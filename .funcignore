@@ -9,4 +9,5 @@ test
 test_*.py
 *_test.py
 tests/
+test_api_local.py
 .vscode*

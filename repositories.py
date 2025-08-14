@@ -17,14 +17,23 @@ class JobRepository:
     def __init__(self):
         self.logger = logging.getLogger(__name__)
         
-        # Get connection string from environment
-        connection_string = os.environ.get('AzureWebJobsStorage')
-        if not connection_string:
-            raise ValueError("AzureWebJobsStorage environment variable not set")
+        # Try managed identity first, fallback to connection string for local dev
+        storage_account_name = os.environ.get('STORAGE_ACCOUNT_NAME')
         
-        self.table_service = TableServiceClient.from_connection_string(connection_string)
+        if storage_account_name:
+            # Use managed identity in production
+            from azure.identity import DefaultAzureCredential
+            account_url = f"https://{storage_account_name}.table.core.windows.net"
+            self.table_service = TableServiceClient(account_url, credential=DefaultAzureCredential())
+        else:
+            # Fallback to connection string for local development
+            connection_string = os.environ.get('AzureWebJobsStorage')
+            if not connection_string:
+                raise ValueError("Either STORAGE_ACCOUNT_NAME or AzureWebJobsStorage environment variable must be set")
+            self.table_service = TableServiceClient.from_connection_string(connection_string)
+        
         self.table_name = "jobs"
-        self._ensure_table_exists()
+        # Don't create table at initialization - will be created when first used
     
     def _ensure_table_exists(self):
         """Create jobs table if it doesn't exist"""
@@ -40,6 +49,7 @@ class JobRepository:
         Returns True if new job, False if job already exists (idempotency)
         """
         try:
+            self._ensure_table_exists()
             table_client = self.table_service.get_table_client(self.table_name)
             
             # Check if job already exists
@@ -73,6 +83,7 @@ class JobRepository:
     def get_job_status(self, job_id: str) -> Optional[JobStatus]:
         """Get job status by job ID"""
         try:
+            self._ensure_table_exists()
             table_client = self.table_service.get_table_client(self.table_name)
             entity = table_client.get_entity('jobs', job_id)
             
@@ -99,6 +110,7 @@ class JobRepository:
                          error_message: str = None, result_data: Dict = None):
         """Update job status in table storage"""
         try:
+            self._ensure_table_exists()
             table_client = self.table_service.get_table_client(self.table_name)
             
             # Get existing entity
@@ -128,6 +140,7 @@ class JobRepository:
     def get_job_details(self, job_id: str) -> Optional[Dict]:
         """Get full job details including original parameters"""
         try:
+            self._ensure_table_exists()
             table_client = self.table_service.get_table_client(self.table_name)
             entity = table_client.get_entity('jobs', job_id)
             

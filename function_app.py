@@ -17,16 +17,25 @@ from services import ServiceFactory
 # Initialize function app
 app = func.FunctionApp()
 
-# Initialize repository
-job_repo = JobRepository()
+# Repository will be initialized lazily when needed
 
 # Queue client for job submission
 def get_queue_client():
-    connection_string = os.environ.get('AzureWebJobsStorage')
-    if not connection_string:
-        raise ValueError("AzureWebJobsStorage environment variable not set")
+    # Try managed identity first, fallback to connection string for local dev
+    storage_account_name = os.environ.get('STORAGE_ACCOUNT_NAME')
     
-    queue_service = QueueServiceClient.from_connection_string(connection_string)
+    if storage_account_name:
+        # Use managed identity in production
+        from azure.identity import DefaultAzureCredential
+        account_url = f"https://{storage_account_name}.queue.core.windows.net"
+        queue_service = QueueServiceClient(account_url, credential=DefaultAzureCredential())
+    else:
+        # Fallback to connection string for local development
+        connection_string = os.environ.get('AzureWebJobsStorage')
+        if not connection_string:
+            raise ValueError("Either STORAGE_ACCOUNT_NAME or AzureWebJobsStorage environment variable must be set")
+        queue_service = QueueServiceClient.from_connection_string(connection_string)
+    
     queue_name = "job-processing"
     
     # Ensure queue exists
@@ -85,6 +94,7 @@ def submit_job(req: func.HttpRequest) -> func.HttpResponse:
             )
         
         # Save job (idempotency check inside)
+        job_repo = JobRepository()
         is_new_job = job_repo.save_job(job_request)
         
         if is_new_job:
@@ -144,6 +154,7 @@ def get_job_status(req: func.HttpRequest) -> func.HttpResponse:
             )
         
         # Get job details
+        job_repo = JobRepository()
         job_details = job_repo.get_job_details(job_id)
         
         if not job_details:
@@ -190,6 +201,7 @@ def process_job_queue(msg: func.QueueMessage) -> None:
         logging.info(f"Processing job from queue: {job_id}")
         
         # Update status to processing
+        job_repo = JobRepository()
         job_repo.update_job_status(job_id, JobStatus.PROCESSING)
         
         # Get appropriate service and process
@@ -211,6 +223,7 @@ def process_job_queue(msg: func.QueueMessage) -> None:
         # Try to update job status to failed
         try:
             if 'job_id' in locals():
+                job_repo = JobRepository()
                 job_repo.update_job_status(
                     job_id, 
                     JobStatus.FAILED, 

@@ -1,13 +1,14 @@
 .git*
-.vscode
+.vscode*
 __azurite_db*__.json
 __blobstorage__
 __queuestorage__
 local.settings.json
-test
 .venv
-test_*.py
-*_test.py
+# Test files and directories
+*test*
+test*
+*Test*
+Test*
 tests/
-test_api_local.py
-.vscode*
+testing/

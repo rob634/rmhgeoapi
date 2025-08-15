@@ -167,3 +167,71 @@ class JobRepository:
         except Exception as e:
             self.logger.error(f"Error getting job details {job_id}: {str(e)}")
             raise
+
+
+class StorageRepository:
+    """Repository for Azure Storage operations"""
+    
+    def __init__(self):
+        self.logger = logging.getLogger(__name__)
+    
+    def list_container_contents(self, container_name: str = None) -> Dict:
+        """
+        List contents of a storage container
+        
+        Args:
+            container_name: Name of container to list (defaults to bronze container)
+            
+        Returns:
+            Dict with container contents and metadata
+        """
+        try:
+            from azure.storage.blob import BlobServiceClient
+            
+            # Use provided container or default to bronze
+            if not container_name:
+                container_name = Config.BRONZE_CONTAINER_NAME
+            
+            self.logger.info(f"Listing contents of container: {container_name}")
+            
+            # Get blob service client
+            if Config.STORAGE_ACCOUNT_NAME:
+                account_url = Config.get_storage_account_url('blob')
+                blob_service = BlobServiceClient(account_url, credential=DefaultAzureCredential())
+            else:
+                Config.validate_storage_config()
+                blob_service = BlobServiceClient.from_connection_string(Config.AZURE_WEBJOBS_STORAGE)
+            
+            # Get container client
+            container_client = blob_service.get_container_client(container_name)
+            
+            # List blobs
+            blobs = []
+            total_size = 0
+            
+            for blob in container_client.list_blobs():
+                blob_info = {
+                    'name': blob.name,
+                    'size': blob.size,
+                    'last_modified': blob.last_modified.isoformat() if blob.last_modified else None,
+                    'content_type': blob.content_settings.content_type if blob.content_settings else None,
+                    'etag': blob.etag,
+                    'creation_time': blob.creation_time.isoformat() if blob.creation_time else None
+                }
+                blobs.append(blob_info)
+                total_size += blob.size if blob.size else 0
+            
+            result = {
+                'container_name': container_name,
+                'blob_count': len(blobs),
+                'total_size_bytes': total_size,
+                'total_size_mb': round(total_size / (1024 * 1024), 2),
+                'blobs': blobs
+            }
+            
+            self.logger.info(f"Listed {len(blobs)} blobs in container {container_name}, total size: {result['total_size_mb']} MB")
+            return result
+            
+        except Exception as e:
+            self.logger.error(f"Error listing container contents: {str(e)}")
+            raise

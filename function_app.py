@@ -10,7 +10,7 @@ from azure.storage.queue import QueueServiceClient
 from azure.identity import DefaultAzureCredential
 
 from models import JobRequest, JobStatus
-from repositories import JobRepository
+from repositories import JobRepository, StorageRepository
 from services import ServiceFactory
 from config import Config
 
@@ -305,6 +305,76 @@ def manual_process_job(req: func.HttpRequest) -> func.HttpResponse:
         
     except Exception as e:
         logging.error(f"Error in manual_process_job: {str(e)}")
+        return func.HttpResponse(
+            json.dumps({"error": f"Internal server error: {str(e)}"}),
+            status_code=500,
+            mimetype="application/json"
+        )
+
+
+@app.route(route="storage/containers/{container_name}/list", methods=["GET"])
+def list_container_contents(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    List contents of a storage container
+    GET /api/storage/containers/{container_name}/list
+    Returns: {"container_name": "...", "blob_count": N, "blobs": [...]}
+    """
+    container_name = req.route_params.get('container_name')
+    logging.info(f"Container listing request for: {container_name}")
+    
+    try:
+        if not container_name:
+            return func.HttpResponse(
+                json.dumps({"error": "container_name parameter is required"}),
+                status_code=400,
+                mimetype="application/json"
+            )
+        
+        # Get storage repository and list contents
+        storage_repo = StorageRepository()
+        result = storage_repo.list_container_contents(container_name)
+        
+        logging.info(f"Listed {result['blob_count']} blobs in container {container_name}")
+        
+        return func.HttpResponse(
+            json.dumps(result),
+            status_code=200,
+            mimetype="application/json"
+        )
+        
+    except Exception as e:
+        logging.error(f"Error in list_container_contents: {str(e)}")
+        return func.HttpResponse(
+            json.dumps({"error": f"Internal server error: {str(e)}"}),
+            status_code=500,
+            mimetype="application/json"
+        )
+
+
+@app.route(route="storage/bronze/list", methods=["GET"])
+def list_bronze_container(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    List contents of the bronze container (convenience endpoint)
+    GET /api/storage/bronze/list
+    Returns: {"container_name": "bronze", "blob_count": N, "blobs": [...]}
+    """
+    logging.info("Bronze container listing request")
+    
+    try:
+        # Get storage repository and list bronze container contents
+        storage_repo = StorageRepository()
+        result = storage_repo.list_container_contents()  # Uses default bronze container
+        
+        logging.info(f"Listed {result['blob_count']} blobs in bronze container")
+        
+        return func.HttpResponse(
+            json.dumps(result),
+            status_code=200,
+            mimetype="application/json"
+        )
+        
+    except Exception as e:
+        logging.error(f"Error in list_bronze_container: {str(e)}")
         return func.HttpResponse(
             json.dumps({"error": f"Internal server error: {str(e)}"}),
             status_code=500,

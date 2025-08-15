@@ -2,14 +2,15 @@
 Repository layer for Azure Table Storage
 Handles job tracking and status updates
 """
-import os
 import logging
+from datetime import datetime
 from typing import Optional, Dict
 from azure.data.tables import TableServiceClient, TableEntity
 from azure.core.exceptions import ResourceExistsError, ResourceNotFoundError
 from azure.identity import DefaultAzureCredential
 
 from models import JobRequest, JobStatus
+from config import Config
 
 
 class JobRepository:
@@ -19,18 +20,14 @@ class JobRepository:
         self.logger = logging.getLogger(__name__)
         
         # Try managed identity first, fallback to connection string for local dev
-        storage_account_name = os.environ.get('STORAGE_ACCOUNT_NAME')
-        
-        if storage_account_name:
+        if Config.STORAGE_ACCOUNT_NAME:
             # Use managed identity in production
-            account_url = f"https://{storage_account_name}.table.core.windows.net"
+            account_url = Config.get_storage_account_url('table')
             self.table_service = TableServiceClient(account_url, credential=DefaultAzureCredential())
         else:
             # Fallback to connection string for local development
-            connection_string = os.environ.get('AzureWebJobsStorage')
-            if not connection_string:
-                raise ValueError("Either STORAGE_ACCOUNT_NAME or AzureWebJobsStorage environment variable must be set")
-            self.table_service = TableServiceClient.from_connection_string(connection_string)
+            Config.validate_storage_config()
+            self.table_service = TableServiceClient.from_connection_string(Config.AZURE_WEBJOBS_STORAGE)
         
         self.table_name = "jobs"
         # Don't create table at initialization - will be created when first used
@@ -118,7 +115,7 @@ class JobRepository:
             
             # Update status fields
             entity['status'] = status
-            entity['updated_at'] = JobStatus().updated_at  # Get current timestamp
+            entity['updated_at'] = datetime.utcnow().isoformat()  # Get current timestamp
             
             if error_message:
                 entity['error_message'] = error_message

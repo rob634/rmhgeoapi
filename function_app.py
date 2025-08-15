@@ -4,8 +4,6 @@ MVP implementation with job submission, status checking, and queue processing
 """
 import json
 import logging
-import os
-from typing import Dict, Any
 
 import azure.functions as func
 from azure.storage.queue import QueueServiceClient
@@ -14,6 +12,7 @@ from azure.identity import DefaultAzureCredential
 from models import JobRequest, JobStatus
 from repositories import JobRepository
 from services import ServiceFactory
+from config import Config
 
 # Initialize function app
 app = func.FunctionApp()
@@ -23,18 +22,14 @@ app = func.FunctionApp()
 # Queue client for job submission
 def get_queue_client():
     # Try managed identity first, fallback to connection string for local dev
-    storage_account_name = os.environ.get('STORAGE_ACCOUNT_NAME')
-    
-    if storage_account_name:
+    if Config.STORAGE_ACCOUNT_NAME:
         # Use managed identity in production
-        account_url = f"https://{storage_account_name}.queue.core.windows.net"
+        account_url = Config.get_storage_account_url('queue')
         queue_service = QueueServiceClient(account_url, credential=DefaultAzureCredential())
     else:
         # Fallback to connection string for local development
-        connection_string = os.environ.get('AzureWebJobsStorage')
-        if not connection_string:
-            raise ValueError("Either STORAGE_ACCOUNT_NAME or AzureWebJobsStorage environment variable must be set")
-        queue_service = QueueServiceClient.from_connection_string(connection_string)
+        Config.validate_storage_config()
+        queue_service = QueueServiceClient.from_connection_string(Config.AZURE_WEBJOBS_STORAGE)
     
     queue_name = "job-processing"
     
@@ -234,3 +229,84 @@ def process_job_queue(msg: func.QueueMessage) -> None:
         
         # Re-raise the exception so Azure Functions knows the processing failed
         raise
+
+
+@app.route(route="jobs/{job_id}/process", methods=["POST"])
+def manual_process_job(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Manually process a pending job (for debugging)
+    POST /api/jobs/{job_id}/process
+    """
+    job_id = req.route_params.get('job_id')
+    logging.info(f"Manual processing request for job: {job_id}")
+    
+    try:
+        if not job_id:
+            return func.HttpResponse(
+                json.dumps({"error": "job_id parameter is required"}),
+                status_code=400,
+                mimetype="application/json"
+            )
+        
+        # Get job details
+        job_repo = JobRepository()
+        job_details = job_repo.get_job_details(job_id)
+        
+        if not job_details:
+            return func.HttpResponse(
+                json.dumps({"error": f"Job not found: {job_id}"}),
+                status_code=404,
+                mimetype="application/json"
+            )
+        
+        current_status = job_details['status']
+        logging.info(f"Job {job_id} current status: {current_status}")
+        
+        if current_status not in [JobStatus.PENDING, JobStatus.QUEUED]:
+            return func.HttpResponse(
+                json.dumps({
+                    "error": f"Job is not in pending/queued status (current: {current_status})",
+                    "job_id": job_id,
+                    "current_status": current_status
+                }),
+                status_code=400,
+                mimetype="application/json"
+            )
+        
+        # Update status to processing
+        job_repo.update_job_status(job_id, JobStatus.PROCESSING)
+        logging.info(f"Updated job {job_id} to PROCESSING")
+        
+        # Get service and process
+        service = ServiceFactory.get_service(job_details['operation_type'])
+        result = service.process(
+            job_id=job_id,
+            dataset_id=job_details['dataset_id'],
+            resource_id=job_details['resource_id'], 
+            version_id=job_details['version_id'],
+            operation_type=job_details['operation_type']
+        )
+        
+        # Update status to completed
+        job_repo.update_job_status(job_id, JobStatus.COMPLETED, result_data=result)
+        logging.info(f"Job {job_id} completed successfully")
+        
+        return func.HttpResponse(
+            json.dumps({
+                "message": "Job processed successfully",
+                "job_id": job_id,
+                "previous_status": current_status,
+                "new_status": JobStatus.COMPLETED,
+                "result": result
+            }),
+            status_code=200,
+            mimetype="application/json"
+        )
+        
+    except Exception as e:
+        logging.error(f"Error in manual_process_job: {str(e)}")
+        return func.HttpResponse(
+            json.dumps({"error": f"Internal server error: {str(e)}"}),
+            status_code=500,
+            mimetype="application/json"
+        )

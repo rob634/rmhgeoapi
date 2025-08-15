@@ -3,7 +3,16 @@
   "Values": {
     "STORAGE_ACCOUNT_NAME": "your-storage-account-name",
     "AzureWebJobsStorage": "__AzureWebJobsStorage__",
+    "BRONZE_CONTAINER_NAME": "bronze",
     "FUNCTIONS_WORKER_RUNTIME": "python",
-    "AZURE_FUNCTIONS_ENVIRONMENT": "Production"
+    "AZURE_FUNCTIONS_ENVIRONMENT": "Production",
+    "POSTGIS_HOST": "your-postgis-host.com",
+    "POSTGIS_PORT": "5432",
+    "POSTGIS_USER": "your-db-user",
+    "POSTGIS_PASSWORD": "your-db-password",
+    "POSTGIS_DATABASE": "geodata",
+    "FUNCTION_TIMEOUT": "300",
+    "MAX_RETRY_ATTEMPTS": "3",
+    "LOG_LEVEL": "INFO"
   }
 }

@@ -13,3 +13,4 @@ Test*
 tests/
 testing/
 .claude* 
+old_reference*

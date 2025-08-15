@@ -13,13 +13,20 @@ class Config:
     STORAGE_ACCOUNT_NAME: Optional[str] = os.environ.get('STORAGE_ACCOUNT_NAME')
     AZURE_WEBJOBS_STORAGE: Optional[str] = os.environ.get('AzureWebJobsStorage')
     BRONZE_CONTAINER_NAME: str = os.environ.get('BRONZE_CONTAINER_NAME', 'bronze')
+    #Silver container hosts COGs 
+    SILVER_CONTAINER_NAME: str = os.environ.get('SILVER_CONTAINER_NAME', 'silver')
+    #Gold container has GeoParquet mirroring selections from Silver Database
+    GOLD_CONTAINER_NAME: str = os.environ.get('GOLD_CONTAINER_NAME', 'gold')
+    
     
     # PostGIS Database Configuration
     POSTGIS_HOST: str = os.environ.get('POSTGIS_HOST', 'localhost')
     POSTGIS_PORT: int = int(os.environ.get('POSTGIS_PORT', '5432'))
     POSTGIS_USER: str = os.environ.get('POSTGIS_USER', 'postgres')
     POSTGIS_PASSWORD: Optional[str] = os.environ.get('POSTGIS_PASSWORD')
+    # This is the database half of silver storage
     POSTGIS_DATABASE: str = os.environ.get('POSTGIS_DATABASE', 'geodata')
+    
     
     # Application Configuration
     FUNCTION_TIMEOUT: int = int(os.environ.get('FUNCTION_TIMEOUT', '300'))  # 5 minutes default

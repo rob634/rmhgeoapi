@@ -143,3 +143,4 @@ tests/
 testing/
 .claude*
 .vscode*
+old_reference*

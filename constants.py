@@ -53,9 +53,12 @@ class Validation:
     INVALID_DATASET_CHARS = ['/', '\\', ':', '*', '?', '"', '<', '>', '|']
     INVALID_RESOURCE_CHARS = [':', '*', '?', '"', '<', '>', '|']
     
-# Azure Configuration
-class Azure:
-    """Azure-specific constants"""
-    QUEUE_NAME = "job-processing"
+# Azure Storage Configuration
+class AzureStorage:
+    """Azure Storage service names and configuration constants"""
+    JOB_PROCESSING_QUEUE = "geospatial-jobs"
+    JOB_TRACKING_TABLE = "jobs"
     FUNCTIONS_KEY_HEADER = "x-functions-key"
     STORAGE_CONNECTION = "AzureWebJobsStorage"
+    # For managed identity connections, Azure Functions expects: {ConnectionName}__serviceUri
+    MANAGED_IDENTITY_CONNECTION = "Storage"

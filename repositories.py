@@ -38,7 +38,8 @@ class JobRepository:
             Config.validate_storage_config()
             raise ValueError("No storage configuration available")
         
-        self.table_name = "jobs"
+        from constants import AzureStorage
+        self.table_name = AzureStorage.JOB_TRACKING_TABLE
         # Don't create table at initialization - will be created when first used
     
     def _ensure_table_exists(self):

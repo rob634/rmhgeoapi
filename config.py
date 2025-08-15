@@ -18,6 +18,7 @@ class EnvVarNames:
     
     # PostGIS Database Environment Variables
     POSTGIS_HOST = 'POSTGIS_HOST'
+    
     POSTGIS_PORT = 'POSTGIS_PORT'
     POSTGIS_USER = 'POSTGIS_USER'
     POSTGIS_PASSWORD = 'POSTGIS_PASSWORD'

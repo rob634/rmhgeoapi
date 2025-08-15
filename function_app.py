@@ -14,7 +14,7 @@ from repositories import JobRepository, StorageRepository
 from services import ServiceFactory
 from config import Config
 from logging_utils import create_buffered_logger
-from constants import APIParams, Defaults, Azure
+from constants import APIParams, Defaults, AzureStorage
 
 # Create common logger for function app
 logger = create_buffered_logger(
@@ -43,7 +43,7 @@ def get_queue_client():
         Config.validate_storage_config()
         raise ValueError("No storage configuration available")
     
-    queue_name = Azure.QUEUE_NAME
+    queue_name = AzureStorage.JOB_PROCESSING_QUEUE
     
     # Ensure queue exists
     try:
@@ -239,7 +239,7 @@ def get_job_status(req: func.HttpRequest) -> func.HttpResponse:
         )
 
 
-@app.queue_trigger(arg_name="msg", queue_name="job-processing", connection="AzureWebJobsStorage")
+@app.queue_trigger(arg_name="msg", queue_name="geospatial-jobs", connection="Storage")
 def process_job_queue(msg: func.QueueMessage) -> None:
     """
     Process jobs from the queue

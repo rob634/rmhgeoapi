@@ -26,7 +26,8 @@ def direct_query_jobs():
     try:
         # Connect directly to Table Storage
         table_service = TableServiceClient.from_connection_string(connection_string)
-        table_name = "jobs"
+        from constants import AzureStorage
+        table_name = AzureStorage.JOB_TRACKING_TABLE
         table_client = table_service.get_table_client(table_name)
         
         print(f"✅ Connected to table: {table_name}")
@@ -170,7 +171,8 @@ def check_queue_directly():
         
         from azure.storage.queue import QueueServiceClient
         queue_service = QueueServiceClient.from_connection_string(connection_string)
-        queue_name = "job-processing"
+        from constants import AzureStorage
+        queue_name = AzureStorage.JOB_PROCESSING_QUEUE
         
         try:
             queue_client = queue_service.get_queue_client(queue_name)

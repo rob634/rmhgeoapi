@@ -12,3 +12,4 @@ test*
 Test*
 tests/
 testing/
+.claude* 

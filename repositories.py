@@ -107,10 +107,10 @@ class JobRepository:
             return job_status
             
         except ResourceNotFoundError:
-            self.logger.warning(f"Job not found: {job_id}")
+            logger.warning(f"Job not found: {job_id}")
             return None
         except Exception as e:
-            self.logger.error(f"Error getting job status {job_id}: {str(e)}")
+            logger.error(f"Error getting job status {job_id}: {str(e)}")
             raise
     
     def update_job_status(self, job_id: str, status: str, 
@@ -135,13 +135,13 @@ class JobRepository:
                 entity['result_data'] = json.dumps(result_data)
             
             table_client.update_entity(entity)
-            self.logger.info(f"Updated job status: {job_id} -> {status}")
+            logger.info(f"Updated job status: {job_id} -> {status}")
             
         except ResourceNotFoundError:
-            self.logger.error(f"Cannot update non-existent job: {job_id}")
+            logger.error(f"Cannot update non-existent job: {job_id}")
             raise
         except Exception as e:
-            self.logger.error(f"Error updating job status {job_id}: {str(e)}")
+            logger.error(f"Error updating job status {job_id}: {str(e)}")
             raise
     
     def get_job_details(self, job_id: str) -> Optional[Dict]:
@@ -182,7 +182,7 @@ class JobRepository:
         except ResourceNotFoundError:
             return None
         except Exception as e:
-            self.logger.error(f"Error getting job details {job_id}: {str(e)}")
+            logger.error(f"Error getting job details {job_id}: {str(e)}")
             raise
 
 
@@ -197,11 +197,6 @@ class StorageRepository:
     ]
     
     def __init__(self, workspace_container_name: str = None):
-        self.logger = create_buffered_logger(
-            name=f"{__name__}.StorageRepository", 
-            capacity=100,
-            flush_level=logging.WARNING
-        )
         
         # Initialize blob service client
         self._init_blob_service_client()
@@ -217,9 +212,9 @@ class StorageRepository:
         # Validate workspace container exists
         if self.workspace_container_name:
             if not self.container_exists(self.workspace_container_name):
-                self.logger.error(f"Workspace container {self.workspace_container_name} not found")
+                logger.error(f"Workspace container {self.workspace_container_name} not found")
                 raise ValueError(f"Workspace container {self.workspace_container_name} not found")
-            self.logger.info(f"StorageRepository initialized with workspace container: {self.workspace_container_name}")
+            logger.info(f"StorageRepository initialized with workspace container: {self.workspace_container_name}")
     
     def _init_blob_service_client(self):
         """Initialize the blob service client with authentication"""
@@ -227,17 +222,17 @@ class StorageRepository:
             if Config.AZURE_WEBJOBS_STORAGE:
                 # Use connection string for local development
                 self.blob_service_client = BlobServiceClient.from_connection_string(Config.AZURE_WEBJOBS_STORAGE)
-                self.logger.info(f"BlobServiceClient initialized with connection string")
+                logger.info(f"BlobServiceClient initialized with connection string")
             elif Config.STORAGE_ACCOUNT_NAME:
                 # Use managed identity in production
                 account_url = Config.get_storage_account_url('blob')
                 self.blob_service_client = BlobServiceClient(account_url, credential=DefaultAzureCredential())
-                self.logger.info(f"BlobServiceClient initialized with managed identity")
+                logger.info(f"BlobServiceClient initialized with managed identity")
             else:
                 Config.validate_storage_config()
                 raise ValueError("No storage configuration available")
         except Exception as e:
-            self.logger.error(f"Error initializing BlobServiceClient: {e}")
+            logger.error(f"Error initializing BlobServiceClient: {e}")
             raise
     
     def list_container_contents(self, container_name: str = None) -> Dict:
@@ -257,7 +252,7 @@ class StorageRepository:
             if not container_name:
                 container_name = Config.BRONZE_CONTAINER_NAME
             
-            self.logger.info(f"Listing contents of container: {container_name}")
+            logger.info(f"Listing contents of container: {container_name}")
             
             # Get blob service client
             if Config.AZURE_WEBJOBS_STORAGE:
@@ -298,11 +293,11 @@ class StorageRepository:
                 'blobs': blobs
             }
             
-            self.logger.info(f"Listed {len(blobs)} blobs in container {container_name}, total size: {result['total_size_mb']} MB")
+            logger.info(f"Listed {len(blobs)} blobs in container {container_name}, total size: {result['total_size_mb']} MB")
             return result
             
         except Exception as e:
-            self.logger.error(f"Error listing container contents: {str(e)}")
+            logger.error(f"Error listing container contents: {str(e)}")
             raise
     
     def container_exists(self, container_name: str) -> bool:
@@ -311,19 +306,19 @@ class StorageRepository:
             if not isinstance(container_name, str):
                 raise ValueError(f"Container name must be a string, got {type(container_name)}")
             
-            self.logger.debug(f"Checking if container {container_name} exists")
+            logger.debug(f"Checking if container {container_name} exists")
             container_client = self.blob_service_client.get_container_client(container_name)
             exists = container_client.exists()
             
             if exists:
-                self.logger.debug(f"Container {container_name} exists")
+                logger.debug(f"Container {container_name} exists")
             else:
-                self.logger.warning(f"Container {container_name} not found")
+                logger.warning(f"Container {container_name} not found")
             
             return exists
             
         except Exception as e:
-            self.logger.error(f"Error checking container {container_name}: {e}")
+            logger.error(f"Error checking container {container_name}: {e}")
             raise
     
     def list_containers(self) -> list:
@@ -331,10 +326,10 @@ class StorageRepository:
         try:
             container_list = self.blob_service_client.list_containers()
             names = [container.name for container in container_list]
-            self.logger.info(f"Found containers: {', '.join(names)}")
+            logger.info(f"Found containers: {', '.join(names)}")
             return names
         except Exception as e:
-            self.logger.error(f"Error listing containers: {e}")
+            logger.error(f"Error listing containers: {e}")
             raise
     
     def blob_exists(self, blob_name: str, container_name: str = None) -> bool:
@@ -347,7 +342,7 @@ class StorageRepository:
             if not container_name:
                 raise ValueError("Container name must be provided")
             
-            self.logger.debug(f"Checking if blob {blob_name} exists in {container_name}")
+            logger.debug(f"Checking if blob {blob_name} exists in {container_name}")
             
             blob_client = self.blob_service_client.get_blob_client(
                 container=container_name, blob=blob_name
@@ -355,14 +350,14 @@ class StorageRepository:
             exists = blob_client.exists()
             
             if exists:
-                self.logger.debug(f"Blob {blob_name} exists in {container_name}")
+                logger.debug(f"Blob {blob_name} exists in {container_name}")
             else:
-                self.logger.debug(f"Blob {blob_name} not found in {container_name}")
+                logger.debug(f"Blob {blob_name} not found in {container_name}")
             
             return exists
             
         except Exception as e:
-            self.logger.error(f"Error checking blob {blob_name} in {container_name}: {e}")
+            logger.error(f"Error checking blob {blob_name} in {container_name}: {e}")
             raise
     
     def download_blob(self, blob_name: str, container_name: str = None) -> bytes:
@@ -372,18 +367,18 @@ class StorageRepository:
             if not self.blob_exists(blob_name, container_name):
                 raise ResourceNotFoundError(f"Blob {blob_name} not found in {container_name}")
             
-            self.logger.debug(f"Downloading blob {blob_name} from {container_name}")
+            logger.debug(f"Downloading blob {blob_name} from {container_name}")
             
             blob_client = self.blob_service_client.get_blob_client(
                 container=container_name, blob=blob_name
             )
             blob_data = blob_client.download_blob().readall()
             
-            self.logger.info(f"Downloaded blob {blob_name} from {container_name}")
+            logger.info(f"Downloaded blob {blob_name} from {container_name}")
             return blob_data
             
         except Exception as e:
-            self.logger.error(f"Error downloading blob {blob_name} from {container_name}: {e}")
+            logger.error(f"Error downloading blob {blob_name} from {container_name}: {e}")
             raise
     
     def upload_blob(self, blob_name: str, data: bytes, container_name: str = None, overwrite: bool = False) -> str:
@@ -396,12 +391,12 @@ class StorageRepository:
             # Validate file name and extension
             validated_name = self._validate_file_name(blob_name)
             
-            self.logger.debug(f"Uploading blob {validated_name} to {container_name}")
+            logger.debug(f"Uploading blob {validated_name} to {container_name}")
             
             # Check if blob already exists
             if self.blob_exists(validated_name, container_name):
                 if overwrite:
-                    self.logger.warning(f"Overwriting existing blob {validated_name} in {container_name}")
+                    logger.warning(f"Overwriting existing blob {validated_name} in {container_name}")
                 else:
                     raise ResourceExistsError(f"Blob {validated_name} already exists in {container_name}")
             
@@ -410,11 +405,11 @@ class StorageRepository:
             )
             blob_client.upload_blob(data=data, overwrite=overwrite)
             
-            self.logger.info(f"Uploaded blob {validated_name} to {container_name}")
+            logger.info(f"Uploaded blob {validated_name} to {container_name}")
             return validated_name
             
         except Exception as e:
-            self.logger.error(f"Error uploading blob {blob_name} to {container_name}: {e}")
+            logger.error(f"Error uploading blob {blob_name} to {container_name}: {e}")
             raise
     
     def delete_blob(self, blob_name: str, container_name: str = None) -> bool:
@@ -429,14 +424,14 @@ class StorageRepository:
                     container=container_name, blob=blob_name
                 )
                 blob_client.delete_blob()
-                self.logger.info(f"Deleted blob {blob_name} from {container_name}")
+                logger.info(f"Deleted blob {blob_name} from {container_name}")
                 return True
             else:
-                self.logger.debug(f"Blob {blob_name} does not exist in {container_name}")
+                logger.debug(f"Blob {blob_name} does not exist in {container_name}")
                 return False
                 
         except Exception as e:
-            self.logger.error(f"Error deleting blob {blob_name} from {container_name}: {e}")
+            logger.error(f"Error deleting blob {blob_name} from {container_name}: {e}")
             raise
     
     def copy_blob(self, source_blob_name: str, dest_blob_name: str, 
@@ -455,9 +450,9 @@ class StorageRepository:
             if self.blob_exists(dest_blob_name, dest_container_name):
                 if not overwrite:
                     raise ResourceExistsError(f"Destination blob {dest_blob_name} already exists in {dest_container_name}")
-                self.logger.warning(f"Overwriting {dest_blob_name} in {dest_container_name}")
+                logger.warning(f"Overwriting {dest_blob_name} in {dest_container_name}")
             
-            self.logger.debug(f"Copying {source_blob_name} from {source_container_name} to {dest_blob_name} in {dest_container_name}")
+            logger.debug(f"Copying {source_blob_name} from {source_container_name} to {dest_blob_name} in {dest_container_name}")
             
             # Get source blob URL
             source_blob_client = self.blob_service_client.get_blob_client(
@@ -471,11 +466,11 @@ class StorageRepository:
             )
             dest_blob_client.start_copy_from_url(source_url)
             
-            self.logger.info(f"Copy initiated: {source_container_name}/{source_blob_name} -> {dest_container_name}/{dest_blob_name}")
+            logger.info(f"Copy initiated: {source_container_name}/{source_blob_name} -> {dest_container_name}/{dest_blob_name}")
             return dest_blob_name
             
         except Exception as e:
-            self.logger.error(f"Error copying blob: {e}")
+            logger.error(f"Error copying blob: {e}")
             raise
     
     def list_blobs_with_prefix(self, prefix: str, container_name: str = None) -> list:
@@ -487,11 +482,11 @@ class StorageRepository:
             blob_list = container_client.list_blobs(name_starts_with=prefix)
             blob_names = [blob.name for blob in blob_list]
             
-            self.logger.info(f"Found {len(blob_names)} blobs with prefix '{prefix}' in {container_name}")
+            logger.info(f"Found {len(blob_names)} blobs with prefix '{prefix}' in {container_name}")
             return blob_names
             
         except Exception as e:
-            self.logger.error(f"Error listing blobs with prefix {prefix}: {e}")
+            logger.error(f"Error listing blobs with prefix {prefix}: {e}")
             raise
     
     def _validate_file_name(self, file_name: str) -> str:
@@ -511,15 +506,15 @@ class StorageRepository:
             
             # Clean up multiple dots
             if len(name_parts) > 2:
-                self.logger.warning(f"File name {file_name} has multiple dots, cleaning up")
+                logger.warning(f"File name {file_name} has multiple dots, cleaning up")
                 name_base = "_".join(name_parts[:-1])  # Use underscore to join parts
                 validated_name = f"{name_base}.{ext}"
             else:
                 validated_name = file_name
             
-            self.logger.debug(f"Validated file name: {validated_name}")
+            logger.debug(f"Validated file name: {validated_name}")
             return validated_name
             
         except Exception as e:
-            self.logger.error(f"Error validating file name {file_name}: {e}")
+            logger.error(f"Error validating file name {file_name}: {e}")
             raise

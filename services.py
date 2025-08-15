@@ -80,11 +80,7 @@ class ContainerListingService(BaseProcessingService):
     """Service for listing container contents with detailed file information"""
     
     def __init__(self):
-        self.logger = create_buffered_logger(
-            name=f"{__name__}.ContainerListingService",
-            capacity=50,
-            flush_level=logging.INFO
-        )
+        pass  # Use centralized logger
     
     def get_supported_operations(self) -> List[str]:
         """Return list of supported operations"""
@@ -105,7 +101,7 @@ class ContainerListingService(BaseProcessingService):
         Returns:
             Dict containing container contents with file details
         """
-        self.logger.info(f"Starting container listing - Job: {job_id}, Container: {dataset_id}")
+        logger.info(f"Starting container listing - Job: {job_id}, Container: {dataset_id}")
         
         try:
             from repositories import StorageRepository
@@ -141,7 +137,7 @@ class ContainerListingService(BaseProcessingService):
             
             # Apply prefix filter if resource_id is provided and not 'none'
             if resource_id and resource_id != 'none':
-                self.logger.info(f"Applying prefix filter: {resource_id}")
+                logger.info(f"Applying prefix filter: {resource_id}")
                 filtered_blobs = [
                     blob for blob in contents['blobs'] 
                     if blob['name'].startswith(resource_id)
@@ -173,12 +169,12 @@ class ContainerListingService(BaseProcessingService):
             if contents.get('filtered'):
                 result['filter_prefix'] = contents['filter_prefix']
             
-            self.logger.info(f"Container listing complete - Found {contents['blob_count']} files, {contents['total_size_mb']} MB total")
+            logger.info(f"Container listing complete - Found {contents['blob_count']} files, {contents['total_size_mb']} MB total")
             
             return result
             
         except Exception as e:
-            self.logger.error(f"Error in container listing: {str(e)}")
+            logger.error(f"Error in container listing: {str(e)}")
             raise
 
 

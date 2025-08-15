@@ -5,7 +5,7 @@ Production-ready architecture with hello world implementation
 from abc import ABC, abstractmethod
 from typing import Dict, List
 import logging
-from logging_utils import create_buffered_logger
+from logger_setup import logger
 
 
 class BaseProcessingService(ABC):
@@ -32,11 +32,7 @@ class HelloWorldService(BaseProcessingService):
     """Hello world implementation for testing pipeline"""
     
     def __init__(self):
-        self.logger = create_buffered_logger(
-            name=f"{__name__}.HelloWorldService",
-            capacity=50,
-            flush_level=logging.INFO  # Flush more frequently for demo output
-        )
+        pass  # Use centralized logger
     
     def get_supported_operations(self) -> List[str]:
         """Support all operations for now - this is just hello world"""
@@ -47,7 +43,7 @@ class HelloWorldService(BaseProcessingService):
         """
         Hello world processing with beautiful parameter display
         """
-        self.logger.info("Starting hello world processing")
+        logger.log_job_stage(job_id, "hello_world_start", "processing")
         
         # Beautiful parameter display
         print("=" * 60)
@@ -64,10 +60,9 @@ class HelloWorldService(BaseProcessingService):
         print("🎉 Ready for real geospatial processing")
         print("=" * 60)
         
-        # Log the same info
-        self.logger.info(f"Hello World Processing Complete - Job: {job_id}, "
-                        f"Dataset: {dataset_id}, Resource: {resource_id}, "
-                        f"Version: {version_id}, Operation: {operation_type}")
+        # Log completion
+        logger.log_job_stage(job_id, "hello_world_complete", "completed")
+        logger.log_service_processing("HelloWorldService", operation_type, job_id, "completed")
         
         return {
             "status": "completed",

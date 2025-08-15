@@ -13,15 +13,10 @@ from models import JobRequest, JobStatus
 from repositories import JobRepository, StorageRepository
 from services import ServiceFactory
 from config import Config
-from logging_utils import create_buffered_logger
+from logger_setup import logger
 from constants import APIParams, Defaults, AzureStorage
 
-# Create common logger for function app
-logger = create_buffered_logger(
-    name="function_app",
-    capacity=300,
-    flush_level=logging.WARNING
-)
+# Use centralized logger (imported from logger_setup)
 
 # Initialize function app
 app = func.FunctionApp()
@@ -257,7 +252,8 @@ def process_job_queue(msg: func.QueueMessage) -> None:
         operation_type = job_data[APIParams.OPERATION_TYPE]
         system = job_data.get(APIParams.SYSTEM, Defaults.SYSTEM_FLAG)  # Backwards compatibility
         
-        logger.info(f"Processing job from queue: {job_id}")
+        logger.log_queue_operation(job_id, "processing_start")
+        logger.log_job_stage(job_id, "queue_processing", "processing")
         
         # Update status to processing
         job_repo = JobRepository()
@@ -274,7 +270,8 @@ def process_job_queue(msg: func.QueueMessage) -> None:
             result_data=result
         )
         
-        logger.info(f"Job completed successfully: {job_id}")
+        logger.log_job_stage(job_id, "queue_processing", "completed")
+        logger.log_queue_operation(job_id, "processing_complete")
         
     except Exception as e:
         logger.error(f"Error processing job: {str(e)}")

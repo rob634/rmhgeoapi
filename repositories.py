@@ -12,18 +12,13 @@ from azure.identity import DefaultAzureCredential
 
 from models import JobRequest, JobStatus
 from config import Config
-from logging_utils import BufferedLogger, create_buffered_logger
+from logger_setup import logger
 
 
 class JobRepository:
     """Repository for job tracking using Azure Table Storage"""
     
     def __init__(self):
-        self.logger = create_buffered_logger(
-            name=f"{__name__}.JobRepository",
-            capacity=200,
-            flush_level=logging.ERROR
-        )
         
         # Prefer connection string for local dev, use managed identity for production
         if Config.AZURE_WEBJOBS_STORAGE:
@@ -46,9 +41,9 @@ class JobRepository:
         """Create jobs table if it doesn't exist"""
         try:
             self.table_service.create_table(self.table_name)
-            self.logger.info(f"Created table: {self.table_name}")
+            logger.info(f"Created table: {self.table_name}")
         except ResourceExistsError:
-            self.logger.debug(f"Table already exists: {self.table_name}")
+            logger.debug(f"Table already exists: {self.table_name}")
     
     def save_job(self, job_request: JobRequest) -> bool:
         """
@@ -62,7 +57,7 @@ class JobRepository:
             # Check if job already exists
             existing_job = self.get_job_status(job_request.job_id)
             if existing_job:
-                self.logger.info(f"Job already exists: {job_request.job_id}")
+                logger.info(f"Job already exists: {job_request.job_id}")
                 return False
             
             # Create table entity
@@ -85,11 +80,11 @@ class JobRepository:
             entity['request_parameters'] = json.dumps(job_request.to_dict())
             
             table_client.create_entity(entity)
-            self.logger.info(f"Saved new job: {job_request.job_id}")
+            logger.info(f"Saved new job: {job_request.job_id}")
             return True
             
         except Exception as e:
-            self.logger.error(f"Error saving job {job_request.job_id}: {str(e)}")
+            logger.error(f"Error saving job {job_request.job_id}: {str(e)}")
             raise
     
     def get_job_status(self, job_id: str) -> Optional[JobStatus]:

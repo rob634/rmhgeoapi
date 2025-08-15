@@ -212,7 +212,12 @@ class StorageRepository:
         self._init_blob_service_client()
         
         # Set workspace container
-        self.workspace_container_name = workspace_container_name or Config.BRONZE_CONTAINER_NAME
+        if workspace_container_name:
+            self.workspace_container_name = workspace_container_name
+        else:
+            # Validate bronze container is configured before using it
+            Config.validate_container_config()
+            self.workspace_container_name = Config.BRONZE_CONTAINER_NAME
         
         # Validate workspace container exists
         if self.workspace_container_name:

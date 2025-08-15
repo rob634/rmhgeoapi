@@ -37,24 +37,24 @@ class Config:
     # Azure Storage Configuration
     STORAGE_ACCOUNT_NAME: Optional[str] = os.environ.get(EnvVarNames.STORAGE_ACCOUNT_NAME)
     AZURE_WEBJOBS_STORAGE: Optional[str] = os.environ.get(EnvVarNames.AZURE_WEBJOBS_STORAGE)
-    BRONZE_CONTAINER_NAME: str = os.environ.get(EnvVarNames.BRONZE_CONTAINER_NAME, 'bronze')
+    BRONZE_CONTAINER_NAME: Optional[str] = os.environ.get(EnvVarNames.BRONZE_CONTAINER_NAME)
     #Silver container hosts COGs 
-    SILVER_CONTAINER_NAME: str = os.environ.get(EnvVarNames.SILVER_CONTAINER_NAME, 'silver')
+    SILVER_CONTAINER_NAME: Optional[str] = os.environ.get(EnvVarNames.SILVER_CONTAINER_NAME)
     #Gold container has GeoParquet mirroring selections from Silver Database
-    GOLD_CONTAINER_NAME: str = os.environ.get(EnvVarNames.GOLD_CONTAINER_NAME, 'gold')
+    GOLD_CONTAINER_NAME: Optional[str] = os.environ.get(EnvVarNames.GOLD_CONTAINER_NAME)
     
     
     # PostGIS Database Configuration
-    POSTGIS_HOST: str = os.environ.get(EnvVarNames.POSTGIS_HOST, 'localhost')
-    POSTGIS_PORT: int = int(os.environ.get(EnvVarNames.POSTGIS_PORT, '5432'))
-    POSTGIS_USER: str = os.environ.get(EnvVarNames.POSTGIS_USER, 'postgres')
+    POSTGIS_HOST: Optional[str] = os.environ.get(EnvVarNames.POSTGIS_HOST)
+    POSTGIS_PORT: Optional[int] = int(os.environ.get(EnvVarNames.POSTGIS_PORT)) if os.environ.get(EnvVarNames.POSTGIS_PORT) else None
+    POSTGIS_USER: Optional[str] = os.environ.get(EnvVarNames.POSTGIS_USER)
     POSTGIS_PASSWORD: Optional[str] = os.environ.get(EnvVarNames.POSTGIS_PASSWORD)
     # This is the database half of silver storage
-    POSTGIS_DATABASE: str = os.environ.get(EnvVarNames.POSTGIS_DATABASE, 'geopgflex')
-    POSTGIS_SCHEMA: str = os.environ.get(EnvVarNames.POSTGIS_SCHEMA, 'geo')
+    POSTGIS_DATABASE: Optional[str] = os.environ.get(EnvVarNames.POSTGIS_DATABASE)
+    POSTGIS_SCHEMA: Optional[str] = os.environ.get(EnvVarNames.POSTGIS_SCHEMA)
     
     
-    # Application Configuration
+    # Application Configuration (these can have sensible defaults)
     FUNCTION_TIMEOUT: int = int(os.environ.get(EnvVarNames.FUNCTION_TIMEOUT, '300'))  # 5 minutes default
     MAX_RETRY_ATTEMPTS: int = int(os.environ.get(EnvVarNames.MAX_RETRY_ATTEMPTS, '3'))
     LOG_LEVEL: str = os.environ.get(EnvVarNames.LOG_LEVEL, 'INFO')
@@ -68,23 +68,48 @@ class Config:
             )
     
     @classmethod
+    def validate_container_config(cls) -> None:
+        """Validate that required container configuration is present"""
+        if not cls.BRONZE_CONTAINER_NAME:
+            raise ValueError(f"{EnvVarNames.BRONZE_CONTAINER_NAME} environment variable must be set")
+        if not cls.SILVER_CONTAINER_NAME:
+            raise ValueError(f"{EnvVarNames.SILVER_CONTAINER_NAME} environment variable must be set")
+        if not cls.GOLD_CONTAINER_NAME:
+            raise ValueError(f"{EnvVarNames.GOLD_CONTAINER_NAME} environment variable must be set")
+    
+    @classmethod
     def validate_postgis_config(cls) -> None:
         """Validate that required PostGIS configuration is present"""
-        if not cls.POSTGIS_PASSWORD:
-            raise ValueError(f"{EnvVarNames.POSTGIS_PASSWORD} environment variable must be set")
-        
         if not cls.POSTGIS_HOST:
             raise ValueError(f"{EnvVarNames.POSTGIS_HOST} environment variable must be set")
+        if not cls.POSTGIS_PORT:
+            raise ValueError(f"{EnvVarNames.POSTGIS_PORT} environment variable must be set")
+        if not cls.POSTGIS_USER:
+            raise ValueError(f"{EnvVarNames.POSTGIS_USER} environment variable must be set")
+        # POSTGIS_PASSWORD is optional when using managed identity
+        if not cls.POSTGIS_DATABASE:
+            raise ValueError(f"{EnvVarNames.POSTGIS_DATABASE} environment variable must be set")
+        if not cls.POSTGIS_SCHEMA:
+            raise ValueError(f"{EnvVarNames.POSTGIS_SCHEMA} environment variable must be set")
     
     @classmethod
     def get_postgis_connection_string(cls, include_schema: bool = False) -> str:
         """Get PostGIS connection string"""
         cls.validate_postgis_config()
         
-        connection_string = (
-            f"postgresql://{cls.POSTGIS_USER}:{cls.POSTGIS_PASSWORD}"
-            f"@{cls.POSTGIS_HOST}:{cls.POSTGIS_PORT}/{cls.POSTGIS_DATABASE}"
-        )
+        # Build connection string with or without password (for managed identity)
+        if cls.POSTGIS_PASSWORD:
+            # Traditional authentication with password
+            connection_string = (
+                f"postgresql://{cls.POSTGIS_USER}:{cls.POSTGIS_PASSWORD}"
+                f"@{cls.POSTGIS_HOST}:{cls.POSTGIS_PORT}/{cls.POSTGIS_DATABASE}"
+            )
+        else:
+            # Managed identity authentication (no password)
+            connection_string = (
+                f"postgresql://{cls.POSTGIS_USER}"
+                f"@{cls.POSTGIS_HOST}:{cls.POSTGIS_PORT}/{cls.POSTGIS_DATABASE}"
+            )
         
         if include_schema:
             connection_string += f"?options=-csearch_path={cls.POSTGIS_SCHEMA}"
@@ -104,6 +129,7 @@ class Config:
     @classmethod
     def get_bronze_container_url(cls) -> str:
         """Get full URL to bronze container"""
+        cls.validate_container_config()
         blob_url = cls.get_storage_account_url('blob')
         return f"{blob_url}/{cls.BRONZE_CONTAINER_NAME}"
     
@@ -114,6 +140,8 @@ class Config:
             'storage_account_name': cls.STORAGE_ACCOUNT_NAME,
             'azure_webjobs_storage_configured': bool(cls.AZURE_WEBJOBS_STORAGE),
             'bronze_container_name': cls.BRONZE_CONTAINER_NAME,
+            'silver_container_name': cls.SILVER_CONTAINER_NAME,
+            'gold_container_name': cls.GOLD_CONTAINER_NAME,
             'postgis_host': cls.POSTGIS_HOST,
             'postgis_port': cls.POSTGIS_PORT,
             'postgis_user': cls.POSTGIS_USER,

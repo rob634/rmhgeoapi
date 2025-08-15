@@ -62,9 +62,9 @@ class Config:
     @classmethod
     def validate_storage_config(cls) -> None:
         """Validate that required storage configuration is present"""
-        if not cls.STORAGE_ACCOUNT_NAME and not cls.AZURE_WEBJOBS_STORAGE:
+        if not cls.STORAGE_ACCOUNT_NAME:
             raise ValueError(
-                f"Either {EnvVarNames.STORAGE_ACCOUNT_NAME} or {EnvVarNames.AZURE_WEBJOBS_STORAGE} environment variable must be set"
+                f"{EnvVarNames.STORAGE_ACCOUNT_NAME} environment variable must be set for managed identity"
             )
     
     @classmethod

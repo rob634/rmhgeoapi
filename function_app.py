@@ -23,20 +23,14 @@ app = func.FunctionApp()
 
 # Repository will be initialized lazily when needed
 
-# Queue client for job submission
+# Queue client for job submission - always use managed identity
 def get_queue_client():
-    # Prefer connection string for local dev, use managed identity for production
-    if Config.AZURE_WEBJOBS_STORAGE:
-        # Use connection string for local development
-        queue_service = QueueServiceClient.from_connection_string(Config.AZURE_WEBJOBS_STORAGE)
-    elif Config.STORAGE_ACCOUNT_NAME:
-        # Use managed identity in production
-        account_url = Config.get_storage_account_url('queue')
-        queue_service = QueueServiceClient(account_url, credential=DefaultAzureCredential())
-    else:
-        # No storage configuration found
-        Config.validate_storage_config()
-        raise ValueError("No storage configuration available")
+    if not Config.STORAGE_ACCOUNT_NAME:
+        raise ValueError("STORAGE_ACCOUNT_NAME environment variable must be set for managed identity")
+    
+    # Always use managed identity in Azure Functions
+    account_url = Config.get_storage_account_url('queue')
+    queue_service = QueueServiceClient(account_url, credential=DefaultAzureCredential())
     
     queue_name = AzureStorage.JOB_PROCESSING_QUEUE
     

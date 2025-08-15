@@ -23,19 +23,13 @@ class STACRepository:
             flush_level=logging.ERROR
         )
         
-        # Initialize Table Storage client (same pattern as JobRepository)
-        if Config.AZURE_WEBJOBS_STORAGE:
-            # Use connection string for local development
-            self.table_service = TableServiceClient.from_connection_string(Config.AZURE_WEBJOBS_STORAGE)
-        elif Config.STORAGE_ACCOUNT_NAME:
-            # Use managed identity in production
-            from azure.identity import DefaultAzureCredential
-            account_url = Config.get_storage_account_url('table')
-            self.table_service = TableServiceClient(account_url, credential=DefaultAzureCredential())
-        else:
-            # No storage configuration found
-            Config.validate_storage_config()
-            raise ValueError("No storage configuration available")
+        # Always use managed identity in Azure Functions
+        if not Config.STORAGE_ACCOUNT_NAME:
+            raise ValueError("STORAGE_ACCOUNT_NAME environment variable must be set for managed identity")
+        
+        from azure.identity import DefaultAzureCredential
+        account_url = Config.get_storage_account_url('table')
+        self.table_service = TableServiceClient(account_url, credential=DefaultAzureCredential())
         
         self.collections_table = "staccollections"
         self.items_table = "stacitems"

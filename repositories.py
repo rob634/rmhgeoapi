@@ -20,18 +20,12 @@ class JobRepository:
     
     def __init__(self):
         
-        # Prefer connection string for local dev, use managed identity for production
-        if Config.AZURE_WEBJOBS_STORAGE:
-            # Use connection string for local development
-            self.table_service = TableServiceClient.from_connection_string(Config.AZURE_WEBJOBS_STORAGE)
-        elif Config.STORAGE_ACCOUNT_NAME:
-            # Use managed identity in production
-            account_url = Config.get_storage_account_url('table')
-            self.table_service = TableServiceClient(account_url, credential=DefaultAzureCredential())
-        else:
-            # No storage configuration found
-            Config.validate_storage_config()
-            raise ValueError("No storage configuration available")
+        # Always use managed identity in Azure Functions
+        if not Config.STORAGE_ACCOUNT_NAME:
+            raise ValueError("STORAGE_ACCOUNT_NAME environment variable must be set for managed identity")
+        
+        account_url = Config.get_storage_account_url('table')
+        self.table_service = TableServiceClient(account_url, credential=DefaultAzureCredential())
         
         from constants import AzureStorage
         self.table_name = AzureStorage.JOB_TRACKING_TABLE
@@ -217,22 +211,17 @@ class StorageRepository:
             logger.info(f"StorageRepository initialized with workspace container: {self.workspace_container_name}")
     
     def _init_blob_service_client(self):
-        """Initialize the blob service client with authentication"""
+        """Initialize the blob service client with managed identity authentication"""
         try:
-            if Config.AZURE_WEBJOBS_STORAGE:
-                # Use connection string for local development
-                self.blob_service_client = BlobServiceClient.from_connection_string(Config.AZURE_WEBJOBS_STORAGE)
-                logger.info(f"BlobServiceClient initialized with connection string")
-            elif Config.STORAGE_ACCOUNT_NAME:
-                # Use managed identity in production
-                account_url = Config.get_storage_account_url('blob')
-                self.blob_service_client = BlobServiceClient(account_url, credential=DefaultAzureCredential())
-                logger.info(f"BlobServiceClient initialized with managed identity")
-            else:
-                Config.validate_storage_config()
-                raise ValueError("No storage configuration available")
+            if not Config.STORAGE_ACCOUNT_NAME:
+                raise ValueError("STORAGE_ACCOUNT_NAME environment variable must be set for managed identity")
+            
+            # Always use managed identity in Azure Functions
+            account_url = Config.get_storage_account_url('blob')
+            self.blob_service_client = BlobServiceClient(account_url, credential=DefaultAzureCredential())
+            logger.info(f"BlobServiceClient initialized with managed identity for {Config.STORAGE_ACCOUNT_NAME}")
         except Exception as e:
-            logger.error(f"Error initializing BlobServiceClient: {e}")
+            logger.error(f"Error initializing BlobServiceClient with managed identity: {e}")
             raise
     
     def list_container_contents(self, container_name: str = None) -> Dict:
@@ -254,17 +243,12 @@ class StorageRepository:
             
             logger.info(f"Listing contents of container: {container_name}")
             
-            # Get blob service client
-            if Config.AZURE_WEBJOBS_STORAGE:
-                # Use connection string for local development
-                blob_service = BlobServiceClient.from_connection_string(Config.AZURE_WEBJOBS_STORAGE)
-            elif Config.STORAGE_ACCOUNT_NAME:
-                # Use managed identity in production
-                account_url = Config.get_storage_account_url('blob')
-                blob_service = BlobServiceClient(account_url, credential=DefaultAzureCredential())
-            else:
-                Config.validate_storage_config()
-                raise ValueError("No storage configuration available")
+            # Use managed identity for blob service client
+            if not Config.STORAGE_ACCOUNT_NAME:
+                raise ValueError("STORAGE_ACCOUNT_NAME environment variable must be set for managed identity")
+            
+            account_url = Config.get_storage_account_url('blob')
+            blob_service = BlobServiceClient(account_url, credential=DefaultAzureCredential())
             
             # Get container client
             container_client = blob_service.get_container_client(container_name)

@@ -7,6 +7,7 @@ import logging
 from typing import Optional, Dict
 from azure.data.tables import TableServiceClient, TableEntity
 from azure.core.exceptions import ResourceExistsError, ResourceNotFoundError
+from azure.identity import DefaultAzureCredential
 
 from models import JobRequest, JobStatus
 
@@ -22,7 +23,6 @@ class JobRepository:
         
         if storage_account_name:
             # Use managed identity in production
-            from azure.identity import DefaultAzureCredential
             account_url = f"https://{storage_account_name}.table.core.windows.net"
             self.table_service = TableServiceClient(account_url, credential=DefaultAzureCredential())
         else:

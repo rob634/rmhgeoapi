@@ -9,6 +9,7 @@ from typing import Dict, Any
 
 import azure.functions as func
 from azure.storage.queue import QueueServiceClient
+from azure.identity import DefaultAzureCredential
 
 from models import JobRequest, JobStatus
 from repositories import JobRepository
@@ -26,7 +27,6 @@ def get_queue_client():
     
     if storage_account_name:
         # Use managed identity in production
-        from azure.identity import DefaultAzureCredential
         account_url = f"https://{storage_account_name}.queue.core.windows.net"
         queue_service = QueueServiceClient(account_url, credential=DefaultAzureCredential())
     else:

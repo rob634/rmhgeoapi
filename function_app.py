@@ -254,7 +254,7 @@ def get_job_status(req: func.HttpRequest) -> func.HttpResponse:
         )
 
 
-@app.queue_trigger(arg_name="msg", queue_name="geospatial-jobs", connection="QueueStorage")
+@app.queue_trigger(arg_name="msg", queue_name="geospatial-jobs", connection="AzureWebJobsStorage")
 def process_job_queue(msg: func.QueueMessage) -> None:
     """
     Process jobs from the queue

@@ -12,9 +12,8 @@ from azure.identity import DefaultAzureCredential
 from models import JobRequest, JobStatus
 from repositories import JobRepository, StorageRepository
 from services import ServiceFactory
-from config import Config
+from config import Config, APIParams, Defaults, AzureStorage
 from logger_setup import logger
-from constants import APIParams, Defaults, AzureStorage
 
 # Use centralized logger (imported from logger_setup)
 
@@ -228,7 +227,7 @@ def get_job_status(req: func.HttpRequest) -> func.HttpResponse:
         )
 
 
-@app.queue_trigger(arg_name="msg", queue_name="geospatial-jobs", connection="AzureWebJobsStorage")
+@app.queue_trigger(arg_name="msg", queue_name="geospatial-jobs", connection="QueueStorage")
 def process_job_queue(msg: func.QueueMessage) -> None:
     """
     Process jobs from the queue

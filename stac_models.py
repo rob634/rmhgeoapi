@@ -7,7 +7,7 @@ import hashlib
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Any, Union
 from dataclasses import dataclass, asdict
-from constants import APIParams
+from config import APIParams
 
 
 @dataclass

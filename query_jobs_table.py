@@ -59,7 +59,7 @@ def query_jobs_table():
             print(f"   STORAGE_ACCOUNT_NAME: {Config.STORAGE_ACCOUNT_NAME}")
             return False
         
-        from constants import AzureStorage
+        from config import AzureStorage
         table_name = AzureStorage.JOB_TRACKING_TABLE
         
         # Check if table exists
@@ -198,7 +198,7 @@ def check_queue_status():
             print("❌ No storage configuration found")
             return False
         
-        from constants import AzureStorage
+        from config import AzureStorage
         queue_name = AzureStorage.JOB_PROCESSING_QUEUE
         queue_client = queue_service.get_queue_client(queue_name)
         

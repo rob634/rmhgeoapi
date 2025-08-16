@@ -27,7 +27,7 @@ class JobRepository:
         account_url = Config.get_storage_account_url('table')
         self.table_service = TableServiceClient(account_url, credential=DefaultAzureCredential())
         
-        from constants import AzureStorage
+        from config import AzureStorage
         self.table_name = AzureStorage.JOB_TRACKING_TABLE
         # Don't create table at initialization - will be created when first used
     

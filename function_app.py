@@ -13,7 +13,7 @@ from models import JobRequest, JobStatus
 from repositories import JobRepository, StorageRepository
 from services import ServiceFactory
 from config import Config, APIParams, Defaults, AzureStorage
-from logger_setup import logger, log_list
+from logger_setup import logger, log_list, log_job_stage, log_queue_operation, log_service_processing
 
 # Use centralized logger (imported from logger_setup)
 
@@ -321,8 +321,8 @@ def process_job_queue(msg: func.QueueMessage) -> None:
             logger.debug("System flag is true, parameters are optional and used flexibly")
         
         try:
-            logger.log_queue_operation(job_id, "processing_start")
-            logger.log_job_stage(job_id, "queue_processing", "processing")
+            log_queue_operation(job_id, "processing_start")
+            log_job_stage(job_id, "queue_processing", "processing")
 
         except Exception as e:
             logger.error(f"Failed to log job processing start: {str(e)}")
@@ -343,8 +343,8 @@ def process_job_queue(msg: func.QueueMessage) -> None:
             result_data=result
         )
         
-        logger.log_job_stage(job_id, "queue_processing", "completed")
-        logger.log_queue_operation(job_id, "processing_complete")
+        log_job_stage(job_id, "queue_processing", "completed")
+        log_queue_operation(job_id, "processing_complete")
         
     except Exception as e:
         logger.error(f"Error processing job: {str(e)}")

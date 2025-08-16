@@ -78,10 +78,5 @@ def log_service_processing(service_name: str, operation_type: str, job_id: str, 
     """Log service processing"""
     logger.info(f"SERVICE_PROC service={service_name} operation={operation_type} job_id={job_id[:16]}... status={status}")
 
-# Add these methods to the logger instance
-logger.log_job_stage = log_job_stage
-logger.log_queue_operation = log_queue_operation 
-logger.log_service_processing = log_service_processing
-
 # Log initialization
 #logger.info("RMH Geospatial API Simple Logger initialized")

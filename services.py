@@ -5,7 +5,7 @@ Production-ready architecture with hello world implementation
 from abc import ABC, abstractmethod
 from typing import Dict, List
 import logging
-from logger_setup import logger
+from logger_setup import logger, log_job_stage, log_service_processing
 
 
 class BaseProcessingService(ABC):
@@ -43,7 +43,7 @@ class HelloWorldService(BaseProcessingService):
         """
         Hello world processing with beautiful parameter display
         """
-        logger.log_job_stage(job_id, "hello_world_start", "processing")
+        log_job_stage(job_id, "hello_world_start", "processing")
         
         # Beautiful parameter display
         print("=" * 60)
@@ -61,8 +61,8 @@ class HelloWorldService(BaseProcessingService):
         print("=" * 60)
         
         # Log completion
-        logger.log_job_stage(job_id, "hello_world_complete", "completed")
-        logger.log_service_processing("HelloWorldService", operation_type, job_id, "completed")
+        log_job_stage(job_id, "hello_world_complete", "completed")
+        log_service_processing("HelloWorldService", operation_type, job_id, "completed")
         
         return {
             "status": "completed",

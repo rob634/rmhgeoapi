@@ -13,7 +13,7 @@ from models import JobRequest, JobStatus
 from repositories import JobRepository, StorageRepository
 from services import ServiceFactory
 from config import Config, APIParams, Defaults, AzureStorage
-from logger_setup import logger
+from logger_setup import logger, log_list
 
 # Use centralized logger (imported from logger_setup)
 
@@ -91,14 +91,16 @@ def submit_job(req: func.HttpRequest) -> func.HttpResponse:
         except ValueError as e:
             logger.error(f"Invalid JSON in request body {e}")
             return func.HttpResponse(
-                json.dumps({"error": "Invalid JSON in request body"}),
+                json.dumps({"error": "Invalid JSON in request body",
+                            'log_list': log_list.log_messages}),
                 status_code=400,
                 mimetype="application/json"
             )
         except Exception as e:
             logger.error(f"Error parsing request body: {str(e)}")
             return func.HttpResponse(
-                json.dumps({"error": f"Error parsing request body: {str(e)}"}),
+                json.dumps({"error": f"Error parsing request body: {str(e)}",
+                             'log_list': log_list.log_messages}),
                 status_code=400,
                 mimetype="application/json"
             )
@@ -107,7 +109,8 @@ def submit_job(req: func.HttpRequest) -> func.HttpResponse:
             logger.error("Request body is required but was empty")
             logger.debug("Returning 400 Bad Request due to missing body")
             return func.HttpResponse(
-                json.dumps({"error": "Request body is required"}),
+                json.dumps({"error": "Request body is required",
+                             'log_list': log_list.log_messages}),
                 status_code=400,
                 mimetype="application/json"
             )
@@ -127,7 +130,8 @@ def submit_job(req: func.HttpRequest) -> func.HttpResponse:
         is_valid, error_msg = job_request.validate()
         if not is_valid:
             return func.HttpResponse(
-                json.dumps({"error": error_msg}),
+                json.dumps({"error": error_msg,
+                             'log_list': log_list.log_messages}),
                 status_code=400,
                 mimetype="application/json"
             )
@@ -184,7 +188,8 @@ def submit_job(req: func.HttpRequest) -> func.HttpResponse:
                 APIParams.RESOURCE_ID: resource_id,
                 APIParams.VERSION_ID: version_id,
                 APIParams.OPERATION_TYPE: operation_type,
-                APIParams.SYSTEM: system
+                APIParams.SYSTEM: system,
+                "log_list": log_list.log_messages
             }),
             status_code=200,  # Always 200 for successful idempotent responses
             mimetype="application/json"
@@ -193,7 +198,8 @@ def submit_job(req: func.HttpRequest) -> func.HttpResponse:
     except Exception as e:
         logger.error(f"Error in submit_job: {str(e)}")
         return func.HttpResponse(
-            json.dumps({"error": f"Internal server error: {str(e)}"}),
+            json.dumps({"error": f"Internal server error: {str(e)}",
+                         'log_list': log_list.log_messages}),
             status_code=500,
             mimetype="application/json"
         )
@@ -212,7 +218,8 @@ def get_job_status(req: func.HttpRequest) -> func.HttpResponse:
     try:
         if not job_id:
             return func.HttpResponse(
-                json.dumps({"error": "job_id parameter is required"}),
+                json.dumps({"error": "job_id parameter is required",
+                             'log_list': log_list.log_messages}),
                 status_code=400,
                 mimetype="application/json"
             )
@@ -223,7 +230,8 @@ def get_job_status(req: func.HttpRequest) -> func.HttpResponse:
         
         if not job_details:
             return func.HttpResponse(
-                json.dumps({"error": f"Job not found: {job_id}"}),
+                json.dumps({"error": f"Job not found: {job_id}",
+                             'log_list': log_list.log_messages}),
                 status_code=404,
                 mimetype="application/json"
             )
@@ -239,7 +247,8 @@ def get_job_status(req: func.HttpRequest) -> func.HttpResponse:
     except Exception as e:
         logger.error(f"Error in get_job_status: {str(e)}")
         return func.HttpResponse(
-            json.dumps({"error": f"Internal server error: {str(e)}"}),
+            json.dumps({"error": f"Internal server error: {str(e)}",
+                         'log_list': log_list.log_messages}),
             status_code=500,
             mimetype="application/json"
         )
@@ -368,7 +377,8 @@ def manual_process_job(req: func.HttpRequest) -> func.HttpResponse:
     try:
         if not job_id:
             return func.HttpResponse(
-                json.dumps({"error": "job_id parameter is required"}),
+                json.dumps({"error": "job_id parameter is required",
+                             'log_list': log_list.log_messages}),
                 status_code=400,
                 mimetype="application/json"
             )
@@ -379,7 +389,8 @@ def manual_process_job(req: func.HttpRequest) -> func.HttpResponse:
         
         if not job_details:
             return func.HttpResponse(
-                json.dumps({"error": f"Job not found: {job_id}"}),
+                json.dumps({"error": f"Job not found: {job_id}",
+                             'log_list': log_list.log_messages}),
                 status_code=404,
                 mimetype="application/json"
             )
@@ -392,7 +403,8 @@ def manual_process_job(req: func.HttpRequest) -> func.HttpResponse:
                 json.dumps({
                     "error": f"Job is not in pending/queued status (current: {current_status})",
                     "job_id": job_id,
-                    "current_status": current_status
+                    "current_status": current_status,
+                    'log_list': log_list.log_messages
                 }),
                 status_code=400,
                 mimetype="application/json"
@@ -422,7 +434,8 @@ def manual_process_job(req: func.HttpRequest) -> func.HttpResponse:
                 "job_id": job_id,
                 "previous_status": current_status,
                 "new_status": JobStatus.COMPLETED,
-                "result": result
+                "result": result,
+                "log_list": log_list.log_messages
             }),
             status_code=200,
             mimetype="application/json"
@@ -431,7 +444,8 @@ def manual_process_job(req: func.HttpRequest) -> func.HttpResponse:
     except Exception as e:
         logger.error(f"Error in manual_process_job: {str(e)}")
         return func.HttpResponse(
-            json.dumps({"error": f"Internal server error: {str(e)}"}),
+            json.dumps({"error": f"Internal server error: {str(e)}",
+                         'log_list': log_list.log_messages}),
             status_code=500,
             mimetype="application/json"
         )

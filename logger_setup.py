@@ -7,7 +7,7 @@ import os
 import logging
 from logging.handlers import MemoryHandler
 
-BUFFER_SIZE = 10  # Increased for Azure Functions
+BUFFER_SIZE = 5  # Flush every 5 items for faster feedback
 
 class BufferedLogger(logging.Logger):
     """Enhanced logger with buffering capabilities for Azure Functions"""
@@ -170,13 +170,13 @@ else:
     logger = GeospatialLogger(logger_name)
     memory_handler = MemoryHandler(
         capacity=BUFFER_SIZE, 
-        flushLevel=logging.WARNING,  # Auto-flush on warnings/errors
+        flushLevel=logging.DEBUG,  # Auto-flush on debug and above for fast feedback
         target=console_handler
     )
     logger.set_memory_handler(memory_handler)
 
-# Set logging level from environment or default to INFO
-log_level = os.environ.get('LOG_LEVEL', 'INFO').upper()
+# Set logging level from environment or default to DEBUG for verbose logging
+log_level = os.environ.get('LOG_LEVEL', 'DEBUG').upper()
 logger.setLevel(getattr(logging, log_level, logging.INFO))
 logger.propagate = False
 

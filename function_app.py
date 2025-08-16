@@ -124,7 +124,9 @@ def submit_job(req: func.HttpRequest) -> func.HttpResponse:
             # Add to processing queue
             queue_client = get_queue_client()
             message_content = json.dumps(job_request.to_dict())
+            logger.debug(f"📤 Sending message to queue: {message_content}")
             queue_client.send_message(message_content)
+            logger.debug(f"✅ Message sent to queue successfully for job: {job_request.job_id}")
             
             # Update status to queued
             job_repo.update_job_status(job_request.job_id, JobStatus.QUEUED)
@@ -234,8 +236,10 @@ def process_job_queue(msg: func.QueueMessage) -> None:
     Triggered by messages in job-processing queue
     """
     try:
+        logger.debug("🔄 QUEUE TRIGGER FIRED! Starting job processing")
         # Parse message
         message_content = msg.get_body().decode('utf-8')
+        logger.debug(f"📨 Queue message received: {message_content}")
         job_data = json.loads(message_content)
         
         job_id = job_data[APIParams.JOB_ID]

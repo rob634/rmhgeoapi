@@ -43,7 +43,7 @@ def get_queue_client():
     return queue_service.get_queue_client(queue_name)
 
 
-@app.route(route="jobs/{operation_type}", methods=["POST"])
+@app.route(route="jobs/{operation_type}", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
 def submit_job(req: func.HttpRequest) -> func.HttpResponse:
     """
     Submit a new processing job
@@ -182,7 +182,7 @@ def submit_job(req: func.HttpRequest) -> func.HttpResponse:
         )
 
 
-@app.route(route="jobs/{job_id}", methods=["GET"])
+@app.route(route="jobs/{job_id}", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
 def get_job_status(req: func.HttpRequest) -> func.HttpResponse:
     """
     Get job status by job ID
@@ -286,7 +286,7 @@ def process_job_queue(msg: func.QueueMessage) -> None:
         raise
 
 
-@app.route(route="jobs/{job_id}/process", methods=["POST"])
+@app.route(route="jobs/{job_id}/process", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
 def manual_process_job(req: func.HttpRequest) -> func.HttpResponse:
     """
     Manually process a pending job (for debugging)

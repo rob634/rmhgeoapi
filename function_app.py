@@ -68,30 +68,44 @@ def submit_job(req: func.HttpRequest) -> func.HttpResponse:
     - version_id: Optional, can be any value
     """
     # Extract operation type from path
-    operation_type = req.route_params.get('operation_type')
+    operation_type = req.route_params.get(APIParams.OPERATION_TYPE)
+    logger.debug(f"Received job submission request for operation: {operation_type}")
     
     logger.info(f"Job submission request received for operation: {operation_type}")
     
     try:
         # Validate operation type
+        logger.debug(f"Validating operation type: {operation_type}")
         if not operation_type:
+            logger.error("Operation type is required in the request path")
             return func.HttpResponse(
-                json.dumps({"error": "operation_type parameter is required in path"}),
+                json.dumps({"error": f"{APIParams.OPERATION_TYPE} parameter is required in path"}),
                 status_code=400,
                 mimetype="application/json"
             )
         
         # Parse request body
+        req_body = None
         try:
             req_body = req.get_json()
-        except ValueError:
+        except ValueError as e:
+            logger.error(f"Invalid JSON in request body {e}")
             return func.HttpResponse(
                 json.dumps({"error": "Invalid JSON in request body"}),
                 status_code=400,
                 mimetype="application/json"
             )
-        
+        except Exception as e:
+            logger.error(f"Error parsing request body: {str(e)}")
+            return func.HttpResponse(
+                json.dumps({"error": f"Error parsing request body: {str(e)}"}),
+                status_code=400,
+                mimetype="application/json"
+            )
+            
         if not req_body:
+            logger.error("Request body is required but was empty")
+            logger.debug("Returning 400 Bad Request due to missing body")
             return func.HttpResponse(
                 json.dumps({"error": "Request body is required"}),
                 status_code=400,
@@ -103,6 +117,8 @@ def submit_job(req: func.HttpRequest) -> func.HttpResponse:
         resource_id = req_body.get(APIParams.RESOURCE_ID)
         version_id = req_body.get(APIParams.VERSION_ID)
         system = req_body.get(APIParams.SYSTEM, Defaults.SYSTEM_FLAG)
+        
+        logger.debug(f"Extracted parameters: dataset_id={dataset_id}, resource_id={resource_id}, version_id={version_id}, system={system}")
         
         # Create job request
         job_request = JobRequest(dataset_id, resource_id, version_id, operation_type, system)
@@ -238,19 +254,70 @@ def process_job_queue(msg: func.QueueMessage) -> None:
     try:
         logger.debug("🔄 QUEUE TRIGGER FIRED! Starting job processing")
         # Parse message
-        message_content = msg.get_body().decode('utf-8')
+        try:
+            logger.debug("Loading message content from queue")
+            message_content = msg.get_body().decode('utf-8')
+            logger.debug(f"Message content: {message_content}")
+            if not message_content:
+                logger.error("Received empty message content from queue")
+                raise ValueError("Empty message content received")
+        except ValueError as e:
+            logger.error(f"ValueError failed to decode queue message: {str(e)}")
+            raise 
+        except Exception as e:
+            logger.error(f"Failed to decode queue message: {str(e)}")
+            raise 
         logger.debug(f"📨 Queue message received: {message_content}")
-        job_data = json.loads(message_content)
         
-        job_id = job_data[APIParams.JOB_ID]
-        dataset_id = job_data[APIParams.DATASET_ID]
-        resource_id = job_data[APIParams.RESOURCE_ID]
-        version_id = job_data[APIParams.VERSION_ID]
-        operation_type = job_data[APIParams.OPERATION_TYPE]
-        system = job_data.get(APIParams.SYSTEM, Defaults.SYSTEM_FLAG)  # Backwards compatibility
+        try:
+            logger.debug("Parsing job data from message content")
+            job_data = json.loads(message_content)
+            logger.debug(f"Parsed job data: {job_data}")
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse job data from message: {str(e)}")
+            raise
+        except Exception as e:
+            logger.error(f"Unexpected error parsing job data: {str(e)}")
+            raise
+        logger.debug("Job data successfully parsed from queue message")
         
-        logger.log_queue_operation(job_id, "processing_start")
-        logger.log_job_stage(job_id, "queue_processing", "processing")
+        job_id = job_data.get(APIParams.JOB_ID)
+        if not job_id:
+            logger.error("Missing job_id in queue message")
+            raise ValueError("job_id is required in the queue message")
+        logger.debug(f"Processing job with ID: {job_id}")
+        
+        operation_type = job_data.get(APIParams.OPERATION_TYPE)
+        if not operation_type:
+            logger.error("Missing operation_type in queue message")
+            raise ValueError("operation_type is required in the queue message")
+        
+        dataset_id = job_data.get(APIParams.DATASET_ID)
+        resource_id = job_data.get(APIParams.RESOURCE_ID)
+        version_id = job_data.get(APIParams.VERSION_ID)
+        
+        system = job_data.get(APIParams.SYSTEM, Defaults.SYSTEM_FLAG)
+        
+        if not system:
+            logger.debug("System flag is false, validating required parameters")
+            if not dataset_id or not resource_id or not version_id:
+                logger.error("Missing required parameters for DDH operation")
+                raise ValueError(
+                    f"dataset_id, resource_id, and version_id are required for DDH operations. "
+                    f"Received: dataset_id={dataset_id}, resource_id={resource_id}, version_id={version_id}"
+                )
+            logger.debug("All required parameters for DDH operation are present")
+            
+        else:
+            logger.debug("System flag is true, parameters are optional and used flexibly")
+        
+        try:
+            logger.log_queue_operation(job_id, "processing_start")
+            logger.log_job_stage(job_id, "queue_processing", "processing")
+
+        except Exception as e:
+            logger.error(f"Failed to log job processing start: {str(e)}")
+            #raise
         
         # Update status to processing
         job_repo = JobRepository()

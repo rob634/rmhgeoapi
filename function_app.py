@@ -254,7 +254,7 @@ def get_job_status(req: func.HttpRequest) -> func.HttpResponse:
         )
 
 
-@app.queue_trigger(arg_name="msg", queue_name="geospatial-jobs", connection="AzureWebJobsStorage")
+@app.queue_trigger(arg_name="msg", queue_name="geospatial-jobs", connection="Storage")
 def process_job_queue(msg: func.QueueMessage) -> None:
     """
     Process jobs from the queue
@@ -262,32 +262,56 @@ def process_job_queue(msg: func.QueueMessage) -> None:
     """
     try:
         logger.debug("🔄 QUEUE TRIGGER FIRED! Starting job processing")
-        # Parse message
+        logger.debug(f"Message ID: {msg.id}, Dequeue count: {msg.dequeue_count}")
+        
+        # Parse message - Azure Functions handles base64 decoding when messageEncoding="base64"
         try:
             logger.debug("Loading message content from queue")
-            message_content = msg.get_body().decode('utf-8')
-            logger.debug(f"Message content: {message_content}")
+            
+            # Get raw bytes from message
+            message_bytes = msg.get_body()
+            logger.debug(f"Received message bytes length: {len(message_bytes)}")
+            
+            # Try to decode as UTF-8 (Azure Functions should have already base64-decoded it)
+            try:
+                message_content = message_bytes.decode('utf-8')
+                logger.debug(f"Successfully decoded message as UTF-8, length: {len(message_content)}")
+            except UnicodeDecodeError as e:
+                logger.error(f"Failed to decode message as UTF-8: {str(e)}")
+                # Log first 100 bytes for debugging
+                logger.error(f"First 100 bytes of message: {message_bytes[:100]}")
+                raise
+            
             if not message_content:
                 logger.error("Received empty message content from queue")
                 raise ValueError("Empty message content received")
+                
+            # Log first 200 chars of message for debugging (might be large)
+            logger.debug(f"Message content preview: {message_content[:200]}...")
+            
         except ValueError as e:
-            logger.error(f"ValueError failed to decode queue message: {str(e)}")
+            logger.error(f"ValueError while decoding queue message: {str(e)}")
             raise 
         except Exception as e:
-            logger.error(f"Failed to decode queue message: {str(e)}")
+            logger.error(f"Unexpected error decoding queue message: {str(e)}")
+            logger.error(f"Message type: {type(msg)}, Body type: {type(msg.get_body())}")
             raise 
-        logger.debug(f"📨 Queue message received: {message_content}")
+        
+        logger.debug(f"📨 Queue message received, attempting JSON parse")
         
         try:
             logger.debug("Parsing job data from message content")
             job_data = json.loads(message_content)
-            logger.debug(f"Parsed job data: {job_data}")
+            logger.debug(f"Successfully parsed JSON, keys: {list(job_data.keys())}")
+            logger.debug(f"Full job data: {job_data}")
         except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse job data from message: {str(e)}")
+            logger.error(f"Failed to parse job data as JSON: {str(e)}")
+            logger.error(f"Invalid JSON content: {message_content[:500]}...")
             raise
         except Exception as e:
             logger.error(f"Unexpected error parsing job data: {str(e)}")
             raise
+        
         logger.debug("Job data successfully parsed from queue message")
         
         job_id = job_data.get(APIParams.JOB_ID)

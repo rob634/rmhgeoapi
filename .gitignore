@@ -144,3 +144,10 @@ testing/
 .claude*
 .vscode*
 old_reference*
+
+# Local testing and utility scripts
+direct_table_query.py
+query_jobs_table.py
+manual_process_job.py
+update_job_status.py
+test_api_local.py

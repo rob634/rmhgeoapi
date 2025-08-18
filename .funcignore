@@ -14,3 +14,22 @@ tests/
 testing/
 .claude* 
 old_reference*
+
+# Local testing and utility scripts
+direct_table_query.py
+query_jobs_table.py
+manual_process_job.py
+update_job_status.py
+test_api_local.py
+
+# Documentation files
+*.md
+README.md
+LOGGING_IMPROVEMENTS.md
+MANAGED_IDENTITY_CONFIG.md
+DEBUG_POISON_QUEUE.md
+TESTING.md
+QUEUE_TRIGGER_FIX.md
+
+# Local settings examples
+local.settings.example.json

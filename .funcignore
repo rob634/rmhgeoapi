@@ -33,3 +33,6 @@ QUEUE_TRIGGER_FIX.md
 
 # Local settings examples
 local.settings.example.json
+
+# Shell scripts
+*.sh

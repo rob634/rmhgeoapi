@@ -17,18 +17,21 @@ from logger_setup import logger, log_list, log_job_stage, log_queue_operation, l
 
 # Use centralized logger (imported from logger_setup)
 
-# Initialize function app
-app = func.FunctionApp()
+# Initialize function app with HTTP auth level
+app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
 
 # Repository will be initialized lazily when needed
 
-# Queue client for job submission - always use managed identity
+# Queue client for job submission - use AzureWebJobsStorage connection
 def get_queue_client():
+    # Check if we have the storage account name (extracted from AzureWebJobsStorage settings)
     if not Config.STORAGE_ACCOUNT_NAME:
-        raise ValueError("STORAGE_ACCOUNT_NAME environment variable must be set for managed identity")
+        raise ValueError("Could not determine storage account name from AzureWebJobsStorage settings")
     
-    # Always use managed identity in Azure Functions
+    # Use the same storage account as AzureWebJobsStorage
     account_url = Config.get_storage_account_url('queue')
+    
+    # Use DefaultAzureCredential which works with managed identity in Azure
     queue_service = QueueServiceClient(account_url, credential=DefaultAzureCredential())
     
     queue_name = AzureStorage.JOB_PROCESSING_QUEUE
@@ -40,6 +43,31 @@ def get_queue_client():
         pass  # Queue already exists
     
     return queue_service.get_queue_client(queue_name)
+
+
+@app.route(route="health", methods=["GET"])
+def health_check(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Simple health check endpoint
+    GET /api/health
+    Returns: {"status": "healthy", "message": "Azure Functions HTTP triggers are working"}
+    """
+    logger.info("Health check endpoint called")
+    return func.HttpResponse(
+        json.dumps({
+            "status": "healthy",
+            "message": "Azure Functions HTTP triggers are working",
+            "queue_trigger": "configured for geospatial-jobs",
+            "http_endpoints": [
+                "GET /api/health",
+                "POST /api/jobs/{operation_type}",
+                "GET /api/jobs/{job_id}",
+                "POST /api/jobs/{job_id}/process"
+            ]
+        }),
+        status_code=200,
+        mimetype="application/json"
+    )
 
 
 @app.route(route="jobs/{operation_type}", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
@@ -254,7 +282,7 @@ def get_job_status(req: func.HttpRequest) -> func.HttpResponse:
         )
 
 
-@app.queue_trigger(arg_name="msg", queue_name="geospatial-jobs", connection="Storage")
+@app.queue_trigger(arg_name="msg", queue_name="geospatial-jobs", connection="AzureWebJobsStorage")
 def process_job_queue(msg: func.QueueMessage) -> None:
     """
     Process jobs from the queue

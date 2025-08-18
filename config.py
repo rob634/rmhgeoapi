@@ -10,7 +10,7 @@ class EnvVarNames:
     """Environment variable name constants - centralized for easy changes"""
     
     # Azure Storage Environment Variables
-    STORAGE_ACCOUNT_NAME = 'AzureWebJobsStorage'
+    STORAGE_ACCOUNT_NAME = 'STORAGE_ACCOUNT_NAME'
     AZURE_WEBJOBS_STORAGE = 'AzureWebJobsStorage'
     BRONZE_CONTAINER_NAME = 'BRONZE_CONTAINER_NAME'
     SILVER_CONTAINER_NAME = 'SILVER_CONTAINER_NAME'
@@ -35,7 +35,15 @@ class Config:
     """Configuration class for environment variables"""
     
     # Azure Storage Configuration
-    STORAGE_ACCOUNT_NAME: Optional[str] = os.environ.get(EnvVarNames.STORAGE_ACCOUNT_NAME)
+    # Extract storage account name from AzureWebJobsStorage__blobServiceUri or use explicit setting
+    _storage_uri = os.environ.get('AzureWebJobsStorage__blobServiceUri', '')
+    if _storage_uri and _storage_uri.startswith('https://'):
+        # Extract account name from URI like https://rmhazuregeo.blob.core.windows.net
+        STORAGE_ACCOUNT_NAME = _storage_uri.split('//')[1].split('.')[0] if '//' in _storage_uri else None
+    else:
+        # Fallback to explicit STORAGE_ACCOUNT_NAME environment variable
+        STORAGE_ACCOUNT_NAME: Optional[str] = os.environ.get(EnvVarNames.STORAGE_ACCOUNT_NAME)
+    
     AZURE_WEBJOBS_STORAGE: Optional[str] = os.environ.get(EnvVarNames.AZURE_WEBJOBS_STORAGE)
     BRONZE_CONTAINER_NAME: Optional[str] = os.environ.get(EnvVarNames.BRONZE_CONTAINER_NAME)
     #Silver container hosts COGs 

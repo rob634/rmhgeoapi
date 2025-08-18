@@ -10,7 +10,7 @@ class EnvVarNames:
     """Environment variable name constants - centralized for easy changes"""
     
     # Azure Storage Environment Variables
-    STORAGE_ACCOUNT_NAME = 'STORAGE_ACCOUNT_NAME'
+    STORAGE_ACCOUNT_NAME = 'AzureWebJobsStorage'
     AZURE_WEBJOBS_STORAGE = 'AzureWebJobsStorage'
     BRONZE_CONTAINER_NAME = 'BRONZE_CONTAINER_NAME'
     SILVER_CONTAINER_NAME = 'SILVER_CONTAINER_NAME'

@@ -68,19 +68,44 @@ log_list.setFormatter(logging.Formatter("%(asctime)s %(levelname)s: %(message)s"
 logger.addHandler(log_list)
 # Simple logging methods for job tracking
 def log_job_stage(job_id: str, stage: str, status: str, duration: float = None):
-    """Log job processing stages"""
+    """Log job processing stages with structured logging for Azure"""
     msg = f"JOB_STAGE job_id={job_id[:16]}... stage={stage} status={status}"
     if duration:
         msg += f" duration={duration:.2f}s"
-    logger.info(msg)
+    
+    # Add structured logging for Application Insights
+    logger.info(msg, extra={
+        "custom_dimensions": {
+            "job_id": job_id,
+            "stage": stage,
+            "status": status,
+            "duration": duration if duration else 0,
+            "event_type": "job_stage"
+        }
+    })
 
 def log_queue_operation(job_id: str, operation: str, queue_name: str = "geospatial-jobs"):
-    """Log queue operations"""
-    logger.info(f"QUEUE_OP job_id={job_id[:16]}... operation={operation} queue={queue_name}")
+    """Log queue operations with structured logging for Azure"""
+    logger.info(f"QUEUE_OP job_id={job_id[:16]}... operation={operation} queue={queue_name}", extra={
+        "custom_dimensions": {
+            "job_id": job_id,
+            "operation": operation,
+            "queue_name": queue_name,
+            "event_type": "queue_operation"
+        }
+    })
 
 def log_service_processing(service_name: str, operation_type: str, job_id: str, status: str):
-    """Log service processing"""
-    logger.info(f"SERVICE_PROC service={service_name} operation={operation_type} job_id={job_id[:16]}... status={status}")
+    """Log service processing with structured logging for Azure"""
+    logger.info(f"SERVICE_PROC service={service_name} operation={operation_type} job_id={job_id[:16]}... status={status}", extra={
+        "custom_dimensions": {
+            "job_id": job_id,
+            "service_name": service_name,
+            "operation_type": operation_type,
+            "status": status,
+            "event_type": "service_processing"
+        }
+    })
 
 # Create buffered logger function for STAC modules
 def create_buffered_logger(name: str, 

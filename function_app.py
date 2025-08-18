@@ -24,6 +24,8 @@ app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
 
 # Queue client for job submission - use AzureWebJobsStorage connection
 def get_queue_client():
+    from azure.storage.queue import TextBase64EncodePolicy
+    
     # Check if we have the storage account name (extracted from AzureWebJobsStorage settings)
     if not Config.STORAGE_ACCOUNT_NAME:
         raise ValueError("Could not determine storage account name from AzureWebJobsStorage settings")
@@ -42,7 +44,12 @@ def get_queue_client():
     except Exception:
         pass  # Queue already exists
     
-    return queue_service.get_queue_client(queue_name)
+    queue_client = queue_service.get_queue_client(queue_name)
+    
+    # Explicitly set the encoding policy to ensure base64 encoding
+    queue_client._config.message_encode_policy = TextBase64EncodePolicy()
+    
+    return queue_client
 
 
 @app.route(route="health", methods=["GET"])
@@ -52,6 +59,7 @@ def health_check(req: func.HttpRequest) -> func.HttpResponse:
     GET /api/health
     Returns: {"status": "healthy", "message": "Azure Functions HTTP triggers are working"}
     """
+    logger.debug("Health check endpoint called")
     logger.info("Health check endpoint called")
     return func.HttpResponse(
         json.dumps({
@@ -173,7 +181,10 @@ def submit_job(req: func.HttpRequest) -> func.HttpResponse:
             queue_client = get_queue_client()
             message_content = json.dumps(job_request.to_dict())
             logger.debug(f"📤 Sending message to queue: {message_content}")
+            
+            # The queue client now has TextBase64EncodePolicy set, so it will handle encoding
             queue_client.send_message(message_content)
+            
             logger.debug(f"✅ Message sent to queue successfully for job: {job_request.job_id}")
             
             # Update status to queued
@@ -241,6 +252,7 @@ def get_job_status(req: func.HttpRequest) -> func.HttpResponse:
     Returns: {"job_id": "...", "status": "...", "created_at": "...", ...}
     """
     job_id = req.route_params.get('job_id')
+    logger.debug(f"Received job status request for job_id: {job_id}")
     logger.info(f"Job status request for: {job_id}")
     
     try:
@@ -282,14 +294,18 @@ def get_job_status(req: func.HttpRequest) -> func.HttpResponse:
         )
 
 
-@app.queue_trigger(arg_name="msg", queue_name="geospatial-jobs", connection="AzureWebJobsStorage")
+@app.queue_trigger(
+        arg_name="msg",
+        queue_name="geospatial-jobs",
+        connection="AzureWebJobsStorage")
 def process_job_queue(msg: func.QueueMessage) -> None:
     """
     Process jobs from the queue
     Triggered by messages in job-processing queue
     """
+    logger.debug("🔄 QUEUE TRIGGER FIRED! Starting job processing")
     try:
-        logger.debug("🔄 QUEUE TRIGGER FIRED! Starting job processing")
+
         logger.debug(f"Message ID: {msg.id}, Dequeue count: {msg.dequeue_count}")
         
         # Parse message - Azure Functions handles base64 decoding when messageEncoding="base64"

@@ -375,10 +375,9 @@ def process_job_queue(msg: func.QueueMessage) -> None:
         try:
             log_queue_operation(job_id, "processing_start")
             log_job_stage(job_id, "queue_processing", "processing")
-
         except Exception as e:
-            logger.error(f"Failed to log job processing start: {str(e)}")
-            #raise
+            # Log the error but don't fail the job because of logging issues
+            logger.warning(f"Could not log job processing start (non-fatal): {str(e)}")
         
         # Update status to processing
         job_repo = JobRepository()
@@ -395,8 +394,12 @@ def process_job_queue(msg: func.QueueMessage) -> None:
             result_data=result
         )
         
-        log_job_stage(job_id, "queue_processing", "completed")
-        log_queue_operation(job_id, "processing_complete")
+        try:
+            log_job_stage(job_id, "queue_processing", "completed")
+            log_queue_operation(job_id, "processing_complete")
+        except Exception as e:
+            # Log the error but don't fail the job because of logging issues
+            logger.warning(f"Could not log job completion (non-fatal): {str(e)}")
         
     except Exception as e:
         logger.error(f"Error processing job: {str(e)}")

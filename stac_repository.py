@@ -9,7 +9,7 @@ from azure.data.tables import TableServiceClient, TableEntity
 from azure.core.exceptions import ResourceExistsError, ResourceNotFoundError
 
 from config import Config
-from logging_utils import create_buffered_logger
+from logger_setup import create_buffered_logger
 from stac_models import STACCollection, STACItem, STACQuery, STACBoundingBox
 
 

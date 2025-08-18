@@ -5,7 +5,7 @@ Integrates with the existing job processing system
 import json
 import logging
 from typing import Dict, List
-from logging_utils import create_buffered_logger
+from logger_setup import create_buffered_logger
 from services import BaseProcessingService
 
 from stac_repository import STACRepository

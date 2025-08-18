@@ -154,3 +154,6 @@ test_api_local.py
 
 # Shell scripts
 *.sh
+
+# Removed/redundant files
+logging_utils.py

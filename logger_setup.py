@@ -1,19 +1,23 @@
 """
 Centralized logging setup for RMH Geospatial API
-Simple console logger that Azure Functions will pick up directly
+Provides both simple logging for Azure Functions and buffered logging for services
 """
 import os
 import logging
 from logging.handlers import MemoryHandler
+from typing import Optional
 
 BUFFER_SIZE = 1
 
 class BufferedLogger(logging.Logger):
-    def __init__(self, name, level=logging.NOTSET):
+    """Logger with buffering capabilities for better log management"""
+    
+    def __init__(self, name: str, level: int = logging.NOTSET):
         super().__init__(name, level)
-        self.memory_handler = None
+        self.memory_handler: Optional[MemoryHandler] = None
 
-    def set_memory_handler(self, memory_handler):
+    def set_memory_handler(self, memory_handler: MemoryHandler):
+        """Set and add a memory handler for buffering logs"""
         self.memory_handler = memory_handler
         self.addHandler(memory_handler)
 
@@ -77,6 +81,53 @@ def log_queue_operation(job_id: str, operation: str, queue_name: str = "geospati
 def log_service_processing(service_name: str, operation_type: str, job_id: str, status: str):
     """Log service processing"""
     logger.info(f"SERVICE_PROC service={service_name} operation={operation_type} job_id={job_id[:16]}... status={status}")
+
+# Create buffered logger function for STAC modules
+def create_buffered_logger(name: str, 
+                          target_handler: logging.Handler = None,
+                          capacity: int = 1000,
+                          flush_level: int = logging.ERROR) -> BufferedLogger:
+    """
+    Create a buffered logger with memory handler
+    
+    Args:
+        name: Logger name
+        target_handler: Handler to flush to (defaults to StreamHandler)
+        capacity: Maximum number of records to buffer
+        flush_level: Log level that triggers automatic flush
+        
+    Returns:
+        Configured BufferedLogger instance
+    """
+    # Set BufferedLogger as the logger class
+    logging.setLoggerClass(BufferedLogger)
+    
+    # Create logger
+    logger = logging.getLogger(name)
+    
+    # Create target handler if not provided
+    if target_handler is None:
+        target_handler = logging.StreamHandler()
+        formatter = logging.Formatter(
+            '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+        )
+        target_handler.setFormatter(formatter)
+    
+    # Create memory handler
+    memory_handler = MemoryHandler(
+        capacity=capacity,
+        flushLevel=flush_level,
+        target=target_handler
+    )
+    
+    # Set up the buffered logger
+    logger.set_memory_handler(memory_handler)
+    logger.setLevel(logging.DEBUG)
+    
+    # Reset logger class to default
+    logging.setLoggerClass(logging.Logger)
+    
+    return logger
 
 # Log initialization
 #logger.info("RMH Geospatial API Simple Logger initialized")

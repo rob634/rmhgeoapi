@@ -36,3 +36,6 @@ local.settings.example.json
 
 # Shell scripts
 *.sh
+
+# Removed/redundant files
+logging_utils.py

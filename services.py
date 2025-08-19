@@ -190,14 +190,17 @@ class ServiceFactory:
         if operation_type == "list_container":
             return ContainerListingService()
         
+        # Raster processing operations
+        elif operation_type in ["cog_conversion", "reproject_raster", "validate_raster", "raster_info"]:
+            from raster_service import RasterProcessingService
+            return RasterProcessingService()
+        
         # STAC operations
         elif operation_type.startswith("stac_"):
             from stac_service import STACService
             return STACService()
         
         # Future: route different operations to different services
-        # elif operation_type == "cog_conversion":
-        #     return RasterProcessingService()
         # elif operation_type == "vector_upload":
         #     return VectorProcessingService()
         

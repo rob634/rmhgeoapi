@@ -502,3 +502,109 @@ class StorageRepository:
         except Exception as e:
             logger.error(f"Error validating file name {file_name}: {e}")
             raise
+    
+    def get_blob_sas_uri(self, container_name: str, blob_name: str) -> str:
+        """
+        Get a SAS URI for accessing a blob directly
+        
+        Args:
+            container_name: Container name
+            blob_name: Blob name
+            
+        Returns:
+            SAS URI string for the blob with SAS token
+        """
+        try:
+            from datetime import datetime, timedelta
+            from azure.storage.blob import BlobSasPermissions, generate_blob_sas
+            
+            blob_client = self.blob_service_client.get_blob_client(
+                container=container_name, 
+                blob=blob_name
+            )
+            
+            # Generate SAS token valid for 1 hour
+            sas_token = generate_blob_sas(
+                account_name=Config.STORAGE_ACCOUNT_NAME,
+                container_name=container_name,
+                blob_name=blob_name,
+                permission=BlobSasPermissions(read=True),
+                expiry=datetime.utcnow() + timedelta(hours=1),
+                account_key=None,  # Will use managed identity
+                user_delegation_key=self._get_user_delegation_key()
+            )
+            
+            # Construct full URL with SAS token
+            sas_url = f"{blob_client.url}?{sas_token}"
+            return sas_url
+            
+        except Exception as e:
+            logger.error(f"Error getting SAS URI for {blob_name}: {e}")
+            raise
+    
+    def _get_user_delegation_key(self):
+        """Get user delegation key for SAS generation with managed identity"""
+        try:
+            from datetime import datetime, timedelta
+            
+            # Get user delegation key valid for 1 hour
+            key_start_time = datetime.utcnow()
+            key_expiry_time = key_start_time + timedelta(hours=1)
+            
+            user_delegation_key = self.blob_service_client.get_user_delegation_key(
+                key_start_time=key_start_time,
+                key_expiry_time=key_expiry_time
+            )
+            return user_delegation_key
+            
+        except Exception as e:
+            logger.error(f"Error getting user delegation key: {e}")
+            raise
+    
+    def get_blob_size(self, blob_name: str, container_name: str) -> int:
+        """
+        Get the size of a blob in bytes
+        
+        Args:
+            blob_name: Name of the blob
+            container_name: Container name
+            
+        Returns:
+            Size in bytes
+        """
+        try:
+            blob_client = self.blob_service_client.get_blob_client(
+                container=container_name, 
+                blob=blob_name
+            )
+            properties = blob_client.get_blob_properties()
+            return properties.size
+        except Exception as e:
+            logger.error(f"Error getting blob size for {blob_name}: {e}")
+            raise
+    
+    def upload_blob_data(self, blob_data: bytes, dest_blob_name: str, 
+                        container_name: str, overwrite: bool = True) -> None:
+        """
+        Upload blob data from bytes
+        
+        Args:
+            blob_data: Raw bytes to upload
+            dest_blob_name: Destination blob name
+            container_name: Container name
+            overwrite: Whether to overwrite existing blob
+        """
+        try:
+            if not overwrite and self.blob_exists(dest_blob_name, container_name):
+                raise ResourceExistsError(f"Blob {dest_blob_name} already exists in {container_name}")
+            
+            blob_client = self.blob_service_client.get_blob_client(
+                container=container_name,
+                blob=dest_blob_name
+            )
+            blob_client.upload_blob(blob_data, overwrite=overwrite)
+            logger.info(f"Uploaded {len(blob_data)} bytes to {dest_blob_name} in {container_name}")
+            
+        except Exception as e:
+            logger.error(f"Error uploading blob data to {dest_blob_name}: {e}")
+            raise

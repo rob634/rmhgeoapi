@@ -157,3 +157,7 @@ test_api_local.py
 
 # Removed/redundant files
 logging_utils.py
+
+# Claude context file with sensitive info
+CLAUDE.md
+claude.md

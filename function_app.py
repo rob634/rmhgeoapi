@@ -5,6 +5,14 @@ MVP implementation with job submission, status checking, and queue processing
 import json
 import logging
 
+# Suppress Azure Identity and Azure SDK authentication/HTTP logging
+logging.getLogger("azure.identity").setLevel(logging.WARNING)
+logging.getLogger("azure.identity._internal").setLevel(logging.WARNING)
+logging.getLogger("azure.core.pipeline.policies.http_logging_policy").setLevel(logging.WARNING)
+logging.getLogger("azure.storage").setLevel(logging.WARNING)
+logging.getLogger("azure.core").setLevel(logging.WARNING)
+logging.getLogger("msal").setLevel(logging.WARNING)  # Microsoft Authentication Library
+
 import azure.functions as func
 from azure.storage.queue import QueueServiceClient
 from azure.identity import DefaultAzureCredential

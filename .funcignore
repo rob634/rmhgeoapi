@@ -5,6 +5,14 @@ __blobstorage__
 __queuestorage__
 local.settings.json
 .venv
+venv/
+env/
+.env
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
 # Test files and directories
 *test*
 test*
@@ -15,12 +23,14 @@ testing/
 .claude* 
 old_reference*
 
-# Local testing and utility scripts
+# Local testing and utility scripts (IMPORTANT - these MUST be excluded!)
 direct_table_query.py
 query_jobs_table.py
 manual_process_job.py
 update_job_status.py
 test_api_local.py
+test_api.py
+test_container_list.py
 
 # Documentation files
 *.md

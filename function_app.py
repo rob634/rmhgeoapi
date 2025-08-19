@@ -32,8 +32,6 @@ app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
 
 # Queue client for job submission - use AzureWebJobsStorage connection
 def get_queue_client():
-    from azure.storage.queue import TextBase64EncodePolicy
-    
     # Check if we have the storage account name (extracted from AzureWebJobsStorage settings)
     if not Config.STORAGE_ACCOUNT_NAME:
         raise ValueError("Could not determine storage account name from AzureWebJobsStorage settings")
@@ -54,8 +52,8 @@ def get_queue_client():
     
     queue_client = queue_service.get_queue_client(queue_name)
     
-    # Explicitly set the encoding policy to ensure base64 encoding
-    queue_client._config.message_encode_policy = TextBase64EncodePolicy()
+    # Don't set TextBase64EncodePolicy - let Azure Functions handle encoding
+    # since host.json has "messageEncoding": "base64" configured
     
     return queue_client
 
@@ -190,8 +188,10 @@ def submit_job(req: func.HttpRequest) -> func.HttpResponse:
             message_content = json.dumps(job_request.to_dict())
             logger.debug(f"📤 Sending message to queue: {message_content}")
             
-            # The queue client now has TextBase64EncodePolicy set, so it will handle encoding
-            queue_client.send_message(message_content)
+            # Send message with explicit Base64 encoding since host.json expects it
+            import base64
+            encoded_message = base64.b64encode(message_content.encode('utf-8')).decode('ascii')
+            queue_client.send_message(encoded_message)
             
             logger.debug(f"✅ Message sent to queue successfully for job: {job_request.job_id}")
             

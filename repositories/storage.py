@@ -10,9 +10,9 @@ from azure.storage.blob import BlobServiceClient
 from azure.core.exceptions import ResourceExistsError, ResourceNotFoundError
 from azure.identity import DefaultAzureCredential
 
-from models import JobRequest, JobStatus
-from config import Config
-from logger_setup import logger
+from core.models import JobRequest, JobStatus
+from core.config import Config
+from utils.logger import logger
 
 
 class JobRepository:

@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Geospatial Functions Dashboard</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; 
+            margin: 0; padding: 0; 
+        }
+        .container { 
+            display: grid; 
+            grid-template-columns: 350px 1fr; 
+            height: 100vh; 
+        }
+        .sidebar { 
+            padding: 20px; 
+            overflow-y: auto; 
+            border-right: 1px solid #ddd; 
+            background: #f8f9fa; 
+        }
+        #map { 
+            height: 100vh; 
+        }
+        
+        h1 { 
+            margin: 0 0 10px 0; 
+            color: #0078d4; 
+            font-size: 24px; 
+        }
+        
+        .subtitle {
+            color: #666; 
+            font-size: 14px; 
+            margin-bottom: 20px;
+        }
+        
+        .function-card { 
+            border: 1px solid #ddd; 
+            margin: 10px 0; 
+            padding: 15px; 
+            border-radius: 8px; 
+            background: white; 
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .function-card h3 {
+            margin: 0 0 10px 0;
+            color: #333;
+            font-size: 16px;
+        }
+        
+        button { 
+            background: #0078d4; 
+            color: white; 
+            border: none; 
+            padding: 10px 15px; 
+            cursor: pointer; 
+            border-radius: 4px; 
+            font-size: 14px;
+            width: 100%;
+            margin: 5px 0;
+        }
+        
+        button:hover { 
+            background: #106ebe; 
+        }
+        
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        
+        input, select { 
+            margin: 5px 0; 
+            padding: 8px; 
+            width: 100%; 
+            box-sizing: border-box; 
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        
+        .layer-control { 
+            margin: 10px 0; 
+            padding: 15px; 
+            background: #e3f2fd; 
+            border-radius: 8px; 
+        }
+        
+        .layer-control h3 {
+            margin: 0 0 10px 0;
+            font-size: 16px;
+            color: #1976d2;
+        }
+        
+        .job-item { 
+            padding: 10px; 
+            margin: 5px 0; 
+            background: #ffffff; 
+            border: 1px solid #dee2e6; 
+            border-radius: 4px; 
+            font-size: 14px;
+        }
+        
+        .status-completed { border-left: 4px solid #28a745; }
+        .status-processing { border-left: 4px solid #ffc107; }
+        .status-failed { border-left: 4px solid #dc3545; }
+        .status-pending { border-left: 4px solid #6c757d; }
+        
+        .config-section {
+            background: #fff3cd;
+            border: 1px solid #ffeaa7;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 20px;
+        }
+        
+        .layer-item {
+            display: flex;
+            align-items: center;
+            margin: 5px 0;
+            font-size: 14px;
+        }
+        
+        .layer-item input[type="checkbox"] {
+            width: auto;
+            margin-right: 8px;
+        }
+        
+        .coordinates-display {
+            background: #f8f9fa;
+            padding: 8px;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 12px;
+            margin: 10px 0;
+        }
+        
+        .loading {
+            opacity: 0.6;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="sidebar">
+            <h1>🌍 Geospatial Dashboard</h1>
+            <p class="subtitle">Azure Functions + Static Web App</p>
+            
+            <!-- Configuration Section -->
+            <div class="config-section">
+                <h3>⚙️ Configuration</h3>
+                <label for="function-app-url">Function App URL:</label>
+                <input type="text" id="function-app-url" 
+                       value="https://rmhgeoapiqfn-h3dza4gyffbsbre7.eastus-01.azurewebsites.net" 
+                       placeholder="Function App URL">
+                <button onclick="dashboard.updateConfig()">Update Configuration</button>
+                <div id="connection-status" class="coordinates-display">
+                    Status: Not connected
+                </div>
+            </div>
+            
+            <!-- Job Submission -->
+            <div class="function-card">
+                <h3>📤 Submit Processing Job</h3>
+                <label for="operation-type">Operation Type:</label>
+                <select id="operation-type">
+                    <option value="hello_world">Hello World (Test)</option>
+                    <option value="cog_conversion">COG Conversion</option>
+                    <option value="vector_processing">Vector Processing</option>
+                    <option value="stac_generation">STAC Generation</option>
+                </select>
+                
+                <label for="dataset-id">Dataset ID:</label>
+                <input type="text" id="dataset-id" placeholder="e.g., afghanistan_imagery_2024" />
+                
+                <label for="resource-id">Resource ID:</label>
+                <input type="text" id="resource-id" placeholder="e.g., landsat8_scene_001" />
+                
+                <div class="coordinates-display" id="current-bbox">
+                    Current Map Extent: Click "Use Current View" to set
+                </div>
+                
+                <button onclick="dashboard.useCurrentView()">Use Current Map View</button>
+                <button onclick="dashboard.submitMapJob()" id="submit-job-btn">Submit Job</button>
+            </div>
+            
+            <!-- Direct Function Tests -->
+            <div class="function-card">
+                <h3>🧪 Quick Tests</h3>
+                <button onclick="dashboard.testHealth()">Test Health Endpoint</button>
+                <button onclick="dashboard.testJobStatus()">Test Job Status</button>
+                <button onclick="dashboard.loadFunctions()">Reload Functions List</button>
+            </div>
+            
+            <!-- Map Layer Controls -->
+            <div class="layer-control">
+                <h3>🗺️ Map Layers</h3>
+                <div id="layers-list">
+                    <div class="layer-item">
+                        <input type="checkbox" id="base-osm" checked onchange="dashboard.toggleBaseLayer('osm', this.checked)">
+                        <label for="base-osm">OpenStreetMap</label>
+                    </div>
+                    <div class="layer-item">
+                        <input type="checkbox" id="base-satellite" onchange="dashboard.toggleBaseLayer('satellite', this.checked)">
+                        <label for="base-satellite">Satellite Imagery</label>
+                    </div>
+                    <hr>
+                    <div id="dynamic-layers">No processed layers yet</div>
+                </div>
+            </div>
+            
+            <!-- Job Status -->
+            <div id="job-status">
+                <h3>📋 Active Jobs</h3>
+                <div id="jobs-list">No active jobs</div>
+            </div>
+            
+            <!-- Debug Info -->
+            <div class="function-card">
+                <h3>🔧 Debug Info</h3>
+                <button onclick="dashboard.showDebugInfo()">Show Debug Info</button>
+                <div id="debug-output" style="font-family: monospace; font-size: 12px; margin-top: 10px;"></div>
+            </div>
+        </div>
+        
+        <div id="map"></div>
+    </div>
+    
+    <!-- Loading Scripts -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="dashboard.js"></script>
+    
+    <!-- Initialize Dashboard -->
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            window.dashboard = new GeospatialDashboard();
+        });
+    </script>
+</body>
+</html>

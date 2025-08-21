@@ -23,6 +23,8 @@ testing/
 .claude* 
 old_reference*
 
+static_web*
+
 # Local testing and utility scripts (IMPORTANT - these MUST be excluded!)
 direct_table_query.py
 query_jobs_table.py

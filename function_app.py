@@ -17,16 +17,17 @@ import azure.functions as func
 from azure.storage.queue import QueueServiceClient
 from azure.identity import DefaultAzureCredential
 
-from models import JobRequest, JobStatus
-from repositories import JobRepository, StorageRepository
-from services import ServiceFactory
-from config import Config, APIParams, Defaults, AzureStorage
-from logger_setup import logger, log_list, log_job_stage, log_queue_operation, log_service_processing
+from core.models import JobRequest, JobStatus
+from repositories.table import JobRepository
+from repositories.storage import StorageRepository
+from services.factory import ServiceFactory
+from core.config import Config, APIParams, Defaults, AzureStorage
+from utils.logger import logger, log_list, log_job_stage, log_queue_operation, log_service_processing
 
 # Use centralized logger (imported from logger_setup)
 
 # Initialize function app with HTTP auth level
-app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
+app = func.FunctionApp()
 
 # Repository will be initialized lazily when needed
 
@@ -58,7 +59,7 @@ def get_queue_client():
     return queue_client
 
 
-@app.route(route="health", methods=["GET"])
+@app.route(route="health", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
 def health_check(req: func.HttpRequest) -> func.HttpResponse:
     """
     Simple health check endpoint

@@ -162,3 +162,5 @@ logging_utils.py
 # Claude context file with sensitive info
 CLAUDE.md
 claude.md
+
+static_web*

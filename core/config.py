@@ -18,12 +18,12 @@ class EnvVarNames:
     
     # PostGIS Database Environment Variables
     POSTGIS_HOST = 'POSTGIS_HOST'
-    
     POSTGIS_PORT = 'POSTGIS_PORT'
     POSTGIS_USER = 'POSTGIS_USER'
     POSTGIS_PASSWORD = 'POSTGIS_PASSWORD'
     POSTGIS_DATABASE = 'POSTGIS_DATABASE'
     POSTGIS_SCHEMA = 'POSTGIS_SCHEMA'
+    POSTGIS_CONNECTION_STRING = 'POSTGIS_CONNECTION_STRING'
     
     # Application Environment Variables
     FUNCTION_TIMEOUT = 'FUNCTION_TIMEOUT'
@@ -53,13 +53,28 @@ class Config:
     
     
     # PostGIS Database Configuration
-    POSTGIS_HOST: Optional[str] = os.environ.get(EnvVarNames.POSTGIS_HOST)
-    POSTGIS_PORT: Optional[int] = int(os.environ.get(EnvVarNames.POSTGIS_PORT)) if os.environ.get(EnvVarNames.POSTGIS_PORT) else None
-    POSTGIS_USER: Optional[str] = os.environ.get(EnvVarNames.POSTGIS_USER)
+    POSTGIS_HOST: Optional[str] = os.environ.get(EnvVarNames.POSTGIS_HOST, 'rmhpgflex.postgres.database.azure.com')
+    POSTGIS_PORT: Optional[int] = int(os.environ.get(EnvVarNames.POSTGIS_PORT, '5432'))
+    POSTGIS_USER: Optional[str] = os.environ.get(EnvVarNames.POSTGIS_USER, 'rob634')
     POSTGIS_PASSWORD: Optional[str] = os.environ.get(EnvVarNames.POSTGIS_PASSWORD)
     # This is the database half of silver storage
-    POSTGIS_DATABASE: Optional[str] = os.environ.get(EnvVarNames.POSTGIS_DATABASE)
-    POSTGIS_SCHEMA: Optional[str] = os.environ.get(EnvVarNames.POSTGIS_SCHEMA)
+    POSTGIS_DATABASE: Optional[str] = os.environ.get(EnvVarNames.POSTGIS_DATABASE, 'postgres')
+    POSTGIS_SCHEMA: Optional[str] = os.environ.get(EnvVarNames.POSTGIS_SCHEMA, 'stac')
+    
+    # Build connection string if components are available
+    @classmethod
+    def get_postgis_connection_string(cls) -> Optional[str]:
+        """Build PostGIS connection string from components"""
+        if cls.POSTGIS_HOST and cls.POSTGIS_USER and cls.POSTGIS_PASSWORD:
+            return (
+                f"host={cls.POSTGIS_HOST} "
+                f"port={cls.POSTGIS_PORT} "
+                f"dbname={cls.POSTGIS_DATABASE} "
+                f"user={cls.POSTGIS_USER} "
+                f"password={cls.POSTGIS_PASSWORD} "
+                f"sslmode=require"
+            )
+        return os.environ.get(EnvVarNames.POSTGIS_CONNECTION_STRING)
     
     
     # Application Configuration (these can have sensible defaults)

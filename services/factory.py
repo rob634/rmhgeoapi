@@ -1,7 +1,7 @@
 """Service factory for creating appropriate service instances."""
 
 from typing import Optional
-from services.base.base import BaseProcessingService
+from services.base import BaseProcessingService
 from core.constants import Operations
 import logging
 

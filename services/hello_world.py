@@ -1,7 +1,7 @@
 """Hello World service for testing the pipeline."""
 
 from typing import Dict, List
-from services.base.base import BaseProcessingService
+from services.base import BaseProcessingService
 from utils.logger import logger, log_job_stage, log_service_processing
 
 

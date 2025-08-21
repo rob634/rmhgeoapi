@@ -2,6 +2,15 @@
 Azure Functions App for Geospatial ETL Pipeline
 MVP implementation with job submission, status checking, and queue processing
 """
+import sys
+import os
+
+# Ensure Azure Functions can find our modules
+# Add the directory containing this file to Python path
+dir_path = os.path.dirname(os.path.abspath(__file__))
+if dir_path not in sys.path:
+    sys.path.insert(0, dir_path)
+
 import json
 import logging
 

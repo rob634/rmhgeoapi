@@ -4,7 +4,7 @@ from typing import Dict, List, Any
 import os
 import hashlib
 from datetime import datetime, timezone
-from services.base import BaseProcessingService
+from services.base_service import BaseProcessingService
 from core.constants import ProcessingMode, FileSizeLimits, GeospatialExtensions
 from core.exceptions import STACProcessingError
 from utils.logger import logger

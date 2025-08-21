@@ -1,7 +1,7 @@
 """Service factory for creating appropriate service instances."""
 
 from typing import Optional
-from services.base import BaseProcessingService
+from services.base_service import BaseProcessingService
 from core.constants import Operations
 import logging
 
@@ -34,12 +34,14 @@ class ServiceFactory:
             return DatabaseIntrospectionService()
             
         elif operation_type in Operations.get_stac_operations():
-            from services.stac.item import STACItemService
+            from services.stac_item import STACItemService
             return STACItemService()
             
         elif operation_type in [Operations.COG_CONVERSION]:
-            from services.raster.processing import RasterProcessingService
-            return RasterProcessingService()
+            # Raster processing not yet implemented
+            # from services.raster_processing import RasterProcessingService
+            from services.hello_world import HelloWorldService  # Temporary fallback
+            return HelloWorldService()
             
         else:
             # Default to hello world for unknown operations

@@ -1,9 +1,10 @@
 """Container listing service."""
 
 from typing import Dict, List
-from services.base_service import BaseProcessingService
-from utils.logger import logger
-from repositories.storage import StorageRepository
+
+from .base_service import BaseProcessingService
+from utils import logger
+from repositories import StorageRepository
 
 
 class ContainerListingService(BaseProcessingService):

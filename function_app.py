@@ -18,10 +18,11 @@ import azure.functions as func
 from azure.storage.queue import QueueServiceClient
 from azure.identity import DefaultAzureCredential
 
-from core import JobRequest, JobStatus, Config, APIParams, Defaults, AzureStorage
-from repositories import JobRepository
-from services import ServiceFactory
-from utils import logger, log_list, log_job_stage, log_queue_operation
+from core.models import JobRequest, JobStatus
+from core.config import Config, APIParams, Defaults, AzureStorage
+from repositories.table import JobRepository
+from services.factory import ServiceFactory
+from utils.logger import logger, log_list, log_job_stage, log_queue_operation
 
 # Initialize function app with HTTP auth level
 app = func.FunctionApp()

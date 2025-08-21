@@ -1,11 +1,9 @@
 """Service factory for creating appropriate service instances."""
 
 from typing import Optional
-from services.base_service import BaseProcessingService
-from core.constants import Operations
-import logging
-
-logger = logging.getLogger(__name__)
+from .base_service import BaseProcessingService
+from core import Operations
+from utils import logger
 
 
 class ServiceFactory:
@@ -26,26 +24,26 @@ class ServiceFactory:
         
         # Import services as needed to avoid circular imports
         if operation_type == Operations.LIST_CONTAINER:
-            from services.container import ContainerListingService
+            from .container import ContainerListingService
             return ContainerListingService()
             
         elif operation_type == Operations.DATABASE_INTROSPECTION:
-            from services.database.introspection import DatabaseIntrospectionService
+            from .database.introspection import DatabaseIntrospectionService
             return DatabaseIntrospectionService()
             
         elif operation_type in Operations.get_stac_operations():
-            from services.stac_item import STACItemService
+            from .stac_item import STACItemService
             return STACItemService()
             
         elif operation_type in [Operations.COG_CONVERSION]:
             # Raster processing not yet implemented
             # from services.raster_processing import RasterProcessingService
-            from services.hello_world import HelloWorldService  # Temporary fallback
+            from .hello_world import HelloWorldService  # Temporary fallback
             return HelloWorldService()
             
         else:
             # Default to hello world for unknown operations
-            from services.hello_world import HelloWorldService
+            from .hello_world import HelloWorldService
             return HelloWorldService()
     
     @staticmethod

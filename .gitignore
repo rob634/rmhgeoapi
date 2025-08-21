@@ -170,6 +170,14 @@ scripts/
 
 # Azure deployment artifacts
 deployments/
+LogFiles/
+logs/
+*.log
+logs.zip
+
+# Static website files
+static-website/
+static_web*
 
 # Backup files
 *_backup.py

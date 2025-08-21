@@ -7,3 +7,4 @@ azure-storage-blob
 azure-storage-queue
 azure-data-tables
 azure-identity
+psycopg[binary]

@@ -190,6 +190,11 @@ class ServiceFactory:
         if operation_type == "list_container":
             return ContainerListingService()
         
+        # Database health check
+        elif operation_type == "database_health":
+            from database_health import DatabaseHealthService
+            return DatabaseHealthService()
+        
         # STAC operations
         elif operation_type.startswith("stac_"):
             from stac_service import STACService

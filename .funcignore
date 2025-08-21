@@ -53,3 +53,8 @@ logging_utils.py
 # Claude context file with sensitive info
 CLAUDE.md
 claude.md
+
+ancient_code/
+ancient_code*
+surprise*
+scripts/

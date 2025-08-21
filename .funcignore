@@ -80,3 +80,11 @@ RESTRUCTURING_*.md
 METADATA_*.md
 STAC_*.md
 QUICK_IMPROVEMENTS.md
+
+# Azure deployment artifacts
+deployments/
+
+# Backup files
+*_backup.py
+function_app_*.py
+test_function_app.py

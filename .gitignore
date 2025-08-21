@@ -164,3 +164,14 @@ CLAUDE.md
 claude.md
 
 static_web*
+
+# Scripts folder - utility scripts for local testing only
+scripts/
+
+# Azure deployment artifacts
+deployments/
+
+# Backup files
+*_backup.py
+function_app_*.py
+test_function_app.py

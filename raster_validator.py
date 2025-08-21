@@ -142,7 +142,7 @@ class RasterValidator:
                     "count": src.count,  # number of bands
                     "dtype": str(src.dtypes[0]) if src.dtypes else "unknown",
                     "driver": src.driver,
-                    "compress": src.compression,
+                    "compress": src.compression if src.compression is None else str(src.compression),
                     "bounds": list(src.bounds) if src.bounds else None,
                     "transform": str(src.transform)
                 }

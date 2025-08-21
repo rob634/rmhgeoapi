@@ -4,7 +4,7 @@ No external dependencies - pure Python classes
 """
 import hashlib
 from datetime import datetime, timezone
-from typing import Dict, Optional, Tuple, List
+from typing import Dict, Optional, Tuple
 from core.config import APIParams, JobStatuses, Validation
 
 

@@ -19,10 +19,9 @@ from azure.identity import DefaultAzureCredential
 
 from core.models import JobRequest, JobStatus
 from repositories.table import JobRepository
-from repositories.storage import StorageRepository
 from services.factory import ServiceFactory
 from core.config import Config, APIParams, Defaults, AzureStorage
-from utils.logger import logger, log_list, log_job_stage, log_queue_operation, log_service_processing
+from utils.logger import logger, log_list, log_job_stage, log_queue_operation
 
 # Use centralized logger (imported from logger_setup)
 

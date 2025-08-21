@@ -1,13 +1,12 @@
 """STAC Item service for cataloging geospatial files."""
 
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Any
 import os
 import hashlib
-import json
 from datetime import datetime, timezone
 from services.base.base import BaseProcessingService
 from core.constants import ProcessingMode, FileSizeLimits, GeospatialExtensions
-from core.exceptions import STACProcessingError, MetadataExtractionError
+from core.exceptions import STACProcessingError
 from utils.logger import logger
 
 

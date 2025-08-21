@@ -211,17 +211,21 @@ class StorageRepository:
             logger.info(f"StorageRepository initialized with workspace container: {self.workspace_container_name}")
     
     def _init_blob_service_client(self):
-        """Initialize the blob service client with managed identity authentication"""
+        """Initialize the blob service client with appropriate authentication"""
         try:
-            if not Config.STORAGE_ACCOUNT_NAME:
-                raise ValueError("STORAGE_ACCOUNT_NAME environment variable must be set for managed identity")
-            
-            # Always use managed identity in Azure Functions
-            account_url = Config.get_storage_account_url('blob')
-            self.blob_service_client = BlobServiceClient(account_url, credential=DefaultAzureCredential())
-            logger.info(f"BlobServiceClient initialized with managed identity for {Config.STORAGE_ACCOUNT_NAME}")
+            # Check if we have a connection string (for local development)
+            if Config.AZURE_WEBJOBS_STORAGE:
+                self.blob_service_client = BlobServiceClient.from_connection_string(Config.AZURE_WEBJOBS_STORAGE)
+                logger.info(f"BlobServiceClient initialized with connection string")
+            elif Config.STORAGE_ACCOUNT_NAME:
+                # Use managed identity in Azure Functions
+                account_url = Config.get_storage_account_url('blob')
+                self.blob_service_client = BlobServiceClient(account_url, credential=DefaultAzureCredential())
+                logger.info(f"BlobServiceClient initialized with managed identity for {Config.STORAGE_ACCOUNT_NAME}")
+            else:
+                raise ValueError("Either AzureWebJobsStorage or STORAGE_ACCOUNT_NAME must be set")
         except Exception as e:
-            logger.error(f"Error initializing BlobServiceClient with managed identity: {e}")
+            logger.error(f"Error initializing BlobServiceClient: {e}")
             raise
     
     def list_container_contents(self, container_name: str = None) -> Dict:
@@ -472,6 +476,88 @@ class StorageRepository:
         except Exception as e:
             logger.error(f"Error listing blobs with prefix {prefix}: {e}")
             raise
+    
+    def get_blob_sas_url(self, container_name: str, blob_name: str, expiry_hours: int = 1) -> str:
+        """
+        Generate a SAS URL for direct blob access
+        
+        Args:
+            container_name: Container name
+            blob_name: Blob name
+            expiry_hours: Hours until SAS token expires
+            
+        Returns:
+            Full URL with SAS token for blob access
+        """
+        try:
+            from datetime import datetime, timedelta, timezone
+            from azure.storage.blob import BlobSasPermissions, generate_blob_sas
+            
+            blob_client = self.blob_service_client.get_blob_client(
+                container=container_name, 
+                blob=blob_name
+            )
+            
+            # For connection string auth, we can generate SAS
+            if hasattr(self.blob_service_client, 'account_name'):
+                account_name = self.blob_service_client.account_name
+                account_key = self.blob_service_client.credential.account_key if hasattr(self.blob_service_client.credential, 'account_key') else None
+                
+                if account_key:
+                    # Generate SAS token
+                    sas_token = generate_blob_sas(
+                        account_name=account_name,
+                        container_name=container_name,
+                        blob_name=blob_name,
+                        account_key=account_key,
+                        permission=BlobSasPermissions(read=True),
+                        expiry=datetime.now(timezone.utc) + timedelta(hours=expiry_hours)
+                    )
+                    return f"{blob_client.url}?{sas_token}"
+            
+            # For managed identity or if SAS generation fails, return the blob URL directly
+            # This will work with managed identity authentication
+            return blob_client.url
+            
+        except Exception as e:
+            logger.error(f"Error generating SAS URL for {blob_name}: {e}")
+            # Fall back to direct URL
+            blob_client = self.blob_service_client.get_blob_client(
+                container=container_name, 
+                blob=blob_name
+            )
+            return blob_client.url
+    
+    def get_blob_properties(self, container_name: str, blob_name: str) -> Optional[Dict]:
+        """
+        Get blob properties including size and metadata
+        
+        Args:
+            container_name: Container name
+            blob_name: Blob name
+            
+        Returns:
+            Dictionary with blob properties or None if not found
+        """
+        try:
+            blob_client = self.blob_service_client.get_blob_client(
+                container=container_name, 
+                blob=blob_name
+            )
+            
+            properties = blob_client.get_blob_properties()
+            
+            return {
+                'size': properties.size,
+                'last_modified': properties.last_modified.isoformat() if properties.last_modified else None,
+                'content_type': properties.content_settings.content_type if properties.content_settings else None,
+                'etag': properties.etag,
+                'metadata': properties.metadata
+            }
+            
+        except Exception as e:
+            logger.error(f"Error getting properties for blob {blob_name}: {e}")
+            return None
     
     def _validate_file_name(self, file_name: str) -> str:
         """Validate file name and extension"""

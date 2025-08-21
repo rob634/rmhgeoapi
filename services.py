@@ -200,9 +200,31 @@ class ServiceFactory:
             from stac_service import STACService
             return STACService()
         
+        # Raster processing operations
+        elif operation_type == "validate_raster":
+            try:
+                from raster_processor import RasterValidationService
+                return RasterValidationService()
+            except ImportError as e:
+                logger.error(f"Failed to import RasterValidationService: {e}")
+                raise ValueError(f"Raster processing not available: {e}")
+        elif operation_type == "process_raster":
+            try:
+                from raster_processor import RasterProcessorService
+                return RasterProcessorService()
+            except ImportError as e:
+                logger.error(f"Failed to import RasterProcessorService: {e}")
+                raise ValueError(f"Raster processing not available: {e}")
+        elif operation_type == "cog_conversion":
+            # Alias for process_raster
+            try:
+                from raster_processor import RasterProcessorService
+                return RasterProcessorService()
+            except ImportError as e:
+                logger.error(f"Failed to import RasterProcessorService: {e}")
+                raise ValueError(f"Raster processing not available: {e}")
+        
         # Future: route different operations to different services
-        # elif operation_type == "cog_conversion":
-        #     return RasterProcessingService()
         # elif operation_type == "vector_upload":
         #     return VectorProcessingService()
         

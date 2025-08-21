@@ -226,3 +226,31 @@ class AzureStorage:
     STORAGE_CONNECTION = "AzureWebJobsStorage"
     # For managed identity connections, Azure Functions expects: {ConnectionName}__serviceUri
     MANAGED_IDENTITY_CONNECTION = "Storage"
+
+
+# Raster Processing Configuration
+class RasterConfig:
+    """Raster processing configuration constants"""
+    # Target CRS for all Silver tier COGs
+    TARGET_EPSG = 4326  # WGS84 - ALWAYS reproject to this for Silver
+    
+    # File size thresholds (in MB)
+    MAX_DOWNLOAD_SIZE_MB = 500  # Use smart mode (URL access) above this size
+    
+    # Maximum file size for processing (Premium Plan limit)
+    # NOTE: Currently limited to 5GB for in-memory processing on Premium Plan
+    # TODO: Future enhancement - implement sequential batch processing for very large GeoTIFFs
+    # This will allow processing of files >5GB by splitting into tiles/windows
+    MAX_PROCESSING_SIZE_GB = 5  # Premium plan memory limit
+    
+    # Valid raster extensions
+    VALID_EXTENSIONS = ['.tif', '.tiff', '.geotiff', '.geotif']
+    
+    # COG profile for rio-cogeo
+    COG_PROFILE = 'lzw'  # LZW compression for COG creation
+    
+    # Resampling method for reprojection
+    RESAMPLING_METHOD = 'bilinear'
+    
+    # Maximum raster name length
+    MAX_RASTER_NAME_LENGTH = 255

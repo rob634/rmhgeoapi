@@ -535,6 +535,11 @@ class StorageRepository:
                         account_key = part.split('=', 1)[1]
                         break
             
+            # Also check if using connection string auth (has account_key in credential)
+            if not account_key and hasattr(self.blob_service_client, 'credential'):
+                if hasattr(self.blob_service_client.credential, 'account_key'):
+                    account_key = self.blob_service_client.credential.account_key
+            
             # If no account key, try user delegation (for managed identity)
             if not account_key:
                 try:
@@ -550,6 +555,9 @@ class StorageRepository:
             # Generate SAS token with whichever key we have
             if account_key or user_delegation_key:
                 try:
+                    auth_method = "account key" if account_key else "user delegation"
+                    logger.debug(f"Generating SAS using {auth_method}")
+                    
                     sas_token = generate_blob_sas(
                         account_name=account_name,
                         container_name=container_name,
@@ -561,7 +569,7 @@ class StorageRepository:
                     )
                     
                     sas_url = f"{blob_client.url}?{sas_token}"
-                    logger.info(f"SAS URI generated for {blob_name} in {container_name}")
+                    logger.info(f"SAS URI generated for {blob_name} using {auth_method}")
                     return sas_url
                     
                 except Exception as e:

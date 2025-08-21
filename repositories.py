@@ -213,17 +213,19 @@ class StorageRepository:
     def _init_blob_service_client(self):
         """Initialize the blob service client with appropriate authentication"""
         try:
-            # Check if we have a connection string (for local development)
-            if Config.AZURE_WEBJOBS_STORAGE:
-                self.blob_service_client = BlobServiceClient.from_connection_string(Config.AZURE_WEBJOBS_STORAGE)
-                logger.info(f"BlobServiceClient initialized with connection string")
-            elif Config.STORAGE_ACCOUNT_NAME:
+            # Prioritize managed identity for Azure Functions
+            # Check for STORAGE_ACCOUNT_NAME which indicates Azure environment
+            if Config.STORAGE_ACCOUNT_NAME:
                 # Use managed identity in Azure Functions
                 account_url = Config.get_storage_account_url('blob')
                 self.blob_service_client = BlobServiceClient(account_url, credential=DefaultAzureCredential())
                 logger.info(f"BlobServiceClient initialized with managed identity for {Config.STORAGE_ACCOUNT_NAME}")
+            elif Config.AZURE_WEBJOBS_STORAGE:
+                # Fall back to connection string for local development
+                self.blob_service_client = BlobServiceClient.from_connection_string(Config.AZURE_WEBJOBS_STORAGE)
+                logger.info(f"BlobServiceClient initialized with connection string (local development)")
             else:
-                raise ValueError("Either AzureWebJobsStorage or STORAGE_ACCOUNT_NAME must be set")
+                raise ValueError("Either STORAGE_ACCOUNT_NAME or AzureWebJobsStorage must be set")
         except Exception as e:
             logger.error(f"Error initializing BlobServiceClient: {e}")
             raise
@@ -523,34 +525,47 @@ class StorageRepository:
                 logger.error("Cannot determine storage account name")
                 return blob_client.url
             
-            # Initialize both keys as None (following ancient_code pattern)
+            # Initialize both keys as None
             account_key = None
             user_delegation_key = None
             
-            # Check if we have an account key first (from connection string)
-            conn_str = os.environ.get('AzureWebJobsStorage', '')
-            if conn_str and 'AccountKey=' in conn_str:
-                for part in conn_str.split(';'):
-                    if part.startswith('AccountKey='):
-                        account_key = part.split('=', 1)[1]
-                        break
+            # Determine if we're using managed identity or connection string
+            # If initialized with managed identity, always use user delegation
+            using_managed_identity = False
             
-            # Also check if using connection string auth (has account_key in credential)
-            if not account_key and hasattr(self.blob_service_client, 'credential'):
-                if hasattr(self.blob_service_client.credential, 'account_key'):
-                    account_key = self.blob_service_client.credential.account_key
+            # Check if blob service client has a credential (managed identity) vs connection string
+            if hasattr(self.blob_service_client, 'credential'):
+                # Check if it's a DefaultAzureCredential or similar (not account key)
+                if not hasattr(self.blob_service_client.credential, 'account_key'):
+                    using_managed_identity = True
+                    logger.debug("Using managed identity authentication")
             
-            # If no account key, try user delegation (for managed identity)
-            if not account_key:
+            if using_managed_identity:
+                # Use user delegation for managed identity
                 try:
                     user_delegation_key = self.blob_service_client.get_user_delegation_key(
                         key_start_time=datetime.now(timezone.utc),
                         key_expiry_time=datetime.now(timezone.utc) + timedelta(hours=expiry_hours)
                     )
-                    logger.debug(f"Got user delegation key for {blob_name}")
+                    logger.info(f"Successfully got user delegation key for managed identity")
                 except Exception as e:
                     logger.error(f"Error getting user delegation key: {e}")
-                    # Don't raise, try to continue
+                    raise  # Fail fast if we can't get delegation key with managed identity
+            else:
+                # Try to get account key from connection string
+                conn_str = os.environ.get('AzureWebJobsStorage', '')
+                if conn_str and 'AccountKey=' in conn_str:
+                    for part in conn_str.split(';'):
+                        if part.startswith('AccountKey='):
+                            account_key = part.split('=', 1)[1]
+                            logger.debug("Using account key from connection string")
+                            break
+                
+                # Also check if credential has account_key
+                if not account_key and hasattr(self.blob_service_client, 'credential'):
+                    if hasattr(self.blob_service_client.credential, 'account_key'):
+                        account_key = self.blob_service_client.credential.account_key
+                        logger.debug("Using account key from credential")
             
             # Generate SAS token with whichever key we have
             if account_key or user_delegation_key:

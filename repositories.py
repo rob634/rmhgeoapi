@@ -491,7 +491,7 @@ class StorageRepository:
             Full URL with SAS token for blob access
         """
         try:
-            from datetime import datetime, timedelta
+            from datetime import datetime, timedelta, timezone
             from azure.storage.blob import (
                 BlobSasPermissions, 
                 generate_blob_sas
@@ -539,8 +539,8 @@ class StorageRepository:
             if not account_key:
                 try:
                     user_delegation_key = self.blob_service_client.get_user_delegation_key(
-                        key_start_time=datetime.utcnow(),
-                        key_expiry_time=datetime.utcnow() + timedelta(hours=expiry_hours)
+                        key_start_time=datetime.now(timezone.utc),
+                        key_expiry_time=datetime.now(timezone.utc) + timedelta(hours=expiry_hours)
                     )
                     logger.debug(f"Got user delegation key for {blob_name}")
                 except Exception as e:
@@ -557,7 +557,7 @@ class StorageRepository:
                         account_key=account_key,  # Will be None if using user delegation
                         user_delegation_key=user_delegation_key,  # Will be None if using account key
                         permission=BlobSasPermissions(read=True),
-                        expiry=datetime.utcnow() + timedelta(hours=expiry_hours)
+                        expiry=datetime.now(timezone.utc) + timedelta(hours=expiry_hours)
                     )
                     
                     sas_url = f"{blob_client.url}?{sas_token}"

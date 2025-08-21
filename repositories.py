@@ -491,12 +491,17 @@ class StorageRepository:
             Full URL with SAS token for blob access
         """
         try:
-            from datetime import datetime, timedelta, timezone
+            from datetime import datetime, timedelta
             from azure.storage.blob import (
                 BlobSasPermissions, 
                 generate_blob_sas
             )
             import os
+            
+            # Check if blob exists first
+            if not self.blob_exists(blob_name, container_name):
+                logger.error(f"Blob {blob_name} not found in container {container_name}")
+                raise ValueError(f"Blob {blob_name} not found in container {container_name}")
             
             blob_client = self.blob_service_client.get_blob_client(
                 container=container_name, 
@@ -518,39 +523,11 @@ class StorageRepository:
                 logger.error("Cannot determine storage account name")
                 return blob_client.url
             
-            # Set up times
-            start_time = datetime.now(timezone.utc)
-            expiry_time = start_time + timedelta(hours=expiry_hours)
-            
-            # First try User Delegation SAS (works with managed identity)
-            try:
-                # Get user delegation key
-                user_delegation_key = self.blob_service_client.get_user_delegation_key(
-                    key_start_time=start_time,
-                    key_expiry_time=expiry_time
-                )
-                
-                # Generate user delegation SAS
-                sas_token = generate_blob_sas(
-                    account_name=account_name,
-                    container_name=container_name,
-                    blob_name=blob_name,
-                    user_delegation_key=user_delegation_key,
-                    permission=BlobSasPermissions(read=True),
-                    expiry=expiry_time,
-                    start=start_time
-                )
-                
-                logger.debug(f"Generated user delegation SAS for {blob_name}")
-                return f"{blob_client.url}?{sas_token}"
-                
-            except Exception as e:
-                logger.debug(f"User delegation SAS failed, trying account key: {e}")
-            
-            # Fall back to account key if available
+            # Initialize both keys as None (following ancient_code pattern)
             account_key = None
+            user_delegation_key = None
             
-            # Check if we have a connection string with account key
+            # Check if we have an account key first (from connection string)
             conn_str = os.environ.get('AzureWebJobsStorage', '')
             if conn_str and 'AccountKey=' in conn_str:
                 for part in conn_str.split(';'):
@@ -558,23 +535,37 @@ class StorageRepository:
                         account_key = part.split('=', 1)[1]
                         break
             
-            # Try from credential object
-            if not account_key and hasattr(self.blob_service_client, 'credential'):
-                if hasattr(self.blob_service_client.credential, 'account_key'):
-                    account_key = self.blob_service_client.credential.account_key
+            # If no account key, try user delegation (for managed identity)
+            if not account_key:
+                try:
+                    user_delegation_key = self.blob_service_client.get_user_delegation_key(
+                        key_start_time=datetime.utcnow(),
+                        key_expiry_time=datetime.utcnow() + timedelta(hours=expiry_hours)
+                    )
+                    logger.debug(f"Got user delegation key for {blob_name}")
+                except Exception as e:
+                    logger.error(f"Error getting user delegation key: {e}")
+                    # Don't raise, try to continue
             
-            if account_key:
-                # Generate account key SAS
-                sas_token = generate_blob_sas(
-                    account_name=account_name,
-                    container_name=container_name,
-                    blob_name=blob_name,
-                    account_key=account_key,
-                    permission=BlobSasPermissions(read=True),
-                    expiry=expiry_time
-                )
-                logger.debug(f"Generated account key SAS for {blob_name}")
-                return f"{blob_client.url}?{sas_token}"
+            # Generate SAS token with whichever key we have
+            if account_key or user_delegation_key:
+                try:
+                    sas_token = generate_blob_sas(
+                        account_name=account_name,
+                        container_name=container_name,
+                        blob_name=blob_name,
+                        account_key=account_key,  # Will be None if using user delegation
+                        user_delegation_key=user_delegation_key,  # Will be None if using account key
+                        permission=BlobSasPermissions(read=True),
+                        expiry=datetime.utcnow() + timedelta(hours=expiry_hours)
+                    )
+                    
+                    sas_url = f"{blob_client.url}?{sas_token}"
+                    logger.info(f"SAS URI generated for {blob_name} in {container_name}")
+                    return sas_url
+                    
+                except Exception as e:
+                    logger.error(f"Error generating SAS token: {e}")
             
             # If all else fails, return direct URL
             logger.warning(f"Cannot generate SAS token for {blob_name}, returning direct URL")

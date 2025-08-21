@@ -492,32 +492,49 @@ class StorageRepository:
         try:
             from datetime import datetime, timedelta, timezone
             from azure.storage.blob import BlobSasPermissions, generate_blob_sas
+            import os
             
             blob_client = self.blob_service_client.get_blob_client(
                 container=container_name, 
                 blob=blob_name
             )
             
-            # For connection string auth, we can generate SAS
-            if hasattr(self.blob_service_client, 'account_name'):
-                account_name = self.blob_service_client.account_name
-                account_key = self.blob_service_client.credential.account_key if hasattr(self.blob_service_client.credential, 'account_key') else None
-                
-                if account_key:
-                    # Generate SAS token
-                    sas_token = generate_blob_sas(
-                        account_name=account_name,
-                        container_name=container_name,
-                        blob_name=blob_name,
-                        account_key=account_key,
-                        permission=BlobSasPermissions(read=True),
-                        expiry=datetime.now(timezone.utc) + timedelta(hours=expiry_hours)
-                    )
-                    return f"{blob_client.url}?{sas_token}"
+            # Try to extract account key from connection string if available
+            account_key = None
+            account_name = None
             
-            # For managed identity or if SAS generation fails, return the blob URL directly
-            # This will work with managed identity authentication
-            return blob_client.url
+            # Check if we have a connection string
+            conn_str = os.environ.get('AzureWebJobsStorage', '')
+            if conn_str and 'AccountKey=' in conn_str:
+                # Parse connection string for account key and name
+                for part in conn_str.split(';'):
+                    if part.startswith('AccountKey='):
+                        account_key = part.split('=', 1)[1]
+                    elif part.startswith('AccountName='):
+                        account_name = part.split('=', 1)[1]
+            
+            # If we still don't have account info, try from the blob service client
+            if not account_name and hasattr(self.blob_service_client, 'account_name'):
+                account_name = self.blob_service_client.account_name
+            
+            if not account_key and hasattr(self.blob_service_client, 'credential'):
+                if hasattr(self.blob_service_client.credential, 'account_key'):
+                    account_key = self.blob_service_client.credential.account_key
+            
+            if account_key and account_name:
+                # Generate SAS token
+                sas_token = generate_blob_sas(
+                    account_name=account_name,
+                    container_name=container_name,
+                    blob_name=blob_name,
+                    account_key=account_key,
+                    permission=BlobSasPermissions(read=True),
+                    expiry=datetime.now(timezone.utc) + timedelta(hours=expiry_hours)
+                )
+                return f"{blob_client.url}?{sas_token}"
+            else:
+                logger.warning(f"Cannot generate SAS token for {blob_name}, returning direct URL")
+                return blob_client.url
             
         except Exception as e:
             logger.error(f"Error generating SAS URL for {blob_name}: {e}")

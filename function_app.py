@@ -2,47 +2,26 @@
 Azure Functions App for Geospatial ETL Pipeline
 MVP implementation with job submission, status checking, and queue processing
 """
-import sys
-import os
 import json
 import logging
+import base64
 
-# Ensure Azure Functions can find our modules
-# Add the directory containing this file to Python path
-dir_path = os.path.dirname(os.path.abspath(__file__))
-if dir_path not in sys.path:
-    sys.path.insert(0, dir_path)
+# Suppress verbose Azure SDK logging
+logging.getLogger("azure.identity").setLevel(logging.WARNING)
+logging.getLogger("azure.identity._internal").setLevel(logging.WARNING)
+logging.getLogger("azure.core.pipeline.policies.http_logging_policy").setLevel(logging.WARNING)
+logging.getLogger("azure.storage").setLevel(logging.WARNING)
+logging.getLogger("azure.core").setLevel(logging.WARNING)
+logging.getLogger("msal").setLevel(logging.WARNING)
 
-# Set up basic logging to catch import errors
-logging.basicConfig(level=logging.DEBUG)
-base_logger = logging.getLogger(__name__)
+import azure.functions as func
+from azure.storage.queue import QueueServiceClient
+from azure.identity import DefaultAzureCredential
 
-try:
-    # Suppress Azure Identity and Azure SDK authentication/HTTP logging
-    logging.getLogger("azure.identity").setLevel(logging.WARNING)
-    logging.getLogger("azure.identity._internal").setLevel(logging.WARNING)
-    logging.getLogger("azure.core.pipeline.policies.http_logging_policy").setLevel(logging.WARNING)
-    logging.getLogger("azure.storage").setLevel(logging.WARNING)
-    logging.getLogger("azure.core").setLevel(logging.WARNING)
-    logging.getLogger("msal").setLevel(logging.WARNING)  # Microsoft Authentication Library
-
-    import azure.functions as func
-    from azure.storage.queue import QueueServiceClient
-    from azure.identity import DefaultAzureCredential
-
-    from core.models import JobRequest, JobStatus
-    from repositories.table import JobRepository
-    from services.factory import ServiceFactory
-    from core.config import Config, APIParams, Defaults, AzureStorage
-    from utils.logger import logger, log_list, log_job_stage, log_queue_operation
-    
-    base_logger.info(f"Successfully imported all modules. Python path: {sys.path}")
-except Exception as e:
-    base_logger.error(f"Failed to import modules: {str(e)}", exc_info=True)
-    # Re-raise to ensure Azure Functions sees the error
-    raise
-
-# Use centralized logger (imported from logger_setup)
+from core import JobRequest, JobStatus, Config, APIParams, Defaults, AzureStorage
+from repositories import JobRepository
+from services import ServiceFactory
+from utils import logger, log_list, log_job_stage, log_queue_operation
 
 # Initialize function app with HTTP auth level
 app = func.FunctionApp()
@@ -208,7 +187,6 @@ def submit_job(req: func.HttpRequest) -> func.HttpResponse:
             logger.debug(f"📤 Sending message to queue: {message_content}")
             
             # Send message with explicit Base64 encoding since host.json expects it
-            import base64
             encoded_message = base64.b64encode(message_content.encode('utf-8')).decode('ascii')
             queue_client.send_message(encoded_message)
             

@@ -1,6 +1,6 @@
 """Core components of the geospatial ETL pipeline."""
 
-from .config import Config
+from .config import Config, APIParams, Defaults, AzureStorage
 from .models import JobRequest, JobStatus
 from .constants import (
     StorageContainers,
@@ -27,6 +27,9 @@ from .exceptions import (
 __all__ = [
     # Config
     'Config',
+    'APIParams',
+    'Defaults',
+    'AzureStorage',
     # Models
     'JobRequest',
     'JobStatus',

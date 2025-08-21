@@ -88,3 +88,5 @@ deployments/
 *_backup.py
 function_app_*.py
 test_function_app.py
+
+deployments/

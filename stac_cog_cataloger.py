@@ -136,10 +136,12 @@ class STACCOGCataloger:
                 bounds = src.bounds
                 if src.crs and src.crs.to_epsg() != 4326:
                     # Transform bounds to EPSG:4326 if needed
-                    bounds = transform_bounds(src.crs, 'EPSG:4326', *bounds)
-                
-                # Create bbox [minx, miny, maxx, maxy]
-                bbox = [bounds.left, bounds.bottom, bounds.right, bounds.top]
+                    # transform_bounds returns tuple (left, bottom, right, top)
+                    left, bottom, right, top = transform_bounds(src.crs, 'EPSG:4326', *bounds)
+                    bbox = [left, bottom, right, top]
+                else:
+                    # Use bounds object attributes
+                    bbox = [bounds.left, bounds.bottom, bounds.right, bounds.top]
                 
                 # Create geometry (polygon of bbox)
                 geometry = {

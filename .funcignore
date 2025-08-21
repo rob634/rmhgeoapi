@@ -23,7 +23,15 @@ testing/
 .claude* 
 old_reference*
 
+# Static website files (MUST be excluded from function app!)
+static-website/
+static-website/*
 static_web*
+deploy-dashboard.sh
+
+# Scripts directory - utility scripts not needed in function app
+scripts/
+scripts/*
 
 # Local testing and utility scripts (IMPORTANT - these MUST be excluded!)
 direct_table_query.py
@@ -33,6 +41,8 @@ update_job_status.py
 test_api_local.py
 test_api.py
 test_container_list.py
+test_*.py
+fix_imports.py
 
 # Documentation files
 *.md
@@ -55,3 +65,18 @@ logging_utils.py
 # Claude context file with sensitive info
 CLAUDE.md
 claude.md
+
+# Log files and debugging
+LogFiles/
+logs/
+*.log
+logs.zip
+
+# API documentation  
+API_DOCUMENTATION.md
+
+# Other documentation/planning files
+RESTRUCTURING_*.md
+METADATA_*.md
+STAC_*.md
+QUICK_IMPROVEMENTS.md

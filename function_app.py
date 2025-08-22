@@ -61,25 +61,157 @@ def get_queue_client():
 @app.route(route="health", methods=["GET"])
 def health_check(req: func.HttpRequest) -> func.HttpResponse:
     """
-    Simple health check endpoint
+    Comprehensive health check endpoint with optional database check
     GET /api/health
-    Returns: {"status": "healthy", "message": "Azure Functions HTTP triggers are working"}
+    Returns health status of all system components
     """
+    import os
+    import sys
+    from datetime import datetime, timezone
+    
     logger.debug("Health check endpoint called")
-    logger.info("Health check endpoint called")
+    
+    health_status = {
+        "status": "healthy",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "environment": {
+            "storage_account": Config.STORAGE_ACCOUNT_NAME,
+            "queues": {},
+            "tables": {}
+        },
+        "runtime": {
+            "python_version": sys.version.split()[0],
+            "function_runtime": "python"
+        }
+    }
+    
+    errors = []
+    
+    # Check storage queues
+    try:
+        from azure.storage.queue import QueueServiceClient
+        from azure.identity import DefaultAzureCredential
+        
+        account_url = Config.get_storage_account_url('queue')
+        queue_service = QueueServiceClient(account_url, credential=DefaultAzureCredential())
+        
+        # Check geospatial-jobs queue
+        for queue_name in ["geospatial-jobs", "geospatial-tasks"]:
+            try:
+                queue_client = queue_service.get_queue_client(queue_name)
+                properties = queue_client.get_queue_properties()
+                health_status["environment"]["queues"][queue_name] = {
+                    "name": queue_name,
+                    "status": "accessible",
+                    "message_count": properties.get("approximate_message_count", 0)
+                }
+            except Exception as e:
+                health_status["environment"]["queues"][queue_name] = {
+                    "name": queue_name,
+                    "status": "error",
+                    "error": str(e)
+                }
+                errors.append(f"Queue {queue_name}: {str(e)}")
+    except Exception as e:
+        errors.append(f"Queue service: {str(e)}")
+        
+    # Check table storage
+    try:
+        from azure.data.tables import TableServiceClient
+        
+        account_url = Config.get_storage_account_url('table')
+        table_service = TableServiceClient(account_url, credential=DefaultAzureCredential())
+        
+        # Check Jobs and Tasks tables
+        for table_name in ["Jobs", "Tasks"]:
+            try:
+                table_client = table_service.get_table_client(table_name)
+                # Try a simple query to verify access
+                entities = table_client.query_entities(
+                    query_filter="PartitionKey eq 'test'"
+                )
+                # Consume the iterator to actually execute the query
+                _ = next(iter(entities), None)
+                health_status["environment"]["tables"][table_name] = {
+                    "name": table_name,
+                    "status": "accessible"
+                }
+            except Exception as e:
+                health_status["environment"]["tables"][table_name] = {
+                    "name": table_name,
+                    "status": "error",
+                    "error": str(e)
+                }
+                errors.append(f"Table {table_name}: {str(e)}")
+    except Exception as e:
+        errors.append(f"Table service: {str(e)}")
+    
+    # Optional database check - only if enabled via environment variable
+    if os.getenv("ENABLE_DATABASE_HEALTH_CHECK", "false").lower() == "true":
+        health_status["database"] = {}
+        try:
+            from database_client import DatabaseClient
+            
+            db_client = DatabaseClient()
+            
+            # Test connection and get basic info
+            with db_client.get_connection() as conn:
+                with conn.cursor() as cursor:
+                    # Check PostgreSQL version
+                    cursor.execute("SELECT version()")
+                    version = cursor.fetchone()[0]
+                    
+                    # Check PostGIS
+                    cursor.execute("SELECT PostGIS_version()")
+                    postgis_version = cursor.fetchone()[0]
+                    
+                    # Check if geo schema exists
+                    cursor.execute("""
+                        SELECT EXISTS(
+                            SELECT 1 FROM information_schema.schemata 
+                            WHERE schema_name = 'geo'
+                        )
+                    """)
+                    geo_schema_exists = cursor.fetchone()[0]
+                    
+                    # Count STAC items if schema exists
+                    stac_item_count = 0
+                    if geo_schema_exists:
+                        try:
+                            cursor.execute("SELECT COUNT(*) FROM geo.items")
+                            stac_item_count = cursor.fetchone()[0]
+                        except:
+                            pass
+                    
+                    health_status["database"] = {
+                        "status": "connected",
+                        "host": Config.POSTGIS_HOST,
+                        "database": Config.POSTGIS_DATABASE,
+                        "postgis_version": postgis_version,
+                        "geo_schema_exists": geo_schema_exists,
+                        "stac_item_count": stac_item_count if geo_schema_exists else None
+                    }
+        except Exception as e:
+            health_status["database"] = {
+                "status": "error",
+                "error": str(e)
+            }
+            errors.append(f"Database: {str(e)}")
+    
+    # Set overall health status
+    if errors:
+        health_status["status"] = "unhealthy"
+        health_status["errors"] = errors
+        status_code = 503  # Service Unavailable
+    else:
+        health_status["message"] = "All systems operational"
+        status_code = 200
+    
+    logger.info(f"Health check completed: {health_status['status']}")
+    
     return func.HttpResponse(
-        json.dumps({
-            "status": "healthy",
-            "message": "Azure Functions HTTP triggers are working",
-            "queue_trigger": "configured for geospatial-jobs",
-            "http_endpoints": [
-                "GET /api/health",
-                "POST /api/jobs/{operation_type}",
-                "GET /api/jobs/{job_id}",
-                "POST /api/jobs/{job_id}/process"
-            ]
-        }),
-        status_code=200,
+        json.dumps(health_status, default=str),
+        status_code=status_code,
         mimetype="application/json"
     )
 
@@ -444,6 +576,80 @@ def process_job_queue(msg: func.QueueMessage) -> None:
         raise
 
 
+@app.queue_trigger(
+        arg_name="msg",
+        queue_name="geospatial-tasks",
+        connection="AzureWebJobsStorage")
+def process_task_queue(msg: func.QueueMessage) -> None:
+    """
+    Process tasks from the geospatial-tasks queue
+    Tasks are individual work items created by jobs (e.g., catalog each file)
+    """
+    from repositories import TaskRepository
+    task_repo = TaskRepository()
+    
+    try:
+        # Log the trigger
+        logger.debug("🔄 TASK QUEUE TRIGGER FIRED! Starting task processing")
+        logger.debug(f"Message ID: {msg.id}, Dequeue count: {msg.dequeue_count}")
+        
+        # Parse the message
+        logger.debug("Loading task message content from queue")
+        message_content = msg.get_body().decode('utf-8')
+        logger.debug(f"Task message received, attempting JSON parse")
+        
+        task_data = json.loads(message_content)
+        logger.debug(f"Task data successfully parsed from queue message")
+        
+        task_id = task_data.get('task_id')
+        parent_job_id = task_data.get('parent_job_id')
+        operation_type = task_data.get('operation_type')
+        
+        if not task_id:
+            logger.error("No task_id found in queue message")
+            raise ValueError("task_id is required in queue message")
+        
+        logger.debug(f"Processing task with ID: {task_id}")
+        logger.info(f"TASK_OP task_id={task_id[:16]}... operation=processing_start queue=geospatial-tasks")
+        
+        # Update task status to processing
+        task_repo.update_task_status(task_id, "processing")
+        
+        # Get the appropriate service based on operation type
+        from services import ServiceFactory
+        service = ServiceFactory.get_service(operation_type)
+        
+        # Process the task
+        logger.info(f"TASK_STAGE task_id={task_id[:16]}... stage=service_processing operation={operation_type}")
+        
+        result = service.process(
+            job_id=task_id,  # Pass task_id as job_id for compatibility
+            dataset_id=task_data.get('dataset_id'),
+            resource_id=task_data.get('resource_id'),
+            version_id=task_data.get('version_id'),
+            operation_type=operation_type
+        )
+        
+        # Update task status to completed
+        task_repo.update_task_status(task_id, "completed", result_data=result)
+        
+        logger.info(f"TASK_OP task_id={task_id[:16]}... operation=processing_complete queue=geospatial-tasks")
+        logger.info(f"Task {task_id} completed successfully")
+        
+    except Exception as e:
+        logger.error(f"Error processing task: {str(e)}")
+        
+        # Try to update task status to failed
+        if 'task_id' in locals() and task_id:
+            try:
+                task_repo.update_task_status(task_id, "failed", error_message=str(e))
+            except Exception as update_error:
+                logger.error(f"Failed to update task status after error: {update_error}")
+        
+        # Re-raise the exception so Azure Functions knows the processing failed
+        raise
+
+
 @app.route(route="jobs/{job_id}/process", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
 def manual_process_job(req: func.HttpRequest) -> func.HttpResponse:
     """
@@ -530,5 +736,83 @@ def manual_process_job(req: func.HttpRequest) -> func.HttpResponse:
         )
 
 
+# Poison queue monitoring endpoints
+@app.route(route="monitor/poison", methods=["GET", "POST"])
+def check_poison_queues(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    HTTP endpoint to manually check poison queues and mark failed jobs/tasks
+    
+    GET: Check poison queues and return summary
+    POST: Check poison queues and optionally cleanup old messages
+    """
+    logger.info("Poison queue check requested via HTTP")
+    
+    try:
+        from poison_queue_monitor import PoisonQueueMonitor
+        
+        monitor = PoisonQueueMonitor()
+        
+        # Check for process_all parameter
+        process_all = False
+        if req.method == "POST":
+            try:
+                req_body = req.get_json()
+                process_all = req_body.get("process_all", False) if req_body else False
+            except:
+                pass
+        
+        # Check poison queues
+        summary = monitor.check_poison_queues(process_all=process_all)
+        
+        # If POST request with cleanup parameter, also cleanup old messages
+        if req.method == "POST":
+            try:
+                req_body = req.get_json() if not process_all else req_body  # Reuse if already parsed
+                if req_body and req_body.get("cleanup_old_messages"):
+                    days_to_keep = req_body.get("days_to_keep", 7)
+                    cleaned = monitor.cleanup_old_poison_messages(days_to_keep)
+                    summary["messages_cleaned"] = cleaned
+                    logger.info(f"Cleaned up {cleaned} old poison messages")
+            except:
+                pass  # Cleanup is optional
+        
+        return func.HttpResponse(
+            json.dumps(summary, indent=2),
+            status_code=200,
+            mimetype="application/json"
+        )
+        
+    except Exception as e:
+        logger.error(f"Error checking poison queues: {str(e)}")
+        return func.HttpResponse(
+            json.dumps({"error": f"Failed to check poison queues: {str(e)}"}),
+            status_code=500,
+            mimetype="application/json"
+        )
+
+
+@app.timer_trigger(schedule="0 */5 * * * *", arg_name="timer", run_on_startup=False)
+def poison_queue_timer(timer: func.TimerRequest) -> None:
+    """
+    Timer trigger that runs every 5 minutes to check poison queues
+    Automatically marks failed jobs/tasks that have been moved to poison queue
+    """
+    logger.info("Poison queue timer trigger fired")
+    
+    try:
+        from poison_queue_monitor import PoisonQueueMonitor
+        
+        monitor = PoisonQueueMonitor()
+        summary = monitor.check_poison_queues()
+        
+        if summary["poison_messages_found"] > 0:
+            logger.warning(f"Found {summary['poison_messages_found']} messages in poison queues. "
+                         f"Marked {summary['jobs_marked_failed']} jobs and "
+                         f"{summary['tasks_marked_failed']} tasks as failed.")
+        else:
+            logger.debug("No messages found in poison queues")
+            
+    except Exception as e:
+        logger.error(f"Error in poison queue timer: {str(e)}")
 
 

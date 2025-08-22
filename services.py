@@ -99,41 +99,30 @@ class ContainerListingService(BaseProcessingService):
             operation_type: Should be 'list_container'
             
         Returns:
-            Dict containing container contents with file details
+            Dict containing container summary and blob inventory URLs
         """
         logger.info(f"Starting container listing - Job: {job_id}, Container: {dataset_id}")
         
         try:
             from repositories import StorageRepository
-            import os
+            from blob_inventory_service import BlobInventoryService
             
             # Use dataset_id as container name
             container_name = dataset_id if dataset_id else None
             
-            # Initialize storage repository
+            # Initialize services
+            storage_repo = StorageRepository()
+            inventory_service = BlobInventoryService()
+            
             if container_name:
                 # List specific container
-                storage_repo = StorageRepository()
                 if not storage_repo.container_exists(container_name):
                     raise ValueError(f"Container '{container_name}' does not exist")
                 
                 contents = storage_repo.list_container_contents(container_name)
             else:
                 # List default workspace container
-                storage_repo = StorageRepository()
                 contents = storage_repo.list_container_contents()
-            
-            # Add file extension analysis
-            extensions = {}
-            total_files = len(contents['blobs'])
-            
-            for blob in contents['blobs']:
-                # Extract extension
-                if '.' in blob['name']:
-                    ext = blob['name'].split('.')[-1].lower()
-                    extensions[ext] = extensions.get(ext, 0) + 1
-                else:
-                    extensions['no_extension'] = extensions.get('no_extension', 0) + 1
             
             # Apply prefix filter if resource_id is provided and not 'none'
             if resource_id and resource_id != 'none':
@@ -142,34 +131,54 @@ class ContainerListingService(BaseProcessingService):
                     blob for blob in contents['blobs'] 
                     if blob['name'].startswith(resource_id)
                 ]
-                contents['blobs'] = filtered_blobs
-                contents['blob_count'] = len(filtered_blobs)
-                contents['filtered'] = True
-                contents['filter_prefix'] = resource_id
+                files_to_store = filtered_blobs
+                filter_applied = True
             else:
-                contents['filtered'] = False
+                files_to_store = contents['blobs']
+                filter_applied = False
             
-            # Add summary statistics
+            # Store inventory in blob storage
+            inventory_metadata = {
+                "job_id": job_id,
+                "filter_applied": filter_applied,
+                "filter_prefix": resource_id if filter_applied else None
+            }
+            
+            inventory_summary = inventory_service.store_inventory(
+                container_name=contents['container_name'],
+                files=files_to_store,
+                metadata=inventory_metadata
+            )
+            
+            # Prepare result with summary and blob URLs
             result = {
                 "job_id": job_id,
                 "operation": "container_listing",
                 "container_name": contents['container_name'],
                 "summary": {
-                    "total_files": contents['blob_count'],
-                    "total_size_bytes": contents['total_size_bytes'],
-                    "total_size_mb": contents['total_size_mb'],
-                    "file_extensions": extensions,
-                    "largest_file": max(contents['blobs'], key=lambda x: x['size']) if contents['blobs'] else None,
-                    "newest_file": max(contents['blobs'], key=lambda x: x['last_modified'] or '1900-01-01') if contents['blobs'] else None
+                    "total_files": inventory_summary['total_files'],
+                    "geospatial_files": inventory_summary['geospatial_files'],
+                    "other_files": inventory_summary['other_files'],
+                    "total_size_gb": inventory_summary['total_size_gb'],
+                    "file_extensions": inventory_summary['file_extensions'],
+                    "scan_time": inventory_summary['scan_time']
                 },
-                "files": contents['blobs'],
-                "filtered": contents.get('filtered', False)
+                "inventory_urls": inventory_summary['inventory_urls'],
+                "filtered": filter_applied
             }
             
-            if contents.get('filtered'):
-                result['filter_prefix'] = contents['filter_prefix']
+            # Include sample files for quick preview
+            if len(files_to_store) > 10:
+                result['files_sample'] = files_to_store[:10]
+                result['note'] = f"Showing first 10 of {len(files_to_store)} files. Full inventory at: {inventory_summary['inventory_urls']['full']}"
+            else:
+                result['files'] = files_to_store
             
-            logger.info(f"Container listing complete - Found {contents['blob_count']} files, {contents['total_size_mb']} MB total")
+            if filter_applied:
+                result['filter_prefix'] = resource_id
+            
+            logger.info(f"Container listing complete - Found {inventory_summary['total_files']} files, "
+                       f"{inventory_summary['total_size_gb']} GB total. Inventory stored in blob.")
             
             return result
             
@@ -199,6 +208,16 @@ class ServiceFactory:
         elif operation_type.startswith("stac_"):
             from stac_service import STACService
             return STACService()
+        
+        # Standalone STAC cataloging
+        elif operation_type == "catalog_file":
+            from stac_catalog_service import STACCatalogService
+            return STACCatalogService()
+        
+        # Container sync operation
+        elif operation_type == "sync_container":
+            from sync_container_service import SyncContainerService
+            return SyncContainerService()
         
         # Raster processing operations
         elif operation_type == "validate_raster":

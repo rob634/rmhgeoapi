@@ -178,7 +178,12 @@ class STACCOGCataloger:
                     "processing:reprojected": processing_info.get("reprojected", False),
                     "processing:cog_profile": processing_info.get("cog_profile", "lzw"),
                     "processing:software": "rmhgeoapi",
-                    "processing:datetime": datetime.now(timezone.utc).isoformat()
+                    "processing:datetime": datetime.now(timezone.utc).isoformat(),
+                    
+                    # COG provenance - was it already a COG or did we convert it?
+                    "processing:was_already_cog": processing_info.get("already_cog", False),
+                    "processing:cog_converted": processing_info.get("converted", True),
+                    "processing:cog_valid": processing_info.get("cog_valid", True)
                 }
                 
                 # Add band information

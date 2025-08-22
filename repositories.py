@@ -2,10 +2,11 @@
 Repository layer for Azure Table Storage and Blob Storage
 Handles job tracking and blob storage operations
 """
+import json
 import logging
 from datetime import datetime, timezone
 from typing import Optional, Dict
-from azure.data.tables import TableServiceClient, TableEntity
+from azure.data.tables import TableServiceClient, TableEntity, UpdateMode
 from azure.storage.blob import BlobServiceClient
 from azure.core.exceptions import ResourceExistsError, ResourceNotFoundError
 from azure.identity import DefaultAzureCredential
@@ -177,6 +178,186 @@ class JobRepository:
             return None
         except Exception as e:
             logger.error(f"Error getting job details {job_id}: {str(e)}")
+            raise
+
+
+class TaskRepository:
+    """Repository for task tracking using Azure Table Storage"""
+    
+    def __init__(self):
+        # Always use managed identity in Azure Functions
+        if not Config.STORAGE_ACCOUNT_NAME:
+            raise ValueError("STORAGE_ACCOUNT_NAME environment variable must be set for managed identity")
+        
+        account_url = Config.get_storage_account_url('table')
+        self.table_service = TableServiceClient(account_url, credential=DefaultAzureCredential())
+        
+        self.table_name = 'tasks'  # Separate table for tasks
+    
+    def _ensure_table_exists(self):
+        """Create tasks table if it doesn't exist"""
+        try:
+            self.table_service.create_table(self.table_name)
+            logger.info(f"Created table: {self.table_name}")
+        except ResourceExistsError:
+            logger.debug(f"Table already exists: {self.table_name}")
+    
+    def create_task(self, task_id: str, parent_job_id: str, task_data: dict) -> bool:
+        """
+        Create a new task associated with a parent job
+        
+        Args:
+            task_id: Unique task identifier
+            parent_job_id: ID of the parent job that created this task
+            task_data: Dictionary containing task details
+            
+        Returns:
+            True if task created, False if already exists
+        """
+        try:
+            self._ensure_table_exists()
+            table_client = self.table_service.get_table_client(self.table_name)
+            
+            # Check if task already exists
+            try:
+                existing = table_client.get_entity('tasks', task_id)
+                logger.debug(f"Task already exists: {task_id}")
+                return False
+            except ResourceNotFoundError:
+                pass  # Task doesn't exist, continue creating
+            
+            # Create table entity
+            entity = TableEntity()
+            entity['PartitionKey'] = 'tasks'
+            entity['RowKey'] = task_id
+            
+            # Task metadata
+            entity['task_id'] = task_id
+            entity['parent_job_id'] = parent_job_id
+            entity['status'] = 'pending'
+            entity['created_at'] = datetime.now(timezone.utc).isoformat()
+            entity['updated_at'] = datetime.now(timezone.utc).isoformat()
+            
+            # Task data
+            entity['operation_type'] = task_data.get('operation_type')
+            entity['dataset_id'] = task_data.get('dataset_id')
+            entity['resource_id'] = task_data.get('resource_id')
+            entity['version_id'] = task_data.get('version_id')
+            
+            # Optional fields
+            if 'file_size' in task_data:
+                entity['file_size'] = task_data['file_size']
+            if 'file_path' in task_data:
+                entity['file_path'] = task_data['file_path']
+            if 'priority' in task_data:
+                entity['priority'] = task_data['priority']
+            
+            # Store full task data as JSON
+            entity['task_data'] = json.dumps(task_data)
+            
+            table_client.create_entity(entity)
+            logger.info(f"Created task: {task_id} for job: {parent_job_id}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error creating task {task_id}: {str(e)}")
+            raise
+    
+    def update_task_status(self, task_id: str, status: str, error_message: str = None, result_data: dict = None):
+        """Update task status"""
+        try:
+            self._ensure_table_exists()
+            table_client = self.table_service.get_table_client(self.table_name)
+            
+            # Get existing entity
+            entity = table_client.get_entity('tasks', task_id)
+            
+            # Update fields
+            entity['status'] = status
+            entity['updated_at'] = datetime.now(timezone.utc).isoformat()
+            
+            if error_message:
+                entity['error_message'] = error_message
+            if result_data:
+                entity['result_data'] = json.dumps(result_data)
+            
+            # If completed or failed, add completion time
+            if status in ['completed', 'failed']:
+                entity['completed_at'] = datetime.now(timezone.utc).isoformat()
+            
+            table_client.update_entity(entity, mode=UpdateMode.MERGE)
+            logger.info(f"Updated task status: {task_id} -> {status}")
+            
+        except Exception as e:
+            logger.error(f"Error updating task status {task_id}: {str(e)}")
+            raise
+    
+    def get_task(self, task_id: str) -> dict:
+        """Get task details"""
+        try:
+            self._ensure_table_exists()
+            table_client = self.table_service.get_table_client(self.table_name)
+            
+            entity = table_client.get_entity('tasks', task_id)
+            
+            # Parse JSON fields
+            result = dict(entity)
+            if 'task_data' in result and isinstance(result['task_data'], str):
+                result['task_data'] = json.loads(result['task_data'])
+            if 'result_data' in result and isinstance(result['result_data'], str):
+                result['result_data'] = json.loads(result['result_data'])
+            
+            return result
+            
+        except ResourceNotFoundError:
+            return None
+        except Exception as e:
+            logger.error(f"Error getting task {task_id}: {str(e)}")
+            raise
+    
+    def get_tasks_for_job(self, parent_job_id: str) -> list:
+        """Get all tasks for a parent job"""
+        try:
+            self._ensure_table_exists()
+            table_client = self.table_service.get_table_client(self.table_name)
+            
+            # Query tasks by parent job ID
+            filter_query = f"parent_job_id eq '{parent_job_id}'"
+            entities = table_client.query_entities(filter_query)
+            
+            tasks = []
+            for entity in entities:
+                task = dict(entity)
+                if 'task_data' in task and isinstance(task['task_data'], str):
+                    task['task_data'] = json.loads(task['task_data'])
+                if 'result_data' in task and isinstance(task['result_data'], str):
+                    task['result_data'] = json.loads(task['result_data'])
+                tasks.append(task)
+            
+            return tasks
+            
+        except Exception as e:
+            logger.error(f"Error getting tasks for job {parent_job_id}: {str(e)}")
+            raise
+    
+    def get_task_summary_for_job(self, parent_job_id: str) -> dict:
+        """Get summary of tasks for a job"""
+        try:
+            tasks = self.get_tasks_for_job(parent_job_id)
+            
+            summary = {
+                'total': len(tasks),
+                'pending': sum(1 for t in tasks if t.get('status') == 'pending'),
+                'queued': sum(1 for t in tasks if t.get('status') == 'queued'),
+                'processing': sum(1 for t in tasks if t.get('status') == 'processing'),
+                'completed': sum(1 for t in tasks if t.get('status') == 'completed'),
+                'failed': sum(1 for t in tasks if t.get('status') == 'failed')
+            }
+            
+            return summary
+            
+        except Exception as e:
+            logger.error(f"Error getting task summary for job {parent_job_id}: {str(e)}")
             raise
 
 

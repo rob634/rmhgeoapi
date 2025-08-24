@@ -355,6 +355,8 @@ class ServiceFactory:
         - sync_container → SyncContainerService
         - validate_raster → RasterValidationService
         - cog_conversion → RasterProcessorService
+        - generate_tile_grid → PostGISTilingService
+        - create_tiling_tasks → PostGISTilingService
         - Default → HelloWorldService
     """
     
@@ -388,6 +390,19 @@ class ServiceFactory:
         """
         if operation_type == "list_container":
             return ContainerListingService()
+        
+        # NEW: Simplified COG operations
+        elif operation_type == "prepare_for_cog":
+            from prepare_for_cog_service import PrepareForCOGService
+            return PrepareForCOGService()
+        
+        elif operation_type == "create_cog":
+            from cog_service import COGService
+            return COGService()
+        
+        elif operation_type == "build_vrt":
+            from vrt_builder_service import VRTBuilderService
+            return VRTBuilderService()
         
         # Database health check
         elif operation_type == "database_health":
@@ -433,6 +448,16 @@ class ServiceFactory:
                 logger.error(f"Failed to import RasterProcessorService: {e}")
                 raise ValueError(f"Raster processing not available: {e}")
         
+        # PostGIS tiling operations
+        elif operation_type in ["generate_tile_grid", "create_tiling_tasks"]:
+            try:
+                from postgis_tiling_service import PostGISTilingService
+                return PostGISTilingService()
+            except ImportError as e:
+                logger.error(f"Failed to import PostGISTilingService: {e}")
+                # Fall through to HelloWorldService for now
+                logger.warning(f"Falling back to HelloWorldService for {operation_type}")
+        
         # Chunked mosaic processing for large operations
         elif operation_type == "chunked_mosaic":
             try:
@@ -441,6 +466,15 @@ class ServiceFactory:
             except ImportError as e:
                 logger.error(f"Failed to import ChunkedMosaicService: {e}")
                 raise ValueError(f"Chunked processing not available: {e}")
+        
+        # Tiled raster processing with parallel tasks
+        elif operation_type in ["process_tiled_raster", "prepare_tiled_cog", "create_tiled_cog"]:
+            try:
+                from tiled_raster_processor import TiledRasterProcessor
+                return TiledRasterProcessor()
+            except ImportError as e:
+                logger.error(f"Failed to import TiledRasterProcessor: {e}")
+                raise ValueError(f"Tiled raster processing not available: {e}")
         
         # Future: route different operations to different services
         # elif operation_type == "vector_upload":

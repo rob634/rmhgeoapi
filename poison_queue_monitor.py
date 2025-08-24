@@ -173,9 +173,9 @@ class PoisonQueueMonitor:
         """
         try:
             # Get current job status
-            job = self.job_repo.get_job(job_id)
+            job_status = self.job_repo.get_job_status(job_id)
             
-            if job and job.get("status") != "failed":
+            if job_status and job_status.status != "failed":
                 # Calculate failure details
                 dequeue_count = getattr(message, 'dequeue_count', 'unknown')
                 inserted_on = getattr(message, 'inserted_on', None)

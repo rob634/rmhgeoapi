@@ -11,18 +11,29 @@ from config import APIParams, JobStatuses, Validation
 class JobRequest:
     """Job submission request model"""
     
-    def __init__(self, dataset_id: str, resource_id: str, version_id: str, operation_type: str, system: bool = False):
+    def __init__(self, dataset_id: str, resource_id: str, version_id: str, operation_type: str, system: bool = False, **kwargs):
         self.dataset_id = dataset_id
         self.resource_id = resource_id
         self.version_id = version_id
         self.operation_type = operation_type
         self.system = system
+        
+        # Store additional parameters (like processing_extent, tile_id, etc.)
+        self.additional_params = kwargs
+        
         self.job_id = self._generate_job_id()
         self.created_at = datetime.now(timezone.utc).isoformat()
     
     def _generate_job_id(self) -> str:
-        """Generate deterministic job ID from parameters"""
+        """Generate deterministic job ID from parameters including additional params"""
         content = f"{self.operation_type}:{self.dataset_id}:{self.resource_id}:{self.version_id}:{self.system}"
+        
+        # Include additional parameters in job ID to ensure different processing_extent creates different jobs
+        if self.additional_params:
+            # Sort keys for consistent ordering
+            additional_content = ":".join([f"{k}={v}" for k, v in sorted(self.additional_params.items())])
+            content = f"{content}:{additional_content}"
+        
         return hashlib.sha256(content.encode()).hexdigest()
     
     def validate(self) -> Tuple[bool, Optional[str]]:
@@ -53,7 +64,7 @@ class JobRequest:
     
     def to_dict(self) -> Dict:
         """Convert to dictionary for storage/serialization"""
-        return {
+        result = {
             APIParams.JOB_ID: self.job_id,
             APIParams.DATASET_ID: self.dataset_id,
             APIParams.RESOURCE_ID: self.resource_id,
@@ -62,6 +73,11 @@ class JobRequest:
             APIParams.SYSTEM: self.system,
             APIParams.CREATED_AT: self.created_at
         }
+        
+        # Include additional parameters in the serialized output
+        result.update(self.additional_params)
+        
+        return result
 
 
 class JobStatus:

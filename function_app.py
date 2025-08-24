@@ -448,7 +448,16 @@ def submit_job(req: func.HttpRequest) -> func.HttpResponse:
         version_id = req_body.get(APIParams.VERSION_ID)
         system = req_body.get(APIParams.SYSTEM, Defaults.SYSTEM_FLAG)
         
+        # Extract additional parameters (processing_extent, tile_id, etc.)
+        additional_params = {}
+        standard_params = {APIParams.DATASET_ID, APIParams.RESOURCE_ID, APIParams.VERSION_ID, APIParams.SYSTEM}
+        for key, value in req_body.items():
+            if key not in standard_params:
+                additional_params[key] = value
+        
         logger.debug(f"Extracted parameters: dataset_id={dataset_id}, resource_id={resource_id}, version_id={version_id}, system={system}")
+        if additional_params:
+            logger.debug(f"Additional parameters: {additional_params}")
         
         # Check if this operation uses state management (POC: simple_cog)
         try:
@@ -492,8 +501,8 @@ def submit_job(req: func.HttpRequest) -> func.HttpResponse:
             # Continue without state management
         
         # Continue with existing job processing for non-state-managed operations
-        # Create job request
-        job_request = JobRequest(dataset_id, resource_id, version_id, operation_type, system)
+        # Create job request with additional parameters
+        job_request = JobRequest(dataset_id, resource_id, version_id, operation_type, system, **additional_params)
         
         # Validate parameters
         is_valid, error_msg = job_request.validate()
@@ -847,9 +856,21 @@ def process_job_queue(msg: func.QueueMessage) -> None:
         job_repo = JobRepository()
         job_repo.update_job_status(job_id, JobStatus.PROCESSING)
         
-        # Get appropriate service and process
+        # Get appropriate service and process with all parameters
         service = ServiceFactory.get_service(operation_type)
-        result = service.process(job_id, dataset_id, resource_id, version_id, operation_type)
+        
+        # Pass additional parameters from job_data to service
+        additional_job_params = {}
+        standard_job_params = {APIParams.JOB_ID, APIParams.DATASET_ID, APIParams.RESOURCE_ID, 
+                               APIParams.VERSION_ID, APIParams.OPERATION_TYPE, APIParams.SYSTEM, APIParams.CREATED_AT}
+        for key, value in job_data.items():
+            if key not in standard_job_params:
+                additional_job_params[key] = value
+        
+        if additional_job_params:
+            logger.debug(f"Passing additional parameters to service: {additional_job_params}")
+        
+        result = service.process(job_id, dataset_id, resource_id, version_id, operation_type, **additional_job_params)
         
         # Update status to completed with results
         job_repo.update_job_status(
@@ -1013,12 +1034,20 @@ def process_task_queue(msg: func.QueueMessage) -> None:
         # Process the task
         logger.info(f"TASK_STAGE task_id={task_id[:16]}... stage=service_processing operation={operation_type}")
         
+        # Pass all task data parameters to the service
+        # This allows tile processing tasks to include processing_extent and tile_id
         result = service.process(
             job_id=task_id,  # Pass task_id as job_id for compatibility
             dataset_id=task_data.get('dataset_id'),
             resource_id=task_data.get('resource_id'),
             version_id=task_data.get('version_id'),
-            operation_type=operation_type
+            operation_type=operation_type,
+            processing_extent=task_data.get('processing_extent'),
+            tile_id=task_data.get('tile_id'),
+            **{k: v for k, v in task_data.items() 
+               if k not in ['task_id', 'parent_job_id', 'operation_type', 
+                           'dataset_id', 'resource_id', 'version_id', 
+                           'processing_extent', 'tile_id']}
         )
         
         # Update task status to completed

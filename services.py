@@ -1,6 +1,31 @@
 """
-Service layer with ABC classes for geospatial processing
-Production-ready architecture with hello world implementation
+Service layer with ABC classes for geospatial processing.
+
+This module provides the service layer architecture for the geospatial ETL
+pipeline, implementing the Strategy pattern with abstract base classes and
+concrete implementations for various processing operations.
+
+Architecture:
+    BaseProcessingService (ABC)
+        ├── HelloWorldService (testing)
+        ├── ContainerListingService (inventory)
+        ├── DatabaseHealthService (monitoring)
+        ├── STACService (cataloging)
+        ├── RasterProcessorService (COG conversion)
+        └── SyncContainerService (batch operations)
+
+The ServiceFactory provides dynamic service routing based on operation type,
+enabling extensible processing capabilities without modifying core logic.
+
+Key Features:
+    - Abstract base class enforces consistent interface
+    - Factory pattern for service instantiation
+    - Lazy loading of service dependencies
+    - Comprehensive logging and error handling
+    - Support for both synchronous and asynchronous operations
+
+Author: Azure Geospatial ETL Team
+Version: 2.0.0
 """
 from abc import ABC, abstractmethod
 from typing import Dict, List
@@ -9,39 +34,110 @@ from logger_setup import logger, log_job_stage, log_service_processing
 
 
 class BaseProcessingService(ABC):
-    """Abstract base class for all processing services"""
+    """
+    Abstract base class for all processing services.
+    
+    Defines the interface that all concrete service implementations must follow.
+    This ensures consistent behavior across different processing operations and
+    enables the factory pattern for dynamic service selection.
+    
+    All services must implement:
+        - process(): Main processing logic for the operation
+        - get_supported_operations(): List of operation types handled
+        
+    Services should follow these patterns:
+        - Use dependency injection for repositories and clients
+        - Log all major operations with structured logging
+        - Return consistent result dictionaries
+        - Handle errors gracefully with meaningful messages
+    """
     
     @abstractmethod
     def process(self, job_id: str, dataset_id: str, resource_id: str, 
                 version_id: str, operation_type: str) -> Dict:
         """
-        Process a job with given parameters
+        Process a job with given parameters.
         
+        This is the main entry point for all service processing. Implementations
+        should handle the specific logic for their operation type.
+        
+        Args:
+            job_id: Unique identifier for the job (SHA256 hash).
+            dataset_id: Container or dataset identifier.
+            resource_id: Specific resource within dataset (file/folder).
+            version_id: Version identifier for the resource.
+            operation_type: Type of operation to perform.
+            
         Returns:
-            Dict with status and result information
+            Dict: Result dictionary containing:
+                - status: Processing status ('completed', 'failed')
+                - message: Human-readable status message
+                - Additional operation-specific data
+                
+        Raises:
+            ValueError: For invalid parameters or configuration.
+            Exception: For processing errors (will be caught by framework).
         """
         pass
     
     @abstractmethod
     def get_supported_operations(self) -> List[str]:
-        """Return list of operations this service supports"""
+        """
+        Return list of operations this service supports.
+        
+        Used by ServiceFactory to determine which service to instantiate
+        for a given operation type. Services can support multiple operations.
+        
+        Returns:
+            List[str]: Operation type identifiers supported by this service.
+        """
         pass
 
 
 class HelloWorldService(BaseProcessingService):
-    """Hello world implementation for testing pipeline"""
+    """
+    Hello world implementation for testing pipeline functionality.
+    
+    Simple service that validates the processing pipeline is working correctly.
+    Logs all received parameters and returns success. Useful for debugging,
+    testing deployments, and verifying queue processing.
+    
+    This service acts as a catch-all for unimplemented operations during
+    development, allowing the pipeline to process any operation type without
+    failing.
+    """
     
     def __init__(self):
+        """Initialize HelloWorldService with logging."""
         pass  # Use centralized logger
     
     def get_supported_operations(self) -> List[str]:
-        """Support all operations for now - this is just hello world"""
+        """
+        Support all operations as fallback handler.
+        
+        Returns:
+            List[str]: Supports multiple operation types for testing.
+        """
         return ["cog_conversion", "vector_upload", "stac_generation", "hello_world"]
     
     def process(self, job_id: str, dataset_id: str, resource_id: str, 
                 version_id: str, operation_type: str) -> Dict:
         """
-        Hello world processing with beautiful parameter display
+        Process hello world operation with parameter display.
+        
+        Logs all parameters in a formatted display and returns success.
+        This helps verify that the pipeline is correctly passing parameters
+        through all layers.
+        
+        Args:
+            job_id: Unique job identifier.
+            dataset_id: Dataset/container name.
+            resource_id: Resource identifier.
+            version_id: Version identifier.
+            operation_type: Operation being tested.
+            
+        Returns:
+            Dict: Success result with all parameters echoed back.
         """
         log_job_stage(job_id, "hello_world_start", "processing")
         
@@ -77,29 +173,78 @@ class HelloWorldService(BaseProcessingService):
 
 
 class ContainerListingService(BaseProcessingService):
-    """Service for listing container contents with detailed file information"""
+    """
+    Service for listing and inventorying container contents.
+    
+    Provides comprehensive container listing with metadata inference, file
+    categorization, and inventory storage. Handles large containers by storing
+    complete inventories in compressed blob storage while returning samples
+    in the API response.
+    
+    Features:
+        - Lists all files in a container with metadata
+        - Applies optional prefix filtering
+        - Categorizes files as geospatial or other
+        - Runs metadata inference to extract vendor and type info
+        - Stores compressed inventories in blob storage
+        - Returns sample of files to avoid Table Storage limits
+        
+    The service solves the 64KB Table Storage limit by storing full inventories
+    in blob storage (compressed JSON) while only storing summary in tables.
+    """
     
     def __init__(self):
+        """Initialize ContainerListingService."""
         pass  # Use centralized logger
     
     def get_supported_operations(self) -> List[str]:
-        """Return list of supported operations"""
+        """
+        Return supported operations.
+        
+        Returns:
+            List[str]: ['list_container']
+        """
         return ["list_container"]
     
     def process(self, job_id: str, dataset_id: str, resource_id: str, 
                 version_id: str, operation_type: str) -> Dict:
         """
-        Process container listing job
+        Process container listing job with inventory storage.
+        
+        Lists container contents, applies optional filtering, runs metadata
+        inference, and stores complete inventory in blob storage.
         
         Args:
-            job_id: Unique job identifier
-            dataset_id: Used as container name to list
-            resource_id: Optional prefix filter
-            version_id: Not used for listing operations
-            operation_type: Should be 'list_container'
+            job_id: Unique job identifier for tracking.
+            dataset_id: Container name to list.
+            resource_id: Optional prefix filter (use 'none' for no filter).
+            version_id: Not used for listing operations.
+            operation_type: Should be 'list_container'.
             
         Returns:
-            Dict containing container summary and blob inventory URLs
+            Dict: Container listing results containing:
+                - summary: Statistics about files found
+                - inventory_urls: URLs to full and geospatial inventories
+                - files_sample: First 10 files (or all if <10)
+                - filtered: Whether prefix filter was applied
+                
+        Raises:
+            ValueError: If specified container doesn't exist.
+            Exception: For storage access errors.
+            
+        Example Result:
+            {
+                "summary": {
+                    "total_files": 1157,
+                    "geospatial_files": 459,
+                    "total_size_gb": 87.96
+                },
+                "inventory_urls": {
+                    "full": "https://...rmhazuregeobronze.json.gz",
+                    "geospatial": "https://...rmhazuregeobronze_geo.json.gz"
+                },
+                "files_sample": [...first 10 files...]
+            }
         """
         logger.info(f"Starting container listing - Job: {job_id}, Container: {dataset_id}")
         
@@ -192,12 +337,54 @@ class ContainerListingService(BaseProcessingService):
 
 
 class ServiceFactory:
-    """Factory to create appropriate service instances"""
+    """
+    Factory class for creating appropriate service instances.
+    
+    Implements the Factory pattern to dynamically instantiate the correct
+    service based on operation type. This enables adding new services without
+    modifying the core routing logic.
+    
+    The factory performs lazy imports to avoid loading unnecessary dependencies
+    and handles graceful fallback to HelloWorldService for unknown operations.
+    
+    Service Routing:
+        - list_container → ContainerListingService
+        - database_health → DatabaseHealthService
+        - stac_* → STACService
+        - catalog_file → STACCatalogService
+        - sync_container → SyncContainerService
+        - validate_raster → RasterValidationService
+        - cog_conversion → RasterProcessorService
+        - Default → HelloWorldService
+    """
     
     @staticmethod
     def get_service(operation_type: str) -> BaseProcessingService:
         """
-        Get the appropriate service for the operation type
+        Get the appropriate service instance for the operation type.
+        
+        Uses lazy imports to load service classes only when needed.
+        Falls back to HelloWorldService for unknown operations to prevent
+        failures during development.
+        
+        Args:
+            operation_type: The type of operation to perform.
+            
+        Returns:
+            BaseProcessingService: Instantiated service for the operation.
+            
+        Raises:
+            ImportError: If a service module cannot be imported.
+            ValueError: If a service is not available (caught from imports).
+            
+        Examples:
+            >>> service = ServiceFactory.get_service("list_container")
+            >>> isinstance(service, ContainerListingService)
+            True
+            
+            >>> service = ServiceFactory.get_service("unknown_op")
+            >>> isinstance(service, HelloWorldService)
+            True
         """
         if operation_type == "list_container":
             return ContainerListingService()

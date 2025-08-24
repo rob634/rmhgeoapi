@@ -1,6 +1,53 @@
 """
-Azure Functions App for Geospatial ETL Pipeline
-MVP implementation with job submission, status checking, and queue processing
+Azure Functions App for Geospatial ETL Pipeline.
+
+This module serves as the entry point for the Azure Functions-based geospatial
+ETL pipeline. It provides HTTP endpoints for job submission and status checking,
+queue-based asynchronous processing, and comprehensive health monitoring.
+
+Architecture:
+    HTTP API → Queue → Processing Service → Storage/Database
+             ↓                             ↓
+        Job Tracking                  STAC Catalog
+       (Table Storage)               (PostgreSQL/PostGIS)
+
+Key Features:
+    - Idempotent job processing with SHA256-based deduplication
+    - Queue-based async processing with poison queue monitoring
+    - Managed identity authentication with user delegation SAS
+    - Support for files up to 20GB with smart metadata extraction
+    - Comprehensive STAC cataloging with PostGIS integration
+    - State management system for complex raster workflows
+
+Endpoints:
+    GET  /api/health - System health check with component status
+    POST /api/jobs/{operation_type} - Submit processing job
+    GET  /api/jobs/{job_id} - Get job status and results
+    GET  /api/monitor/poison - Check poison queue status
+    POST /api/monitor/poison - Process poison messages
+
+Supported Operations:
+    - list_container: List and inventory container contents
+    - sync_container: Sync container to STAC catalog
+    - catalog_file: Catalog individual file to STAC
+    - validate_raster: Validate raster file integrity
+    - cog_conversion: Convert raster to Cloud Optimized GeoTIFF
+    - simple_cog: State-managed COG conversion (<4GB files)
+    - database_health: Check database connectivity and status
+    - setup_stac_geo_schema: Initialize STAC tables in PostgreSQL
+
+Environment Variables:
+    STORAGE_ACCOUNT_NAME: Azure storage account name
+    AzureWebJobsStorage: Connection string for Functions runtime
+    ENABLE_DATABASE_CHECK: Enable PostgreSQL health checks (optional)
+    POSTGIS_HOST: PostgreSQL host for STAC catalog
+    POSTGIS_DATABASE: PostgreSQL database name
+    POSTGIS_USER: PostgreSQL username
+    POSTGIS_PASSWORD: PostgreSQL password
+
+Author: Azure Geospatial ETL Team
+Version: 2.0.0
+Last Updated: August 2025
 """
 import json
 import logging
@@ -31,8 +78,28 @@ app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
 
 # Repository will be initialized lazily when needed
 
-# Queue client for job submission - use AzureWebJobsStorage connection
 def get_queue_client():
+    """
+    Initialize and return Azure Queue client with managed identity.
+    
+    Creates a QueueServiceClient using DefaultAzureCredential for managed
+    identity authentication. Ensures the queue exists before returning
+    the client. This client is used for submitting jobs to the processing
+    queue.
+    
+    Returns:
+        QueueClient: Configured client for job queue operations with
+            base64 encoding handled by Azure Functions runtime.
+        
+    Raises:
+        ValueError: If STORAGE_ACCOUNT_NAME is not configured in environment.
+        
+    Note:
+        - Uses AzureWebJobsStorage settings extracted during configuration
+        - Queue encoding is handled by Azure Functions runtime based on
+          host.json configuration (messageEncoding: "base64")
+        - Queue is created if it doesn't exist
+    """
     # Check if we have the storage account name (extracted from AzureWebJobsStorage settings)
     if not Config.STORAGE_ACCOUNT_NAME:
         raise ValueError("Could not determine storage account name from AzureWebJobsStorage settings")
@@ -62,9 +129,49 @@ def get_queue_client():
 @app.route(route="health", methods=["GET"])
 def health_check(req: func.HttpRequest) -> func.HttpResponse:
     """
-    Comprehensive health check endpoint with optional database check
-    GET /api/health
-    Returns health status of all system components
+    Comprehensive health check endpoint with optional database check.
+    
+    Performs health checks on all system components including storage queues,
+    table storage, and optionally PostgreSQL database. Returns detailed status
+    information for monitoring and diagnostics.
+    
+    Args:
+        req: Azure Functions HTTP request object.
+        
+    Returns:
+        HttpResponse: JSON response with health status and component details.
+            Status code 200 if healthy, 503 if any component is unhealthy.
+            
+    Response Format:
+        {
+            "status": "healthy" | "unhealthy",
+            "timestamp": "ISO-8601 timestamp",
+            "environment": {
+                "storage_account": "account_name",
+                "queues": {
+                    "geospatial-jobs": {"status": "accessible", "message_count": 0},
+                    "geospatial-tasks": {"status": "accessible", "message_count": 0}
+                },
+                "tables": {
+                    "Jobs": {"status": "accessible"},
+                    "Tasks": {"status": "accessible"}
+                }
+            },
+            "runtime": {
+                "python_version": "3.11.0",
+                "function_runtime": "python"
+            },
+            "database": {  # Optional, if ENABLE_DATABASE_HEALTH_CHECK=true
+                "status": "connected",
+                "postgis_version": "3.4.0",
+                "stac_item_count": 270
+            },
+            "errors": []  # List of error messages if unhealthy
+        }
+        
+    Note:
+        Database check is only performed if ENABLE_DATABASE_HEALTH_CHECK
+        environment variable is set to "true".
     """
     import os
     import sys
@@ -220,27 +327,72 @@ def health_check(req: func.HttpRequest) -> func.HttpResponse:
 @app.route(route="jobs/{operation_type}", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
 def submit_job(req: func.HttpRequest) -> func.HttpResponse:
     """
-    Submit a new processing job
-    POST /api/jobs/{operation_type}
-    Body: {"dataset_id": "...", "resource_id": "...", "version_id": "...", "system": false}
-    Returns: {"job_id": "...", "status": "queued"}
+    Submit a new processing job to the ETL pipeline.
     
+    Creates an idempotent job request based on SHA256 hash of parameters.
+    Jobs are queued for asynchronous processing. Duplicate requests return
+    the existing job status without creating a new job.
+    
+    Args:
+        req: Azure Functions HTTP request with operation_type in path and
+            job parameters in JSON body.
+            
+    Path Parameters:
+        operation_type: The type of operation to perform (e.g., 'list_container',
+            'cog_conversion', 'sync_container', 'catalog_file').
+            
+    Request Body:
+        {
+            "dataset_id": "container_name",     # Required for DDH operations
+            "resource_id": "file_or_folder",    # Required for DDH operations  
+            "version_id": "v1",                 # Required for DDH operations
+            "system": false                     # Optional, default: false
+        }
+        
     Parameters:
-    - system: boolean (default: false)
-      * false: DDH application requests - dataset_id/resource_id/version_id are mandatory
-      * true: Admin/testing requests - parameters are optional and used flexibly
-    
-    Supported operation types:
-    - hello_world: Basic test operation
-    - list_container: List container contents with file details
-    
-    For DDH operations (system=false):
-    - All ETL parameters (dataset_id, resource_id, version_id) are required
-    
-    For admin operations (system=true):
-    - dataset_id: Used as container name for list_container
-    - resource_id: Used as prefix filter (use "none" for no filter)
-    - version_id: Optional, can be any value
+        system (bool): Operation mode flag
+            - false: DDH application mode - all parameters required
+            - true: Admin/testing mode - parameters optional and flexible
+            
+    Returns:
+        HttpResponse: JSON response with job details and status.
+            Always returns 200 for successful idempotent operations.
+            
+    Response Format:
+        {
+            "job_id": "SHA256_hash",
+            "status": "queued" | "processing" | "completed" | "failed",
+            "message": "Job created and queued" | "Duplicate request...",
+            "is_duplicate": false | true,
+            "dataset_id": "...",
+            "resource_id": "...",
+            "version_id": "...",
+            "operation_type": "...",
+            "system": false | true
+        }
+        
+    Supported Operations:
+        - list_container: List and inventory container contents
+        - sync_container: Sync entire container to STAC catalog  
+        - catalog_file: Catalog individual file to STAC
+        - validate_raster: Validate raster file integrity
+        - cog_conversion: Convert raster to Cloud Optimized GeoTIFF
+        - simple_cog: State-managed COG conversion for files <4GB
+        - database_health: Check database connectivity
+        - setup_stac_geo_schema: Initialize STAC tables
+        
+    Raises:
+        400: Invalid request parameters or missing required fields
+        500: Internal server error during job creation
+        
+    Examples:
+        # List container contents
+        POST /api/jobs/list_container
+        {"dataset_id": "rmhazuregeobronze", "system": true}
+        
+        # Convert file to COG
+        POST /api/jobs/cog_conversion
+        {"dataset_id": "bronze", "resource_id": "file.tif", "version_id": "v1"}
     """
     # Extract operation type from path
     operation_type = req.route_params.get(APIParams.OPERATION_TYPE)
@@ -430,9 +582,71 @@ def submit_job(req: func.HttpRequest) -> func.HttpResponse:
 @app.route(route="jobs/{job_id}", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
 def get_job_status(req: func.HttpRequest) -> func.HttpResponse:
     """
-    Get job status by job ID
-    GET /api/jobs/{job_id}
-    Returns: {"job_id": "...", "status": "...", "created_at": "...", ...}
+    Get job status and results by job ID.
+    
+    Retrieves detailed job information including current status, timestamps,
+    result data, and task progress for state-managed jobs. Supports both
+    regular jobs and state-managed jobs with enhanced task tracking.
+    
+    Args:
+        req: Azure Functions HTTP request with job_id in path.
+        
+    Path Parameters:
+        job_id: SHA256 hash job identifier to query.
+        
+    Returns:
+        HttpResponse: JSON response with job details.
+            Status code 200 if found, 404 if not found.
+            
+    Response Format (Regular Job):
+        {
+            "job_id": "SHA256_hash",
+            "status": "pending" | "queued" | "processing" | "completed" | "failed",
+            "created_at": "ISO-8601 timestamp",
+            "updated_at": "ISO-8601 timestamp",
+            "dataset_id": "...",
+            "resource_id": "...",
+            "version_id": "...",
+            "operation_type": "...",
+            "error_message": null | "error details",
+            "result_data": {  # When completed
+                "summary": {...},
+                "files": [...],
+                "inventory_urls": {...}
+            }
+        }
+        
+    Response Format (State-Managed Job):
+        {
+            "job_id": "SHA256_hash",
+            "status": "processing" | "completed" | "failed",
+            "progress": "50%",
+            "tasks": {
+                "total": 2,
+                "completed": 1,
+                "failed": 0,
+                "current": "CREATE_COG"
+            },
+            "task_details": [
+                {
+                    "task_id": "...",
+                    "task_type": "CREATE_COG",
+                    "status": "completed",
+                    "started_at": "ISO-8601",
+                    "completed_at": "ISO-8601",
+                    "duration_seconds": 15.2
+                }
+            ],
+            "output_path": "silver/cogs/job_id/output.tif"  # When completed
+        }
+        
+    Raises:
+        400: Missing job_id parameter
+        404: Job not found
+        500: Internal server error
+        
+    Examples:
+        GET /api/jobs/f542843127e97ec6cdfa921f3c16d747b8657cdb662b135e2ff71fea72439542
     """
     job_id = req.route_params.get('job_id')
     logger.debug(f"Received job status request for job_id: {job_id}")
@@ -496,8 +710,46 @@ def get_job_status(req: func.HttpRequest) -> func.HttpResponse:
         connection="AzureWebJobsStorage")
 def process_job_queue(msg: func.QueueMessage) -> None:
     """
-    Process jobs from the queue
-    Triggered by messages in job-processing queue
+    Process jobs from the geospatial-jobs queue.
+    
+    Queue trigger function that processes job messages asynchronously.
+    Handles message decoding, job validation, service routing, and status
+    updates. Messages that fail after 5 attempts are moved to poison queue.
+    
+    Args:
+        msg: Azure Functions queue message containing job data.
+            Message is base64-encoded JSON with job parameters.
+            
+    Queue Message Format:
+        {
+            "job_id": "SHA256_hash",
+            "dataset_id": "container_name",
+            "resource_id": "file_or_folder",
+            "version_id": "v1",
+            "operation_type": "list_container",
+            "system": false,
+            "created_at": "ISO-8601 timestamp"
+        }
+        
+    Processing Flow:
+        1. Decode base64 message (handled by runtime)
+        2. Parse JSON job data
+        3. Validate required parameters
+        4. Update job status to 'processing'
+        5. Route to appropriate service based on operation_type
+        6. Process job and capture results
+        7. Update job status with results or error
+        
+    Error Handling:
+        - Invalid JSON: Message rejected, sent to poison queue
+        - Missing parameters: Job marked as failed
+        - Service errors: Job marked as failed with error message
+        - After 5 attempts: Message moved to poison queue automatically
+        
+    Note:
+        - Base64 encoding/decoding handled by Azure Functions runtime
+        - Messages are automatically retried on failure
+        - Poison queue monitoring handled by separate timer trigger
     """
     logger.debug("🔄 QUEUE TRIGGER FIRED! Starting job processing")
     try:
@@ -638,8 +890,47 @@ def process_job_queue(msg: func.QueueMessage) -> None:
         connection="AzureWebJobsStorage")
 def process_task_queue(msg: func.QueueMessage) -> None:
     """
-    Process tasks from the geospatial-tasks queue
-    Tasks are individual work items created by jobs (e.g., catalog each file)
+    Process individual tasks from the geospatial-tasks queue.
+    
+    Handles granular work items created by jobs, such as cataloging individual
+    files to STAC or processing raster chunks. Tasks are typically created by
+    fan-out operations like sync_container which creates one task per file.
+    
+    Args:
+        msg: Azure Functions queue message containing task data.
+            
+    Task Message Format:
+        {
+            "task_id": "UUID",
+            "parent_job_id": "SHA256_hash",  # Original job that created this task
+            "operation": "catalog_file",
+            "parameters": {
+                "container": "rmhazuregeobronze",
+                "blob_name": "file.tif",
+                "collection_id": "bronze-assets"
+            }
+        }
+        
+    Supported Task Operations:
+        - catalog_file: Add individual file to STAC catalog
+        - process_chunk: Process a raster chunk (for large files)
+        - validate_output: Validate processing output
+        
+    Processing Flow:
+        1. Decode task message
+        2. Extract task parameters
+        3. Route to appropriate handler
+        4. Update task status in table storage
+        5. Report completion to parent job
+        
+    Error Handling:
+        - Task failures don't fail the parent job
+        - Failed tasks are logged and counted
+        - After 5 attempts, moved to geospatial-tasks-poison queue
+        
+    Note:
+        Tasks are fire-and-forget operations that report back to parent job
+        upon completion but don't block job completion.
     """
     from repositories import TaskRepository
     task_repo = TaskRepository()
@@ -847,10 +1138,55 @@ def diagnose_state(req: func.HttpRequest) -> func.HttpResponse:
 @app.route(route="monitor/poison", methods=["GET", "POST"])
 def check_poison_queues(req: func.HttpRequest) -> func.HttpResponse:
     """
-    HTTP endpoint to manually check poison queues and mark failed jobs/tasks
+    Monitor and manage poison queue messages.
     
-    GET: Check poison queues and return summary
-    POST: Check poison queues and optionally cleanup old messages
+    Provides visibility into failed messages that have been moved to poison
+    queues after exceeding retry limits. Can optionally process or clean up
+    old poison messages.
+    
+    Args:
+        req: Azure Functions HTTP request.
+        
+    Methods:
+        GET: Check poison queues and return summary
+        POST: Process messages and/or cleanup old messages
+        
+    POST Request Body (Optional):
+        {
+            "process_all": true,           # Process all poison messages
+            "cleanup_old_messages": true,  # Remove old messages
+            "days_to_keep": 7              # Keep messages newer than N days
+        }
+        
+    Returns:
+        HttpResponse: JSON summary of poison queue status.
+        
+    Response Format:
+        {
+            "timestamp": "ISO-8601",
+            "queues_checked": ["geospatial-jobs-poison", "geospatial-tasks-poison"],
+            "total_messages": 5,
+            "messages_by_queue": {
+                "geospatial-jobs-poison": 2,
+                "geospatial-tasks-poison": 3
+            },
+            "jobs_marked_failed": 2,
+            "tasks_marked_failed": 3,
+            "messages_processed": 5,      # If process_all=true
+            "messages_cleaned": 10        # If cleanup_old_messages=true
+        }
+        
+    Examples:
+        # Check poison queue status
+        GET /api/monitor/poison
+        
+        # Process all poison messages and mark jobs as failed
+        POST /api/monitor/poison
+        {"process_all": true}
+        
+        # Clean up messages older than 30 days
+        POST /api/monitor/poison
+        {"cleanup_old_messages": true, "days_to_keep": 30}
     """
     logger.info("Poison queue check requested via HTTP")
     
@@ -904,8 +1240,30 @@ def check_poison_queues(req: func.HttpRequest) -> func.HttpResponse:
 @app.timer_trigger(schedule="0 */5 * * * *", arg_name="timer", run_on_startup=False)
 def poison_queue_timer(timer: func.TimerRequest) -> None:
     """
-    Timer trigger that runs every 5 minutes to check poison queues
-    Automatically marks failed jobs/tasks that have been moved to poison queue
+    Automated poison queue monitoring timer.
+    
+    Runs every 5 minutes to check for messages in poison queues and
+    automatically mark corresponding jobs and tasks as failed. This ensures
+    failed processing attempts are properly tracked and visible in job status.
+    
+    Args:
+        timer: Azure Functions timer request object (unused but required).
+        
+    Schedule:
+        Runs every 5 minutes (0 */5 * * * *)
+        Does not run on startup to avoid immediate processing
+        
+    Processing:
+        1. Checks geospatial-jobs-poison queue for failed job messages
+        2. Checks geospatial-tasks-poison queue for failed task messages
+        3. Extracts job/task IDs from poison messages
+        4. Updates corresponding records in Table Storage to 'failed' status
+        5. Logs summary of actions taken
+        
+    Note:
+        - Does not delete poison messages (kept for audit trail)
+        - Runs silently unless messages are found
+        - Errors are logged but don't fail the timer trigger
     """
     logger.info("Poison queue timer trigger fired")
     

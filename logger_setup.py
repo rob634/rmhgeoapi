@@ -66,6 +66,15 @@ logger.propagate = False
 log_list = ListHandler()
 log_list.setFormatter(logging.Formatter("%(asctime)s %(levelname)s: %(message)s"))
 logger.addHandler(log_list)
+# Function to get a logger for modules
+def get_logger(name: str) -> logging.Logger:
+    """Get a logger instance for a module"""
+    module_logger = logging.getLogger(name)
+    module_logger.setLevel(logging.DEBUG)
+    module_logger.addHandler(console_handler)
+    module_logger.propagate = False
+    return module_logger
+
 # Simple logging methods for job tracking
 def log_job_stage(job_id: str, stage: str, status: str, duration: float = None):
     """Log job processing stages with structured logging for Azure"""

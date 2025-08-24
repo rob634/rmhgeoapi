@@ -681,15 +681,17 @@ class StorageRepository:
             )
             import os
             
-            # Check if blob exists first
-            if not self.blob_exists(blob_name, container_name):
-                logger.error(f"Blob {blob_name} not found in container {container_name}")
-                raise ValueError(f"Blob {blob_name} not found in container {container_name}")
-            
+            # Get blob client first
             blob_client = self.blob_service_client.get_blob_client(
                 container=container_name, 
                 blob=blob_name
             )
+            
+            # Check if blob exists
+            if not self.blob_exists(blob_name, container_name):
+                logger.error(f"Blob {blob_name} not found in container {container_name}")
+                # Return the direct URL even if blob doesn't exist (might be useful for error tracking)
+                return blob_client.url
             
             # Get account name
             account_name = None

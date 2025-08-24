@@ -12,15 +12,17 @@ from rasterio.warp import transform_bounds
 
 from config import Config
 from database_client import STACDatabase
+from base_raster_processor import BaseRasterProcessor
 
 logger = logging.getLogger(__name__)
 
 
-class STACCOGCataloger:
+class STACCOGCataloger(BaseRasterProcessor):
     """Service for cataloging COG outputs in STAC database"""
     
     def __init__(self):
-        """Initialize with STAC database client"""
+        """Initialize with STAC database client and base functionality"""
+        super().__init__()
         self.db_client = STACDatabase(
             host=Config.POSTGIS_HOST,
             database=Config.POSTGIS_DATABASE,
@@ -126,10 +128,8 @@ class STACCOGCataloger:
             # Generate item ID (hash of container + blob name for uniqueness)
             item_id = hashlib.md5(f"{container_name}/{blob_name}".encode()).hexdigest()
             
-            # Get COG metadata using rasterio
-            from repositories import StorageRepository
-            storage = StorageRepository()
-            blob_url = storage.get_blob_sas_url(container_name, blob_name)
+            # Get COG metadata using rasterio with base class method
+            blob_url = self.get_blob_url(container_name, blob_name)
             
             with rasterio.open(blob_url) as src:
                 # Get bounds in EPSG:4326
@@ -319,3 +319,31 @@ class STACCOGCataloger:
         except Exception as e:
             logger.error(f"Error getting STAC item: {e}")
             return None
+    
+    def process(self, **kwargs) -> Dict[str, Any]:
+        """
+        Process method required by base class.
+        Routes to catalog_cog method.
+        
+        Args:
+            container_name: Container name
+            blob_name: Blob name
+            cog_metadata: Optional COG metadata
+            collection_id: Optional collection ID
+            
+        Returns:
+            Cataloging result dictionary
+        """
+        container_name = kwargs.get('container_name', self.silver_container)
+        blob_name = kwargs.get('blob_name', kwargs.get('resource_id', ''))
+        cog_metadata = kwargs.get('cog_metadata')
+        collection_id = kwargs.get('collection_id', self.default_collection)
+        
+        success = self.catalog_cog(container_name, blob_name, cog_metadata, collection_id)
+        
+        return {
+            'success': success,
+            'container': container_name,
+            'blob': blob_name,
+            'collection': collection_id
+        }

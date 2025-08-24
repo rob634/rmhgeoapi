@@ -10,6 +10,7 @@ from azure.storage.blob import BlobServiceClient
 from azure.identity import DefaultAzureCredential
 from config import Config
 from logger_setup import logger
+from metadata_inference import MetadataInferenceService
 
 
 class BlobInventoryService:
@@ -22,6 +23,7 @@ class BlobInventoryService:
         self.inventory_container = "rmhazuregeoinventory"
         account_url = Config.get_storage_account_url('blob')
         self.blob_service = BlobServiceClient(account_url, credential=DefaultAzureCredential())
+        self.inference_service = MetadataInferenceService()
         self._ensure_container_exists()
     
     def _ensure_container_exists(self):
@@ -35,7 +37,7 @@ class BlobInventoryService:
             logger.error(f"Error ensuring inventory container exists: {e}")
     
     def store_inventory(self, container_name: str, files: List[Dict], 
-                       metadata: Optional[Dict] = None) -> Dict:
+                       metadata: Optional[Dict] = None, enable_inference: bool = True) -> Dict:
         """
         Store container inventory as compressed JSON in blob storage
         
@@ -43,6 +45,7 @@ class BlobInventoryService:
             container_name: Name of the container being inventoried
             files: List of file dictionaries with metadata
             metadata: Optional additional metadata to store
+            enable_inference: Whether to run metadata inference on files
             
         Returns:
             Dict with summary and blob URLs
@@ -63,10 +66,21 @@ class BlobInventoryService:
             if metadata:
                 inventory["metadata"] = metadata
             
+            # Run metadata inference if enabled
+            if enable_inference:
+                try:
+                    logger.info(f"Running metadata inference on {len(files)} files...")
+                    inventory = self.inference_service.enrich_inventory(inventory)
+                    logger.info("Metadata inference completed successfully")
+                except Exception as e:
+                    logger.warning(f"Metadata inference failed (continuing without): {e}")
+            
             # Calculate statistics
             total_size_gb = inventory["total_size_bytes"] / (1024**3)
             
-            # Categorize files
+            # Categorize files (use enriched files from inventory if available)
+            files_to_categorize = inventory.get('files', files)
+            
             geospatial_extensions = {'.tif', '.tiff', '.geotiff', '.cog', '.jp2', 
                                     '.geojson', '.json', '.gpkg', '.shp', '.kml', 
                                     '.kmz', '.gml', '.mbtiles'}
@@ -74,7 +88,7 @@ class BlobInventoryService:
             geospatial_files = []
             other_files = []
             
-            for f in files:
+            for f in files_to_categorize:
                 name = f.get('name', '').lower()
                 is_geo = any(name.endswith(ext) for ext in geospatial_extensions)
                 if is_geo:
@@ -111,6 +125,20 @@ class BlobInventoryService:
                 "file_extensions": self._count_extensions(files)
             }
             
+            # Add inference analysis to summary if available
+            if 'inference_analysis' in inventory:
+                summary['inference_summary'] = {
+                    'statistics': inventory['inference_analysis']['statistics'],
+                    'vendor_summary': inventory['inference_analysis']['vendor_summary'],
+                    'relationships': {
+                        'sidecar_pairs': len(inventory['inference_analysis']['relationships']['sidecar_pairs']),
+                        'tiled_scenes': len(inventory['inference_analysis']['relationships']['tiled_scenes']),
+                        'orphan_sidecars': len(inventory['inference_analysis']['relationships']['orphan_sidecars']),
+                        'complete_datasets': len(inventory['inference_analysis']['relationships']['complete_datasets'])
+                    },
+                    'recommendations': len(inventory['inference_analysis'].get('processing_recommendations', []))
+                }
+            
             # Also store uncompressed summary for quick access
             summary_blob_name = f"current/{container_name}_summary.json"
             summary_url = self._store_json(summary_blob_name, summary)
@@ -118,6 +146,10 @@ class BlobInventoryService:
             
             logger.info(f"Stored inventory for {container_name}: {len(files)} files, "
                        f"{len(geospatial_files)} geospatial")
+            
+            # Include enriched files in summary if inference was run
+            if enable_inference and 'files' in inventory:
+                summary['enriched_files'] = inventory['files']
             
             return summary
             

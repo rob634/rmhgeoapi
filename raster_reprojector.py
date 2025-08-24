@@ -2,7 +2,6 @@
 Raster reprojection service for geospatial ETL pipeline
 Reprojects rasters to target CRS (EPSG:4326 for Silver tier)
 """
-import logging
 from typing import Optional, Dict, Any
 import rasterio
 from rasterio.crs import CRS
@@ -10,20 +9,16 @@ from rasterio.warp import calculate_default_transform, reproject, Resampling
 from rasterio.io import MemoryFile
 from rasterio.errors import RasterioError
 
-from config import Config, RasterConfig
-from repositories import StorageRepository
-
-logger = logging.getLogger(__name__)
+from base_raster_processor import BaseRasterProcessor
+from config import RasterConfig
 
 
-class RasterReprojector:
+class RasterReprojector(BaseRasterProcessor):
     """Service for reprojecting raster files"""
     
     def __init__(self):
-        """Initialize with storage repository"""
-        self.storage_repo = StorageRepository()
-        self.bronze_container = Config.BRONZE_CONTAINER_NAME or "rmhazuregeobronze"
-        self.silver_container = Config.SILVER_CONTAINER_NAME or "rmhazuregeosilver"
+        """Initialize reprojector with shared base functionality"""
+        super().__init__()
         
     def needs_reprojection(self, current_epsg: int, target_epsg: int = None) -> bool:
         """
@@ -76,18 +71,17 @@ class RasterReprojector:
         # Default to WGS84 for Silver tier
         if target_epsg is None:
             target_epsg = RasterConfig.TARGET_EPSG
-            logger.info(f"Using default target EPSG:{target_epsg} for Silver tier")
+            self.logger.info(f"Using default target EPSG:{target_epsg} for Silver tier")
             
         # Check if reprojection is needed
         if not self.needs_reprojection(source_epsg, target_epsg):
             result["warnings"].append(f"Raster already in EPSG:{target_epsg}, no reprojection needed")
             
-            # Copy file as-is to destination
+            # Copy file as-is to destination using base class method
             try:
-                self.storage_repo.copy_blob(
-                    source_blob, dest_blob,
-                    source_container, dest_container,
-                    overwrite=True
+                self.copy_blob(
+                    source_container, source_blob,
+                    dest_container, dest_blob
                 )
                 result["success"] = True
                 result["metadata"]["reprojected"] = False
@@ -98,22 +92,20 @@ class RasterReprojector:
                 result["errors"].append(f"Error copying raster: {str(e)}")
                 return result
                 
-        # Determine if we should use smart mode (URL access) based on file size
+        # Determine if we should use smart mode based on file size
         if use_smart_mode is None:
-            blob_props = self.storage_repo.get_blob_properties(source_container, source_blob)
-            if blob_props:
-                size_mb = blob_props.get("size", 0) / (1024 * 1024)
-                use_smart_mode = size_mb > RasterConfig.MAX_DOWNLOAD_SIZE_MB
-                if use_smart_mode:
-                    logger.info(f"File size {size_mb:.1f}MB exceeds threshold, using smart mode")
+            size_mb = self.get_file_size_mb(source_container, source_blob)
+            use_smart_mode = self.should_use_smart_mode(size_mb)
+            if use_smart_mode:
+                self.logger.info(f"File size {size_mb:.1f}MB exceeds threshold, using smart mode")
                     
         try:
             # Create CRS objects
             crs_in = CRS.from_epsg(source_epsg)
             crs_out = CRS.from_epsg(target_epsg)
             
-            # Get source URL for rasterio
-            source_url = self.storage_repo.get_blob_sas_url(source_container, source_blob)
+            # Get source URL using base class method
+            source_url = self.get_blob_url(source_container, source_blob)
             
             # Open source raster
             with rasterio.open(source_url) as src:
@@ -141,7 +133,7 @@ class RasterReprojector:
                 result["metadata"]["bands"] = src.count
                 
                 # Reproject to memory
-                logger.info(f"Reprojecting {source_blob} from EPSG:{source_epsg} to EPSG:{target_epsg}")
+                self.logger.info(f"Reprojecting {source_blob} from EPSG:{source_epsg} to EPSG:{target_epsg}")
                 
                 with MemoryFile() as memfile:
                     with memfile.open(**kwargs) as dst:
@@ -157,9 +149,9 @@ class RasterReprojector:
                                 resampling=Resampling.bilinear  # Using bilinear as defined in config
                             )
                             
-                    # Upload reprojected raster
+                    # Upload reprojected raster using base class storage
                     memfile.seek(0)
-                    self.storage_repo.upload_blob(
+                    self.storage.upload_blob(
                         dest_blob,
                         memfile.read(),
                         dest_container,
@@ -168,13 +160,45 @@ class RasterReprojector:
                     
                 result["success"] = True
                 result["metadata"]["reprojected"] = True
-                logger.info(f"Successfully reprojected {source_blob} to {dest_blob}")
+                self.logger.info(f"Successfully reprojected {source_blob} to {dest_blob}")
                 
         except RasterioError as e:
             result["errors"].append(f"Rasterio error during reprojection: {str(e)}")
-            logger.error(f"Rasterio error: {e}")
+            self.logger.error(f"Rasterio error: {e}")
         except Exception as e:
             result["errors"].append(f"Error during reprojection: {str(e)}")
-            logger.error(f"Reprojection error: {e}")
+            self.logger.error(f"Reprojection error: {e}")
             
         return result
+    
+    def process(self, **kwargs) -> Dict[str, Any]:
+        """
+        Process method required by base class.
+        Routes to reproject_raster method.
+        
+        Args:
+            source_container: Source container name
+            source_blob: Source blob name
+            dest_container: Destination container name
+            dest_blob: Destination blob name
+            source_epsg: Source EPSG code
+            target_epsg: Target EPSG code (defaults to 4326)
+            
+        Returns:
+            Reprojection result dictionary
+        """
+        source_container = kwargs.get('source_container', self.get_source_container(kwargs.get('dataset_id')))
+        source_blob = kwargs.get('source_blob', kwargs.get('resource_id', ''))
+        dest_container = kwargs.get('dest_container', self.silver_container)
+        dest_blob = kwargs.get('dest_blob', self.generate_output_name(source_blob, 'reprojected'))
+        source_epsg = kwargs.get('source_epsg')
+        target_epsg = kwargs.get('target_epsg', RasterConfig.TARGET_EPSG)
+        
+        if not source_epsg:
+            raise ValueError("source_epsg is required for reprojection")
+        
+        return self.reproject_raster(
+            source_container, source_blob,
+            dest_container, dest_blob,
+            source_epsg, target_epsg
+        )

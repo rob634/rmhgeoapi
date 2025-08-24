@@ -22,6 +22,7 @@ from repositories import JobRepository, StorageRepository
 from services import ServiceFactory
 from config import Config, APIParams, Defaults, AzureStorage
 from logger_setup import logger, log_list, log_job_stage, log_queue_operation, log_service_processing
+from state_integration import StateIntegration  # NEW: State management integration
 
 # Use centralized logger (imported from logger_setup)
 
@@ -297,6 +298,48 @@ def submit_job(req: func.HttpRequest) -> func.HttpResponse:
         
         logger.debug(f"Extracted parameters: dataset_id={dataset_id}, resource_id={resource_id}, version_id={version_id}, system={system}")
         
+        # Check if this operation uses state management (POC: simple_cog)
+        try:
+            state_integration = StateIntegration()
+            if state_integration.is_state_managed_job(operation_type):
+                logger.info(f"Using state management for operation: {operation_type}")
+                
+                # Handle state-managed operations
+                if operation_type in ['simple_cog', 'cog_conversion_v2']:
+                    try:
+                        result = state_integration.submit_simple_cog_job(
+                            dataset_id=dataset_id,
+                            resource_id=resource_id,
+                            version_id=version_id
+                        )
+                        
+                        return func.HttpResponse(
+                            json.dumps({
+                                "job_id": result['job_id'],
+                                "status": result['status'],
+                                "message": result['message'],
+                                "state_managed": True,
+                                "log_list": log_list.log_messages
+                            }),
+                            status_code=200,
+                            mimetype="application/json"
+                        )
+                    except Exception as e:
+                        logger.error(f"State-managed job submission failed: {e}")
+                        return func.HttpResponse(
+                            json.dumps({
+                                "error": str(e),
+                                "state_managed": True,
+                                "log_list": log_list.log_messages
+                            }),
+                            status_code=500,
+                            mimetype="application/json"
+                        )
+        except Exception as e:
+            logger.debug(f"State management check failed (non-fatal): {e}")
+            # Continue without state management
+        
+        # Continue with existing job processing for non-state-managed operations
         # Create job request
         job_request = JobRequest(dataset_id, resource_id, version_id, operation_type, system)
         
@@ -404,7 +447,20 @@ def get_job_status(req: func.HttpRequest) -> func.HttpResponse:
                 mimetype="application/json"
             )
         
-        # Get job details
+        # First check if this is a state-managed job
+        state_integration = StateIntegration()
+        state_job_details = state_integration.get_job_status_with_state(job_id)
+        
+        if state_job_details:
+            # This is a state-managed job, return enhanced status
+            logger.info(f"State-managed job status retrieved: {job_id} -> {state_job_details['status']}")
+            return func.HttpResponse(
+                json.dumps(state_job_details),
+                status_code=200,
+                mimetype="application/json"
+            )
+        
+        # Fall back to regular job repository
         job_repo = JobRepository()
         job_details = job_repo.get_job_details(job_id)
         
@@ -601,6 +657,50 @@ def process_task_queue(msg: func.QueueMessage) -> None:
         task_data = json.loads(message_content)
         logger.debug(f"Task data successfully parsed from queue message")
         
+        # Check if this is a state-managed task
+        if 'task_id' in task_data and 'task_type' in task_data:
+            logger.info(f"Detected state-managed task: {task_data.get('task_id')}")
+            logger.info(f"  Task type: {task_data.get('task_type')}")
+            logger.info(f"  Job ID: {task_data.get('job_id')}")
+            
+            try:
+                state_integration = StateIntegration()
+                logger.info(f"StateIntegration created successfully")
+                
+                state_result = state_integration.process_state_managed_task(task_data)
+                if state_result is not None:
+                    # This was a state-managed task, it's been processed
+                    logger.info(f"State-managed task processed successfully")
+                    return
+                else:
+                    logger.warning(f"State-managed task returned None - may have failed to initialize")
+            except Exception as e:
+                logger.error(f"Error in state management task processing: {e}", exc_info=True)
+                # This is definitely a state-managed task that failed
+                logger.error(f"State-managed task {task_data.get('task_id')} failed to process")
+                raise
+        else:
+            logger.debug(f"Not a state-managed task (no task_id/task_type)")
+            # Continue with regular processing
+        
+        # Check if this is a chunk processing task
+        if task_data.get('operation') in ['process_chunk', 'assemble_chunks']:
+            # Handle chunk processing tasks
+            logger.info(f"Processing chunk task: {task_data.get('operation')}")
+            from raster_chunked_processor import ChunkedRasterProcessor
+            processor = ChunkedRasterProcessor()
+            
+            job_id = task_data.get('job_id')
+            if task_data['operation'] == 'process_chunk':
+                chunk_id = task_data.get('chunk_id')
+                result = processor.process_chunk(job_id, chunk_id)
+                logger.info(f"Chunk {chunk_id} processed for job {job_id}")
+            else:  # assemble_chunks
+                result = processor.assemble_chunks(job_id)
+                logger.info(f"Chunks assembled for job {job_id}")
+            return
+        
+        # Regular task processing
         task_id = task_data.get('task_id')
         parent_job_id = task_data.get('parent_job_id')
         operation_type = task_data.get('operation_type')
@@ -736,6 +836,13 @@ def manual_process_job(req: func.HttpRequest) -> func.HttpResponse:
         )
 
 
+# Diagnostic endpoint for state management (TEMPORARY)
+@app.route(route="diagnose/state", methods=["GET"])
+def diagnose_state(req: func.HttpRequest) -> func.HttpResponse:
+    """Diagnostic endpoint for state management"""
+    from diagnose_state import diagnose_state_management
+    return diagnose_state_management(req)
+
 # Poison queue monitoring endpoints
 @app.route(route="monitor/poison", methods=["GET", "POST"])
 def check_poison_queues(req: func.HttpRequest) -> func.HttpResponse:
@@ -789,6 +896,9 @@ def check_poison_queues(req: func.HttpRequest) -> func.HttpResponse:
             status_code=500,
             mimetype="application/json"
         )
+
+
+# Chunk processing now handled in process_task_queue function above
 
 
 @app.timer_trigger(schedule="0 */5 * * * *", arg_name="timer", run_on_startup=False)

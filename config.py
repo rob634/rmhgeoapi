@@ -16,6 +16,11 @@ class EnvVarNames:
     SILVER_CONTAINER_NAME = 'SILVER_CONTAINER_NAME'
     GOLD_CONTAINER_NAME = 'GOLD_CONTAINER_NAME'
     
+    # Temporary Storage Configuration
+    TEMP_CONTAINER_NAME = 'TEMP_CONTAINER_NAME'
+    TEMP_STORAGE_ACCOUNT = 'TEMP_STORAGE_ACCOUNT'  # Optional: separate account for temp
+    USE_ADLS = 'USE_ADLS'  # Enable ADLS features (hierarchical namespace)
+    
     # PostGIS Database Environment Variables
     POSTGIS_HOST = 'POSTGIS_HOST'
     
@@ -50,6 +55,17 @@ class Config:
     SILVER_CONTAINER_NAME: Optional[str] = os.environ.get(EnvVarNames.SILVER_CONTAINER_NAME)
     #Gold container has GeoParquet mirroring selections from Silver Database
     GOLD_CONTAINER_NAME: Optional[str] = os.environ.get(EnvVarNames.GOLD_CONTAINER_NAME)
+    
+    # Storage Folder Configuration - use folders within Silver container for efficiency
+    SILVER_TEMP_FOLDER: str = os.environ.get('SILVER_TEMP_FOLDER', 'temp')
+    SILVER_COGS_FOLDER: str = os.environ.get('SILVER_COGS_FOLDER', 'cogs')
+    SILVER_CHUNKS_FOLDER: str = os.environ.get('SILVER_CHUNKS_FOLDER', 'chunks')
+    
+    # ADLS Configuration for efficient operations
+    USE_ADLS: bool = os.environ.get(EnvVarNames.USE_ADLS, 'false').lower() == 'true'
+    
+    # State storage configuration (keep separate for management)
+    STATE_CONTAINER_NAME: str = os.environ.get('STATE_CONTAINER_NAME', 'rmhazuregeostate')
     
     
     # PostGIS Database Configuration

@@ -167,12 +167,15 @@ class ContainerListingService(BaseProcessingService):
                 "filtered": filter_applied
             }
             
+            # Use enriched files if available from inference
+            files_to_return = inventory_summary.get('enriched_files', files_to_store)
+            
             # Include sample files for quick preview
-            if len(files_to_store) > 10:
-                result['files_sample'] = files_to_store[:10]
-                result['note'] = f"Showing first 10 of {len(files_to_store)} files. Full inventory at: {inventory_summary['inventory_urls']['full']}"
+            if len(files_to_return) > 10:
+                result['files_sample'] = files_to_return[:10]
+                result['note'] = f"Showing first 10 of {len(files_to_return)} files. Full inventory at: {inventory_summary['inventory_urls']['full']}"
             else:
-                result['files'] = files_to_store
+                result['files'] = files_to_return
             
             if filter_applied:
                 result['filter_prefix'] = resource_id
@@ -234,14 +237,23 @@ class ServiceFactory:
             except ImportError as e:
                 logger.error(f"Failed to import RasterProcessorService: {e}")
                 raise ValueError(f"Raster processing not available: {e}")
-        elif operation_type == "cog_conversion":
-            # Alias for process_raster
+        elif operation_type == "cog_conversion" or operation_type == "mosaic_cog":
+            # Alias for process_raster (handles both single and mosaic)
             try:
                 from raster_processor import RasterProcessorService
                 return RasterProcessorService()
             except ImportError as e:
                 logger.error(f"Failed to import RasterProcessorService: {e}")
                 raise ValueError(f"Raster processing not available: {e}")
+        
+        # Chunked mosaic processing for large operations
+        elif operation_type == "chunked_mosaic":
+            try:
+                from raster_chunked_processor import ChunkedMosaicService
+                return ChunkedMosaicService()
+            except ImportError as e:
+                logger.error(f"Failed to import ChunkedMosaicService: {e}")
+                raise ValueError(f"Chunked processing not available: {e}")
         
         # Future: route different operations to different services
         # elif operation_type == "vector_upload":

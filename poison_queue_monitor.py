@@ -227,7 +227,7 @@ class PoisonQueueMonitor:
                 )
                 
                 # Update task status to failed
-                self.task_repo.update_task_status(task_id, "failed", error_message=error_message)
+                self.task_repo.update_task_status(task_id, "failed", metadata={'error_message': error_message})
                 
                 # Also update parent job if all tasks are complete/failed
                 parent_job_id = task.get("parent_job_id")

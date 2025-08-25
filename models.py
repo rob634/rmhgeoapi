@@ -25,16 +25,25 @@ class JobRequest:
         self.created_at = datetime.now(timezone.utc).isoformat()
     
     def _generate_job_id(self) -> str:
-        """Generate deterministic job ID from parameters including additional params"""
-        content = f"{self.operation_type}:{self.dataset_id}:{self.resource_id}:{self.version_id}:{self.system}"
+        """Generate deterministic job ID from parameters using JSON format"""
+        import json
         
-        # Include additional parameters in job ID to ensure different processing_extent creates different jobs
+        # Build params dict with all fields
+        params = {
+            'operation_type': self.operation_type,
+            'dataset_id': self.dataset_id,
+            'resource_id': self.resource_id,
+            'version_id': self.version_id,
+            'system': self.system
+        }
+        
+        # Include additional parameters for uniqueness
         if self.additional_params:
-            # Sort keys for consistent ordering
-            additional_content = ":".join([f"{k}={v}" for k, v in sorted(self.additional_params.items())])
-            content = f"{content}:{additional_content}"
+            params.update(self.additional_params)
         
-        return hashlib.sha256(content.encode()).hexdigest()
+        # Generate deterministic string using JSON (sorted for consistency)
+        param_string = json.dumps(params, sort_keys=True)
+        return hashlib.sha256(param_string.encode()).hexdigest()
     
     def validate(self) -> Tuple[bool, Optional[str]]:
         """Validate required fields based on system parameter"""

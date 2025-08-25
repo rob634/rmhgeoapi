@@ -109,8 +109,20 @@ class JobRepository:
             raise
     
     def update_job_status(self, job_id: str, status: str, 
-                         error_message: str = None, result_data: Dict = None):
-        """Update job status in table storage"""
+                         metadata: Dict = None, error_message: str = None, result_data: Dict = None) -> bool:
+        """
+        Update job status in table storage.
+        
+        Args:
+            job_id: Job identifier
+            status: New status
+            metadata: Optional metadata dict (preferred, can contain error_message, result_data, etc.)
+            error_message: Legacy parameter for error message
+            result_data: Legacy parameter for result data
+            
+        Returns:
+            bool: True if updated successfully
+        """
         try:
             self._ensure_table_exists()
             table_client = self.table_service.get_table_client(self.table_name)
@@ -120,8 +132,18 @@ class JobRepository:
             
             # Update status fields
             entity['status'] = status
-            entity['updated_at'] = datetime.now(timezone.utc).isoformat()  # Get current timestamp
+            entity['updated_at'] = datetime.now(timezone.utc).isoformat()
             
+            # Handle metadata dict (preferred)
+            if metadata:
+                for key, value in metadata.items():
+                    if isinstance(value, (dict, list)):
+                        import json
+                        entity[key] = json.dumps(value)
+                    else:
+                        entity[key] = value
+            
+            # Handle legacy parameters
             if error_message:
                 entity['error_message'] = error_message
             
@@ -131,13 +153,100 @@ class JobRepository:
             
             table_client.update_entity(entity)
             logger.info(f"Updated job status: {job_id} -> {status}")
+            return True
             
         except ResourceNotFoundError:
             logger.error(f"Cannot update non-existent job: {job_id}")
-            raise
+            return False
         except Exception as e:
             logger.error(f"Error updating job status {job_id}: {str(e)}")
+            return False
+    
+    def create_job(self, job_id: str, job_data: Dict) -> bool:
+        """
+        Create a new job record (for controller compatibility).
+        
+        Args:
+            job_id: Unique job identifier
+            job_data: Job data dictionary
+            
+        Returns:
+            bool: True if created, False if already exists
+        """
+        try:
+            self._ensure_table_exists()
+            table_client = self.table_service.get_table_client(self.table_name)
+            
+            # Check if job already exists
+            try:
+                existing = table_client.get_entity('jobs', job_id)
+                logger.debug(f"Job already exists: {job_id}")
+                return False
+            except ResourceNotFoundError:
+                pass  # Job doesn't exist, proceed to create
+            
+            # Create entity
+            entity = TableEntity()
+            entity['PartitionKey'] = 'jobs'
+            entity['RowKey'] = job_id
+            
+            # Add all job data fields
+            for key, value in job_data.items():
+                if isinstance(value, (dict, list)):
+                    import json
+                    entity[key] = json.dumps(value)
+                else:
+                    entity[key] = value
+            
+            # Ensure standard fields
+            entity['status'] = job_data.get('status', JobStatus.PENDING)
+            entity['created_at'] = job_data.get('created_at', datetime.now(timezone.utc).isoformat())
+            
+            table_client.create_entity(entity)
+            logger.info(f"Created job: {job_id}")
+            return True
+            
+        except ResourceExistsError:
+            logger.debug(f"Job already exists (race condition): {job_id}")
+            return False
+        except Exception as e:
+            logger.error(f"Error creating job {job_id}: {str(e)}")
             raise
+    
+    def get_job(self, job_id: str) -> Optional[Dict]:
+        """
+        Get job as dictionary (for controller compatibility).
+        
+        Args:
+            job_id: Job identifier
+            
+        Returns:
+            Dict or None if not found
+        """
+        try:
+            self._ensure_table_exists()
+            table_client = self.table_service.get_table_client(self.table_name)
+            entity = table_client.get_entity('jobs', job_id)
+            
+            # Convert entity to dict
+            result = dict(entity)
+            
+            # Parse JSON fields
+            if 'request' in result and isinstance(result['request'], str):
+                import json
+                result['request'] = json.loads(result['request'])
+            if 'task_ids' in result and isinstance(result['task_ids'], str):
+                import json
+                result['task_ids'] = json.loads(result['task_ids'])
+            
+            return result
+            
+        except ResourceNotFoundError:
+            logger.debug(f"Job not found: {job_id}")
+            return None
+        except Exception as e:
+            logger.error(f"Error getting job {job_id}: {str(e)}")
+            return None
     
     def get_job_details(self, job_id: str) -> Optional[Dict]:
         """Get full job details including original parameters"""
@@ -263,8 +372,18 @@ class TaskRepository:
             logger.error(f"Error creating task {task_id}: {str(e)}")
             raise
     
-    def update_task_status(self, task_id: str, status: str, error_message: str = None, result_data: dict = None):
-        """Update task status"""
+    def update_task_status(self, task_id: str, status: str, metadata: dict = None) -> bool:
+        """
+        Update task status with optional metadata.
+        
+        Args:
+            task_id: Task identifier
+            status: New status
+            metadata: Optional metadata dict (can contain error_message, result_data, etc.)
+            
+        Returns:
+            bool: True if updated successfully
+        """
         try:
             self._ensure_table_exists()
             table_client = self.table_service.get_table_client(self.table_name)
@@ -276,10 +395,19 @@ class TaskRepository:
             entity['status'] = status
             entity['updated_at'] = datetime.now(timezone.utc).isoformat()
             
-            if error_message:
-                entity['error_message'] = error_message
-            if result_data:
-                entity['result_data'] = json.dumps(result_data)
+            # Apply metadata if provided
+            if metadata:
+                if 'error_message' in metadata:
+                    entity['error_message'] = metadata['error_message']
+                if 'result_data' in metadata:
+                    entity['result_data'] = json.dumps(metadata['result_data'])
+                # Allow any other metadata fields
+                for key, value in metadata.items():
+                    if key not in ['error_message', 'result_data']:
+                        if isinstance(value, (dict, list)):
+                            entity[key] = json.dumps(value)
+                        else:
+                            entity[key] = value
             
             # If completed or failed, add completion time
             if status in ['completed', 'failed']:
@@ -287,10 +415,14 @@ class TaskRepository:
             
             table_client.update_entity(entity, mode=UpdateMode.MERGE)
             logger.info(f"Updated task status: {task_id} -> {status}")
+            return True
             
+        except ResourceNotFoundError:
+            logger.error(f"Task not found: {task_id}")
+            return False
         except Exception as e:
             logger.error(f"Error updating task status {task_id}: {str(e)}")
-            raise
+            return False
     
     def get_task(self, task_id: str) -> dict:
         """Get task details"""
@@ -841,3 +973,47 @@ class StorageRepository:
         except Exception as e:
             logger.error(f"Error validating file name {file_name}: {e}")
             raise
+    
+    def queue_message(self, queue_name: str, message_data: Dict) -> bool:
+        """
+        Send a message to an Azure Storage Queue.
+        
+        Args:
+            queue_name: Name of the queue (e.g., 'geospatial-tasks')
+            message_data: Dictionary to send as message
+            
+        Returns:
+            bool: True if message sent successfully
+        """
+        try:
+            from azure.storage.queue import QueueServiceClient
+            from azure.identity import DefaultAzureCredential
+            import json
+            import base64
+            
+            # Initialize queue service
+            account_url = Config.get_storage_account_url('queue')
+            queue_service = QueueServiceClient(account_url, credential=DefaultAzureCredential())
+            
+            # Get queue client
+            queue_client = queue_service.get_queue_client(queue_name)
+            
+            # Ensure queue exists
+            try:
+                queue_client.create_queue()
+            except:
+                pass  # Queue already exists
+            
+            # Encode message to Base64 as expected by Azure Functions
+            message_json = json.dumps(message_data)
+            encoded_message = base64.b64encode(message_json.encode('utf-8')).decode('ascii')
+            
+            # Send message
+            queue_client.send_message(encoded_message)
+            
+            logger.info(f"Queued message to {queue_name}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to queue message to {queue_name}: {e}")
+            return False

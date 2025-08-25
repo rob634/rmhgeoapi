@@ -121,7 +121,7 @@ class HelloWorldService(BaseProcessingService):
         return ["cog_conversion", "vector_upload", "stac_generation", "hello_world"]
     
     def process(self, job_id: str, dataset_id: str, resource_id: str, 
-                version_id: str, operation_type: str) -> Dict:
+                version_id: str, operation_type: str, **kwargs) -> Dict:
         """
         Process hello world operation with parameter display.
         
@@ -139,6 +139,10 @@ class HelloWorldService(BaseProcessingService):
         Returns:
             Dict: Success result with all parameters echoed back.
         """
+        # Extract task_id if provided (for task-based processing)
+        task_id = kwargs.get('task_id')
+        message = kwargs.get('message', 'Hello from Job→Task architecture!')
+        
         log_job_stage(job_id, "hello_world_start", "processing")
         
         # Beautiful parameter display
@@ -146,13 +150,19 @@ class HelloWorldService(BaseProcessingService):
         print("🚀 GEOSPATIAL ETL PIPELINE - HELLO WORLD")
         print("=" * 60)
         print(f"📋 Job ID: {job_id}")
+        if task_id:
+            print(f"📌 Task ID: {task_id}")
         print(f"📊 Dataset: {dataset_id}")
         print(f"📁 Resource: {resource_id}")
         print(f"🔢 Version: {version_id}")
         print(f"⚙️  Operation: {operation_type}")
+        if message != 'Hello from Job→Task architecture!':
+            print(f"💬 Message: {message}")
         print("-" * 60)
         print("🎯 Processing Status: HELLO WORLD COMPLETE!")
         print("✅ All parameters received and validated")
+        if task_id:
+            print("✨ Task-based processing successful!")
         print("🎉 Ready for real geospatial processing")
         print("=" * 60)
         
@@ -160,7 +170,7 @@ class HelloWorldService(BaseProcessingService):
         log_job_stage(job_id, "hello_world_complete", "completed")
         log_service_processing("HelloWorldService", operation_type, job_id, "completed")
         
-        return {
+        result = {
             "status": "completed",
             "message": "Hello world processing completed successfully",
             "processed_items": {
@@ -170,6 +180,16 @@ class HelloWorldService(BaseProcessingService):
                 "operation_type": operation_type
             }
         }
+        
+        # Add task info if processing through task
+        if task_id:
+            result["task_id"] = task_id
+            result["execution_mode"] = "task-based"
+            result["custom_message"] = message
+        else:
+            result["execution_mode"] = "direct"
+        
+        return result
 
 
 class ContainerListingService(BaseProcessingService):

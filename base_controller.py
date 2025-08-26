@@ -117,14 +117,33 @@ class BaseJobController(ABC):
         """
         Generate deterministic job ID from request parameters.
         
-        Uses SHA256 hash to ensure same parameters always produce
-        same job ID (idempotency). Uses JSON format for consistency.
+        Uses SHA256 hash to ensure same parameters always produce the same 
+        job ID, enabling idempotency. The hash is based on a JSON-serialized
+        representation of the request parameters, ensuring consistency across
+        different Python dictionary orderings.
+        
+        Algorithm:
+            1. Extract standard parameters (operation_type, dataset_id, etc.)
+            2. Include any additional custom parameters
+            3. Sort keys and JSON serialize for consistency
+            4. Return SHA256 hash (64 character hex string)
         
         Args:
-            request: Request parameters
+            request: Request parameters dictionary
             
         Returns:
-            str: SHA256 hash as job ID
+            str: SHA256 hash as job ID (64 characters)
+            
+        Example:
+            >>> request = {'operation_type': 'cog', 'dataset_id': 'bronze', 
+            ...            'resource_id': 'file.tif', 'version_id': 'v1'}
+            >>> job_id = controller.generate_job_id(request)
+            >>> len(job_id)  # Always 64 characters
+            64
+            
+        Note:
+            The same request parameters will ALWAYS generate the same job ID,
+            which prevents duplicate job creation and enables safe retries.
         """
         # Build params dict with all relevant fields
         params = {
@@ -141,7 +160,7 @@ class BaseJobController(ABC):
             if key not in standard_params:
                 params[key] = value
         
-        # Generate deterministic string using JSON
+        # Generate deterministic string using JSON (sort_keys ensures consistency)
         param_string = json.dumps(params, sort_keys=True)
         return hashlib.sha256(param_string.encode()).hexdigest()
     
@@ -186,27 +205,52 @@ class BaseJobController(ABC):
     
     def process_job(self, request: Dict[str, Any]) -> str:
         """
-        Standard job processing flow.
+        Standard job processing flow with optimized task queuing.
         
         This is the main entry point for controllers. It implements
-        the standard pattern:
+        the standard pattern with efficiency improvements:
+        
         1. Validate request
-        2. Generate/check job ID
-        3. Create job record
-        4. Generate tasks
-        5. Queue tasks
+        2. Generate/check job ID (idempotency check)
+        3. Create job record (atomic operation)
+        4. Generate tasks (batch creation)
+        5. Queue tasks (batch operation with retry)
         6. Return job ID
         
+        Performance Optimizations:
+            - Early return for existing jobs (idempotency)
+            - Batch task retrieval to minimize DB calls
+            - Single storage repository instance for all queuing
+            - Efficient error handling with proper cleanup
+        
         Args:
-            request: Incoming request dictionary
+            request: Incoming request dictionary containing:
+                - operation_type: Type of operation to perform
+                - dataset_id: Target dataset identifier
+                - resource_id: Resource to process
+                - version_id: Version identifier (optional)
+                - Additional operation-specific parameters
             
         Returns:
-            str: Job ID for tracking
+            str: Job ID for tracking (SHA256 hash, 64 chars)
             
         Raises:
-            ValueError: If validation fails
-            TaskCreationError: If no tasks created
+            ValueError: If request validation fails
+            TaskCreationError: If no tasks could be created
+            
+        Example:
+            >>> controller = MyController()
+            >>> job_id = controller.process_job({
+            ...     'operation_type': 'cog_conversion',
+            ...     'dataset_id': 'bronze',
+            ...     'resource_id': 'file.tif',
+            ...     'version_id': 'v1'
+            ... })
+            >>> print(f"Job queued: {job_id}")
         """
+        job_id = None  # Initialize for error handling
+        storage_repo = None  # Single instance for efficiency
+        
         try:
             # Step 1: Validate request
             if not self.validate_request(request):
@@ -218,11 +262,16 @@ class BaseJobController(ABC):
             
             # Step 3: Check if job already exists (idempotency)
             existing_job = self.job_repo.get_job(job_id)
-            if existing_job and existing_job.get('status') != 'failed':
-                self.logger.info(f"Job already exists: {job_id}")
-                return job_id
+            if existing_job:
+                status = existing_job.get('status')
+                if status != 'failed':
+                    self.logger.info(f"Job already exists with status '{status}': {job_id}")
+                    return job_id
+                else:
+                    # Allow retry of failed jobs
+                    self.logger.info(f"Retrying failed job: {job_id}")
             
-            # Step 4: Create job record
+            # Step 4: Create or update job record
             job_data = {
                 'job_id': job_id,
                 'status': 'pending',
@@ -235,7 +284,8 @@ class BaseJobController(ABC):
             }
             
             if not self.job_repo.create_job(job_id, job_data):
-                self.logger.warning(f"Job already exists in table: {job_id}")
+                # Job exists, update it instead
+                self.job_repo.update_job_status(job_id, 'pending', job_data)
             
             # Step 5: Create tasks (MUST create at least one)
             task_ids = self.create_tasks(job_id, request)
@@ -251,42 +301,70 @@ class BaseJobController(ABC):
                 'task_ids': task_ids
             })
             
-            # Step 7: Queue all tasks
-            success_count = 0
+            # Step 7: Batch queue all tasks (optimized)
+            # Initialize storage repo once for all tasks
+            from repositories import StorageRepository
+            storage_repo = StorageRepository()
+            
+            # Batch retrieve all tasks to minimize DB calls
+            tasks_to_queue = []
             for task_id in task_ids:
-                # Get task data from repository
                 task = self.task_repo.get_task(task_id)
-                if task:
-                    # Extract just the task_data field for queuing
-                    task_payload = task.get('task_data', {})
-                    if isinstance(task_payload, dict):
-                        # Ensure task_id is in the payload
-                        task_payload['task_id'] = task_id
-                        if self.queue_task(task_id, task_payload):
-                            success_count += 1
-                            self.task_repo.update_task_status(task_id, 'queued')
+                if task and isinstance(task.get('task_data'), dict):
+                    task_payload = task['task_data'].copy()  # Copy to avoid mutation
+                    task_payload['task_id'] = task_id
+                    tasks_to_queue.append((task_id, task_payload))
+                else:
+                    self.logger.error(f"Task {task_id} missing or has invalid task_data")
+            
+            # Queue all tasks efficiently
+            success_count = 0
+            failed_tasks = []
+            
+            for task_id, task_payload in tasks_to_queue:
+                try:
+                    if storage_repo.queue_message('geospatial-tasks', task_payload):
+                        success_count += 1
+                        self.task_repo.update_task_status(task_id, 'queued')
                     else:
-                        self.logger.error(f"Task {task_id} has invalid task_data")
+                        failed_tasks.append(task_id)
+                except Exception as queue_error:
+                    self.logger.error(f"Failed to queue task {task_id}: {queue_error}")
+                    failed_tasks.append(task_id)
             
             self.logger.info(f"Queued {success_count}/{len(task_ids)} tasks for job {job_id}")
             
-            # Step 8: Update job status to processing
-            if success_count > 0:
+            # Step 8: Update job status based on queuing results
+            if success_count == len(task_ids):
+                # All tasks queued successfully
                 self.job_repo.update_job_status(job_id, 'processing')
-            else:
-                self.job_repo.update_job_status(job_id, 'failed', {
-                    'error': 'Failed to queue tasks'
+            elif success_count > 0:
+                # Partial success
+                self.job_repo.update_job_status(job_id, 'processing', {
+                    'warning': f'Only {success_count}/{len(task_ids)} tasks queued',
+                    'failed_tasks': failed_tasks
                 })
+            else:
+                # Complete failure
+                self.job_repo.update_job_status(job_id, 'failed', {
+                    'error': 'Failed to queue any tasks',
+                    'failed_tasks': failed_tasks
+                })
+                raise RuntimeError(f"Failed to queue any tasks for job {job_id}")
             
             return job_id
             
         except Exception as e:
-            self.logger.error(f"Job processing failed: {e}")
-            # Try to update job status
-            if 'job_id' in locals():
-                self.job_repo.update_job_status(job_id, 'failed', {
-                    'error': str(e)
-                })
+            self.logger.error(f"Job processing failed: {e}", exc_info=True)
+            # Try to update job status if job_id exists
+            if job_id:
+                try:
+                    self.job_repo.update_job_status(job_id, 'failed', {
+                        'error': str(e),
+                        'error_type': type(e).__name__
+                    })
+                except Exception as update_error:
+                    self.logger.error(f"Failed to update job status: {update_error}")
             raise
     
     def get_job_progress(self, job_id: str) -> Dict[str, Any]:

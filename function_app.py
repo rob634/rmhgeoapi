@@ -1150,10 +1150,7 @@ def process_task_queue(msg: func.QueueMessage) -> None:
                     dataset_id=task_data.get('dataset_id'),
                     resource_id=task_data.get('resource_id'),
                     version_id=task_data.get('version_id', 'v1'),
-                    operation_type=operation,  # Pass the operation type
-                    task_id=task_id,  # Also pass task_id in kwargs
-                    **{k: v for k, v in task_data.items() 
-                       if k not in ['task_id', 'operation', 'parent_job_id', 'dataset_id', 'resource_id', 'version_id', 'operation_type']}
+                    operation_type=operation  # Pass the operation type
                 )
                 
                 logger.info(f"✅ Service.process() completed successfully")
@@ -1222,6 +1219,150 @@ def process_task_queue(msg: func.QueueMessage) -> None:
         else:
             logger.debug(f"Not a Job→Task or state-managed task")
             # Continue with regular processing
+        
+        # Check if this is an orchestrator task (sync_container)
+        # Orchestrator tasks handle sequential execution patterns where an initial task
+        # must complete before creating subsequent tasks (e.g., inventory → catalog tasks)
+        if task_data.get('operation') in ['sync_orchestrator', 'list_container']:
+            logger.info(f"🎼 Processing orchestrator/container task: {task_data.get('operation')}")
+            
+            if task_data.get('operation') == 'list_container':
+                # Simple list operation - pass through to service
+                logger.info(f"📋 Running list_container operation")
+                from services import ServiceFactory
+                service = ServiceFactory.get_service('list_container')
+                
+                result = service.process(
+                    job_id=task_data.get('task_id', task_data.get('parent_job_id')),
+                    dataset_id=task_data.get('dataset_id'),
+                    resource_id=task_data.get('resource_id', 'none'),
+                    version_id=task_data.get('version_id', 'v1'),
+                    operation_type='list_container'
+                )
+                
+                # Update task status
+                if 'task_id' in task_data:
+                    task_repo.update_task_status(task_data['task_id'], 'completed', metadata=result)
+                    
+                logger.info(f"✅ list_container completed successfully")
+                return
+                
+            elif task_data.get('operation') == 'sync_orchestrator':
+                # Orchestrator task - creates inventory then spawns catalog tasks
+                logger.info(f"🎭 Running sync_orchestrator - will create inventory then catalog tasks")
+                
+                parent_job_id = task_data.get('parent_job_id')
+                dataset_id = task_data.get('dataset_id')
+                collection_id = task_data.get('collection_id', 'bronze-assets')
+                
+                try:
+                    # Step 1: Create fresh inventory (MUST COMPLETE FIRST)
+                    logger.info(f"📦 Step 1: Creating fresh inventory for container: {dataset_id}")
+                    from repositories import StorageRepository
+                    from blob_inventory_service import BlobInventoryService
+                    
+                    storage_repo = StorageRepository()
+                    inventory_service = BlobInventoryService()
+                    
+                    # List container contents
+                    contents = storage_repo.list_container_contents(dataset_id)
+                    if not contents or 'blobs' not in contents:
+                        logger.warning(f"No files found in container {dataset_id}")
+                        task_repo.update_task_status(
+                            task_data['task_id'], 
+                            'completed',
+                            metadata={'message': 'No files to catalog', 'files_found': 0}
+                        )
+                        return
+                    
+                    logger.info(f"Found {len(contents['blobs'])} files in container")
+                    
+                    # Store inventory
+                    inventory_summary = inventory_service.store_inventory(
+                        container_name=dataset_id,
+                        files=contents['blobs'],
+                        metadata={'job_id': parent_job_id, 'purpose': 'sync_container'}
+                    )
+                    
+                    logger.info(f"✅ Inventory created: {inventory_summary['total_files']} files, "
+                              f"{inventory_summary['geospatial_files']} geospatial")
+                    
+                    # Step 2: Filter for geospatial files
+                    from sync_container_service import is_geospatial_file
+                    geo_files = [f for f in contents['blobs'] if is_geospatial_file(f['name'])]
+                    
+                    logger.info(f"📍 Step 2: Found {len(geo_files)} geospatial files to catalog")
+                    
+                    # Step 3: Create catalog tasks (ONLY AFTER INVENTORY COMPLETES)
+                    logger.info(f"📝 Step 3: Creating {len(geo_files)} catalog tasks")
+                    
+                    from task_manager import TaskManager
+                    task_manager = TaskManager()
+                    created_tasks = []
+                    
+                    for index, file_info in enumerate(geo_files):
+                        # Create catalog task
+                        catalog_task_data = {
+                            'operation': 'catalog_file',
+                            'dataset_id': dataset_id,
+                            'resource_id': file_info['name'],
+                            'version_id': collection_id,
+                            'file_size': file_info.get('size', 0),
+                            'parent_job_id': parent_job_id
+                        }
+                        
+                        # Create task in Table Storage
+                        task_id = task_manager.create_task(
+                            job_id=parent_job_id,
+                            task_type='catalog_file',
+                            task_data=catalog_task_data,
+                            index=index + 1  # Orchestrator is index 0
+                        )
+                        
+                        if task_id:
+                            # Queue the task
+                            queue_message = {
+                                'task_id': task_id,
+                                'operation': 'catalog_file',
+                                'dataset_id': dataset_id,
+                                'resource_id': file_info['name'],
+                                'version_id': collection_id,
+                                'parent_job_id': parent_job_id
+                            }
+                            
+                            # Queue to geospatial-tasks
+                            storage_repo.queue_message('geospatial-tasks', queue_message)
+                            created_tasks.append(task_id)
+                    
+                    logger.info(f"✅ Step 3 Complete: Created and queued {len(created_tasks)} catalog tasks")
+                    
+                    # Step 4: Mark orchestrator task as complete
+                    orchestrator_result = {
+                        'status': 'completed',
+                        'inventory_created': True,
+                        'total_files': inventory_summary['total_files'],
+                        'geospatial_files': len(geo_files),
+                        'catalog_tasks_created': len(created_tasks),
+                        'inventory_url': inventory_summary.get('inventory_url')
+                    }
+                    
+                    task_repo.update_task_status(
+                        task_data['task_id'],
+                        'completed',
+                        metadata=orchestrator_result
+                    )
+                    
+                    logger.info(f"🎉 Orchestrator task complete! Created {len(created_tasks)} catalog tasks")
+                    return
+                    
+                except Exception as e:
+                    logger.error(f"❌ Orchestrator task failed: {str(e)}", exc_info=True)
+                    task_repo.update_task_status(
+                        task_data['task_id'],
+                        'failed',
+                        metadata={'error': str(e), 'error_type': type(e).__name__}
+                    )
+                    raise
         
         # Check if this is a chunk processing task
         if task_data.get('operation') in ['process_chunk', 'assemble_chunks']:

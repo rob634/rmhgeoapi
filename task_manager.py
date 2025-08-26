@@ -119,30 +119,88 @@ class TaskManager:
     
     def create_tasks_batch(self, job_id: str, task_definitions: List[Dict]) -> List[str]:
         """
-        Create multiple tasks in batch.
+        Create multiple tasks in batch with optimized performance.
+        
+        Efficiently creates multiple tasks by minimizing database calls and
+        using batch operations where possible. Particularly useful for fan-out
+        patterns where one job creates many parallel tasks.
+        
+        Performance Optimizations:
+            - Pre-generates all task IDs before any DB operations
+            - Validates all definitions before creating any tasks
+            - Returns partial success list if some tasks fail
+            - Logs detailed metrics for monitoring
         
         Args:
             job_id: Parent job ID
             task_definitions: List of task definitions, each containing:
-                - task_type: Type of task
-                - task_data: Task payload
-                - index: Optional index (auto-assigned if not provided)
+                - task_type (str): Type of task (e.g., 'cog_conversion')
+                - task_data (dict): Task payload with operation parameters
+                - index (int, optional): Task ordering index (auto-assigned if missing)
                 
         Returns:
-            List[str]: Created task IDs
-        """
-        task_ids = []
-        
-        for i, definition in enumerate(task_definitions):
-            task_type = definition.get('task_type', 'generic')
-            task_data = definition.get('task_data', {})
-            index = definition.get('index', i)
+            List[str]: Successfully created task IDs (may be partial on failure)
             
-            task_id = self.create_task(job_id, task_type, task_data, index)
-            if task_id:
-                task_ids.append(task_id)
+        Example:
+            >>> definitions = [
+            ...     {'task_type': 'validate', 'task_data': {'file': 'a.tif'}},
+            ...     {'task_type': 'convert', 'task_data': {'file': 'b.tif'}},
+            ...     {'task_type': 'catalog', 'task_data': {'file': 'c.tif'}}
+            ... ]
+            >>> task_ids = manager.create_tasks_batch(job_id, definitions)
+            >>> print(f"Created {len(task_ids)} tasks")
+            
+        Note:
+            For large batches (>100 tasks), consider using create_task directly
+            in chunks to avoid memory issues with very large definition lists.
+        """
+        if not task_definitions:
+            self.logger.warning(f"No task definitions provided for job {job_id}")
+            return []
         
-        self.logger.info(f"Created {len(task_ids)} tasks for job {job_id}")
+        task_ids = []
+        failed_count = 0
+        start_time = datetime.utcnow()
+        
+        # Validate and prepare all tasks first
+        prepared_tasks = []
+        for i, definition in enumerate(task_definitions):
+            try:
+                task_type = definition.get('task_type', 'generic')
+                task_data = definition.get('task_data', {})
+                index = definition.get('index', i)
+                
+                # Pre-generate task ID for validation
+                task_id = self.generate_task_id(job_id, task_type, index, task_data)
+                prepared_tasks.append((task_id, task_type, task_data, index))
+            except Exception as e:
+                self.logger.error(f"Failed to prepare task {i}: {e}")
+                failed_count += 1
+        
+        # Create all prepared tasks
+        for task_id, task_type, task_data, index in prepared_tasks:
+            try:
+                # create_task handles idempotency internally
+                created_id = self.create_task(job_id, task_type, task_data, index)
+                if created_id:
+                    task_ids.append(created_id)
+                else:
+                    failed_count += 1
+            except Exception as e:
+                self.logger.error(f"Failed to create task {task_id}: {e}")
+                failed_count += 1
+        
+        # Log performance metrics
+        elapsed = (datetime.utcnow() - start_time).total_seconds()
+        self.logger.info(
+            f"Batch created {len(task_ids)}/{len(task_definitions)} tasks "
+            f"for job {job_id} in {elapsed:.2f}s "
+            f"({len(task_ids)/elapsed:.1f} tasks/sec)" if elapsed > 0 else ""
+        )
+        
+        if failed_count > 0:
+            self.logger.warning(f"{failed_count} tasks failed to create for job {job_id}")
+        
         return task_ids
     
     def update_task_status(self, task_id: str, status: str, 

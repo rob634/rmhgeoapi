@@ -1,7 +1,16 @@
 # 🎆 Job vs Task Architecture Guidelines 🎆
 
-## 🎉 IMPLEMENTATION STATUS: PHASE 1 COMPLETE AND VERIFIED! 🎉
-**Completion Date**: January 25, 2025
+## 🎉 IMPLEMENTATION STATUS: PHASE 2 IN PROGRESS! 🎉
+**Phase 1 Completion**: January 25, 2025
+**Phase 2 Started**: August 24, 2025 - Priority Controllers
+**Container Operations Deployed**: August 25, 2025 - Orchestrator Pattern Working
+
+## 🚧 CURRENT FOCUS: Orchestration Patterns for Mixed Task Types
+Parallelization is core to serverless architecture. We need to distinguish between:
+- **Parallel Tasks**: Can execute immediately and concurrently
+- **Sequential Tasks**: Must wait for dependencies
+- **Orchestrator Tasks**: Create other tasks dynamically
+- **Barrier Tasks**: Wait for task groups to complete
 
 ### 🏆 Phase 1 Completed Components (FULLY OPERATIONAL):
 - **BaseJobController**: Abstract base class enforcing Job→Task pattern ✅
@@ -35,10 +44,13 @@
 5. **Logging is Critical**: Enhanced logging with visual indicators essential for debugging
 6. **Testing Pattern**: Clear poison queues before testing to avoid confusion
 
-### ⏳ Phase 2 Ready to Begin:
-- Additional controllers for existing operations (Container, Database, STAC, Raster)
-- Migration of existing services to task-aware pattern
-- Deprecation warnings in ServiceFactory
+### 🚀 Phase 2 Progress:
+- ✅ **ContainerController**: COMPLETE - list_container and sync_container deployed & tested
+- ✅ **Orchestrator Pattern**: COMPLETE - Sequential task execution working
+- ✅ **Fixed Issues**: Resolved task_id vs job_id parameter mismatch
+- 🚧 **STACController**: Next priority - catalog_file operation
+- 🚧 **RasterController**: Phase 3 - COG operations
+- 🚧 **TiledRasterController**: Phase 3 - Tiling operations
 
 ## Executive Summary
 
@@ -447,6 +459,92 @@ Keep as single task when:
 - [ ] Add job→task relationship tracking in repositories
 - [ ] Update monitoring to show job/task hierarchy
 - [ ] Document the pattern for team
+
+## Current Architecture Limitations (August 24, 2025)
+
+The Job→Task architecture currently treats **all tasks as parallel by default**:
+- ❌ No task dependencies (`depends_on` field)
+- ❌ No distinction between parallel/sequential tasks
+- ❌ No orchestrator tasks that create child tasks
+- ❌ No barrier synchronization for groups
+
+## Proposed Orchestration Enhancement
+
+```python
+class TaskType(Enum):
+    PARALLEL = "parallel"      # Can run immediately (default)
+    SEQUENTIAL = "sequential"   # Must wait for dependencies
+    ORCHESTRATOR = "orchestrator"  # Creates other tasks
+    BARRIER = "barrier"        # Waits for group completion
+
+class EnhancedTaskData:
+    task_id: str
+    task_type: TaskType = TaskType.PARALLEL
+    depends_on: List[str] = []  # Task IDs to wait for
+    creates_tasks: bool = False  # Can spawn child tasks
+    group_id: Optional[str] = None  # For barrier sync
+```
+
+## Priority Implementation Examples
+
+### 1. ContainerController (Simple Pattern)
+```python
+# list_container: 1 job → 1 task
+def create_tasks(self, job_id, request):
+    task_id = self.generate_task_id(job_id, 'list', 0)
+    self.task_repo.create_task(task_id, job_id, {
+        'operation': 'list_container',
+        'container': request['dataset_id'],
+        'task_type': 'parallel'  # Simple, immediate execution
+    })
+    return [task_id]
+```
+
+### 2. STACController (Fan-out Pattern)
+```python
+# sync_container: 1 job → N parallel tasks
+def create_tasks(self, job_id, request):
+    # Orchestrator task that creates catalog tasks
+    inventory_task = self.generate_task_id(job_id, 'inventory', 0)
+    self.task_repo.create_task(inventory_task, job_id, {
+        'operation': 'inventory_for_sync',
+        'task_type': 'orchestrator',
+        'creates_tasks': True,  # Will create N catalog tasks
+        'container': request['dataset_id']
+    })
+    return [inventory_task]
+```
+
+### 3. TiledRasterController (Complex Orchestration)
+```python
+# Tiled processing: 1 job → orchestrator → N parallel → barrier → sequential
+def create_tasks(self, job_id, request):
+    tasks = []
+    
+    # 1. Orchestrator: Generate tiling plan
+    tiling_task = self.create_orchestrator_task(
+        job_id, 'generate_tiles',
+        creates_pattern='parallel'  # Children run in parallel
+    )
+    tasks.append(tiling_task)
+    
+    # 2. Barrier: Wait for all tiles
+    assembly_task = self.create_barrier_task(
+        job_id, 'assemble_tiles',
+        depends_on=[tiling_task],
+        wait_for_group=f"{job_id}_tiles"
+    )
+    tasks.append(assembly_task)
+    
+    # 3. Sequential: Validate after assembly
+    validation_task = self.create_sequential_task(
+        job_id, 'validate',
+        depends_on=[assembly_task]
+    )
+    tasks.append(validation_task)
+    
+    return tasks
+```
 
 ## Summary
 

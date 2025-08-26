@@ -35,15 +35,17 @@ class ControllerFactory:
             - hello_world → HelloWorldController ✅
             - test → HelloWorldController ✅
             
-        Phase 2 (IN PROGRESS):
+        Phase 2 (COMPLETE):
             - list_container → ContainerController ✅ DEPLOYED
             - sync_container → ContainerController ✅ DEPLOYED
-            - catalog_file → STACController (TODO - Next Priority)
+            - catalog_file → STACController ✅ DEPLOYED
             
-        Phase 3 (PLANNED):
-            - cog_conversion → RasterController
-            - validate_raster → RasterController
-            - process_tiled_raster → TiledRasterController
+        Phase 3 (IN PROGRESS):
+            - generate_tiling_plan → TilingController ✅ IMPLEMENTED
+            - tile_raster → TilingController ✅ IMPLEMENTED
+            - cog_conversion → RasterController (TODO)
+            - validate_raster → RasterController (TODO)
+            - process_tiled_raster → TiledRasterController (TODO)
     
     Usage:
         >>> controller = ControllerFactory.get_controller('hello_world')
@@ -102,9 +104,29 @@ class ControllerFactory:
             controller = ContainerController()
             logger.info(f"Using ContainerController for {operation_type}")
         
-        # STAC operations (to be added in Phase 2)
-        elif operation_type in ['stac_item_quick', 'stac_item_full', 'stac_item_smart', 'catalog_file']:
-            # Phase 2: Will wrap STACService
+        # STAC operations
+        elif operation_type == 'catalog_file':
+            from stac_controller import STACController
+            controller = STACController()
+            logger.info(f"Using STACController for {operation_type}")
+        
+        # Tiling operations (Phase 3 - PostGIS-based tiling)
+        elif operation_type in ['generate_tiling_plan', 'tile_raster']:
+            from tiling_controller import TilingController
+            controller = TilingController()
+            logger.info(f"Using TilingController for {operation_type}")
+        
+        # Database metadata operations
+        elif operation_type in ['list_collections', 'list_items', 'get_database_summary', 
+                                'get_collection_details', 'export_metadata', 'query_spatial',
+                                'get_statistics']:
+            from database_metadata_controller import DatabaseMetadataController
+            controller = DatabaseMetadataController()
+            logger.info(f"Using DatabaseMetadataController for {operation_type}")
+        
+        # Other STAC operations (to be added later)
+        elif operation_type in ['stac_item_quick', 'stac_item_full', 'stac_item_smart']:
+            # These will be added after catalog_file is proven
             logger.warning(f"Controller not yet implemented for {operation_type}, falling back to direct service")
             raise ControllerNotFoundError(operation_type)
         
@@ -162,12 +184,23 @@ class ControllerFactory:
             Available controllers: hello_world, test
         """
         # Phase 1 - COMPLETE
-        # Phase 2 - IN PROGRESS
+        # Phase 2 - COMPLETE  
+        # Phase 3 - IN PROGRESS (Tiling)
         implemented = [
             'hello_world',
             'test',
             'list_container',
-            'sync_container'
+            'sync_container',
+            'catalog_file',
+            'generate_tiling_plan',
+            'tile_raster',
+            'list_collections',
+            'list_items',
+            'get_database_summary',
+            'get_collection_details',
+            'export_metadata',
+            'query_spatial',
+            'get_statistics'
         ]
         
         # Phase 2 - IN PROGRESS (will be added as implemented)

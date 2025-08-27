@@ -102,9 +102,8 @@ class HelloWorldService(BaseProcessingService):
     Logs all received parameters and returns success. Useful for debugging,
     testing deployments, and verifying queue processing.
     
-    This service acts as a catch-all for unimplemented operations during
-    development, allowing the pipeline to process any operation type without
-    failing.
+    IMPORTANT: This service ONLY handles 'hello_world' operations. It is NOT
+    a catch-all fallback. Unknown operations will now fail with explicit errors.
     """
     
     def __init__(self):
@@ -113,12 +112,12 @@ class HelloWorldService(BaseProcessingService):
     
     def get_supported_operations(self) -> List[str]:
         """
-        Support all operations as fallback handler.
+        Support ONLY hello_world operation - no longer a fallback handler.
         
         Returns:
-            List[str]: Supports multiple operation types for testing.
+            List[str]: Only supports hello_world for testing.
         """
-        return ["cog_conversion", "vector_upload", "stac_generation", "hello_world"]
+        return ["hello_world"]
     
     def process(self, job_id: str, dataset_id: str, resource_id: str, 
                 version_id: str, operation_type: str, **kwargs) -> Dict:
@@ -227,7 +226,7 @@ class ContainerListingService(BaseProcessingService):
         return ["list_container"]
     
     def process(self, job_id: str, dataset_id: str, resource_id: str, 
-                version_id: str, operation_type: str) -> Dict:
+                version_id: str, operation_type: str, **kwargs) -> Dict:
         """
         Process container listing job with inventory storage.
         
@@ -439,10 +438,33 @@ class ServiceFactory:
             from stac_catalog_service import STACCatalogService
             return STACCatalogService()
         
-        # Container sync operation
-        elif operation_type == "sync_container":
+        # Container sync operations
+        elif operation_type in ["sync_container", "sync_orchestrator"]:
             from sync_container_service import SyncContainerService
             return SyncContainerService()
+        
+        # Database metadata operations
+        elif operation_type in [
+            "list_collections", "list_items", "get_database_summary", 
+            "get_collection_details", "export_metadata", "query_spatial", 
+            "get_statistics", "verify_stac_tables", "clear_stac_tables"
+        ]:
+            from database_metadata_service import DatabaseMetadataService
+            return DatabaseMetadataService(repositories={})
+        
+        # STAC smart cataloging operations
+        elif operation_type in ["stac_item_quick", "stac_item_full", "stac_item_smart"]:
+            from stac_catalog_service import STACCatalogService
+            return STACCatalogService()
+        
+        # STAC sync operation (different from container sync)
+        elif operation_type == "sync":
+            from stac_service import STACService
+            return STACService()
+        
+        # Hello World - ONLY for explicit hello_world requests
+        elif operation_type == "hello_world":
+            return HelloWorldService()
         
         # Raster processing operations
         elif operation_type == "validate_raster":
@@ -475,8 +497,7 @@ class ServiceFactory:
                 return PostGISTilingService()
             except ImportError as e:
                 logger.error(f"Failed to import PostGISTilingService: {e}")
-                # Fall through to HelloWorldService for now
-                logger.warning(f"Falling back to HelloWorldService for {operation_type}")
+                raise ValueError(f"PostGIS tiling not available: {e}")
         
         # Chunked mosaic processing for large operations
         elif operation_type == "chunked_mosaic":
@@ -496,10 +517,13 @@ class ServiceFactory:
                 logger.error(f"Failed to import TiledRasterProcessor: {e}")
                 raise ValueError(f"Tiled raster processing not available: {e}")
         
-        # Future: route different operations to different services
-        # elif operation_type == "vector_upload":
-        #     return VectorProcessingService()
-        
-        # Default to hello world for unknown operations
-        return HelloWorldService()
+        # NO FALLBACK - Unknown operations should fail with explicit errors
+        else:
+            logger.error(f"Unknown operation type: {operation_type}")
+            raise ValueError(f"Unsupported operation type: '{operation_type}'. "
+                           f"Supported operations: list_container, database_health, "
+                           f"stac_*, catalog_file, sync_container, sync_orchestrator, sync, hello_world, "
+                           f"validate_raster, process_raster, cog_conversion, "
+                           f"list_collections, verify_stac_tables, clear_stac_tables, "
+                           f"stac_item_smart, and various raster processing operations.")
     

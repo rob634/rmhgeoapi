@@ -197,15 +197,44 @@ class TaskMessage:
     task_id: str
     job_id: str
     task_type: str
-    sequence_number: int
+    sequence_number: int = 0
     parameters: Dict[str, Any] = None
+    # Allow additional fields from controller task data
+    dataset_id: Optional[str] = None
+    resource_id: Optional[str] = None
+    version_id: Optional[str] = None
+    operation: Optional[str] = None
+    parent_job_id: Optional[str] = None
     
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
     
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'TaskMessage':
-        return cls(**data)
+        # Handle flexible task data from controllers
+        # Extract known fields first
+        known_fields = {
+            'task_id', 'job_id', 'task_type', 'sequence_number', 'parameters',
+            'dataset_id', 'resource_id', 'version_id', 'operation', 'parent_job_id'
+        }
+        
+        task_msg_data = {}
+        extra_parameters = {}
+        
+        for key, value in data.items():
+            if key in known_fields:
+                task_msg_data[key] = value
+            else:
+                # Put unknown fields in parameters
+                extra_parameters[key] = value
+        
+        # Merge extra parameters into the parameters dict
+        if extra_parameters:
+            existing_params = task_msg_data.get('parameters', {}) or {}
+            existing_params.update(extra_parameters)
+            task_msg_data['parameters'] = existing_params
+            
+        return cls(**task_msg_data)
 
 
 # State transition rules

@@ -46,19 +46,24 @@ class JobRequest:
         return hashlib.sha256(param_string.encode()).hexdigest()
     
     def validate(self) -> Tuple[bool, Optional[str]]:
-        """Validate required fields based on system parameter"""
+        """Validate required fields based on system parameter and DDH awareness"""
+        from schema_enforcement import DDHParameterGuide
+        
         # operation_type is always required
         if not self.operation_type or not self.operation_type.strip():
             return False, f"{APIParams.OPERATION_TYPE} is required"
         
-        # For DDH application requests (system=False), all ETL parameters are mandatory
-        if not self.system:
+        # DDH parameters are only required for silver layer ETL operations (and not system operations)
+        silver_layer_etl_jobs = DDHParameterGuide.silver_layer_etl_jobs()
+        requires_ddh = self.operation_type in silver_layer_etl_jobs and not self.system
+        
+        if requires_ddh:
             if not self.dataset_id or not self.dataset_id.strip():
-                return False, f"{APIParams.DATASET_ID} is required for DDH operations"
+                return False, f"{APIParams.DATASET_ID} is required for silver layer ETL operations (use 'system': true to bypass)"
             if not self.resource_id or not self.resource_id.strip():
-                return False, f"{APIParams.RESOURCE_ID} is required for DDH operations"
+                return False, f"{APIParams.RESOURCE_ID} is required for silver layer ETL operations (use 'system': true to bypass)"
             if not self.version_id or not self.version_id.strip():
-                return False, f"{APIParams.VERSION_ID} is required for DDH operations"
+                return False, f"{APIParams.VERSION_ID} is required for silver layer ETL operations (use 'system': true to bypass)"
             
             # Basic sanitization for DDH parameters
             if any(char in self.dataset_id for char in Validation.INVALID_DATASET_CHARS):
@@ -66,7 +71,7 @@ class JobRequest:
             if any(char in self.resource_id for char in Validation.INVALID_RESOURCE_CHARS):
                 return False, f"{APIParams.RESOURCE_ID} contains invalid characters"
         
-        # For system requests (system=True), parameters are optional and used differently
+        # For system requests or non-ETL operations, parameters are optional and used flexibly
         # They may contain container names, prefixes, etc. with more relaxed validation
         
         return True, None

@@ -19,7 +19,7 @@ class DatabaseHealthService(BaseProcessingService):
         return ["database_health"]
     
     def process(self, job_id: str, dataset_id: str, resource_id: str, 
-                version_id: str, operation_type: str) -> Dict[str, Any]:
+                version_id: str, operation_type: str, **kwargs) -> Dict[str, Any]:
         """
         Check database health and connectivity.
         

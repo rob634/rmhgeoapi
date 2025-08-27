@@ -49,7 +49,7 @@ class STACCatalogService(BaseProcessingService):
         return ["catalog_file", "setup_stac_collections"]
     
     def process(self, job_id: str, dataset_id: str, resource_id: str, 
-                version_id: str, operation_type: str) -> Dict[str, Any]:
+                version_id: str, operation_type: str, **kwargs) -> Dict[str, Any]:
         """
         Process STAC cataloging request
         

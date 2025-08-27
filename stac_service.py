@@ -39,7 +39,7 @@ class STACService(BaseProcessingService):
         ]
     
     def process(self, job_id: str, dataset_id: str, resource_id: str, 
-                version_id: str, operation_type: str) -> Dict:
+                version_id: str, operation_type: str, **kwargs) -> Dict:
         """
         Process STAC operations
         

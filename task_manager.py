@@ -2,11 +2,39 @@
 Centralized task management for the Job→Task architecture.
 
 This module provides a centralized manager for task operations,
-including task creation, ID generation, state tracking, and
-coordination with repositories.
+including task creation, ID generation, state tracking, job completion
+detection, and coordination with repositories.
+
+Key Features:
+    - Deterministic task ID generation
+    - Task lifecycle management (creation → queued → processing → completed/failed)
+    - Distributed job completion detection ("last task wins" pattern)
+    - Task result aggregation for job completion
+    - Atomic job status updates with comprehensive result data
+
+Architecture Pattern:
+    Jobs (user-facing orchestration) → Tasks (atomic work units)
+    
+    Each task completion triggers a job completion check where:
+    1. Task updates its own status to completed/failed
+    2. Task queries all other tasks for the same job
+    3. If all tasks are done, task updates job status with aggregated results
+    4. This creates an "N² query pattern" that's efficient for <5,000 tasks
+
+Job Completion Flow:
+    Task 1 completes → Check: Are we all done? → No, continue
+    Task 2 completes → Check: Are we all done? → No, continue  
+    Task N completes → Check: Are we all done? → Yes! Update job to completed
+
+Result Data Aggregation:
+    When job completes, result_data includes:
+    - Summary of task counts and status
+    - Sample task results (limited for storage efficiency)
+    - Error details from failed tasks
+    - Completion timestamps
 
 Author: Azure Geospatial ETL Team
-Version: 1.0.0
+Version: 1.1.0 - Enhanced with result aggregation and completion detection
 """
 import hashlib
 import json
@@ -21,14 +49,43 @@ logger = get_logger(__name__)
 
 class TaskManager:
     """
-    Centralized task management service.
+    Centralized task management service for the Job→Task architecture.
     
-    Handles all task-related operations including:
-        - Task ID generation (deterministic)
-        - Task creation and storage
-        - Task state transitions
-        - Task lineage tracking
-        - Job-task relationship management
+    This class orchestrates the complete task lifecycle and implements the
+    "distributed job completion detection" pattern where each completing task
+    checks if the entire job is done.
+    
+    Core Responsibilities:
+        - Task ID generation (deterministic SHA256-based)
+        - Task creation and storage in Azure Table Storage
+        - Task state transitions (queued → processing → completed/failed)
+        - Job completion detection via "last task wins" pattern
+        - Task result aggregation into job-level result_data
+        - Job-task relationship management and lineage tracking
+    
+    Architecture Benefits:
+        - No separate orchestrator needed for job completion
+        - Real-time job completion (instant when last task finishes)
+        - Fault tolerant (if tasks fail, others continue checking)
+        - Scales efficiently for 10-5,000 tasks per job
+    
+    Completion Detection Algorithm:
+        1. Every task completion calls check_job_completion()
+        2. Method queries ALL tasks for the job (N² pattern)
+        3. Counts completed vs total tasks
+        4. If all done, aggregates results and updates job status
+        5. Only the last task actually performs the job completion
+    
+    Performance Characteristics:
+        - Sweet spot: 10-1,000 tasks (current workload)
+        - Acceptable: 1,000-5,000 tasks
+        - Redesign needed: >5,000 tasks (becomes N² expensive)
+    
+    Usage Example:
+        manager = TaskManager()
+        task_ids = manager.create_tasks(job_id, task_definitions)
+        # Tasks execute independently...
+        # Last task completion automatically updates job status
     """
     
     def __init__(self):
@@ -100,6 +157,7 @@ class TaskManager:
                 'task_id': task_id,
                 'parent_job_id': job_id,
                 'task_type': task_type,
+                'operation': task_type,  # Add operation field for task processor compatibility
                 'index': index,
                 'status': 'pending',
                 'created_at': datetime.utcnow().isoformat()
@@ -290,10 +348,50 @@ class TaskManager:
     
     def check_and_update_job_status(self, job_id: str):
         """
-        Check task completion and update job status accordingly.
+        Check task completion and update job status with aggregated results.
+        
+        This is the core of the "distributed job completion detection" pattern.
+        Called by every task upon completion to check if the entire job is done.
+        
+        Algorithm:
+            1. Query ALL tasks for this job (creates N² query pattern)
+            2. Count completed, failed, and total tasks
+            3. Collect task results and error messages
+            4. If all tasks done:
+               - Aggregate results into comprehensive result_data
+               - Update job status (completed/failed/completed_with_errors)
+               - Include task summaries, results, and timestamps
+            5. If still processing, update progress metadata only
+        
+        Performance Impact:
+            - Called N times (once per task completion)
+            - Queries N tasks each time = N² total queries
+            - Efficient for <5,000 tasks, expensive beyond that
+        
+        Result Data Structure:
+            For successful jobs:
+            {
+                'status': 'completed',
+                'message': 'Job completed successfully with N tasks',
+                'summary': {'total_tasks': N, 'completed_tasks': N, 'failed_tasks': 0},
+                'task_results': [{'task_id': '...', 'result': {...}}, ...],
+                'completed_at': '2025-08-27T17:30:00Z'
+            }
+            
+            For failed jobs:
+            {
+                'status': 'failed', 
+                'message': 'All N tasks failed',
+                'task_errors': [{'task_id': '...', 'error': '...'}, ...],
+                'failed_at': '2025-08-27T17:30:00Z'
+            }
         
         Args:
-            job_id: Job to check and update
+            job_id: Job to check and potentially complete
+            
+        Note:
+            Only the LAST task to complete actually performs the job status update.
+            All other tasks see "still processing" and exit without updating job.
         """
         try:
             self.logger.debug(f"📊 Checking and updating job status for: {job_id}")
@@ -311,32 +409,101 @@ class TaskManager:
             
             self.logger.debug(f"  Task counts - Total: {total}, Completed: {completed}, Failed: {failed}")
             
+            # Collect task results for job completion
+            task_results = []
+            error_messages = []
+            
+            for task in tasks:
+                task_status = task.get('status')
+                task_id = task.get('task_id')
+                
+                if task_status == 'completed':
+                    # Get task result if available
+                    result = task.get('result')
+                    if result:
+                        task_results.append({
+                            'task_id': task_id,
+                            'task_type': task.get('task_type') or task.get('operation_type'),
+                            'resource_id': task.get('resource_id'),
+                            'status': 'completed',
+                            'result': result
+                        })
+                elif task_status == 'failed':
+                    # Collect error information
+                    error_msg = task.get('error_message', 'Task failed')
+                    error_messages.append({
+                        'task_id': task_id,
+                        'task_type': task.get('task_type') or task.get('operation_type'),
+                        'resource_id': task.get('resource_id'),
+                        'error': error_msg
+                    })
+            
             # Update job metadata
             job_metadata = {
                 'total_tasks': total,
                 'completed_tasks': completed,
                 'failed_tasks': failed,
-                'progress_percentage': (completed + failed) / total * 100
+                'progress_percentage': (completed + failed) / total * 100,
+                'task_results': task_results,
+                'task_errors': error_messages if error_messages else None
             }
             
             # Determine job status
             if completed + failed == total:
                 # All tasks finished
                 if failed == 0:
-                    # All succeeded
+                    # All succeeded - prepare result data
+                    result_data = {
+                        'status': 'completed',
+                        'message': f'Job completed successfully with {total} tasks',
+                        'summary': {
+                            'total_tasks': total,
+                            'completed_tasks': completed,
+                            'failed_tasks': failed
+                        },
+                        'task_results': task_results[:10],  # Limit to first 10 for storage efficiency
+                        'completed_at': datetime.utcnow().isoformat()
+                    }
+                    
                     self.logger.info(f"✅ All {total} tasks completed successfully - updating job to COMPLETED")
-                    self.job_repo.update_job_status(job_id, 'completed', job_metadata)
-                    self.logger.info(f"🎉 Job {job_id} marked as COMPLETED")
+                    self.job_repo.update_job_status(job_id, 'completed', job_metadata, result_data=result_data)
+                    self.logger.info(f"🎉 Job {job_id} marked as COMPLETED with result data")
                 elif completed == 0:
-                    # All failed
+                    # All failed - prepare error message
+                    error_msg = f'All {total} tasks failed'
+                    result_data = {
+                        'status': 'failed',
+                        'message': error_msg,
+                        'summary': {
+                            'total_tasks': total,
+                            'completed_tasks': completed,
+                            'failed_tasks': failed
+                        },
+                        'task_errors': error_messages[:10],  # Limit to first 10 for storage efficiency
+                        'failed_at': datetime.utcnow().isoformat()
+                    }
+                    
                     self.logger.error(f"❌ All {total} tasks failed - updating job to FAILED")
-                    self.job_repo.update_job_status(job_id, 'failed', job_metadata)
-                    self.logger.error(f"💀 Job {job_id} marked as FAILED")
+                    self.job_repo.update_job_status(job_id, 'failed', job_metadata, error_message=error_msg, result_data=result_data)
+                    self.logger.error(f"💀 Job {job_id} marked as FAILED with error data")
                 else:
-                    # Partial success
+                    # Partial success - prepare mixed result
+                    result_data = {
+                        'status': 'completed_with_errors',
+                        'message': f'Job completed with {completed} successful and {failed} failed tasks',
+                        'summary': {
+                            'total_tasks': total,
+                            'completed_tasks': completed,
+                            'failed_tasks': failed
+                        },
+                        'task_results': task_results[:5],  # Limited successful results
+                        'task_errors': error_messages[:5],  # Limited error results
+                        'completed_at': datetime.utcnow().isoformat()
+                    }
+                    
                     self.logger.warning(f"⚠️ {completed} tasks succeeded, {failed} failed - updating job to COMPLETED_WITH_ERRORS")
-                    self.job_repo.update_job_status(job_id, 'completed_with_errors', job_metadata)
-                    self.logger.warning(f"⚠️ Job {job_id} marked as COMPLETED_WITH_ERRORS")
+                    self.job_repo.update_job_status(job_id, 'completed_with_errors', job_metadata, result_data=result_data)
+                    self.logger.warning(f"⚠️ Job {job_id} marked as COMPLETED_WITH_ERRORS with mixed result data")
             else:
                 # Still processing
                 self.logger.debug(f"  Job still processing - {total - completed - failed} tasks remaining")
@@ -347,13 +514,45 @@ class TaskManager:
     
     def check_job_completion(self, job_id: str) -> bool:
         """
-        Check if all tasks for a job are complete and update job status.
+        Public interface for checking job completion status.
+        
+        This method is called from the Azure Functions task processor 
+        (function_app.py) after every task completion to determine if
+        the job is done.
+        
+        Workflow:
+            1. Calls check_and_update_job_status() to handle completion logic
+            2. Queries all tasks to determine completion status
+            3. Returns boolean indicating if job is complete
+            
+        Called From:
+            - function_app.py:1170 (after successful task completion)
+            - function_app.py:1190 (after task failure)
+            
+        Completion Logic:
+            A job is "complete" when all tasks are in terminal states:
+            - completed_tasks + failed_tasks == total_tasks
+            
+        Side Effects:
+            - May update job status to completed/failed if this is the last task
+            - May aggregate task results into job result_data
+            - Logs completion status for monitoring
         
         Args:
-            job_id: Job to check
+            job_id: Job identifier to check
             
         Returns:
-            bool: True if all tasks are complete (either succeeded or failed)
+            bool: True if all tasks are complete (succeeded OR failed)
+                  False if any tasks are still queued/processing
+                  
+        Example Usage:
+            # In Azure Functions task processor
+            task_manager = TaskManager()
+            job_complete = task_manager.check_job_completion(parent_job_id)
+            if job_complete:
+                logger.info("🎉 All tasks completed for job")
+            else:
+                logger.info("⏳ Job still has pending tasks")
         """
         try:
             self.logger.debug(f"🔍 Checking job completion for job: {job_id}")

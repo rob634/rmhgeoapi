@@ -1,6 +1,37 @@
 """
-Repository layer for Azure Table Storage and Blob Storage
-Handles job tracking and blob storage operations
+Repository layer for Azure Table Storage and Blob Storage operations.
+
+This module provides data access abstractions for the Job→Task architecture,
+handling persistent storage of jobs, tasks, and blob operations with proper
+Azure managed identity authentication.
+
+Components:
+    - JobRepository: Job lifecycle management in Azure Table Storage
+    - TaskRepository: Task tracking and status management
+    - StorageRepository: Blob storage operations with SAS token generation
+    
+Key Features:
+    - Managed identity authentication (no connection strings)
+    - Job and task result data storage with JSON serialization
+    - Comprehensive status tracking (queued → processing → completed/failed)
+    - Idempotent operations with proper error handling
+    - Enhanced result data aggregation for job completion
+    - Batch operations for efficiency
+
+Architecture Integration:
+    - Used by controllers for job/task persistence
+    - Integrates with TaskManager for distributed completion detection
+    - Provides blob access for services and processing operations
+    - Handles Azure Functions queue message generation
+
+Performance Considerations:
+    - Table operations optimized for high-frequency status updates
+    - JSON serialization for complex result data structures
+    - Proper indexing on PartitionKey/RowKey for efficient queries
+    - Connection pooling via managed identity
+
+Author: Azure Geospatial ETL Team
+Version: 1.2.0 - Enhanced with result data aggregation support
 """
 import json
 import logging
@@ -17,7 +48,47 @@ from logger_setup import logger
 
 
 class JobRepository:
-    """Repository for job tracking using Azure Table Storage"""
+    """
+    Repository for job lifecycle management using Azure Table Storage.
+    
+    Handles persistent storage of job records throughout their lifecycle,
+    from creation through completion. Supports the enhanced Job→Task 
+    architecture with comprehensive result data aggregation.
+    
+    Key Responsibilities:
+        - Job creation with idempotency checks
+        - Status transitions (queued → processing → completed/failed)
+        - Result data storage with JSON serialization
+        - Enhanced completion metadata from task aggregation
+        - Error message tracking for failed jobs
+        
+    Table Schema:
+        PartitionKey: 'jobs' (for efficient querying)
+        RowKey: job_id (SHA256 hash for uniqueness)
+        Status: queued | processing | completed | failed | completed_with_errors
+        result_data: JSON string with task results and completion metadata
+        error_message: Error details for failed jobs
+        created_at, updated_at: ISO timestamps
+        
+    Enhanced Features (August 2025):
+        - Comprehensive result_data populated from task results
+        - Metadata parameter for flexible field updates
+        - Proper JSON serialization for complex data structures
+        - Support for completed_with_errors status (partial failures)
+        - Legacy parameter support for backward compatibility
+        
+    Usage:
+        repo = JobRepository()
+        
+        # Create new job
+        is_new = repo.save_job(job_request)
+        
+        # Update with task results
+        success = repo.update_job_status(
+            job_id, 'completed', 
+            result_data={'task_results': [...], 'summary': {...}}
+        )
+    """
     
     def __init__(self):
         
@@ -64,7 +135,8 @@ class JobRepository:
             entity['dataset_id'] = job_request.dataset_id
             entity['resource_id'] = job_request.resource_id
             entity['version_id'] = job_request.version_id
-            entity['operation_type'] = job_request.operation_type
+            entity['job_type'] = job_request.operation_type  # Store as job_type in table (primary field)
+            # entity['operation_type'] = job_request.operation_type  # REMOVED: No more operation_type field
             entity['system'] = job_request.system
             entity['status'] = JobStatus.PENDING
             entity['created_at'] = job_request.created_at
@@ -177,6 +249,21 @@ class JobRepository:
             self._ensure_table_exists()
             table_client = self.table_service.get_table_client(self.table_name)
             
+            # Validate that job_type is provided (required field)
+            job_type = job_data.get('job_type')
+            if not job_type:
+                # Check if caller is using deprecated operation_type
+                operation_type = job_data.get('operation_type')
+                if operation_type:
+                    logger.error(f"Job creation failed: operation_type provided but job_type required")
+                    logger.error(f"Please use 'job_type' instead of 'operation_type' for job {job_id}")
+                    raise ValueError(f"job_type is required (found operation_type: {operation_type})")
+                else:
+                    logger.error(f"Job creation failed: job_type is required for job {job_id}")
+                    raise ValueError("job_type is required for job creation")
+            
+            logger.debug(f"Creating job {job_id} with job_type: {job_type}")
+            
             # Check if job already exists
             try:
                 existing = table_client.get_entity('jobs', job_id)
@@ -190,8 +277,13 @@ class JobRepository:
             entity['PartitionKey'] = 'jobs'
             entity['RowKey'] = job_id
             
-            # Add all job data fields
+            # Add all job data fields (excluding deprecated operation_type)
             for key, value in job_data.items():
+                if key == 'operation_type' and key != 'job_type':
+                    # Skip deprecated operation_type field
+                    logger.debug(f"Skipping deprecated operation_type field in job data")
+                    continue
+                    
                 if isinstance(value, (dict, list)):
                     import json
                     entity[key] = json.dumps(value)
@@ -255,18 +347,39 @@ class JobRepository:
             table_client = self.table_service.get_table_client(self.table_name)
             entity = table_client.get_entity('jobs', job_id)
             
+            # Validate that job_type exists (required field)
+            job_type = entity.get('job_type')
+            if not job_type:
+                # Check if this is an old record with operation_type
+                operation_type = entity.get('operation_type')
+                if operation_type:
+                    logger.warning(f"Job {job_id} has operation_type but no job_type - legacy record detected")
+                    logger.warning("Please migrate legacy jobs to use job_type field")
+                    # job_type = operation_type  # COMMENTED OUT: No fallback allowed
+                    raise ValueError(f"Job {job_id} missing required job_type field (found operation_type: {operation_type})")
+                else:
+                    raise ValueError(f"Job {job_id} missing required job_type field")
+            
             # Convert entity to dictionary
             result = {
                 'job_id': job_id,
                 'dataset_id': entity.get('dataset_id'),
                 'resource_id': entity.get('resource_id'),
                 'version_id': entity.get('version_id'),
-                'operation_type': entity.get('operation_type'),
+                'job_type': job_type,  # Required field, no fallback
+                'operation_type': job_type,  # For API compatibility, return job_type as operation_type
                 'system': entity.get('system', False),  # Default to False for backwards compatibility
                 'status': entity.get('status'),
                 'created_at': entity.get('created_at'),
                 'updated_at': entity.get('updated_at'),
                 'error_message': entity.get('error_message'),
+                # Controller-managed job fields
+                'controller_managed': entity.get('controller_managed', False),
+                'task_count': entity.get('task_count', 0),
+                'total_tasks': entity.get('total_tasks', 0),
+                'completed_tasks': entity.get('completed_tasks', 0),
+                'failed_tasks': entity.get('failed_tasks', 0),
+                'progress_percentage': entity.get('progress_percentage', 0.0),
             }
             
             # Parse result_data if it exists
@@ -347,8 +460,14 @@ class TaskRepository:
             entity['created_at'] = datetime.now(timezone.utc).isoformat()
             entity['updated_at'] = datetime.now(timezone.utc).isoformat()
             
-            # Task data
-            entity['operation_type'] = task_data.get('operation_type')
+            # Set both task_type and operation_type fields for compatibility
+            task_type_value = task_data.get('task_type')
+            if task_type_value:
+                entity['task_type'] = task_type_value
+                entity['operation_type'] = task_type_value  # Legacy compatibility
+                logger.info(f"Setting task_type and operation_type to: {task_type_value}")
+            else:
+                logger.warning(f"task_type is None in task_data: {task_data}")
             entity['dataset_id'] = task_data.get('dataset_id')
             entity['resource_id'] = task_data.get('resource_id')
             entity['version_id'] = task_data.get('version_id')
@@ -439,6 +558,22 @@ class TaskRepository:
             if 'result_data' in result and isinstance(result['result_data'], str):
                 result['result_data'] = json.loads(result['result_data'])
             
+            # If task_type column is empty, try to get it from task_data JSON
+            if not result.get('task_type') and result.get('task_data'):
+                task_data = result['task_data']
+                if isinstance(task_data, dict):
+                    json_task_type = task_data.get('task_type')
+                    if json_task_type:
+                        result['task_type'] = json_task_type
+                        # Also populate operation_type for compatibility
+                        if not result.get('operation_type'):
+                            result['operation_type'] = json_task_type
+                        logger.info(f"Populated task_type from JSON: {json_task_type} for task {result.get('task_id', 'unknown')}")
+                    else:
+                        logger.warning(f"task_type not found in task_data JSON for task {result.get('task_id', 'unknown')}")
+                else:
+                    logger.warning(f"task_data is not a dict for task {result.get('task_id', 'unknown')}: {type(task_data)}")
+            
             return result
             
         except ResourceNotFoundError:
@@ -464,6 +599,23 @@ class TaskRepository:
                     task['task_data'] = json.loads(task['task_data'])
                 if 'result_data' in task and isinstance(task['result_data'], str):
                     task['result_data'] = json.loads(task['result_data'])
+                
+                # If task_type column is empty, try to get it from task_data JSON
+                if not task.get('task_type') and task.get('task_data'):
+                    task_data = task['task_data']
+                    if isinstance(task_data, dict):
+                        json_task_type = task_data.get('task_type')
+                        if json_task_type:
+                            task['task_type'] = json_task_type
+                            # Also populate operation_type for compatibility
+                            if not task.get('operation_type'):
+                                task['operation_type'] = json_task_type
+                            logger.info(f"Populated task_type from JSON: {json_task_type} for task {task.get('task_id', 'unknown')}")
+                        else:
+                            logger.warning(f"task_type not found in task_data JSON for task {task.get('task_id', 'unknown')}")
+                    else:
+                        logger.warning(f"task_data is not a dict for task {task.get('task_id', 'unknown')}: {type(task_data)}")
+                
                 tasks.append(task)
             
             return tasks

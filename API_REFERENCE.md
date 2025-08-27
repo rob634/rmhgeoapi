@@ -11,6 +11,11 @@ All operations use the `submit_job` endpoint with the operation type in the URL 
 - **System Operations** (Internal): Set `system: true` to bypass DDH requirements
 - **Without `system: true`**: The API expects DDH parameters and will return an error if missing
 
+### Task Management (Internal - No Direct HTTP Endpoints)
+- **Tasks are managed internally through the Job→Task architecture**
+- **No direct task endpoints** - tasks are accessed via job status
+- **Task queries available through repositories** for internal use only
+
 ## 🛠️ Available Operations
 
 ### Container Operations
@@ -194,9 +199,15 @@ curl -X POST https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/
 
 ### Check Job Status
 ```bash
+# ✅ CORRECT endpoint - Job status and details
 curl https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/jobs/{job_id} \
   -H "x-functions-key: [FUNCTION_KEY_REMOVED]"
 ```
+
+**⚠️ IMPORTANT**: 
+- **CORRECT**: `/api/jobs/{job_id}` - Returns job status, progress, and results
+- **INCORRECT**: `/api/jobs/{job_id}/status` - Does NOT exist, returns 404
+- **NO TASK ENDPOINTS**: Tasks are internal only, accessed via job status
 
 ### Run Full STAC Inventory
 ```bash

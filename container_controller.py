@@ -18,6 +18,7 @@ from base_controller import BaseJobController
 from task_manager import TaskManager
 from controller_exceptions import InvalidRequestError, TaskCreationError
 from logger_setup import get_logger
+from schema_enforcement import SchemaDefinition
 
 logger = get_logger(__name__)
 
@@ -39,6 +40,20 @@ class ContainerController(BaseJobController):
         super().__init__()
         self.task_manager = TaskManager()
         self.logger = get_logger(self.__class__.__name__)
+    
+    def extend_schema(self, base_schema: SchemaDefinition) -> SchemaDefinition:
+        """
+        Extend base schema with container-specific parameters.
+        
+        Args:
+            base_schema: Base job request schema
+            
+        Returns:
+            SchemaDefinition: Schema with container parameters
+        """
+        return base_schema \
+            .optional("prefix", str, "Blob prefix filter for container operations") \
+            .optional("recursive", bool, "Include subdirectories in container listing")
     
     def validate_request(self, request: Dict[str, Any]) -> bool:
         """
@@ -181,7 +196,6 @@ class ContainerController(BaseJobController):
         """
         # Prepare orchestrator task data
         task_data = {
-            'operation': 'sync_orchestrator',
             'dataset_id': request.get('dataset_id'),  # Container to sync
             'collection_id': request.get('version_id', 'bronze-assets'),  # STAC collection
             'resource_id': request.get('resource_id', 'none'),  # Optional prefix

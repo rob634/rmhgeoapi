@@ -625,3 +625,107 @@ class MetadataInferenceService:
             })
         
         return recommendations
+    
+    def recommend_processing_strategy(self, file_info: Dict) -> str:
+        """
+        Intelligent processing strategy recommendations based on file analysis.
+        
+        Args:
+            file_info: Dictionary with file metadata and inferred information
+            
+        Returns:
+            Recommended processing strategy
+        """
+        meta = file_info.get('inferred_metadata', {})
+        size_mb = file_info.get('size', 0) / (1024 * 1024)
+        file_name = file_info.get('name', '')
+        
+        # Skip COG conversion if already optimized
+        if meta.get('likely_cog') or meta.get('skip_cog_conversion'):
+            return 'catalog_only'
+        
+        # Header-only for very large files (>5GB)
+        if size_mb > 5000:
+            return 'header_only_cataloging'
+        
+        # Mosaic strategy for tiled scenes
+        if meta.get('part_of_tiled_scene'):
+            scene_name = meta.get('scene_name', '')
+            return f'mosaic_then_catalog:{scene_name}'
+        
+        # Smart mode for large files (>1GB but <5GB)
+        if size_mb > 1000:
+            return 'smart_mode_processing'
+        
+        # Special handling for Maxar multi-part acquisitions
+        if meta.get('vendor') == 'Maxar' and meta.get('part_of_acquisition'):
+            catalog_id = meta.get('maxar_catalog_id')
+            return f'maxar_multipart:{catalog_id}'
+        
+        # Defer sidecar files (process with main data file)
+        if meta.get('likely_sidecar'):
+            main_file = meta.get('sidecar_for', '')
+            return f'defer_until_main:{main_file}'
+        
+        # Standard processing for regular files
+        if meta.get('data_category') == 'raster':
+            return 'standard_raster_pipeline'
+        elif meta.get('data_category') == 'vector':
+            return 'standard_vector_pipeline'
+        else:
+            return 'metadata_only'
+    
+    def batch_processing_recommendations(self, files: List[Dict]) -> Dict[str, List[Dict]]:
+        """
+        Group files by recommended processing strategy for batch operations.
+        
+        Args:
+            files: List of file dictionaries with metadata
+            
+        Returns:
+            Dictionary with strategy as key and files as values
+        """
+        strategy_groups = {}
+        
+        for file_info in files:
+            strategy = self.recommend_processing_strategy(file_info)
+            
+            if strategy not in strategy_groups:
+                strategy_groups[strategy] = []
+            
+            strategy_groups[strategy].append(file_info)
+        
+        # Add batch statistics
+        batch_stats = {}
+        for strategy, files_group in strategy_groups.items():
+            total_size = sum(f.get('size', 0) for f in files_group)
+            batch_stats[strategy] = {
+                'files': files_group,
+                'count': len(files_group),
+                'total_size_gb': round(total_size / (1024**3), 2),
+                'estimated_time_minutes': self._estimate_processing_time(strategy, len(files_group))
+            }
+        
+        return batch_stats
+    
+    def _estimate_processing_time(self, strategy: str, file_count: int) -> float:
+        """Estimate processing time based on strategy and file count"""
+        time_per_file = {
+            'catalog_only': 0.5,
+            'header_only_cataloging': 1.0,
+            'smart_mode_processing': 2.0,
+            'standard_raster_pipeline': 5.0,
+            'standard_vector_pipeline': 1.0,
+            'metadata_only': 0.2
+        }
+        
+        # Handle special strategies
+        if strategy.startswith('mosaic_then_catalog'):
+            return file_count * 3.0  # Mosaic operations take longer
+        elif strategy.startswith('maxar_multipart'):
+            return file_count * 4.0  # Multi-part acquisitions are complex
+        elif strategy.startswith('defer_until_main'):
+            return 0  # Deferred files don't count toward time
+        
+        base_time = time_per_file.get(strategy, 2.0)
+        return file_count * base_time

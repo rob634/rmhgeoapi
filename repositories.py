@@ -243,6 +243,41 @@ class JobRepository:
             logger.error(f"Error updating job status {job_id}: {str(e)}")
             return False
     
+    def update_job_field(self, job_id: str, field_name: str, field_value: str) -> bool:
+        """
+        Update a specific field in a job record.
+        
+        Args:
+            job_id: Job identifier
+            field_name: Field name to update
+            field_value: New field value
+            
+        Returns:
+            bool: True if updated successfully
+        """
+        try:
+            self._ensure_table_exists()
+            table_client = self.table_service.get_table_client(self.table_name)
+            
+            # Get existing job
+            entity = table_client.get_entity('jobs', job_id)
+            
+            # Update the specific field
+            entity[field_name] = field_value
+            entity['updated_at'] = datetime.now(timezone.utc).isoformat()
+            
+            # Save back to storage
+            table_client.update_entity(entity)
+            logger.debug(f"Updated field {field_name} for job {job_id}")
+            return True
+            
+        except ResourceNotFoundError:
+            logger.error(f"Job {job_id} not found for field update")
+            return False
+        except Exception as e:
+            logger.error(f"Failed to update field {field_name} for job {job_id}: {e}")
+            return False
+    
     def create_job(self, job_id: str, job_data: Dict) -> bool:
         """
         Create a new job record (for controller compatibility).
@@ -465,7 +500,7 @@ class TaskRepository:
             # Task metadata
             entity['task_id'] = task_id
             entity['parent_job_id'] = parent_job_id
-            entity['status'] = 'pending'
+            entity['status'] = 'queued'
             entity['created_at'] = datetime.now(timezone.utc).isoformat()
             entity['updated_at'] = datetime.now(timezone.utc).isoformat()
             
@@ -640,7 +675,6 @@ class TaskRepository:
             
             summary = {
                 'total': len(tasks),
-                'pending': sum(1 for t in tasks if t.get('status') == 'pending'),
                 'queued': sum(1 for t in tasks if t.get('status') == 'queued'),
                 'processing': sum(1 for t in tasks if t.get('status') == 'processing'),
                 'completed': sum(1 for t in tasks if t.get('status') == 'completed'),

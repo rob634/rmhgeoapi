@@ -39,7 +39,7 @@ Version: 1.1.0 - Enhanced with result aggregation and completion detection
 import hashlib
 import json
 from typing import Dict, Any, List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 
 from repositories import TaskRepository, JobRepository
 from logger_setup import get_logger
@@ -158,7 +158,7 @@ class TaskManager:
                 'parent_job_id': job_id,
                 'task_type': task_type,
                 'index': index,
-                'status': 'pending',
+                'status': 'queued',
                 'created_at': datetime.utcnow().isoformat()
             })
             
@@ -286,7 +286,14 @@ class TaskManager:
             # Check if this affects job completion
             task = self.task_repo.get_task(task_id)
             if task and status in ['completed', 'failed']:
-                self._check_job_completion(task.get('parent_job_id'))
+                job_id = task.get('parent_job_id')
+                
+                # Check for stage completion and advancement (for sequential jobs)
+                if status == 'completed':
+                    self.check_stage_completion_and_advance(job_id, task_id)
+                
+                # Check overall job completion
+                self._check_job_completion(job_id)
             
             return result
             
@@ -491,12 +498,18 @@ class TaskManager:
                 self.logger.warning(f"  No tasks found for job {job_id} - cannot update status")
                 return
             
-            # Count task statuses
+            # Count task statuses - only valid statuses: queued, processing, completed, failed
             total = len(tasks)
             completed = sum(1 for t in tasks if t.get('status') == 'completed')
             failed = sum(1 for t in tasks if t.get('status') == 'failed')
+            queued = sum(1 for t in tasks if t.get('status') == 'queued')
+            processing = sum(1 for t in tasks if t.get('status') == 'processing')
             
-            self.logger.debug(f"  Task counts - Total: {total}, Completed: {completed}, Failed: {failed}")
+            self.logger.debug(f"  Task counts - Total: {total}, Completed: {completed}, Failed: {failed}, Queued: {queued}, Processing: {processing}")
+            
+            # CRITICAL: Job is only complete when NO tasks are queued/processing
+            active_tasks = queued + processing
+            finished_tasks = completed + failed
             
             # Collect task results for job completion
             task_results = []
@@ -532,13 +545,15 @@ class TaskManager:
                 'total_tasks': total,
                 'completed_tasks': completed,
                 'failed_tasks': failed,
-                'progress_percentage': (completed + failed) / total * 100,
+                'queued_tasks': queued,
+                'processing_tasks': processing,
+                'progress_percentage': (finished_tasks) / total * 100 if total > 0 else 0,
                 'task_results': task_results,
                 'task_errors': error_messages if error_messages else None
             }
             
-            # Determine job status
-            if completed + failed == total:
+            # Determine job status - FIXED: Only complete when NO active tasks
+            if active_tasks == 0 and finished_tasks == total:
                 # All tasks finished
                 if failed == 0:
                     # All succeeded - prepare result data
@@ -553,6 +568,9 @@ class TaskManager:
                         'task_results': task_results[:10],  # Limit to first 10 for storage efficiency
                         'completed_at': datetime.utcnow().isoformat()
                     }
+                    
+                    # Add job-specific result aggregation (hello_world, etc.)
+                    self._aggregate_job_specific_results(result_data, tasks)
                     
                     self.logger.info(f"✅ All {total} tasks completed successfully - updating job to COMPLETED")
                     self.job_repo.update_job_status(job_id, 'completed', job_metadata, result_data=result_data)
@@ -590,12 +608,15 @@ class TaskManager:
                         'completed_at': datetime.utcnow().isoformat()
                     }
                     
+                    # Add job-specific result aggregation (hello_world, etc.) for successful tasks
+                    self._aggregate_job_specific_results(result_data, tasks)
+                    
                     self.logger.warning(f"⚠️ {completed} tasks succeeded, {failed} failed - updating job to COMPLETED_WITH_ERRORS")
                     self.job_repo.update_job_status(job_id, 'completed_with_errors', job_metadata, result_data=result_data)
                     self.logger.warning(f"⚠️ Job {job_id} marked as COMPLETED_WITH_ERRORS with mixed result data")
             else:
-                # Still processing
-                self.logger.debug(f"  Job still processing - {total - completed - failed} tasks remaining")
+                # Still processing - tasks are queued or processing
+                self.logger.debug(f"  Job still processing - {active_tasks} active tasks remaining (Queued: {queued}, Processing: {processing})")
                 self.job_repo.update_job_status(job_id, 'processing', job_metadata)
                 
         except Exception as e:
@@ -754,3 +775,379 @@ class TaskManager:
             return False
         
         return True
+    
+    # ========================================
+    # STAGE MANAGEMENT METHODS (Job Chaining)
+    # ========================================
+    
+    def check_stage_completion_and_advance(self, job_id: str, completed_task_id: str):
+        """
+        Check if current stage is complete and advance to next stage if ready.
+        
+        This is the core method for sequential job chaining. Called when any task
+        completes to check if the entire current stage is done, and if so, advance
+        to the next stage by creating new tasks.
+        
+        Algorithm:
+        1. Get current job state and stage information
+        2. Get all tasks for current stage
+        3. Check if all current stage tasks are complete
+        4. If complete:
+           - Record stage completion with actual timing
+           - If more stages remain: advance to next stage
+           - If all stages done: complete the sequential job
+        
+        Args:
+            job_id: Job to check for stage completion
+            completed_task_id: ID of the task that just completed
+        """
+        try:
+            self.logger.debug(f"🎯 Checking stage completion for job {job_id} after task {completed_task_id[:8]}... completed")
+            
+            # Get current job state
+            job = self.job_repo.get_job(job_id)
+            if not job:
+                self.logger.warning(f"Job {job_id} not found for stage completion check")
+                return
+            
+            current_stage = job.get('current_stage_n', 1)
+            total_stages = job.get('stages', 1)
+            
+            self.logger.debug(f"  Current stage: {current_stage}/{total_stages}")
+            
+            # Get all tasks for current stage
+            stage_tasks = self._get_stage_tasks(job_id, current_stage)
+            completed_tasks = [t for t in stage_tasks if t.get('status') == 'completed']
+            
+            self.logger.debug(f"  Stage {current_stage} tasks: {len(completed_tasks)}/{len(stage_tasks)} completed")
+            
+            # Check if current stage is complete
+            if len(completed_tasks) == len(stage_tasks) and len(stage_tasks) > 0:
+                self.logger.info(f"🎯 Stage {current_stage} completed for job {job_id} - all {len(stage_tasks)} tasks finished")
+                
+                # Record stage completion with actual timing
+                self._record_stage_completion(job_id, current_stage, completed_tasks)
+                
+                if current_stage < total_stages:
+                    # Advance to next stage
+                    self._advance_to_next_stage(job_id, completed_tasks)
+                else:
+                    # All stages completed - finish sequential job
+                    self._complete_sequential_job(job_id, completed_tasks)
+            else:
+                self.logger.debug(f"  Stage {current_stage} still processing: {len(completed_tasks)}/{len(stage_tasks)} tasks done")
+                
+        except Exception as e:
+            self.logger.error(f"Failed to check stage completion for job {job_id}: {e}")
+    
+    def _get_stage_tasks(self, job_id: str, stage_n: int) -> List[Dict]:
+        """
+        Get all tasks for a specific stage of a job.
+        
+        Args:
+            job_id: Job identifier
+            stage_n: Stage number (1, 2, 3, etc.)
+            
+        Returns:
+            List[Dict]: Tasks for the specified stage
+        """
+        try:
+            # Get all tasks for this job
+            all_tasks = self.task_repo.get_tasks_for_job(job_id)
+            
+            # Filter tasks by stage - check task_data for stage information
+            stage_tasks = []
+            for task in all_tasks:
+                task_data = task.get('task_data', '{}')
+                if isinstance(task_data, str):
+                    try:
+                        task_data = json.loads(task_data)
+                    except:
+                        task_data = {}
+                
+                # Check if task belongs to this stage
+                task_stage = task_data.get('stage')
+                if task_stage == stage_n:
+                    stage_tasks.append(task)
+                elif task.get('task_type', '').endswith(f'_stage{stage_n}'):
+                    # Alternative: check task_type suffix (e.g., hello_world_stage1)
+                    stage_tasks.append(task)
+            
+            return stage_tasks
+            
+        except Exception as e:
+            self.logger.error(f"Failed to get stage {stage_n} tasks for job {job_id}: {e}")
+            return []
+    
+    def _record_stage_completion(self, job_id: str, stage_n: int, completed_tasks: List[Dict]):
+        """
+        Record actual stage completion with real timing metrics.
+        
+        Args:
+            job_id: Job identifier
+            stage_n: Completed stage number
+            completed_tasks: List of completed tasks from this stage
+        """
+        try:
+            # Calculate real stage duration from task completion timestamps
+            task_times = []
+            for task in completed_tasks:
+                updated_at = task.get('updated_at')
+                if updated_at:
+                    try:
+                        task_times.append(datetime.fromisoformat(updated_at.replace('Z', '+00:00')))
+                    except:
+                        pass
+            
+            # Calculate actual duration (from first to last task completion)
+            if len(task_times) > 1:
+                stage_start = min(task_times)
+                stage_end = max(task_times)
+                actual_duration = (stage_end - stage_start).total_seconds()
+            else:
+                actual_duration = 0.0  # Single task or no timing data
+            
+            # Get stage name from job configuration
+            job = self.job_repo.get_job(job_id)
+            stage_sequence = json.loads(job.get('stage_sequence', '{}'))
+            stage_name = stage_sequence.get(str(stage_n), f'stage_{stage_n}')
+            
+            # Create stage completion record
+            stage_record = {
+                'stage_n': stage_n,
+                'stage': stage_name,
+                'completed_at': datetime.utcnow().isoformat(),
+                'duration_seconds': round(actual_duration, 3),  # Real measurement
+                'task_count': len(completed_tasks),
+                'successful_tasks': len(completed_tasks),  # All tasks in completed_tasks are successful
+                'status': 'completed'
+            }
+            
+            # Add to job's stage_history
+            stage_history = json.loads(job.get('stage_history', '[]'))
+            stage_history.append(stage_record)
+            
+            # Update job record
+            self.job_repo.update_job_field(job_id, 'stage_history', json.dumps(stage_history))
+            
+            self.logger.info(f"📊 Recorded completion of stage {stage_n} ({stage_name}) for job {job_id}: {actual_duration:.3f}s, {len(completed_tasks)} tasks")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to record stage completion for job {job_id} stage {stage_n}: {e}")
+    
+    def _advance_to_next_stage(self, job_id: str, completed_tasks: List[Dict]):
+        """
+        Advance job to next stage and create appropriate tasks.
+        
+        Args:
+            job_id: Job identifier
+            completed_tasks: Tasks completed in current stage
+        """
+        try:
+            # Get job configuration
+            job = self.job_repo.get_job(job_id)
+            current_stage = job.get('current_stage_n', 1)
+            next_stage = current_stage + 1
+            
+            stage_sequence = json.loads(job.get('stage_sequence', '{}'))
+            next_stage_name = stage_sequence.get(str(next_stage), f'stage_{next_stage}')
+            
+            self.logger.info(f"🚀 Advancing job {job_id} from stage {current_stage} to stage {next_stage} ({next_stage_name})")
+            
+            # Update job to next stage
+            job_updates = {
+                'current_stage_n': next_stage,
+                'current_stage': next_stage_name,
+                'updated_at': datetime.utcnow().isoformat()
+            }
+            
+            # Update stage_data with completed stage results
+            stage_data = json.loads(job.get('stage_data', '{}'))
+            stage_data[f'stage{current_stage}_results'] = [
+                {
+                    'task_id': task.get('task_id'),
+                    'status': task.get('status'),
+                    'result': task.get('result_data'),
+                    'task_type': task.get('task_type')
+                }
+                for task in completed_tasks
+            ]
+            job_updates['stage_data'] = json.dumps(stage_data)
+            
+            # Apply updates to job
+            for field, value in job_updates.items():
+                self.job_repo.update_job_field(job_id, field, value)
+            
+            # Create tasks for next stage based on stage type
+            self._create_next_stage_tasks(job_id, next_stage, next_stage_name, completed_tasks)
+            
+            self.logger.info(f"✅ Job {job_id} advanced to stage {next_stage} ({next_stage_name})")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to advance job {job_id} to next stage: {e}")
+    
+    def _create_next_stage_tasks(self, job_id: str, stage_n: int, stage_name: str, previous_stage_tasks: List[Dict]):
+        """
+        Create tasks for the next stage based on the stage type and previous results.
+        
+        Args:
+            job_id: Job identifier
+            stage_n: Stage number to create tasks for
+            stage_name: Stage name
+            previous_stage_tasks: Completed tasks from previous stage
+        """
+        try:
+            # Get job configuration to understand the sequential workflow
+            job = self.job_repo.get_job(job_id)
+            stage_data = json.loads(job.get('stage_data', '{}'))
+            
+            # Create tasks based on stage type
+            if stage_name == 'validation' and stage_n == 2:
+                # Stage 2: Create single validation task
+                self._create_validation_task(job_id, stage_data, previous_stage_tasks)
+                
+            elif stage_name == 'response' and stage_n == 3:
+                # Stage 3: Create response tasks based on Stage 1 results
+                self._create_response_tasks(job_id, stage_data, previous_stage_tasks)
+                
+            else:
+                self.logger.warning(f"Unknown stage type: {stage_name} (stage {stage_n}) for job {job_id}")
+                
+        except Exception as e:
+            self.logger.error(f"Failed to create stage {stage_n} tasks for job {job_id}: {e}")
+    
+    def _create_validation_task(self, job_id: str, stage_data: Dict, stage1_tasks: List[Dict]):
+        """
+        Create Stage 2 validation task.
+        
+        Args:
+            job_id: Job identifier
+            stage_data: Job stage data
+            stage1_tasks: Completed Stage 1 tasks
+        """
+        self.logger.info(f"🔍 DEBUG: Creating Stage 2 validation task for job {job_id}")
+        self.logger.info(f"DEBUG: Stage 1 tasks count: {len(stage1_tasks)}")
+        self.logger.info(f"DEBUG: Stage 1 task IDs: {[t.get('task_id')[:16] + '...' for t in stage1_tasks]}")
+        
+        task_data = {
+            'job_id': job_id,
+            'stage': 2,
+            'validation_target': 'stage1_completion',
+            'stage1_task_count': len(stage1_tasks),
+            'stage1_task_ids': [t.get('task_id') for t in stage1_tasks]
+        }
+        
+        self.logger.info(f"DEBUG: Stage 2 task_data: {task_data}")
+        
+        task_id = self.create_task(
+            job_id=job_id,
+            task_type='hello_world_stage2_validation',
+            task_data=task_data,
+            index=0
+        )
+        
+        self.logger.info(f"DEBUG: create_task returned task_id: {task_id}")
+        
+        if task_id:
+            # Queue the validation task
+            from base_controller import BaseJobController
+            controller = BaseJobController()  # Use base controller for queuing
+            self.logger.info(f"DEBUG: About to queue Stage 2 validation task with ID: {task_id}")
+            
+            if controller.queue_task(task_id, task_data):
+                self.logger.info(f"✅ Created and queued validation task for job {job_id}: {task_id[:16]}...")
+            else:
+                self.logger.error(f"❌ Failed to queue validation task {task_id[:16]}... for job {job_id}")
+        else:
+            self.logger.error(f"❌ Failed to create validation task for job {job_id}")
+    
+    def _create_response_tasks(self, job_id: str, stage_data: Dict, stage2_tasks: List[Dict]):
+        """
+        Create Stage 3 response tasks based on Stage 1 task mapping.
+        
+        Args:
+            job_id: Job identifier 
+            stage_data: Job stage data
+            stage2_tasks: Completed Stage 2 validation tasks
+        """
+        try:
+            # Get Stage 1 results from stage_data
+            stage1_results = stage_data.get('stage1_results', [])
+            
+            # Extract task mapping from Stage 2 validation result
+            task_mapping = {}
+            if stage2_tasks:
+                validation_task = stage2_tasks[0]  # Should be only one validation task
+                validation_result = validation_task.get('result_data')
+                if isinstance(validation_result, str):
+                    try:
+                        validation_result = json.loads(validation_result)
+                    except:
+                        validation_result = {}
+                
+                if isinstance(validation_result, dict):
+                    task_mapping = validation_result.get('stage3_task_mapping', {})
+            
+            # Create response tasks based on mapping
+            response_tasks_created = 0
+            for mapping_key, mapping_data in task_mapping.items():
+                responds_to_task_id = mapping_data.get('responds_to_task_id')
+                original_hello_number = mapping_data.get('original_hello_number')
+                original_message = mapping_data.get('original_message')
+                
+                if responds_to_task_id:
+                    task_data = {
+                        'job_id': job_id,
+                        'stage': 3,
+                        'response_number': int(mapping_key),
+                        'responds_to_task_id': responds_to_task_id,
+                        'original_hello_number': original_hello_number,
+                        'original_message': original_message
+                    }
+                    
+                    task_id = self.create_task(
+                        job_id=job_id,
+                        task_type='hello_world_stage3_response',
+                        task_data=task_data,
+                        index=response_tasks_created
+                    )
+                    
+                    if task_id:
+                        # Queue the response task
+                        from base_controller import BaseJobController
+                        controller = BaseJobController()  # Use base controller for queuing
+                        if controller.queue_task(task_id, task_data):
+                            response_tasks_created += 1
+                            self.logger.debug(f"Created response task {response_tasks_created}: {task_id[:16]}...")
+                        else:
+                            self.logger.error(f"Failed to queue response task {task_id[:16]}...")
+                    else:
+                        self.logger.error(f"Failed to create response task {response_tasks_created + 1}")
+            
+            self.logger.info(f"✅ Created {response_tasks_created} Stage 3 response tasks for job {job_id}")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to create response tasks for job {job_id}: {e}")
+    
+    def _complete_sequential_job(self, job_id: str, final_stage_tasks: List[Dict]):
+        """
+        Complete a sequential job after all stages are finished.
+        
+        Args:
+            job_id: Job identifier
+            final_stage_tasks: Tasks from the final stage
+        """
+        try:
+            self.logger.info(f"🎉 Completing sequential job {job_id} - all stages finished")
+            
+            # Get all tasks from all stages for final aggregation
+            all_tasks = self.task_repo.get_tasks_for_job(job_id)
+            
+            # Use the standard job completion flow with controller-specific aggregation
+            # This will call aggregate_results on the appropriate controller
+            self._check_job_completion(job_id)
+            
+            self.logger.info(f"✅ Sequential job {job_id} completed successfully")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to complete sequential job {job_id}: {e}")

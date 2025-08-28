@@ -228,6 +228,18 @@ class TaskMessage:
                 # Put unknown fields in parameters
                 extra_parameters[key] = value
         
+        # Handle job_id mapping - use parent_job_id if job_id is missing
+        if 'job_id' not in task_msg_data and 'parent_job_id' in task_msg_data:
+            task_msg_data['job_id'] = task_msg_data['parent_job_id']
+        
+        # Ensure required fields have defaults
+        if 'job_id' not in task_msg_data:
+            task_msg_data['job_id'] = 'unknown'  # Provide fallback for required field
+        if 'task_id' not in task_msg_data:
+            task_msg_data['task_id'] = 'unknown'  # Provide fallback for required field
+        if 'task_type' not in task_msg_data:
+            task_msg_data['task_type'] = data.get('operation', 'unknown')  # Use operation as fallback
+        
         # Merge extra parameters into the parameters dict
         if extra_parameters:
             existing_params = task_msg_data.get('parameters', {}) or {}

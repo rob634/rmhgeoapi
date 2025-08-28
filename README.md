@@ -1,15 +1,65 @@
 # Azure Geospatial ETL Pipeline
 
-A production-ready Azure Functions-based geospatial ETL pipeline for processing satellite imagery and geospatial data through Bronze→Silver→Gold tiers with STAC cataloging.
+**🚨 DEVELOPMENT ENVIRONMENT - CORE ARCHITECTURE DESIGN**
+
+This is a **development environment** focused on **core architecture design and implementation**. There are no production users, no legacy data, and no backward compatibility requirements. All architectural changes are made with clean design principles prioritizing correctness and maintainability over compatibility.
+
+**Key Development Principles:**
+- **No Backward Compatibility**: Breaking changes are acceptable and encouraged for better architecture
+- **Explicit Error Handling**: No fallback logic - errors force proper migration to new patterns  
+- **Clean Architecture**: Remove deprecated patterns completely rather than maintaining dual support
+- **Fast Iteration**: Focus on core design quality without production migration concerns
+
+---
+
+A Azure Functions-based geospatial ETL pipeline for processing satellite imagery and geospatial data through Bronze→Silver→Gold tiers with STAC cataloging.
 
 ## 🏗️ Architecture Overview
 
+**Current Architecture**: Clean Job→Task pattern with distributed completion detection
+
 ```
-HTTP API → Job Queue → Task Queue → Processing Service → Storage/Database
-         ↓           ↓                                 ↓
-    Job Tracking  Task Tracking                   STAC Catalog
-   (Table Storage) (Table Storage)              (PostgreSQL/PostGIS)
+HTTP Request → Controller → Job → Task → Queue → Service → Results
+         ↓            ↓     ↓                           ↓
+    ControllerFactory  Jobs Table  Tasks Table    STAC Catalog
+                    (Table Storage)              (PostgreSQL/PostGIS)
 ```
+
+**Pattern**: Controller → Service → Repository with ABC classes for extensibility
+
+### Request Flow
+1. **Controller**: Validates request, creates job and tasks
+2. **Job**: Tracks overall operation status and aggregates results
+3. **Task**: Individual work unit processed in queue
+4. **Service**: Performs actual geospatial processing
+
+### 🎉 Job→Task Architecture Status
+
+#### ✅ What's Proven and Working
+
+**HelloWorldController**: Complete end-to-end validation with multi-task support (n=1 to n=100)
+- Job Creation → Task Creation → Queue Processing → Task Completion → Job Aggregation ✅
+- Multi-task workflows with comprehensive result statistics ✅
+- Distributed completion detection without coordination servers ✅
+
+#### ⚠️ What Needs Validation
+
+**All Other Operations**: Status unknown - need validation to confirm controller pattern adoption
+- ContainerController (list_container, sync_container)
+- STACController (catalog_file operations)  
+- DatabaseMetadataController (list_collections, get_database_summary, etc.)
+- RasterController (COG operations)
+- TiledRasterController (tiling operations)
+
+**CRITICAL**: Only HelloWorldController has been validated with the clean Job→Task architecture.
+
+### Architecture Benefits
+
+1. **Consistency**: Every operation follows same pattern
+2. **Scalability**: Tasks process independently in parallel
+3. **Reliability**: Built-in error handling and job completion detection
+4. **Maintainability**: Clear separation of concerns between controllers and services
+5. **Testability**: Each component can be tested in isolation
 
 ## 📦 Module Documentation
 
@@ -42,54 +92,60 @@ Centralized logging configuration with consistent formatting.
 - Provides structured logging format with timestamps
 - Creates logger instances for all modules
 
-### State Management System
+### Job→Task Architecture (NEW - Aug 2025)
 
-#### `state_models.py`
-Data models for job and task state tracking.
-- **Job States**: INITIALIZED → PLANNING → PROCESSING → VALIDATING → COMPLETED/FAILED
-- **Task States**: QUEUED → PROCESSING → COMPLETED/FAILED
-- **Job Types**: `simple_cog` (<4GB), `monster_cog` (>10GB chunked), `multi_merge_cog` (tiled)
-- **Validation Levels**: STRICT, STANDARD, LENIENT
-- **Message Classes**: JobMessage, TaskMessage for queue communication
+#### `base_controller.py`
+Abstract base class enforcing Job→Task pattern with validation helpers.
+- **Parameter Validation**: DDH parameter checking, request validation
+- **Task Creation**: Abstract methods for controller implementations
+- **Result Aggregation**: Combines task results into job results
+- **Error Handling**: Consistent exception handling across controllers
 
-#### `state_manager.py`
-Manages job and task state persistence in Azure Table Storage.
-- **Table Management**: Creates and manages `jobs` and `tasks` tables
-- **State Transitions**: Validates and enforces state transition rules
-- **Task Counters**: Tracks total, completed, and failed tasks per job
-- **Large Metadata Storage**: Stores metadata >64KB in blob storage
-- **Job Completion Logic**: Determines when jobs are complete based on task status
+#### `controller_factory.py`
+Routes operations to appropriate controllers based on operation type.
+- **Dynamic Routing**: Maps operation types to controller classes
+- **Controller Registration**: Centralized controller management
+- **Fallback Handling**: Routes unknown operations to legacy services
 
-#### `state_integration.py`
-Bridge between the main application and state management system.
-- **Job Submission**: Creates job records and queues initial tasks
-- **Task Processing**: Routes queued tasks to appropriate handlers
-- **Status Tracking**: Updates job/task status throughout processing
-- **Queue Integration**: Handles message encoding/decoding for queues
+#### `hello_world_controller.py`
+**ONLY PROVEN WORKING CONTROLLER** - Complete end-to-end validation.
+- **Multi-task Support**: Creates n tasks (1-100) from single request
+- **Architecture Testing**: Primary test case for Job→Task pattern
+- **Result Statistics**: Comprehensive hello_statistics aggregation
+- **Distributed Completion**: Proven distributed task completion detection
 
-### Task Processing
+#### `task_manager.py`
+Centralized task lifecycle and job completion detection.
+- **Task Creation**: Creates task records and queues task messages
+- **Completion Detection**: Distributed job completion without coordination
+- **Result Aggregation**: Collects task results into job results
+- **Status Management**: Updates job status based on task completion
 
 #### `task_router.py`
-Routes tasks to appropriate processing handlers.
-- **Task Dispatch**: Maps task types to handler functions
-- **Handler Methods**:
-  - `_handle_create_cog`: COG conversion processing
-  - `_handle_validate`: Output validation
-  - `_handle_analyze_input`: Input analysis (placeholder)
-  - `_handle_process_chunk`: Chunk processing (placeholder)
-- **Task Chaining**: Automatically queues next task in sequence
-- **Error Handling**: Updates task status on failure
+Clean task processing with TaskManager integration.
+- **Task Routing**: Routes tasks to appropriate handler functions
+- **TaskManager Integration**: Uses TaskManager for proper lifecycle
+- **Handler Registration**: Maps task types to processing functions
+- **Result Processing**: Updates task status and checks job completion
 
-#### `output_validator.py`
-Validates processing outputs with configurable strictness.
-- **Validation Checks**:
-  - Output file existence
-  - Valid COG format verification
-  - Metadata integrity checks
-  - File size reasonableness
-- **Clean Naming**: Removes tile suffixes (_R1C1, _merged, etc.)
-- **Final Path Management**: Moves validated files to final locations
-- **Temp Cleanup**: Manages temporary file cleanup
+### Additional Controllers (Status Unknown - Need Validation)
+
+⚠️ **CRITICAL**: Only HelloWorldController has been validated with the clean Job→Task architecture.
+
+#### `container_controller.py`
+Container operations controller - **STATUS UNKNOWN**.
+- **Operations**: list_container, sync_container
+- **Validation Needed**: Test if using controller pattern vs deprecated service pattern
+
+#### `database_metadata_controller.py` 
+Database metadata controller - **STATUS UNKNOWN**.
+- **Operations**: list_collections, get_database_summary, database_health
+- **Validation Needed**: Test if using controller pattern vs deprecated service pattern
+
+#### Other Controllers
+- **STACController**: catalog_file operations - Status unknown
+- **RasterController**: COG operations - Status unknown  
+- **TiledRasterController**: tiling operations - Status unknown
 
 ### Core Services
 
@@ -377,34 +433,179 @@ curl http://localhost:7071/api/health
 ### Deployment
 ```bash
 # Deploy to Azure
-func azure functionapp publish rmhgeoapibeta --python
+func azure functionapp publish rmhgeoapibeta --build remote
 
 # Check deployment
 curl https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/health
 ```
 
-## 📊 Current Status
+## 🏗️ Infrastructure Setup & Management
+
+The system includes comprehensive infrastructure initialization that automatically ensures all required Azure resources exist and are properly configured.
+
+### ✅ Automatic Infrastructure Creation
+
+**What Gets Created Automatically**:
+- **Azure Storage Tables**: Jobs, Tasks (with proper schemas)
+- **Azure Storage Queues**: geospatial-jobs, geospatial-tasks, poison queues  
+- **PostgreSQL STAC Schema**: geo.collections, geo.items tables (optional)
+- **Health monitoring**: Table and queue accessibility validation
+
+**When It Initializes**:
+- **First health check**: `/api/health`
+- **First job submission**: `/api/jobs/{operation}`
+- **Manual trigger**: `/api/infrastructure`
+
+### 📊 Infrastructure Components
+
+#### Storage Tables
+| Table | Purpose | Key Fields |
+|-------|---------|------------|
+| **Jobs** | Job lifecycle tracking | `job_id`, `status`, `job_type`, `dataset_id`, `resource_id`, `result_data` |
+| **Tasks** | Task execution tracking | `task_id`, `parent_job_id`, `status`, `task_type`, `task_data` |
+
+#### Storage Queues
+| Queue | Purpose |
+|-------|---------|
+| **geospatial-jobs** | Job processing queue |
+| **geospatial-tasks** | Task processing queue |
+| **geospatial-jobs-poison** | Failed job messages |
+| **geospatial-tasks-poison** | Failed task messages |
+
+#### Database Schema (Optional)
+| Component | Purpose |
+|-----------|---------|
+| **geo schema** | PostgreSQL schema for STAC data |
+| **geo.collections** | STAC collections table |
+| **geo.items** | STAC items table |
+
+### 🔧 Infrastructure Management APIs
+
+#### Check Infrastructure Status
+```bash
+GET /api/infrastructure
+```
+Response:
+```json
+{
+  "initialized": true,
+  "status": {
+    "tables_created": ["Jobs", "Tasks"],
+    "tables_validated": ["Jobs", "Tasks"],  
+    "queues_created": ["geospatial-jobs", "geospatial-tasks"],
+    "overall_success": true
+  },
+  "health": {
+    "tables": {"Jobs": {"status": "healthy"}},
+    "queues": {"geospatial-jobs": {"status": "healthy", "message_count": 0}}
+  }
+}
+```
+
+#### Force Infrastructure Re-initialization
+```bash
+curl -X POST /api/infrastructure \
+  -H "Content-Type: application/json" \
+  -d '{"force_reinit": true}'
+```
+
+### 🧪 Testing Infrastructure
+
+#### Comprehensive Test Suite
+```bash
+# Set environment variables
+export STORAGE_ACCOUNT_NAME="your_storage_account"
+export AzureWebJobsStorage="DefaultEndpointsProtocol=https;..."
+
+# Run infrastructure tests
+python test_infrastructure_init.py
+```
+
+#### Expected Test Output
+```
+🧪 Testing Infrastructure Initialization Service
+============================================================
+📋 Configuration:
+  Storage Account: rmhazuregeo
+  PostgreSQL Host: rmhpgflex.postgres.database.azure.com
+
+✅ All tests PASSED!
+✅ Tables: 2/2 healthy
+✅ Queues: 4/4 healthy
+✅ Idempotency: Working correctly
+✅ Database: Initialized successfully
+```
+
+### 🔧 Troubleshooting
+
+#### Common Issues
+**❌ Missing STORAGE_ACCOUNT_NAME**
+```bash
+# Solution: Set environment variable
+export STORAGE_ACCOUNT_NAME="rmhazuregeo"
+```
+
+**❌ Permission denied on table/queue creation**
+```bash
+# Solution: Ensure managed identity has Storage Contributor role
+```
+
+**❌ Database connection failures**
+```bash
+# Solution: Check POSTGIS_* environment variables and firewall rules
+```
+
+#### Manual Recovery
+```bash
+# Force complete re-initialization
+curl -X POST /api/infrastructure \
+  -H "Content-Type: application/json" \
+  -d '{"force_reinit": true, "include_database": true}'
+```
+
+### 📋 Best Practices
+
+1. **Let it initialize automatically** - First health check will set up infrastructure
+2. **Monitor infrastructure endpoint** - Use `/api/infrastructure` for status monitoring  
+3. **Test after deployment** - Run infrastructure tests after each deployment
+4. **Check poison queues** - Use `/api/monitor/poison` to check for failed messages
+5. **Database is optional** - System works without PostgreSQL, just no STAC features
+
+## 📊 Current Status (Updated August 28, 2025)
+
+### ✅ Architecture Status
+
+**HelloWorldController**: ✅ **FULLY OPERATIONAL** - Complete end-to-end workflow validated
+- Job Creation → Task Creation → Queue Processing → Task Completion → Job Aggregation ✅
+- Multi-task workflows (n=1 to n=100) with comprehensive result statistics ✅
+- Distributed completion detection without coordination servers ✅
+
+**All Other Operations**: ⚠️ **STATUS UNKNOWN** - Need validation with clean Job→Task architecture
+- ContainerController (list_container, sync_container) - Unknown if using controller pattern
+- STACController (catalog_file operations) - Unknown if using controller pattern  
+- DatabaseMetadataController (metadata operations) - Unknown if using controller or service pattern
+- RasterController (COG operations) - Unknown if implemented with controller pattern
+- TiledRasterController (tiling operations) - Unknown if implemented with controller pattern
 
 ### ✅ Working Features
-- COG conversion for files up to 5GB
-- STAC cataloging with smart mode for 20GB+ files
-- State management with job/task tracking
-- Blob inventory system handling 1000+ files
-- Poison queue monitoring
-- Container sync operations
-- Metadata inference from filenames
+- **Job→Task Architecture**: Complete with HelloWorldController as proven template
+- **STAC cataloging**: Smart mode for 20GB+ files with 270+ items cataloged
+- **Blob inventory system**: Handling 1,157 files (87.96 GB) in bronze container
+- **Poison queue monitoring**: Automatic failed job detection and cleanup
+- **Infrastructure initialization**: Automatic table/queue creation on deployment
+- **Distributed completion**: No coordination servers needed for job completion
 
-### ⚠️ Known Issues
-- Jobs may remain in PROCESSING state after completion
-- Nested file paths create duplicated folder structures
-- Generic naming for some processed files
+### ⚠️ Immediate Priorities
+1. **Validate existing operations**: Test list_container, sync_container for controller pattern usage
+2. **Implement sequential task chaining**: Required for vector and raster processing workflows  
+3. **Test integration**: Verify end-to-end workflows for each operation type
+4. **Convert service pattern operations**: Update any operations still using direct service calls
 
-### 🎯 Upcoming Features
-- Chunked processing for files >10GB (monster_cog)
-- Multi-tile scene merging (multi_merge_cog)
-- Vector data processing to PostGIS
-- GeoParquet exports (Gold tier)
-- TiTiler integration for visualization
+### 🎯 Future Features
+- **Sequential job chaining framework**: Multi-stage workflows (job chaining with stage management)
+- **Vector processing**: Sequential preprocessing → parallel PostGIS upload  
+- **Tiled raster processing**: Orchestrator → N parallel tiles → N COGs
+- **GeoParquet exports**: Gold tier analysis-ready products
 
 ## 📚 Additional Documentation
 See `CLAUDE.md` for detailed technical documentation, deployment instructions, and API examples.

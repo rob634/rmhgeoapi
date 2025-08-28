@@ -142,6 +142,15 @@ class JobRepository:
             entity['created_at'] = job_request.created_at
             entity['updated_at'] = job_request.created_at
             
+            # Stage tracking fields (MANDATORY for job chaining framework)
+            import json
+            entity['stages'] = 1  # Default single stage for non-sequential jobs
+            entity['current_stage_n'] = 1  # Start at stage 1
+            entity['current_stage'] = job_request.operation_type  # Default stage name = operation type
+            entity['stage_sequence'] = json.dumps({1: job_request.operation_type})  # Single stage mapping
+            entity['stage_data'] = json.dumps({})  # Empty initial stage data
+            entity['stage_history'] = json.dumps([])  # Empty initial history
+            
             # Store complete request parameters as JSON for full tracking
             import json
             entity['request_parameters'] = json.dumps(job_request.to_dict())

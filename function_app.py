@@ -111,7 +111,7 @@ from repositories import JobRepository, StorageRepository
 from services import ServiceFactory
 from config import Config, APIParams, Defaults, AzureStorage
 from logger_setup import logger, log_list, log_job_stage, log_queue_operation, log_service_processing
-# DEPRECATED: from state_integration import StateIntegration  # Removed for clean architecture
+# CLEAN JOB→TASK ARCHITECTURE - No legacy state management imports
 
 # Use centralized logger (imported from logger_setup)
 
@@ -755,48 +755,7 @@ def submit_job(req: func.HttpRequest) -> func.HttpResponse:
             logger.debug(f"Controller check failed (non-fatal): {e}")
             # Continue with existing flow
         
-        # Check if this operation uses state management (POC: simple_cog)
-        try:
-            state_integration = StateIntegration()
-            if state_integration.is_state_managed_job(operation_type):
-                logger.info(f"Using state management for operation: {operation_type}")
-                
-                # Handle state-managed operations
-                if operation_type in ['simple_cog', 'cog_conversion_v2']:
-                    try:
-                        result = state_integration.submit_simple_cog_job(
-                            dataset_id=dataset_id,
-                            resource_id=resource_id,
-                            version_id=version_id
-                        )
-                        
-                        return func.HttpResponse(
-                            json.dumps({
-                                "job_id": result['job_id'],
-                                "status": result['status'],
-                                "message": result['message'],
-                                "state_managed": True,
-                                "log_list": log_list.log_messages
-                            }),
-                            status_code=200,
-                            mimetype="application/json"
-                        )
-                    except Exception as e:
-                        logger.error(f"State-managed job submission failed: {e}")
-                        return func.HttpResponse(
-                            json.dumps({
-                                "error": str(e),
-                                "state_managed": True,
-                                "log_list": log_list.log_messages
-                            }),
-                            status_code=500,
-                            mimetype="application/json"
-                        )
-        except Exception as e:
-            logger.debug(f"State management check failed (non-fatal): {e}")
-            # Continue without state management
-        
-        # Continue with existing job processing for non-state-managed operations
+        # CLEAN JOB→TASK ARCHITECTURE - All operations use same pattern
         # Create job request with additional parameters
         job_request = JobRequest(dataset_id, resource_id, version_id, operation_type, system, **additional_params)
         
@@ -987,20 +946,7 @@ def get_job_status(req: func.HttpRequest) -> func.HttpResponse:
                 mimetype="application/json"
             )
         
-        # First check if this is a state-managed job
-        state_integration = StateIntegration()
-        state_job_details = state_integration.get_job_status_with_state(job_id)
-        
-        if state_job_details:
-            # This is a state-managed job, return enhanced status
-            logger.info(f"State-managed job status retrieved: {job_id} -> {state_job_details['status']}")
-            return func.HttpResponse(
-                json.dumps(state_job_details),
-                status_code=200,
-                mimetype="application/json"
-            )
-        
-        # Fall back to regular job repository
+        # CLEAN JOB→TASK ARCHITECTURE - Use JobRepository directly
         job_repo = JobRepository()
         job_details = job_repo.get_job_details(job_id)
         

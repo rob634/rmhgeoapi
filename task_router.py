@@ -22,6 +22,10 @@ class TaskRouter:
     def __init__(self):
         logger.info("Initializing clean TaskRouter for Job→Task architecture")
         
+        # Import TaskManager for task completion workflow
+        from task_manager import TaskManager
+        self.task_manager = TaskManager()
+        
         # CLEAN Job→Task architecture handlers only
         self.handlers = {
             'hello_world': self._handle_hello_world,
@@ -47,23 +51,36 @@ class TaskRouter:
         logger.info(f"Routing task {task_id} of type '{task_type}' for job {job_id}")
         
         try:
+            # Update task status to processing
+            self.task_manager.update_task_status(task_id, 'processing')
+            
             # Get handler for task type
             handler = self.handlers.get(task_type)
             
             if not handler:
                 available_types = list(self.handlers.keys())
                 logger.error(f"Unknown task type: '{task_type}'. Available types: {available_types}")
+                # Mark task as failed
+                self.task_manager.update_task_status(task_id, 'failed', 
+                    {'error': f"Unknown task type: {task_type}"})
                 raise ValueError(f"Unknown task type: {task_type}")
             
             # Execute handler with task data
             logger.info(f"Executing handler for task type '{task_type}'")
             result = handler(task_data)
             
+            # Mark task as completed and store result
+            self.task_manager.update_task_status(task_id, 'completed', 
+                {'result': result})
+            
             logger.info(f"Task {task_id} completed successfully")
             return result
             
         except Exception as e:
             logger.error(f"Task {task_id} failed: {e}", exc_info=True)
+            # Mark task as failed with error details
+            self.task_manager.update_task_status(task_id, 'failed', 
+                {'error': str(e)})
             raise
     
 # DEPRECATED: All old state-managed handlers removed for clean architecture

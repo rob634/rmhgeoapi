@@ -78,17 +78,17 @@ class ContainerController(BaseJobController):
                 field='dataset_id'
             )
         
-        # Validate operation type
-        operation = request.get('operation_type')
-        if operation not in ['list_container', 'sync_container']:
+        # Validate job type
+        job_type = request.get('job_type')
+        if job_type not in ['list_container', 'sync_container']:
             raise InvalidRequestError(
-                f"Invalid operation type: {operation}",
-                field='operation_type',
+                f"Invalid job type: {job_type}",
+                field='job_type',
                 valid_values=['list_container', 'sync_container']
             )
         
         # For sync_container, version_id determines the STAC collection
-        if operation == 'sync_container' and not request.get('version_id'):
+        if job_type == 'sync_container' and not request.get('version_id'):
             # Default to bronze-assets if not specified
             request['version_id'] = 'bronze-assets'
             self.logger.info(f"Using default collection: bronze-assets")
@@ -113,15 +113,15 @@ class ContainerController(BaseJobController):
         Raises:
             TaskCreationError: If task creation fails
         """
-        operation = request.get('operation_type')
+        job_type = request.get('job_type')
         
-        if operation == 'list_container':
+        if job_type == 'list_container':
             return self._create_list_task(job_id, request)
-        elif operation == 'sync_container':
+        elif job_type == 'sync_container':
             return self._create_sync_orchestrator_task(job_id, request)
         else:
             raise TaskCreationError(
-                f"Unknown operation: {operation}",
+                f"Unknown job type: {job_type}",
                 job_id=job_id
             )
     

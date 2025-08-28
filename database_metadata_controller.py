@@ -40,19 +40,19 @@ class DatabaseMetadataController(BaseJobController):
         Raises:
             InvalidRequestError: If request is invalid
         """
-        # Get operation type
-        operation = request.get('operation')
-        if not operation:
+        # Get job type
+        job_type = request.get('job_type')
+        if not job_type:
             from controller_exceptions import InvalidRequestError
-            raise InvalidRequestError("Operation type is required")
+            raise InvalidRequestError("Job type is required")
         
-        # Validate based on operation
-        if operation == 'get_collection_details':
+        # Validate based on job type
+        if job_type == 'get_collection_details':
             if not request.get('collection_id'):
                 from controller_exceptions import InvalidRequestError
                 raise InvalidRequestError("collection_id is required for get_collection_details")
         
-        elif operation == 'query_spatial':
+        elif job_type == 'query_spatial':
             if not request.get('geometry'):
                 from controller_exceptions import InvalidRequestError
                 raise InvalidRequestError("geometry is required for spatial queries")
@@ -70,11 +70,11 @@ class DatabaseMetadataController(BaseJobController):
         Returns:
             List containing single task for database operation
         """
-        operation = request.get('operation')
+        job_type = request.get('job_type')
         
         # Database operations are typically single tasks
         task = {
-            'operation': operation,
+            'operation': job_type,  # Keep 'operation' for task data compatibility
             'parameters': request
         }
         

@@ -108,8 +108,12 @@ class InfrastructureInitializer:
     JOBS_SCHEMA = TableSchema(
         name="Jobs",
         required_fields=[
+            # Core job identification and status
             'dataset_id', 'resource_id', 'version_id', 'job_type',
-            'status', 'created_at', 'updated_at', 'system'
+            'status', 'created_at', 'updated_at', 'system',
+            # Stage tracking fields (MANDATORY for job chaining framework)
+            'stages', 'current_stage_n', 'current_stage', 
+            'stage_sequence', 'stage_data', 'stage_history'
         ],
         optional_fields=[
             'task_count', 'task_ids', 'result_data', 

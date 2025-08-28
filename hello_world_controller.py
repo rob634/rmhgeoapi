@@ -187,8 +187,13 @@ class HelloWorldController(BaseJobController):
             )
             
             if task_id:
-                task_ids.append(task_id)
-                self.logger.debug(f"Created hello_world task {i+1}/{n}: {task_id[:16]}...")
+                # Queue the task for processing
+                if self.queue_task(task_id, task_data):
+                    task_ids.append(task_id)
+                    self.logger.debug(f"Created and queued hello_world task {i+1}/{n}: {task_id[:16]}...")
+                else:
+                    failed_tasks.append(i + 1)
+                    self.logger.error(f"Failed to queue hello_world task {i+1}/{n}: {task_id[:16]}...")
             else:
                 failed_tasks.append(i + 1)
                 self.logger.error(f"Failed to create hello_world task {i+1}/{n}")

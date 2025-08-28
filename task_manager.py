@@ -157,7 +157,6 @@ class TaskManager:
                 'task_id': task_id,
                 'parent_job_id': job_id,
                 'task_type': task_type,
-                'operation': task_type,  # Add operation field for task processor compatibility
                 'index': index,
                 'status': 'pending',
                 'created_at': datetime.utcnow().isoformat()
@@ -326,11 +325,38 @@ class TaskManager:
             
             # Determine job status
             if completed + failed == total:
-                # All tasks finished
+                # All tasks finished - aggregate results
+                task_results = []
+                for task in tasks:
+                    task_result = {
+                        'task_id': task.get('task_id'),
+                        'task_type': task.get('task_type'),
+                        'status': task.get('status'),
+                        'result': task.get('result_data'),
+                        'error': task.get('error_message')
+                    }
+                    task_results.append(task_result)
+                
+                # Build aggregated result_data
+                result_data = {
+                    'task_results': task_results,
+                    'task_summary': {
+                        'total_tasks': total,
+                        'successful_tasks': completed,
+                        'failed_tasks': failed
+                    }
+                }
+                
+                # Add job-specific result aggregation (for hello_world)
+                self._aggregate_job_specific_results(result_data, tasks)
+                
+                # Update job with aggregated results
+                job_metadata.update({'result_data': result_data})
+                
                 if failed == 0:
                     # All succeeded
                     self.job_repo.update_job_status(job_id, 'completed', job_metadata)
-                    self.logger.info(f"Job {job_id} completed successfully")
+                    self.logger.info(f"Job {job_id} completed successfully with {completed} tasks")
                 elif completed == 0:
                     # All failed
                     self.job_repo.update_job_status(job_id, 'failed', job_metadata)
@@ -345,6 +371,69 @@ class TaskManager:
                 
         except Exception as e:
             self.logger.error(f"Failed to check job completion for {job_id}: {e}")
+    
+    def _aggregate_job_specific_results(self, result_data: Dict, tasks: List[Dict]) -> None:
+        """
+        Aggregate job-specific results based on task types.
+        
+        Args:
+            result_data: Job result data to modify
+            tasks: List of completed tasks
+        """
+        try:
+            # Check if this is a hello_world job
+            task_types = [task.get('task_type') for task in tasks]
+            if 'hello_world' in task_types:
+                self._aggregate_hello_world_results(result_data, tasks)
+                
+        except Exception as e:
+            self.logger.error(f"Failed to aggregate job-specific results: {e}")
+    
+    def _aggregate_hello_world_results(self, result_data: Dict, tasks: List[Dict]) -> None:
+        """
+        Aggregate hello_world job results into hello_statistics and hello_messages.
+        
+        Args:
+            result_data: Job result data to modify
+            tasks: List of completed tasks
+        """
+        hello_messages = []
+        successful_hellos = 0
+        failed_hellos = 0
+        failed_hello_numbers = []
+        
+        for task in tasks:
+            if task.get('task_type') == 'hello_world':
+                if task.get('status') == 'completed':
+                    successful_hellos += 1
+                    task_result = task.get('result_data')
+                    if task_result and isinstance(task_result, dict):
+                        greeting = task_result.get('greeting')
+                        if greeting:
+                            hello_messages.append(greeting)
+                elif task.get('status') == 'failed':
+                    failed_hellos += 1
+                    task_result = task.get('result_data')
+                    if task_result and isinstance(task_result, dict):
+                        hello_number = task_result.get('hello_number')
+                        if hello_number:
+                            failed_hello_numbers.append(hello_number)
+        
+        total_hellos = successful_hellos + failed_hellos
+        success_rate = (successful_hellos / total_hellos * 100) if total_hellos > 0 else 0
+        
+        # Add hello_world specific aggregation
+        result_data['hello_statistics'] = {
+            'total_hellos_requested': total_hellos,
+            'hellos_completed_successfully': successful_hellos,
+            'hellos_failed': failed_hellos,
+            'success_rate': round(success_rate, 1)
+        }
+        
+        if failed_hello_numbers:
+            result_data['hello_statistics']['failed_hello_numbers'] = failed_hello_numbers
+            
+        result_data['hello_messages'] = hello_messages
     
     def check_and_update_job_status(self, job_id: str):
         """

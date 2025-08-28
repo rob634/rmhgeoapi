@@ -111,7 +111,7 @@ from repositories import JobRepository, StorageRepository
 from services import ServiceFactory
 from config import Config, APIParams, Defaults, AzureStorage
 from logger_setup import logger, log_list, log_job_stage, log_queue_operation, log_service_processing
-from state_integration import StateIntegration  # NEW: State management integration
+# DEPRECATED: from state_integration import StateIntegration  # Removed for clean architecture
 
 # Use centralized logger (imported from logger_setup)
 
@@ -1400,7 +1400,7 @@ def process_task_queue(msg: func.QueueMessage) -> None:
                 
                 # Pass all task_data as additional parameters for services that need them
                 # Exclude standard service.process() parameters to avoid duplicate arguments
-                excluded_params = ['task_id', 'operation', 'parent_job_id', 'dataset_id', 'resource_id', 'version_id']
+                excluded_params = ['task_id', 'operation', 'parent_job_id', 'dataset_id', 'resource_id', 'version_id', 'task_type']
                 additional_params = {k: v for k, v in task_data.items() 
                                    if k not in excluded_params}
                 logger.debug(f"    additional_params: {list(additional_params.keys())}")
@@ -1411,7 +1411,7 @@ def process_task_queue(msg: func.QueueMessage) -> None:
                         dataset_id=task_data.get('dataset_id'),
                         resource_id=task_data.get('resource_id'),
                         version_id=task_data.get('version_id', 'v1'),
-                        operation_type=operation,  # Pass the operation type
+                        operation_type=operation,  # Services expect operation_type parameter
                         **additional_params  # Pass all additional task data
                     )
                     logger.info(f"✅ Service.process() completed successfully")
@@ -1483,21 +1483,19 @@ def process_task_queue(msg: func.QueueMessage) -> None:
             logger.info(f"  Task type: {task_data.get('task_type')}")
             logger.info(f"  Job ID: {task_data.get('job_id')}")
             
+# CLEAN JOB→TASK ARCHITECTURE ROUTING
+            # Use clean TaskRouter for Job→Task architecture tasks
             try:
-                state_integration = StateIntegration()
-                logger.info(f"StateIntegration created successfully")
+                from task_router import TaskRouter
+                task_router = TaskRouter()
+                logger.info(f"Clean TaskRouter initialized for task: {task_data.get('task_id')}")
                 
-                state_result = state_integration.process_state_managed_task(task_data)
-                if state_result is not None:
-                    # This was a state-managed task, it's been processed
-                    logger.info(f"State-managed task processed successfully")
-                    return
-                else:
-                    logger.warning(f"State-managed task returned None - may have failed to initialize")
+                result = task_router.route(task_data)
+                logger.info(f"Clean TaskRouter processed task successfully")
+                return result
+                
             except Exception as e:
-                logger.error(f"Error in state management task processing: {e}", exc_info=True)
-                # This is definitely a state-managed task that failed
-                logger.error(f"State-managed task {task_data.get('task_id')} failed to process")
+                logger.error(f"Clean TaskRouter failed: {e}", exc_info=True)
                 raise
         else:
             logger.debug(f"Not a Job→Task or state-managed task")
@@ -1826,11 +1824,16 @@ def diagnose_state(req: func.HttpRequest) -> func.HttpResponse:
 @app.route(route="monitor/poison", methods=["GET", "POST"])
 def check_poison_queues(req: func.HttpRequest) -> func.HttpResponse:
     """
-    Monitor and manage poison queue messages.
+    Enhanced poison queue monitoring with production-ready analytics.
     
-    Provides visibility into failed messages that have been moved to poison
-    queues after exceeding retry limits. Can optionally process or clean up
-    old poison messages.
+    Provides comprehensive visibility into failed messages with detailed error
+    analysis, health status, and operational recommendations.
+    
+    Query Parameters:
+        - health: Return health status dashboard (GET /api/monitor/poison?health=true)
+        - analysis: Return detailed analysis (GET /api/monitor/poison?analysis=true)
+        - process_all: Process all messages (POST with {"process_all": true})
+        - cleanup: Cleanup old messages (POST with {"cleanup_old_messages": true})
     
     Args:
         req: Azure Functions HTTP request.
@@ -1879,7 +1882,33 @@ def check_poison_queues(req: func.HttpRequest) -> func.HttpResponse:
     logger.info("Poison queue check requested via HTTP")
     
     try:
-        from poison_queue_monitor import PoisonQueueMonitor
+        from poison_queue_monitor import PoisonQueueMonitor, PoisonQueueDashboard
+        
+        # Check for enhanced monitoring requests
+        health_request = req.params.get("health", "").lower() == "true"
+        analysis_request = req.params.get("analysis", "").lower() == "true"
+        
+        if health_request:
+            # Return health status dashboard
+            dashboard = PoisonQueueDashboard()
+            health_status = dashboard.get_health_status()
+            logger.info(f"Poison queue health status: {health_status['overall_health']}")
+            return func.HttpResponse(
+                json.dumps(health_status),
+                mimetype="application/json",
+                status_code=200
+            )
+        
+        if analysis_request:
+            # Return detailed analysis
+            dashboard = PoisonQueueDashboard()
+            analysis = dashboard.get_detailed_analysis()
+            logger.info(f"Poison queue analysis: {analysis['total_messages_analyzed']} messages analyzed")
+            return func.HttpResponse(
+                json.dumps(analysis),
+                mimetype="application/json", 
+                status_code=200
+            )
         
         monitor = PoisonQueueMonitor()
         

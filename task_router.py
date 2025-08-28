@@ -38,6 +38,8 @@ class TaskRouter:
             TaskType.PROCESS_CHUNK.value: self._handle_process_chunk,
             TaskType.ASSEMBLE_CHUNKS.value: self._handle_assemble_chunks,
             TaskType.BUILD_VRT.value: self._handle_build_vrt,
+            # Job→Task architecture handlers
+            'hello_world': self._handle_hello_world,
         }
     
     def route(self, task_message: TaskMessage) -> Dict[str, Any]:
@@ -299,6 +301,42 @@ class TaskRouter:
         # In production, this would call the VRT builder
         
         return {'status': 'vrt_built'}
+    
+    def _handle_hello_world(self, task_message: TaskMessage) -> Dict[str, Any]:
+        """Handle hello world task from Job→Task architecture"""
+        logger.info(f"Processing hello world task {task_message.task_id}")
+        
+        params = task_message.parameters or {}
+        
+        # Extract hello world parameters
+        message = params.get('message', 'Hello from Task Router!')
+        hello_number = params.get('hello_number', 1)
+        total_hellos = params.get('total_hellos', 1)
+        dataset_id = params.get('dataset_id', 'unknown')
+        resource_id = params.get('resource_id', 'unknown')
+        
+        logger.info(
+            f"Hello World #{hello_number}/{total_hellos}: {message} "
+            f"(Dataset: {dataset_id}, Resource: {resource_id})"
+        )
+        
+        # Build result data
+        result = {
+            'status': 'success',
+            'message': message,
+            'hello_number': hello_number,
+            'total_hellos': total_hellos,
+            'dataset_id': dataset_id,
+            'resource_id': resource_id,
+            'task_id': task_message.task_id,
+            'job_id': task_message.job_id,
+            'processed_at': datetime.now().isoformat(),
+            'greeting': f"🎉 Hello #{hello_number} completed successfully!"
+        }
+        
+        logger.info(f"Hello world task {task_message.task_id} completed: {result['greeting']}")
+        
+        return result
     
     def _queue_next_task(
         self,

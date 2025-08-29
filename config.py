@@ -1,272 +1,318 @@
 """
-Configuration module for Azure Functions geospatial ETL pipeline
-Centralized environment variable management and constants
+Strongly typed configuration management with Pydantic v2
+Centralized environment variable validation and documentation
 """
 import os
 from typing import Optional
+from pydantic import BaseModel, Field, field_validator, ValidationError
 
 
-class EnvVarNames:
-    """Environment variable name constants - centralized for easy changes"""
+class AppConfig(BaseModel):
+    """
+    Strongly typed application configuration using Pydantic v2.
     
-    # Azure Storage Environment Variables
-    STORAGE_ACCOUNT_NAME = 'STORAGE_ACCOUNT_NAME'
-    AZURE_WEBJOBS_STORAGE = 'AzureWebJobsStorage'
-    BRONZE_CONTAINER_NAME = 'BRONZE_CONTAINER_NAME'
-    SILVER_CONTAINER_NAME = 'SILVER_CONTAINER_NAME'
-    GOLD_CONTAINER_NAME = 'GOLD_CONTAINER_NAME'
+    All environment variables are documented, validated, and typed.
+    Provides single source of truth for configuration management.
+    """
     
-    # Temporary Storage Configuration
-    TEMP_CONTAINER_NAME = 'TEMP_CONTAINER_NAME'
-    TEMP_STORAGE_ACCOUNT = 'TEMP_STORAGE_ACCOUNT'  # Optional: separate account for temp
-    USE_ADLS = 'USE_ADLS'  # Enable ADLS features (hierarchical namespace)
-    
-    # PostGIS Database Environment Variables
-    POSTGIS_HOST = 'POSTGIS_HOST'
-    
-    POSTGIS_PORT = 'POSTGIS_PORT'
-    POSTGIS_USER = 'POSTGIS_USER'
-    POSTGIS_PASSWORD = 'POSTGIS_PASSWORD'
-    POSTGIS_DATABASE = 'POSTGIS_DATABASE'
-    POSTGIS_SCHEMA = 'POSTGIS_SCHEMA'
-    
-    # Application Environment Variables
-    FUNCTION_TIMEOUT = 'FUNCTION_TIMEOUT'
-    MAX_RETRY_ATTEMPTS = 'MAX_RETRY_ATTEMPTS'
-    LOG_LEVEL = 'LOG_LEVEL'
-
-
-class Config:
-    """Configuration class for environment variables"""
-    
+    # ========================================================================
     # Azure Storage Configuration
-    # Extract storage account name from AzureWebJobsStorage__blobServiceUri or use explicit setting
-    _storage_uri = os.environ.get('AzureWebJobsStorage__blobServiceUri', '')
-    if _storage_uri and _storage_uri.startswith('https://'):
-        # Extract account name from URI like https://rmhazuregeo.blob.core.windows.net
-        STORAGE_ACCOUNT_NAME = _storage_uri.split('//')[1].split('.')[0] if '//' in _storage_uri else None
-    else:
-        # Fallback to explicit STORAGE_ACCOUNT_NAME environment variable
-        STORAGE_ACCOUNT_NAME: Optional[str] = os.environ.get(EnvVarNames.STORAGE_ACCOUNT_NAME)
+    # ========================================================================
     
-    AZURE_WEBJOBS_STORAGE: Optional[str] = os.environ.get(EnvVarNames.AZURE_WEBJOBS_STORAGE)
-    BRONZE_CONTAINER_NAME: Optional[str] = os.environ.get(EnvVarNames.BRONZE_CONTAINER_NAME)
-    #Silver container hosts COGs 
-    SILVER_CONTAINER_NAME: Optional[str] = os.environ.get(EnvVarNames.SILVER_CONTAINER_NAME)
-    #Gold container has GeoParquet mirroring selections from Silver Database
-    GOLD_CONTAINER_NAME: Optional[str] = os.environ.get(EnvVarNames.GOLD_CONTAINER_NAME)
+    storage_account_name: str = Field(
+        ...,  # Required field
+        description="Azure Storage Account name for managed identity authentication",
+        examples=["rmhazuregeo"]
+    )
     
-    # Storage Folder Configuration - use folders within Silver container for efficiency
-    SILVER_TEMP_FOLDER: str = os.environ.get('SILVER_TEMP_FOLDER', 'temp')
-    SILVER_COGS_FOLDER: str = os.environ.get('SILVER_COGS_FOLDER', 'cogs')
-    SILVER_CHUNKS_FOLDER: str = os.environ.get('SILVER_CHUNKS_FOLDER', 'chunks')
+    bronze_container_name: str = Field(
+        ...,
+        description="Bronze tier container name for raw geospatial data",
+        examples=["rmhazuregeobronze"]
+    )
     
-    # ADLS Configuration for efficient operations
-    USE_ADLS: bool = os.environ.get(EnvVarNames.USE_ADLS, 'false').lower() == 'true'
+    silver_container_name: str = Field(
+        ...,
+        description="Silver tier container name for processed COGs and structured data",
+        examples=["rmhazuregeosilver"]
+    )
     
-    # State storage configuration (keep separate for management)
-    STATE_CONTAINER_NAME: str = os.environ.get('STATE_CONTAINER_NAME', 'rmhazuregeostate')
+    gold_container_name: str = Field(
+        ...,
+        description="Gold tier container name for GeoParquet exports and analytics",
+        examples=["rmhazuregeogold"]
+    )
     
+    # ========================================================================
+    # PostgreSQL/PostGIS Configuration
+    # ========================================================================
     
-    # PostGIS Database Configuration
-    POSTGIS_HOST: Optional[str] = os.environ.get(EnvVarNames.POSTGIS_HOST)
-    POSTGIS_PORT: Optional[int] = int(os.environ.get(EnvVarNames.POSTGIS_PORT)) if os.environ.get(EnvVarNames.POSTGIS_PORT) else None
-    POSTGIS_USER: Optional[str] = os.environ.get(EnvVarNames.POSTGIS_USER)
-    POSTGIS_PASSWORD: Optional[str] = os.environ.get(EnvVarNames.POSTGIS_PASSWORD)
-    # This is the database half of silver storage
-    POSTGIS_DATABASE: Optional[str] = os.environ.get(EnvVarNames.POSTGIS_DATABASE)
-    POSTGIS_SCHEMA: Optional[str] = os.environ.get(EnvVarNames.POSTGIS_SCHEMA)
+    postgis_host: str = Field(
+        ...,
+        description="PostgreSQL server hostname for STAC catalog and metadata",
+        examples=["rmhpgflex.postgres.database.azure.com"]
+    )
     
+    postgis_port: int = Field(
+        default=5432,
+        description="PostgreSQL server port number"
+    )
     
-    # Application Configuration (these can have sensible defaults)
-    FUNCTION_TIMEOUT: int = int(os.environ.get(EnvVarNames.FUNCTION_TIMEOUT, '300'))  # 5 minutes default
-    MAX_RETRY_ATTEMPTS: int = int(os.environ.get(EnvVarNames.MAX_RETRY_ATTEMPTS, '3'))
-    LOG_LEVEL: str = os.environ.get(EnvVarNames.LOG_LEVEL, 'INFO')
+    postgis_user: str = Field(
+        ...,
+        description="PostgreSQL username for database connections"
+    )
     
-    @classmethod
-    def validate_storage_config(cls) -> None:
-        """Validate that required storage configuration is present"""
-        if not cls.STORAGE_ACCOUNT_NAME:
-            raise ValueError(
-                f"{EnvVarNames.STORAGE_ACCOUNT_NAME} environment variable must be set for managed identity"
-            )
+    postgis_password: Optional[str] = Field(
+        default=None,
+        description="PostgreSQL password (optional when using managed identity)"
+    )
     
-    @classmethod
-    def validate_container_config(cls) -> None:
-        """Validate that required container configuration is present"""
-        if not cls.BRONZE_CONTAINER_NAME:
-            raise ValueError(f"{EnvVarNames.BRONZE_CONTAINER_NAME} environment variable must be set")
-        if not cls.SILVER_CONTAINER_NAME:
-            raise ValueError(f"{EnvVarNames.SILVER_CONTAINER_NAME} environment variable must be set")
-        if not cls.GOLD_CONTAINER_NAME:
-            raise ValueError(f"{EnvVarNames.GOLD_CONTAINER_NAME} environment variable must be set")
+    postgis_database: str = Field(
+        ...,
+        description="PostgreSQL database name containing STAC catalog",
+        examples=["geopgflex"]
+    )
     
-    @classmethod
-    def validate_postgis_config(cls) -> None:
-        """Validate that required PostGIS configuration is present"""
-        if not cls.POSTGIS_HOST:
-            raise ValueError(f"{EnvVarNames.POSTGIS_HOST} environment variable must be set")
-        if not cls.POSTGIS_PORT:
-            raise ValueError(f"{EnvVarNames.POSTGIS_PORT} environment variable must be set")
-        if not cls.POSTGIS_USER:
-            raise ValueError(f"{EnvVarNames.POSTGIS_USER} environment variable must be set")
-        # POSTGIS_PASSWORD is optional when using managed identity
-        if not cls.POSTGIS_DATABASE:
-            raise ValueError(f"{EnvVarNames.POSTGIS_DATABASE} environment variable must be set")
-        if not cls.POSTGIS_SCHEMA:
-            raise ValueError(f"{EnvVarNames.POSTGIS_SCHEMA} environment variable must be set")
+    postgis_schema: str = Field(
+        default="geo",
+        description="PostgreSQL schema name for STAC collections and items"
+    )
     
-    @classmethod
-    def get_postgis_connection_string(cls, include_schema: bool = False) -> str:
-        """Get PostGIS connection string"""
-        cls.validate_postgis_config()
-        
-        # Build connection string with or without password (for managed identity)
-        if cls.POSTGIS_PASSWORD:
-            # Traditional authentication with password
-            connection_string = (
-                f"postgresql://{cls.POSTGIS_USER}:{cls.POSTGIS_PASSWORD}"
-                f"@{cls.POSTGIS_HOST}:{cls.POSTGIS_PORT}/{cls.POSTGIS_DATABASE}"
+    # ========================================================================
+    # Queue Processing Configuration
+    # ========================================================================
+    
+    job_processing_queue: str = Field(
+        default="geospatial-jobs",
+        description="Azure Storage Queue for job orchestration messages"
+    )
+    
+    task_processing_queue: str = Field(
+        default="geospatial-tasks", 
+        description="Azure Storage Queue for individual task processing"
+    )
+    
+    # ========================================================================
+    # Application Configuration
+    # ========================================================================
+    
+    function_timeout_minutes: int = Field(
+        default=5,
+        ge=1,
+        le=10,
+        description="Azure Function timeout in minutes (1-10 range)"
+    )
+    
+    max_retry_attempts: int = Field(
+        default=3,
+        ge=1,
+        le=10,
+        description="Maximum retry attempts for failed operations"
+    )
+    
+    log_level: str = Field(
+        default="INFO",
+        description="Logging level for application diagnostics"
+    )
+    
+    enable_database_health_check: bool = Field(
+        default=True,
+        description="Enable PostgreSQL connectivity checks in health endpoint"
+    )
+    
+    # ========================================================================
+    # Computed Properties
+    # ========================================================================
+    
+    @property
+    def blob_service_url(self) -> str:
+        """Azure Blob Storage service URL for managed identity"""
+        return f"https://{self.storage_account_name}.blob.core.windows.net"
+    
+    @property
+    def queue_service_url(self) -> str:
+        """Azure Queue Storage service URL for managed identity"""
+        return f"https://{self.storage_account_name}.queue.core.windows.net"
+    
+    @property
+    def table_service_url(self) -> str:
+        """Azure Table Storage service URL for managed identity"""
+        return f"https://{self.storage_account_name}.table.core.windows.net"
+    
+    @property
+    def postgis_connection_string(self) -> str:
+        """PostgreSQL connection string with or without password"""
+        if self.postgis_password:
+            return (
+                f"postgresql://{self.postgis_user}:{self.postgis_password}"
+                f"@{self.postgis_host}:{self.postgis_port}/{self.postgis_database}"
             )
         else:
-            # Managed identity authentication (no password)
-            connection_string = (
-                f"postgresql://{cls.POSTGIS_USER}"
-                f"@{cls.POSTGIS_HOST}:{cls.POSTGIS_PORT}/{cls.POSTGIS_DATABASE}"
+            # Managed identity or no password authentication
+            return (
+                f"postgresql://{self.postgis_user}"
+                f"@{self.postgis_host}:{self.postgis_port}/{self.postgis_database}"
             )
-        
-        if include_schema:
-            connection_string += f"?options=-csearch_path={cls.POSTGIS_SCHEMA}"
-        
-        return connection_string
+    
+    # ========================================================================
+    # Validation
+    # ========================================================================
+    
+    @field_validator('log_level')
+    @classmethod
+    def validate_log_level(cls, v: str) -> str:
+        """Validate log level is one of the standard Python logging levels"""
+        valid_levels = {'DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'}
+        if v.upper() not in valid_levels:
+            raise ValueError(f"log_level must be one of: {', '.join(valid_levels)}")
+        return v.upper()
+    
+    @field_validator('storage_account_name')
+    @classmethod
+    def validate_storage_account_name(cls, v: str) -> str:
+        """Validate Azure Storage account name format"""
+        if not v.islower():
+            raise ValueError("storage_account_name must be lowercase")
+        if not v.replace('-', '').isalnum():
+            raise ValueError("storage_account_name must contain only lowercase letters, numbers, and hyphens")
+        if len(v) < 3 or len(v) > 24:
+            raise ValueError("storage_account_name must be 3-24 characters long")
+        return v
+    
+    # ========================================================================
+    # Factory Methods
+    # ========================================================================
     
     @classmethod
-    def get_storage_account_url(cls, service: str = 'blob') -> str:
-        """Get storage account URL for specified service"""
-        cls.validate_storage_config()
+    def from_environment(cls) -> 'AppConfig':
+        """
+        Create configuration from environment variables.
         
-        if not cls.STORAGE_ACCOUNT_NAME:
-            raise ValueError(f"{EnvVarNames.STORAGE_ACCOUNT_NAME} not configured for managed identity")
+        Raises:
+            ValidationError: If required environment variables are missing or invalid
+        """
+        return cls(
+            # Azure Storage
+            storage_account_name=os.environ['STORAGE_ACCOUNT_NAME'],
+            bronze_container_name=os.environ['BRONZE_CONTAINER_NAME'],
+            silver_container_name=os.environ['SILVER_CONTAINER_NAME'],
+            gold_container_name=os.environ['GOLD_CONTAINER_NAME'],
+            
+            # PostgreSQL
+            postgis_host=os.environ['POSTGIS_HOST'],
+            postgis_port=int(os.environ.get('POSTGIS_PORT', '5432')),
+            postgis_user=os.environ['POSTGIS_USER'],
+            postgis_password=os.environ.get('POSTGIS_PASSWORD'),
+            postgis_database=os.environ['POSTGIS_DATABASE'],
+            postgis_schema=os.environ.get('POSTGIS_SCHEMA', 'geo'),
+            
+            # Application
+            function_timeout_minutes=int(os.environ.get('FUNCTION_TIMEOUT_MINUTES', '5')),
+            max_retry_attempts=int(os.environ.get('MAX_RETRY_ATTEMPTS', '3')),
+            log_level=os.environ.get('LOG_LEVEL', 'INFO'),
+            enable_database_health_check=os.environ.get('ENABLE_DATABASE_HEALTH_CHECK', 'true').lower() == 'true',
+            
+            # Queues (usually defaults are fine)
+            job_processing_queue=os.environ.get('JOB_PROCESSING_QUEUE', 'geospatial-jobs'),
+            task_processing_queue=os.environ.get('TASK_PROCESSING_QUEUE', 'geospatial-tasks'),
+        )
+    
+    def validate_runtime_dependencies(self) -> None:
+        """
+        Validate that runtime dependencies are accessible.
+        Call this during application startup to fail fast.
+        """
+        # Could add actual connectivity tests here
+        # For now, just validate required fields exist
+        required_fields = [
+            'storage_account_name', 'bronze_container_name', 
+            'silver_container_name', 'gold_container_name',
+            'postgis_host', 'postgis_user', 'postgis_database'
+        ]
         
-        return f"https://{cls.STORAGE_ACCOUNT_NAME}.{service}.core.windows.net"
+        for field in required_fields:
+            value = getattr(self, field)
+            if not value:
+                raise ValueError(f"Configuration field '{field}' is required but empty")
+
+
+# ========================================================================
+# Global Configuration Instance
+# ========================================================================
+
+def get_config() -> AppConfig:
+    """
+    Get the global application configuration.
     
-    @classmethod
-    def get_bronze_container_url(cls) -> str:
-        """Get full URL to bronze container"""
-        cls.validate_container_config()
-        blob_url = cls.get_storage_account_url('blob')
-        return f"{blob_url}/{cls.BRONZE_CONTAINER_NAME}"
+    Creates and validates configuration from environment variables on first call.
+    Subsequent calls return the cached instance.
     
-    @classmethod
-    def debug_config(cls) -> dict:
-        """Get configuration summary for debugging (masks sensitive values)"""
+    Raises:
+        ValidationError: If configuration is invalid
+        KeyError: If required environment variables are missing
+    """
+    global _config_instance
+    if _config_instance is None:
+        try:
+            _config_instance = AppConfig.from_environment()
+            _config_instance.validate_runtime_dependencies()
+        except KeyError as e:
+            raise ValueError(f"Missing required environment variable: {e}")
+        except ValidationError as e:
+            raise ValueError(f"Configuration validation failed: {e}")
+    return _config_instance
+
+
+# Global instance (lazy loaded)
+_config_instance: Optional[AppConfig] = None
+
+
+# ========================================================================
+# Legacy Constants (for backwards compatibility during migration)
+# ========================================================================
+
+class QueueNames:
+    """Queue name constants for easy access"""
+    JOBS = "geospatial-jobs"
+    TASKS = "geospatial-tasks"
+
+
+# ========================================================================
+# Development Helpers
+# ========================================================================
+
+def debug_config() -> dict:
+    """
+    Get sanitized configuration for debugging (masks sensitive values).
+    
+    Returns:
+        Dictionary with configuration values, passwords masked
+    """
+    try:
+        config = get_config()
         return {
-            'storage_account_name': cls.STORAGE_ACCOUNT_NAME,
-            'azure_webjobs_storage_configured': bool(cls.AZURE_WEBJOBS_STORAGE),
-            'bronze_container_name': cls.BRONZE_CONTAINER_NAME,
-            'silver_container_name': cls.SILVER_CONTAINER_NAME,
-            'gold_container_name': cls.GOLD_CONTAINER_NAME,
-            'postgis_host': cls.POSTGIS_HOST,
-            'postgis_port': cls.POSTGIS_PORT,
-            'postgis_user': cls.POSTGIS_USER,
-            'postgis_password_configured': bool(cls.POSTGIS_PASSWORD),
-            'postgis_database': cls.POSTGIS_DATABASE,
-            'postgis_schema': cls.POSTGIS_SCHEMA,
-            'function_timeout': cls.FUNCTION_TIMEOUT,
-            'max_retry_attempts': cls.MAX_RETRY_ATTEMPTS,
-            'log_level': cls.LOG_LEVEL
+            'storage_account_name': config.storage_account_name,
+            'bronze_container': config.bronze_container_name,
+            'silver_container': config.silver_container_name,
+            'gold_container': config.gold_container_name,
+            'postgis_host': config.postgis_host,
+            'postgis_port': config.postgis_port,
+            'postgis_user': config.postgis_user,
+            'postgis_password_set': bool(config.postgis_password),
+            'postgis_database': config.postgis_database,
+            'postgis_schema': config.postgis_schema,
+            'job_queue': config.job_processing_queue,
+            'task_queue': config.task_processing_queue,
+            'function_timeout_minutes': config.function_timeout_minutes,
+            'log_level': config.log_level,
         }
+    except Exception as e:
+        return {'error': f'Configuration validation failed: {e}'}
 
 
-# API Parameter Names - Change these to update across entire application
-class APIParams:
-    """HTTP API parameter names"""
-    DATASET_ID = "dataset_id"
-    RESOURCE_ID = "resource_id"
-    VERSION_ID = "version_id"
-    OPERATION_TYPE = "operation_type"
-    SYSTEM = "system"
-    
-    # Job tracking parameters
-    JOB_ID = "job_id"
-    STATUS = "status"
-    MESSAGE = "message"
-    IS_DUPLICATE = "is_duplicate"
-    CREATED_AT = "created_at"
-    UPDATED_AT = "updated_at"
-    ERROR_MESSAGE = "error_message"
-    RESULT_DATA = "result_data"
-
-
-# Operation Types
-class Operations:
-    """Supported operation types"""
-    HELLO_WORLD = "hello_world"
-    LIST_CONTAINER = "list_container"
-    COG_CONVERSION = "cog_conversion"
-    VECTOR_UPLOAD = "vector_upload"
-    STAC_GENERATION = "stac_generation"
-
-
-# Job Status Values
-class JobStatuses:
-    """Job status constants"""
-    PENDING = "pending"
-    QUEUED = "queued"
-    PROCESSING = "processing"
-    COMPLETED = "completed"
-    FAILED = "failed"
-
-
-# Default Values
-class Defaults:
-    """Default parameter values"""
-    SYSTEM_FLAG = False
-    NO_FILTER = "none"
-    DEFAULT_VERSION = "v1.0.0"
-    
-
-# Validation Constants
-class Validation:
-    """Validation rules and patterns"""
-    INVALID_DATASET_CHARS = ['/', '\\', ':', '*', '?', '"', '<', '>', '|']
-    INVALID_RESOURCE_CHARS = [':', '*', '?', '"', '<', '>', '|']
-    
-
-# Azure Storage Configuration
-class AzureStorage:
-    """Azure Storage service names and configuration constants"""
-    JOB_PROCESSING_QUEUE = "geospatial-jobs"
-    JOB_TRACKING_TABLE = "jobs"
-    FUNCTIONS_KEY_HEADER = "x-functions-key"
-    STORAGE_CONNECTION = "AzureWebJobsStorage"
-    # For managed identity connections, Azure Functions expects: {ConnectionName}__serviceUri
-    MANAGED_IDENTITY_CONNECTION = "Storage"
-
-
-# Raster Processing Configuration
-class RasterConfig:
-    """Raster processing configuration constants"""
-    # Target CRS for all Silver tier COGs
-    TARGET_EPSG = 4326  # WGS84 - ALWAYS reproject to this for Silver
-    
-    # File size thresholds (in MB)
-    MAX_DOWNLOAD_SIZE_MB = 500  # Use smart mode (URL access) above this size
-    
-    # Maximum file size for processing (Premium Plan limit)
-    # NOTE: Currently limited to 5GB for in-memory processing on Premium Plan
-    # TODO: Future enhancement - implement sequential batch processing for very large GeoTIFFs
-    # This will allow processing of files >5GB by splitting into tiles/windows
-    MAX_PROCESSING_SIZE_GB = 5  # Premium plan memory limit
-    
-    # Valid raster extensions
-    VALID_EXTENSIONS = ['.tif', '.tiff', '.geotiff', '.geotif']
-    
-    # COG profile for rio-cogeo
-    COG_PROFILE = 'lzw'  # LZW compression for COG creation
-    
-    # Resampling method for reprojection
-    RESAMPLING_METHOD = 'bilinear'
-    
-    # Maximum raster name length
-    MAX_RASTER_NAME_LENGTH = 255
+if __name__ == "__main__":
+    # Quick test/debug when run directly
+    import json
+    print("Configuration Debug:")
+    print(json.dumps(debug_config(), indent=2))

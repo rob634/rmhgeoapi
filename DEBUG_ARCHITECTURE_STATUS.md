@@ -1,6 +1,6 @@
 # Debug Architecture Status - Aug 29, 2025
 
-**PRODUCTION DEBUGGING COMPLETE** ✅ - All critical architecture issues resolved through systematic debugging
+**QUEUE TRIGGER DEBUGGING IN PROGRESS** 🔄 - Previous architecture issues resolved, now debugging queue execution errors
 
 ## 🎯 Debugging Session Summary
 
@@ -106,10 +106,95 @@ The hello_world controller pattern is now fully functional and production-ready 
 - **Type Safety**: Pydantic validation throughout the pipeline
 - **Queue Integration**: Reliable asynchronous processing
 
-## 🔄 Next Steps
+---
+
+## 🔄 **PHASE 2: QUEUE TRIGGER DEBUGGING - Aug 29, 2025**
+
+### 🎯 New Objective
+Debug queue trigger execution errors after successful deployment and job creation.
+
+### 🔍 Investigation Results
+
+**✅ Deployment Verification:**
+- Function app `rmhgeoapibeta` successfully deployed with remote build
+- All dependencies installed: Pydantic v2, Azure SDK, rasterio, psycopg
+- All functions deployed correctly (HTTP triggers + Queue triggers)
+
+**✅ Queue Trigger Status:**
+- `process_job_queue` function: ✅ Deployed and configured correctly
+- `process_task_queue` function: ✅ Deployed and configured correctly
+- Queue trigger bindings: ✅ Properly configured for `geospatial-jobs` and `geospatial-tasks` queues
+
+**✅ Managed Identity Authentication:**
+- Function app managed identity: ✅ `995badc6-9b03-481f-9544-9f5957dd893d`
+- Storage permissions confirmed:
+  - ✅ **Storage Queue Data Contributor** - for queue triggers
+  - ✅ **Storage Blob Data Owner** - for blob operations
+  - ✅ **Storage Table Data Contributor** - for table operations
+- Configuration: ✅ Using managed identity (no connection strings)
+
+**✅ Queue Processing Discovery:**
+- Queue triggers ARE working - messages being picked up from queue
+- Function execution IS happening - messages moved to poison queue after 5 retry attempts
+- **Root Cause**: Runtime errors in `process_job_queue` function execution
+
+### 📊 Evidence of Working Queue Triggers
+
+**Test Jobs Created:**
+1. `b87d908b6ff8dbdd38275f54fa012acf57661c3e06949df76825932f955653e1` - Initial test
+2. `4718063d9558c07a26c6cb207e59fa8d03d8eea038b56491c3aa3d4b9e034dbf` - Post-restart test
+
+**Poison Queue Message (User Observation):**
+```json
+{
+  "jobId": "4718063d9558c07a26c6cb207e59fa8d03d8eea038b56491c3aa3d4b9e034dbf",
+  "jobType": "hello_world",
+  "stage": 1,
+  "parameters": {
+    "n": 1,
+    "message": "Testing queue trigger after restart",
+    "dataset_id": "test_post_restart",
+    "resource_id": "queue_trigger_test",
+    "version_id": "v1",
+    "system": true,
+    "job_type": "hello_world"
+  },
+  "stageResults": {},
+  "retryCount": 0
+}
+```
+
+**Key Insight**: Poison queue movement **confirms** queue triggers are working and function is being invoked 5 times before failure.
+
+### 🚨 Current Issue
+- ❌ **Function Execution Failures**: `process_job_queue` function failing during runtime
+- **Likely Causes**: Import errors, configuration issues, database connection failures, or JSON parsing errors
+- **Next Phase**: Add debug logging to `process_job_queue` function to identify runtime errors
+
+### 📋 Architecture Status Summary
+
+**✅ WORKING COMPONENTS:**
+- HTTP endpoints (job creation, status retrieval)
+- Job ID generation and determinism 
+- Parameter validation and storage
+- Queue message creation and queuing
+- Queue trigger invocation and managed identity authentication
+- Poison queue handling (after 5 retries)
+
+**❌ FAILING COMPONENT:**
+- Queue trigger function execution (runtime errors)
+
+**🔄 NEXT PHASE:**
+- Add comprehensive debug logging to `process_job_queue` function
+- Identify and fix runtime execution errors
+- Achieve end-to-end hello_world workflow completion
+
+---
+
+## 🔄 Previous Next Steps
 
 1. **Extend Pattern**: Apply debugging methodology to other controllers (sync_container, catalog_file)
-2. **Remove Debug Logs**: Consider removing verbose debug logging for production (keep key checkpoints)
+2. **Remove Debug Logs**: Consider removing verbose debug logging for production (keep key checkpoints)  
 3. **Monitor Production**: Watch for any remaining edge cases in production usage
 4. **Document Patterns**: Update controller development guidelines with debugging best practices
 

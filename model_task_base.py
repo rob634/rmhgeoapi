@@ -20,7 +20,7 @@ import logging
 import time
 from datetime import datetime
 
-from core_models import (
+from model_core import (
     TaskStatus, TaskExecutionContext, TaskRecord, TaskQueueMessage, TaskResult
 )
 

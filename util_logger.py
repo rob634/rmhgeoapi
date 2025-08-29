@@ -104,13 +104,13 @@ def log_queue_operation(job_id: str, operation: str, queue_name: str = "geospati
         }
     })
 
-def log_service_processing(service_name: str, operation_type: str, job_id: str, status: str):
+def log_service_processing(service_name: str, job_type: str, job_id: str, status: str):
     """Log service processing with structured logging for Azure"""
-    logger.info(f"SERVICE_PROC service={service_name} operation={operation_type} job_id={job_id[:16]}... status={status}", extra={
+    logger.info(f"SERVICE_PROC service={service_name} operation={job_type} job_id={job_id[:16]}... status={status}", extra={
         "custom_dimensions": {
             "job_id": job_id,
             "service_name": service_name,
-            "operation_type": operation_type,
+            "job_type": job_type,
             "status": status,
             "event_type": "service_processing"
         }

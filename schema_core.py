@@ -120,25 +120,25 @@ class JobRecord(BaseModel):
     """
     
     # Primary identifiers (IMMUTABLE after creation)
-    jobId: str = Field(..., description="Unique job identifier (SHA256)", min_length=64, max_length=64)
-    jobType: str = Field(..., description="Type of job (snake_case)", min_length=1, max_length=50)
+    job_id: str = Field(..., description="Unique job identifier (SHA256)", min_length=64, max_length=64)
+    job_type: str = Field(..., description="Type of job (snake_case)", min_length=1, max_length=50)
     
     # State management (MUTABLE with validation)
     status: JobStatus = Field(default=JobStatus.QUEUED, description="Current job status")
     stage: int = Field(default=1, ge=1, le=100, description="Current stage number")
-    totalStages: int = Field(default=1, ge=1, le=100, description="Total stages in job")
+    total_stages: int = Field(default=1, ge=1, le=100, description="Total stages in job")
     
     # Data containers (VALIDATED JSON)
     parameters: Dict[str, Any] = Field(default_factory=dict, description="Job parameters")
-    stageResults: Dict[int, Dict[str, Any]] = Field(default_factory=dict, description="Results from completed stages")
-    resultData: Optional[Dict[str, Any]] = Field(None, description="Final job result data")
+    stage_results: Dict[int, Dict[str, Any]] = Field(default_factory=dict, description="Results from completed stages")
+    result_data: Optional[Dict[str, Any]] = Field(None, description="Final job result data")
     
     # Error handling (OPTIONAL but structured)
-    errorDetails: Optional[str] = Field(None, description="Error details if job failed")
+    error_details: Optional[str] = Field(None, description="Error details if job failed")
     
     # Audit trail (IMMUTABLE timestamps)
-    createdAt: datetime = Field(..., description="Job creation timestamp")
-    updatedAt: datetime = Field(..., description="Last update timestamp")
+    created_at: datetime = Field(..., description="Job creation timestamp")
+    updated_at: datetime = Field(..., description="Last update timestamp")
     
     # Validation rules
     @field_validator('jobId')

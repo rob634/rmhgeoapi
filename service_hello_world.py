@@ -15,7 +15,7 @@ import logging
 import time
 from datetime import datetime
 
-from task_base import BaseTask
+from model_task_base import BaseTask
 from model_core import TaskStatus, TaskExecutionContext, TaskResult
 
 

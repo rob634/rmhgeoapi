@@ -123,31 +123,80 @@ class HelloWorldController(BaseController):
         """
         Aggregate results from both stages into comprehensive job result.
         
-        Creates detailed statistics and summaries from all Hello World stages.
+        Updated to work with enhanced BaseController architecture:
+        - Uses context.stage_results with proper task_results structure
+        - Extracts results from TaskResult objects in stage_results
+        - Creates comprehensive hello world statistics
+        - Leverages new BaseController visibility methods
         """
-        self.logger.info(f"Aggregating results for Hello World job {context.job_id}")
+        self.logger.info(f"Aggregating Hello World results for job {context.job_id[:16]}... with enhanced architecture")
         
-        # Get results from both stages
-        stage1_results = context.get_stage_result(1) or {}
-        stage2_results = context.get_stage_result(2) or {}
+        # Use enhanced BaseController methods for better visibility
+        task_progress = self.get_task_progress(context.job_id)
+        stage_status = self.get_stage_status(context.job_id)
         
-        # Extract greetings and replies
-        stage1_greetings = stage1_results.get('greetings', [])
-        stage2_replies = stage2_results.get('replies', [])
+        self.logger.debug(f"Task progress: {task_progress['overall']['completion_percentage']:.1f}% complete")
+        self.logger.debug(f"Stage status: {stage_status}")
         
+        # Extract results from stage_results (now contains task_results arrays)
+        stage1_data = context.stage_results.get(1, {})
+        stage2_data = context.stage_results.get(2, {})
+        
+        # Extract task results from each stage
+        stage1_task_results = stage1_data.get('task_results', [])
+        stage2_task_results = stage2_data.get('task_results', [])
+        
+        # Extract greetings and replies from task results
+        stage1_greetings = []
+        for task_result in stage1_task_results:
+            if task_result.get('status') == 'completed':
+                result_data = task_result.get('result_data', {})
+                if isinstance(result_data, dict):
+                    greeting = result_data.get('greeting') or result_data.get('enhanced_greeting')
+                    if greeting:
+                        stage1_greetings.append(greeting)
+        
+        stage2_replies = []
+        for task_result in stage2_task_results:
+            if task_result.get('status') == 'completed':
+                result_data = task_result.get('result_data', {})
+                if isinstance(result_data, dict):
+                    reply = result_data.get('reply') or result_data.get('contextual_reply')
+                    if reply:
+                        stage2_replies.append(reply)
+        
+        # Get n parameter from context
         n = context.parameters.get('n', 1)
         
-        # Calculate statistics
+        # Calculate enhanced statistics using BaseController data
+        total_tasks = task_progress['overall']['total_tasks']
+        completed_tasks = task_progress['overall']['completed_tasks']
+        failed_tasks = task_progress['overall']['failed_tasks']
+        
         hello_statistics = {
-            'total_hellos_requested': n * 2,  # Both greeting and reply tasks
-            'stage1_hellos_completed': len(stage1_greetings),
-            'stage2_replies_completed': len(stage2_replies),
-            'hellos_completed_successfully': len(stage1_greetings) + len(stage2_replies),
-            'hellos_failed': (n * 2) - (len(stage1_greetings) + len(stage2_replies)),
-            'success_rate': round(((len(stage1_greetings) + len(stage2_replies)) / (n * 2)) * 100, 1)
+            'total_hellos_requested': n,  # Each stage creates n tasks
+            'total_tasks_created': total_tasks,
+            'stage1_tasks_completed': len(stage1_task_results),
+            'stage2_tasks_completed': len(stage2_task_results),
+            'stage1_greetings_extracted': len(stage1_greetings),
+            'stage2_replies_extracted': len(stage2_replies),
+            'hellos_completed_successfully': completed_tasks,
+            'hellos_failed': failed_tasks,
+            'success_rate': round((completed_tasks / total_tasks * 100) if total_tasks > 0 else 0, 1),
+            'overall_completion_percentage': task_progress['overall']['completion_percentage']
         }
         
-        # Create comprehensive result
+        # Add failed task details if any
+        failed_hello_numbers = []
+        if failed_tasks > 0:
+            for stage_num, stage_info in task_progress['stages'].items():
+                if stage_info['failed_tasks'] > 0:
+                    # Could extract specific task numbers that failed
+                    failed_hello_numbers.extend([f"stage_{stage_num}_task_{i}" for i in range(stage_info['failed_tasks'])])
+        
+        hello_statistics['failed_hello_numbers'] = failed_hello_numbers
+        
+        # Create comprehensive result with enhanced architecture info
         job_result = {
             'job_id': context.job_id,
             'job_type': self.job_type,
@@ -155,31 +204,257 @@ class HelloWorldController(BaseController):
             'hello_statistics': hello_statistics,
             'stage_summary': {
                 'total_stages': context.total_stages,
-                'completed_stages': len([r for r in [stage1_results, stage2_results] if r]),
-                'stage1_status': 'completed' if stage1_results else 'failed',
-                'stage2_status': 'completed' if stage2_results else 'failed'
+                'stage_status': stage_status,
+                'stage1_status': stage_status.get(1, 'unknown'),
+                'stage2_status': stage_status.get(2, 'unknown'),
+                'completed_stages': len([s for s in stage_status.values() if 'completed' in s])
             },
             'hello_messages': stage1_greetings,
             'reply_messages': stage2_replies,
+            'task_summary': {
+                'total_tasks': total_tasks,
+                'successful_tasks': completed_tasks,
+                'failed_tasks': failed_tasks,
+                'task_progress_by_stage': {stage_num: stage_info for stage_num, stage_info in task_progress['stages'].items()}
+            },
             'workflow_demonstration': {
-                'pattern': 'Hello Worlds → Worlds Reply',
-                'stage_sequence': 'Sequential execution',
-                'task_execution': 'Parallel within stages',
-                'completion_detection': 'Last task turns out the lights',
-                'result_aggregation': 'Comprehensive job-level summary'
+                'pattern': 'Hello Worlds → Worlds Reply (Enhanced Architecture)',
+                'stage_sequence': 'Sequential execution with BaseController orchestration',
+                'task_execution': 'Parallel within stages using TaskExecutionContext',
+                'completion_detection': 'Enhanced "last task turns out lights" with explicit complete_job()',
+                'result_aggregation': 'Comprehensive job-level summary with task visibility',
+                'architecture_features': [
+                    'Task progress monitoring',
+                    'Stage status tracking', 
+                    'Explicit job completion',
+                    'Enhanced visibility methods'
+                ]
             }
         }
         
-        # Add failure details if any
+        # Add failure details using enhanced architecture
         if hello_statistics['hellos_failed'] > 0:
-            job_result['failed_tasks'] = {
+            job_result['failed_tasks_details'] = {
                 'count': hello_statistics['hellos_failed'],
-                'stage1_failures': n - len(stage1_greetings),
-                'stage2_failures': n - len(stage2_replies)
+                'failed_task_identifiers': failed_hello_numbers,
+                'failure_breakdown_by_stage': {
+                    stage_num: stage_info['failed_tasks'] 
+                    for stage_num, stage_info in task_progress['stages'].items() 
+                    if stage_info['failed_tasks'] > 0
+                }
             }
         
-        self.logger.info(f"Hello World job aggregation complete: "
-                        f"{hello_statistics['hellos_completed_successfully']}/{hello_statistics['total_hellos_requested']} "
+        self.logger.info(f"✅ Hello World job aggregation complete using enhanced architecture: "
+                        f"{hello_statistics['hellos_completed_successfully']}/{hello_statistics['total_tasks_created']} "
                         f"tasks successful ({hello_statistics['success_rate']}%)")
         
         return job_result
+
+    # ========================================================================
+    # HELLO WORLD SPECIFIC METHODS - Enhanced with new BaseController features
+    # ========================================================================
+
+    def get_hello_world_progress(self, job_id: str) -> Dict[str, Any]:
+        """
+        Get Hello World specific progress information.
+        
+        Combines BaseController progress with Hello World domain knowledge.
+        
+        Args:
+            job_id: The job identifier
+            
+        Returns:
+            Hello World specific progress with greeting/reply details
+        """
+        # Use BaseController progress method
+        base_progress = self.get_task_progress(job_id)
+        stage_status = self.get_stage_status(job_id)
+        
+        # Add Hello World domain information
+        hello_progress = {
+            **base_progress,
+            'hello_world_info': {
+                'workflow_pattern': 'Hello Worlds → Worlds Reply',
+                'stage_1_purpose': 'Generate greeting messages',
+                'stage_2_purpose': 'Generate reply messages using stage 1 results',
+                'expected_stages': 2,
+                'current_stage_names': {
+                    1: 'Hello Worlds (Greeting Generation)',
+                    2: 'Worlds Reply (Reply Generation)'
+                }
+            },
+            'hello_specific_status': {
+                'greeting_stage_status': stage_status.get(1, 'pending'),
+                'reply_stage_status': stage_status.get(2, 'pending'),
+                'ready_for_reply_stage': stage_status.get(1) in ['completed', 'completed_with_errors']
+            }
+        }
+        
+        self.logger.debug(f"Hello World progress for {job_id[:16]}...: "
+                         f"Stage 1: {hello_progress['hello_specific_status']['greeting_stage_status']}, "
+                         f"Stage 2: {hello_progress['hello_specific_status']['reply_stage_status']}")
+        
+        return hello_progress
+
+    def get_hello_messages(self, job_id: str) -> Dict[str, List[str]]:
+        """
+        Extract hello messages and replies from completed tasks.
+        
+        Uses BaseController task listing to find and extract messages.
+        
+        Args:
+            job_id: The job identifier
+            
+        Returns:
+            Dictionary with greeting and reply messages
+        """
+        # Get all tasks using BaseController method
+        tasks_by_stage = self.get_job_tasks(job_id)
+        
+        greetings = []
+        replies = []
+        
+        # Extract greetings from Stage 1 tasks
+        stage1_tasks = tasks_by_stage.get(1, [])
+        for task in stage1_tasks:
+            if task.get('status') == 'completed':
+                result_data = task.get('result_data', {})
+                if isinstance(result_data, str):
+                    try:
+                        import json
+                        result_data = json.loads(result_data)
+                    except:
+                        pass
+                
+                if isinstance(result_data, dict):
+                    greeting = result_data.get('greeting') or result_data.get('enhanced_greeting')
+                    if greeting:
+                        greetings.append(greeting)
+        
+        # Extract replies from Stage 2 tasks
+        stage2_tasks = tasks_by_stage.get(2, [])
+        for task in stage2_tasks:
+            if task.get('status') == 'completed':
+                result_data = task.get('result_data', {})
+                if isinstance(result_data, str):
+                    try:
+                        import json
+                        result_data = json.loads(result_data)
+                    except:
+                        pass
+                
+                if isinstance(result_data, dict):
+                    reply = result_data.get('reply') or result_data.get('contextual_reply')
+                    if reply:
+                        replies.append(reply)
+        
+        messages = {
+            'greetings': greetings,
+            'replies': replies,
+            'total_messages': len(greetings) + len(replies),
+            'extraction_summary': {
+                'stage1_tasks_checked': len(stage1_tasks),
+                'stage2_tasks_checked': len(stage2_tasks),
+                'greetings_found': len(greetings),
+                'replies_found': len(replies)
+            }
+        }
+        
+        self.logger.debug(f"Extracted {len(greetings)} greetings and {len(replies)} replies from job {job_id[:16]}...")
+        return messages
+
+    def demonstrate_enhanced_controller_features(self, job_id: str) -> Dict[str, Any]:
+        """
+        Demonstrate all the enhanced BaseController features for Hello World.
+        
+        This method showcases the new capabilities added to BaseController.
+        
+        Args:
+            job_id: The job identifier
+            
+        Returns:
+            Comprehensive demonstration of all enhanced features
+        """
+        self.logger.info(f"Demonstrating enhanced controller features for Hello World job {job_id[:16]}...")
+        
+        demonstration = {
+            'job_id': job_id,
+            'controller_type': self.__class__.__name__,
+            'enhanced_features': {},
+            'demonstration_timestamp': datetime.utcnow().isoformat()
+        }
+        
+        try:
+            # 1. Stage listing
+            demonstration['enhanced_features']['stage_listing'] = {
+                'method': 'list_job_stages()',
+                'result': self.list_job_stages(),
+                'description': 'Lists all workflow stages with metadata'
+            }
+            
+            # 2. Task progress
+            demonstration['enhanced_features']['task_progress'] = {
+                'method': 'get_task_progress(job_id)',
+                'result': self.get_task_progress(job_id),
+                'description': 'Detailed progress metrics by stage and overall'
+            }
+            
+            # 3. Stage status
+            demonstration['enhanced_features']['stage_status'] = {
+                'method': 'get_stage_status(job_id)',
+                'result': self.get_stage_status(job_id),
+                'description': 'Completion status of each stage'
+            }
+            
+            # 4. Completed stages
+            demonstration['enhanced_features']['completed_stages'] = {
+                'method': 'get_completed_stages(job_id)',
+                'result': self.get_completed_stages(job_id),
+                'description': 'List of completed stage numbers'
+            }
+            
+            # 5. Task listing by stage
+            demonstration['enhanced_features']['tasks_by_stage'] = {
+                'method': 'get_job_tasks(job_id)',
+                'result': {stage: len(tasks) for stage, tasks in self.get_job_tasks(job_id).items()},
+                'description': 'Task counts by stage (full task details available)'
+            }
+            
+            # 6. Hello World specific features
+            demonstration['enhanced_features']['hello_world_specific'] = {
+                'method': 'get_hello_world_progress(job_id)',
+                'result': self.get_hello_world_progress(job_id)['hello_world_info'],
+                'description': 'Hello World domain-specific progress information'
+            }
+            
+            # 7. Message extraction
+            demonstration['enhanced_features']['message_extraction'] = {
+                'method': 'get_hello_messages(job_id)',
+                'result': self.get_hello_messages(job_id)['extraction_summary'],
+                'description': 'Extracted greeting and reply messages from completed tasks'
+            }
+            
+            demonstration['summary'] = {
+                'total_enhanced_methods': len(demonstration['enhanced_features']),
+                'architecture_benefits': [
+                    'Complete job visibility',
+                    'Stage-by-stage progress tracking',
+                    'Task-level monitoring',
+                    'Explicit completion flow',
+                    'Domain-specific extensions',
+                    'Comprehensive result aggregation'
+                ],
+                'demonstration_success': True
+            }
+            
+            self.logger.info(f"✅ Enhanced controller features demonstration complete for {job_id[:16]}...")
+            
+        except Exception as e:
+            demonstration['error'] = {
+                'message': str(e),
+                'error_type': type(e).__name__,
+                'demonstration_success': False
+            }
+            self.logger.error(f"❌ Error during enhanced features demonstration: {e}")
+        
+        return demonstration

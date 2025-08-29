@@ -13,7 +13,6 @@ Based on consolidated_redesign.md specifications:
 """
 
 from abc import ABC, abstractmethod
-from typing import List, Dict, Any, Optional
 import hashlib
 import json
 import logging
@@ -24,6 +23,7 @@ from schema_core import (
 from model_core import (
     TaskDefinition, JobExecutionContext, StageExecutionContext
 )
+from typing import List, Dict, Any, Optional
 from schema_workflow import WorkflowDefinition, get_workflow_definition
 
 
@@ -287,6 +287,316 @@ class BaseController(ABC):
         except Exception as e:
             self.logger.error(f"Failed to queue job {job_id}: {e}")
             raise RuntimeError(f"Failed to queue job: {e}")
+
+    # ========================================================================
+    # TASK AND STAGE MANAGEMENT METHODS - Enhanced visibility and control
+    # ========================================================================
+
+    def list_stage_tasks(self, job_id: str, stage_number: int) -> List[Dict[str, Any]]:
+        """
+        List all tasks for a specific stage.
+        
+        Provides visibility into task progress within a stage.
+        Useful for debugging, monitoring, and progress reporting.
+        
+        Args:
+            job_id: The job identifier
+            stage_number: The stage number to query
+            
+        Returns:
+            List of task records for the specified stage
+        """
+        from repository_data import RepositoryFactory
+        
+        job_repo, task_repo, _ = RepositoryFactory.create_repositories()
+        tasks = task_repo.get_tasks_by_stage(job_id, stage_number)
+        
+        self.logger.debug(f"Found {len(tasks)} tasks in stage {stage_number} for job {job_id[:16]}...")
+        return tasks
+
+    def get_job_tasks(self, job_id: str) -> Dict[int, List[Dict[str, Any]]]:
+        """
+        Get all tasks grouped by stage.
+        
+        Provides complete visibility into job task structure across all stages.
+        Essential for job monitoring and progress tracking.
+        
+        Args:
+            job_id: The job identifier
+            
+        Returns:
+            Dictionary mapping stage numbers to lists of task records
+        """
+        tasks_by_stage = {}
+        
+        for stage in self.workflow_definition.stages:
+            stage_tasks = self.list_stage_tasks(job_id, stage.stage_number)
+            tasks_by_stage[stage.stage_number] = stage_tasks
+        
+        total_tasks = sum(len(tasks) for tasks in tasks_by_stage.values())
+        self.logger.debug(f"Retrieved {total_tasks} tasks across {len(tasks_by_stage)} stages for job {job_id[:16]}...")
+        
+        return tasks_by_stage
+
+    def get_task_progress(self, job_id: str) -> Dict[str, Any]:
+        """
+        Get task completion progress by stage.
+        
+        Provides detailed progress metrics for monitoring and UI display.
+        
+        Args:
+            job_id: The job identifier
+            
+        Returns:
+            Dictionary with progress statistics by stage and overall job
+        """
+        tasks_by_stage = self.get_job_tasks(job_id)
+        
+        progress = {
+            'job_id': job_id,
+            'job_type': self.job_type,
+            'total_stages': len(self.workflow_definition.stages),
+            'stages': {},
+            'overall': {
+                'total_tasks': 0,
+                'completed_tasks': 0,
+                'failed_tasks': 0,
+                'processing_tasks': 0,
+                'pending_tasks': 0
+            }
+        }
+        
+        for stage_num, tasks in tasks_by_stage.items():
+            stage_progress = {
+                'stage_number': stage_num,
+                'stage_name': f"stage_{stage_num}",
+                'total_tasks': len(tasks),
+                'completed_tasks': 0,
+                'failed_tasks': 0,
+                'processing_tasks': 0,
+                'pending_tasks': 0
+            }
+            
+            # Count task statuses
+            for task in tasks:
+                task_status = task.get('status', 'pending')
+                if task_status == 'completed':
+                    stage_progress['completed_tasks'] += 1
+                    progress['overall']['completed_tasks'] += 1
+                elif task_status == 'failed':
+                    stage_progress['failed_tasks'] += 1
+                    progress['overall']['failed_tasks'] += 1
+                elif task_status == 'processing':
+                    stage_progress['processing_tasks'] += 1
+                    progress['overall']['processing_tasks'] += 1
+                else:
+                    stage_progress['pending_tasks'] += 1
+                    progress['overall']['pending_tasks'] += 1
+                
+                progress['overall']['total_tasks'] += 1
+            
+            # Calculate percentages
+            if stage_progress['total_tasks'] > 0:
+                stage_progress['completion_percentage'] = (
+                    stage_progress['completed_tasks'] / stage_progress['total_tasks']
+                ) * 100
+                stage_progress['is_complete'] = stage_progress['completed_tasks'] == stage_progress['total_tasks']
+            else:
+                stage_progress['completion_percentage'] = 0.0
+                stage_progress['is_complete'] = False
+            
+            progress['stages'][stage_num] = stage_progress
+        
+        # Calculate overall percentage
+        if progress['overall']['total_tasks'] > 0:
+            progress['overall']['completion_percentage'] = (
+                progress['overall']['completed_tasks'] / progress['overall']['total_tasks']
+            ) * 100
+        else:
+            progress['overall']['completion_percentage'] = 0.0
+        
+        return progress
+
+    def list_job_stages(self) -> List[Dict[str, Any]]:
+        """
+        List all stages for this job type from workflow definition.
+        
+        Provides stage metadata for job planning and monitoring.
+        
+        Returns:
+            List of stage definition dictionaries
+        """
+        stages = []
+        for stage in self.workflow_definition.stages:
+            stage_info = {
+                'stage_number': stage.stage_number,
+                'stage_name': stage.stage_name,
+                'task_type': stage.task_type,
+                'is_final_stage': stage.is_final_stage,
+                'description': getattr(stage, 'description', f'Stage {stage.stage_number} - {stage.stage_name}')
+            }
+            stages.append(stage_info)
+        
+        return stages
+
+    def get_stage_status(self, job_id: str) -> Dict[int, str]:
+        """
+        Get completion status of each stage.
+        
+        Args:
+            job_id: The job identifier
+            
+        Returns:
+            Dictionary mapping stage numbers to status strings
+        """
+        progress = self.get_task_progress(job_id)
+        stage_status = {}
+        
+        for stage_num, stage_info in progress['stages'].items():
+            if stage_info['is_complete']:
+                if stage_info['failed_tasks'] > 0:
+                    stage_status[stage_num] = 'completed_with_errors'
+                else:
+                    stage_status[stage_num] = 'completed'
+            elif stage_info['processing_tasks'] > 0:
+                stage_status[stage_num] = 'processing'
+            elif stage_info['failed_tasks'] > 0 and stage_info['processing_tasks'] == 0:
+                stage_status[stage_num] = 'failed'
+            else:
+                stage_status[stage_num] = 'pending'
+        
+        return stage_status
+
+    def get_completed_stages(self, job_id: str) -> List[int]:
+        """
+        List completed stage numbers.
+        
+        Args:
+            job_id: The job identifier
+            
+        Returns:
+            List of stage numbers that have completed
+        """
+        stage_status = self.get_stage_status(job_id)
+        completed = [
+            stage_num for stage_num, status in stage_status.items() 
+            if status in ['completed', 'completed_with_errors']
+        ]
+        
+        self.logger.debug(f"Job {job_id[:16]}... has {len(completed)} completed stages: {completed}")
+        return completed
+
+    # ========================================================================
+    # EXPLICIT JOB COMPLETION METHOD - Cleaner separation of concerns
+    # ========================================================================
+
+    def complete_job(self, job_id: str, all_task_results: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """
+        Explicit job completion with full workflow context.
+        
+        This method provides a clear completion flow that:
+        1. Creates complete job execution context from all task results
+        2. Calls the abstract aggregate_job_results() for job-specific aggregation
+        3. Updates job status to COMPLETED in database
+        4. Returns the final aggregated result
+        
+        This is typically called by the "last task" completion detection.
+        
+        Args:
+            job_id: The job identifier
+            all_task_results: List of task results from all stages
+            
+        Returns:
+            Final aggregated job result dictionary
+        """
+        self.logger.info(f"Starting explicit job completion for {job_id[:16]}... with {len(all_task_results)} task results")
+        
+        # Create job execution context from task results
+        context = self._create_completion_context(job_id, all_task_results)
+        self.logger.debug(f"Created completion context with {len(context.stage_results)} stage results")
+        
+        # Use the abstract method for job-specific aggregation
+        self.logger.debug(f"Calling job-specific aggregate_job_results()")
+        final_result = self.aggregate_job_results(context)
+        self.logger.debug(f"Job aggregation complete: {list(final_result.keys()) if isinstance(final_result, dict) else 'non-dict result'}")
+        
+        # Store completion in database
+        from repository_data import RepositoryFactory
+        job_repo, _, _ = RepositoryFactory.create_repositories()
+        
+        self.logger.debug(f"Updating job status to COMPLETED in database")
+        success = job_repo.complete_job(job_id, final_result)
+        
+        if success:
+            self.logger.info(f"✅ Job {job_id[:16]}... completed successfully with {len(all_task_results)} tasks")
+        else:
+            self.logger.error(f"❌ Failed to update job completion status for {job_id[:16]}...")
+            raise RuntimeError(f"Failed to complete job {job_id} in database")
+        
+        return final_result
+
+    def _create_completion_context(self, job_id: str, all_task_results: List[Dict[str, Any]]) -> JobExecutionContext:
+        """
+        Create JobExecutionContext from task results for job completion.
+        
+        Args:
+            job_id: The job identifier
+            all_task_results: All task results from all stages
+            
+        Returns:
+            JobExecutionContext with stage results populated
+        """
+        # Group task results by stage
+        stage_results = {}
+        
+        for task_result in all_task_results:
+            stage_num = task_result.get('stage_number', task_result.get('stage', 1))
+            
+            if stage_num not in stage_results:
+                stage_results[stage_num] = {
+                    'stage_number': stage_num,
+                    'stage_name': f"stage_{stage_num}",
+                    'task_results': [],
+                    'stage_status': 'completed',
+                    'total_tasks': 0,
+                    'successful_tasks': 0,
+                    'failed_tasks': 0
+                }
+            
+            stage_results[stage_num]['task_results'].append(task_result)
+            stage_results[stage_num]['total_tasks'] += 1
+            
+            if task_result.get('status') == 'completed':
+                stage_results[stage_num]['successful_tasks'] += 1
+            else:
+                stage_results[stage_num]['failed_tasks'] += 1
+        
+        # Calculate success rates and stage status
+        for stage_num, stage_data in stage_results.items():
+            total = stage_data['total_tasks']
+            successful = stage_data['successful_tasks']
+            
+            stage_data['success_rate'] = (successful / total * 100) if total > 0 else 0.0
+            
+            if stage_data['failed_tasks'] == 0:
+                stage_data['stage_status'] = 'completed'
+            elif stage_data['successful_tasks'] == 0:
+                stage_data['stage_status'] = 'failed'
+            else:
+                stage_data['stage_status'] = 'completed_with_errors'
+        
+        # Get job parameters (would normally come from job record)
+        # For now, create minimal context
+        job_context = JobExecutionContext(
+            job_id=job_id,
+            job_type=self.job_type,
+            current_stage=max(stage_results.keys()) if stage_results else 1,
+            total_stages=len(self.workflow_definition.stages),
+            parameters={'job_type': self.job_type},  # Minimal parameters
+            stage_results=stage_results
+        )
+        
+        return job_context
 
     def __repr__(self):
         return f"<{self.__class__.__name__}(job_type='{self.job_type}', stages={len(self.workflow_definition.stages)})>"

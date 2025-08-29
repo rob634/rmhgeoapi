@@ -146,6 +146,11 @@ class AzureTableStorageAdapter:
         entity['stage'] = job.stage
         entity['totalStages'] = job.totalStages
         
+        # Legacy field compatibility - populate underscore versions for existing table structure
+        entity['job_id'] = job.jobId
+        entity['job_type'] = job.jobType
+        entity['request_parameters'] = json.dumps(job.parameters, default=str)
+        
         # JSON fields - serialize complex data
         entity['parameters'] = json.dumps(job.parameters, default=str)
         entity['stageResults'] = json.dumps(job.stageResults, default=str)

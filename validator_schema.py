@@ -294,7 +294,7 @@ class SchemaEvolution:
         # Map legacy field names to current schema
         field_mappings = {
             'job_id': 'jobId',
-            'operation_type': 'jobType',  # Legacy field name
+            'job_type': 'jobType',  # Legacy field name
             'job_type': 'jobType',        # Current field name
             'created_at': 'createdAt',
             'updated_at': 'updatedAt',
@@ -335,7 +335,7 @@ class SchemaEvolution:
         field_mappings = {
             'task_id': 'taskId',
             'parent_job_id': 'parentJobId',
-            'operation_type': 'taskType',  # Legacy task type field
+            'job_type': 'taskType',  # Legacy task type field
             'task_type': 'taskType',       # Current task type field
             'stage_number': 'stage',       # Legacy stage field
             'task_index': 'taskIndex',

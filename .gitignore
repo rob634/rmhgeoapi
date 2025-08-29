@@ -169,3 +169,6 @@ surprise*
 scripts/
 static_web*
 .DS*
+*.zip
+
+reference/

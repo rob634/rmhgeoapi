@@ -14,7 +14,7 @@ This document provides a comprehensive index of all files in the root directory 
 
 ### **function_app.py**
 - **Primary Azure Functions entry point**
-- HTTP triggers for job submission (`/api/jobs/{operation_type}`)
+- HTTP triggers for job submission (`/api/jobs/{job_type}`)
 - Queue triggers for job and task processing (`geospatial-jobs`, `geospatial-tasks`)
 - Timer triggers for poison queue monitoring
 - Controller routing for Pydantic Job→Task architecture
@@ -187,11 +187,12 @@ This document provides a comprehensive index of all files in the root directory 
 - Environment variable documentation and validation
 - Migration guide from scattered configuration approach
 
-### **DEBUG_ARCHITECTURE_STATUS.md** ⭐ NEW
-- **Production debugging completion status (Aug 29, 2025)**
-- Systematic resolution of 6 critical architecture issues
+### **DEBUG_ARCHITECTURE_STATUS.md** ⭐ UPDATED
+- **Queue trigger debugging status (Aug 29, 2025)**
+- Phase 1: HTTP endpoints debugging complete (6 issues resolved)
+- Phase 2: Queue trigger investigation - deployment successful, function execution failing
 - Comprehensive debug logging methodology with visual indicators
-- Enum handling fixes, job ID determinism, parameter flow validation
+- Evidence of working queue triggers with runtime execution errors
 
 ### **PROJECT_FILE_INDEX.md**
 - **This document - comprehensive file catalog**
@@ -271,7 +272,7 @@ This document provides a comprehensive index of all files in the root directory 
 | **Core Application** | 3 | ✅ Production Ready |
 | **Configuration** | 4 | ✅ Complete with Pydantic v2 Strong Typing |
 | **Architecture & Models** | 4 | ✅ Strong Typing Implemented |
-| **Controllers** | 2 | 🔄 Hello World Complete, Others Pending |
+| **Controllers** | 2 | 🔄 Hello World HTTP Working, Queue Debugging |
 | **Schema & Validation** | 3 | ✅ Pydantic v2 Integration |
 | **Services & Processing** | 3 | 🔄 Partial Implementation |
 | **Utilities** | 2 | ✅ Core Utils Complete |

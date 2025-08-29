@@ -30,7 +30,7 @@ JOB (Controller Layer - Orchestration)
 - **Location**: Controller layer doing orchestration
 
 ### **STAGE** (Controller Layer - Sequential)  
-- **Purpose**: One or more tasks that can run in parallel
+- **Purpose**: Queue up one or more tasks that can run in parallel
 - **Responsibility**: Task creation, stage completion detection
 - **Completion**: Last task to finish completes the stage
 - **Transition**: Moves job to next stage or completion stage
@@ -60,10 +60,10 @@ HTTP Request → Jobs Queue → Job Controller → Tasks Queue → Task Processo
 3. **Tasks Queue Trigger**: Processes individual tasks via service layer
 4. **Completion Detection**: Last task triggers stage/job completion
 
-### **Database Schema (PostgreSQL)**
+### **Database Schema (PostgreSQL)** WE WILL USE TABLE STORAGE FOR DEV 
 ```sql
 -- Jobs table
-jobs: id, job_type, status, stage, parameters, metadata, result_data, created_at, updated_at
+jobs: job_id, job_type, status, stage, parameters, metadata, result_data, created_at, updated_at
 
 -- Tasks table  
 tasks: id, job_id, task_type, status, stage, parameters, heartbeat, retry_count, metadata, result_data, created_at, updated_at
@@ -79,7 +79,7 @@ tasks: id, job_id, task_type, status, stage, parameters, heartbeat, retry_count,
 - **Results flow forward**: Previous stage results passed to next stage
 
 ### **"Last Task Turns Out the Lights"**
-- **Atomic detection**: SQL operations prevent race conditions
+- **Atomic detection**: SQL operations prevent race conditions (in production)
 - **Stage completion**: Last task in stage triggers transition
 - **Job completion**: Last task in final stage triggers job completion
 

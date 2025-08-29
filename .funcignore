@@ -58,3 +58,7 @@ ancient_code/
 ancient_code*
 surprise*
 scripts/
+
+*.zip
+
+reference/

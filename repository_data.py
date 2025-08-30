@@ -122,15 +122,15 @@ class JobRepository(BaseRepository):
             # Create job record with current timestamp
             now = datetime.utcnow()
             job_data = {
-                'jobId': job_id,
-                'jobType': job_type,
+                'job_id': job_id,
+                'job_type': job_type,
                 'status': JobStatus.QUEUED,
                 'stage': 1,
-                'totalStages': total_stages,
+                'total_stages': total_stages,
                 'parameters': parameters.copy(),  # Defensive copy
-                'stageResults': {},
-                'createdAt': now,
-                'updatedAt': now
+                'stage_results': {},
+                'created_at': now,
+                'updated_at': now
             }
             
             # Validate job data
@@ -230,10 +230,10 @@ class JobRepository(BaseRepository):
                       "loc": ["stage"]}]
                 )
             
-            if new_stage > current_job.totalStages:
+            if new_stage > current_job.total_stages:
                 raise SchemaValidationError(
                     "JobRecord",
-                    [{"msg": f"Stage {new_stage} exceeds totalStages {current_job.totalStages}", 
+                    [{"msg": f"Stage {new_stage} exceeds total_stages {current_job.total_stages}", 
                       "loc": ["stage"]}]
                 )
             
@@ -242,9 +242,9 @@ class JobRepository(BaseRepository):
             
             if stage_results:
                 # Add stage results to existing results
-                updated_stage_results = current_job.stageResults.copy()
+                updated_stage_results = current_job.stage_results.copy()
                 updated_stage_results[current_job.stage] = stage_results
-                updates['stageResults'] = updated_stage_results
+                updates['stage_results'] = updated_stage_results
             
             success = self.storage.update_job(job_id, updates)
             
@@ -268,7 +268,7 @@ class JobRepository(BaseRepository):
             return self.update_job_status(
                 job_id, 
                 JobStatus.COMPLETED, 
-                {'resultData': result_data}
+                {'result_data': result_data}
             )
     
     def fail_job(self, job_id: str, error_details: str) -> bool:
@@ -286,7 +286,7 @@ class JobRepository(BaseRepository):
             return self.update_job_status(
                 job_id,
                 JobStatus.FAILED,
-                {'errorDetails': error_details}
+                {'error_details': error_details}
             )
     
     def list_jobs(self, status_filter: Optional[JobStatus] = None) -> List[JobRecord]:
@@ -412,12 +412,12 @@ class TaskRepository(BaseRepository):
         return self.update_task_status(
             task_id,
             TaskStatus.COMPLETED,
-            {'resultData': result_data}
+            {'result_data': result_data}
         )
     
     def fail_task(self, task_id: str, error_details: str, increment_retry: bool = True) -> bool:
         """Mark task as failed with error details"""
-        additional_updates = {'errorDetails': error_details}
+        additional_updates = {'error_details': error_details}
         
         if increment_retry:
             current_task = self.get_task(task_id)
@@ -560,11 +560,11 @@ class CompletionDetector:
                 return False
             
             # If current stage complete, check if this is the final stage
-            if job_record.stage >= job_record.totalStages:
-                logger.info(f"🎉 Job complete: {job_id[:16]}... (all {job_record.totalStages} stages finished)")
+            if job_record.stage >= job_record.total_stages:
+                logger.info(f"🎉 Job complete: {job_id[:16]}... (all {job_record.total_stages} stages finished)")
                 return True
             
-            logger.debug(f"📊 Job {job_id[:16]}... stage {job_record.stage}/{job_record.totalStages} complete")
+            logger.debug(f"📊 Job {job_id[:16]}... stage {job_record.stage}/{job_record.total_stages} complete")
             return False
 
 
@@ -573,19 +573,51 @@ class CompletionDetector:
 # ============================================================================
 
 class RepositoryFactory:
-    """Factory for creating repositories with consistent configuration"""
+    """Factory for creating repositories with consistent configuration and schema validation"""
     
     @staticmethod
     def create_repositories(storage_backend_type: str = 'azure_tables') -> tuple[JobRepository, TaskRepository, CompletionDetector]:
         """
-        Create job and task repositories with completion detector
+        Create job and task repositories with completion detector.
+        
+        Includes schema validation for PostgreSQL backends to ensure database
+        is ready for repository operations.
         
         Args:
             storage_backend_type: Type of storage backend to use
             
         Returns:
             Tuple of (JobRepository, TaskRepository, CompletionDetector)
+            
+        Raises:
+            SchemaManagementError: If PostgreSQL schema validation fails
         """
+        logger.info(f"🏛️ Creating repositories with {storage_backend_type} backend")
+        
+        # Validate schema for PostgreSQL backends
+        if storage_backend_type == 'postgres':
+            try:
+                from validator_schema_database import SchemaValidatorFactory
+                
+                schema_validator = SchemaValidatorFactory.create_validator()
+                validation_results = schema_validator.validate_schema_ready()
+                
+                if not validation_results['schema_ready']:
+                    error_msg = (
+                        f"PostgreSQL schema not ready for repository operations. "
+                        f"Recommendations: {validation_results['recommendations']}"
+                    )
+                    logger.error(f"❌ {error_msg}")
+                    raise RuntimeError(error_msg)
+                    
+                logger.info(f"✅ PostgreSQL schema validated successfully: {validation_results['app_schema']}")
+                
+            except ImportError as e:
+                logger.warning(f"⚠️ Schema validation not available: {e}")
+            except Exception as e:
+                logger.error(f"❌ Schema validation failed: {e}")
+                raise RuntimeError(f"Database schema validation failed: {e}")
+        
         # Create storage adapter
         storage_adapter = StorageAdapterFactory.create_adapter(storage_backend_type)
         
@@ -596,7 +628,7 @@ class RepositoryFactory:
         # Create completion detector
         completion_detector = CompletionDetector(job_repo, task_repo)
         
-        logger.info(f"🏛️ Repository factory created repositories with {storage_backend_type} backend")
+        logger.info(f"✅ Repository factory created repositories with {storage_backend_type} backend")
         
         return job_repo, task_repo, completion_detector
 

@@ -1,27 +1,74 @@
 """
-Job Status HTTP Trigger - Job Management
+Job Status HTTP Trigger - Azure Geospatial ETL Pipeline
 
-Concrete implementation of job status retrieval endpoint using BaseHttpTrigger.
-Retrieves detailed job information including status, progress, and results.
+HTTP endpoint implementation for job status retrieval using BaseHttpTrigger pattern.
+Provides detailed job information including current status, processing stage, parameters,
+results, and comprehensive metadata for the Job→Stage→Task architecture.
 
-Usage:
+Key Features:
+- Real-time job status and progress tracking
+- Stage-based progress reporting with current/total stages
+- Complete job parameter and result data retrieval
+- Snake_case to camelCase field transformation for JavaScript compatibility
+- Enhanced metadata including architecture information
+- Comprehensive error handling for missing or invalid jobs
+
+Job Status Flow:
+1. Extract and validate job_id from URL path parameter
+2. Retrieve job record from repository using validated ID
+3. Format internal job record for API response
+4. Transform field names for frontend compatibility
+5. Add enhanced metadata and architecture information
+6. Return comprehensive job status response
+
+Job Status States:
+- queued: Job created and waiting for processing
+- processing: Job currently being processed (may include stage info)
+- completed: All stages completed successfully with results
+- failed: Job failed with error details
+- completed_with_errors: Partial success with some task failures
+
+Response Data Categories:
+- Basic Information: job_id, job_type, status, timestamps
+- Progress Tracking: stage, total_stages, stage_results
+- Input Data: parameters (original job submission parameters)
+- Output Data: result_data (aggregated results from completed tasks)
+- Error Information: error_details (when status is failed)
+- Metadata: Architecture pattern and validation information
+
+Integration Points:
+- Uses JobManagementTrigger base class for repository access
+- Reads from job storage via RepositoryFactory
+- Formats JobRecord schema objects for API consumption
+- Provides data for frontend dashboards and monitoring
+
+API Endpoint:
     GET /api/jobs/{job_id}
+    
+Path Parameters:
+    job_id: SHA256 hash of job parameters (validates format)
     
 Response:
     {
-        "job_id": "SHA256_hash",
-        "job_type": "operation_type",
-        "status": "queued" | "processing" | "completed" | "failed",
-        "stage": 1,
-        "total_stages": 2,
-        "parameters": {...},
-        "stage_results": {...},
-        "result_data": {...},
-        "created_at": "ISO-8601",
-        "updated_at": "ISO-8601",
-        "request_id": "uuid",
-        "timestamp": "ISO-8601"
+        "jobId": "sha256_hash_of_parameters",
+        "jobType": "operation_name",
+        "status": "queued|processing|completed|failed",
+        "stage": 2,                           # Current stage (1-indexed)
+        "totalStages": 3,                     # Total stages in workflow
+        "parameters": {...original_params},    # Job submission parameters
+        "stageResults": {...},                # Results from completed stages
+        "resultData": {...},                  # Final aggregated results
+        "errorDetails": {...},                # Error information if failed
+        "createdAt": "2025-01-30T12:34:56.789Z",
+        "updatedAt": "2025-01-30T12:45:12.123Z",
+        "architecture": "strong_typing_discipline",
+        "pattern": "Job→Stage→Task with Pydantic validation"
     }
+
+Error Responses:
+- 400: Invalid job_id format
+- 404: Job not found
+- 500: Internal server error during retrieval
 
 Author: Azure Geospatial ETL Team
 """

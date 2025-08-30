@@ -1,6 +1,42 @@
 """
-Strongly typed configuration management with Pydantic v2
-Centralized environment variable validation and documentation
+Strongly Typed Configuration Management - Azure Geospatial ETL Pipeline
+
+Centralized configuration management using Pydantic v2 for runtime validation,
+type safety, and comprehensive documentation of all environment variables.
+Provides single source of truth for application configuration across all components.
+
+Key Features:
+- Pydantic v2 schema validation with runtime type checking
+- Environment variable documentation with examples and descriptions
+- Computed properties for Azure service URLs and connection strings
+- Validation for Azure naming conventions and constraints
+- Factory methods for different initialization patterns
+- Development helpers with sanitized debug output
+
+Configuration Categories:
+- Azure Storage: Storage account, container names, service URLs
+- PostgreSQL/PostGIS: Database connection and schema configuration
+- Security: Azure Key Vault integration for credential management
+- Queues: Processing queue names and configuration
+- Application: Timeouts, retry policies, logging levels
+
+Integration Points:
+- Used by all Azure Functions triggers for consistent configuration
+- Repository layer uses database connection settings
+- Storage adapters use Azure Storage configuration
+- Health checks validate all configuration components
+- Vault repository retrieves secure credentials
+
+Usage Examples:
+    # Standard application usage
+    config = get_config()
+    blob_url = config.blob_service_url
+    
+    # Development debugging (safe - passwords masked)
+    debug_info = debug_config()
+    print(json.dumps(debug_info, indent=2))
+
+Author: Azure Geospatial ETL Team
 """
 import os
 from typing import Optional
@@ -79,6 +115,12 @@ class AppConfig(BaseModel):
         description="PostgreSQL schema name for STAC collections and items"
     )
     
+    app_schema: str = Field(
+        default="rmhgeoapi",
+        description="PostgreSQL schema name for application tables (jobs, tasks, etc.)",
+        examples=["rmhgeoapi", "dev_rmhgeoapi", "prod_rmhgeoapi"]
+    )
+    
     # ========================================================================
     # Queue Processing Configuration
     # ========================================================================
@@ -91,6 +133,22 @@ class AppConfig(BaseModel):
     task_processing_queue: str = Field(
         default="geospatial-tasks", 
         description="Azure Storage Queue for individual task processing"
+    )
+    
+    # ========================================================================
+    # Security Configuration - Azure Key Vault
+    # ========================================================================
+    
+    key_vault_name: str = Field(
+        default="rmhkeyvault",
+        description="Azure Key Vault name for secure credential storage",
+        examples=["rmhkeyvault", "rmhazurevault"]
+    )
+    
+    key_vault_database_secret: str = Field(
+        default="postgis-password",
+        description="Name of the secret in Key Vault containing the PostgreSQL password",
+        examples=["postgis-password", "database-password"]
     )
     
     # ========================================================================
@@ -206,6 +264,11 @@ class AppConfig(BaseModel):
             postgis_password=os.environ.get('POSTGIS_PASSWORD'),
             postgis_database=os.environ['POSTGIS_DATABASE'],
             postgis_schema=os.environ.get('POSTGIS_SCHEMA', 'geo'),
+            app_schema=os.environ.get('APP_SCHEMA', 'rmhgeoapi'),
+            
+            # Security
+            key_vault_name=os.environ.get('KEY_VAULT', 'rmhkeyvault'),
+            key_vault_database_secret=os.environ.get('KEY_VAULT_DATABASE_SECRET', 'postgis-password'),
             
             # Application
             function_timeout_minutes=int(os.environ.get('FUNCTION_TIMEOUT_MINUTES', '5')),
@@ -302,6 +365,9 @@ def debug_config() -> dict:
             'postgis_password_set': bool(config.postgis_password),
             'postgis_database': config.postgis_database,
             'postgis_schema': config.postgis_schema,
+            'app_schema': config.app_schema,
+            'key_vault_name': config.key_vault_name,
+            'key_vault_database_secret': config.key_vault_database_secret,
             'job_queue': config.job_processing_queue,
             'task_queue': config.task_processing_queue,
             'function_timeout_minutes': config.function_timeout_minutes,

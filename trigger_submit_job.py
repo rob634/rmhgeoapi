@@ -1,30 +1,71 @@
 """
-Job Submission HTTP Trigger - Job Management
+Job Submission HTTP Trigger - Azure Geospatial ETL Pipeline
 
-Concrete implementation of job submission endpoint using BaseHttpTrigger.
-Handles creation of new processing jobs with idempotent behavior.
+HTTP endpoint implementation for job submission using BaseHttpTrigger pattern.
+Handles creation of new processing jobs with idempotent behavior, parameter validation,
+and controller-based job orchestration for the Job→Stage→Task architecture.
 
-Usage:
+Key Features:
+- Idempotent job creation with SHA256-based deduplication
+- Parameter validation using controller-specific schemas
+- Controller pattern routing based on job_type
+- Comprehensive error handling with detailed messages
+- Queue integration for asynchronous processing
+- DDH parameter validation for ETL operations
+
+Job Creation Flow:
+1. Extract job_type from URL path parameter
+2. Extract and validate JSON request body parameters
+3. Route to appropriate controller based on job_type
+4. Validate parameters using controller schema validation
+5. Generate deterministic job ID (SHA256 of parameters)
+6. Create job record in storage with validated parameters
+7. Queue job message for asynchronous processing
+8. Return job creation response with queue information
+
+Supported Job Types:
+- hello_world: Multi-stage greeting workflow (fully implemented)
+- Additional job types require controller implementation
+
+Parameter Categories:
+- Standard DDH Parameters: dataset_id, resource_id, version_id, system
+- Job-specific Parameters: Varies by job_type (validated by controller)
+- System Parameters: Internal flags for bypassing validation
+
+Integration Points:
+- Uses JobManagementTrigger base class for common patterns
+- Routes to controller implementations in controller_* files
+- Integrates with RepositoryFactory for job storage
+- Connects to Azure Storage Queues for processing
+
+API Endpoint:
     POST /api/jobs/{job_type}
+    
+Request Body:
     {
-        "dataset_id": "container_name",
-        "resource_id": "file_or_folder", 
-        "version_id": "v1",
-        "system": false,
-        ... additional parameters
+        "dataset_id": "container_name",     # Required for ETL operations
+        "resource_id": "file_or_folder",    # Required for ETL operations
+        "version_id": "v1.0",               # Required for ETL operations
+        "system": false,                    # Optional: bypass DDH validation
+        ...additional_job_specific_params   # Varies by job_type
     }
     
 Response:
     {
-        "job_id": "SHA256_hash",
+        "job_id": "sha256_hash_of_parameters",
         "status": "created",
         "job_type": "operation_type",
         "message": "Job created and queued for processing",
-        "parameters": {...},
-        "queue_info": {...},
-        "request_id": "uuid",
-        "timestamp": "ISO-8601"
+        "parameters": {...validated_parameters},
+        "queue_info": {...queue_details},
+        "request_id": "unique_request_id",
+        "timestamp": "2025-01-30T12:34:56.789Z"
     }
+
+Error Responses:
+- 400: Invalid parameters or missing required fields
+- 404: Unsupported job_type (no controller implementation)
+- 500: Internal server error during job creation
 
 Author: Azure Geospatial ETL Team
 """

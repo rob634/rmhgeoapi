@@ -1,13 +1,70 @@
 """
-Hello World Tasks - Redesign Architecture Test Implementation
+Hello World Service Layer - Job→Stage→Task Architecture Implementation
 
-Implements the business logic tasks for the Hello World → Worlds Reply workflow.
-These tasks demonstrate the Service + Repository layer responsibility within
-the Job→Stage→Task architecture.
+Service layer implementation demonstrating the business logic pattern within the
+Job→Stage→Task architecture. Provides concrete task implementations for the
+HelloWorld two-stage workflow showing proper task execution, parameter validation,
+and result formatting patterns.
+
+Architecture Responsibility:
+    This module implements the SERVICE + REPOSITORY layer within the architecture:
+    - Job (Controller Layer): HelloWorldController orchestrates stages
+    - Stage (Controller Layer): Creates parallel tasks for execution  
+    - Task (Service Layer): THIS MODULE - Business logic execution
+    - Repository Layer: Data persistence and retrieval operations
+
+Key Features:
+- Two-stage workflow implementation (Greeting → Reply pattern)
+- Pydantic-based parameter validation with detailed error messages
+- Comprehensive task result formatting with metadata
+- Execution time tracking and performance monitoring
+- Task registry pattern for dynamic task type resolution
+- Robust error handling with detailed logging
+
+Workflow Pattern:
+    STAGE 1 (Greeting Stage):
+    ├── HelloWorldGreetingTask (parallel execution)
+    ├── HelloWorldGreetingTask (parallel execution)
+    └── HelloWorldGreetingTask (parallel execution)
+                ↓ All tasks complete
+    STAGE 2 (Reply Stage):
+    ├── HelloWorldReplyTask (parallel execution)
+    ├── HelloWorldReplyTask (parallel execution) 
+    └── HelloWorldReplyTask (parallel execution)
+                ↓ All tasks complete
+    JOB COMPLETION (Controller aggregates results)
 
 Task Types:
-1. HelloWorldGreetingTask - Creates greeting messages in Stage 1
-2. HelloWorldReplyTask - Creates reply messages in Stage 2
+- HelloWorldGreetingTask: Stage 1 business logic for greeting generation
+- HelloWorldReplyTask: Stage 2 business logic for reply generation
+
+Task Execution Flow:
+1. Receive TaskExecutionContext from queue processor
+2. Validate task-specific parameters against schema
+3. Execute business logic with error handling
+4. Format results with metadata and timing information
+5. Return TaskResult with success/failure status
+
+Integration Points:
+- Called by process_task_queue() in function_app.py
+- Uses BaseTask abstract class for consistent interface
+- Integrates with TaskExecutionContext for parameter passing
+- Returns TaskResult objects for result aggregation
+- Registers tasks in HELLO_WORLD_TASKS for dynamic dispatch
+
+Parameter Requirements:
+- task_number: Integer task index for identification
+- message: Base message content for greeting/reply
+- greeting: Greeting prefix for Stage 1 tasks
+- reply_to: Original greeting for Stage 2 tasks
+
+Usage Example:
+    # Task creation and execution (typically done by queue processor)
+    task = get_hello_world_task("hello_world_greeting")
+    context = TaskExecutionContext(...)
+    result = task.execute(context)
+
+Author: Azure Geospatial ETL Team
 """
 
 from typing import Dict, Any

@@ -1,23 +1,100 @@
 """
-Poison Queue Monitoring HTTP Trigger - System Monitoring
+Poison Queue Monitor HTTP Trigger - Azure Geospatial ETL Pipeline
 
-Concrete implementation of poison queue monitoring endpoint using BaseHttpTrigger.
-Handles detection and processing of poison messages in Azure Storage Queues.
+HTTP endpoint implementation for poison queue monitoring and cleanup using SystemMonitoringTrigger
+pattern. Provides comprehensive poison message detection, processing, and system health monitoring
+for the Azure Storage Queue infrastructure supporting the Job→Stage→Task architecture.
 
-Usage:
-    GET /api/monitor/poison - Check poison message status
-    POST /api/monitor/poison - Process poison messages
+Architecture Responsibility:
+    This module provides QUEUE HEALTH MONITORING within the Job→Stage→Task architecture:
+    - Job Layer: Poison message detection for stuck job processing
+    - Task Layer: Failed task identification and cleanup processing
+    - Queue Layer: Storage queue health monitoring and poison message management
+    - System Layer: Overall pipeline health monitoring and error recovery
+
+Key Features:
+- Dual-mode operation (GET for status checking, POST for poison message processing)
+- Comprehensive poison message detection across all system queues
+- Automatic job and task failure marking for poison messages
+- Detailed queue health reporting with per-queue statistics
+- Safe poison message cleanup with audit trail and logging
+- System health status determination based on poison message counts
+- Error recovery mechanisms for queue processing failures
+
+Poison Message Detection:
+    Messages become "poison" when they fail processing multiple times:
+    - Azure Storage Queues automatically move messages to poison queues after 5 failed attempts
+    - PoisonQueueMonitor detects these messages and correlates them with jobs/tasks
+    - Jobs and tasks associated with poison messages are marked as FAILED
+    - System health status reflects poison message presence
+
+Queue Monitoring Workflow:
+    GET Request → Check Poison Status → Queue Analysis
+                                    ↓
+    Per-Queue Counts → Health Status → Response
     
-Response:
+    POST Request → Process Poison Messages → Job/Task Failure Marking
+                                         ↓
+    Cleanup Messages → Audit Logging → Recovery Response
+
+Integration Points:
+- Uses SystemMonitoringTrigger base class for consistent monitoring patterns
+- Integrates with PoisonQueueMonitor utility for queue operations
+- Connects to job and task repositories for failure marking
+- Provides health status to monitoring dashboards and alerting systems
+- Feeds into system recovery procedures and operational workflows
+
+API Endpoints:
+    GET /api/monitor/poison
+    - Returns current poison message status across all queues
+    - Non-destructive operation for health monitoring
+    - Provides detailed queue statistics and health assessment
+    
+    POST /api/monitor/poison  
+    - Processes and cleans up poison messages
+    - Marks associated jobs and tasks as failed
+    - Returns processing results and cleanup statistics
+
+Response Formats:
+    GET Response (Status Check):
     {
+        "action": "status_check",
+        "poison_messages_found": 5,
+        "queues_checked": ["geospatial-jobs", "geospatial-tasks"],
+        "queue_details": {"geospatial-jobs": {"count": 3}},
+        "status": "healthy|attention_needed",
+        "last_checked": "2025-01-30T12:34:56.789Z"
+    }
+    
+    POST Response (Process Messages):
+    {
+        "action": "process_poison_messages",
         "poison_messages_found": 5,
         "jobs_marked_failed": 3,
         "tasks_marked_failed": 2,
-        "processed_at": "ISO-8601",
-        "messages": [...],
-        "request_id": "uuid",
-        "timestamp": "ISO-8601"
+        "processed_at": "2025-01-30T12:34:56.789Z",
+        "messages": ["Processing details..."],
+        "success": true
     }
+
+Monitoring Benefits:
+- Early detection of queue processing issues before they impact system performance
+- Automated cleanup of poison messages preventing queue bloat and performance degradation
+- Clear correlation between poison messages and failed jobs/tasks for debugging
+- Health status reporting for operational monitoring and alerting
+- Recovery mechanisms maintaining system reliability and availability
+
+Usage Examples:
+    # Check poison message status
+    GET /api/monitor/poison
+    → Returns current queue health without making changes
+    
+    # Process and cleanup poison messages
+    POST /api/monitor/poison
+    → Cleans up poison messages and marks associated jobs/tasks as failed
+    
+    # Automated monitoring (typically called by timer trigger)
+    curl -X GET https://app.azurewebsites.net/api/monitor/poison
 
 Author: Azure Geospatial ETL Team
 """

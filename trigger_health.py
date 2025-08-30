@@ -76,7 +76,21 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
             health_data["status"] = "unhealthy"
             health_data["errors"].extend(table_health.get("errors", []))
         
-        # Check database (optional)
+        # Check vault configuration and connectivity
+        vault_health = self._check_vault_configuration()
+        health_data["components"]["vault"] = vault_health
+        if vault_health["status"] == "unhealthy":
+            health_data["status"] = "unhealthy"
+            health_data["errors"].extend(vault_health.get("errors", []))
+        
+        # Check database configuration
+        db_config_health = self._check_database_configuration()
+        health_data["components"]["database_config"] = db_config_health
+        if db_config_health["status"] == "unhealthy":
+            health_data["status"] = "unhealthy"
+            health_data["errors"].extend(db_config_health.get("errors", []))
+        
+        # Check database connectivity (optional)
         if self._should_check_database():
             db_health = self._check_database()
             health_data["components"]["database"] = db_health
@@ -194,6 +208,110 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                     }
         
         return self.check_component_health("database", check_pg)
+    
+    def _check_vault_configuration(self) -> Dict[str, Any]:
+        """Check Azure Key Vault configuration and connectivity."""
+        def check_vault():
+            from repository_vault import VaultRepositoryFactory, VaultAccessError
+            
+            config = get_config()
+            
+            # Validate configuration
+            config_status = {
+                "key_vault_name": config.key_vault_name,
+                "key_vault_database_secret": config.key_vault_database_secret,
+                "vault_url": f"https://{config.key_vault_name}.vault.azure.net/"
+            }
+            
+            # Test vault connectivity
+            try:
+                vault_repo = VaultRepositoryFactory.create_with_config()
+                vault_info = vault_repo.get_vault_info()
+                
+                # Test secret access (just to verify connectivity, not retrieve actual secret)
+                try:
+                    # This will test connectivity without exposing the secret
+                    vault_repo.get_secret(config.key_vault_database_secret)
+                    secret_accessible = True
+                except VaultAccessError as e:
+                    if "Failed to resolve" in str(e):
+                        secret_accessible = "DNS resolution failed"
+                    elif "authentication" in str(e).lower():
+                        secret_accessible = "Authentication failed"
+                    else:
+                        secret_accessible = f"Access failed: {str(e)[:100]}..."
+                
+                return {
+                    **config_status,
+                    "vault_connectivity": "successful",
+                    "authentication_type": vault_info["authentication_type"],
+                    "secret_accessible": secret_accessible,
+                    "cache_ttl_minutes": vault_info["cache_ttl_minutes"]
+                }
+                
+            except Exception as e:
+                return {
+                    **config_status,
+                    "vault_connectivity": "failed",
+                    "error": str(e)[:200]
+                }
+        
+        return self.check_component_health("vault", check_vault)
+    
+    def _check_database_configuration(self) -> Dict[str, Any]:
+        """Check PostgreSQL database configuration."""
+        def check_db_config():
+            config = get_config()
+            
+            # Required environment variables
+            required_env_vars = {
+                "KEY_VAULT": os.getenv("KEY_VAULT"),
+                "KEY_VAULT_DATABASE_SECRET": os.getenv("KEY_VAULT_DATABASE_SECRET"), 
+                "POSTGIS_DATABASE": os.getenv("POSTGIS_DATABASE"),
+                "POSTGIS_HOST": os.getenv("POSTGIS_HOST"),
+                "POSTGIS_USER": os.getenv("POSTGIS_USER"),
+                "POSTGIS_PORT": os.getenv("POSTGIS_PORT")
+            }
+            
+            # Optional environment variables
+            optional_env_vars = {
+                "POSTGIS_PASSWORD": bool(os.getenv("POSTGIS_PASSWORD")),
+                "POSTGIS_SCHEMA": os.getenv("POSTGIS_SCHEMA", "geo"),
+                "APP_SCHEMA": os.getenv("APP_SCHEMA", "rmhgeoapi")
+            }
+            
+            # Check for missing required variables
+            missing_vars = []
+            present_vars = {}
+            
+            for var_name, var_value in required_env_vars.items():
+                if var_value:
+                    present_vars[var_name] = var_value
+                else:
+                    missing_vars.append(var_name)
+            
+            # Configuration from loaded config
+            config_values = {
+                "postgis_host": config.postgis_host,
+                "postgis_port": config.postgis_port,
+                "postgis_user": config.postgis_user,
+                "postgis_database": config.postgis_database,
+                "postgis_schema": config.postgis_schema,
+                "app_schema": config.app_schema,
+                "key_vault_name": config.key_vault_name,
+                "key_vault_database_secret": config.key_vault_database_secret,
+                "postgis_password_configured": bool(config.postgis_password)
+            }
+            
+            return {
+                "required_env_vars_present": present_vars,
+                "missing_required_vars": missing_vars,
+                "optional_env_vars": optional_env_vars,
+                "loaded_config_values": config_values,
+                "configuration_complete": len(missing_vars) == 0
+            }
+        
+        return self.check_component_health("database_config", check_db_config)
     
     def _should_check_database(self) -> bool:
         """Check if database health check is enabled."""

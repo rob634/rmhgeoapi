@@ -1,8 +1,83 @@
 """
-Base Job - Redesign Architecture
+Base Job Model - Job→Stage→Task Architecture Core
 
-Defines the abstract base class for job state management and completion detection.
-Handles job lifecycle, stage transitions, and result aggregation.
+Abstract base class defining the job lifecycle management patterns for the Azure Geospatial
+ETL Pipeline. Provides comprehensive job state management, stage transition logic, completion
+detection mechanisms, and result aggregation patterns that concrete job implementations
+must customize for their specific workflows.
+
+Architecture Responsibility:
+    This module defines the JOB LAYER within the Job→Stage→Task architecture:
+    - Job Layer: THIS MODULE - Workflow orchestration and state management
+    - Stage Layer: Coordinates parallel task execution within workflow phases
+    - Task Layer: Implements business logic for individual processing units
+    - Repository Layer: Handles persistent storage and retrieval operations
+
+Key Features:
+- Abstract base class enforcing consistent job implementation patterns
+- "Last task turns out the lights" completion detection with atomic operations
+- Multi-stage workflow coordination with inter-stage data passing
+- Comprehensive job lifecycle management (creation, processing, completion)
+- Built-in progress tracking and completion percentage calculations
+- Failure handling with stage-level error isolation and recovery options
+- Job metrics extraction for monitoring and performance analysis
+- Validation framework ensuring job integrity and successful completion
+
+Job Lifecycle Stages:
+    1. CREATION: BaseJob.create_job_record() → Initial job record with metadata
+    2. QUEUING: Job parameters validated and queued for async processing
+    3. STAGE EXECUTION: Sequential stage processing with parallel task execution
+    4. STAGE COMPLETION: BaseJob.is_stage_complete() → Atomic completion detection
+    5. STAGE TRANSITION: BaseJob.should_transition_to_next_stage() → Next stage logic
+    6. FINAL AGGREGATION: BaseJob.aggregate_final_results() → Result consolidation
+    7. COMPLETION: Job marked complete with final results stored
+
+Completion Detection Pattern:
+    The "last task turns out the lights" pattern ensures atomic stage completion:
+    - Tasks complete independently and update their status
+    - Final task in stage performs atomic completion check
+    - Stage transitions only occur when ALL tasks complete
+    - Race conditions prevented through repository-level atomic operations
+
+Stage Transition Flow:
+    STAGE 1 (All tasks complete)
+         ↓ should_transition_to_next_stage()
+    STAGE 2 (All tasks complete) 
+         ↓ is_final_stage() = True
+    JOB COMPLETION → aggregate_final_results()
+
+Integration Points:
+- Extended by concrete job controllers (HelloWorldController, etc.)
+- Uses JobExecutionContext for state passing between stages
+- Integrates with repository layer for persistent state management
+- Connects to queue systems for asynchronous stage processing
+- Provides metrics to monitoring systems for performance tracking
+
+Abstract Methods (Must Implement):
+- should_proceed_to_next_stage(): Custom logic for stage progression
+- aggregate_final_results(): Job-specific result consolidation
+
+Concrete Methods (Ready to Use):
+- create_job_record(): Standardized job record creation
+- update_job_status(): Status and metadata updates
+- calculate_job_completion_percentage(): Progress tracking
+- handle_job_failure(): Error handling and recovery
+- validate_job_completion(): Final integrity checks
+
+Usage Example:
+    class CustomJobController(BaseJob):
+        def __init__(self):
+            super().__init__("custom_job")
+        
+        def should_proceed_to_next_stage(self, context, results):
+            # Custom stage progression logic
+            return results.get('success', False)
+        
+        def aggregate_final_results(self, context):
+            # Custom result aggregation
+            return {"total_processed": sum_results(context.stage_results)}
+
+Author: Azure Geospatial ETL Team
 """
 
 from abc import ABC, abstractmethod

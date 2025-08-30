@@ -1,15 +1,55 @@
 """
-Abstract Base Controller - Redesign Architecture
+Abstract Base Controller - Job→Stage→Task Architecture
 
-Defines the abstract base class for all controllers in the new architecture.
-Provides stage orchestration, task fan-out, and completion patterns.
+Abstract base class implementing the sophisticated Job→Stage→Task orchestration pattern
+for complex geospatial workflows. Controllers define job types, coordinate sequential stages,
+and manage parallel task execution with distributed completion detection.
 
-Based on consolidated_redesign.md specifications:
-- Job (Controller Layer): Orchestration with job_type specific completion
-- Stage (Controller Layer): Sequential coordination 
-- Task (Service + Repository Layer): Parallel execution with business logic
+Architecture Pattern:
+    JOB (Controller Layer - Orchestration)
+     ├── STAGE 1 (Sequential coordination)
+     │   ├── Task A (Service + Repository Layer - Parallel)
+     │   ├── Task B (Service + Repository Layer - Parallel) 
+     │   └── Task C (Service + Repository Layer - Parallel)
+     │                     ↓ Last task completes stage
+     ├── STAGE 2 (Sequential coordination)
+     │   ├── Task D (Service + Repository Layer - Parallel)
+     │   └── Task E (Service + Repository Layer - Parallel)
+     │                     ↓ Last task completes stage
+     └── COMPLETION (job_type specific aggregation)
 
-"Last task turns out the lights" completion pattern with atomic SQL operations.
+Key Features:
+- Pydantic workflow definitions with stage sequences
+- Sequential stages with parallel task execution within stages
+- Idempotent job processing with SHA256-based deduplication
+- "Last task turns out the lights" atomic completion detection
+- Strong typing discipline with explicit error handling
+- Centralized workflow validation and parameter schemas
+
+Controller Responsibilities:
+- Define job_type and workflow stages (orchestration only)
+- Create and coordinate sequential stage transitions
+- Fan-out parallel tasks within each stage
+- Aggregate final job results from all task outputs
+- Handle job completion and result formatting
+
+Integration Points:
+- Used by HTTP triggers for job submission
+- Creates JobRecord and TaskDefinition objects
+- Interfaces with RepositoryFactory for data persistence
+- Routes to Service layer for business logic execution
+- Integrates with queue system for asynchronous processing
+
+Usage Example:
+    class MyController(BaseController):
+        def get_job_type(self) -> str:
+            return "my_operation"
+            
+        def process_job_stage(self, job_record, stage, parameters, stage_results):
+            # Stage coordination logic here
+            pass
+
+Author: Azure Geospatial ETL Team
 """
 
 from abc import ABC, abstractmethod
@@ -230,11 +270,11 @@ class BaseController(ABC):
                                stage: int = 1, stage_results: Dict[int, Dict[str, Any]] = None) -> JobQueueMessage:
         """Create message for jobs queue"""
         return JobQueueMessage(
-            job_id=job_id,
-            job_type=self.job_type,
+            jobId=job_id,
+            jobType=self.job_type,
             stage=stage,
             parameters=parameters,
-            stage_results=stage_results or {}
+            stageResults=stage_results or {}
         )
 
     def queue_job(self, job_id: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
@@ -597,6 +637,119 @@ class BaseController(ABC):
         )
         
         return job_context
+
+    def process_job_stage(self, job_record: 'JobRecord', stage: int, parameters: Dict[str, Any], stage_results: Dict[int, Dict[str, Any]] = None) -> Dict[str, Any]:
+        """
+        Process a specific stage by creating and queueing tasks.
+        
+        This is the main method called by the job queue processor to handle stage execution.
+        It creates tasks for the stage and queues them to the task queue for parallel processing.
+        
+        Args:
+            job_record: The job record from storage
+            stage: Stage number to process
+            parameters: Job parameters
+            stage_results: Results from previous stages
+            
+        Returns:
+            Dictionary with stage processing results
+        """
+        # Defensive programming - handle both JobRecord object and dict
+        try:
+            if hasattr(job_record, 'job_id'):
+                job_id = job_record.job_id
+                job_type_from_record = getattr(job_record, 'job_type', 'unknown')
+            else:
+                # Fallback for dict-like object
+                job_id = job_record.get('job_id') or job_record.get('jobId', 'unknown_job_id')
+                job_type_from_record = job_record.get('job_type') or job_record.get('jobType', 'unknown')
+                self.logger.warning(f"⚠️ job_record is not a JobRecord object, type: {type(job_record)}")
+        except Exception as e:
+            self.logger.error(f"❌ Failed to extract job_id from job_record: {e}")
+            self.logger.error(f"❌ job_record type: {type(job_record)}, content: {job_record}")
+            raise RuntimeError(f"Invalid job_record format: {e}")
+            
+        self.logger.info(f"Processing stage {stage} for job {job_id[:16]}... type={self.job_type} (record_type={job_type_from_record})")
+        
+        # Create job and stage contexts
+        job_context = self.create_job_context(
+            job_id=job_id, 
+            parameters=parameters,
+            current_stage=stage, 
+            stage_results=stage_results or {}
+        )
+        
+        stage_context = self.create_stage_context(job_context, stage)
+        
+        # Create tasks for this stage using the abstract method
+        try:
+            task_definitions = self.create_stage_tasks(stage_context)
+            self.logger.info(f"Created {len(task_definitions)} task definitions for stage {stage}")
+        except Exception as e:
+            self.logger.error(f"Failed to create stage tasks: {e}")
+            raise RuntimeError(f"Failed to create tasks for stage {stage}: {e}")
+        
+        # Create and store task records, then queue them
+        from repository_data import RepositoryFactory
+        job_repo, task_repo, _ = RepositoryFactory.create_repositories()
+        
+        queued_tasks = 0
+        failed_tasks = 0
+        
+        for i, task_def in enumerate(task_definitions):
+            try:
+                # Create task record in storage
+                task_record = task_repo.create_task(
+                    task_id=task_def.task_id,
+                    job_id=task_def.job_id,
+                    task_type=task_def.task_type,
+                    stage_number=task_def.stage_number,
+                    task_index=i,
+                    parameters=task_def.parameters
+                )
+                
+                # Create task queue message
+                from schema_core import TaskQueueMessage
+                task_message = TaskQueueMessage(
+                    taskId=task_def.task_id,
+                    parentJobId=task_def.job_id,
+                    taskType=task_def.task_type,
+                    stage=task_def.stage_number,
+                    taskIndex=i,
+                    parameters=task_def.parameters
+                )
+                
+                # Queue the task
+                from azure.storage.queue import QueueServiceClient
+                from azure.identity import DefaultAzureCredential
+                from config import get_config
+                
+                config = get_config()
+                account_url = config.queue_service_url
+                queue_service = QueueServiceClient(account_url, credential=DefaultAzureCredential())
+                queue_client = queue_service.get_queue_client(config.task_processing_queue)
+                
+                message_json = task_message.model_dump_json()
+                queue_client.send_message(message_json)
+                
+                queued_tasks += 1
+                self.logger.debug(f"Task queued: {task_def.task_id}")
+                
+            except Exception as e:
+                self.logger.error(f"Failed to queue task {task_def.task_id}: {e}")
+                failed_tasks += 1
+        
+        stage_result = {
+            "stage_number": stage,
+            "stage_name": stage_context.stage_name,
+            "tasks_created": len(task_definitions),
+            "tasks_queued": queued_tasks,
+            "tasks_failed_to_queue": failed_tasks,
+            "processing_status": "tasks_queued" if queued_tasks > 0 else "failed"
+        }
+        
+        self.logger.info(f"Stage {stage} processing complete: {queued_tasks}/{len(task_definitions)} tasks queued successfully")
+        return stage_result
 
     def __repr__(self):
         return f"<{self.__class__.__name__}(job_type='{self.job_type}', stages={len(self.workflow_definition.stages)})>"

@@ -1,24 +1,97 @@
 """
-STORAGE BACKEND ADAPTERS - Type-Safe Storage Abstraction
+Storage Backend Adapters - Job→Stage→Task Architecture Persistence
 
-Provides storage backend abstraction with C-style type discipline.
-Each adapter converts between Pydantic models and storage-specific formats
-while maintaining schema consistency and validation.
+Comprehensive storage abstraction layer providing type-safe, schema-validated persistence for
+the Azure Geospatial ETL Pipeline. Implements backend-agnostic storage patterns with strict
+type discipline, automatic validation, and seamless migration capabilities supporting the
+complete Job→Stage→Task workflow data lifecycle.
 
-Design Principles:
-1. Storage backend agnostic - same interface for all backends
-2. Type-safe conversions with zero data loss  
-3. Automatic schema validation on all operations
-4. Consistent error handling across backends
-5. Future-proof for easy backend migration
+Architecture Responsibility:
+    This module provides STORAGE ABSTRACTION within the Job→Stage→Task architecture:
+    - Job Layer: JobRecord persistence with complete workflow state management
+    - Task Layer: TaskRecord persistence with parent-child relationship integrity
+    - Queue Layer: Storage backend integration for reliable message processing
+    - Schema Layer: Automatic validation ensuring type safety across all operations
 
-Supported Backends:
-- Azure Table Storage (current)
-- PostgreSQL (future)
-- CosmosDB (future)
+Key Features:
+- Backend-agnostic storage protocol enabling seamless migration between storage systems
+- Type-safe conversions with zero data loss between Pydantic models and storage formats
+- Automatic schema validation on all CRUD operations preventing data corruption
+- Comprehensive error handling with detailed logging and recovery mechanisms
+- Future-proof adapter pattern supporting multiple storage backends simultaneously
+- Idempotent operations ensuring safe retry behavior for distributed systems
+- Legacy field compatibility maintaining backward compatibility during migrations
 
-Author: Strong Typing Discipline Team
-Version: 1.0.0 - Foundation implementation
+Storage Backend Protocol:
+    All storage backends implement the same type-safe interface:
+    - create_job/task(): Creates records with schema validation
+    - get_job/task(): Retrieves records with automatic validation
+    - update_job/task(): Updates records with merge validation
+    - list_jobs/tasks(): Queries with filtering and validation
+    - count_tasks_by_status(): Aggregation queries for completion detection
+
+Data Flow Architecture:
+    Pydantic Models → Storage Adapter → Backend-Specific Format
+                   ↓                  ↓                    ↓
+    Type Safety    Schema Validation  Storage Operations
+                   ↓                  ↓                    ↓
+    Runtime Safety ← Validated Data ← Persistent Storage
+
+Current Implementation - Azure Table Storage:
+    - AzureTableStorageAdapter: Production-ready implementation with managed identity
+    - Automatic table creation and management with idempotent operations
+    - JSON serialization for complex fields (parameters, stage_results, result_data)
+    - Timezone-aware timestamp handling with UTC normalization
+    - Legacy field compatibility for smooth migrations
+    - Comprehensive error handling with detailed logging
+
+Future Implementations:
+    - PostgresAdapter: SQL-based storage with ACID transactions
+    - CosmosDbAdapter: Document-based storage with global distribution
+    - Additional adapters as needed for specific use cases
+
+Schema Validation Integration:
+    Every storage operation includes automatic validation:
+    - Input Validation: Pydantic models validated before storage conversion
+    - Storage Conversion: Type-safe conversion to backend-specific formats
+    - Retrieval Validation: Retrieved data validated against schemas
+    - Update Validation: Merged updates validated for consistency
+
+Error Handling Patterns:
+    - SchemaValidationError: Type safety violations with detailed field information
+    - ResourceExistsError: Idempotent creation handling for duplicate operations
+    - ResourceNotFoundError: Safe handling of missing records with appropriate responses
+    - Connection errors: Automatic retry with exponential backoff
+
+Integration Points:
+- Used by repository layer for all data persistence operations
+- Integrates with schema validation system for type safety enforcement
+- Connects to configuration system for backend selection and credentials
+- Feeds into monitoring systems for storage operation tracking
+- Supports job and task lifecycle management with completion detection
+
+Factory Pattern Benefits:
+    StorageAdapterFactory enables:
+    - Runtime backend selection based on configuration
+    - Easy testing with mock adapters
+    - Seamless migration between storage backends
+    - Multiple backends for different workloads
+
+Usage Examples:
+    # Create storage adapter
+    adapter = StorageAdapterFactory.create_adapter('azure_tables')
+    
+    # Store job with validation
+    job = JobRecord(job_id="abc123", job_type="hello_world", ...)
+    success = adapter.create_job(job)  # Automatic validation
+    
+    # Retrieve with validation
+    retrieved_job = adapter.get_job("abc123")  # Returns validated JobRecord
+    
+    # Update with merge validation
+    adapter.update_job("abc123", {"status": "completed"})
+
+Author: Azure Geospatial ETL Team
 """
 
 from abc import ABC, abstractmethod
@@ -134,38 +207,38 @@ class AzureTableStorageAdapter:
         
         # Azure Table Storage required fields
         entity['PartitionKey'] = 'jobs'  # All jobs in same partition for queries
-        entity['RowKey'] = job.jobId
+        entity['RowKey'] = job.job_id
         
         # Schema fields - direct mapping from Pydantic model
-        entity['jobId'] = job.jobId
-        entity['jobType'] = job.jobType
+        entity['jobId'] = job.job_id
+        entity['jobType'] = job.job_type
         # Debug logging for enum handling
         logger.debug(f"🔍 job.status type: {type(job.status)}, value: {job.status}")
         entity['status'] = job.status if isinstance(job.status, str) else job.status.value  # Handle enum or string
         logger.debug(f"✅ Converted status to: {entity['status']} (type: {type(entity['status'])})")
         entity['stage'] = job.stage
-        entity['totalStages'] = job.totalStages
+        entity['totalStages'] = job.total_stages
         
         # Legacy field compatibility - populate underscore versions for existing table structure
-        entity['job_id'] = job.jobId
-        entity['job_type'] = job.jobType
+        entity['job_id'] = job.job_id
+        entity['job_type'] = job.job_type
         entity['request_parameters'] = json.dumps(job.parameters, default=str)
         
         # JSON fields - serialize complex data
         entity['parameters'] = json.dumps(job.parameters, default=str)
-        entity['stageResults'] = json.dumps(job.stageResults, default=str)
+        entity['stageResults'] = json.dumps(job.stage_results, default=str)
         
         # Optional fields
-        if job.resultData:
-            entity['resultData'] = json.dumps(job.resultData, default=str)
-        if job.errorDetails:
-            entity['errorDetails'] = job.errorDetails
+        if job.result_data:
+            entity['resultData'] = json.dumps(job.result_data, default=str)
+        if job.error_details:
+            entity['errorDetails'] = job.error_details
         
         # Timestamps - ensure timezone awareness
-        entity['createdAt'] = job.createdAt.replace(tzinfo=timezone.utc).isoformat()
-        entity['updatedAt'] = job.updatedAt.replace(tzinfo=timezone.utc).isoformat()
+        entity['createdAt'] = job.created_at.replace(tzinfo=timezone.utc).isoformat()
+        entity['updatedAt'] = job.updated_at.replace(tzinfo=timezone.utc).isoformat()
         
-        logger.debug(f"🔄 Converted JobRecord to Azure entity: {job.jobId[:16]}...")
+        logger.debug(f"🔄 Converted JobRecord to Azure entity: {job.job_id[:16]}...")
         return entity
     
     def _entity_to_job_record(self, entity: TableEntity) -> JobRecord:
@@ -181,13 +254,13 @@ class AzureTableStorageAdapter:
         try:
             # Extract data from entity
             job_data = {
-                'jobId': entity['jobId'],
-                'jobType': entity['jobType'],
+                'job_id': entity['jobId'],
+                'job_type': entity['jobType'],
                 'status': entity['status'],
                 'stage': entity['stage'],
-                'totalStages': entity['totalStages'],
-                'createdAt': entity['createdAt'],
-                'updatedAt': entity['updatedAt']
+                'total_stages': entity['totalStages'],
+                'created_at': entity['createdAt'],
+                'updated_at': entity['updatedAt']
             }
             
             # Parse JSON fields with error handling
@@ -198,25 +271,25 @@ class AzureTableStorageAdapter:
                 job_data['parameters'] = {}
             
             try:
-                job_data['stageResults'] = json.loads(entity.get('stageResults', '{}'))
+                job_data['stage_results'] = json.loads(entity.get('stageResults', '{}'))
             except json.JSONDecodeError:
                 logger.warning(f"Invalid stageResults JSON for job {entity['jobId']}")
-                job_data['stageResults'] = {}
+                job_data['stage_results'] = {}
             
             # Optional fields
             if 'resultData' in entity and entity['resultData']:
                 try:
-                    job_data['resultData'] = json.loads(entity['resultData'])
+                    job_data['result_data'] = json.loads(entity['resultData'])
                 except json.JSONDecodeError:
                     logger.warning(f"Invalid resultData JSON for job {entity['jobId']}")
-                    job_data['resultData'] = None
+                    job_data['result_data'] = None
             
             if 'errorDetails' in entity:
-                job_data['errorDetails'] = entity['errorDetails']
+                job_data['error_details'] = entity['errorDetails']
             
             # Validate and return schema-compliant record
             job_record = SchemaValidator.validate_job_record(job_data, strict=True)
-            logger.debug(f"🔄 Converted Azure entity to JobRecord: {job_record.jobId[:16]}...")
+            logger.debug(f"🔄 Converted Azure entity to JobRecord: {job_record.job_id[:16]}...")
             return job_record
             
         except Exception as e:
@@ -327,8 +400,8 @@ class AzureTableStorageAdapter:
             
             # Check if job already exists (idempotent)
             try:
-                existing = table_client.get_entity('jobs', job.jobId)
-                logger.info(f"📋 Job already exists: {job.jobId[:16]}...")
+                existing = table_client.get_entity('jobs', job.job_id)
+                logger.info(f"📋 Job already exists: {job.job_id[:16]}...")
                 return False
             except ResourceNotFoundError:
                 pass  # Job doesn't exist, continue creating
@@ -338,11 +411,11 @@ class AzureTableStorageAdapter:
             
             # Create entity
             table_client.create_entity(entity)
-            logger.info(f"✅ Job created: {job.jobId[:16]}... type={job.jobType} status={job.status}")
+            logger.info(f"✅ Job created: {job.job_id[:16]}... type={job.job_type} status={job.status}")
             return True
             
         except Exception as e:
-            logger.error(f"❌ Failed to create job {job.jobId[:16]}...: {e}")
+            logger.error(f"❌ Failed to create job {job.job_id[:16]}...: {e}")
             raise
     
     def get_job(self, job_id: str) -> Optional[JobRecord]:

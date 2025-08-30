@@ -1,15 +1,78 @@
 """
-HelloWorldController - Redesign Architecture Test Implementation
+HelloWorld Controller - Job→Stage→Task Architecture Reference Implementation
 
-Implements the foundational Job→Stage→Task architecture using a two-stage
-"Hello Worlds → Worlds Reply" pattern as specified in the implementation plan.
+Concrete controller implementation demonstrating the complete Job→Stage→Task
+orchestration pattern for Azure Geospatial ETL Pipeline. Provides a two-stage
+"Hello Worlds → Worlds Reply" workflow that validates all architectural components
+and serves as the reference implementation for other controllers.
 
-This controller demonstrates:
-- Sequential stage processing (Stage 1 → Stage 2)
-- Parallel task execution within each stage
-- "Last task turns out the lights" completion pattern
-- Job result aggregation across all stages
-- The n parameter for controlling parallel task creation
+Architecture Demonstration:
+    JOB: HelloWorld (Controller orchestrates entire workflow)
+     ├── STAGE 1: Greeting Stage (Sequential coordination)
+     │   ├── HelloWorldGreetingTask (Service layer - Parallel)
+     │   ├── HelloWorldGreetingTask (Service layer - Parallel)
+     │   └── HelloWorldGreetingTask (Service layer - Parallel)
+     │                     ↓ Last task completes stage
+     ├── STAGE 2: Reply Stage (Sequential coordination)
+     │   ├── HelloWorldReplyTask (Service layer - Parallel)
+     │   ├── HelloWorldReplyTask (Service layer - Parallel)
+     │   └── HelloWorldReplyTask (Service layer - Parallel)
+     │                     ↓ Last task completes stage
+     └── COMPLETION: Aggregate results with comprehensive statistics
+
+Key Features:
+- Two-stage sequential workflow with parallel task execution
+- Dynamic task creation based on 'n' parameter (fan-out pattern)
+- Pydantic workflow definition validation and parameter schemas
+- Inter-stage result passing from Greeting to Reply stage
+- Comprehensive result aggregation with statistics and metadata
+- "Last task turns out the lights" distributed completion detection
+- Idempotent job processing with SHA256-based job IDs
+
+Workflow Validation:
+- Stage orchestration and sequential execution patterns
+- Parallel task creation and execution within stages
+- Task result collection and inter-stage data flow
+- Job completion detection across distributed tasks
+- Error handling and partial failure scenarios
+- Result formatting for API consumption
+
+Controller Responsibilities (Orchestration Layer):
+- Define job_type and workflow stages (no business logic)
+- Validate job parameters against Pydantic schemas
+- Create task definitions for parallel execution
+- Coordinate stage transitions and data passing
+- Aggregate final results from all completed tasks
+- Handle job completion and status management
+
+Business Logic Separation:
+- Controller: Stage coordination and task creation (THIS MODULE)
+- Service: Task business logic execution (service_hello_world.py)
+- Repository: Data persistence and retrieval (repository_data.py)
+
+Integration Points:
+- Used by trigger_submit_job.py for job creation
+- Creates TaskDefinition objects for queue processing
+- Interfaces with RepositoryFactory for job/task persistence
+- Calls service_hello_world.py tasks for business logic
+- Provides results to trigger_get_job_status.py
+
+Parameter Schema:
+- n: Number of parallel tasks per stage (default: 1, validates 1-10)
+- message: Base message content for greeting generation
+- dataset_id, resource_id, version_id: Standard DDH parameters
+- system: Boolean flag for bypassing validation
+
+Usage Examples:
+    # Job creation (typically via HTTP API)
+    controller = HelloWorldController()
+    job_id = controller.generate_job_id(parameters)
+    job_record = controller.create_job_record(job_id, parameters)
+    
+    # Stage processing (typically via queue processing)
+    result = controller.process_job_stage(job_record, stage=1, ...)
+
+Author: Azure Geospatial ETL Team
 """
 
 from typing import List, Dict, Any

@@ -1,13 +1,115 @@
 """
-WORKFLOW SCHEMA DEFINITIONS - Stage Sequence and Parameter Validation
+Workflow Schema Definitions - Job→Stage→Task Architecture Orchestration
 
-Pydantic models for defining job_type workflows with:
-- Sequential stage definitions with parameters
-- Stage parameter validation and defaults
-- Controller workflow specifications
-- Type-safe stage sequence management
+Comprehensive workflow definition system providing declarative multi-stage job orchestration for
+the Azure Geospatial ETL Pipeline. Implements type-safe workflow specifications with parameter
+validation, stage dependencies, and execution constraints that enable consistent, maintainable,
+and scalable job workflow management across all pipeline operations.
 
-Integrates with our strong typing discipline using Pydantic v2.
+Architecture Responsibility:
+    This module defines WORKFLOW ORCHESTRATION within the Job→Stage→Task architecture:
+    - Job Layer: WorkflowDefinition providing complete job specification and validation
+    - Stage Layer: WorkflowStageDefinition providing stage sequence and parameter management
+    - Task Layer: Stage parameter validation ensuring type-safe task execution
+    - Repository Layer: Parameter validation and constraint enforcement integration
+
+Key Features:
+- Declarative workflow definitions with comprehensive validation and constraint enforcement
+- Type-safe parameter systems with automatic validation, coercion, and default value handling
+- Stage dependency management preventing invalid execution sequences and circular dependencies
+- Parallel execution controls with configurable task limits and resource management
+- Built-in workflow registry for standard pipeline operations and reusable patterns
+- Version-aware workflow definitions supporting evolution and backward compatibility
+- Comprehensive parameter constraint system (ranges, lengths, allowed values)
+- Global and stage-specific parameter validation with inheritance and override patterns
+
+Workflow Definition Hierarchy:
+    WorkflowDefinition (Job Level)
+    ├── Global Parameters (Available to all stages)
+    ├── Stage 1: WorkflowStageDefinition
+    │   ├── Stage Parameters (Stage-specific)
+    │   ├── Task Type Definition
+    │   └── Execution Constraints
+    ├── Stage 2: WorkflowStageDefinition
+    │   ├── Dependencies on Stage 1
+    │   └── Parameter Inheritance
+    └── Stage N: WorkflowStageDefinition (Final)
+
+Parameter Validation System:
+    Request Parameters → Global Validation → Stage Validation
+                      ↓                    ↓                ↓
+                 Type Coercion    Default Application    Constraint Check
+                      ↓                    ↓                ↓
+                 Validated Params → Task Execution → Business Logic
+
+Stage Dependency Resolution:
+    Workflow stages execute in dependency-resolved order:
+    - Stage 1 (no dependencies) → executes first
+    - Stage 2 (depends on Stage 1) → waits for Stage 1 completion
+    - Stage 3 (depends on Stage 1,2) → waits for both completions
+    - Final Stage (marked is_final_stage=True) → triggers job completion
+
+Integration Points:
+- Used by controller implementations for job workflow specification and validation
+- Integrates with HTTP triggers for parameter validation and constraint enforcement
+- Connects to queue systems for stage sequencing and dependency management
+- Feeds into task creation systems for parameter distribution and context setup
+- Provides job lifecycle management with completion detection and error handling
+
+Predefined Workflows:
+- HelloWorld: Two-stage demonstration workflow (greeting → reply pattern)
+- SyncContainer: Multi-stage container synchronization (inventory → cataloging)
+- Additional workflows registered in WORKFLOW_REGISTRY for easy access
+
+Parameter Types Supported:
+- STRING: Text values with length constraints and validation
+- INTEGER: Numeric values with range validation and coercion
+- FLOAT: Decimal values with range constraints and automatic conversion
+- BOOLEAN: Boolean values with string coercion ("true"/"false" handling)
+- DICT: Complex object parameters with structure validation
+- LIST: Array parameters with length constraints and element validation
+- ANY: Flexible parameters for advanced use cases
+
+Validation Features:
+- Required/optional parameter enforcement with clear error messaging
+- Default value application with type-safe handling
+- Range validation for numeric parameters (min_value, max_value)
+- Length validation for strings and lists (min_length, max_length)
+- Allowed value constraints with enumeration support
+- Cross-parameter validation and dependency checking
+
+Usage Examples:
+    # Create workflow definition
+    workflow = WorkflowDefinition(
+        job_type="custom_workflow",
+        workflow_name="Custom Processing",
+        description="Multi-stage custom workflow",
+        stages=[
+            WorkflowStageDefinition(
+                stage_number=1,
+                stage_name="Data Preparation",
+                task_type="prepare_data",
+                stage_parameters=[
+                    StageParameterDefinition(
+                        name="input_format",
+                        param_type=StageParameterType.STRING,
+                        allowed_values=["geotiff", "shapefile", "json"]
+                    )
+                ]
+            )
+        ]
+    )
+    
+    # Validate job parameters
+    validated = workflow.validate_job_parameters({
+        "input_format": "geotiff",
+        "parallel_tasks": 10
+    })
+    
+    # Get workflow from registry
+    hello_workflow = get_workflow_definition("hello_world")
+
+Author: Azure Geospatial ETL Team
 """
 
 from pydantic import BaseModel, Field, field_validator, model_validator

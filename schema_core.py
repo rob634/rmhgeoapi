@@ -1,26 +1,110 @@
 """
-STRONG TYPING DISCIPLINE - Core Schema Definitions
+Core Schema Definitions - Job→Stage→Task Architecture Type Safety
 
-This module enforces C-style type discipline for Python using Pydantic.
-ZERO tolerance for runtime type errors, missing fields, or data corruption.
+Comprehensive schema validation system providing bulletproof type safety for the Azure Geospatial
+ETL Pipeline. Implements C-style type discipline using Pydantic v2 with zero tolerance for runtime
+type errors, missing fields, or data corruption. Establishes canonical data contracts across all
+system components with immutable field constraints and comprehensive validation rules.
 
-Design Principle: "If it compiles, it works. If it validates, it's bulletproof."
+Strong Typing Discipline Philosophy:
+    "If it validates at creation, it's safe at runtime. If it's safe at runtime, it's bulletproof in production."
+    
+    This module eliminates entire classes of production errors by enforcing strict type contracts:
+    - Field presence validation prevents missing data errors
+    - Type constraints prevent data corruption and casting failures
+    - Format validation ensures consistent data patterns across components
+    - Transition validation prevents invalid state changes
+    - Relationship validation maintains referential integrity
 
-Schema Hierarchy:
-- JobRecord: Canonical job storage schema
-- TaskRecord: Canonical task storage schema  
-- JobQueueMessage: Strict job queue message format
-- TaskQueueMessage: Strict task queue message format
+Architecture Foundation:
+    These schemas define the data contracts for the entire Job→Stage→Task architecture:
+    - Job Layer: JobRecord, JobQueueMessage for workflow orchestration
+    - Stage Layer: Stage-related fields in job records for coordination
+    - Task Layer: TaskRecord, TaskQueueMessage for business logic execution
+    - Queue Layer: Message schemas for reliable asynchronous processing
+    - Storage Layer: Canonical record schemas for database persistence
 
-All schemas are:
-1. Immutable after creation (frozen=True where appropriate)
-2. Strictly validated at runtime
-3. Storage backend agnostic
-4. JSON serializable
-5. Type-safe with full IntelliSense support
+Key Features:
+- Pydantic v2 BaseModel classes with comprehensive field validation
+- Immutable primary identifiers preventing data corruption after creation
+- Strict enumeration types for status management with transition validation
+- Parent-child relationship validation maintaining referential integrity
+- JSON serialization compatibility with storage backends and APIs
+- Runtime field assignment validation catching errors at assignment time
+- Deterministic ID generation ensuring consistent object identification
+- Structured error handling with detailed validation failure messages
 
-Author: Redesign Architecture Team
-Version: 1.0.0 - Foundation implementation with strong typing discipline
+Schema Categories:
+
+1. **Core Record Schemas** (Persistent Storage):
+   - JobRecord: Complete job state with multi-stage workflow tracking
+   - TaskRecord: Individual task state with parent job relationship
+
+2. **Queue Message Schemas** (Asynchronous Processing):
+   - JobQueueMessage: Job processing queue with stage progression
+   - TaskQueueMessage: Task processing queue with execution context
+
+3. **Validation Utilities** (Type Safety Enforcement):
+   - ID format validators ensuring consistent identifier patterns
+   - Type format validators enforcing naming conventions
+   - Transition validators preventing invalid state changes
+
+4. **Generation Utilities** (Deterministic Creation):
+   - generate_job_id(): SHA256-based deterministic job identification
+   - generate_task_id(): Hierarchical task identification within jobs
+
+Data Flow Type Safety:
+    HTTP Request → Schema Validation → Persistent Storage
+         ↓                ↓                    ↓
+    Request Body    JobRecord/TaskRecord    Database
+         ↓                ↓                    ↓
+    Parameter Extraction → Queue Messages → Task Execution
+         ↓                ↓                    ↓
+    Validation Errors ← Pydantic Errors ← Runtime Safety
+
+Validation Layers:
+1. **Field-Level**: Type, length, format, range validation on individual fields
+2. **Model-Level**: Cross-field validation ensuring data consistency
+3. **Transition-Level**: State change validation preventing invalid progressions
+4. **Relationship-Level**: Parent-child validation maintaining referential integrity
+
+Integration Points:
+- Used by all HTTP triggers for request/response validation
+- Integrated with repository layers for type-safe database operations
+- Consumed by queue processors for message format validation
+- Referenced by controller implementations for parameter validation
+- Utilized by service layers for business logic data contracts
+
+Configuration:
+- SchemaConfig: Global settings for validation strictness and constraints
+- MAX_PARAMETER_SIZE_BYTES: JSON parameter size limits
+- MAX_RESULT_DATA_SIZE_BYTES: Result data size constraints
+- Timeout configurations for job and task processing
+
+Error Handling:
+- SchemaValidationError: Structured validation failure reporting
+- Detailed field-level error messages with location information
+- Immediate failure on validation errors preventing data corruption
+
+Usage Examples:
+    # Job record creation with validation
+    job = JobRecord(
+        job_id="a1b2c3...",  # Must be 64-char SHA256
+        job_type="hello_world",  # Must be snake_case
+        status=JobStatus.QUEUED,  # Enum validation
+        parameters={"message": "Hello"}  # JSON validation
+    )
+    
+    # Queue message with relationship validation
+    message = TaskQueueMessage(
+        taskId="a1b2c3..._stage1_task0",  # Format validation
+        parentJobId="a1b2c3...",  # Must match task ID prefix
+        taskType="hello_world_greeting",  # Snake_case validation
+        stage=1,  # Range validation
+        parameters={"task_number": 1}
+    )
+
+Author: Azure Geospatial ETL Team
 """
 
 from pydantic import BaseModel, Field, field_validator, model_validator

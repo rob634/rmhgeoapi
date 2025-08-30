@@ -1,24 +1,86 @@
 """
-SCHEMA VALIDATION LAYER - Centralized Type Enforcement
+Schema Validation Layer - Job→Stage→Task Architecture Type Enforcement
 
-This module provides centralized validation for all data entering the system.
-C-style discipline: "Validate early, validate often, fail fast."
+Comprehensive validation system providing centralized type enforcement and data integrity
+for the Azure Geospatial ETL Pipeline. Implements strict C-style validation discipline
+with "validate early, validate often, fail fast" principles to ensure bulletproof
+type safety across all system components.
+
+Key Features:
+- Centralized validation engine with consistent error handling
+- Queue message validation for both job and task messages
+- Storage record validation with automatic type coercion
+- Status transition validation following state machine rules
+- Parent-child relationship validation for job-task hierarchies
+- Schema migration support for backward compatibility
+- Validation middleware decorators for automatic enforcement
+- Structured error reporting with detailed debugging information
 
 Design Principles:
-1. ZERO tolerance for invalid data
-2. Fail fast with detailed error messages  
-3. Automatic type coercion where safe
-4. Structured error reporting for debugging
-5. Schema evolution support for migrations
+- ZERO tolerance for invalid data entering the system
+- Fail fast with detailed error messages for debugging
+- Automatic type coercion where safe and appropriate
+- Structured error reporting for operational monitoring
+- Schema evolution support for smooth migrations
+- Comprehensive logging for validation audit trails
 
 Validation Points:
-- Queue message parsing (both job and task queues)
-- Storage record creation/updates  
-- API request/response validation
-- Inter-service data transfer
+The validator operates at critical system boundaries:
+- Queue message parsing (job queue and task queue messages)
+- Storage record creation and updates (JobRecord, TaskRecord)
+- API request/response validation (HTTP endpoints)
+- Inter-service data transfer (between controllers, services, repositories)
+- State transitions (job status changes, task status changes)
+- Relationship integrity (parent-child job-task relationships)
 
-Author: Strong Typing Discipline Team  
-Version: 1.0.0 - Foundation implementation
+Architecture Integration:
+This validation layer integrates with the Job→Stage→Task architecture by:
+- Validating job creation parameters before stage orchestration
+- Ensuring task parameters are valid before service layer execution
+- Enforcing status transition rules throughout job lifecycle
+- Maintaining parent-child integrity between jobs and tasks
+- Supporting schema evolution without breaking existing workflows
+
+Usage Examples:
+    # Validate job record from storage
+    job_record = SchemaValidator.validate_job_record(raw_data)
+    
+    # Validate task record with strict mode
+    task_record = SchemaValidator.validate_task_record(task_data, strict=True)
+    
+    # Validate queue message with automatic type detection
+    message = SchemaValidator.validate_queue_message(queue_data, 'job')
+    
+    # Check status transition validity
+    is_valid = SchemaValidator.validate_status_transition(current_job, new_status)
+    
+    # Migrate legacy data to current schema
+    migrated_job = SchemaEvolution.migrate_legacy_job(legacy_data)
+    
+    # Use validation middleware decorators
+    @ValidationMiddleware.validate_input(JobRecord)
+    def process_job(job_record):
+        # Function receives validated JobRecord instance
+        pass
+
+Error Handling:
+The validator provides comprehensive error handling:
+- SchemaValidationError: Structured validation failure information
+- Detailed field-level error messages with context
+- Non-strict mode for graceful degradation scenarios
+- Comprehensive logging for debugging and monitoring
+- Clear error paths for operational alerting
+
+Integration Points:
+- schema_core.py: Uses Pydantic models for type definitions
+- model_core.py: Validates against core data models
+- repository_data.py: Storage layer validation
+- trigger_*.py: HTTP endpoint request/response validation
+- function_app.py: Queue message validation
+- controller_*.py: Job parameter validation
+- service_*.py: Business logic input/output validation
+
+Author: Azure Geospatial ETL Team
 """
 
 from typing import Union, Dict, Any, List, Optional, Type, TypeVar
@@ -78,7 +140,7 @@ class SchemaValidator:
                 data['updatedAt'] = now
                 
             job_record = JobRecord(**data)
-            logger.info(f"✅ Job record validated: {job_record.jobId[:16]}... type={job_record.jobType}")
+            logger.info(f"✅ Job record validated: {job_record.job_id[:16]}... type={job_record.job_type}")
             return job_record
             
         except ValidationError as e:
@@ -214,7 +276,7 @@ class SchemaValidator:
             if not current_record.status.can_transition_to(new_status):
                 raise ValueError(
                     f"Invalid job status transition: {current_record.status} → {new_status} "
-                    f"for job {current_record.jobId[:16]}..."
+                    f"for job {current_record.job_id[:16]}..."
                 )
                 
         elif isinstance(current_record, TaskRecord):

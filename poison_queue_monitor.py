@@ -32,6 +32,25 @@ class PoisonQueueMonitor:
         """Basic implementation - returns 0 messages cleaned"""
         logger.debug(f"Cleanup old poison messages (basic implementation)")
         return 0
+    
+    def get_poison_message_counts(self) -> Dict[str, Any]:
+        """Basic implementation - returns empty poison message counts"""
+        logger.debug("Getting poison message counts (basic implementation)")
+        return {
+            "geospatial-jobs-poison": 0,
+            "geospatial-tasks-poison": 0,
+            "total_poison_messages": 0
+        }
+    
+    def process_poison_messages(self, process_all: bool = False) -> Dict[str, Any]:
+        """Basic implementation - returns no processing results"""
+        logger.debug("Processing poison messages (basic implementation)")
+        return {
+            "messages_processed": 0,
+            "jobs_marked_failed": 0,
+            "tasks_marked_failed": 0,
+            "timestamp": datetime.now().isoformat()
+        }
 
 
 class PoisonQueueDashboard:

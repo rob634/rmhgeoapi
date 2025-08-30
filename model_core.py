@@ -1,8 +1,90 @@
 """
-Core Models - Redesign Architecture
+Core Data Models - Job→Stage→Task Architecture Foundation
 
-Defines the core data models, enums, and context classes for the redesign architecture.
-These models are shared across all base classes and concrete implementations.
+Comprehensive data model definitions forming the backbone of the Azure Geospatial ETL Pipeline's
+strong typing discipline. Provides type-safe dataclasses, enumerations, context objects, and
+result structures that enforce architectural patterns and enable reliable inter-component
+communication throughout the Job→Stage→Task workflow system.
+
+Architecture Foundation:
+    This module establishes the fundamental data structures for the entire pipeline:
+    - Job Layer: JobRecord, JobResult, JobExecutionContext for workflow orchestration
+    - Stage Layer: StageDefinition, StageResult, StageExecutionContext for coordination
+    - Task Layer: TaskDefinition, TaskResult, TaskExecutionContext for business logic
+    - Queue Layer: JobQueueMessage, TaskQueueMessage for asynchronous processing
+    - Storage Layer: Record classes for database persistence
+
+Key Features:
+- Comprehensive dataclass definitions with validation and property methods
+- Strongly typed enumerations for status tracking across all workflow levels
+- Context objects providing execution state and parameter passing mechanisms
+- Result objects with built-in analytics (success rates, timing, metadata)
+- Queue message formats for reliable asynchronous processing
+- Database record structures with factory methods for ORM integration
+- Type-safe property accessors and computed values throughout
+
+Type Safety Benefits:
+- IDE autocompletion and type checking for all model interactions
+- Runtime validation through dataclass field types and constraints
+- Clear contracts between components preventing integration errors
+- Consistent data structures across HTTP triggers, controllers, and services
+- Standardized JSON serialization with to_dict() methods
+
+Workflow Data Flow:
+    HTTP Request → JobRecord (storage) → JobQueueMessage (async)
+         ↓                                      ↓
+    Job Controller ← JobExecutionContext ← Queue Processor
+         ↓                                      ↓
+    Stage Creation → StageExecutionContext → Task Creation
+         ↓                                      ↓  
+    TaskQueueMessage → Task Execution → TaskResult
+         ↓                                      ↓
+    StageResult ← Result Aggregation ← Task Completion
+         ↓                                      ↓
+    JobResult → Final Storage → HTTP Response
+
+Context Objects:
+- JobExecutionContext: Orchestrates multi-stage workflow with result passing
+- StageExecutionContext: Coordinates parallel task execution with completion tracking  
+- TaskExecutionContext: Provides business logic execution environment with retries
+
+Integration Points:
+- Used by all controller classes for job orchestration and parameter validation
+- Referenced by service layer implementations for business logic execution
+- Integrated with repository layer for type-safe database operations
+- Consumed by HTTP triggers for request/response transformation
+- Utilized by queue processors for reliable message handling
+
+Usage Examples:
+    # Job creation with type safety
+    job_context = JobExecutionContext(
+        job_id="abc123",
+        job_type="hello_world",
+        current_stage=1,
+        total_stages=2,
+        parameters={"message": "Hello World"}
+    )
+    
+    # Task execution with context
+    task_context = TaskExecutionContext(
+        task_id="task_001",
+        parent_job_id=job_context.job_id,
+        stage=1,
+        task_index=0,
+        parameters={"task_number": 1}
+    )
+    
+    # Result aggregation
+    task_result = TaskResult(
+        task_id=task_context.task_id,
+        job_id=task_context.job_id,
+        stage_number=1,
+        task_type="hello_world_greeting",
+        status=TaskStatus.COMPLETED,
+        result={"greeting": "Hello from task_1!"}
+    )
+
+Author: Azure Geospatial ETL Team
 """
 
 from enum import Enum

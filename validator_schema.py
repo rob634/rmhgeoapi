@@ -245,26 +245,26 @@ class SchemaValidator:
         Raises:
             ValueError: If relationship is invalid
         """
-        if task_record.parentJobId != job_record.jobId:
+        if task_record.parent_job_id != job_record.job_id:
             raise ValueError(
-                f"Task parentJobId mismatch: task.parentJobId={task_record.parentJobId} "
-                f"but job.jobId={job_record.jobId}"
+                f"Task parent_job_id mismatch: task.parent_job_id={task_record.parent_job_id} "
+                f"but job.job_id={job_record.job_id}"
             )
         
         # Validate that task ID contains job ID (structural consistency)
-        if not task_record.taskId.startswith(job_record.jobId):
+        if not task_record.task_id.startswith(job_record.job_id):
             raise ValueError(
-                f"Task ID must start with job ID: taskId={task_record.taskId} "
-                f"but jobId={job_record.jobId}"
+                f"Task ID must start with job ID: task_id={task_record.task_id} "
+                f"but job_id={job_record.job_id}"
             )
         
         # Validate stage consistency
-        if task_record.stage > job_record.totalStages:
+        if task_record.stage > job_record.total_stages:
             raise ValueError(
-                f"Task stage ({task_record.stage}) exceeds job totalStages ({job_record.totalStages})"
+                f"Task stage ({task_record.stage}) exceeds job total_stages ({job_record.total_stages})"
             )
         
-        logger.debug(f"✅ Parent-child relationship validated: job={job_record.jobId[:16]}... task={task_record.taskId}")
+        logger.debug(f"✅ Parent-child relationship validated: job={job_record.job_id[:16]}... task={task_record.task_id}")
         return True
 
 

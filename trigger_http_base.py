@@ -118,9 +118,6 @@ class BaseHttpTrigger(ABC):
                     request_id=request_id
                 )
             
-            # Call infrastructure setup
-            self._ensure_infrastructure_ready()
-            
             # Process the request (business logic)
             response_data = self.process_request(req)
             
@@ -307,12 +304,6 @@ class BaseHttpTrigger(ABC):
     # ========================================================================
     # PRIVATE INFRASTRUCTURE METHODS
     # ========================================================================
-    
-    def _ensure_infrastructure_ready(self) -> None:
-        """Ensure infrastructure is ready for processing."""
-        # Import here to avoid circular dependencies
-        from function_app import ensure_infrastructure_ready
-        ensure_infrastructure_ready()
     
     def _generate_request_id(self) -> str:
         """Generate unique request ID for tracing."""

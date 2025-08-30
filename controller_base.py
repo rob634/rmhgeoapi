@@ -230,11 +230,11 @@ class BaseController(ABC):
                                stage: int = 1, stage_results: Dict[int, Dict[str, Any]] = None) -> JobQueueMessage:
         """Create message for jobs queue"""
         return JobQueueMessage(
-            jobId=job_id,
-            jobType=self.job_type,
+            job_id=job_id,
+            job_type=self.job_type,
             stage=stage,
             parameters=parameters,
-            stageResults=stage_results or {}
+            stage_results=stage_results or {}
         )
 
     def queue_job(self, job_id: str, parameters: Dict[str, Any]) -> Dict[str, Any]:

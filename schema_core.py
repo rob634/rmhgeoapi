@@ -141,28 +141,28 @@ class JobRecord(BaseModel):
     updated_at: datetime = Field(..., description="Last update timestamp")
     
     # Validation rules
-    @field_validator('jobId')
+    @field_validator('job_id')
     @classmethod
     def validate_job_id_format(cls, v):
         return validate_job_id(v)
     
-    @field_validator('jobType')
+    @field_validator('job_type')
     @classmethod 
     def validate_job_type_format(cls, v):
         return validate_job_type(v)
     
     @model_validator(mode='after')
     def validate_stage_consistency(self):
-        if self.stage > self.totalStages:
-            raise ValueError(f"stage ({self.stage}) cannot exceed totalStages ({self.totalStages})")
+        if self.stage > self.total_stages:
+            raise ValueError(f"stage ({self.stage}) cannot exceed total_stages ({self.total_stages})")
         return self
     
     @model_validator(mode='after')
     def validate_terminal_status_has_result_or_error(self):
-        if self.status == JobStatus.COMPLETED and not self.resultData:
-            raise ValueError("COMPLETED jobs must have resultData")
-        if self.status == JobStatus.FAILED and not self.errorDetails:
-            raise ValueError("FAILED jobs must have errorDetails")
+        if self.status == JobStatus.COMPLETED and not self.result_data:
+            raise ValueError("COMPLETED jobs must have result_data")
+        if self.status == JobStatus.FAILED and not self.error_details:
+            raise ValueError("FAILED jobs must have error_details")
         return self
     
     def can_transition_to(self, new_status: JobStatus) -> bool:

@@ -71,7 +71,6 @@ Author: Azure Geospatial ETL Team
 Version: 2.1.0
 Last Updated: January 2025
 """
-import json
 import logging
 
 # Suppress Azure Identity and Azure SDK authentication/HTTP logging
@@ -83,741 +82,45 @@ logging.getLogger("azure.core").setLevel(logging.WARNING)
 logging.getLogger("msal").setLevel(logging.WARNING)  # Microsoft Authentication Library
 
 import azure.functions as func
-from azure.storage.queue import QueueServiceClient
-from azure.identity import DefaultAzureCredential
 
 # ========================================================================
-# REDESIGN ARCHITECTURE IMPORTS - New foundation classes
+# QUEUE TRIGGER IMPORTS - Only needed for queue processing functions
 # ========================================================================
-from schema_core import (
-    JobStatus, TaskStatus, JobRecord, TaskRecord, JobQueueMessage, TaskQueueMessage
-)
-from controller_base import BaseController  
-from util_completion import CompletionOrchestrator
+# Note: HTTP endpoints now use trigger classes with their own imports
+from schema_core import JobStatus, TaskStatus, JobQueueMessage, TaskQueueMessage
+from util_logger import logger
 
-# Strongly typed configuration
-from config import get_config, debug_config, QueueNames
-from util_logger import logger, log_list, log_job_stage, log_queue_operation, log_service_processing
-
+# HTTP Trigger Classes - Infrastructure Layer
+from trigger_health import health_check_trigger
+from trigger_submit_job import submit_job_trigger
+from trigger_get_job_status import get_job_status_trigger
+from trigger_poison_monitor import poison_monitor_trigger
 
 # Use centralized logger (imported from logger_setup)
 
 # Initialize function app with HTTP auth level
 app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
 
-# Global infrastructure status for startup checks
-_infrastructure_initialized = False
-_infrastructure_status = None
-
-def ensure_infrastructure_ready():
-    """
-    Ensure infrastructure is initialized on first request.
-    
-    This function is called by endpoints to guarantee that tables and queues
-    exist before processing begins. Uses lazy initialization to avoid startup
-    delays but ensures infrastructure is ready when needed.
-    """
-    global _infrastructure_initialized, _infrastructure_status
-    
-    if not _infrastructure_initialized:
-        logger.info("🔧 Initializing infrastructure on first request...")
-        try:
-            # TODO: Temporarily skip infrastructure initialization for local testing
-            # from initializer_infrastructure import InfrastructureInitializer
-            # initializer = InfrastructureInitializer()
-            # _infrastructure_status = initializer.initialize_all()
-            _infrastructure_initialized = True
-            _infrastructure_status = {"overall_success": True}  # Mock status for now
-            logger.info("✅ Infrastructure initialization skipped for local testing")
-                
-        except Exception as e:
-            logger.error(f"❌ Infrastructure initialization failed: {e}")
-            # Continue anyway - individual operations will handle missing infrastructure
-    
-    return _infrastructure_initialized
-
-def get_queue_client():
-    """
-    Initialize and return Azure Queue client with managed identity.
-    
-    Creates a QueueServiceClient using DefaultAzureCredential for managed
-    identity authentication. Ensures the queue exists before returning
-    the client. This client is used for submitting jobs to the processing
-    queue.
-    
-    Returns:
-        QueueClient: Configured client for job queue operations with
-            base64 encoding handled by Azure Functions runtime.
-        
-    Raises:
-        ValueError: If STORAGE_ACCOUNT_NAME is not configured in environment.
-        
-    Note:
-        - Uses AzureWebJobsStorage settings extracted during configuration
-        - Queue encoding is handled by Azure Functions runtime based on
-          host.json configuration (messageEncoding: "base64")
-        - Queue is created if it doesn't exist
-    """
-    # Get strongly typed configuration
-    config = get_config()
-    
-    # Use queue service URL from config
-    account_url = config.queue_service_url
-    
-    # Use DefaultAzureCredential which works with managed identity in Azure
-    queue_service = QueueServiceClient(account_url, credential=DefaultAzureCredential())
-    
-    queue_name = config.job_processing_queue
-    
-    # Ensure queue exists
-    try:
-        queue_service.create_queue(queue_name)
-    except Exception:
-        pass  # Queue already exists
-    
-    queue_client = queue_service.get_queue_client(queue_name)
-    
-    # Don't set TextBase64EncodePolicy - let Azure Functions handle encoding
-    # since host.json has "messageEncoding": "base64" configured
-    
-    return queue_client
 
 
 
 
 @app.route(route="health", methods=["GET"])
 def health_check(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    Comprehensive health check endpoint with optional database check.
-    
-    Performs health checks on all system components including storage queues,
-    table storage, and optionally PostgreSQL database. Returns detailed status
-    information for monitoring and diagnostics.
-    
-    Args:
-        req: Azure Functions HTTP request object.
-        
-    Returns:
-        HttpResponse: JSON response with health status and component details.
-            Status code 200 if healthy, 503 if any component is unhealthy.
-            
-    Response Format:
-        {
-            "status": "healthy" | "unhealthy",
-            "timestamp": "ISO-8601 timestamp",
-            "environment": {
-                "storage_account": "account_name",
-                "queues": {
-                    "geospatial-jobs": {"status": "accessible", "message_count": 0},
-                    "geospatial-tasks": {"status": "accessible", "message_count": 0}
-                },
-                "tables": {
-                    "Jobs": {"status": "accessible"},
-                    "Tasks": {"status": "accessible"}
-                }
-            },
-            "runtime": {
-                "python_version": "3.11.0",
-                "function_runtime": "python"
-            },
-            "database": {  # Optional, if ENABLE_DATABASE_HEALTH_CHECK=true
-                "status": "connected",
-                "postgis_version": "3.4.0",
-                "stac_item_count": 270
-            },
-            "errors": []  # List of error messages if unhealthy
-        }
-        
-    Note:
-        Database check is only performed if ENABLE_DATABASE_HEALTH_CHECK
-        environment variable is set to "true".
-    """
-    import os
-    import sys
-    from datetime import datetime, timezone
-    
-    logger.debug("Health check endpoint called")
-    
-    # Ensure infrastructure is ready - this will initialize on first health check
-    ensure_infrastructure_ready()
-    
-    health_status = {
-        "status": "healthy",
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "environment": {
-            "storage_account": get_config().storage_account_name,
-            "queues": {},
-            "tables": {}
-        },
-        "runtime": {
-            "python_version": sys.version.split()[0],
-            "function_runtime": "python"
-        }
-    }
-    
-    errors = []
-    
-    # Check storage queues
-    try:
-        from azure.storage.queue import QueueServiceClient
-        from azure.identity import DefaultAzureCredential
-        
-        config = get_config()
-        account_url = config.queue_service_url
-        queue_service = QueueServiceClient(account_url, credential=DefaultAzureCredential())
-        
-        # Check geospatial-jobs queue
-        for queue_name in [config.job_processing_queue, config.task_processing_queue]:
-            try:
-                queue_client = queue_service.get_queue_client(queue_name)
-                properties = queue_client.get_queue_properties()
-                health_status["environment"]["queues"][queue_name] = {
-                    "name": queue_name,
-                    "status": "accessible",
-                    "message_count": properties.get("approximate_message_count", 0)
-                }
-            except Exception as e:
-                health_status["environment"]["queues"][queue_name] = {
-                    "name": queue_name,
-                    "status": "error",
-                    "error": str(e)
-                }
-                errors.append(f"Queue {queue_name}: {str(e)}")
-    except Exception as e:
-        errors.append(f"Queue service: {str(e)}")
-        
-    # Check table storage
-    try:
-        from azure.data.tables import TableServiceClient
-        
-        config = get_config()
-        account_url = config.table_service_url
-        table_service = TableServiceClient(account_url, credential=DefaultAzureCredential())
-        
-        # Check Jobs and Tasks tables
-        for table_name in ["Jobs", "Tasks"]:
-            try:
-                table_client = table_service.get_table_client(table_name)
-                # Try a simple query to verify access
-                entities = table_client.query_entities(
-                    query_filter="PartitionKey eq 'test'"
-                )
-                # Consume the iterator to actually execute the query
-                _ = next(iter(entities), None)
-                health_status["environment"]["tables"][table_name] = {
-                    "name": table_name,
-                    "status": "accessible"
-                }
-            except Exception as e:
-                health_status["environment"]["tables"][table_name] = {
-                    "name": table_name,
-                    "status": "error",
-                    "error": str(e)
-                }
-                errors.append(f"Table {table_name}: {str(e)}")
-    except Exception as e:
-        errors.append(f"Table service: {str(e)}")
-    
-    # Optional database check - only if enabled via environment variable
-    if os.getenv("ENABLE_DATABASE_HEALTH_CHECK", "false").lower() == "true":
-        health_status["database"] = {}
-        try:
-            from client_database import DatabaseClient
-            
-            db_client = DatabaseClient()
-            
-            # Test connection and get basic info
-            with db_client.get_connection() as conn:
-                with conn.cursor() as cursor:
-                    # Check PostgreSQL version
-                    cursor.execute("SELECT version()")
-                    version = cursor.fetchone()[0]
-                    
-                    # Check PostGIS
-                    cursor.execute("SELECT PostGIS_version()")
-                    postgis_version = cursor.fetchone()[0]
-                    
-                    # Check if geo schema exists
-                    cursor.execute("""
-                        SELECT EXISTS(
-                            SELECT 1 FROM information_schema.schemata 
-                            WHERE schema_name = 'geo'
-                        )
-                    """)
-                    geo_schema_exists = cursor.fetchone()[0]
-                    
-                    # Count STAC items if schema exists
-                    stac_item_count = 0
-                    if geo_schema_exists:
-                        try:
-                            cursor.execute("SELECT COUNT(*) FROM geo.items")
-                            stac_item_count = cursor.fetchone()[0]
-                        except:
-                            pass
-                    
-                    health_status["database"] = {
-                        "status": "connected",
-                        "host": config.postgis_host,
-                        "database": config.postgis_database,
-                        "postgis_version": postgis_version,
-                        "geo_schema_exists": geo_schema_exists,
-                        "stac_item_count": stac_item_count if geo_schema_exists else None
-                    }
-        except Exception as e:
-            health_status["database"] = {
-                "status": "error",
-                "error": str(e)
-            }
-            errors.append(f"Database: {str(e)}")
-    
-    # Set overall health status
-    if errors:
-        health_status["status"] = "unhealthy"
-        health_status["errors"] = errors
-        status_code = 503  # Service Unavailable
-    else:
-        health_status["message"] = "All systems operational"
-        status_code = 200
-    
-    logger.info(f"Health check completed: {health_status['status']}")
-    
-    return func.HttpResponse(
-        json.dumps(health_status, default=str),
-        status_code=status_code,
-        mimetype="application/json"
-    )
+    """Health check endpoint using HTTP trigger base class."""
+    return health_check_trigger.handle_request(req)
 
 
 @app.route(route="jobs/{job_type}", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
 def submit_job(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    Submit a new processing job to the ETL pipeline.
-    
-    Creates an idempotent job request based on SHA256 hash of parameters.
-    Jobs are queued for asynchronous processing. Duplicate requests return
-    the existing job status without creating a new job.
-    
-    Job→Task Architecture (PRODUCTION READY - August 2025):
-        Operations with controllers follow the Job→Task pattern where:
-        - Controllers validate requests and create tasks
-        - Jobs are orchestration units that manage multiple tasks  
-        - Tasks are atomic processing units queued separately
-        - Job completion uses "distributed detection" - each task checks if all done
-        - Last completing task aggregates results into comprehensive result_data
-        - Scales efficiently for 10-5,000 tasks per job (N² query pattern)
-    
-    Args:
-        req: Azure Functions HTTP request with job_type in path and
-            job parameters in JSON body.
-            
-    Path Parameters:
-        job_type: The type of operation to perform (e.g., 'hello_world',
-            'list_container', 'cog_conversion', 'sync_container', 'catalog_file').
-            
-    Request Body:
-        {
-            "dataset_id": "container_name",     # Required for DDH operations
-            "resource_id": "file_or_folder",    # Required for DDH operations  
-            "version_id": "v1",                 # Required for DDH operations
-            "system": false                     # Optional, default: false
-        }
-        
-    Parameters:
-        system (bool): Operation mode flag
-            - false: DDH application mode - all parameters required
-            - true: Admin/testing mode - parameters optional and flexible
-            
-    Returns:
-        HttpResponse: JSON response with job details and status.
-            Always returns 200 for successful idempotent operations.
-            
-    Response Format (Controller-Managed):
-        {
-            "job_id": "SHA256_hash",
-            "status": "queued",
-            "message": "Job created and queued for processing",
-            "task_count": 1,
-            "dataset_id": "...",
-            "resource_id": "...",
-            "version_id": "...",
-            "job_type": "..."
-        }
-        
-    Response Format:
-        {
-            "job_id": "SHA256_hash",
-            "status": "queued" | "processing" | "completed" | "failed",
-            "message": "Job created and queued" | "Duplicate request...",
-            "is_duplicate": false | true,
-            "dataset_id": "...",
-            "resource_id": "...",
-            "version_id": "...",
-            "job_type": "...",
-            "system": false | true
-        }
-        
-    Supported Operations (Pydantic Job→Task Architecture Only):
-        - hello_world: Fully implemented with workflow definition and controller routing
-        - sync_container: Container synchronization with parallel task creation (requires controller implementation)
-        - catalog_file: Individual file cataloging (requires controller implementation)
-        - database_health: Database connectivity checks (requires controller implementation)
-        
-        Note: All operations must use workflow definitions with strong typing discipline.
-              No fallback or legacy service patterns are supported.
-        
-    Raises:
-        400: Invalid request parameters or missing required fields
-        500: Internal server error during job creation
-        
-    Examples:
-        # List container contents
-        POST /api/jobs/list_container
-        {"dataset_id": "rmhazuregeobronze", "system": true}
-        
-        # Convert file to COG
-        POST /api/jobs/cog_conversion
-        {"dataset_id": "bronze", "resource_id": "file.tif", "version_id": "v1"}
-    """
-    # Extract operation type from path
-    job_type = req.route_params.get("job_type")
-    logger.debug(f"Received job submission request for operation: {job_type}")
-    
-    logger.info(f"Job submission request received for operation: {job_type}")
-    
-    # Ensure infrastructure is ready before processing any jobs
-    ensure_infrastructure_ready()
-    
-    try:
-        # Validate operation type
-        logger.debug(f"Validating operation type: {job_type}")
-        if not job_type:
-            logger.error("Operation type is required in the request path")
-            return func.HttpResponse(
-                json.dumps({"error": "job_type parameter is required in path"}),
-                status_code=400,
-                mimetype="application/json"
-            )
-        
-        # Parse request body
-        req_body = None
-        try:
-            req_body = req.get_json()
-        except ValueError as e:
-            logger.error(f"Invalid JSON in request body {e}")
-            return func.HttpResponse(
-                json.dumps({"error": "Invalid JSON in request body",
-                            'log_list': log_list.log_messages}),
-                status_code=400,
-                mimetype="application/json"
-            )
-        except Exception as e:
-            logger.error(f"Error parsing request body: {str(e)}")
-            return func.HttpResponse(
-                json.dumps({"error": f"Error parsing request body: {str(e)}",
-                             'log_list': log_list.log_messages}),
-                status_code=400,
-                mimetype="application/json"
-            )
-            
-        if not req_body:
-            logger.error("Request body is required but was empty")
-            logger.debug("Returning 400 Bad Request due to missing body")
-            return func.HttpResponse(
-                json.dumps({"error": "Request body is required",
-                             'log_list': log_list.log_messages}),
-                status_code=400,
-                mimetype="application/json"
-            )
-        
-        # Extract parameters from body using constants
-        dataset_id = req_body.get("dataset_id")
-        resource_id = req_body.get("resource_id")
-        version_id = req_body.get("version_id")
-        system = req_body.get("system", False)
-        
-        # Extract additional parameters (processing_extent, tile_id, etc.)
-        additional_params = {}
-        standard_params = {"dataset_id", "resource_id", "version_id", "system"}
-        for key, value in req_body.items():
-            if key not in standard_params:
-                additional_params[key] = value
-        
-        logger.debug(f"Extracted parameters: dataset_id={dataset_id}, resource_id={resource_id}, version_id={version_id}, system={system}")
-        if additional_params:
-            logger.debug(f"Additional parameters: {additional_params}")
-        
-        # Controller factory - ALL operations must have controllers
-        controller = None
-        
-        try:
-            # Get controller for job_type
-            if job_type == "hello_world":
-                logger.debug(f"🎯 Loading HelloWorldController")
-                from controller_hello_world import HelloWorldController
-                controller = HelloWorldController()
-            else:
-                # Explicitly fail for operations without controllers
-                logger.error(f"❌ No controller found for job_type: {job_type}")
-                return func.HttpResponse(
-                    json.dumps({
-                        "error": "Controller required",
-                        "message": f"Operation '{job_type}' requires a controller implementation. All operations must use the controller pattern.",
-                        "job_type": job_type,
-                        "required_implementation": f"Create {job_type.title()}Controller class inheriting from BaseController"
-                    }),
-                    status_code=501,  # Not Implemented
-                    mimetype="application/json"
-                )
-            
-            logger.debug(f"✅ Controller instantiated: {type(controller)}")
-            
-            # Create job parameters from request
-            job_params = {
-                'dataset_id': dataset_id,
-                'resource_id': resource_id, 
-                'version_id': version_id,
-                'system': system,
-                **additional_params
-            }
-            logger.debug(f"📦 Job parameters created: {job_params}")
-            
-            # Validate parameters FIRST
-            logger.debug(f"🔍 Starting parameter validation with: {job_params}")
-            validated_params = controller.validate_job_parameters(job_params)
-            logger.debug(f"✅ Parameter validation complete: {validated_params}")
-            
-            # Generate job ID AFTER validation (ensures deterministic hash)
-            job_id = controller.generate_job_id(validated_params)
-            logger.debug(f"🔑 Generated job_id from validated params: {job_id}")
-            
-            logger.info(f"Creating {job_type} job with ID: {job_id}")
-            
-            # Create job record
-            logger.debug(f"💾 Creating job record with job_id={job_id}, params={validated_params}")
-            job_record = controller.create_job_record(job_id, validated_params)
-            logger.debug(f"✅ Job record created: {job_record}")
-            
-            # Queue the job for processing
-            logger.debug(f"📤 Queueing job for processing: job_id={job_id}")
-            queue_result = controller.queue_job(job_id, validated_params)
-            logger.debug(f"📤 Queue result: {queue_result}")
-            
-            # Prepare response (NO controller_managed flag - all jobs are controller-managed)
-            response_data = {
-                "job_id": job_id,
-                "status": "created", 
-                "job_type": job_type,
-                "message": "Job created and queued for processing",
-                "parameters": validated_params,
-                "queue_info": queue_result
-            }
-            logger.debug(f"📋 Response data prepared: {response_data}")
-            
-            return func.HttpResponse(
-                json.dumps(response_data),
-                status_code=200,
-                mimetype="application/json"
-            )
-            
-        except Exception as e:
-            logger.error(f"❌ Error creating {job_type} job: {e}")
-            logger.debug(f"🔍 Error details: {type(e).__name__}: {str(e)}")
-            import traceback
-            logger.debug(f"📍 Full traceback: {traceback.format_exc()}")
-            return func.HttpResponse(
-                json.dumps({
-                    "error": "Controller error",
-                    "message": str(e),
-                    "job_type": job_type,
-                    "error_type": type(e).__name__
-                }),
-                status_code=500,
-                mimetype="application/json"
-            )
-    
-    except Exception as e:
-        logger.error(f"Error in submit_job: {str(e)}")
-        return func.HttpResponse(
-            json.dumps({"error": f"Internal server error: {str(e)}",
-                         'log_list': log_list.log_messages}),
-            status_code=500,
-            mimetype="application/json"
-        )
+    """Job submission endpoint using HTTP trigger base class."""
+    return submit_job_trigger.handle_request(req)
 
 
 @app.route(route="jobs/{job_id}", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
 def get_job_status(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    Get job status and results by job ID.
-    
-    Retrieves detailed job information including current status, timestamps,
-    result data, and task progress for state-managed jobs. Supports both
-    regular jobs and state-managed jobs with enhanced task tracking.
-    
-    Args:
-        req: Azure Functions HTTP request with job_id in path.
-        
-    Path Parameters:
-        job_id: SHA256 hash job identifier to query.
-        
-    Returns:
-        HttpResponse: JSON response with job details.
-            Status code 200 if found, 404 if not found.
-            
-    Response Format (Job→Task Architecture - Phase 1):
-        {
-            "job_id": "SHA256_hash",
-            "status": "pending" | "queued" | "processing" | "completed" | "failed" | "completed_with_errors",
-            "created_at": "ISO-8601 timestamp",
-            "updated_at": "ISO-8601 timestamp",
-            "task_count": 1,
-            "total_tasks": 1,
-            "completed_tasks": 1,
-            "failed_tasks": 0,
-            "progress_percentage": 100.0,
-            "dataset_id": "...",
-            "resource_id": "...",
-            "version_id": "...",
-            "job_type": "hello_world",
-            "result_data": {  # When completed
-                "message": "Hello World from Job→Task architecture!"
-            }
-        }
-        
-    Response Format (Regular Job):
-        {
-            "job_id": "SHA256_hash",
-            "status": "pending" | "queued" | "processing" | "completed" | "failed",
-            "created_at": "ISO-8601 timestamp",
-            "updated_at": "ISO-8601 timestamp",
-            "dataset_id": "...",
-            "resource_id": "...",
-            "version_id": "...",
-            "job_type": "...",
-            "error_message": null | "error details",
-            "result_data": {  # When completed
-                "summary": {...},
-                "files": [...],
-                "inventory_urls": {...}
-            }
-        }
-        
-    Response Format (State-Managed Job):
-        {
-            "job_id": "SHA256_hash",
-            "status": "processing" | "completed" | "failed",
-            "progress": "50%",
-            "tasks": {
-                "total": 2,
-                "completed": 1,
-                "failed": 0,
-                "current": "CREATE_COG"
-            },
-            "task_details": [
-                {
-                    "task_id": "...",
-                    "task_type": "CREATE_COG",
-                    "status": "completed",
-                    "started_at": "ISO-8601",
-                    "completed_at": "ISO-8601",
-                    "duration_seconds": 15.2
-                }
-            ],
-            "output_path": "silver/cogs/job_id/output.tif"  # When completed
-        }
-        
-    Raises:
-        400: Missing job_id parameter
-        404: Job not found
-        500: Internal server error
-        
-    Examples:
-        GET /api/jobs/f542843127e97ec6cdfa921f3c16d747b8657cdb662b135e2ff71fea72439542
-    """
-    job_id = req.route_params.get('job_id')
-    logger.debug(f"🔍 Received job status request for job_id: {job_id}")
-    logger.info(f"Job status request for: {job_id}")
-    
-    try:
-        if not job_id:
-            logger.error(f"❌ Missing job_id parameter in request")
-            return func.HttpResponse(
-                json.dumps({"error": "job_id parameter is required",
-                             'log_list': log_list.log_messages}),
-                status_code=400,
-                mimetype="application/json"
-            )
-        
-        logger.debug(f"✅ Job ID validation passed: {job_id}")
-        
-        # 🔥 STRONG TYPING DISCIPLINE - Use type-safe job retrieval
-        logger.debug(f"🏗️ Initializing schema-validated repositories")
-        
-        from repository_data import RepositoryFactory
-        logger.debug(f"📦 RepositoryFactory imported successfully")
-        
-        job_repo, task_repo, completion_detector = RepositoryFactory.create_repositories()
-        logger.debug(f"✅ Repositories created: job_repo={type(job_repo)}, task_repo={type(task_repo)}")
-        
-        logger.debug(f"🔍 Attempting to retrieve job: {job_id}")
-        job_record = job_repo.get_job(job_id)
-        logger.debug(f"📋 Job retrieval result: {job_record}")
-        
-        if not job_record:
-            logger.warning(f"❌ Job not found in storage: {job_id}")
-            logger.debug(f"🔍 Double-checking job existence with direct query...")
-            
-            # Try to debug by checking if job exists at all
-            try:
-                # Check if the job might exist but retrieval is failing
-                logger.debug(f"📋 Checking job repository state")
-                logger.debug(f"🔍 Repository connection status: {hasattr(job_repo, '_client')}")
-                
-            except Exception as debug_e:
-                logger.debug(f"🔍 Debug query failed: {debug_e}")
-                
-            return func.HttpResponse(
-                json.dumps({
-                    "error": f"Job not found: {job_id}",
-                    "message": "Job may not exist or has been removed",
-                    'log_list': log_list.log_messages
-                }),
-                status_code=404,
-                mimetype="application/json"
-            )
-        
-        logger.debug(f"✅ Job record found: {job_record}")
-        logger.debug(f"📊 Job details: id={job_record.job_id if hasattr(job_record, 'job_id') else 'unknown'}, status={job_record.status if hasattr(job_record, 'status') else 'unknown'}")
-        
-        # Convert JobRecord to dictionary with type safety
-        logger.debug(f"🔄 Converting job record to dictionary")
-        job_details = job_record.model_dump()  # Updated from deprecated .dict() method
-        logger.debug(f"✅ Job details converted: {job_details}")
-        
-        # Add strong typing information  
-        job_details['architecture'] = 'strong_typing_discipline'
-        job_details['pattern'] = 'Job→Stage→Task with Pydantic validation'
-        job_details['schema_validated'] = True
-        
-        logger.info(f"✅ Job status retrieved with schema validation: {job_id[:16]}... -> {job_record.status}")
-        
-        response_json = json.dumps(job_details, default=str)
-        logger.debug(f"📤 Prepared response JSON: {response_json[:200]}...")
-        
-        return func.HttpResponse(
-            response_json,
-            status_code=200,
-            mimetype="application/json"
-        )
-        
-    except Exception as e:
-        logger.error(f"Error in get_job_status: {str(e)}")
-        return func.HttpResponse(
-            json.dumps({"error": f"Internal server error: {str(e)}",
-                         'log_list': log_list.log_messages}),
-            status_code=500,
-            mimetype="application/json"
-        )
+    """Job status retrieval endpoint using HTTP trigger base class."""
+    return get_job_status_trigger.handle_request(req)
 
 
 @app.queue_trigger(
@@ -894,8 +197,8 @@ def process_job_queue(msg: func.QueueMessage) -> None:
             logger.debug(f"📋 Invalid message content: {message_content}")
             raise ValueError(f"Message validation failed: {validation_error}")
         
-        logger.info(f"📨 Processing job: {job_message.jobId[:16]}... type={job_message.jobType}")
-        logger.debug(f"📊 Full job message details: jobId={job_message.jobId}, jobType={job_message.jobType}, stage={job_message.stage}, parameters={job_message.parameters}")
+        logger.info(f"📨 Processing job: {job_message.job_id[:16]}... type={job_message.job_type}")
+        logger.debug(f"📊 Full job message details: job_id={job_message.job_id}, job_type={job_message.job_type}, stage={job_message.stage}, parameters={job_message.parameters}")
         
         # Get repositories with strong typing
         logger.debug(f"🏗️ Creating repositories for job processing")
@@ -942,8 +245,8 @@ def process_job_queue(msg: func.QueueMessage) -> None:
             raise RuntimeError(f"Job status update failed: {status_error}")
         
         # Route to controller based on job type
-        logger.debug(f"🎯 Routing to controller for job type: {job_message.jobType}")
-        if job_message.jobType == "hello_world":
+        logger.debug(f"🎯 Routing to controller for job type: {job_message.job_type}")
+        if job_message.job_type == "hello_world":
             logger.debug(f"📦 Importing HelloWorldController")
             try:
                 from controller_hello_world import HelloWorldController
@@ -988,10 +291,10 @@ def process_job_queue(msg: func.QueueMessage) -> None:
             
         else:
             # Controller not implemented
-            error_msg = f"Controller not implemented for job type: {job_message.jobType}"
+            error_msg = f"Controller not implemented for job type: {job_message.job_type}"
             logger.error(f"❌ {error_msg}")
             logger.debug(f"🔧 Marking job as failed due to missing controller")
-            job_repo.fail_job(job_message.jobId, error_msg)
+            job_repo.fail_job(job_message.job_id, error_msg)
             
     except Exception as e:
         logger.error(f"❌ Error processing job: {str(e)}")
@@ -1094,8 +397,8 @@ def process_task_queue(msg: func.QueueMessage) -> None:
             logger.debug(f"📋 Invalid task message content: {message_content}")
             raise ValueError(f"Task message validation failed: {validation_error}")
         
-        logger.info(f"📋 Processing task: {task_message.taskId} type={task_message.taskType}")
-        logger.debug(f"📊 Full task message details: taskId={task_message.taskId}, parentJobId={task_message.parentJobId}, taskType={task_message.taskType}, parameters={task_message.parameters}")
+        logger.info(f"📋 Processing task: {task_message.task_id} type={task_message.task_type}")
+        logger.debug(f"📊 Full task message details: task_id={task_message.task_id}, parent_job_id={task_message.parent_job_id}, task_type={task_message.task_type}, parameters={task_message.parameters}")
         
         # Get repositories with strong typing
         logger.debug(f"🏗️ Creating repositories for task processing")
@@ -1306,135 +609,10 @@ def process_task_queue(msg: func.QueueMessage) -> None:
 
 
 
-# Poison queue monitoring endpoints
 @app.route(route="monitor/poison", methods=["GET", "POST"])
 def check_poison_queues(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    Enhanced poison queue monitoring with production-ready analytics.
-    
-    Provides comprehensive visibility into failed messages with detailed error
-    analysis, health status, and operational recommendations.
-    
-    Query Parameters:
-        - health: Return health status dashboard (GET /api/monitor/poison?health=true)
-        - analysis: Return detailed analysis (GET /api/monitor/poison?analysis=true)
-        - process_all: Process all messages (POST with {"process_all": true})
-        - cleanup: Cleanup old messages (POST with {"cleanup_old_messages": true})
-    
-    Args:
-        req: Azure Functions HTTP request.
-        
-    Methods:
-        GET: Check poison queues and return summary
-        POST: Process messages and/or cleanup old messages
-        
-    POST Request Body (Optional):
-        {
-            "process_all": true,           # Process all poison messages
-            "cleanup_old_messages": true,  # Remove old messages
-            "days_to_keep": 7              # Keep messages newer than N days
-        }
-        
-    Returns:
-        HttpResponse: JSON summary of poison queue status.
-        
-    Response Format:
-        {
-            "timestamp": "ISO-8601",
-            "queues_checked": ["geospatial-jobs-poison", "geospatial-tasks-poison"],
-            "total_messages": 5,
-            "messages_by_queue": {
-                "geospatial-jobs-poison": 2,
-                "geospatial-tasks-poison": 3
-            },
-            "jobs_marked_failed": 2,
-            "tasks_marked_failed": 3,
-            "messages_processed": 5,      # If process_all=true
-            "messages_cleaned": 10        # If cleanup_old_messages=true
-        }
-        
-    Examples:
-        # Check poison queue status
-        GET /api/monitor/poison
-        
-        # Process all poison messages and mark jobs as failed
-        POST /api/monitor/poison
-        {"process_all": true}
-        
-        # Clean up messages older than 30 days
-        POST /api/monitor/poison
-        {"cleanup_old_messages": true, "days_to_keep": 30}
-    """
-    logger.info("Poison queue check requested via HTTP")
-    
-    try:
-        from poison_queue_monitor import PoisonQueueMonitor, PoisonQueueDashboard
-        
-        # Check for enhanced monitoring requests
-        health_request = req.params.get("health", "").lower() == "true"
-        analysis_request = req.params.get("analysis", "").lower() == "true"
-        
-        if health_request:
-            # Return health status dashboard
-            dashboard = PoisonQueueDashboard()
-            health_status = dashboard.get_health_status()
-            logger.info(f"Poison queue health status: {health_status['overall_health']}")
-            return func.HttpResponse(
-                json.dumps(health_status),
-                mimetype="application/json",
-                status_code=200
-            )
-        
-        if analysis_request:
-            # Return detailed analysis
-            dashboard = PoisonQueueDashboard()
-            analysis = dashboard.get_detailed_analysis()
-            logger.info(f"Poison queue analysis: {analysis['total_messages_analyzed']} messages analyzed")
-            return func.HttpResponse(
-                json.dumps(analysis),
-                mimetype="application/json", 
-                status_code=200
-            )
-        
-        monitor = PoisonQueueMonitor()
-        
-        # Check for process_all parameter
-        process_all = False
-        if req.method == "POST":
-            try:
-                req_body = req.get_json()
-                process_all = req_body.get("process_all", False) if req_body else False
-            except:
-                pass
-        
-        # Check poison queues
-        summary = monitor.check_poison_queues(process_all=process_all)
-        
-        # If POST request with cleanup parameter, also cleanup old messages
-        if req.method == "POST":
-            try:
-                req_body = req.get_json() if not process_all else req_body  # Reuse if already parsed
-                if req_body and req_body.get("cleanup_old_messages"):
-                    days_to_keep = req_body.get("days_to_keep", 7)
-                    cleaned = monitor.cleanup_old_poison_messages(days_to_keep)
-                    summary["messages_cleaned"] = cleaned
-                    logger.info(f"Cleaned up {cleaned} old poison messages")
-            except:
-                pass  # Cleanup is optional
-        
-        return func.HttpResponse(
-            json.dumps(summary, indent=2),
-            status_code=200,
-            mimetype="application/json"
-        )
-        
-    except Exception as e:
-        logger.error(f"Error checking poison queues: {str(e)}")
-        return func.HttpResponse(
-            json.dumps({"error": f"Failed to check poison queues: {str(e)}"}),
-            status_code=500,
-            mimetype="application/json"
-        )
+    """Poison queue monitoring endpoint using HTTP trigger base class."""
+    return poison_monitor_trigger.handle_request(req)
 
 
 # Chunk processing now handled in process_task_queue function above

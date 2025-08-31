@@ -1,3 +1,12 @@
+# ============================================================================
+# CLAUDE CONTEXT - CONFIGURATION
+# ============================================================================
+# PURPOSE: Primary job submission HTTP endpoint with controller routing
+# SOURCE: Environment variables (PostgreSQL) + Managed Identity (Azure Storage)
+# SCOPE: HTTP-specific job submission with queue integration and validation
+# VALIDATION: Job parameter validation + controller schema validation
+# ============================================================================
+
 """
 Job Submission HTTP Trigger - Azure Geospatial ETL Pipeline
 
@@ -126,7 +135,13 @@ class JobSubmissionTrigger(JobManagementTrigger):
         )
         
         # Get controller for job type
-        controller = self._get_controller_for_job_type(job_type)
+        self.logger.debug(f"🎯 Getting controller for job_type: {job_type}")
+        try:
+            controller = self._get_controller_for_job_type(job_type)
+            self.logger.debug(f"✅ Controller loaded successfully: {type(controller).__name__}")
+        except Exception as controller_error:
+            self.logger.error(f"❌ Failed to load controller for {job_type}: {controller_error}")
+            raise
         
         # Create job parameters
         job_params = {
@@ -153,8 +168,13 @@ class JobSubmissionTrigger(JobManagementTrigger):
         
         # Queue the job for processing
         self.logger.debug(f"📤 Queueing job for processing")
-        queue_result = controller.queue_job(job_id, validated_params)
-        self.logger.debug(f"📤 Queue result: {queue_result}")
+        try:
+            queue_result = controller.queue_job(job_id, validated_params)
+            self.logger.debug(f"📤 Queue result: {queue_result}")
+        except Exception as queue_error:
+            self.logger.error(f"❌ Failed to queue job {job_id}: {queue_error}")
+            # Re-raise with more context about where the error occurred
+            raise RuntimeError(f"Job queuing failed in controller.queue_job(): {queue_error}")
         
         # Return success response
         return {
@@ -182,8 +202,18 @@ class JobSubmissionTrigger(JobManagementTrigger):
         self.logger.debug(f"🎯 Loading controller for job_type: {job_type}")
         
         if job_type == "hello_world":
-            from controller_hello_world import HelloWorldController
-            return HelloWorldController()
+            self.logger.debug(f"🏗️ Importing HelloWorldController")
+            try:
+                from controller_hello_world import HelloWorldController
+                self.logger.debug(f"✅ HelloWorldController imported successfully")
+                
+                self.logger.debug(f"🏗️ Instantiating HelloWorldController")
+                controller = HelloWorldController()
+                self.logger.debug(f"✅ HelloWorldController instantiated successfully")
+                return controller
+            except Exception as hello_error:
+                self.logger.error(f"❌ Failed to create HelloWorldController: {hello_error}")
+                raise RuntimeError(f"HelloWorldController creation failed: {hello_error}")
         else:
             # Explicitly fail for operations without controllers
             raise NotImplementedError(

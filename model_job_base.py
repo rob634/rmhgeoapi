@@ -1,3 +1,12 @@
+# ============================================================================
+# CLAUDE CONTEXT - CONFIGURATION
+# ============================================================================
+# PURPOSE: Abstract job model base class for workflow orchestration and state management
+# SOURCE: No direct configuration - provides job lifecycle management patterns
+# SCOPE: Job-specific workflow orchestration foundation for all job type implementations
+# VALIDATION: Pydantic v2 job parameter validation with lifecycle state constraints
+# ============================================================================
+
 """
 Base Job Model - Job→Stage→Task Architecture Core
 

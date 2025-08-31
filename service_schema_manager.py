@@ -1,3 +1,12 @@
+# ============================================================================
+# CLAUDE CONTEXT - CONFIGURATION
+# ============================================================================
+# PURPOSE: PostgreSQL schema management service for database initialization
+# SOURCE: Environment variables for PostgreSQL connection (POSTGIS_PASSWORD)
+# SCOPE: Database-specific schema creation and validation for application tables
+# VALIDATION: Schema creation validation + database permission verification
+# ============================================================================
+
 """
 PostgreSQL Schema Management Service
 
@@ -23,7 +32,6 @@ import psycopg
 from typing import Dict, Any, List, Optional, Tuple
 from psycopg import sql
 from config import get_config
-from repository_vault import VaultRepositoryFactory, VaultAccessError
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +71,7 @@ class SchemaManager:
         logger.debug(f"   postgis_port: {self.config.postgis_port}")
         logger.debug(f"   postgis_database: {self.config.postgis_database}")
         logger.debug(f"   postgis_user: {self.config.postgis_user}")
-        logger.debug(f"   key_vault_name: {self.config.key_vault_name}")
+        # logger.debug(f"   key_vault_name: {self.config.key_vault_name}")  # Key Vault disabled
         
         self.connection_string = self._build_connection_string()
         logger.info(f"🏗️ SchemaManager initialized for schema: {self.app_schema}")

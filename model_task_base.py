@@ -1,3 +1,12 @@
+# ============================================================================
+# CLAUDE CONTEXT - CONFIGURATION
+# ============================================================================
+# PURPOSE: Abstract task model base class for business logic execution and result handling
+# SOURCE: No direct configuration - provides task execution patterns and failure recovery
+# SCOPE: Task-specific business logic foundation for service and repository layer integration
+# VALIDATION: Pydantic v2 task parameter validation with execution context constraints
+# ============================================================================
+
 """
 Base Task Model - Job→Stage→Task Architecture Execution
 

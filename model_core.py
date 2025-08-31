@@ -1,3 +1,12 @@
+# ============================================================================
+# CLAUDE CONTEXT - CONFIGURATION
+# ============================================================================
+# PURPOSE: Core Pydantic data models for Job→Stage→Task architecture foundation
+# SOURCE: No direct configuration - provides type-safe data model definitions
+# SCOPE: Global data model foundation for all workflow components and persistence
+# VALIDATION: Pydantic v2 model validation with custom validators and field constraints
+# ============================================================================
+
 """
 Core Data Models - Job→Stage→Task Architecture Foundation
 

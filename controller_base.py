@@ -1,3 +1,12 @@
+# ============================================================================
+# CLAUDE CONTEXT - CONFIGURATION
+# ============================================================================
+# PURPOSE: Abstract base controller for Job→Stage→Task orchestration
+# SOURCE: Environment variables (PostgreSQL) + Managed Identity (Azure Storage)
+# SCOPE: Global job orchestration foundation for all workflow types
+# VALIDATION: Pydantic workflow validation + Azure credential validation
+# ============================================================================
+
 """
 Abstract Base Controller - Job→Stage→Task Architecture
 
@@ -303,10 +312,24 @@ class BaseController(ABC):
         
         # Send to queue
         try:
-            # Initialize queue client
+            # Initialize queue client using managed identity
             account_url = config.queue_service_url
-            queue_service = QueueServiceClient(account_url, credential=DefaultAzureCredential())
-            queue_client = queue_service.get_queue_client(config.job_processing_queue)
+            self.logger.debug(f"🔐 Creating DefaultAzureCredential for queue operations")
+            try:
+                credential = DefaultAzureCredential()
+                self.logger.debug(f"✅ DefaultAzureCredential created successfully")
+            except Exception as cred_error:
+                self.logger.error(f"❌ CRITICAL: Failed to create DefaultAzureCredential for storage queues: {cred_error}")
+                raise RuntimeError(f"CRITICAL CONFIGURATION ERROR - Managed identity authentication failed for Azure Storage: {cred_error}")
+            
+            self.logger.debug(f"🔗 Creating QueueServiceClient with URL: {account_url}")
+            try:
+                queue_service = QueueServiceClient(account_url, credential=credential)
+                queue_client = queue_service.get_queue_client(config.job_processing_queue)
+                self.logger.debug(f"📤 Queue client created for: {config.job_processing_queue}")
+            except Exception as queue_error:
+                self.logger.error(f"❌ CRITICAL: Failed to create QueueServiceClient or queue client: {queue_error}")
+                raise RuntimeError(f"CRITICAL CONFIGURATION ERROR - Azure Storage Queue access failed: {queue_error}")
             
             # Convert message to JSON
             message_json = queue_message.model_dump_json()
@@ -726,8 +749,23 @@ class BaseController(ABC):
                 
                 config = get_config()
                 account_url = config.queue_service_url
-                queue_service = QueueServiceClient(account_url, credential=DefaultAzureCredential())
-                queue_client = queue_service.get_queue_client(config.task_processing_queue)
+                
+                self.logger.debug(f"🔐 Creating DefaultAzureCredential for task queue operations")
+                try:
+                    credential = DefaultAzureCredential()
+                    self.logger.debug(f"✅ DefaultAzureCredential created successfully for tasks")
+                except Exception as cred_error:
+                    self.logger.error(f"❌ CRITICAL: Failed to create DefaultAzureCredential for task queues: {cred_error}")
+                    raise RuntimeError(f"CRITICAL CONFIGURATION ERROR - Managed identity authentication failed for task queues: {cred_error}")
+                
+                self.logger.debug(f"🔗 Creating QueueServiceClient for tasks with URL: {account_url}")
+                try:
+                    queue_service = QueueServiceClient(account_url, credential=credential)
+                    queue_client = queue_service.get_queue_client(config.task_processing_queue)
+                    self.logger.debug(f"📤 Task queue client created for: {config.task_processing_queue}")
+                except Exception as queue_error:
+                    self.logger.error(f"❌ CRITICAL: Failed to create task QueueServiceClient or queue client: {queue_error}")
+                    raise RuntimeError(f"CRITICAL CONFIGURATION ERROR - Azure Storage Task Queue access failed: {queue_error}")
                 
                 message_json = task_message.model_dump_json()
                 queue_client.send_message(message_json)

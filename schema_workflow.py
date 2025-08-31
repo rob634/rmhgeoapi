@@ -1,3 +1,12 @@
+# ============================================================================
+# CLAUDE CONTEXT - CONFIGURATION
+# ============================================================================
+# PURPOSE: Workflow definition system for declarative multi-stage job orchestration
+# SOURCE: No direct configuration - provides workflow specification and validation patterns
+# SCOPE: Workflow-specific orchestration schemas for job type implementations and stage management
+# VALIDATION: Pydantic v2 workflow validation with stage dependencies and execution constraints
+# ============================================================================
+
 """
 Workflow Schema Definitions - Job→Stage→Task Architecture Orchestration
 

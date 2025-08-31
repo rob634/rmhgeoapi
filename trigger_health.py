@@ -1,3 +1,12 @@
+# ============================================================================
+# CLAUDE CONTEXT - CONFIGURATION
+# ============================================================================
+# PURPOSE: System health monitoring HTTP endpoint with component validation
+# SOURCE: Environment variables (PostgreSQL) + Managed Identity (Azure Storage)
+# SCOPE: HTTP-specific health checks for all system components and dependencies
+# VALIDATION: Component health validation + infrastructure connectivity checks
+# ============================================================================
+
 """
 Health Check HTTP Trigger - System Monitoring
 
@@ -76,12 +85,16 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
             health_data["status"] = "unhealthy"
             health_data["errors"].extend(table_health.get("errors", []))
         
-        # Check vault configuration and connectivity
-        vault_health = self._check_vault_configuration()
-        health_data["components"]["vault"] = vault_health
-        if vault_health["status"] == "unhealthy":
-            health_data["status"] = "unhealthy"
-            health_data["errors"].extend(vault_health.get("errors", []))
+        # Key Vault disabled - using environment variables only
+        # vault_health = self._check_vault_configuration()
+        # health_data["components"]["vault"] = vault_health
+        from datetime import datetime
+        health_data["components"]["vault"] = {
+            "component": "vault", 
+            "status": "disabled",
+            "details": {"message": "Key Vault disabled - using environment variables only"},
+            "checked_at": datetime.utcnow().isoformat() + "Z"
+        }
         
         # Check database configuration
         db_config_health = self._check_database_configuration()
@@ -325,7 +338,14 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
         return self.check_component_health("database", check_pg)
     
     def _check_vault_configuration(self) -> Dict[str, Any]:
-        """Check Azure Key Vault configuration and connectivity."""
+        """Check Azure Key Vault configuration and connectivity. DISABLED - using environment variables."""
+        return {
+            "component": "vault",
+            "status": "disabled", 
+            "details": {"message": "Key Vault disabled - using environment variables only"}
+        }
+        
+        # DISABLED - Key Vault not configured for managed identity
         def check_vault():
             from repository_vault import VaultRepositoryFactory, VaultAccessError
             

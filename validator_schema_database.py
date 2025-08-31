@@ -1,3 +1,12 @@
+# ============================================================================
+# CLAUDE CONTEXT - CONFIGURATION
+# ============================================================================
+# PURPOSE: Database schema validation system ensuring structural integrity for PostgreSQL operations
+# SOURCE: Environment variables for PostgreSQL connection and schema validation configuration
+# SCOPE: Database-specific schema validation for repository layer operations and data integrity
+# VALIDATION: PostgreSQL schema validation with fail-fast error handling and integrity checks
+# ============================================================================
+
 """
 Database Schema Validator - Job→Stage→Task Architecture Schema Integrity
 

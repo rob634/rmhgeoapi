@@ -1,3 +1,12 @@
+# ============================================================================
+# CLAUDE CONTEXT - CONFIGURATION
+# ============================================================================
+# PURPOSE: Package initialization for Azure Geospatial ETL Pipeline architecture
+# SOURCE: No direct configuration - provides package-level imports and documentation
+# SCOPE: Package-level initialization and architectural documentation
+# VALIDATION: No validation - package initialization with import verification
+# ============================================================================
+
 """
 Redesign Architecture - August 29, 2025
 

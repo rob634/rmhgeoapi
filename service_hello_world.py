@@ -1,3 +1,12 @@
+# ============================================================================
+# CLAUDE CONTEXT - CONFIGURATION
+# ============================================================================
+# PURPOSE: HelloWorld business logic service implementing task execution patterns
+# SOURCE: Inherited from controller configuration for task parameter validation
+# SCOPE: Service-specific HelloWorld task execution with two-stage workflow logic
+# VALIDATION: Task parameter validation + HelloWorld business rule validation
+# ============================================================================
+
 """
 Hello World Service Layer - Job→Stage→Task Architecture Implementation
 

@@ -1,3 +1,12 @@
+# ============================================================================
+# CLAUDE CONTEXT - CONFIGURATION
+# ============================================================================
+# PURPOSE: Core schema validation system providing bulletproof type safety across all components
+# SOURCE: No direct configuration - provides schema validation utilities and type constraints
+# SCOPE: Global schema validation foundation for all data models and workflow components
+# VALIDATION: Pydantic v2 schema validation with C-style type discipline and field constraints
+# ============================================================================
+
 """
 Core Schema Definitions - Job→Stage→Task Architecture Type Safety
 

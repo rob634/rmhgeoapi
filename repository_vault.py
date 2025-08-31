@@ -1,3 +1,12 @@
+# ============================================================================
+# CLAUDE CONTEXT - CONFIGURATION
+# ============================================================================
+# PURPOSE: Azure Key Vault repository for secure credential management (DISABLED)
+# SOURCE: Environment variables for vault name and DefaultAzureCredential for authentication
+# SCOPE: Global credential access for database passwords and secrets (currently disabled)
+# VALIDATION: Azure credential validation + Key Vault access validation (currently bypassed)
+# ============================================================================
+
 """
 Azure Key Vault Repository - Secure Credential Management
 

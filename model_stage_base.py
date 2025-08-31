@@ -1,3 +1,12 @@
+# ============================================================================
+# CLAUDE CONTEXT - CONFIGURATION
+# ============================================================================
+# PURPOSE: Abstract stage model base class for coordinating parallel task execution
+# SOURCE: No direct configuration - provides stage coordination and task creation patterns
+# SCOPE: Stage-specific task coordination foundation for workflow phase management
+# VALIDATION: Pydantic v2 stage parameter validation with parallel task constraints
+# ============================================================================
+
 """
 Base Stage Model - Job→Stage→Task Architecture Coordination
 

@@ -1,3 +1,12 @@
+# ============================================================================
+# CLAUDE CONTEXT - CONFIGURATION
+# ============================================================================
+# PURPOSE: Job completion orchestration implementing "last task turns out lights" pattern
+# SOURCE: No direct configuration - operates on passed job/task data and repositories
+# SCOPE: Utility-specific completion detection and atomic stage/job transitions
+# VALIDATION: Completion logic validation + atomic operation integrity checks
+# ============================================================================
+
 """
 Completion Orchestrator - Redesign Architecture
 

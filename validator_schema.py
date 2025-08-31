@@ -1,3 +1,12 @@
+# ============================================================================
+# CLAUDE CONTEXT - CONFIGURATION
+# ============================================================================
+# PURPOSE: Centralized validation system providing strict type enforcement and data integrity
+# SOURCE: No direct configuration - provides validation utilities and type enforcement patterns
+# SCOPE: Global validation infrastructure for all system components and data operations
+# VALIDATION: Pydantic v2 validation with C-style discipline and fail-fast error handling
+# ============================================================================
+
 """
 Schema Validation Layer - Job→Stage→Task Architecture Type Enforcement
 

@@ -1,3 +1,12 @@
+# ============================================================================
+# CLAUDE CONTEXT - CONFIGURATION
+# ============================================================================
+# PURPOSE: Data access layer with PostgreSQL persistence and completion detection
+# SOURCE: Environment variables for PostgreSQL connection (POSTGIS_PASSWORD)
+# SCOPE: Global data repository patterns for jobs and tasks with ACID transactions
+# VALIDATION: PostgreSQL schema validation + Pydantic model validation
+# ============================================================================
+
 """
 TYPE-SAFE REPOSITORIES - Schema-Validated Data Access Layer
 
@@ -569,6 +578,122 @@ class CompletionDetector:
 
 
 # ============================================================================
+# POSTGRESQL-SPECIFIC REPOSITORIES - Atomic workflow operations
+# ============================================================================
+
+class PostgreSQLCompletionDetector(CompletionDetector):
+    """
+    PostgreSQL-optimized completion detector with atomic operations.
+    
+    Uses PostgreSQL stored procedures for atomic completion detection,
+    preventing race conditions in "last task turns out lights" scenarios.
+    """
+    
+    def __init__(self, job_repo: JobRepository, task_repo: TaskRepository):
+        super().__init__(job_repo, task_repo)
+        # Verify we have a PostgreSQL adapter
+        from adapter_storage import PostgresAdapter
+        if not isinstance(job_repo.storage, PostgresAdapter):
+            raise ValueError("PostgreSQLCompletionDetector requires PostgreSQL storage adapter")
+        
+        self.postgres_adapter = job_repo.storage
+        logger.info("🔍 PostgreSQLCompletionDetector initialized with atomic operations")
+    
+    def complete_task_and_check_stage(self, task_id: str, job_id: str, stage: int, result_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Atomically complete task and check stage completion.
+        
+        This replaces the non-atomic check_stage_completion method for PostgreSQL,
+        providing race-condition-free completion detection.
+        
+        Args:
+            task_id: Task to complete
+            job_id: Parent job identifier
+            stage: Stage number
+            result_data: Task completion results
+            
+        Returns:
+            Dict with stage completion status and remaining tasks
+        """
+        try:
+            logger.debug(f"🔄 PostgreSQL atomic completion: task {task_id} in stage {stage}")
+            
+            # Use PostgreSQL adapter's atomic method
+            completion_result = self.postgres_adapter.complete_task_and_check_stage(
+                task_id, job_id, stage, result_data
+            )
+            
+            logger.info(f"✅ Atomic completion: task {task_id}, stage complete: {completion_result['stage_complete']}")
+            return completion_result
+            
+        except Exception as e:
+            logger.error(f"❌ Atomic task completion failed for {task_id}: {e}")
+            raise
+
+    def advance_job_stage(self, job_id: str, current_stage: int, stage_results: Dict[str, Any]) -> bool:
+        """
+        Atomically advance job to next stage.
+        
+        Args:
+            job_id: Job to advance
+            current_stage: Current stage number
+            stage_results: Results from completed stage
+            
+        Returns:
+            bool: True if advancement succeeded
+        """
+        try:
+            next_stage = current_stage + 1
+            logger.debug(f"🔄 PostgreSQL atomic stage advancement: job {job_id[:16]}... {current_stage} -> {next_stage}")
+            
+            # Use PostgreSQL adapter's atomic method
+            success = self.postgres_adapter.advance_job_stage(
+                job_id, current_stage, next_stage, stage_results
+            )
+            
+            if success:
+                logger.info(f"✅ Atomic stage advancement: job {job_id[:16]}... -> stage {next_stage}")
+            else:
+                logger.warning(f"⚠️ Atomic stage advancement failed: job {job_id[:16]}... (concurrent update?)")
+            
+            return success
+            
+        except Exception as e:
+            logger.error(f"❌ Atomic stage advancement failed for job {job_id[:16]}...: {e}")
+            raise
+
+    def check_job_completion(self, job_id: str) -> bool:
+        """
+        Check if job workflow is fully complete using PostgreSQL stored procedure.
+        
+        Args:
+            job_id: Job to check
+            
+        Returns:
+            bool: True if job is complete
+        """
+        try:
+            logger.debug(f"🔍 PostgreSQL job completion check: {job_id[:16]}...")
+            
+            # Use PostgreSQL adapter's atomic method
+            completion_status = self.postgres_adapter.check_job_completion(job_id)
+            
+            job_complete = completion_status['job_complete']
+            final_stage = completion_status['final_stage']
+            
+            if job_complete:
+                logger.info(f"🎉 Job complete (PostgreSQL): {job_id[:16]}... at stage {final_stage}")
+            else:
+                logger.debug(f"📊 Job incomplete (PostgreSQL): {job_id[:16]}... at stage {final_stage}")
+            
+            return job_complete
+            
+        except Exception as e:
+            logger.error(f"❌ PostgreSQL job completion check failed for {job_id[:16]}...: {e}")
+            raise
+
+
+# ============================================================================
 # REPOSITORY FACTORY - Create repositories with dependency injection
 # ============================================================================
 
@@ -626,8 +751,13 @@ class RepositoryFactory:
         job_repo = JobRepository(storage_adapter)
         task_repo = TaskRepository(storage_adapter)
         
-        # Create completion detector
-        completion_detector = CompletionDetector(job_repo, task_repo)
+        # Create completion detector (PostgreSQL-specific for atomic operations)
+        if storage_backend_type == 'postgres':
+            completion_detector = PostgreSQLCompletionDetector(job_repo, task_repo)
+            logger.info("✅ Using PostgreSQL atomic completion detector")
+        else:
+            completion_detector = CompletionDetector(job_repo, task_repo)
+            logger.info(f"✅ Using standard completion detector for {storage_backend_type}")
         
         logger.info(f"✅ Repository factory created repositories with {storage_backend_type} backend")
         
@@ -639,5 +769,6 @@ __all__ = [
     'JobRepository',
     'TaskRepository', 
     'CompletionDetector',
+    'PostgreSQLCompletionDetector',
     'RepositoryFactory'
 ]

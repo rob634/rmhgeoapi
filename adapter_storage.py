@@ -1,3 +1,12 @@
+# ============================================================================
+# CLAUDE CONTEXT - CONFIGURATION
+# ============================================================================
+# PURPOSE: Azure Storage abstraction layer with managed identity authentication
+# SOURCE: Managed Identity (DefaultAzureCredential) for Azure Storage access
+# SCOPE: Global storage operations for jobs, tasks, and queue messaging
+# VALIDATION: Pydantic model validation + Azure credential validation
+# ============================================================================
+
 """
 Storage Backend Adapters - Job→Stage→Task Architecture Persistence
 
@@ -1207,6 +1216,147 @@ class PostgresAdapter:
                     
         except Exception as e:
             logger.error(f"❌ Failed to count tasks for job {job_id[:16]}...: {e}")
+            raise
+
+    def complete_task_and_check_stage(self, task_id: str, job_id: str, stage: int, result_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Atomically complete a task and check if stage is complete.
+        
+        This method uses the PostgreSQL stored procedure to:
+        1. Update the task as completed with result data
+        2. Check if all tasks in the stage are complete
+        3. Return stage completion status atomically
+        
+        Args:
+            task_id: Unique identifier for the task
+            job_id: Parent job identifier
+            stage: Stage number the task belongs to
+            result_data: Task completion result data
+            
+        Returns:
+            Dict containing:
+                - stage_complete: Boolean indicating if stage is complete
+                - remaining_tasks: Number of tasks remaining in stage
+                - job_id: Job identifier
+                
+        Raises:
+            Exception: If atomic operation fails or task not found
+        """
+        try:
+            logger.debug(f"🔄 Atomically completing task {task_id} in stage {stage}")
+            
+            with self._get_connection() as conn:
+                with conn.cursor() as cursor:
+                    # Call PostgreSQL stored procedure for atomic completion
+                    cursor.execute("""
+                        SELECT stage_complete, remaining_tasks, job_id
+                        FROM complete_task_and_check_stage(%s, %s, %s, %s)
+                    """, (task_id, job_id, stage, json.dumps(result_data) if result_data else None))
+                    
+                    result = cursor.fetchone()
+                    if not result:
+                        raise Exception(f"Failed to complete task {task_id} - no result from stored procedure")
+                    
+                    completion_result = {
+                        'stage_complete': result[0],
+                        'remaining_tasks': result[1], 
+                        'job_id': result[2]
+                    }
+                    
+                    logger.info(f"✅ Task {task_id} completed atomically. Stage complete: {completion_result['stage_complete']}, remaining: {completion_result['remaining_tasks']}")
+                    return completion_result
+                    
+        except Exception as e:
+            logger.error(f"❌ Failed to atomically complete task {task_id}: {e}")
+            raise
+
+    def advance_job_stage(self, job_id: str, current_stage: int, next_stage: int, stage_results: Dict[str, Any]) -> bool:
+        """
+        Atomically advance job to the next stage.
+        
+        This method uses the PostgreSQL stored procedure to:
+        1. Verify current stage matches expected stage
+        2. Update job to next stage with stage results
+        3. Return success status atomically
+        
+        Args:
+            job_id: Job identifier to advance
+            current_stage: Expected current stage number
+            next_stage: Target stage number
+            stage_results: Results from completed stage
+            
+        Returns:
+            bool: True if stage advancement succeeded, False otherwise
+            
+        Raises:
+            Exception: If atomic operation fails or stage mismatch
+        """
+        try:
+            logger.debug(f"🔄 Atomically advancing job {job_id[:16]}... from stage {current_stage} to {next_stage}")
+            
+            with self._get_connection() as conn:
+                with conn.cursor() as cursor:
+                    # Call PostgreSQL stored procedure for atomic advancement
+                    cursor.execute("""
+                        SELECT advance_job_stage(%s, %s, %s, %s)
+                    """, (job_id, current_stage, next_stage, json.dumps(stage_results) if stage_results else None))
+                    
+                    result = cursor.fetchone()
+                    success = result[0] if result else False
+                    
+                    if success:
+                        logger.info(f"✅ Job {job_id[:16]}... advanced atomically to stage {next_stage}")
+                    else:
+                        logger.warning(f"⚠️ Job {job_id[:16]}... stage advancement failed - possible concurrent update")
+                    
+                    return success
+                    
+        except Exception as e:
+            logger.error(f"❌ Failed to atomically advance job {job_id[:16]}... to stage {next_stage}: {e}")
+            raise
+
+    def check_job_completion(self, job_id: str) -> Dict[str, Any]:
+        """
+        Check if job workflow is fully complete.
+        
+        Uses PostgreSQL stored procedure to determine if all stages are done.
+        
+        Args:
+            job_id: Job identifier to check
+            
+        Returns:
+            Dict containing:
+                - job_complete: Boolean indicating if job is complete
+                - final_stage: Current/final stage number
+                
+        Raises:
+            Exception: If check operation fails
+        """
+        try:
+            logger.debug(f"🔍 Checking completion status for job {job_id[:16]}...")
+            
+            with self._get_connection() as conn:
+                with conn.cursor() as cursor:
+                    # Call PostgreSQL stored procedure for completion check
+                    cursor.execute("""
+                        SELECT job_complete, final_stage
+                        FROM check_job_completion(%s)
+                    """, (job_id,))
+                    
+                    result = cursor.fetchone()
+                    if not result:
+                        raise Exception(f"Failed to check completion for job {job_id}")
+                    
+                    completion_status = {
+                        'job_complete': result[0],
+                        'final_stage': result[1]
+                    }
+                    
+                    logger.debug(f"🔍 Job {job_id[:16]}... completion status: {completion_status}")
+                    return completion_status
+                    
+        except Exception as e:
+            logger.error(f"❌ Failed to check completion for job {job_id[:16]}...: {e}")
             raise
 
 

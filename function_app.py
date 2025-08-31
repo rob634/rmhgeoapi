@@ -1,3 +1,12 @@
+# ============================================================================
+# CLAUDE CONTEXT - CONFIGURATION
+# ============================================================================
+# PURPOSE: Azure Functions entry point for geospatial ETL pipeline
+# SOURCE: Environment variables for function bindings and configuration
+# SCOPE: Global application entry point with HTTP triggers and queue processing
+# VALIDATION: Azure Function binding validation and HTTP request validation
+# ============================================================================
+
 """
 Azure Functions App for Geospatial ETL Pipeline - REDESIGN ARCHITECTURE.
 
@@ -115,6 +124,7 @@ def health_check(req: func.HttpRequest) -> func.HttpResponse:
 def submit_job(req: func.HttpRequest) -> func.HttpResponse:
     """Job submission endpoint using HTTP trigger base class."""
     return submit_job_trigger.handle_request(req)
+
 
 
 @app.route(route="jobs/{job_id}", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)

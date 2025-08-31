@@ -1,3 +1,12 @@
+# ============================================================================
+# CLAUDE CONTEXT - CONFIGURATION
+# ============================================================================
+# PURPOSE: Central configuration management with Pydantic v2 validation
+# SOURCE: Environment variables with fallback defaults and computed properties
+# SCOPE: Global application configuration for all services and components
+# VALIDATION: Pydantic v2 runtime validation with Azure naming convention checks
+# ============================================================================
+
 """
 Strongly Typed Configuration Management - Azure Geospatial ETL Pipeline
 

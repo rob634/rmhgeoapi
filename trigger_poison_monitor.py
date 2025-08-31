@@ -1,3 +1,12 @@
+# ============================================================================
+# CLAUDE CONTEXT - CONFIGURATION
+# ============================================================================
+# PURPOSE: Poison queue monitoring HTTP trigger for failed message detection and cleanup
+# SOURCE: Environment variables for Azure Storage queue access and timer configuration
+# SCOPE: Timer-specific poison queue monitoring with HTTP endpoint for manual triggering
+# VALIDATION: Queue monitoring validation + poison message cleanup verification
+# ============================================================================
+
 """
 Poison Queue Monitor HTTP Trigger - Azure Geospatial ETL Pipeline
 

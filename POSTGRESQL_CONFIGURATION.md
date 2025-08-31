@@ -2,7 +2,7 @@
 
 ## Overview
 
-The PostgreSQL repository adapter is now fully implemented with comprehensive Key Vault integration for secure password management. This configuration uses environment variables for all database connection details while securely retrieving the password from Azure Key Vault.
+The PostgreSQL repository adapter is now fully implemented with **environment variable configuration only**. This approach eliminates DNS resolution issues and simplifies deployment by using direct environment variable access for all database connection details, including the password.
 
 ## ✅ Configuration Architecture
 
@@ -18,35 +18,37 @@ POSTGIS_SCHEMA="geo"                                  # PostGIS schema (optional
 APP_SCHEMA="rmhgeoapi"                                # Application schema (optional, defaults to 'rmhgeoapi')
 
 # === Security Configuration ===
-KEY_VAULT_NAME="rmhkeyvault"                          # Azure Key Vault name
-KEY_VAULT_DATABASE_SECRET="postgis-password"         # Secret name in Key Vault
+POSTGIS_PASSWORD="your-database-password"            # PostgreSQL database password (required)
 
-# Note: POSTGIS_PASSWORD is NOT set as environment variable
-# Password is securely retrieved from Key Vault at runtime
+# Note: Key Vault is NOT used for PostgreSQL password
+# Password is retrieved directly from environment variable for performance and reliability
 ```
 
-### **Key Vault Setup**
+### **Environment Variable Only Approach**
 
-The PostgreSQL password must be stored in Azure Key Vault:
+PostgreSQL configuration uses environment variables exclusively:
 
-1. **Secret Name**: `postgis-password` (configurable via `KEY_VAULT_DATABASE_SECRET`)
-2. **Secret Value**: The actual PostgreSQL database password
-3. **Access**: Function App's managed identity must have "Key Vault Secrets User" role
+1. **POSTGIS_PASSWORD**: Set directly in Azure Function App configuration
+2. **No Key Vault**: Eliminates DNS resolution dependencies
+3. **No Managed Identity**: Simple username/password authentication
 
-### **No Managed Identity for Database**
+### **Database Authentication**
 
-Unlike Azure Storage which uses managed identity, PostgreSQL connections use:
+PostgreSQL connections use:
 - ✅ **Username/Password authentication** 
 - ✅ **Password from POSTGIS_PASSWORD environment variable**
-- ❌ **No managed identity for database connection**
+- ✅ **Direct environment variable access (no Key Vault lookup)**
+- ✅ **No DNS dependencies or network calls for authentication**
 
-**Password Access Patterns:**
-The system has two patterns for accessing the PostgreSQL password, both reading from the same `POSTGIS_PASSWORD` environment variable:
+**Password Access Pattern:**
+All PostgreSQL components access password via direct environment variable:
 
-1. **PostgreSQL Adapter**: `os.environ.get('POSTGIS_PASSWORD')` - Direct environment variable access
-2. **Health Checks**: `config.postgis_password` - Via configuration system (which loads from same env var)
+```python
+# PostgreSQL Adapter and all components:
+password = os.environ.get('POSTGIS_PASSWORD')
+```
 
-Both patterns work correctly and access the same password source.
+This approach provides better performance and eliminates DNS resolution issues.
 
 ## 🏗️ Implementation Details
 

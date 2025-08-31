@@ -1,3 +1,12 @@
+# ============================================================================
+# CLAUDE CONTEXT - CONFIGURATION
+# ============================================================================
+# PURPOSE: Job status retrieval HTTP endpoint with real-time progress tracking
+# SOURCE: Environment variables for repository access and logging configuration
+# SCOPE: HTTP-specific job status queries with formatted response transformation
+# VALIDATION: Job ID validation + repository data integrity validation
+# ============================================================================
+
 """
 Job Status HTTP Trigger - Azure Geospatial ETL Pipeline
 

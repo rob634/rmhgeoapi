@@ -1,3 +1,12 @@
+# ============================================================================
+# CLAUDE CONTEXT - CONFIGURATION
+# ============================================================================
+# PURPOSE: Poison queue monitoring service for failed message detection and processing
+# SOURCE: Environment variables for Azure Storage queue access and monitoring configuration
+# SCOPE: Service-specific poison queue monitoring for job and task failure detection
+# VALIDATION: Queue access validation + poison message detection and reporting
+# ============================================================================
+
 """
 Poison Queue Monitor - Basic implementation for error handling
 """

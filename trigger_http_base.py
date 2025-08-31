@@ -1,3 +1,12 @@
+# ============================================================================
+# CLAUDE CONTEXT - CONFIGURATION
+# ============================================================================
+# PURPOSE: Abstract HTTP trigger foundation for Azure Functions endpoints
+# SOURCE: Environment variables for logging and request handling configuration
+# SCOPE: Global HTTP infrastructure foundation for all API endpoints
+# VALIDATION: HTTP request/response validation and structured error handling
+# ============================================================================
+
 """
 HTTP Trigger Base Class - Infrastructure Layer
 

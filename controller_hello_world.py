@@ -1,3 +1,12 @@
+# ============================================================================
+# CLAUDE CONTEXT - CONFIGURATION
+# ============================================================================
+# PURPOSE: HelloWorld workflow controller demonstrating Job→Stage→Task orchestration
+# SOURCE: Inherited from BaseController (Environment + Managed Identity)
+# SCOPE: Job-specific HelloWorld workflow with two-stage demonstration pattern
+# VALIDATION: Workflow schema validation + HelloWorld parameter validation
+# ============================================================================
+
 """
 HelloWorld Controller - Job→Stage→Task Architecture Reference Implementation
 

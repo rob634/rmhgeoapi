@@ -1,3 +1,12 @@
+# ============================================================================
+# CLAUDE CONTEXT - CONFIGURATION
+# ============================================================================
+# PURPOSE: Example code demonstrating HTTP trigger base class usage patterns
+# SOURCE: No configuration - provides example implementation patterns and documentation
+# SCOPE: Example-specific demonstration of HTTP trigger architecture patterns
+# VALIDATION: No validation - example code for documentation and reference purposes
+# ============================================================================
+
 """
 EXAMPLE: How to use HTTP Trigger Base Classes
 

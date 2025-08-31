@@ -1,3 +1,12 @@
+# ============================================================================
+# CLAUDE CONTEXT - CONFIGURATION
+# ============================================================================
+# PURPOSE: Centralized logging infrastructure with buffered and Azure Functions support
+# SOURCE: Environment variables for log level configuration and Azure Functions context
+# SCOPE: Global logging infrastructure for all application components and services
+# VALIDATION: Logger configuration validation + Azure Functions logging integration
+# ============================================================================
+
 """
 Centralized logging setup for RMH Geospatial API
 Provides both simple logging for Azure Functions and buffered logging for services

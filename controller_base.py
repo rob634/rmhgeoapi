@@ -256,7 +256,7 @@ class BaseController(ABC):
         from repository_data import RepositoryFactory
         
         # Store the job record using repository interface
-        job_repo, task_repo, completion_detector = RepositoryFactory.create_repositories()
+        job_repo, task_repo, completion_detector = RepositoryFactory.create_repositories('postgres')
         job_record = job_repo.create_job(
             job_type=self.job_type,
             parameters=parameters,
@@ -348,7 +348,7 @@ class BaseController(ABC):
         """
         from repository_data import RepositoryFactory
         
-        job_repo, task_repo, _ = RepositoryFactory.create_repositories()
+        job_repo, task_repo, _ = RepositoryFactory.create_repositories('postgres')
         tasks = task_repo.get_tasks_by_stage(job_id, stage_number)
         
         self.logger.debug(f"Found {len(tasks)} tasks in stage {stage_number} for job {job_id[:16]}...")
@@ -562,7 +562,7 @@ class BaseController(ABC):
         
         # Store completion in database
         from repository_data import RepositoryFactory
-        job_repo, _, _ = RepositoryFactory.create_repositories()
+        job_repo, _, _ = RepositoryFactory.create_repositories('postgres')
         
         self.logger.debug(f"Updating job status to COMPLETED in database")
         success = job_repo.complete_job(job_id, final_result)
@@ -691,7 +691,7 @@ class BaseController(ABC):
         
         # Create and store task records, then queue them
         from repository_data import RepositoryFactory
-        job_repo, task_repo, _ = RepositoryFactory.create_repositories()
+        job_repo, task_repo, _ = RepositoryFactory.create_repositories('postgres')
         
         queued_tasks = 0
         failed_tasks = 0

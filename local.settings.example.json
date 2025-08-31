@@ -1,18 +1,37 @@
 {
   "IsEncrypted": false,
   "Values": {
-    "STORAGE_ACCOUNT_NAME": "your-storage-account-name",
     "AzureWebJobsStorage": "__AzureWebJobsStorage__",
-    "BRONZE_CONTAINER_NAME": "bronze",
     "FUNCTIONS_WORKER_RUNTIME": "python",
-    "AZURE_FUNCTIONS_ENVIRONMENT": "Production",
-    "POSTGIS_HOST": "your-postgis-host.com",
+    "AZURE_FUNCTIONS_ENVIRONMENT": "Development",
+    
+    "_comment_storage": "=== Azure Storage Configuration ===",
+    "STORAGE_ACCOUNT_NAME": "your-storage-account-name",
+    "BRONZE_CONTAINER_NAME": "your-bronze-container",
+    "SILVER_CONTAINER_NAME": "your-silver-container",
+    "GOLD_CONTAINER_NAME": "your-gold-container",
+    
+    "_comment_postgres": "=== PostgreSQL Configuration ===",
+    "POSTGIS_HOST": "your-postgres-server.postgres.database.azure.com",
     "POSTGIS_PORT": "5432",
     "POSTGIS_USER": "your-db-user",
-    "POSTGIS_PASSWORD": "your-db-password",
-    "POSTGIS_DATABASE": "geodata",
-    "FUNCTION_TIMEOUT": "300",
+    "POSTGIS_DATABASE": "your-database-name",
+    "POSTGIS_SCHEMA": "geo",
+    "APP_SCHEMA": "rmhgeoapi",
+    
+    "_comment_security": "=== Security Configuration (Key Vault for password) ===",
+    "KEY_VAULT_NAME": "your-key-vault-name",
+    "KEY_VAULT_DATABASE_SECRET": "postgis-password",
+    "_comment_password": "Note: POSTGIS_PASSWORD not set - will be retrieved from Key Vault",
+    
+    "_comment_queues": "=== Queue Configuration ===",
+    "JOB_PROCESSING_QUEUE": "geospatial-jobs",
+    "TASK_PROCESSING_QUEUE": "geospatial-tasks",
+    
+    "_comment_app": "=== Application Configuration ===",
+    "FUNCTION_TIMEOUT_MINUTES": "5",
     "MAX_RETRY_ATTEMPTS": "3",
-    "LOG_LEVEL": "INFO"
+    "LOG_LEVEL": "INFO",
+    "ENABLE_DATABASE_HEALTH_CHECK": "true"
   }
 }

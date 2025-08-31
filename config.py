@@ -101,7 +101,17 @@ class AppConfig(BaseModel):
     
     postgis_password: Optional[str] = Field(
         default=None,
-        description="PostgreSQL password (optional when using managed identity)"
+        description="""PostgreSQL password from POSTGIS_PASSWORD environment variable.
+        
+        IMPORTANT: Two access patterns exist for this password:
+        1. config.postgis_password (used by health checks) - via this config system
+        2. os.environ.get('POSTGIS_PASSWORD') (used by PostgreSQL adapter) - direct access
+        
+        Both patterns access the same POSTGIS_PASSWORD environment variable.
+        The direct access pattern was implemented during Key Vault → env var migration.
+        
+        For new code: Use config.postgis_password for consistency with other config values.
+        """
     )
     
     postgis_database: str = Field(
@@ -116,7 +126,7 @@ class AppConfig(BaseModel):
     )
     
     app_schema: str = Field(
-        default="rmhgeoapi",
+        default="app",
         description="PostgreSQL schema name for application tables (jobs, tasks, etc.)",
         examples=["rmhgeoapi", "dev_rmhgeoapi", "prod_rmhgeoapi"]
     )

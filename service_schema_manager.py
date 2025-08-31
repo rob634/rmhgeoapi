@@ -70,27 +70,30 @@ class SchemaManager:
         logger.debug(f"🔧 Connection string built (password masked)")
     
     def _build_connection_string(self) -> str:
-        """Build secure connection string using vault for password."""
+        """Build secure connection string using environment variable by default."""
         logger.debug("🔐 Building database connection string")
         
-        try:
-            # Try to get password from vault first
-            logger.debug(f"🔐 Attempting to retrieve password from vault: {self.config.key_vault_name}")
-            vault_repo = VaultRepositoryFactory.create_with_config()
-            password = vault_repo.get_database_password("postgis")
-            logger.info("🔐 Using password from Azure Key Vault")
-            logger.debug("🔐 Vault password retrieval successful")
-        except VaultAccessError as e:
-            # Fallback to environment variable
-            logger.debug(f"🔐 Vault access failed, trying environment variable fallback: {e}")
-            password = self.config.postgis_password
-            if not password:
-                logger.error("❌ No database password available from vault or environment")
-                raise SchemaManagementError(f"No database password available. Vault error: {e}")
-            logger.warning("⚠️ Using password from environment variable (fallback)")
-            logger.debug("🔐 Environment password retrieval successful")
+        # Debug environment variables
+        import os
+        env_password = os.environ.get('POSTGIS_PASSWORD')
+        logger.debug(f"🔍 POSTGIS_PASSWORD env var: {'SET' if env_password else 'NOT SET'}")
+        logger.debug(f"🔍 config.postgis_password: {'SET' if self.config.postgis_password else 'NOT SET'}")
+        
+        # Use environment variable only (Key Vault causing DNS issues)
+        password = self.config.postgis_password
+        if not password:
+            logger.error("❌ POSTGIS_PASSWORD environment variable not set")
+            raise SchemaManagementError("POSTGIS_PASSWORD environment variable is required")
+        
+        logger.info("🔐 Using password from environment variable (POSTGIS_PASSWORD)")
+        logger.debug("🔐 Environment password retrieval successful")
         
         # Build connection string (mask password in logs)
+        logger.debug(f"🔍 Building connection with host: {self.config.postgis_host}")
+        logger.debug(f"🔍 Building connection with port: {self.config.postgis_port}")
+        logger.debug(f"🔍 Building connection with user: {self.config.postgis_user}")
+        logger.debug(f"🔍 Building connection with database: {self.config.postgis_database}")
+        
         connection_parts = {
             'host': self.config.postgis_host,
             'port': self.config.postgis_port,
@@ -100,11 +103,20 @@ class SchemaManager:
         
         logger.debug(f"🔐 Connection parameters: {connection_parts}")
         
-        return (
-            f"postgresql://{self.config.postgis_user}:{password}"
-            f"@{self.config.postgis_host}:{self.config.postgis_port}"
-            f"/{self.config.postgis_database}"
+        # Build connection string in same format as health endpoint
+        conn_str = (
+            f"host={self.config.postgis_host} "
+            f"dbname={self.config.postgis_database} "
+            f"user={self.config.postgis_user} "
+            f"password={password} "
+            f"port={self.config.postgis_port}"
         )
+        
+        # Log masked connection string  
+        masked_conn_str = conn_str.replace(password, "***MASKED***")
+        logger.debug(f"🔗 Connection string: {masked_conn_str}")
+        
+        return conn_str
     
     def validate_and_initialize_schema(self) -> Dict[str, Any]:
         """

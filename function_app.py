@@ -211,8 +211,8 @@ def process_job_queue(msg: func.QueueMessage) -> None:
             raise ImportError(f"Repository import failed: {import_error}")
         
         try:
-            job_repo, task_repo, completion_detector = RepositoryFactory.create_repositories()
-            logger.debug(f"✅ Repositories created: job_repo={type(job_repo)}, task_repo={type(task_repo)}, completion_detector={type(completion_detector)}")
+            job_repo, task_repo, completion_detector = RepositoryFactory.create_repositories('postgres')
+            logger.debug(f"✅ Repositories created with PostgreSQL backend: job_repo={type(job_repo)}, task_repo={type(task_repo)}, completion_detector={type(completion_detector)}")
         except Exception as repo_error:
             logger.error(f"❌ Failed to create repositories: {repo_error}")
             logger.debug(f"🔍 Repository creation error type: {type(repo_error).__name__}")
@@ -411,8 +411,8 @@ def process_task_queue(msg: func.QueueMessage) -> None:
             raise ImportError(f"Task repository import failed: {import_error}")
         
         try:
-            job_repo, task_repo, completion_detector = RepositoryFactory.create_repositories()
-            logger.debug(f"✅ Repositories created: task_repo={type(task_repo)}, job_repo={type(job_repo)}, completion_detector={type(completion_detector)}")
+            job_repo, task_repo, completion_detector = RepositoryFactory.create_repositories('postgres')
+            logger.debug(f"✅ Repositories created with PostgreSQL backend: task_repo={type(task_repo)}, job_repo={type(job_repo)}, completion_detector={type(completion_detector)}")
         except Exception as repo_error:
             logger.error(f"❌ Failed to create repositories for tasks: {repo_error}")
             logger.debug(f"🔍 Task repository creation error type: {type(repo_error).__name__}")

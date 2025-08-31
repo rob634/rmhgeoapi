@@ -624,20 +624,590 @@ class AzureTableStorageAdapter:
 # ============================================================================
 
 class PostgresAdapter:
-    """
-    FUTURE: PostgreSQL storage adapter with same type-safe interface
+    """PostgreSQL storage adapter with type-safe operations and ACID transactions.
     
-    Will implement same StorageBackend protocol with SQL operations
-    instead of NoSQL operations.
+    Implements the StorageBackend protocol for PostgreSQL persistence with comprehensive
+    schema validation, idempotent operations, and secure authentication via environment
+    variables. Provides full CRUD operations for Job and Task records with automatic
+    JSON serialization and PostgreSQL-specific optimizations.
+    
+    Key Features:
+        - Environment variable configuration with POSTGIS_PASSWORD authentication
+        - SSL-encrypted connections with configurable schema search paths
+        - Idempotent operations for distributed system reliability
+        - Schema validation on all database operations using Pydantic models
+        - ACID transaction support with proper error handling and rollback
+        - Multi-tenant support via configurable application schema
+        
+    Authentication:
+        Uses username/password authentication with credentials from environment variables.
+        Does NOT use managed identity for database connections - password must be
+        provided via POSTGIS_PASSWORD environment variable.
+        
+    Database Schema:
+        Expects PostgreSQL database with tables: jobs, tasks
+        Uses configurable schema search path: {APP_SCHEMA}, public
+        
+    Environment Variables:
+        POSTGIS_HOST: PostgreSQL server hostname
+        POSTGIS_PORT: PostgreSQL server port (default: 5432) 
+        POSTGIS_USER: PostgreSQL username
+        POSTGIS_PASSWORD: PostgreSQL password (required)
+        POSTGIS_DATABASE: PostgreSQL database name
+        POSTGIS_SCHEMA: PostGIS schema for geospatial data (default: geo)
+        APP_SCHEMA: Application schema for jobs/tasks tables (default: rmhgeoapi)
     """
     
-    def __init__(self, connection_string: str):
-        self.connection_string = connection_string
-        logger.info("🐘 PostgreSQL adapter initialized (FUTURE)")
+    def __init__(self):
+        """Initialize PostgreSQL adapter with configuration from environment variables.
+        
+        Establishes database connection using environment variables for all configuration
+        including the POSTGIS_PASSWORD for secure authentication. Configures SSL mode
+        and schema search path for proper multi-tenant operation.
+        
+        Environment Variables Required:
+            POSTGIS_HOST: PostgreSQL server hostname
+            POSTGIS_PORT: PostgreSQL server port (default: 5432)
+            POSTGIS_USER: PostgreSQL username
+            POSTGIS_PASSWORD: PostgreSQL password (required)
+            POSTGIS_DATABASE: PostgreSQL database name
+            POSTGIS_SCHEMA: PostGIS schema name (default: geo)
+            APP_SCHEMA: Application schema name (default: rmhgeoapi)
+            
+        Raises:
+            ValueError: If POSTGIS_PASSWORD environment variable is not set
+            Exception: If database connection or configuration fails
+        """
+        from config import get_config
+        
+        self.config = get_config()
+        
+        # Get database password from environment variable
+        # NOTE: Direct env var access used here (vs config.postgis_password used by health checks)
+        # Both access the same POSTGIS_PASSWORD env var. See config.py postgis_password field documentation.
+        import os
+        db_password = os.environ.get('POSTGIS_PASSWORD')
+        if not db_password:
+            raise ValueError("POSTGIS_PASSWORD environment variable is required")
+        
+        logger.info(f"✅ Using PostgreSQL password from environment variable")
+        
+        # Build connection string with password from environment and SSL parameters
+        self.connection_string = (
+            f"postgresql://{self.config.postgis_user}:{db_password}"
+            f"@{self.config.postgis_host}:{self.config.postgis_port}/{self.config.postgis_database}"
+            f"?sslmode=require"
+        )
+        
+        # Set schema search path
+        self.search_path = f"{self.config.app_schema}, public"
+        
+        logger.info(f"🐘 PostgreSQL adapter initialized: {self.config.postgis_host}:{self.config.postgis_port}")
+    
+    def _get_connection(self):
+        """Get database connection with proper schema search path.
+        
+        Creates a new PostgreSQL connection using the configured connection string
+        and sets the schema search path to include the application schema first.
+        
+        Returns:
+            psycopg.Connection: Database connection with configured schema search path
+            
+        Raises:
+            Exception: If database connection fails
+        """
+        import psycopg
+        
+        conn = psycopg.connect(self.connection_string)
+        # Set search path for this session
+        with conn.cursor() as cursor:
+            cursor.execute(f"SET search_path TO {self.search_path}")
+        return conn
     
     def create_job(self, job: JobRecord) -> bool:
-        # TODO: Implement with psycopg and SQL schema
-        raise NotImplementedError("PostgreSQL adapter not yet implemented")
+        """Create job record in PostgreSQL with schema validation.
+        
+        Performs idempotent creation - if job already exists, returns False
+        without error. Job is validated before insertion.
+        
+        Args:
+            job: JobRecord instance to create in database
+            
+        Returns:
+            bool: True if job was created, False if job already exists
+            
+        Raises:
+            Exception: If database insertion fails or schema validation fails
+        """
+        try:
+            with self._get_connection() as conn:
+                with conn.cursor() as cursor:
+                    # Check if job already exists (idempotent)
+                    cursor.execute("SELECT job_id FROM jobs WHERE job_id = %s", (job.job_id,))
+                    if cursor.fetchone():
+                        logger.info(f"📋 Job already exists: {job.job_id[:16]}... (idempotent)")
+                        return False
+                    
+                    # Insert new job
+                    cursor.execute("""
+                        INSERT INTO jobs (
+                            job_id, job_type, status, stage, total_stages,
+                            parameters, stage_results, result_data, error_details,
+                            created_at, updated_at
+                        ) VALUES (
+                            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                        )
+                    """, (
+                        job.job_id,
+                        job.job_type, 
+                        job.status.value if hasattr(job.status, 'value') else job.status,
+                        job.stage,
+                        job.total_stages,
+                        json.dumps(job.parameters),
+                        json.dumps(job.stage_results),
+                        json.dumps(job.result_data) if job.result_data else None,
+                        job.error_details,
+                        job.created_at,
+                        job.updated_at
+                    ))
+                    
+                    conn.commit()
+                    logger.info(f"✅ Job created in PostgreSQL: {job.job_id[:16]}... type={job.job_type}")
+                    return True
+                    
+        except Exception as e:
+            logger.error(f"❌ Failed to create job {job.job_id[:16]}...: {e}")
+            raise
+    
+    def get_job(self, job_id: str) -> Optional[JobRecord]:
+        """Retrieve job record from PostgreSQL with schema validation.
+        
+        Args:
+            job_id: Unique identifier for the job record
+            
+        Returns:
+            JobRecord: Validated job record if found, None if job doesn't exist
+            
+        Raises:
+            Exception: If database query fails or schema validation fails
+        """
+        try:
+            with self._get_connection() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute("""
+                        SELECT job_id, job_type, status, stage, total_stages,
+                               parameters, stage_results, result_data, error_details,
+                               created_at, updated_at
+                        FROM jobs WHERE job_id = %s
+                    """, (job_id,))
+                    
+                    row = cursor.fetchone()
+                    if not row:
+                        logger.debug(f"📋 Job not found: {job_id[:16]}...")
+                        return None
+                    
+                    # Convert row to JobRecord
+                    job_data = {
+                        'job_id': row[0],
+                        'job_type': row[1],
+                        'status': row[2],
+                        'stage': row[3],
+                        'total_stages': row[4],
+                        'parameters': json.loads(row[5]) if row[5] else {},
+                        'stage_results': json.loads(row[6]) if row[6] else {},
+                        'result_data': json.loads(row[7]) if row[7] else None,
+                        'error_details': row[8],
+                        'created_at': row[9],
+                        'updated_at': row[10]
+                    }
+                    
+                    # Validate and return
+                    job_record = SchemaValidator.validate_job_record(job_data, strict=True)
+                    logger.debug(f"📋 Retrieved job from PostgreSQL: {job_id[:16]}... status={job_record.status}")
+                    return job_record
+                    
+        except Exception as e:
+            logger.error(f"❌ Failed to retrieve job {job_id[:16]}...: {e}")
+            raise
+    
+    def update_job(self, job_id: str, updates: Dict[str, Any]) -> bool:
+        """Update job record in PostgreSQL with schema validation.
+        
+        Merges provided updates with current job data and validates the result
+        against the schema before persisting to PostgreSQL.
+        
+        Args:
+            job_id: Unique identifier for the job to update
+            updates: Dictionary of field updates to apply
+            
+        Returns:
+            bool: True if update succeeded, False if job doesn't exist
+            
+        Raises:
+            Exception: If database update fails or schema validation fails
+        """
+        try:
+            # Get current job for validation
+            current_job = self.get_job(job_id)
+            if not current_job:
+                logger.warning(f"📋 Cannot update non-existent job: {job_id[:16]}...")
+                return False
+            
+            # Merge updates with current data
+            current_data = current_job.dict()
+            current_data.update(updates)
+            current_data['updated_at'] = datetime.utcnow()
+            
+            # Validate updated data
+            updated_job = SchemaValidator.validate_job_record(current_data, strict=True)
+            
+            with self._get_connection() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute("""
+                        UPDATE jobs SET
+                            status = %s, stage = %s, total_stages = %s,
+                            parameters = %s, stage_results = %s, result_data = %s,
+                            error_details = %s, updated_at = %s
+                        WHERE job_id = %s
+                    """, (
+                        updated_job.status.value if hasattr(updated_job.status, 'value') else updated_job.status,
+                        updated_job.stage,
+                        updated_job.total_stages,
+                        json.dumps(updated_job.parameters),
+                        json.dumps(updated_job.stage_results),
+                        json.dumps(updated_job.result_data) if updated_job.result_data else None,
+                        updated_job.error_details,
+                        updated_job.updated_at,
+                        job_id
+                    ))
+                    
+                    conn.commit()
+                    logger.info(f"✅ Job updated in PostgreSQL: {job_id[:16]}... status={updated_job.status}")
+                    return True
+                    
+        except Exception as e:
+            logger.error(f"❌ Failed to update job {job_id[:16]}...: {e}")
+            raise
+    
+    def list_jobs(self, status_filter: Optional[JobStatus] = None) -> List[JobRecord]:
+        """List jobs from PostgreSQL with optional status filtering.
+        
+        Args:
+            status_filter: Optional job status to filter results. If None, returns all jobs
+            
+        Returns:
+            List[JobRecord]: List of validated job records, ordered by creation time (newest first)
+            
+        Raises:
+            Exception: If database query fails
+        """
+        try:
+            with self._get_connection() as conn:
+                with conn.cursor() as cursor:
+                    if status_filter:
+                        status_value = status_filter.value if hasattr(status_filter, 'value') else status_filter
+                        cursor.execute("""
+                            SELECT job_id, job_type, status, stage, total_stages,
+                                   parameters, stage_results, result_data, error_details,
+                                   created_at, updated_at
+                            FROM jobs WHERE status = %s
+                            ORDER BY created_at DESC
+                        """, (status_value,))
+                    else:
+                        cursor.execute("""
+                            SELECT job_id, job_type, status, stage, total_stages,
+                                   parameters, stage_results, result_data, error_details,
+                                   created_at, updated_at
+                            FROM jobs ORDER BY created_at DESC
+                        """)
+                    
+                    jobs = []
+                    for row in cursor.fetchall():
+                        try:
+                            job_data = {
+                                'job_id': row[0],
+                                'job_type': row[1], 
+                                'status': row[2],
+                                'stage': row[3],
+                                'total_stages': row[4],
+                                'parameters': json.loads(row[5]) if row[5] else {},
+                                'stage_results': json.loads(row[6]) if row[6] else {},
+                                'result_data': json.loads(row[7]) if row[7] else None,
+                                'error_details': row[8],
+                                'created_at': row[9],
+                                'updated_at': row[10]
+                            }
+                            
+                            job_record = SchemaValidator.validate_job_record(job_data, strict=True)
+                            jobs.append(job_record)
+                        except SchemaValidationError as e:
+                            logger.warning(f"Skipping invalid job record: {e}")
+                            continue
+                    
+                    logger.info(f"📋 Listed {len(jobs)} jobs from PostgreSQL" + 
+                               (f" with status {status_filter}" if status_filter else ""))
+                    return jobs
+                    
+        except Exception as e:
+            logger.error(f"❌ Failed to list jobs: {e}")
+            raise
+    
+    def create_task(self, task: TaskRecord) -> bool:
+        """Create task record in PostgreSQL with schema validation.
+        
+        Performs idempotent creation - if task already exists, returns False
+        without error. Task is validated before insertion.
+        
+        Args:
+            task: TaskRecord instance to create in database
+            
+        Returns:
+            bool: True if task was created, False if task already exists
+            
+        Raises:
+            Exception: If database insertion fails or schema validation fails
+        """
+        try:
+            with self._get_connection() as conn:
+                with conn.cursor() as cursor:
+                    # Check if task already exists (idempotent)
+                    cursor.execute("SELECT task_id FROM tasks WHERE task_id = %s", (task.taskId,))
+                    if cursor.fetchone():
+                        logger.info(f"📋 Task already exists: {task.taskId} (idempotent)")
+                        return False
+                    
+                    # Insert new task
+                    cursor.execute("""
+                        INSERT INTO tasks (
+                            task_id, parent_job_id, task_type, status, stage, task_index,
+                            parameters, result_data, error_details, retry_count, heartbeat,
+                            created_at, updated_at
+                        ) VALUES (
+                            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                        )
+                    """, (
+                        task.taskId,
+                        task.parentJobId,
+                        task.taskType,
+                        task.status.value if hasattr(task.status, 'value') else task.status,
+                        task.stage,
+                        task.taskIndex,
+                        json.dumps(task.parameters),
+                        json.dumps(task.resultData) if task.resultData else None,
+                        task.errorDetails,
+                        task.retryCount,
+                        task.heartbeat,
+                        task.createdAt,
+                        task.updatedAt
+                    ))
+                    
+                    conn.commit()
+                    logger.info(f"✅ Task created in PostgreSQL: {task.taskId} parent={task.parentJobId[:16]}...")
+                    return True
+                    
+        except Exception as e:
+            logger.error(f"❌ Failed to create task {task.taskId}: {e}")
+            raise
+    
+    def get_task(self, task_id: str) -> Optional[TaskRecord]:
+        """Retrieve task record from PostgreSQL with schema validation.
+        
+        Args:
+            task_id: Unique identifier for the task record
+            
+        Returns:
+            TaskRecord: Validated task record if found, None if task doesn't exist
+            
+        Raises:
+            Exception: If database query fails or schema validation fails
+        """
+        try:
+            with self._get_connection() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute("""
+                        SELECT task_id, parent_job_id, task_type, status, stage, task_index,
+                               parameters, result_data, error_details, retry_count, heartbeat,
+                               created_at, updated_at
+                        FROM tasks WHERE task_id = %s
+                    """, (task_id,))
+                    
+                    row = cursor.fetchone()
+                    if not row:
+                        logger.debug(f"📋 Task not found: {task_id}")
+                        return None
+                    
+                    # Convert row to TaskRecord
+                    task_data = {
+                        'taskId': row[0],
+                        'parentJobId': row[1],
+                        'taskType': row[2],
+                        'status': row[3],
+                        'stage': row[4],
+                        'taskIndex': row[5],
+                        'parameters': json.loads(row[6]) if row[6] else {},
+                        'resultData': json.loads(row[7]) if row[7] else None,
+                        'errorDetails': row[8],
+                        'retryCount': row[9],
+                        'heartbeat': row[10],
+                        'createdAt': row[11],
+                        'updatedAt': row[12]
+                    }
+                    
+                    # Validate and return
+                    task_record = SchemaValidator.validate_task_record(task_data, strict=True)
+                    logger.debug(f"📋 Retrieved task from PostgreSQL: {task_id} status={task_record.status}")
+                    return task_record
+                    
+        except Exception as e:
+            logger.error(f"❌ Failed to retrieve task {task_id}: {e}")
+            raise
+    
+    def update_task(self, task_id: str, updates: Dict[str, Any]) -> bool:
+        """Update task record in PostgreSQL with schema validation.
+        
+        Merges provided updates with current task data and validates the result
+        against the schema before persisting to PostgreSQL.
+        
+        Args:
+            task_id: Unique identifier for the task to update
+            updates: Dictionary of field updates to apply
+            
+        Returns:
+            bool: True if update succeeded, False if task doesn't exist
+            
+        Raises:
+            Exception: If database update fails or schema validation fails
+        """
+        try:
+            # Get current task for validation
+            current_task = self.get_task(task_id)
+            if not current_task:
+                logger.warning(f"📋 Cannot update non-existent task: {task_id}")
+                return False
+            
+            # Merge updates with current data
+            current_data = current_task.dict()
+            current_data.update(updates)
+            current_data['updatedAt'] = datetime.utcnow()
+            
+            # Validate updated data
+            updated_task = SchemaValidator.validate_task_record(current_data, strict=True)
+            
+            with self._get_connection() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute("""
+                        UPDATE tasks SET
+                            status = %s, parameters = %s, result_data = %s,
+                            error_details = %s, retry_count = %s, heartbeat = %s, 
+                            updated_at = %s
+                        WHERE task_id = %s
+                    """, (
+                        updated_task.status.value if hasattr(updated_task.status, 'value') else updated_task.status,
+                        json.dumps(updated_task.parameters),
+                        json.dumps(updated_task.resultData) if updated_task.resultData else None,
+                        updated_task.errorDetails,
+                        updated_task.retryCount,
+                        updated_task.heartbeat,
+                        updated_task.updatedAt,
+                        task_id
+                    ))
+                    
+                    conn.commit()
+                    logger.info(f"✅ Task updated in PostgreSQL: {task_id} status={updated_task.status}")
+                    return True
+                    
+        except Exception as e:
+            logger.error(f"❌ Failed to update task {task_id}: {e}")
+            raise
+    
+    def list_tasks_for_job(self, job_id: str) -> List[TaskRecord]:
+        """List all tasks for a job from PostgreSQL.
+        
+        Args:
+            job_id: Unique identifier for the parent job
+            
+        Returns:
+            List[TaskRecord]: List of validated task records for the job, 
+                            ordered by stage and task_index
+            
+        Raises:
+            Exception: If database query fails
+        """
+        try:
+            with self._get_connection() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute("""
+                        SELECT task_id, parent_job_id, task_type, status, stage, task_index,
+                               parameters, result_data, error_details, retry_count, heartbeat,
+                               created_at, updated_at
+                        FROM tasks WHERE parent_job_id = %s
+                        ORDER BY stage, task_index
+                    """, (job_id,))
+                    
+                    tasks = []
+                    for row in cursor.fetchall():
+                        try:
+                            task_data = {
+                                'taskId': row[0],
+                                'parentJobId': row[1], 
+                                'taskType': row[2],
+                                'status': row[3],
+                                'stage': row[4],
+                                'taskIndex': row[5],
+                                'parameters': json.loads(row[6]) if row[6] else {},
+                                'resultData': json.loads(row[7]) if row[7] else None,
+                                'errorDetails': row[8],
+                                'retryCount': row[9],
+                                'heartbeat': row[10],
+                                'createdAt': row[11],
+                                'updatedAt': row[12]
+                            }
+                            
+                            task_record = SchemaValidator.validate_task_record(task_data, strict=True)
+                            tasks.append(task_record)
+                        except SchemaValidationError as e:
+                            logger.warning(f"Skipping invalid task record: {e}")
+                            continue
+                    
+                    logger.debug(f"📋 Listed {len(tasks)} tasks for job {job_id[:16]}... from PostgreSQL")
+                    return tasks
+                    
+        except Exception as e:
+            logger.error(f"❌ Failed to list tasks for job {job_id[:16]}...: {e}")
+            raise
+    
+    def count_tasks_by_status(self, job_id: str, status: TaskStatus) -> int:
+        """Count tasks by status for completion detection.
+        
+        Used by completion detection logic to determine when all tasks
+        in a stage or job have reached a specific status.
+        
+        Args:
+            job_id: Unique identifier for the parent job
+            status: TaskStatus enum value to count
+            
+        Returns:
+            int: Number of tasks with the specified status
+            
+        Raises:
+            Exception: If database query fails
+        """
+        try:
+            with self._get_connection() as conn:
+                with conn.cursor() as cursor:
+                    status_value = status.value if hasattr(status, 'value') else status
+                    cursor.execute("""
+                        SELECT COUNT(*) FROM tasks 
+                        WHERE parent_job_id = %s AND status = %s
+                    """, (job_id, status_value))
+                    
+                    count = cursor.fetchone()[0]
+                    logger.debug(f"📋 Counted {count} {status} tasks for job {job_id[:16]}... in PostgreSQL")
+                    return count
+                    
+        except Exception as e:
+            logger.error(f"❌ Failed to count tasks for job {job_id[:16]}...: {e}")
+            raise
 
 
 class CosmosDbAdapter:
@@ -679,7 +1249,7 @@ class StorageAdapterFactory:
         if backend_type == 'azure_tables':
             return AzureTableStorageAdapter()
         elif backend_type == 'postgres':
-            return PostgresAdapter("connection_string_here")
+            return PostgresAdapter()  # Uses environment variables for all configuration
         elif backend_type == 'cosmos':
             return CosmosDbAdapter("endpoint", "key")
         else:

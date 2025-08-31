@@ -175,6 +175,8 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
             config = get_config()
             
             # Build connection string
+            # NOTE: Using config.postgis_password here (vs direct env var used by PostgreSQL adapter)
+            # Both access the same POSTGIS_PASSWORD env var. See config.py postgis_password field documentation.
             conn_str = (
                 f"host={config.postgis_host} "
                 f"dbname={config.postgis_database} "
@@ -193,6 +195,20 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                     cur.execute("SELECT PostGIS_Version()")
                     postgis_version = cur.fetchone()[0]
                     
+                    # Check app schema exists (for jobs and tasks tables)
+                    try:
+                        cur.execute("SELECT schema_name FROM information_schema.schemata WHERE schema_name = %s", (config.app_schema,))
+                        app_schema_exists = cur.fetchone() is not None
+                    except:
+                        app_schema_exists = False
+                    
+                    # Check postgis schema exists (for STAC data)
+                    try:
+                        cur.execute("SELECT schema_name FROM information_schema.schemata WHERE schema_name = %s", (config.postgis_schema,))
+                        postgis_schema_exists = cur.fetchone() is not None
+                    except:
+                        postgis_schema_exists = False
+                    
                     # Count STAC items (optional)
                     try:
                         cur.execute(f"SELECT COUNT(*) FROM {config.postgis_schema}.items")
@@ -200,11 +216,110 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                     except:
                         stac_count = "unknown"
                     
+                    # Ensure app tables exist and validate schema
+                    app_tables_status = {}
+                    table_management_results = {}
+                    
+                    if app_schema_exists:
+                        # Define required table schemas
+                        table_definitions = {
+                            'jobs': """
+                                CREATE TABLE IF NOT EXISTS {schema}.jobs (
+                                    id VARCHAR(255) PRIMARY KEY,
+                                    job_type VARCHAR(100) NOT NULL,
+                                    status VARCHAR(50) DEFAULT 'queued',
+                                    stage INTEGER DEFAULT 1,
+                                    total_stages INTEGER DEFAULT 1,
+                                    parameters JSONB,
+                                    stage_results JSONB DEFAULT '{{}}',
+                                    result_data JSONB,
+                                    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                                    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                                    heartbeat TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+                                )
+                            """,
+                            'tasks': """
+                                CREATE TABLE IF NOT EXISTS {schema}.tasks (
+                                    id VARCHAR(255) PRIMARY KEY,
+                                    job_id VARCHAR(255) NOT NULL,
+                                    task_type VARCHAR(100) NOT NULL,
+                                    status VARCHAR(50) DEFAULT 'queued',
+                                    stage_number INTEGER NOT NULL,
+                                    parameters JSONB,
+                                    result_data JSONB,
+                                    retry_count INTEGER DEFAULT 0,
+                                    heartbeat TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                                    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                                    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                                    FOREIGN KEY (job_id) REFERENCES {schema}.jobs(id) ON DELETE CASCADE
+                                )
+                            """
+                        }
+                        
+                        for table_name, table_sql in table_definitions.items():
+                            try:
+                                # Check if table exists
+                                cur.execute(
+                                    "SELECT table_name FROM information_schema.tables WHERE table_schema = %s AND table_name = %s",
+                                    (config.app_schema, table_name)
+                                )
+                                table_exists = cur.fetchone() is not None
+                                
+                                if not table_exists:
+                                    # Create the table
+                                    formatted_sql = table_sql.format(schema=config.app_schema)
+                                    cur.execute(formatted_sql)
+                                    table_management_results[table_name] = "created"
+                                    app_tables_status[table_name] = True
+                                else:
+                                    # Validate existing table schema
+                                    cur.execute("""
+                                        SELECT column_name, data_type 
+                                        FROM information_schema.columns 
+                                        WHERE table_schema = %s AND table_name = %s
+                                        ORDER BY ordinal_position
+                                    """, (config.app_schema, table_name))
+                                    columns = cur.fetchall()
+                                    
+                                    required_columns = {
+                                        'jobs': ['id', 'job_type', 'status', 'stage', 'total_stages', 'parameters'],
+                                        'tasks': ['id', 'job_id', 'task_type', 'status', 'stage_number', 'parameters']
+                                    }
+                                    
+                                    existing_columns = [col[0] for col in columns]
+                                    missing_columns = [col for col in required_columns[table_name] if col not in existing_columns]
+                                    
+                                    if missing_columns:
+                                        table_management_results[table_name] = f"schema_incomplete_missing_{len(missing_columns)}_columns"
+                                        app_tables_status[table_name] = "schema_invalid"
+                                    else:
+                                        table_management_results[table_name] = "validated"
+                                        app_tables_status[table_name] = True
+                                        
+                            except Exception as table_error:
+                                table_management_results[table_name] = f"error_{str(table_error)[:50]}"
+                                app_tables_status[table_name] = False
+                    
                     return {
                         "postgresql_version": pg_version.split()[0],
                         "postgis_version": postgis_version,
-                        "stac_item_count": stac_count,
-                        "connection": "successful"
+                        "connection": "successful",
+                        "schema_health": {
+                            "app_schema_name": config.app_schema,
+                            "app_schema_exists": app_schema_exists,
+                            "postgis_schema_name": config.postgis_schema,
+                            "postgis_schema_exists": postgis_schema_exists,
+                            "app_tables": app_tables_status if app_schema_exists else "schema_not_found"
+                        },
+                        "table_management": {
+                            "auto_creation_enabled": True,
+                            "operations_performed": table_management_results,
+                            "tables_ready": all(status is True for status in app_tables_status.values()) if app_tables_status else False
+                        },
+                        "stac_data": {
+                            "items_count": stac_count,
+                            "schema_accessible": postgis_schema_exists
+                        }
                     }
         
         return self.check_component_health("database", check_pg)

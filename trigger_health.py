@@ -238,33 +238,47 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                         table_definitions = {
                             'jobs': """
                                 CREATE TABLE IF NOT EXISTS {schema}.jobs (
-                                    id VARCHAR(255) PRIMARY KEY,
-                                    job_type VARCHAR(100) NOT NULL,
+                                    job_id VARCHAR(64) PRIMARY KEY
+                                        CHECK (length(job_id) = 64 AND job_id ~ '^[a-f0-9]+$'),
+                                    job_type VARCHAR(50) NOT NULL
+                                        CHECK (length(job_type) >= 1 AND job_type ~ '^[a-z_]+$'),
                                     status VARCHAR(50) DEFAULT 'queued',
-                                    stage INTEGER DEFAULT 1,
-                                    total_stages INTEGER DEFAULT 1,
-                                    parameters JSONB,
-                                    stage_results JSONB DEFAULT '{{}}',
+                                    stage INTEGER DEFAULT 1
+                                        CHECK (stage >= 1 AND stage <= 100),
+                                    total_stages INTEGER DEFAULT 1
+                                        CHECK (total_stages >= 1 AND total_stages <= 100),
+                                    parameters JSONB NOT NULL DEFAULT '{{}}',
+                                    metadata JSONB NOT NULL DEFAULT '{{}}',
+                                    stage_results JSONB NOT NULL DEFAULT '{{}}',
                                     result_data JSONB,
+                                    error_details TEXT,
                                     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-                                    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-                                    heartbeat TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+                                    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
                                 )
                             """,
                             'tasks': """
                                 CREATE TABLE IF NOT EXISTS {schema}.tasks (
-                                    id VARCHAR(255) PRIMARY KEY,
-                                    job_id VARCHAR(255) NOT NULL,
-                                    task_type VARCHAR(100) NOT NULL,
+                                    task_id VARCHAR(100) PRIMARY KEY
+                                        CHECK (length(task_id) >= 1 AND length(task_id) <= 100),
+                                    parent_job_id VARCHAR(64) NOT NULL
+                                        REFERENCES {schema}.jobs(job_id) ON DELETE CASCADE
+                                        CHECK (length(parent_job_id) = 64 AND parent_job_id ~ '^[a-f0-9]+$'),
+                                    task_type VARCHAR(50) NOT NULL
+                                        CHECK (length(task_type) >= 1 AND task_type ~ '^[a-z_]+$'),
                                     status VARCHAR(50) DEFAULT 'queued',
-                                    stage_number INTEGER NOT NULL,
-                                    parameters JSONB,
+                                    stage INTEGER NOT NULL
+                                        CHECK (stage >= 1 AND stage <= 100),
+                                    task_index INTEGER NOT NULL DEFAULT 0
+                                        CHECK (task_index >= 0),
+                                    parameters JSONB NOT NULL DEFAULT '{{}}',
+                                    metadata JSONB NOT NULL DEFAULT '{{}}',
                                     result_data JSONB,
-                                    retry_count INTEGER DEFAULT 0,
+                                    error_details TEXT,
                                     heartbeat TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                                    retry_count INTEGER NOT NULL DEFAULT 0
+                                        CHECK (retry_count >= 0 AND retry_count <= 10),
                                     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-                                    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-                                    FOREIGN KEY (job_id) REFERENCES {schema}.jobs(id) ON DELETE CASCADE
+                                    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
                                 )
                             """
                         }
@@ -412,7 +426,7 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
             optional_env_vars = {
                 "POSTGIS_PASSWORD": bool(os.getenv("POSTGIS_PASSWORD")),
                 "POSTGIS_SCHEMA": os.getenv("POSTGIS_SCHEMA", "geo"),
-                "APP_SCHEMA": os.getenv("APP_SCHEMA", "rmhgeoapi")
+                "APP_SCHEMA": os.getenv("APP_SCHEMA", "app")
             }
             
             # Check for missing required variables

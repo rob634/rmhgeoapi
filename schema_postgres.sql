@@ -17,11 +17,11 @@
 
 -- Create application schema if it doesn't exist
 -- Note: Schema name will be replaced by APP_SCHEMA environment variable
-CREATE SCHEMA IF NOT EXISTS rmhgeoapi;
+CREATE SCHEMA IF NOT EXISTS app;
 
 -- Set default schema for this session  
 -- Note: This will be dynamically replaced with actual APP_SCHEMA value
-SET search_path TO rmhgeoapi, public;
+SET search_path TO app, public;
 
 -- =============================================================================
 -- ENUMS - Type-safe status management

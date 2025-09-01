@@ -127,7 +127,7 @@ from uuid import UUID
 # ENUMERATIONS - Strictly controlled state values
 # ============================================================================
 
-class JobStatus(str, Enum):
+class JobStatus(Enum):
     """Job status enumeration - immutable state values"""
     QUEUED = "queued"
     PROCESSING = "processing" 
@@ -149,7 +149,7 @@ class JobStatus(str, Enum):
         return new_status in transitions.get(self, [])
 
 
-class TaskStatus(str, Enum):
+class TaskStatus(Enum):
     """Task status enumeration - immutable state values"""
     QUEUED = "queued"
     PROCESSING = "processing"
@@ -244,6 +244,14 @@ class JobRecord(BaseModel):
     def validate_job_type_format(cls, v):
         return validate_job_type(v)
     
+    @field_validator('status')
+    @classmethod
+    def validate_status_enum(cls, v):
+        """Convert string status to JobStatus enum"""
+        if isinstance(v, str):
+            return JobStatus(v)
+        return v
+    
     @model_validator(mode='after')
     def validate_stage_consistency(self):
         if self.stage > self.total_stages:
@@ -281,54 +289,62 @@ class TaskRecord(BaseModel):
     """
     
     # Primary identifiers (IMMUTABLE after creation)
-    taskId: str = Field(..., description="Unique task identifier", min_length=1, max_length=100)
-    parentJobId: str = Field(..., description="Parent job ID (foreign key)", min_length=64, max_length=64)
-    taskType: str = Field(..., description="Type of task (snake_case)", min_length=1, max_length=50)
+    task_id: str = Field(..., description="Unique task identifier", min_length=1, max_length=100)
+    parent_job_id: str = Field(..., description="Parent job ID (foreign key)", min_length=64, max_length=64)
+    task_type: str = Field(..., description="Type of task (snake_case)", min_length=1, max_length=50)
     
     # State management (MUTABLE with validation)
     status: TaskStatus = Field(default=TaskStatus.QUEUED, description="Current task status")
     
     # Hierarchy (IMMUTABLE after creation)
     stage: int = Field(..., ge=1, le=100, description="Stage number this task belongs to")
-    taskIndex: int = Field(..., ge=0, le=10000, description="Index within stage (0-based)")
+    task_index: int = Field(..., ge=0, le=10000, description="Index within stage (0-based)")
     
     # Data containers (VALIDATED JSON)  
     parameters: Dict[str, Any] = Field(default_factory=dict, description="Task parameters")
-    resultData: Optional[Dict[str, Any]] = Field(None, description="Task result data")
+    result_data: Optional[Dict[str, Any]] = Field(None, description="Task result data")
     
     # Error handling & retry (STRUCTURED)
-    errorDetails: Optional[str] = Field(None, description="Error details if task failed")
-    retryCount: int = Field(default=0, ge=0, le=10, description="Number of retry attempts")
+    error_details: Optional[str] = Field(None, description="Error details if task failed")
+    retry_count: int = Field(default=0, ge=0, le=10, description="Number of retry attempts")
     
     # Health monitoring (MUTABLE for heartbeat updates)
     heartbeat: Optional[datetime] = Field(None, description="Last heartbeat timestamp")
     
     # Audit trail (IMMUTABLE timestamps)
-    createdAt: datetime = Field(..., description="Task creation timestamp")
-    updatedAt: datetime = Field(..., description="Last update timestamp")
+    created_at: datetime = Field(..., description="Task creation timestamp")
+    updated_at: datetime = Field(..., description="Last update timestamp")
     
     # Validation rules  
-    @field_validator('taskId')
+    @field_validator('task_id')
     @classmethod
     def validate_task_id_format(cls, v):
         return validate_task_id(v)
     
-    @field_validator('parentJobId')
+    @field_validator('parent_job_id')
     @classmethod
     def validate_parent_job_id_format(cls, v):
         return validate_job_id(v)
     
-    @field_validator('taskType')
+    @field_validator('task_type')
     @classmethod
     def validate_task_type_format(cls, v):
         return validate_task_type(v)
     
+    @field_validator('status')
+    @classmethod
+    def validate_status_enum(cls, v):
+        """Convert string status to TaskStatus enum"""
+        if isinstance(v, str):
+            return TaskStatus(v)
+        return v
+    
     @model_validator(mode='after')
     def validate_terminal_status_requirements(self):
-        if self.status == TaskStatus.COMPLETED and not self.resultData:
-            raise ValueError("COMPLETED tasks must have resultData")
-        if self.status == TaskStatus.FAILED and not self.errorDetails:
-            raise ValueError("FAILED tasks must have errorDetails")
+        if self.status == TaskStatus.COMPLETED and not self.result_data:
+            raise ValueError("COMPLETED tasks must have result_data")
+        if self.status == TaskStatus.FAILED and not self.error_details:
+            raise ValueError("FAILED tasks must have error_details")
         return self
     
     def can_transition_to(self, new_status: TaskStatus) -> bool:
@@ -341,11 +357,11 @@ class TaskRecord(BaseModel):
     
     def extract_job_id_from_task_id(self) -> str:
         """Extract parent job ID from task ID format"""
-        return self.taskId.split('_')[0]
+        return self.task_id.split('_')[0]
     
     def extract_stage_from_task_id(self) -> int:
         """Extract stage number from task ID format"""
-        parts = self.taskId.split('_')
+        parts = self.task_id.split('_')
         return int(parts[1].replace('stage', ''))
     
     class Config:
@@ -365,20 +381,20 @@ class JobQueueMessage(BaseModel):
     Any deviation results in immediate ValidationError.
     """
     
-    jobId: str = Field(..., description="Job ID to process", min_length=64, max_length=64)
-    jobType: str = Field(..., description="Job type", min_length=1, max_length=50)
+    job_id: str = Field(..., description="Job ID to process", min_length=64, max_length=64)
+    job_type: str = Field(..., description="Job type", min_length=1, max_length=50)
     stage: int = Field(..., ge=1, le=100, description="Stage number to process")
     parameters: Dict[str, Any] = Field(default_factory=dict, description="Job parameters")
-    stageResults: Dict[int, Dict[str, Any]] = Field(default_factory=dict, description="Previous stage results")
-    retryCount: int = Field(default=0, ge=0, le=10, description="Retry attempt number")
+    stage_results: Dict[int, Dict[str, Any]] = Field(default_factory=dict, description="Previous stage results")
+    retry_count: int = Field(default=0, ge=0, le=10, description="Retry attempt number")
     
     # Validation rules
-    @field_validator('jobId')
+    @field_validator('job_id')
     @classmethod
     def validate_job_id_format(cls, v):
         return validate_job_id(v)
     
-    @field_validator('jobType')
+    @field_validator('job_type')
     @classmethod
     def validate_job_type_format(cls, v):
         return validate_job_type(v)
@@ -395,26 +411,26 @@ class TaskQueueMessage(BaseModel):
     Enforces parent-child relationship with jobs.
     """
     
-    taskId: str = Field(..., description="Task ID to process", min_length=1, max_length=100)
-    parentJobId: str = Field(..., description="Parent job ID", min_length=64, max_length=64)
-    taskType: str = Field(..., description="Task type", min_length=1, max_length=50)
+    task_id: str = Field(..., description="Task ID to process", min_length=1, max_length=100)
+    parent_job_id: str = Field(..., description="Parent job ID", min_length=64, max_length=64)
+    task_type: str = Field(..., description="Task type", min_length=1, max_length=50)
     stage: int = Field(..., ge=1, le=100, description="Stage number")
-    taskIndex: int = Field(..., ge=0, le=10000, description="Task index within stage")
+    task_index: int = Field(..., ge=0, le=10000, description="Task index within stage")
     parameters: Dict[str, Any] = Field(default_factory=dict, description="Task parameters")
-    retryCount: int = Field(default=0, ge=0, le=10, description="Retry attempt number")
+    retry_count: int = Field(default=0, ge=0, le=10, description="Retry attempt number")
     
     # Validation rules
-    @field_validator('taskId')
+    @field_validator('task_id')
     @classmethod
     def validate_task_id_format(cls, v):
         return validate_task_id(v)
     
-    @field_validator('parentJobId')
+    @field_validator('parent_job_id')
     @classmethod
     def validate_parent_job_id_format(cls, v):
         return validate_job_id(v)
     
-    @field_validator('taskType')
+    @field_validator('task_type')
     @classmethod
     def validate_task_type_format(cls, v):
         return validate_task_type(v)
@@ -422,8 +438,8 @@ class TaskQueueMessage(BaseModel):
     @model_validator(mode='after')
     def validate_task_belongs_to_job(self):
         """Validate that task ID contains the parent job ID"""
-        if self.parentJobId and not self.taskId.startswith(self.parentJobId):
-            raise ValueError(f"taskId must start with parentJobId. Got taskId={self.taskId}, parentJobId={self.parentJobId}")
+        if self.parent_job_id and not self.task_id.startswith(self.parent_job_id):
+            raise ValueError(f"task_id must start with parent_job_id. Got task_id={self.task_id}, parent_job_id={self.parent_job_id}")
         return self
     
     class Config:

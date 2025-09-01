@@ -307,7 +307,7 @@ class DatabaseSchemaValidator:
             logger.debug("🔧 Validation not successful, generating remediation actions")
             
             if not validation_results['schema_exists']:
-                action = "Execute: CREATE SCHEMA rmhgeoapi; (or set APP_SCHEMA)"
+                action = "Execute: CREATE SCHEMA app; (or set APP_SCHEMA)"
                 actions.append(action)
                 logger.debug(f"🔧 Added schema creation action: {action}")
                 

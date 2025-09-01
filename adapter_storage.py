@@ -664,7 +664,7 @@ class PostgresAdapter:
         POSTGIS_PASSWORD: PostgreSQL password (required)
         POSTGIS_DATABASE: PostgreSQL database name
         POSTGIS_SCHEMA: PostGIS schema for geospatial data (default: geo)
-        APP_SCHEMA: Application schema for jobs/tasks tables (default: rmhgeoapi)
+        APP_SCHEMA: Application schema for jobs/tasks tables (default: app)
     """
     
     def __init__(self):
@@ -681,7 +681,7 @@ class PostgresAdapter:
             POSTGIS_PASSWORD: PostgreSQL password (required)
             POSTGIS_DATABASE: PostgreSQL database name
             POSTGIS_SCHEMA: PostGIS schema name (default: geo)
-            APP_SCHEMA: Application schema name (default: rmhgeoapi)
+            APP_SCHEMA: Application schema name (default: app)
             
         Raises:
             ValueError: If POSTGIS_PASSWORD environment variable is not set
@@ -701,17 +701,22 @@ class PostgresAdapter:
         
         logger.info(f"✅ Using PostgreSQL password from environment variable")
         
-        # Build connection string with password from environment and SSL parameters
+        # Build connection string using working trigger_health.py pattern
         self.connection_string = (
-            f"postgresql://{self.config.postgis_user}:{db_password}"
-            f"@{self.config.postgis_host}:{self.config.postgis_port}/{self.config.postgis_database}"
-            f"?sslmode=require"
+            f"host={self.config.postgis_host} "
+            f"dbname={self.config.postgis_database} "
+            f"user={self.config.postgis_user} "
+            f"password={db_password} "
+            f"port={self.config.postgis_port}"
         )
         
         # Set schema search path
         self.search_path = f"{self.config.app_schema}, public"
         
         logger.info(f"🐘 PostgreSQL adapter initialized: {self.config.postgis_host}:{self.config.postgis_port}")
+        
+        # Validate required tables exist
+        self._ensure_tables_exist()
     
     def _get_connection(self):
         """Get database connection with proper schema search path.
@@ -732,6 +737,94 @@ class PostgresAdapter:
         with conn.cursor() as cursor:
             cursor.execute(f"SET search_path TO {self.search_path}")
         return conn
+    
+    def _ensure_tables_exist(self):
+        """Ensure required database tables exist, creating them if necessary.
+        
+        Checks for existence of 'jobs' and 'tasks' tables in the configured app schema.
+        If tables don't exist, creates them using the schema definition from health check pattern.
+        
+        Raises:
+            Exception: If table creation fails or schema is invalid
+        """
+        try:
+            with self._get_connection() as conn:
+                with conn.cursor() as cursor:
+                    # Table definitions matching health check pattern
+                    table_definitions = {
+                        'jobs': """
+                            CREATE TABLE IF NOT EXISTS {schema}.jobs (
+                                job_id VARCHAR(64) PRIMARY KEY
+                                    CHECK (length(job_id) = 64 AND job_id ~ '^[a-f0-9]+$'),
+                                job_type VARCHAR(50) NOT NULL
+                                    CHECK (length(job_type) >= 1 AND job_type ~ '^[a-z_]+$'),
+                                status VARCHAR(50) DEFAULT 'queued',
+                                stage INTEGER DEFAULT 1
+                                    CHECK (stage >= 1 AND stage <= 100),
+                                total_stages INTEGER DEFAULT 1
+                                    CHECK (total_stages >= 1 AND total_stages <= 100),
+                                parameters JSONB NOT NULL DEFAULT '{{}}',
+                                metadata JSONB NOT NULL DEFAULT '{{}}',
+                                stage_results JSONB NOT NULL DEFAULT '{{}}',
+                                result_data JSONB,
+                                error_details TEXT,
+                                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                                updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+                            )
+                        """,
+                        'tasks': """
+                            CREATE TABLE IF NOT EXISTS {schema}.tasks (
+                                task_id VARCHAR(100) PRIMARY KEY
+                                    CHECK (length(task_id) >= 1 AND length(task_id) <= 100),
+                                parent_job_id VARCHAR(64) NOT NULL
+                                    REFERENCES {schema}.jobs(job_id) ON DELETE CASCADE
+                                    CHECK (length(parent_job_id) = 64 AND parent_job_id ~ '^[a-f0-9]+$'),
+                                task_type VARCHAR(50) NOT NULL
+                                    CHECK (length(task_type) >= 1 AND task_type ~ '^[a-z_]+$'),
+                                status VARCHAR(50) DEFAULT 'queued',
+                                stage INTEGER NOT NULL
+                                    CHECK (stage >= 1 AND stage <= 100),
+                                task_index INTEGER NOT NULL DEFAULT 0
+                                    CHECK (task_index >= 0),
+                                parameters JSONB NOT NULL DEFAULT '{{}}',
+                                metadata JSONB NOT NULL DEFAULT '{{}}',
+                                result_data JSONB,
+                                error_details TEXT,
+                                heartbeat TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                                retry_count INTEGER NOT NULL DEFAULT 0
+                                    CHECK (retry_count >= 0 AND retry_count <= 10),
+                                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                                updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+                            )
+                        """
+                    }
+                    
+                    tables_created = []
+                    for table_name, table_sql in table_definitions.items():
+                        # Check if table exists
+                        cursor.execute("""
+                            SELECT table_name FROM information_schema.tables 
+                            WHERE table_schema = %s AND table_name = %s
+                        """, (self.config.app_schema, table_name))
+                        
+                        table_exists = cursor.fetchone() is not None
+                        
+                        if not table_exists:
+                            # Create the table
+                            formatted_sql = table_sql.format(schema=self.config.app_schema)
+                            cursor.execute(formatted_sql)
+                            tables_created.append(table_name)
+                            logger.info(f"✅ Created table: {self.config.app_schema}.{table_name}")
+                    
+                    if tables_created:
+                        conn.commit()
+                        logger.info(f"✅ Tables created successfully: {tables_created}")
+                    else:
+                        logger.info(f"✅ All required tables already exist in schema: {self.config.app_schema}")
+                    
+        except Exception as e:
+            logger.error(f"❌ Failed to ensure database tables exist: {e}")
+            raise
     
     def create_job(self, job: JobRecord) -> bool:
         """Create job record in PostgreSQL with schema validation.
@@ -819,12 +912,12 @@ class PostgresAdapter:
                     job_data = {
                         'job_id': row[0],
                         'job_type': row[1],
-                        'status': row[2],
+                        'status': JobStatus(row[2]),  # Explicit enum conversion
                         'stage': row[3],
                         'total_stages': row[4],
-                        'parameters': json.loads(row[5]) if row[5] else {},
-                        'stage_results': json.loads(row[6]) if row[6] else {},
-                        'result_data': json.loads(row[7]) if row[7] else None,
+                        'parameters': row[5] if row[5] else {},
+                        'stage_results': row[6] if row[6] else {},
+                        'result_data': row[7] if row[7] else None,
                         'error_details': row[8],
                         'created_at': row[9],
                         'updated_at': row[10]
@@ -936,12 +1029,12 @@ class PostgresAdapter:
                             job_data = {
                                 'job_id': row[0],
                                 'job_type': row[1], 
-                                'status': row[2],
+                                'status': JobStatus(row[2]),  # Explicit enum conversion
                                 'stage': row[3],
                                 'total_stages': row[4],
-                                'parameters': json.loads(row[5]) if row[5] else {},
-                                'stage_results': json.loads(row[6]) if row[6] else {},
-                                'result_data': json.loads(row[7]) if row[7] else None,
+                                'parameters': row[5] if row[5] else {},
+                                'stage_results': row[6] if row[6] else {},
+                                'result_data': row[7] if row[7] else None,
                                 'error_details': row[8],
                                 'created_at': row[9],
                                 'updated_at': row[10]
@@ -1050,11 +1143,11 @@ class PostgresAdapter:
                         'taskId': row[0],
                         'parentJobId': row[1],
                         'taskType': row[2],
-                        'status': row[3],
+                        'status': TaskStatus(row[3]),  # Explicit enum conversion
                         'stage': row[4],
                         'taskIndex': row[5],
-                        'parameters': json.loads(row[6]) if row[6] else {},
-                        'resultData': json.loads(row[7]) if row[7] else None,
+                        'parameters': row[6] if row[6] else {},
+                        'resultData': row[7] if row[7] else None,
                         'errorDetails': row[8],
                         'retryCount': row[9],
                         'heartbeat': row[10],
@@ -1160,11 +1253,11 @@ class PostgresAdapter:
                                 'taskId': row[0],
                                 'parentJobId': row[1], 
                                 'taskType': row[2],
-                                'status': row[3],
+                                'status': TaskStatus(row[3]),  # Explicit enum conversion
                                 'stage': row[4],
                                 'taskIndex': row[5],
-                                'parameters': json.loads(row[6]) if row[6] else {},
-                                'resultData': json.loads(row[7]) if row[7] else None,
+                                'parameters': row[6] if row[6] else {},
+                                'resultData': row[7] if row[7] else None,
                                 'errorDetails': row[8],
                                 'retryCount': row[9],
                                 'heartbeat': row[10],

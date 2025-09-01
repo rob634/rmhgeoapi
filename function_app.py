@@ -97,7 +97,7 @@ import azure.functions as func
 # ========================================================================
 # Note: HTTP endpoints now use trigger classes with their own imports
 from schema_core import JobStatus, TaskStatus, JobQueueMessage, TaskQueueMessage
-from util_logger import logger
+from util_logger import LoggerFactory, ComponentType
 
 # HTTP Trigger Classes - Infrastructure Layer
 from trigger_health import health_check_trigger
@@ -149,8 +149,8 @@ def process_job_queue(msg: func.QueueMessage) -> None:
             
     Queue Message Format (Pydantic Job→Task Architecture):
         {
-            "jobId": "SHA256_hash",
-            "jobType": "hello_world",
+            "job_id": "SHA256_hash",
+            "job_type": "hello_world",
             "parameters": {
                 "dataset_id": "container_name",
                 "resource_id": "file_or_folder",
@@ -158,7 +158,7 @@ def process_job_queue(msg: func.QueueMessage) -> None:
                 "system": false
             },
             "stage": 1,
-            "retryCount": 0
+            "retry_count": 0
         }
         
     Processing Flow:
@@ -173,6 +173,9 @@ def process_job_queue(msg: func.QueueMessage) -> None:
         - Controller errors: Job marked failed with error details
         - After 5 attempts: Message moved to poison queue automatically
     """
+    # Initialize queue-specific logger for poison queue debugging
+    logger = LoggerFactory.get_queue_logger("geospatial-jobs")
+    
     logger.info("🔄 Job queue trigger activated - processing with Pydantic architecture")
     logger.debug(f"📨 Raw queue message received: {msg}")
     
@@ -207,6 +210,13 @@ def process_job_queue(msg: func.QueueMessage) -> None:
             logger.debug(f"📋 Invalid message content: {message_content}")
             raise ValueError(f"Message validation failed: {validation_error}")
         
+        # Update logger context with job details for better correlation
+        logger.update_context(
+            job_id=job_message.job_id,
+            job_type=job_message.job_type,
+            stage=job_message.stage
+        )
+        
         logger.info(f"📨 Processing job: {job_message.job_id[:16]}... type={job_message.job_type}")
         logger.debug(f"📊 Full job message details: job_id={job_message.job_id}, job_type={job_message.job_type}, stage={job_message.stage}, parameters={job_message.parameters}")
         
@@ -229,9 +239,9 @@ def process_job_queue(msg: func.QueueMessage) -> None:
             raise RuntimeError(f"Repository creation failed: {repo_error}")
         
         # Load job record
-        logger.debug(f"🔍 Loading job record for: {job_message.jobId}")
+        logger.debug(f"🔍 Loading job record for: {job_message.job_id}")
         try:
-            job_record = job_repo.get_job(job_message.jobId)
+            job_record = job_repo.get_job(job_message.job_id)
             logger.debug(f"📋 Job record retrieval result: {job_record}")
         except Exception as load_error:
             logger.error(f"❌ Failed to load job record: {load_error}")
@@ -239,15 +249,15 @@ def process_job_queue(msg: func.QueueMessage) -> None:
             raise RuntimeError(f"Job record load failed: {load_error}")
         
         if not job_record:
-            logger.error(f"❌ Job record not found: {job_message.jobId}")
-            raise ValueError(f"Job record not found: {job_message.jobId}")
+            logger.error(f"❌ Job record not found: {job_message.job_id}")
+            raise ValueError(f"Job record not found: {job_message.job_id}")
         
         logger.debug(f"✅ Job record loaded successfully: status={job_record.status}")
         
         # Update job status to processing
-        logger.debug(f"🔄 Updating job status to PROCESSING for: {job_message.jobId}")
+        logger.debug(f"🔄 Updating job status to PROCESSING for: {job_message.job_id}")
         try:
-            job_repo.update_job_status(job_message.jobId, JobStatus.PROCESSING)
+            job_repo.update_job_status(job_message.job_id, JobStatus.PROCESSING)
             logger.debug(f"✅ Job status updated to PROCESSING")
         except Exception as status_error:
             logger.error(f"❌ Failed to update job status to PROCESSING: {status_error}")
@@ -279,7 +289,7 @@ def process_job_queue(msg: func.QueueMessage) -> None:
                 'job_record': job_record,
                 'stage': job_message.stage,
                 'parameters': job_message.parameters,
-                'stage_results': job_message.stageResults
+                'stage_results': job_message.stage_results
             }
             logger.debug(f"🚀 Processing job stage with params: {stage_params}")
             
@@ -288,10 +298,10 @@ def process_job_queue(msg: func.QueueMessage) -> None:
                     job_record=job_record,
                     stage=job_message.stage,
                     parameters=job_message.parameters,
-                    stage_results=job_message.stageResults
+                    stage_results=job_message.stage_results
                 )
                 logger.debug(f"✅ Stage processing result: {stage_result}")
-                logger.info(f"✅ Job {job_message.jobId[:16]}... stage {job_message.stage} completed")
+                logger.info(f"✅ Job {job_message.job_id[:16]}... stage {job_message.stage} completed")
             except Exception as stage_error:
                 logger.error(f"❌ Failed to process job stage: {stage_error}")
                 logger.debug(f"🔍 Stage processing error type: {type(stage_error).__name__}")
@@ -315,8 +325,8 @@ def process_job_queue(msg: func.QueueMessage) -> None:
         # Try to mark job as failed
         try:
             if 'job_message' in locals():
-                logger.debug(f"🔧 Attempting to mark job as failed: {job_message.jobId}")
-                job_repo.fail_job(job_message.jobId, str(e))
+                logger.debug(f"🔧 Attempting to mark job as failed: {job_message.job_id}")
+                job_repo.fail_job(job_message.job_id, str(e))
                 logger.debug(f"✅ Job marked as failed successfully")
         except Exception as update_error:
             logger.error(f"❌ Failed to update job status: {update_error}")
@@ -342,7 +352,7 @@ def process_task_queue(msg: func.QueueMessage) -> None:
         1. Decode and validate task message using TaskQueueMessage schema
         2. Load task record from storage with schema validation
         3. Update task status to 'processing'
-        4. Route to appropriate task handler based on taskType
+        4. Route to appropriate task handler based on task_type
         5. Execute task with validated parameters
         6. Update task status to 'completed'/'failed'
         7. CRITICAL: Check if parent job is complete (distributed detection)
@@ -360,16 +370,16 @@ def process_task_queue(msg: func.QueueMessage) -> None:
             
     Task Message Format (Pydantic Job→Task Architecture):
         {
-            "taskId": "jobId_stage1_task0",
-            "parentJobId": "SHA256_hash",
-            "taskType": "hello_world",
+            "task_id": "job_id_stage1_task0",
+            "parent_job_id": "SHA256_hash",
+            "task_type": "hello_world",
             "stage": 1,
-            "taskIndex": 0,
+            "task_index": 0,
             "parameters": {
                 "dataset_id": "container",
                 "message": "Hello World!"
             },
-            "retryCount": 0
+            "retry_count": 0
         }
         
     Supported Task Types:
@@ -383,6 +393,9 @@ def process_task_queue(msg: func.QueueMessage) -> None:
         - After 5 attempts: Message moved to poison queue
         - Failed tasks counted in parent job statistics
     """
+    # Initialize task queue-specific logger
+    logger = LoggerFactory.get_queue_logger("geospatial-tasks")
+    
     logger.info("🔄 Task queue trigger activated - processing with Pydantic architecture")
     logger.debug(f"📨 Raw task queue message received: {msg}")
     
@@ -407,6 +420,14 @@ def process_task_queue(msg: func.QueueMessage) -> None:
             logger.debug(f"📋 Invalid task message content: {message_content}")
             raise ValueError(f"Task message validation failed: {validation_error}")
         
+        # Update logger context with task details for better correlation
+        logger.update_context(
+            task_id=task_message.task_id,
+            job_id=task_message.parent_job_id,
+            task_type=task_message.task_type,
+            stage=task_message.stage
+        )
+        
         logger.info(f"📋 Processing task: {task_message.task_id} type={task_message.task_type}")
         logger.debug(f"📊 Full task message details: task_id={task_message.task_id}, parent_job_id={task_message.parent_job_id}, task_type={task_message.task_type}, parameters={task_message.parameters}")
         
@@ -429,9 +450,9 @@ def process_task_queue(msg: func.QueueMessage) -> None:
             raise RuntimeError(f"Task repository creation failed: {repo_error}")
         
         # Load task record
-        logger.debug(f"🔍 Loading task record for: {task_message.taskId}")
+        logger.debug(f"🔍 Loading task record for: {task_message.task_id}")
         try:
-            task_record = task_repo.get_task(task_message.taskId)
+            task_record = task_repo.get_task(task_message.task_id)
             logger.debug(f"📋 Task record retrieval result: {task_record}")
         except Exception as load_error:
             logger.error(f"❌ Failed to load task record: {load_error}")
@@ -439,15 +460,15 @@ def process_task_queue(msg: func.QueueMessage) -> None:
             raise RuntimeError(f"Task record load failed: {load_error}")
         
         if not task_record:
-            logger.error(f"❌ Task record not found: {task_message.taskId}")
-            raise ValueError(f"Task record not found: {task_message.taskId}")
+            logger.error(f"❌ Task record not found: {task_message.task_id}")
+            raise ValueError(f"Task record not found: {task_message.task_id}")
         
         logger.debug(f"✅ Task record loaded successfully: status={task_record.status if hasattr(task_record, 'status') else 'unknown'}")
         
         # Update task status to processing
-        logger.debug(f"🔄 Updating task status to PROCESSING for: {task_message.taskId}")
+        logger.debug(f"🔄 Updating task status to PROCESSING for: {task_message.task_id}")
         try:
-            task_repo.update_task_status(task_message.taskId, TaskStatus.PROCESSING)
+            task_repo.update_task_status(task_message.task_id, TaskStatus.PROCESSING)
             logger.debug(f"✅ Task status updated to PROCESSING")
         except Exception as status_error:
             logger.error(f"❌ Failed to update task status to PROCESSING: {status_error}")
@@ -455,9 +476,9 @@ def process_task_queue(msg: func.QueueMessage) -> None:
             raise RuntimeError(f"Task status update failed: {status_error}")
         
         # Route to task handler based on task type
-        logger.debug(f"🎯 Routing to task handler for task type: {task_message.taskType}")
-        if task_message.taskType in ["hello_world_greeting", "hello_world_reply"]:
-            logger.debug(f"📦 Importing task handler for: {task_message.taskType}")
+        logger.debug(f"🎯 Routing to task handler for task type: {task_message.task_type}")
+        if task_message.task_type in ["hello_world_greeting", "hello_world_reply"]:
+            logger.debug(f"📦 Importing task handler for: {task_message.task_type}")
             try:
                 from service_hello_world import get_hello_world_task
                 from model_core import TaskExecutionContext
@@ -468,7 +489,7 @@ def process_task_queue(msg: func.QueueMessage) -> None:
                 raise ImportError(f"Task handler import failed: {service_import_error}")
             
             try:
-                task_handler = get_hello_world_task(task_message.taskType)
+                task_handler = get_hello_world_task(task_message.task_type)
                 logger.debug(f"✅ Task handler instantiated: {type(task_handler)}")
             except Exception as service_error:
                 logger.error(f"❌ Failed to instantiate task handler: {service_error}")
@@ -477,12 +498,10 @@ def process_task_queue(msg: func.QueueMessage) -> None:
             
             # Create proper execution context
             context = TaskExecutionContext(
-                task_id=task_message.taskId,
-                job_id=task_message.parentJobId,
-                task_type=task_message.taskType,
-                stage_number=task_message.stage,
-                stage_name=f"stage_{task_message.stage}",
-                task_index=task_message.taskIndex,
+                task_id=task_message.task_id,
+                parent_job_id=task_message.parent_job_id,
+                stage=task_message.stage,
+                task_index=task_message.task_index,
                 parameters=task_message.parameters
             )
             logger.debug(f"✅ Task execution context created: {context}")
@@ -506,12 +525,12 @@ def process_task_queue(msg: func.QueueMessage) -> None:
             logger.debug(f"💾 Updating task with completion status and result")
             try:
                 task_repo.update_task_status(
-                    task_message.taskId, 
+                    task_message.task_id, 
                     TaskStatus.COMPLETED, 
                     result_data=result
                 )
                 logger.debug(f"✅ Task status updated to COMPLETED with result data")
-                logger.info(f"✅ Task {task_message.taskId} completed successfully")
+                logger.info(f"✅ Task {task_message.task_id} completed successfully")
             except Exception as update_error:
                 logger.error(f"❌ Failed to update task completion status: {update_error}")
                 logger.debug(f"🔍 Task completion update error type: {type(update_error).__name__}")
@@ -519,7 +538,7 @@ def process_task_queue(msg: func.QueueMessage) -> None:
             
         else:
             # Task handler not implemented
-            error_msg = f"Task handler not implemented for task type: {task_message.taskType}"
+            error_msg = f"Task handler not implemented for task type: {task_message.task_type}"
             logger.error(f"❌ {error_msg}")
             
             # Get available task types dynamically
@@ -531,15 +550,15 @@ def process_task_queue(msg: func.QueueMessage) -> None:
                 logger.debug(f"📋 Available task types: [unable to load registry]")
             
             task_repo.update_task_status(
-                task_message.taskId, 
+                task_message.task_id, 
                 TaskStatus.FAILED, 
                 error_message=error_msg
             )
         
         # CRITICAL: Check if parent job is complete (distributed detection)
-        logger.debug(f"🔍 Checking job completion for parent: {task_message.parentJobId}")
+        logger.debug(f"🔍 Checking job completion for parent: {task_message.parent_job_id}")
         try:
-            completion_result = completion_detector.check_job_completion(task_message.parentJobId)
+            completion_result = completion_detector.check_job_completion(task_message.parent_job_id)
             logger.debug(f"📊 Completion check result: is_complete={completion_result.is_complete}, task_count={len(completion_result.task_results) if hasattr(completion_result, 'task_results') else 'unknown'}")
         except Exception as completion_error:
             logger.error(f"❌ Failed to check job completion: {completion_error}")
@@ -549,7 +568,7 @@ def process_task_queue(msg: func.QueueMessage) -> None:
             raise RuntimeError(f"Job completion check failed: {completion_error}")
         
         if completion_result.is_complete:
-            logger.info(f"🎉 Job {task_message.parentJobId[:16]}... completed - all tasks finished!")
+            logger.info(f"🎉 Job {task_message.parent_job_id[:16]}... completed - all tasks finished!")
             
             # This is the last task - complete the parent job
             logger.debug(f"📦 Importing controller for job aggregation")
@@ -571,32 +590,19 @@ def process_task_queue(msg: func.QueueMessage) -> None:
             
             logger.debug(f"🔄 Aggregating job results with task count: {len(completion_result.task_results) if hasattr(completion_result, 'task_results') else 'unknown'}")
             try:
-                job_result = controller.aggregate_job_results(
-                    job_id=task_message.parentJobId,
-                    task_results=completion_result.task_results
+                # Use the complete_job method which handles JobExecutionContext properly
+                job_result = controller.complete_job(
+                    job_id=task_message.parent_job_id,
+                    all_task_results=completion_result.task_results
                 )
-                logger.debug(f"✅ Job results aggregated successfully: {job_result}")
+                logger.debug(f"✅ Job results aggregated and completed successfully: {job_result}")
+                logger.info(f"✅ Job {task_message.parent_job_id[:16]}... marked as completed by complete_job()")
             except Exception as aggregation_error:
-                logger.error(f"❌ Failed to aggregate job results: {aggregation_error}")
-                logger.debug(f"🔍 Aggregation error type: {type(aggregation_error).__name__}")
+                logger.error(f"❌ Failed to complete job: {aggregation_error}")
+                logger.debug(f"🔍 Job completion error type: {type(aggregation_error).__name__}")
                 import traceback
-                logger.debug(f"📍 Aggregation traceback: {traceback.format_exc()}")
-                raise RuntimeError(f"Job result aggregation failed: {aggregation_error}")
-            
-            # Update job status to completed
-            logger.debug(f"💾 Updating job status to COMPLETED with result data")
-            try:
-                job_repo.update_job_status(
-                    task_message.parentJobId,
-                    JobStatus.COMPLETED,
-                    result_data=job_result
-                )
-                logger.debug(f"✅ Job status updated to COMPLETED successfully")
-                logger.info(f"✅ Job {task_message.parentJobId[:16]}... marked as completed")
-            except Exception as job_update_error:
-                logger.error(f"❌ Failed to update job completion status: {job_update_error}")
-                logger.debug(f"🔍 Job update error type: {type(job_update_error).__name__}")
-                raise RuntimeError(f"Job completion status update failed: {job_update_error}")
+                logger.debug(f"📍 Job completion traceback: {traceback.format_exc()}")
+                raise RuntimeError(f"Job completion failed: {aggregation_error}")
             
     except Exception as e:
         logger.error(f"❌ Error processing task: {str(e)}")
@@ -605,7 +611,7 @@ def process_task_queue(msg: func.QueueMessage) -> None:
         try:
             if 'task_message' in locals():
                 task_repo.update_task_status(
-                    task_message.taskId,
+                    task_message.task_id,
                     TaskStatus.FAILED,
                     error_message=str(e)
                 )
@@ -656,6 +662,9 @@ def poison_queue_timer(timer: func.TimerRequest) -> None:
         - Runs silently unless messages are found
         - Errors are logged but don't fail the timer trigger
     """
+    # Initialize poison queue monitor logger
+    logger = LoggerFactory.get_logger(ComponentType.POISON_MONITOR, "PoisonQueueTimer")
+    
     logger.info("Poison queue timer trigger fired")
     
     try:

@@ -17,7 +17,7 @@
     "POSTGIS_USER": "your-db-user",
     "POSTGIS_DATABASE": "your-database-name",
     "POSTGIS_SCHEMA": "geo",
-    "APP_SCHEMA": "rmhgeoapi",
+    "APP_SCHEMA": "app",
     
     "_comment_security": "=== Security Configuration (Key Vault for password) ===",
     "KEY_VAULT_NAME": "your-key-vault-name",

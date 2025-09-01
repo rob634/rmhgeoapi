@@ -15,7 +15,7 @@ POSTGIS_PORT="5432"                                    # Optional, defaults to 5
 POSTGIS_USER="rob634"                                  # Database username
 POSTGIS_DATABASE="geopgflex"                          # Database name
 POSTGIS_SCHEMA="geo"                                  # PostGIS schema (optional, defaults to 'geo')
-APP_SCHEMA="rmhgeoapi"                                # Application schema (optional, defaults to 'rmhgeoapi')
+APP_SCHEMA="app"                                # Application schema (optional, defaults to 'app')
 
 # === Security Configuration ===
 POSTGIS_PASSWORD="your-database-password"            # PostgreSQL database password (required)
@@ -134,7 +134,7 @@ postgres_adapter = StorageAdapterFactory.create_adapter('postgres')
     "POSTGIS_USER": "your-db-user", 
     "POSTGIS_DATABASE": "your-database-name",
     "POSTGIS_SCHEMA": "geo",
-    "APP_SCHEMA": "rmhgeoapi",
+    "APP_SCHEMA": "app",
     
     "_comment_security": "=== Security Configuration (Key Vault for password) ===",
     "KEY_VAULT_NAME": "your-key-vault-name",

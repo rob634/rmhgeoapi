@@ -136,8 +136,7 @@ class AppConfig(BaseModel):
     
     app_schema: str = Field(
         default="app",
-        description="PostgreSQL schema name for application tables (jobs, tasks, etc.)",
-        examples=["rmhgeoapi", "dev_rmhgeoapi", "prod_rmhgeoapi"]
+        description="PostgreSQL schema name for application tables (jobs, tasks, etc.)"
     )
     
     # ========================================================================
@@ -159,9 +158,8 @@ class AppConfig(BaseModel):
     # ========================================================================
     
     key_vault_name: str = Field(
-        default="rmhkeyvault",
-        description="Azure Key Vault name for secure credential storage",
-        examples=["rmhkeyvault", "rmhazurevault"]
+        default="rmhazurevault",
+        description="Azure Key Vault name for secure credential storage"
     )
     
     key_vault_database_secret: str = Field(
@@ -283,7 +281,7 @@ class AppConfig(BaseModel):
             postgis_password=os.environ.get('POSTGIS_PASSWORD'),
             postgis_database=os.environ['POSTGIS_DATABASE'],
             postgis_schema=os.environ.get('POSTGIS_SCHEMA', 'geo'),
-            app_schema=os.environ.get('APP_SCHEMA', 'rmhgeoapi'),
+            app_schema=os.environ.get('APP_SCHEMA', 'app'),
             
             # Security
             key_vault_name=os.environ.get('KEY_VAULT', 'rmhkeyvault'),

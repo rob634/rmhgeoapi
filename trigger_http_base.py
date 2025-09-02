@@ -31,11 +31,10 @@ Version: 1.0.0 - Foundation HTTP trigger abstraction
 from abc import ABC, abstractmethod
 from typing import Dict, Any, Optional, Union, List
 import json
-import logging
 from datetime import datetime, timezone
 
 import azure.functions as func
-from util_logger import logger
+from util_logger import LoggerFactory, ComponentType
 
 
 class BaseHttpTrigger(ABC):
@@ -54,7 +53,7 @@ class BaseHttpTrigger(ABC):
             trigger_name: Name of the trigger for logging (e.g., "submit_job", "health_check")
         """
         self.trigger_name = trigger_name
-        self.logger = logging.getLogger(f"HttpTrigger.{trigger_name}")
+        self.logger = LoggerFactory.get_logger(ComponentType.HTTP_TRIGGER, f"HttpTrigger.{trigger_name}")
     
     # ========================================================================
     # ABSTRACT METHODS - Must be implemented by concrete triggers

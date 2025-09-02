@@ -77,10 +77,10 @@ Author: Azure Geospatial ETL Team
 """
 
 from typing import Dict, Any
-import logging
 import time
 from datetime import datetime
 
+from util_logger import LoggerFactory, ComponentType
 from model_task_base import BaseTask
 from model_core import TaskStatus, TaskExecutionContext, TaskResult
 
@@ -95,7 +95,7 @@ class HelloWorldGreetingTask(BaseTask):
     
     def __init__(self):
         super().__init__("hello_world_greeting")
-        self.logger = logging.getLogger("HelloWorldGreetingTask")
+        self.logger = LoggerFactory.get_logger(ComponentType.SERVICE, "HelloWorldGreetingTask")
     
     def validate_task_parameters(self, context: TaskExecutionContext) -> bool:
         """Validate greeting task parameters"""
@@ -191,7 +191,7 @@ class HelloWorldReplyTask(BaseTask):
     
     def __init__(self):
         super().__init__("hello_world_reply")
-        self.logger = logging.getLogger("HelloWorldReplyTask")
+        self.logger = LoggerFactory.get_logger(ComponentType.SERVICE, "HelloWorldReplyTask")
     
     def validate_task_parameters(self, context: TaskExecutionContext) -> bool:
         """Validate reply task parameters"""

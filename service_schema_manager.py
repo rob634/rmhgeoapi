@@ -27,13 +27,14 @@ Database Governance:
 - Idempotent operations (safe to run multiple times)
 """
 
-import logging
 import psycopg
 from typing import Dict, Any, List, Optional, Tuple
 from psycopg import sql
+
+from util_logger import LoggerFactory, ComponentType
 from config import get_config
 
-logger = logging.getLogger(__name__)
+logger = LoggerFactory.get_logger(ComponentType.SERVICE, "SchemaManager")
 
 
 class SchemaManagementError(Exception):
@@ -286,9 +287,20 @@ class SchemaManager:
                 
                 if missing_tables:
                     logger.warning(f"⚠️ Missing tables in schema '{self.app_schema}': {missing_tables}")
-                    results['actions_taken'] = [f"Schema '{self.app_schema}' missing tables: {missing_tables}"]
+                    # Try to create missing tables with complete schema
+                    created_tables = self._create_complete_tables(conn, missing_tables)
+                    results['tables_created'] = created_tables
+                    results['actions_taken'] = [f"Created missing tables: {created_tables}"]
+                    if created_tables:
+                        logger.info(f"✅ Created missing tables: {created_tables}")
+                        results['tables_exist'] = True
                 else:
                     logger.info(f"✅ All required tables exist in schema: {self.app_schema}")
+                    # Verify existing tables have complete schema
+                    schema_issues = self._validate_table_schema(conn, existing_tables)
+                    if schema_issues:
+                        logger.warning(f"⚠️ Existing tables have schema issues: {schema_issues}")
+                        results['schema_issues'] = schema_issues
                 
         except Exception as e:
             logger.error(f"❌ Failed to validate tables: {e}")
@@ -411,6 +423,180 @@ class SchemaManager:
             error_msg = f"Failed to initialize schema '{self.app_schema}': {e}"
             logger.error(f"❌ {error_msg}")
             raise SchemaManagementError(error_msg)
+    
+    def _create_complete_tables(self, conn: psycopg.Connection, missing_tables: List[str]) -> List[str]:
+        """Create missing tables with complete schema matching schema_postgres.sql"""
+        created_tables = []
+        
+        try:
+            with conn.cursor() as cur:
+                # First create ENUM types if they don't exist
+                logger.info(f"🔧 Creating ENUM types in schema '{self.app_schema}'")
+                cur.execute(f"SET search_path TO {self.app_schema}, public")
+                
+                # Create job_status enum
+                cur.execute("""
+                    DO $$ BEGIN
+                        CREATE TYPE job_status AS ENUM (
+                            'queued', 'processing', 'completed', 'failed', 'completed_with_errors'
+                        );
+                    EXCEPTION
+                        WHEN duplicate_object THEN null;
+                    END $$;
+                """)
+                
+                # Create task_status enum  
+                cur.execute("""
+                    DO $$ BEGIN
+                        CREATE TYPE task_status AS ENUM (
+                            'queued', 'processing', 'completed', 'failed'
+                        );
+                    EXCEPTION
+                        WHEN duplicate_object THEN null;
+                    END $$;
+                """)
+                
+                # Create jobs table with complete schema
+                if 'jobs' in missing_tables:
+                    logger.info(f"🔧 Creating jobs table with complete schema")
+                    jobs_sql = f"""
+                        CREATE TABLE {self.app_schema}.jobs (
+                            job_id VARCHAR(64) PRIMARY KEY 
+                                CHECK (length(job_id) = 64 AND job_id ~ '^[a-f0-9]+$'),
+                            job_type VARCHAR(50) NOT NULL
+                                CHECK (length(job_type) >= 1 AND job_type ~ '^[a-z_]+$'),
+                            status job_status NOT NULL DEFAULT 'queued',
+                            stage INTEGER NOT NULL DEFAULT 1
+                                CHECK (stage >= 1 AND stage <= 100),
+                            total_stages INTEGER NOT NULL DEFAULT 1  
+                                CHECK (total_stages >= 1 AND total_stages <= 100),
+                            parameters JSONB NOT NULL DEFAULT '{{}}',
+                            stage_results JSONB NOT NULL DEFAULT '{{}}',  
+                            result_data JSONB NULL,
+                            error_details TEXT NULL,
+                            created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                            updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                            CONSTRAINT jobs_stage_consistency 
+                                CHECK (stage <= total_stages),
+                            CONSTRAINT jobs_completed_has_result
+                                CHECK (
+                                    (status = 'completed' AND result_data IS NOT NULL) OR 
+                                    (status != 'completed')
+                                ),
+                            CONSTRAINT jobs_failed_has_error
+                                CHECK (
+                                    (status = 'failed' AND error_details IS NOT NULL) OR
+                                    (status != 'failed')
+                                )
+                        )
+                    """
+                    cur.execute(jobs_sql)
+                    created_tables.append('jobs')
+                
+                # Create tasks table with complete schema
+                if 'tasks' in missing_tables:
+                    logger.info(f"🔧 Creating tasks table with complete schema")
+                    tasks_sql = f"""
+                        CREATE TABLE {self.app_schema}.tasks (
+                            task_id VARCHAR(100) PRIMARY KEY
+                                CHECK (length(task_id) >= 1),
+                            parent_job_id VARCHAR(64) NOT NULL 
+                                REFERENCES {self.app_schema}.jobs(job_id) ON DELETE CASCADE
+                                CHECK (length(parent_job_id) = 64 AND parent_job_id ~ '^[a-f0-9]+$'),
+                            task_type VARCHAR(50) NOT NULL
+                                CHECK (length(task_type) >= 1 AND task_type ~ '^[a-z_]+$'),
+                            status task_status NOT NULL DEFAULT 'queued',
+                            stage INTEGER NOT NULL 
+                                CHECK (stage >= 1 AND stage <= 100),
+                            task_index INTEGER NOT NULL 
+                                CHECK (task_index >= 0 AND task_index <= 10000),
+                            parameters JSONB NOT NULL DEFAULT '{{}}',
+                            result_data JSONB NULL,
+                            error_details TEXT NULL,
+                            retry_count INTEGER NOT NULL DEFAULT 0
+                                CHECK (retry_count >= 0 AND retry_count <= 10),
+                            heartbeat TIMESTAMP NULL,
+                            created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                            updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+                        )
+                    """
+                    cur.execute(tasks_sql)
+                    created_tables.append('tasks')
+                
+                # Create indexes
+                if created_tables:
+                    logger.info(f"🔧 Creating indexes for tables: {created_tables}")
+                    index_sql = f"""
+                        CREATE INDEX IF NOT EXISTS idx_jobs_status ON {self.app_schema}.jobs(status);
+                        CREATE INDEX IF NOT EXISTS idx_jobs_job_type ON {self.app_schema}.jobs(job_type);  
+                        CREATE INDEX IF NOT EXISTS idx_jobs_created_at ON {self.app_schema}.jobs(created_at);
+                        CREATE INDEX IF NOT EXISTS idx_jobs_updated_at ON {self.app_schema}.jobs(updated_at);
+                        CREATE INDEX IF NOT EXISTS idx_tasks_parent_job_id ON {self.app_schema}.tasks(parent_job_id);
+                        CREATE INDEX IF NOT EXISTS idx_tasks_status ON {self.app_schema}.tasks(status);
+                        CREATE INDEX IF NOT EXISTS idx_tasks_job_stage ON {self.app_schema}.tasks(parent_job_id, stage);  
+                        CREATE INDEX IF NOT EXISTS idx_tasks_job_stage_status ON {self.app_schema}.tasks(parent_job_id, stage, status);
+                        CREATE INDEX IF NOT EXISTS idx_tasks_heartbeat ON {self.app_schema}.tasks(heartbeat) WHERE heartbeat IS NOT NULL;
+                        CREATE INDEX IF NOT EXISTS idx_tasks_retry_count ON {self.app_schema}.tasks(retry_count) WHERE retry_count > 0;
+                    """
+                    cur.execute(index_sql)
+                
+                conn.commit()
+                logger.info(f"✅ Successfully created complete tables: {created_tables}")
+                
+        except Exception as e:
+            logger.error(f"❌ Failed to create complete tables: {e}")
+            conn.rollback()
+            raise SchemaManagementError(f"Table creation failed: {e}")
+        
+        return created_tables
+    
+    def _validate_table_schema(self, conn: psycopg.Connection, existing_tables: List[str]) -> Dict[str, List[str]]:
+        """Validate that existing tables have complete schema"""
+        schema_issues = {}
+        
+        try:
+            with conn.cursor() as cur:
+                for table in existing_tables:
+                    issues = []
+                    
+                    # Check if table has all required columns
+                    cur.execute("""
+                        SELECT column_name, data_type, is_nullable, column_default
+                        FROM information_schema.columns 
+                        WHERE table_schema = %s AND table_name = %s
+                        ORDER BY ordinal_position
+                    """, (self.app_schema, table))
+                    
+                    columns = {row[0]: {'type': row[1], 'nullable': row[2], 'default': row[3]} 
+                             for row in cur.fetchall()}
+                    
+                    if table == 'jobs':
+                        required_columns = [
+                            'job_id', 'job_type', 'status', 'stage', 'total_stages',
+                            'parameters', 'stage_results', 'result_data', 'error_details',
+                            'created_at', 'updated_at'
+                        ]
+                        missing = [col for col in required_columns if col not in columns]
+                        if missing:
+                            issues.append(f"missing_columns: {missing}")
+                    
+                    elif table == 'tasks':
+                        required_columns = [
+                            'task_id', 'parent_job_id', 'task_type', 'status', 'stage',
+                            'task_index', 'parameters', 'result_data', 'error_details',
+                            'retry_count', 'heartbeat', 'created_at', 'updated_at'
+                        ]
+                        missing = [col for col in required_columns if col not in columns]
+                        if missing:
+                            issues.append(f"missing_columns: {missing}")
+                    
+                    if issues:
+                        schema_issues[table] = issues
+                        
+        except Exception as e:
+            logger.error(f"❌ Failed to validate table schema: {e}")
+            
+        return schema_issues
 
 
 # Factory for creating SchemaManager instances

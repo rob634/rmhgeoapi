@@ -1,10 +1,12 @@
 # ============================================================================
 # CLAUDE CONTEXT - CONFIGURATION
 # ============================================================================
-# PURPOSE: Azure Key Vault repository for secure credential management (DISABLED)
-# SOURCE: Environment variables for vault name and DefaultAzureCredential for authentication
+# PURPOSE: Azure Key Vault repository for future database secure credential management CURRENTLY DISABLED)
+# SOURCE: Environment variables for vault name and DefaultAzureCredential for authentication (VAULT NOT SET UP FOR RBAC YET)
 # SCOPE: Global credential access for database passwords and secrets (currently disabled)
 # VALIDATION: Azure credential validation + Key Vault access validation (currently bypassed)
+# STATUS: Currently not using Key Vault becase debugging access issues is not a priority
+# FUTURE: Figure out the damn RBAC access that also allows updating secrets
 # ============================================================================
 
 """
@@ -25,14 +27,15 @@ Integration with Database Repository:
 - Supports Azure Functions managed identity authentication
 """
 
-import logging
 from typing import Optional, Dict, Any
 from datetime import datetime, timedelta
 from azure.keyvault.secrets import SecretClient
 from azure.identity import DefaultAzureCredential
 from azure.core.exceptions import AzureError
 
-logger = logging.getLogger(__name__)
+from util_logger import LoggerFactory, ComponentType
+
+logger = LoggerFactory.get_logger(ComponentType.REPOSITORY, "VaultRepository")
 
 
 class VaultAccessError(Exception):

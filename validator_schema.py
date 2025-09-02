@@ -94,9 +94,10 @@ Author: Azure Geospatial ETL Team
 
 from typing import Union, Dict, Any, List, Optional, Type, TypeVar
 import json
-import logging
 from datetime import datetime
 from pydantic import ValidationError
+
+from util_logger import LoggerFactory, ComponentType
 
 from schema_core import (
     JobRecord, TaskRecord, JobQueueMessage, TaskQueueMessage,
@@ -106,7 +107,7 @@ from schema_core import (
 # Type variables for generic validation
 T = TypeVar('T')
 
-logger = logging.getLogger(__name__)
+logger = LoggerFactory.get_logger(ComponentType.VALIDATOR, "SchemaValidator")
 
 
 class SchemaValidator:

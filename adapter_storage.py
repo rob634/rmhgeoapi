@@ -106,18 +106,22 @@ Author: Azure Geospatial ETL Team
 from abc import ABC, abstractmethod
 from typing import Optional, Dict, Any, List, Protocol, Union
 import json
-import logging
 from datetime import datetime, timezone
 from azure.data.tables import TableServiceClient, TableEntity, UpdateMode
 from azure.storage.blob import BlobServiceClient
 from azure.core.exceptions import ResourceExistsError, ResourceNotFoundError
 from azure.identity import DefaultAzureCredential
 
+from util_logger import LoggerFactory, ComponentType
+from util_enum_conversion import (
+    EnumConverter, convert_job_status_to_postgres, convert_task_status_to_postgres,
+    convert_job_status_from_postgres, convert_task_status_from_postgres
+)
 from schema_core import JobRecord, TaskRecord, JobStatus, TaskStatus
 from validator_schema import SchemaValidator, SchemaValidationError
 from config import get_config
 
-logger = logging.getLogger(__name__)
+logger = LoggerFactory.get_logger(ComponentType.ADAPTER, "StorageAdapter")
 
 
 # ============================================================================
@@ -862,7 +866,7 @@ class PostgresAdapter:
                     """, (
                         job.job_id,
                         job.job_type, 
-                        job.status.value if hasattr(job.status, 'value') else job.status,
+                        convert_job_status_to_postgres(job.status),
                         job.stage,
                         job.total_stages,
                         json.dumps(job.parameters),
@@ -912,7 +916,7 @@ class PostgresAdapter:
                     job_data = {
                         'job_id': row[0],
                         'job_type': row[1],
-                        'status': JobStatus(row[2]),  # Explicit enum conversion
+                        'status': convert_job_status_from_postgres(row[2]),  # Robust enum conversion
                         'stage': row[3],
                         'total_stages': row[4],
                         'parameters': row[5] if row[5] else {},
@@ -972,7 +976,7 @@ class PostgresAdapter:
                             error_details = %s, updated_at = %s
                         WHERE job_id = %s
                     """, (
-                        updated_job.status.value if hasattr(updated_job.status, 'value') else updated_job.status,
+                        convert_job_status_to_postgres(updated_job.status),
                         updated_job.stage,
                         updated_job.total_stages,
                         json.dumps(updated_job.parameters),
@@ -1007,7 +1011,7 @@ class PostgresAdapter:
             with self._get_connection() as conn:
                 with conn.cursor() as cursor:
                     if status_filter:
-                        status_value = status_filter.value if hasattr(status_filter, 'value') else status_filter
+                        status_value = convert_job_status_to_postgres(status_filter)
                         cursor.execute("""
                             SELECT job_id, job_type, status, stage, total_stages,
                                    parameters, stage_results, result_data, error_details,
@@ -1029,7 +1033,7 @@ class PostgresAdapter:
                             job_data = {
                                 'job_id': row[0],
                                 'job_type': row[1], 
-                                'status': JobStatus(row[2]),  # Explicit enum conversion
+                                'status': convert_job_status_from_postgres(row[2]),  # Robust enum conversion
                                 'stage': row[3],
                                 'total_stages': row[4],
                                 'parameters': row[5] if row[5] else {},
@@ -1091,7 +1095,7 @@ class PostgresAdapter:
                         task.taskId,
                         task.parentJobId,
                         task.taskType,
-                        task.status.value if hasattr(task.status, 'value') else task.status,
+                        convert_task_status_to_postgres(task.status),
                         task.stage,
                         task.taskIndex,
                         json.dumps(task.parameters),
@@ -1143,7 +1147,7 @@ class PostgresAdapter:
                         'taskId': row[0],
                         'parentJobId': row[1],
                         'taskType': row[2],
-                        'status': TaskStatus(row[3]),  # Explicit enum conversion
+                        'status': convert_task_status_from_postgres(row[3]),  # Robust enum conversion
                         'stage': row[4],
                         'taskIndex': row[5],
                         'parameters': row[6] if row[6] else {},
@@ -1204,7 +1208,7 @@ class PostgresAdapter:
                             updated_at = %s
                         WHERE task_id = %s
                     """, (
-                        updated_task.status.value if hasattr(updated_task.status, 'value') else updated_task.status,
+                        convert_task_status_to_postgres(updated_task.status),
                         json.dumps(updated_task.parameters),
                         json.dumps(updated_task.resultData) if updated_task.resultData else None,
                         updated_task.errorDetails,
@@ -1253,7 +1257,7 @@ class PostgresAdapter:
                                 'taskId': row[0],
                                 'parentJobId': row[1], 
                                 'taskType': row[2],
-                                'status': TaskStatus(row[3]),  # Explicit enum conversion
+                                'status': convert_task_status_from_postgres(row[3]),  # Robust enum conversion
                                 'stage': row[4],
                                 'taskIndex': row[5],
                                 'parameters': row[6] if row[6] else {},
@@ -1297,7 +1301,7 @@ class PostgresAdapter:
         try:
             with self._get_connection() as conn:
                 with conn.cursor() as cursor:
-                    status_value = status.value if hasattr(status, 'value') else status
+                    status_value = convert_task_status_to_postgres(status)
                     cursor.execute("""
                         SELECT COUNT(*) FROM tasks 
                         WHERE parent_job_id = %s AND status = %s

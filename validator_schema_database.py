@@ -98,8 +98,8 @@ Integration Points:
 Author: Azure Geospatial ETL Team
 """
 
-import logging
 from typing import Dict, Any, Optional, List
+from util_logger import LoggerFactory, ComponentType
 from service_schema_manager import (
     SchemaManager, 
     SchemaManagerFactory,
@@ -107,7 +107,7 @@ from service_schema_manager import (
     InsufficientPrivilegesError
 )
 
-logger = logging.getLogger(__name__)
+logger = LoggerFactory.get_logger(ComponentType.VALIDATOR, "DatabaseSchemaValidator")
 
 
 class DatabaseSchemaValidator:

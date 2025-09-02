@@ -85,9 +85,9 @@ Author: Azure Geospatial ETL Team
 """
 
 from typing import List, Dict, Any
-import logging
 from datetime import datetime
 
+from util_logger import LoggerFactory, ComponentType
 from controller_base import BaseController
 from model_core import (
     TaskDefinition, JobExecutionContext, 
@@ -113,7 +113,7 @@ class HelloWorldController(BaseController):
     
     def __init__(self):
         super().__init__()
-        self.logger = logging.getLogger("HelloWorldController")
+        self.logger = LoggerFactory.get_logger(ComponentType.CONTROLLER, "HelloWorldController")
         self.logger.info(f"HelloWorldController initialized with {len(self.workflow_definition.stages)} stages")
     
     def get_job_type(self) -> str:

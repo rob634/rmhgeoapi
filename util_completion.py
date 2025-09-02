@@ -18,10 +18,10 @@ shared across all controllers in the redesign architecture.
 """
 
 from typing import Dict, Any, Optional, Tuple, List
-import logging
 import json
 from datetime import datetime
 
+from util_logger import LoggerFactory, ComponentType
 from model_core import (
     JobStatus, StageStatus, TaskStatus, JobExecutionContext,
     StageExecutionContext, TaskResult, StageResult, JobResult
@@ -38,7 +38,7 @@ class CompletionOrchestrator:
     """
     
     def __init__(self):
-        self.logger = logging.getLogger(self.__class__.__name__)
+        self.logger = LoggerFactory.get_logger(ComponentType.UTIL, "CompletionOrchestrator")
     
     def check_task_completion(self, task_id: str, job_id: str, stage_number: int,
                             task_result: TaskResult) -> Dict[str, Any]:

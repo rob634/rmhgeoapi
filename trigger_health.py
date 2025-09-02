@@ -38,6 +38,8 @@ import sys
 import azure.functions as func
 from trigger_http_base import SystemMonitoringTrigger
 from config import get_config
+from service_schema_manager import SchemaManagerFactory
+from util_import_validator import validator
 
 
 class HealthCheckTrigger(SystemMonitoringTrigger):
@@ -70,6 +72,13 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
             },
             "errors": []
         }
+        
+        # Check import validation (critical for application startup)
+        import_health = self._check_import_validation()
+        health_data["components"]["imports"] = import_health
+        if import_health["status"] == "unhealthy":
+            health_data["status"] = "unhealthy"
+            health_data["errors"].extend(import_health.get("errors", []))
         
         # Check storage queues
         queue_health = self._check_storage_queues()
@@ -112,6 +121,80 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                 health_data["errors"].extend(db_health.get("errors", []))
         
         return health_data
+    
+    def handle_request(self, req: func.HttpRequest) -> func.HttpResponse:
+        """
+        Override to provide proper HTTP status codes for health checks.
+        
+        Returns:
+            - 200 OK when all components are healthy
+            - 503 Service Unavailable when any component is unhealthy  
+            - 500 Internal Server Error for unexpected errors
+        """
+        import json
+        from datetime import datetime, timezone
+        import uuid
+        
+        request_id = str(uuid.uuid4())
+        
+        try:
+            # Validate HTTP method
+            if req.method not in self.get_allowed_methods():
+                return func.HttpResponse(
+                    json.dumps({
+                        "error": "Method not allowed",
+                        "message": f"Method {req.method} not allowed. Allowed: GET",
+                        "request_id": request_id,
+                        "timestamp": datetime.now(timezone.utc).isoformat()
+                    }),
+                    status_code=405,
+                    mimetype="application/json"
+                )
+            
+            # Process the health check
+            health_data = self.process_request(req)
+            
+            # Determine HTTP status code based on health status
+            if health_data["status"] == "healthy":
+                status_code = 200  # OK
+            elif health_data["status"] == "unhealthy":
+                status_code = 503  # Service Unavailable
+            else:
+                status_code = 500  # Internal Server Error (unexpected status)
+            
+            # Add response metadata
+            response_data = {
+                **health_data,
+                "request_id": request_id,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+            
+            return func.HttpResponse(
+                json.dumps(response_data, default=str),
+                status_code=status_code,
+                mimetype="application/json",
+                headers={
+                    "X-Request-ID": request_id,
+                    "Cache-Control": "no-cache, no-store, must-revalidate"
+                }
+            )
+            
+        except Exception as e:
+            # Log the error
+            self.logger.error(f"💥 [{self.trigger_name}] Health check error: {e}")
+            
+            return func.HttpResponse(
+                json.dumps({
+                    "error": "Internal server error",
+                    "message": f"Health check failed: {str(e)}",
+                    "request_id": request_id,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "status": "error"
+                }),
+                status_code=500,
+                mimetype="application/json",
+                headers={"X-Request-ID": request_id}
+            )
     
     def _check_storage_queues(self) -> Dict[str, Any]:
         """Check Azure Storage Queue health."""
@@ -234,98 +317,54 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                     table_management_results = {}
                     
                     if app_schema_exists:
-                        # Define required table schemas
-                        table_definitions = {
-                            'jobs': """
-                                CREATE TABLE IF NOT EXISTS {schema}.jobs (
-                                    job_id VARCHAR(64) PRIMARY KEY
-                                        CHECK (length(job_id) = 64 AND job_id ~ '^[a-f0-9]+$'),
-                                    job_type VARCHAR(50) NOT NULL
-                                        CHECK (length(job_type) >= 1 AND job_type ~ '^[a-z_]+$'),
-                                    status VARCHAR(50) DEFAULT 'queued',
-                                    stage INTEGER DEFAULT 1
-                                        CHECK (stage >= 1 AND stage <= 100),
-                                    total_stages INTEGER DEFAULT 1
-                                        CHECK (total_stages >= 1 AND total_stages <= 100),
-                                    parameters JSONB NOT NULL DEFAULT '{{}}',
-                                    metadata JSONB NOT NULL DEFAULT '{{}}',
-                                    stage_results JSONB NOT NULL DEFAULT '{{}}',
-                                    result_data JSONB,
-                                    error_details TEXT,
-                                    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-                                    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-                                )
-                            """,
-                            'tasks': """
-                                CREATE TABLE IF NOT EXISTS {schema}.tasks (
-                                    task_id VARCHAR(100) PRIMARY KEY
-                                        CHECK (length(task_id) >= 1 AND length(task_id) <= 100),
-                                    parent_job_id VARCHAR(64) NOT NULL
-                                        REFERENCES {schema}.jobs(job_id) ON DELETE CASCADE
-                                        CHECK (length(parent_job_id) = 64 AND parent_job_id ~ '^[a-f0-9]+$'),
-                                    task_type VARCHAR(50) NOT NULL
-                                        CHECK (length(task_type) >= 1 AND task_type ~ '^[a-z_]+$'),
-                                    status VARCHAR(50) DEFAULT 'queued',
-                                    stage INTEGER NOT NULL
-                                        CHECK (stage >= 1 AND stage <= 100),
-                                    task_index INTEGER NOT NULL DEFAULT 0
-                                        CHECK (task_index >= 0),
-                                    parameters JSONB NOT NULL DEFAULT '{{}}',
-                                    metadata JSONB NOT NULL DEFAULT '{{}}',
-                                    result_data JSONB,
-                                    error_details TEXT,
-                                    heartbeat TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-                                    retry_count INTEGER NOT NULL DEFAULT 0
-                                        CHECK (retry_count >= 0 AND retry_count <= 10),
-                                    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-                                    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-                                )
-                            """
-                        }
-                        
-                        for table_name, table_sql in table_definitions.items():
-                            try:
-                                # Check if table exists
-                                cur.execute(
-                                    "SELECT table_name FROM information_schema.tables WHERE table_schema = %s AND table_name = %s",
-                                    (config.app_schema, table_name)
-                                )
-                                table_exists = cur.fetchone() is not None
-                                
-                                if not table_exists:
-                                    # Create the table
-                                    formatted_sql = table_sql.format(schema=config.app_schema)
-                                    cur.execute(formatted_sql)
-                                    table_management_results[table_name] = "created"
-                                    app_tables_status[table_name] = True
-                                else:
-                                    # Validate existing table schema
-                                    cur.execute("""
-                                        SELECT column_name, data_type 
-                                        FROM information_schema.columns 
-                                        WHERE table_schema = %s AND table_name = %s
-                                        ORDER BY ordinal_position
-                                    """, (config.app_schema, table_name))
-                                    columns = cur.fetchall()
-                                    
-                                    required_columns = {
-                                        'jobs': ['id', 'job_type', 'status', 'stage', 'total_stages', 'parameters'],
-                                        'tasks': ['id', 'job_id', 'task_type', 'status', 'stage_number', 'parameters']
-                                    }
-                                    
-                                    existing_columns = [col[0] for col in columns]
-                                    missing_columns = [col for col in required_columns[table_name] if col not in existing_columns]
-                                    
-                                    if missing_columns:
-                                        table_management_results[table_name] = f"schema_incomplete_missing_{len(missing_columns)}_columns"
-                                        app_tables_status[table_name] = "schema_invalid"
+                        try:
+                            # Use enhanced schema manager for complete table creation
+                            schema_manager = SchemaManagerFactory.create_schema_manager()
+                            validation_results = schema_manager.validate_and_initialize_schema()
+                            
+                            # Map schema manager results to health check format
+                            if validation_results.get('tables_created'):
+                                # Tables were created with complete schema
+                                created_tables = validation_results.get('tables_created', [])
+                                for table in ['jobs', 'tasks']:
+                                    if table in created_tables:
+                                        app_tables_status[table] = True
+                                        table_management_results[table] = "created_with_complete_schema"
                                     else:
-                                        table_management_results[table_name] = "validated"
-                                        app_tables_status[table_name] = True
+                                        app_tables_status[table] = True
+                                        table_management_results[table] = "validated"
+                            elif validation_results.get('tables_exist', False):
+                                # Check for schema issues
+                                schema_issues = validation_results.get('schema_issues', {})
+                                for table in ['jobs', 'tasks']:
+                                    if table in schema_issues:
+                                        app_tables_status[table] = "schema_invalid"
+                                        issues = schema_issues[table]
+                                        table_management_results[table] = f"schema_issues: {', '.join(issues[:2])}"
+                                    else:
+                                        app_tables_status[table] = True
+                                        table_management_results[table] = "validated"
+                            else:
+                                # Handle missing tables or other issues
+                                missing_tables = validation_results.get('missing_tables', [])
+                                existing_tables = validation_results.get('existing_tables', [])
+                                
+                                for table in ['jobs', 'tasks']:
+                                    if table in missing_tables:
+                                        app_tables_status[table] = "missing"
+                                        table_management_results[table] = "table_missing_creation_failed"
+                                    elif table in existing_tables:
+                                        app_tables_status[table] = True
+                                        table_management_results[table] = "validated"
+                                    else:
+                                        app_tables_status[table] = "unknown"
+                                        table_management_results[table] = "status_unknown"
                                         
-                            except Exception as table_error:
-                                table_management_results[table_name] = f"error_{str(table_error)[:50]}"
-                                app_tables_status[table_name] = False
+                        except Exception as schema_error:
+                            # Fallback error handling
+                            table_management_results['schema_manager_error'] = f"error: {str(schema_error)[:100]}"
+                            app_tables_status['jobs'] = "error"
+                            app_tables_status['tasks'] = "error"
                     
                     return {
                         "postgresql_version": pg_version.split()[0],
@@ -465,6 +504,119 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
     def _should_check_database(self) -> bool:
         """Check if database health check is enabled."""
         return os.getenv("ENABLE_DATABASE_HEALTH_CHECK", "false").lower() == "true"
+    
+    def _check_import_validation(self) -> Dict[str, Any]:
+        """
+        Check import validation status using enhanced auto-discovery validator.
+        
+        Provides comprehensive import health including:
+        - Critical dependency validation (Azure SDK, Pydantic, etc.)
+        - Auto-discovered application module validation
+        - Historical validation tracking
+        - Registry file status
+        
+        Returns:
+            Dict with import validation health status
+        """
+        def check_imports():
+            # Get comprehensive health status from enhanced validator
+            import_status = validator.get_health_status()
+            
+            # Extract key metrics from validation results
+            validation_results = import_status.get('imports', {})
+            auto_discovery = validation_results.get('auto_discovery', {})
+            critical_imports = validation_results.get('critical_imports', {})
+            application_modules = validation_results.get('application_modules', {})
+            
+            # Count successful vs failed imports
+            critical_success = len([m for m, d in critical_imports.get('details', {}).items() 
+                                  if d.get('status') == 'success'])
+            critical_total = len(critical_imports.get('details', {}))
+            critical_failed = len(critical_imports.get('failed', []))
+            
+            app_success = len([m for m, d in application_modules.get('details', {}).items() 
+                             if d.get('status') == 'success'])
+            app_total = len(application_modules.get('details', {}))
+            app_failed = len(application_modules.get('failed', []))
+            
+            # Generate summary statistics
+            total_modules = critical_total + app_total
+            total_success = critical_success + app_success
+            total_failed = critical_failed + app_failed
+            success_rate = (total_success / total_modules * 100) if total_modules > 0 else 0
+            
+            # Check if registry file exists and is accessible
+            registry_status = "unknown"
+            try:
+                import os
+                if os.path.exists('import_validation_registry.json'):
+                    registry_status = "accessible"
+                    registry_size = os.path.getsize('import_validation_registry.json')
+                else:
+                    registry_status = "not_found"
+                    registry_size = 0
+            except Exception as e:
+                registry_status = f"error: {str(e)[:50]}"
+                registry_size = 0
+            
+            # Get validation timestamp for cache status
+            validation_timestamp = validation_results.get('timestamp', 'unknown')
+            cache_age = "unknown"
+            if validation_timestamp != 'unknown':
+                from datetime import datetime
+                try:
+                    val_time = datetime.fromisoformat(validation_timestamp.replace('Z', '+00:00'))
+                    cache_age = (datetime.now() - val_time.replace(tzinfo=None)).total_seconds()
+                    cache_age = f"{int(cache_age)}s ago"
+                except:
+                    cache_age = "parse_error"
+            
+            return {
+                "overall_success": import_status.get('overall_success', False),
+                "validation_summary": import_status.get('summary', 'No summary available'),
+                "statistics": {
+                    "total_modules_discovered": total_modules,
+                    "successful_imports": total_success,
+                    "failed_imports": total_failed,
+                    "success_rate_percent": round(success_rate, 1)
+                },
+                "critical_dependencies": {
+                    "total": critical_total,
+                    "successful": critical_success,
+                    "failed": critical_failed,
+                    "failed_modules": critical_imports.get('failed', [])
+                },
+                "application_modules": {
+                    "total": app_total,
+                    "successful": app_success, 
+                    "failed": app_failed,
+                    "failed_modules": application_modules.get('failed', []),
+                    "auto_discovered": auto_discovery.get('modules_discovered', 0)
+                },
+                "auto_discovery": {
+                    "enabled": True,
+                    "modules_discovered": auto_discovery.get('modules_discovered', 0),
+                    "patterns_used": auto_discovery.get('discovery_patterns_used', 0),
+                    "registry_updated": auto_discovery.get('registry_updated', False)
+                },
+                "registry_file": {
+                    "status": registry_status,
+                    "size_bytes": registry_size if registry_status == "accessible" else None,
+                    "location": "import_validation_registry.json"
+                },
+                "validation_cache": {
+                    "timestamp": validation_timestamp,
+                    "age": cache_age,
+                    "cache_duration": "5 minutes"
+                },
+                "startup_validation": {
+                    "enabled": validator.is_azure_functions or validator.force_validation,
+                    "fail_fast_active": validator.is_azure_functions,
+                    "environment_detected": "azure_functions" if validator.is_azure_functions else "local"
+                }
+            }
+        
+        return self.check_component_health("import_validation", check_imports)
 
 
 # Create singleton instance for use in function_app.py

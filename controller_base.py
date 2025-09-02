@@ -64,8 +64,8 @@ Author: Azure Geospatial ETL Team
 from abc import ABC, abstractmethod
 import hashlib
 import json
-import logging
 
+from util_logger import LoggerFactory, ComponentType
 from schema_core import (
     JobStatus, TaskStatus, JobRecord, JobQueueMessage
 )
@@ -103,7 +103,7 @@ class BaseController(ABC):
                            f"All controllers must have workflow definitions defined in schema_workflow.py. "
                            f"Error: {e}")
         
-        self.logger = logging.getLogger(f"{self.__class__.__name__}")
+        self.logger = LoggerFactory.get_logger(ComponentType.CONTROLLER, self.__class__.__name__)
         self.logger.info(f"Loaded workflow definition for {self.job_type} with {len(self.workflow_definition.stages)} stages")
 
     # ========================================================================
@@ -712,69 +712,169 @@ class BaseController(ABC):
             raise RuntimeError(f"Failed to create tasks for stage {stage}: {e}")
         
         # Create and store task records, then queue them
-        from repository_data import RepositoryFactory
-        job_repo, task_repo, _ = RepositoryFactory.create_repositories('postgres')
+        self.logger.debug(f"🏗️ Starting task creation and queueing process")
+        try:
+            from repository_data import RepositoryFactory
+            self.logger.debug(f"📦 RepositoryFactory import successful")
+        except Exception as repo_import_error:
+            self.logger.error(f"❌ CRITICAL: Failed to import RepositoryFactory: {repo_import_error}")
+            import traceback
+            self.logger.error(f"📍 RepositoryFactory import traceback: {traceback.format_exc()}")
+            raise RuntimeError(f"Failed to import RepositoryFactory: {repo_import_error}")
         
+        try:
+            job_repo, task_repo, _ = RepositoryFactory.create_repositories('postgres')
+            self.logger.debug(f"✅ Repositories created successfully: task_repo={type(task_repo)}")
+        except Exception as repo_create_error:
+            self.logger.error(f"❌ CRITICAL: Failed to create repositories: {repo_create_error}")
+            import traceback
+            self.logger.error(f"📍 Repository creation traceback: {traceback.format_exc()}")
+            raise RuntimeError(f"Failed to create repositories: {repo_create_error}")
+        
+        # Initialize counters and task processing
         queued_tasks = 0
         failed_tasks = 0
+        task_creation_failures = 0
+        task_queueing_failures = 0
+        
+        self.logger.info(f"🚀 Processing {len(task_definitions)} task definitions for stage {stage}")
         
         for i, task_def in enumerate(task_definitions):
+            self.logger.debug(f"📋 Processing task {i+1}/{len(task_definitions)}: {task_def.task_id}")
+            
             try:
-                # Create task record in storage
-                task_record = task_repo.create_task(
-                    task_id=task_def.task_id,
-                    job_id=task_def.job_id,
-                    task_type=task_def.task_type,
-                    stage_number=task_def.stage_number,
-                    task_index=i,
-                    parameters=task_def.parameters
-                )
-                
-                # Create task queue message
-                from schema_core import TaskQueueMessage
-                task_message = TaskQueueMessage(
-                    task_id=task_def.task_id,
-                    parent_job_id=task_def.job_id,
-                    task_type=task_def.task_type,
-                    stage=task_def.stage_number,
-                    task_index=i,
-                    parameters=task_def.parameters
-                )
-                
-                # Queue the task
-                from azure.storage.queue import QueueServiceClient
-                from azure.identity import DefaultAzureCredential
-                from config import get_config
-                
-                config = get_config()
-                account_url = config.queue_service_url
-                
-                self.logger.debug(f"🔐 Creating DefaultAzureCredential for task queue operations")
+                # === STEP 1: CREATE TASK RECORD IN DATABASE ===
+                self.logger.debug(f"💾 Creating task record in database for: {task_def.task_id}")
                 try:
+                    task_record = task_repo.create_task(
+                        parent_job_id=task_def.job_id,
+                        task_type=task_def.task_type,
+                        stage=task_def.stage_number,
+                        task_index=i,
+                        parameters=task_def.parameters
+                    )
+                    self.logger.debug(f"✅ Task record created successfully: {task_def.task_id}")
+                    self.logger.debug(f"📊 Task record details: type={task_def.task_type}, stage={task_def.stage_number}, index={i}")
+                except Exception as task_create_error:
+                    self.logger.error(f"❌ CRITICAL: Failed to create task record: {task_def.task_id}")
+                    self.logger.error(f"❌ Task creation error: {task_create_error}")
+                    self.logger.error(f"🔍 Task creation error type: {type(task_create_error).__name__}")
+                    import traceback
+                    self.logger.error(f"📍 Task creation traceback: {traceback.format_exc()}")
+                    self.logger.error(f"📋 Task definition details: {task_def}")
+                    task_creation_failures += 1
+                    failed_tasks += 1
+                    continue  # Skip to next task
+                
+                # === STEP 2: CREATE TASK QUEUE MESSAGE ===
+                self.logger.debug(f"📨 Creating task queue message for: {task_record.task_id}")
+                try:
+                    from schema_core import TaskQueueMessage
+                    task_message = TaskQueueMessage(
+                        task_id=task_record.task_id,
+                        parent_job_id=task_record.parent_job_id,
+                        task_type=task_record.task_type,
+                        stage=task_record.stage,
+                        task_index=task_record.task_index,
+                        parameters=task_record.parameters
+                    )
+                    self.logger.debug(f"✅ Task queue message created successfully")
+                    self.logger.debug(f"📊 Message details: parent_job_id={task_message.parent_job_id[:16]}..., task_type={task_message.task_type}")
+                except Exception as message_create_error:
+                    self.logger.error(f"❌ CRITICAL: Failed to create task queue message: {task_def.task_id}")
+                    self.logger.error(f"❌ Message creation error: {message_create_error}")
+                    self.logger.error(f"🔍 Message creation error type: {type(message_create_error).__name__}")
+                    import traceback
+                    self.logger.error(f"📍 Message creation traceback: {traceback.format_exc()}")
+                    task_queueing_failures += 1
+                    failed_tasks += 1
+                    continue  # Skip to next task
+                
+                # === STEP 3: SETUP AZURE QUEUE CLIENT ===
+                self.logger.debug(f"🔗 Setting up Azure Queue client for task: {task_record.task_id}")
+                try:
+                    from azure.storage.queue import QueueServiceClient
+                    from azure.identity import DefaultAzureCredential
+                    from config import get_config
+                    
+                    config = get_config()
+                    account_url = config.queue_service_url
+                    self.logger.debug(f"🌐 Queue service URL: {account_url}")
+                    self.logger.debug(f"📤 Target task queue: {config.task_processing_queue}")
+                    
+                    # Create credential (reuse from RBAC configuration)
+                    self.logger.debug(f"🔐 Creating DefaultAzureCredential for task queue operations")
                     credential = DefaultAzureCredential()
                     self.logger.debug(f"✅ DefaultAzureCredential created successfully for tasks")
-                except Exception as cred_error:
-                    self.logger.error(f"❌ CRITICAL: Failed to create DefaultAzureCredential for task queues: {cred_error}")
-                    raise RuntimeError(f"CRITICAL CONFIGURATION ERROR - Managed identity authentication failed for task queues: {cred_error}")
-                
-                self.logger.debug(f"🔗 Creating QueueServiceClient for tasks with URL: {account_url}")
-                try:
+                    
+                    # Create queue service and client
+                    self.logger.debug(f"🔗 Creating QueueServiceClient for tasks")
                     queue_service = QueueServiceClient(account_url, credential=credential)
                     queue_client = queue_service.get_queue_client(config.task_processing_queue)
-                    self.logger.debug(f"📤 Task queue client created for: {config.task_processing_queue}")
-                except Exception as queue_error:
-                    self.logger.error(f"❌ CRITICAL: Failed to create task QueueServiceClient or queue client: {queue_error}")
-                    raise RuntimeError(f"CRITICAL CONFIGURATION ERROR - Azure Storage Task Queue access failed: {queue_error}")
+                    self.logger.debug(f"✅ Task queue client created successfully for: {config.task_processing_queue}")
+                    
+                except Exception as queue_setup_error:
+                    self.logger.error(f"❌ CRITICAL: Failed to setup Azure Queue client for task: {task_record.task_id}")
+                    self.logger.error(f"❌ Queue setup error: {queue_setup_error}")
+                    self.logger.error(f"🔍 Queue setup error type: {type(queue_setup_error).__name__}")
+                    import traceback
+                    self.logger.error(f"📍 Queue setup traceback: {traceback.format_exc()}")
+                    self.logger.error(f"🌐 Account URL: {account_url if 'account_url' in locals() else 'undefined'}")
+                    self.logger.error(f"📤 Task queue name: {config.task_processing_queue if 'config' in locals() else 'undefined'}")
+                    task_queueing_failures += 1
+                    failed_tasks += 1
+                    continue  # Skip to next task
                 
-                message_json = task_message.model_dump_json()
-                queue_client.send_message(message_json)
+                # === STEP 4: SEND MESSAGE TO QUEUE ===
+                self.logger.debug(f"📨 Sending task message to queue: {task_record.task_id}")
+                try:
+                    message_json = task_message.model_dump_json()
+                    self.logger.debug(f"📋 Task message JSON length: {len(message_json)} characters")
+                    self.logger.debug(f"📋 Task message preview: {message_json[:200]}...")
+                    
+                    queue_client.send_message(message_json)
+                    self.logger.debug(f"✅ Task message sent successfully to queue: {task_record.task_id}")
+                    
+                    queued_tasks += 1
+                    self.logger.info(f"✅ Task {i+1}/{len(task_definitions)} completed successfully: {task_record.task_id}")
+                    
+                except Exception as message_send_error:
+                    self.logger.error(f"❌ CRITICAL: Failed to send task message to queue: {task_record.task_id}")
+                    self.logger.error(f"❌ Message send error: {message_send_error}")
+                    self.logger.error(f"🔍 Message send error type: {type(message_send_error).__name__}")
+                    import traceback
+                    self.logger.error(f"📍 Message send traceback: {traceback.format_exc()}")
+                    self.logger.error(f"📋 Message JSON length: {len(message_json) if 'message_json' in locals() else 'undefined'}")
+                    task_queueing_failures += 1
+                    failed_tasks += 1
+                    continue  # Skip to next task
                 
-                queued_tasks += 1
-                self.logger.debug(f"Task queued: {task_def.task_id}")
-                
-            except Exception as e:
-                self.logger.error(f"Failed to queue task {task_def.task_id}: {e}")
+            except Exception as overall_task_error:
+                # Use task_record.task_id if available, otherwise fall back to task_def.task_id
+                task_id_for_error = getattr(locals().get('task_record'), 'task_id', task_def.task_id) if 'task_record' in locals() else task_def.task_id
+                self.logger.error(f"❌ CRITICAL: Unexpected error processing task {task_id_for_error}: {overall_task_error}")
+                self.logger.error(f"🔍 Overall task error type: {type(overall_task_error).__name__}")
+                import traceback
+                self.logger.error(f"📍 Overall task error traceback: {traceback.format_exc()}")
                 failed_tasks += 1
+        
+        # === COMPREHENSIVE RESULTS LOGGING ===
+        self.logger.info(f"🏁 Task processing complete for stage {stage}")
+        self.logger.info(f"📊 SUMMARY: {queued_tasks}/{len(task_definitions)} tasks queued successfully")
+        self.logger.info(f"📊 FAILURES: {failed_tasks} total failures")
+        self.logger.info(f"📊 BREAKDOWN: {task_creation_failures} database failures, {task_queueing_failures} queue failures")
+        
+        if failed_tasks > 0:
+            self.logger.error(f"❌ CRITICAL: {failed_tasks} tasks failed during stage {stage} processing")
+            self.logger.error(f"❌ Task creation failures: {task_creation_failures}")
+            self.logger.error(f"❌ Task queueing failures: {task_queueing_failures}")
+        
+        if queued_tasks == 0:
+            self.logger.error(f"❌ CRITICAL: NO TASKS were successfully queued for stage {stage}")
+            self.logger.error(f"❌ This will cause the job to remain stuck in processing status")
+        else:
+            self.logger.info(f"✅ Successfully queued {queued_tasks} tasks for stage {stage}")
+            self.logger.info(f"🎯 Tasks should now process via geospatial-tasks queue trigger")
         
         stage_result = {
             "stage_number": stage,

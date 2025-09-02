@@ -80,7 +80,16 @@ Author: Azure Geospatial ETL Team
 Version: 2.1.0
 Last Updated: January 2025
 """
+
+# ========================================================================
+# IMPORTS - Categorized by source for maintainability
+# ========================================================================
+
+# Native Python modules
 import logging
+
+# Azure SDK modules (3rd party - Microsoft)
+import azure.functions as func
 
 # Suppress Azure Identity and Azure SDK authentication/HTTP logging
 logging.getLogger("azure.identity").setLevel(logging.WARNING)
@@ -90,22 +99,30 @@ logging.getLogger("azure.storage").setLevel(logging.WARNING)
 logging.getLogger("azure.core").setLevel(logging.WARNING)
 logging.getLogger("msal").setLevel(logging.WARNING)  # Microsoft Authentication Library
 
-import azure.functions as func
+# ========================================================================
+# STARTUP VALIDATION - Fail-fast import validation for critical dependencies
+# ========================================================================
+# CRITICAL: This must run before any other imports to catch missing dependencies
+
+# Application modules (our code) - Utilities
+from util_import_validator import validator
+
+# Perform fail-fast startup validation (only in Azure Functions or when explicitly enabled)
+validator.ensure_startup_ready()
 
 # ========================================================================
-# QUEUE TRIGGER IMPORTS - Only needed for queue processing functions
+# APPLICATION IMPORTS - Our modules (validated at startup)
 # ========================================================================
-# Note: HTTP endpoints now use trigger classes with their own imports
+
+# Application modules (our code) - Core schemas and logging
 from schema_core import JobStatus, TaskStatus, JobQueueMessage, TaskQueueMessage
 from util_logger import LoggerFactory, ComponentType
 
-# HTTP Trigger Classes - Infrastructure Layer
+# Application modules (our code) - HTTP Trigger Classes  
 from trigger_health import health_check_trigger
 from trigger_submit_job import submit_job_trigger
 from trigger_get_job_status import get_job_status_trigger
 from trigger_poison_monitor import poison_monitor_trigger
-
-# Use centralized logger (imported from logger_setup)
 
 # Initialize function app with HTTP auth level
 app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
@@ -179,15 +196,7 @@ def process_job_queue(msg: func.QueueMessage) -> None:
     logger.info("🔄 Job queue trigger activated - processing with Pydantic architecture")
     logger.debug(f"📨 Raw queue message received: {msg}")
     
-    # Check basic imports early
-    try:
-        logger.debug(f"🔧 Testing basic imports availability")
-        from schema_core import JobQueueMessage, JobStatus
-        logger.debug(f"✅ Core schema imports working: JobQueueMessage, JobStatus")
-    except ImportError as basic_import_error:
-        logger.error(f"❌ CRITICAL: Basic schema imports failed: {basic_import_error}")
-        logger.debug(f"🔍 Basic import error type: {type(basic_import_error).__name__}")
-        raise ImportError(f"Critical schema import failure: {basic_import_error}")
+    # Note: Import validation now handled at startup via util_import_validator
     
     try:
         # Parse and validate message using Pydantic schema
@@ -220,22 +229,15 @@ def process_job_queue(msg: func.QueueMessage) -> None:
         logger.info(f"📨 Processing job: {job_message.job_id[:16]}... type={job_message.job_type}")
         logger.debug(f"📊 Full job message details: job_id={job_message.job_id}, job_type={job_message.job_type}, stage={job_message.stage}, parameters={job_message.parameters}")
         
-        # Get repositories with strong typing
+        # Get repositories (imports validated at startup)
         logger.debug(f"🏗️ Creating repositories for job processing")
-        try:
-            from repository_data import RepositoryFactory
-            logger.debug(f"📦 RepositoryFactory imported successfully")
-        except ImportError as import_error:
-            logger.error(f"❌ Failed to import RepositoryFactory: {import_error}")
-            logger.debug(f"🔍 Import error details: {type(import_error).__name__}")
-            raise ImportError(f"Repository import failed: {import_error}")
+        from repository_data import RepositoryFactory
         
         try:
             job_repo, task_repo, completion_detector = RepositoryFactory.create_repositories('postgres')
-            logger.debug(f"✅ Repositories created with PostgreSQL backend: job_repo={type(job_repo)}, task_repo={type(task_repo)}, completion_detector={type(completion_detector)}")
+            logger.debug(f"✅ Repositories created with PostgreSQL backend")
         except Exception as repo_error:
             logger.error(f"❌ Failed to create repositories: {repo_error}")
-            logger.debug(f"🔍 Repository creation error type: {type(repo_error).__name__}")
             raise RuntimeError(f"Repository creation failed: {repo_error}")
         
         # Load job record
@@ -264,24 +266,16 @@ def process_job_queue(msg: func.QueueMessage) -> None:
             logger.debug(f"🔍 Status update error type: {type(status_error).__name__}")
             raise RuntimeError(f"Job status update failed: {status_error}")
         
-        # Route to controller based on job type
+        # Route to controller based on job type (imports validated at startup)
         logger.debug(f"🎯 Routing to controller for job type: {job_message.job_type}")
         if job_message.job_type == "hello_world":
-            logger.debug(f"📦 Importing HelloWorldController")
-            try:
-                from controller_hello_world import HelloWorldController
-                logger.debug(f"✅ HelloWorldController imported successfully")
-            except ImportError as controller_import_error:
-                logger.error(f"❌ Failed to import HelloWorldController: {controller_import_error}")
-                logger.debug(f"🔍 Controller import error type: {type(controller_import_error).__name__}")
-                raise ImportError(f"HelloWorldController import failed: {controller_import_error}")
+            from controller_hello_world import HelloWorldController
             
             try:
                 controller = HelloWorldController()
-                logger.debug(f"✅ HelloWorldController instantiated: {type(controller)}")
+                logger.debug(f"✅ HelloWorldController instantiated")
             except Exception as controller_error:
                 logger.error(f"❌ Failed to instantiate HelloWorldController: {controller_error}")
-                logger.debug(f"🔍 Controller instantiation error type: {type(controller_error).__name__}")
                 raise RuntimeError(f"HelloWorldController instantiation failed: {controller_error}")
             
             # Process the job stage
@@ -431,22 +425,15 @@ def process_task_queue(msg: func.QueueMessage) -> None:
         logger.info(f"📋 Processing task: {task_message.task_id} type={task_message.task_type}")
         logger.debug(f"📊 Full task message details: task_id={task_message.task_id}, parent_job_id={task_message.parent_job_id}, task_type={task_message.task_type}, parameters={task_message.parameters}")
         
-        # Get repositories with strong typing
+        # Get repositories (imports validated at startup)
         logger.debug(f"🏗️ Creating repositories for task processing")
-        try:
-            from repository_data import RepositoryFactory
-            logger.debug(f"📦 RepositoryFactory imported successfully")
-        except ImportError as import_error:
-            logger.error(f"❌ Failed to import RepositoryFactory for tasks: {import_error}")
-            logger.debug(f"🔍 Task repository import error type: {type(import_error).__name__}")
-            raise ImportError(f"Task repository import failed: {import_error}")
+        from repository_data import RepositoryFactory
         
         try:
             job_repo, task_repo, completion_detector = RepositoryFactory.create_repositories('postgres')
-            logger.debug(f"✅ Repositories created with PostgreSQL backend: task_repo={type(task_repo)}, job_repo={type(job_repo)}, completion_detector={type(completion_detector)}")
+            logger.debug(f"✅ Repositories created with PostgreSQL backend")
         except Exception as repo_error:
             logger.error(f"❌ Failed to create repositories for tasks: {repo_error}")
-            logger.debug(f"🔍 Task repository creation error type: {type(repo_error).__name__}")
             raise RuntimeError(f"Task repository creation failed: {repo_error}")
         
         # Load task record
@@ -475,25 +462,17 @@ def process_task_queue(msg: func.QueueMessage) -> None:
             logger.debug(f"🔍 Task status update error type: {type(status_error).__name__}")
             raise RuntimeError(f"Task status update failed: {status_error}")
         
-        # Route to task handler based on task type
+        # Route to task handler based on task type (imports validated at startup)
         logger.debug(f"🎯 Routing to task handler for task type: {task_message.task_type}")
         if task_message.task_type in ["hello_world_greeting", "hello_world_reply"]:
-            logger.debug(f"📦 Importing task handler for: {task_message.task_type}")
-            try:
-                from service_hello_world import get_hello_world_task
-                from model_core import TaskExecutionContext
-                logger.debug(f"✅ Task handler imported successfully")
-            except ImportError as service_import_error:
-                logger.error(f"❌ Failed to import task handler: {service_import_error}")
-                logger.debug(f"🔍 Service import error type: {type(service_import_error).__name__}")
-                raise ImportError(f"Task handler import failed: {service_import_error}")
+            from service_hello_world import get_hello_world_task
+            from model_core import TaskExecutionContext
             
             try:
                 task_handler = get_hello_world_task(task_message.task_type)
-                logger.debug(f"✅ Task handler instantiated: {type(task_handler)}")
+                logger.debug(f"✅ Task handler instantiated")
             except Exception as service_error:
                 logger.error(f"❌ Failed to instantiate task handler: {service_error}")
-                logger.debug(f"🔍 Service instantiation error type: {type(service_error).__name__}")
                 raise RuntimeError(f"Task handler instantiation failed: {service_error}")
             
             # Create proper execution context
@@ -541,13 +520,10 @@ def process_task_queue(msg: func.QueueMessage) -> None:
             error_msg = f"Task handler not implemented for task type: {task_message.task_type}"
             logger.error(f"❌ {error_msg}")
             
-            # Get available task types dynamically
-            try:
-                from service_hello_world import HELLO_WORLD_TASKS
-                available_types = list(HELLO_WORLD_TASKS.keys())
-                logger.debug(f"📋 Available task types: {', '.join(available_types)}")
-            except ImportError:
-                logger.debug(f"📋 Available task types: [unable to load registry]")
+            # Get available task types (imports validated at startup)
+            from service_hello_world import HELLO_WORLD_TASKS
+            available_types = list(HELLO_WORLD_TASKS.keys())
+            logger.debug(f"📋 Available task types: {', '.join(available_types)}")
             
             task_repo.update_task_status(
                 task_message.task_id, 
@@ -570,22 +546,14 @@ def process_task_queue(msg: func.QueueMessage) -> None:
         if completion_result.is_complete:
             logger.info(f"🎉 Job {task_message.parent_job_id[:16]}... completed - all tasks finished!")
             
-            # This is the last task - complete the parent job
-            logger.debug(f"📦 Importing controller for job aggregation")
-            try:
-                from controller_hello_world import HelloWorldController
-                logger.debug(f"✅ HelloWorldController imported for aggregation")
-            except ImportError as controller_import_error:
-                logger.error(f"❌ Failed to import controller for aggregation: {controller_import_error}")
-                logger.debug(f"🔍 Controller aggregation import error type: {type(controller_import_error).__name__}")
-                raise ImportError(f"Controller aggregation import failed: {controller_import_error}")
+            # This is the last task - complete the parent job (imports validated at startup)
+            from controller_hello_world import HelloWorldController
             
             try:
                 controller = HelloWorldController()
-                logger.debug(f"✅ Controller instantiated for aggregation: {type(controller)}")
+                logger.debug(f"✅ Controller instantiated for aggregation")
             except Exception as controller_error:
                 logger.error(f"❌ Failed to instantiate controller for aggregation: {controller_error}")
-                logger.debug(f"🔍 Controller aggregation instantiation error type: {type(controller_error).__name__}")
                 raise RuntimeError(f"Controller aggregation instantiation failed: {controller_error}")
             
             logger.debug(f"🔄 Aggregating job results with task count: {len(completion_result.task_results) if hasattr(completion_result, 'task_results') else 'unknown'}")
@@ -634,53 +602,53 @@ def check_poison_queues(req: func.HttpRequest) -> func.HttpResponse:
 # Chunk processing now handled in process_task_queue function above
 
 
-@app.timer_trigger(schedule="0 */5 * * * *", arg_name="timer", run_on_startup=False)
-def poison_queue_timer(timer: func.TimerRequest) -> None:
-    """
-    Automated poison queue monitoring timer.
-    
-    Runs every 5 minutes to check for messages in poison queues and
-    automatically mark corresponding jobs and tasks as failed. This ensures
-    failed processing attempts are properly tracked and visible in job status.
-    
-    Args:
-        timer: Azure Functions timer request object (unused but required).
-        
-    Schedule:
-        Runs every 5 minutes (0 */5 * * * *)
-        Does not run on startup to avoid immediate processing
-        
-    Processing:
-        1. Checks geospatial-jobs-poison queue for failed job messages
-        2. Checks geospatial-tasks-poison queue for failed task messages
-        3. Extracts job/task IDs from poison messages
-        4. Updates corresponding records in Table Storage to 'failed' status
-        5. Logs summary of actions taken
-        
-    Note:
-        - Does not delete poison messages (kept for audit trail)
-        - Runs silently unless messages are found
-        - Errors are logged but don't fail the timer trigger
-    """
-    # Initialize poison queue monitor logger
-    logger = LoggerFactory.get_logger(ComponentType.POISON_MONITOR, "PoisonQueueTimer")
-    
-    logger.info("Poison queue timer trigger fired")
-    
-    try:
-        from poison_queue_monitor import PoisonQueueMonitor
-        
-        monitor = PoisonQueueMonitor()
-        summary = monitor.check_poison_queues()
-        
-        if summary["poison_messages_found"] > 0:
-            logger.warning(f"Found {summary['poison_messages_found']} messages in poison queues. "
-                         f"Marked {summary['jobs_marked_failed']} jobs and "
-                         f"{summary['tasks_marked_failed']} tasks as failed.")
-        else:
-            logger.debug("No messages found in poison queues")
-            
-    except Exception as e:
-        logger.error(f"Error in poison queue timer: {str(e)}")
+# @app.timer_trigger(schedule="0 */5 * * * *", arg_name="timer", run_on_startup=False)
+# def poison_queue_timer(timer: func.TimerRequest) -> None:
+#     """
+#     Automated poison queue monitoring timer.
+#     
+#     Runs every 5 minutes to check for messages in poison queues and
+#     automatically mark corresponding jobs and tasks as failed. This ensures
+#     failed processing attempts are properly tracked and visible in job status.
+#     
+#     Args:
+#         timer: Azure Functions timer request object (unused but required).
+#         
+#     Schedule:
+#         Runs every 5 minutes (0 */5 * * * *)
+#         Does not run on startup to avoid immediate processing
+#         
+#     Processing:
+#         1. Checks geospatial-jobs-poison queue for failed job messages
+#         2. Checks geospatial-tasks-poison queue for failed task messages
+#         3. Extracts job/task IDs from poison messages
+#         4. Updates corresponding records in Table Storage to 'failed' status
+#         5. Logs summary of actions taken
+#         
+#     Note:
+#         - Does not delete poison messages (kept for audit trail)
+#         - Runs silently unless messages are found
+#         - Errors are logged but don't fail the timer trigger
+#     """
+#     # Initialize poison queue monitor logger
+#     logger = LoggerFactory.get_logger(ComponentType.POISON_MONITOR, "PoisonQueueTimer")
+#     
+#     logger.info("Poison queue timer trigger fired")
+#     
+#     try:
+#         from poison_queue_monitor import PoisonQueueMonitor
+#         
+#         monitor = PoisonQueueMonitor()
+#         summary = monitor.check_poison_queues()
+#         
+#         if summary["poison_messages_found"] > 0:
+#             logger.warning(f"Found {summary['poison_messages_found']} messages in poison queues. "
+#                          f"Marked {summary['jobs_marked_failed']} jobs and "
+#                          f"{summary['tasks_marked_failed']} tasks as failed.")
+#         else:
+#             logger.debug("No messages found in poison queues")
+#             
+#     except Exception as e:
+#         logger.error(f"Error in poison queue timer: {str(e)}")
 
 

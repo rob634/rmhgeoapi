@@ -17,6 +17,11 @@ import os
 import sys
 from pathlib import Path
 
+from util_logger import LoggerFactory, ComponentType
+
+# Set up logging using LoggerFactory
+logger = LoggerFactory.get_logger(ComponentType.UTIL, "SchemaDeployer")
+
 
 def main():
     """Deploy PostgreSQL schema using environment variables."""
@@ -29,7 +34,7 @@ def main():
     
     missing_vars = [var for var in required_vars if not os.environ.get(var)]
     if missing_vars:
-        print(f"❌ Missing required environment variables: {missing_vars}")
+        logger.error(f"❌ Missing required environment variables: {missing_vars}")
         sys.exit(1)
     
     # Get configuration
@@ -39,12 +44,12 @@ def main():
     database = os.environ['POSTGIS_DATABASE']
     app_schema = os.environ.get('APP_SCHEMA', 'app')
     
-    print(f"🐘 Deploying schema to {host}:{database} schema: {app_schema}")
+    logger.info(f"🐘 Deploying schema to {host}:{database} schema: {app_schema}")
     
     # Read schema SQL file
     schema_file = Path(__file__).parent / 'schema_postgres.sql'
     if not schema_file.exists():
-        print(f"❌ Schema file not found: {schema_file}")
+        logger.error(f"❌ Schema file not found: {schema_file}")
         sys.exit(1)
     
     try:
@@ -62,7 +67,7 @@ def main():
                 schema_sql = schema_sql.replace('CREATE SCHEMA IF NOT EXISTS app;', f'CREATE SCHEMA IF NOT EXISTS {app_schema};')
                 schema_sql = schema_sql.replace('SET search_path TO app, public;', f'SET search_path TO {app_schema}, public;')
                 
-                print("📋 Executing schema SQL...")
+                logger.info("📋 Executing schema SQL...")
                 cursor.execute(schema_sql)
                 conn.commit()
                 
@@ -76,12 +81,12 @@ def main():
                 created_tables = [row[0] for row in cursor.fetchall()]
                 
                 if len(created_tables) == 2:
-                    print(f"✅ Schema deployment successful! Created tables: {created_tables}")
+                    logger.info(f"✅ Schema deployment successful! Created tables: {created_tables}")
                 else:
-                    print(f"⚠️ Partial deployment. Tables found: {created_tables}")
+                    logger.warning(f"⚠️ Partial deployment. Tables found: {created_tables}")
                 
     except Exception as e:
-        print(f"❌ Schema deployment failed: {e}")
+        logger.error(f"❌ Schema deployment failed: {e}")
         sys.exit(1)
 
 

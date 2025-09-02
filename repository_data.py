@@ -32,10 +32,10 @@ Version: 1.0.0 - Foundation implementation with bulletproof validation
 """
 
 from typing import Optional, List, Dict, Any, Union
-import logging
 from datetime import datetime, timezone
 from contextlib import contextmanager
 
+from util_logger import LoggerFactory, ComponentType
 from schema_core import (
     JobRecord, TaskRecord, JobStatus, TaskStatus, 
     generate_job_id, generate_task_id, SchemaConfig
@@ -43,7 +43,7 @@ from schema_core import (
 from validator_schema import SchemaValidator, SchemaValidationError
 from adapter_storage import StorageBackend, StorageAdapterFactory
 
-logger = logging.getLogger(__name__)
+logger = LoggerFactory.get_logger(ComponentType.REPOSITORY, "DataRepository")
 
 
 # ============================================================================

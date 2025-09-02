@@ -7,12 +7,12 @@ where the failure is occurring that causes messages to go to poison queue.
 """
 
 import json
-import logging
 import sys
 
-# Set up logging
-logging.basicConfig(level=logging.DEBUG, format='%(levelname)s: %(message)s')
-logger = logging.getLogger(__name__)
+from util_logger import LoggerFactory, ComponentType
+
+# Set up logging using LoggerFactory
+logger = LoggerFactory.get_logger(ComponentType.UTIL, "QueueDebugger")
 
 def test_basic_imports():
     """Test all imports that the queue trigger uses"""

@@ -28,7 +28,7 @@ Database Governance:
 """
 
 import psycopg
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, List
 from psycopg import sql
 
 from util_logger import LoggerFactory, ComponentType
@@ -287,12 +287,12 @@ class SchemaManager:
                 
                 if missing_tables:
                     logger.warning(f"⚠️ Missing tables in schema '{self.app_schema}': {missing_tables}")
-                    # Try to create missing tables with complete schema
-                    created_tables = self._create_complete_tables(conn, missing_tables)
-                    results['tables_created'] = created_tables
-                    results['actions_taken'] = [f"Created missing tables: {created_tables}"]
-                    if created_tables:
-                        logger.info(f"✅ Created missing tables: {created_tables}")
+                    # Execute complete schema to create missing tables
+                    schema_executed = self._execute_schema_file(conn)
+                    results['tables_created'] = schema_executed
+                    results['actions_taken'] = [f"Executed schema file for missing tables: {missing_tables}"]
+                    if schema_executed:
+                        logger.info(f"✅ Schema executed for missing tables: {missing_tables}")
                         results['tables_exist'] = True
                 else:
                     logger.info(f"✅ All required tables exist in schema: {self.app_schema}")
@@ -310,7 +310,7 @@ class SchemaManager:
     
     def _validate_functions(self, conn: psycopg.Connection) -> Dict[str, Any]:
         """Validate that required PostgreSQL functions exist."""
-        required_functions = ['complete_task_and_check_stage', 'advance_job_stage']
+        required_functions = ['complete_task_and_check_stage', 'advance_job_stage', 'check_job_completion']
         results = {
             'functions_exist': False,
             'functions_created': False,
@@ -336,7 +336,13 @@ class SchemaManager:
                 
                 if missing_functions:
                     logger.warning(f"⚠️ Missing functions in schema '{self.app_schema}': {missing_functions}")
-                    results['actions_taken'] = [f"Schema '{self.app_schema}' missing functions: {missing_functions}"]
+                    # Execute only functions to create missing functions
+                    functions_executed = self._execute_functions_only(conn)
+                    results['functions_created'] = functions_executed
+                    results['actions_taken'] = [f"Executed functions for missing functions: {missing_functions}"]
+                    if functions_executed:
+                        logger.info(f"✅ Functions executed for missing functions: {missing_functions}")
+                        results['functions_exist'] = True
                 else:
                     logger.info(f"✅ All required functions exist in schema: {self.app_schema}")
                 
@@ -395,24 +401,7 @@ class SchemaManager:
         
         try:
             with psycopg.connect(self.connection_string) as conn:
-                with conn.cursor() as cur:
-                    # Read the schema SQL file
-                    try:
-                        with open('schema_postgres.sql', 'r') as f:
-                            schema_sql = f.read()
-                    except FileNotFoundError:
-                        raise SchemaManagementError("schema_postgres.sql file not found")
-                    
-                    # Replace 'geo' schema with app_schema in the SQL
-                    schema_sql = schema_sql.replace('SET search_path TO geo, public;', 
-                                                  f'SET search_path TO {self.app_schema}, public;')
-                    
-                    # Execute the schema creation SQL
-                    cur.execute(schema_sql)
-                    conn.commit()
-                    
-                    logger.info(f"✅ Successfully initialized schema: {self.app_schema}")
-                    return True
+                return self._execute_schema_file(conn)
                     
         except psycopg.errors.InsufficientPrivilege as e:
             error_msg = f"Insufficient privileges to initialize schema '{self.app_schema}': {e}"
@@ -423,132 +412,6 @@ class SchemaManager:
             error_msg = f"Failed to initialize schema '{self.app_schema}': {e}"
             logger.error(f"❌ {error_msg}")
             raise SchemaManagementError(error_msg)
-    
-    def _create_complete_tables(self, conn: psycopg.Connection, missing_tables: List[str]) -> List[str]:
-        """Create missing tables with complete schema matching schema_postgres.sql"""
-        created_tables = []
-        
-        try:
-            with conn.cursor() as cur:
-                # First create ENUM types if they don't exist
-                logger.info(f"🔧 Creating ENUM types in schema '{self.app_schema}'")
-                cur.execute(f"SET search_path TO {self.app_schema}, public")
-                
-                # Create job_status enum
-                cur.execute("""
-                    DO $$ BEGIN
-                        CREATE TYPE job_status AS ENUM (
-                            'queued', 'processing', 'completed', 'failed', 'completed_with_errors'
-                        );
-                    EXCEPTION
-                        WHEN duplicate_object THEN null;
-                    END $$;
-                """)
-                
-                # Create task_status enum  
-                cur.execute("""
-                    DO $$ BEGIN
-                        CREATE TYPE task_status AS ENUM (
-                            'queued', 'processing', 'completed', 'failed'
-                        );
-                    EXCEPTION
-                        WHEN duplicate_object THEN null;
-                    END $$;
-                """)
-                
-                # Create jobs table with complete schema
-                if 'jobs' in missing_tables:
-                    logger.info(f"🔧 Creating jobs table with complete schema")
-                    jobs_sql = f"""
-                        CREATE TABLE {self.app_schema}.jobs (
-                            job_id VARCHAR(64) PRIMARY KEY 
-                                CHECK (length(job_id) = 64 AND job_id ~ '^[a-f0-9]+$'),
-                            job_type VARCHAR(50) NOT NULL
-                                CHECK (length(job_type) >= 1 AND job_type ~ '^[a-z_]+$'),
-                            status job_status NOT NULL DEFAULT 'queued',
-                            stage INTEGER NOT NULL DEFAULT 1
-                                CHECK (stage >= 1 AND stage <= 100),
-                            total_stages INTEGER NOT NULL DEFAULT 1  
-                                CHECK (total_stages >= 1 AND total_stages <= 100),
-                            parameters JSONB NOT NULL DEFAULT '{{}}',
-                            stage_results JSONB NOT NULL DEFAULT '{{}}',  
-                            result_data JSONB NULL,
-                            error_details TEXT NULL,
-                            created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-                            updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
-                            CONSTRAINT jobs_stage_consistency 
-                                CHECK (stage <= total_stages),
-                            CONSTRAINT jobs_completed_has_result
-                                CHECK (
-                                    (status = 'completed' AND result_data IS NOT NULL) OR 
-                                    (status != 'completed')
-                                ),
-                            CONSTRAINT jobs_failed_has_error
-                                CHECK (
-                                    (status = 'failed' AND error_details IS NOT NULL) OR
-                                    (status != 'failed')
-                                )
-                        )
-                    """
-                    cur.execute(jobs_sql)
-                    created_tables.append('jobs')
-                
-                # Create tasks table with complete schema
-                if 'tasks' in missing_tables:
-                    logger.info(f"🔧 Creating tasks table with complete schema")
-                    tasks_sql = f"""
-                        CREATE TABLE {self.app_schema}.tasks (
-                            task_id VARCHAR(100) PRIMARY KEY
-                                CHECK (length(task_id) >= 1),
-                            parent_job_id VARCHAR(64) NOT NULL 
-                                REFERENCES {self.app_schema}.jobs(job_id) ON DELETE CASCADE
-                                CHECK (length(parent_job_id) = 64 AND parent_job_id ~ '^[a-f0-9]+$'),
-                            task_type VARCHAR(50) NOT NULL
-                                CHECK (length(task_type) >= 1 AND task_type ~ '^[a-z_]+$'),
-                            status task_status NOT NULL DEFAULT 'queued',
-                            stage INTEGER NOT NULL 
-                                CHECK (stage >= 1 AND stage <= 100),
-                            task_index INTEGER NOT NULL 
-                                CHECK (task_index >= 0 AND task_index <= 10000),
-                            parameters JSONB NOT NULL DEFAULT '{{}}',
-                            result_data JSONB NULL,
-                            error_details TEXT NULL,
-                            retry_count INTEGER NOT NULL DEFAULT 0
-                                CHECK (retry_count >= 0 AND retry_count <= 10),
-                            heartbeat TIMESTAMP NULL,
-                            created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-                            updated_at TIMESTAMP NOT NULL DEFAULT NOW()
-                        )
-                    """
-                    cur.execute(tasks_sql)
-                    created_tables.append('tasks')
-                
-                # Create indexes
-                if created_tables:
-                    logger.info(f"🔧 Creating indexes for tables: {created_tables}")
-                    index_sql = f"""
-                        CREATE INDEX IF NOT EXISTS idx_jobs_status ON {self.app_schema}.jobs(status);
-                        CREATE INDEX IF NOT EXISTS idx_jobs_job_type ON {self.app_schema}.jobs(job_type);  
-                        CREATE INDEX IF NOT EXISTS idx_jobs_created_at ON {self.app_schema}.jobs(created_at);
-                        CREATE INDEX IF NOT EXISTS idx_jobs_updated_at ON {self.app_schema}.jobs(updated_at);
-                        CREATE INDEX IF NOT EXISTS idx_tasks_parent_job_id ON {self.app_schema}.tasks(parent_job_id);
-                        CREATE INDEX IF NOT EXISTS idx_tasks_status ON {self.app_schema}.tasks(status);
-                        CREATE INDEX IF NOT EXISTS idx_tasks_job_stage ON {self.app_schema}.tasks(parent_job_id, stage);  
-                        CREATE INDEX IF NOT EXISTS idx_tasks_job_stage_status ON {self.app_schema}.tasks(parent_job_id, stage, status);
-                        CREATE INDEX IF NOT EXISTS idx_tasks_heartbeat ON {self.app_schema}.tasks(heartbeat) WHERE heartbeat IS NOT NULL;
-                        CREATE INDEX IF NOT EXISTS idx_tasks_retry_count ON {self.app_schema}.tasks(retry_count) WHERE retry_count > 0;
-                    """
-                    cur.execute(index_sql)
-                
-                conn.commit()
-                logger.info(f"✅ Successfully created complete tables: {created_tables}")
-                
-        except Exception as e:
-            logger.error(f"❌ Failed to create complete tables: {e}")
-            conn.rollback()
-            raise SchemaManagementError(f"Table creation failed: {e}")
-        
-        return created_tables
     
     def _validate_table_schema(self, conn: psycopg.Connection, existing_tables: List[str]) -> Dict[str, List[str]]:
         """Validate that existing tables have complete schema"""
@@ -597,6 +460,140 @@ class SchemaManager:
             logger.error(f"❌ Failed to validate table schema: {e}")
             
         return schema_issues
+    
+    def _execute_schema_file(self, conn: psycopg.Connection) -> bool:
+        """Execute the complete schema file to ensure all components exist.
+        
+        This is the single source of truth for schema creation.
+        The schema file is idempotent, so running it multiple times is safe.
+        
+        Returns:
+            True if schema execution successful
+            
+        Raises:
+            SchemaManagementError: If schema execution fails
+        """
+        try:
+            with conn.cursor() as cur:
+                # Read the schema SQL file
+                try:
+                    with open('schema_postgres.sql', 'r') as f:
+                        schema_sql = f.read()
+                except FileNotFoundError:
+                    raise SchemaManagementError("schema_postgres.sql file not found")
+                
+                # Replace 'app' schema placeholder with actual app_schema
+                # Handle all possible schema references precisely
+                schema_sql = schema_sql.replace('CREATE SCHEMA IF NOT EXISTS app;', 
+                                              f'CREATE SCHEMA IF NOT EXISTS {self.app_schema};')
+                schema_sql = schema_sql.replace('SET search_path TO app, public;', 
+                                              f'SET search_path TO {self.app_schema}, public;')
+                # Replace table references in functions (more precise than general app. replacement)
+                schema_sql = schema_sql.replace('FROM app.jobs', f'FROM {self.app_schema}.jobs')
+                schema_sql = schema_sql.replace('FROM app.tasks', f'FROM {self.app_schema}.tasks')
+                schema_sql = schema_sql.replace('UPDATE app.jobs', f'UPDATE {self.app_schema}.jobs')
+                schema_sql = schema_sql.replace('UPDATE app.tasks', f'UPDATE {self.app_schema}.tasks')
+                
+                # Execute the complete schema creation SQL
+                cur.execute(schema_sql)
+                conn.commit()
+                
+                logger.info(f"✅ Successfully executed complete schema file for: {self.app_schema}")
+                return True
+                
+        except Exception as e:
+            logger.error(f"❌ Failed to execute schema file: {e}")
+            raise SchemaManagementError(f"Schema file execution failed: {e}")
+    
+    def _execute_functions_only(self, conn: psycopg.Connection) -> bool:
+        """Execute only the functions from the dedicated functions file.
+        
+        This reads the functions_only.sql file and creates the required functions,
+        avoiding table creation that would fail if tables already exist.
+        
+        Returns:
+            True if function execution successful
+            
+        Raises:
+            SchemaManagementError: If function execution fails
+        """
+        try:
+            with conn.cursor() as cur:
+                # Read the functions-only SQL file
+                try:
+                    with open('functions_only.sql', 'r') as f:
+                        functions_sql = f.read()
+                except FileNotFoundError:
+                    raise SchemaManagementError("functions_only.sql file not found")
+                
+                # Set search path first
+                cur.execute(f'SET search_path TO {self.app_schema}, public;')
+                
+                # Replace schema references
+                functions_sql = functions_sql.replace('FROM app.jobs', f'FROM {self.app_schema}.jobs')
+                functions_sql = functions_sql.replace('FROM app.tasks', f'FROM {self.app_schema}.tasks')
+                functions_sql = functions_sql.replace('UPDATE app.jobs', f'UPDATE {self.app_schema}.jobs')
+                functions_sql = functions_sql.replace('UPDATE app.tasks', f'UPDATE {self.app_schema}.tasks')
+                
+                # Execute the functions SQL
+                cur.execute(functions_sql)
+                conn.commit()
+                
+                logger.info(f"✅ Successfully executed functions-only for schema: {self.app_schema}")
+                return True
+                
+        except Exception as e:
+            logger.error(f"❌ Failed to execute functions-only: {e}")
+            raise SchemaManagementError(f"Functions execution failed: {e}")
+    
+    def force_create_functions(self) -> Dict[str, Any]:
+        """Force creation of PostgreSQL functions without table validation.
+        
+        This bypasses all table checks and directly creates the required functions.
+        Use this when tables exist but function deployment is blocked by validation issues.
+        
+        Returns:
+            Dictionary with function creation results
+        """
+        logger.info(f"🔧 Force creating functions for schema: {self.app_schema}")
+        
+        try:
+            with psycopg.connect(self.connection_string) as conn:
+                # Directly execute functions only
+                functions_executed = self._execute_functions_only(conn)
+                
+                if functions_executed:
+                    # Verify functions were created
+                    with conn.cursor() as cur:
+                        cur.execute("""
+                            SELECT routine_name
+                            FROM information_schema.routines
+                            WHERE routine_schema = %s AND routine_name = ANY(%s)
+                        """, (self.app_schema, ['complete_task_and_check_stage', 'advance_job_stage', 'check_job_completion']))
+                        
+                        created_functions = [row[0] for row in cur.fetchall()]
+                        
+                        return {
+                            'success': True,
+                            'functions_created': created_functions,
+                            'functions_count': len(created_functions),
+                            'message': f"Successfully created {len(created_functions)} functions"
+                        }
+                else:
+                    return {
+                        'success': False,
+                        'error': 'Function execution failed',
+                        'functions_created': []
+                    }
+                    
+        except Exception as e:
+            error_msg = f"Force function creation failed: {e}"
+            logger.error(f"❌ {error_msg}")
+            return {
+                'success': False,
+                'error': error_msg,
+                'functions_created': []
+            }
 
 
 # Factory for creating SchemaManager instances

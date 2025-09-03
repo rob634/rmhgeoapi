@@ -28,21 +28,29 @@ SET search_path TO app, public;
 -- =============================================================================
 
 -- Job status enum matching JobStatus in schema_core.py
-CREATE TYPE job_status AS ENUM (
-    'queued',               -- Initial state after creation
-    'processing',           -- Job is actively processing stages
-    'completed',           -- All stages completed successfully
-    'failed',              -- Job failed with unrecoverable error
-    'completed_with_errors' -- Job completed but some tasks had errors
-);
+DO $$ BEGIN
+    CREATE TYPE job_status AS ENUM (
+        'queued',               -- Initial state after creation
+        'processing',           -- Job is actively processing stages
+        'completed',           -- All stages completed successfully
+        'failed',              -- Job failed with unrecoverable error
+        'completed_with_errors' -- Job completed but some tasks had errors
+    );
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
 
 -- Task status enum matching TaskStatus in schema_core.py
-CREATE TYPE task_status AS ENUM (
-    'queued',      -- Task created but not started
-    'processing',  -- Task actively running
-    'completed',   -- Task finished successfully
-    'failed'       -- Task failed with error
-);
+DO $$ BEGIN
+    CREATE TYPE task_status AS ENUM (
+        'queued',      -- Task created but not started
+        'processing',  -- Task actively running
+        'completed',   -- Task finished successfully
+        'failed'       -- Task failed with error
+    );
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
 
 -- =============================================================================
 -- JOBS TABLE - Primary job orchestration
@@ -159,14 +167,9 @@ CREATE TABLE tasks (
     
     -- Audit trail (IMMUTABLE timestamps)
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
     
-    -- Table constraints
-    CONSTRAINT tasks_stage_matches_job
-        CHECK (
-            stage <= (SELECT total_stages FROM jobs WHERE job_id = parent_job_id)
-        )
-        -- Task stage cannot exceed job's total stages (Note: This is expensive, consider removing)
+    -- Note: Removed tasks_stage_matches_job constraint as PostgreSQL doesn't allow subqueries in CHECK constraints
 );
 
 -- =============================================================================
@@ -231,7 +234,7 @@ DECLARE
     v_task_status task_status;
 BEGIN
     -- Get task info and update atomically
-    UPDATE tasks 
+    UPDATE app.tasks 
     SET 
         status = CASE 
             WHEN p_error_details IS NOT NULL THEN 'failed'::task_status
@@ -254,7 +257,7 @@ BEGIN
     
     -- Count remaining non-completed tasks in the same stage
     SELECT COUNT(*) INTO v_remaining
-    FROM tasks 
+    FROM app.tasks 
     WHERE parent_job_id = v_job_id 
       AND stage = v_stage 
       AND status NOT IN ('completed', 'failed');
@@ -287,7 +290,7 @@ DECLARE
     v_new_stage INTEGER;
 BEGIN
     -- Update job stage and stage results atomically
-    UPDATE jobs
+    UPDATE app.jobs
     SET 
         stage = stage + 1,
         stage_results = CASE 
@@ -317,6 +320,84 @@ BEGIN
         TRUE,                              -- job_updated
         v_new_stage,                      -- new_stage
         v_new_stage > v_total_stages;     -- is_final_stage
+END;
+$$;
+
+-- Function to check if job is complete and gather results
+-- CRITICAL: This function prevents race conditions in "last task turns out lights" pattern
+CREATE OR REPLACE FUNCTION check_job_completion(
+    p_job_id VARCHAR(64)
+)
+RETURNS TABLE (
+    job_complete BOOLEAN,
+    final_stage INTEGER,
+    total_tasks INTEGER,
+    completed_tasks INTEGER,
+    task_results JSONB
+)
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    v_job_record RECORD;
+    v_task_counts RECORD;
+BEGIN
+    -- Get job info with row-level lock to prevent race conditions
+    -- FOR UPDATE prevents other transactions from checking completion simultaneously
+    SELECT job_id, job_type, status, stage, total_stages, stage_results
+    INTO v_job_record
+    FROM app.jobs 
+    WHERE job_id = p_job_id
+    FOR UPDATE;
+    
+    -- If job doesn't exist, return not complete
+    IF v_job_record.job_id IS NULL THEN
+        RETURN QUERY SELECT 
+            FALSE,              -- job_complete
+            0,                  -- final_stage
+            0,                  -- total_tasks
+            0,                  -- completed_tasks  
+            '[]'::jsonb;        -- task_results
+        RETURN;
+    END IF;
+    
+    -- Count tasks for this job atomically
+    SELECT 
+        COUNT(*) as total_tasks,
+        COUNT(CASE WHEN status = 'completed' THEN 1 END) as completed_tasks,
+        COUNT(CASE WHEN status = 'failed' THEN 1 END) as failed_tasks,
+        COALESCE(
+            jsonb_agg(
+                jsonb_build_object(
+                    'task_id', task_id,
+                    'task_type', task_type,
+                    'stage', stage,
+                    'task_index', task_index,
+                    'status', status::text,
+                    'result_data', result_data,
+                    'error_details', error_details
+                )
+            ) FILTER (WHERE result_data IS NOT NULL OR error_details IS NOT NULL), 
+            '[]'::jsonb
+        ) as task_results
+    INTO v_task_counts
+    FROM app.tasks 
+    WHERE parent_job_id = p_job_id;
+    
+    -- Determine completion status
+    -- Job is complete when:
+    -- 1. There are tasks (total_tasks > 0)
+    -- 2. All tasks are either completed or failed (no queued/processing tasks)
+    -- 3. Job has reached its final stage
+    RETURN QUERY SELECT 
+        (
+            v_task_counts.total_tasks > 0 AND 
+            (v_task_counts.completed_tasks + v_task_counts.failed_tasks) = v_task_counts.total_tasks AND
+            v_job_record.stage >= v_job_record.total_stages
+        ) as job_complete,
+        v_job_record.stage as final_stage,
+        v_task_counts.total_tasks,
+        v_task_counts.completed_tasks,
+        v_task_counts.task_results;
 END;
 $$;
 
@@ -357,6 +438,7 @@ CREATE TRIGGER tasks_update_updated_at
 -- GRANT SELECT, INSERT, UPDATE, DELETE ON tasks TO your_function_user;
 -- GRANT EXECUTE ON FUNCTION complete_task_and_check_stage TO your_function_user;
 -- GRANT EXECUTE ON FUNCTION advance_job_stage TO your_function_user;
+-- GRANT EXECUTE ON FUNCTION check_job_completion TO your_function_user;
 
 -- =============================================================================
 -- SAMPLE QUERIES - Testing and validation
@@ -399,6 +481,7 @@ COMMENT ON TABLE jobs IS 'Job orchestration table - matches JobRecord in schema_
 COMMENT ON TABLE tasks IS 'Task execution table - matches TaskRecord in schema_core.py'; 
 COMMENT ON FUNCTION complete_task_and_check_stage IS 'Atomic task completion with race condition prevention';
 COMMENT ON FUNCTION advance_job_stage IS 'Atomic job stage advancement';
+COMMENT ON FUNCTION check_job_completion IS 'Atomic job completion detection with task result aggregation';
 
 -- Schema creation complete
 SELECT 'PostgreSQL schema for Azure Geospatial ETL Pipeline created successfully!' AS status;

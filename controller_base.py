@@ -683,8 +683,8 @@ class BaseController(ABC):
                 job_type_from_record = getattr(job_record, 'job_type', 'unknown')
             else:
                 # Fallback for dict-like object
-                job_id = job_record.get('job_id') or job_record.get('jobId', 'unknown_job_id')
-                job_type_from_record = job_record.get('job_type') or job_record.get('jobType', 'unknown')
+                job_id = job_record.get('job_id', 'unknown_job_id')
+                job_type_from_record = job_record.get('job_type', 'unknown')
                 self.logger.warning(f"⚠️ job_record is not a JobRecord object, type: {type(job_record)}")
         except Exception as e:
             self.logger.error(f"❌ Failed to extract job_id from job_record: {e}")

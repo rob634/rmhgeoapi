@@ -137,17 +137,17 @@ class SchemaValidator:
             logger.debug(f"Validating job record with keys: {list(data.keys())}")
             
             # Ensure datetime fields are properly formatted
-            if 'createdAt' in data and isinstance(data['createdAt'], str):
-                data['createdAt'] = datetime.fromisoformat(data['createdAt'].replace('Z', '+00:00'))
-            if 'updatedAt' in data and isinstance(data['updatedAt'], str):
-                data['updatedAt'] = datetime.fromisoformat(data['updatedAt'].replace('Z', '+00:00'))
+            if 'created_at' in data and isinstance(data['created_at'], str):
+                data['created_at'] = datetime.fromisoformat(data['created_at'].replace('Z', '+00:00'))
+            if 'updated_at' in data and isinstance(data['updated_at'], str):
+                data['updated_at'] = datetime.fromisoformat(data['updated_at'].replace('Z', '+00:00'))
                 
             # Set defaults for required timestamp fields if missing
             now = datetime.utcnow()
-            if 'createdAt' not in data:
-                data['createdAt'] = now
-            if 'updatedAt' not in data:
-                data['updatedAt'] = now
+            if 'created_at' not in data:
+                data['created_at'] = now
+            if 'updated_at' not in data:
+                data['updated_at'] = now
                 
             job_record = JobRecord(**data)
             logger.info(f"✅ Job record validated: {job_record.job_id[:16]}... type={job_record.job_type}")
@@ -182,22 +182,22 @@ class SchemaValidator:
             logger.debug(f"Validating task record with keys: {list(data.keys())}")
             
             # Ensure datetime fields are properly formatted
-            if 'createdAt' in data and isinstance(data['createdAt'], str):
-                data['createdAt'] = datetime.fromisoformat(data['createdAt'].replace('Z', '+00:00'))
-            if 'updatedAt' in data and isinstance(data['updatedAt'], str):  
-                data['updatedAt'] = datetime.fromisoformat(data['updatedAt'].replace('Z', '+00:00'))
+            if 'created_at' in data and isinstance(data['created_at'], str):
+                data['created_at'] = datetime.fromisoformat(data['created_at'].replace('Z', '+00:00'))
+            if 'updated_at' in data and isinstance(data['updated_at'], str):  
+                data['updated_at'] = datetime.fromisoformat(data['updated_at'].replace('Z', '+00:00'))
             if 'heartbeat' in data and isinstance(data['heartbeat'], str):
                 data['heartbeat'] = datetime.fromisoformat(data['heartbeat'].replace('Z', '+00:00'))
                 
             # Set defaults for required timestamp fields if missing
             now = datetime.utcnow()
-            if 'createdAt' not in data:
-                data['createdAt'] = now
-            if 'updatedAt' not in data:
-                data['updatedAt'] = now
+            if 'created_at' not in data:
+                data['created_at'] = now
+            if 'updated_at' not in data:
+                data['updated_at'] = now
                 
             task_record = TaskRecord(**data)
-            logger.info(f"✅ Task record validated: {task_record.taskId} parent={task_record.parentJobId[:16]}...")
+            logger.info(f"✅ Task record validated: {task_record.task_id} parent={task_record.parent_job_id[:16]}...")
             return task_record
             
         except ValidationError as e:
@@ -243,12 +243,12 @@ class SchemaValidator:
             
             if message_type == 'job':
                 message = JobQueueMessage(**data)
-                logger.info(f"✅ Job queue message validated: {message.jobId[:16]}... type={message.jobType}")
+                logger.info(f"✅ Job queue message validated: {message.job_id[:16]}... type={message.job_type}")
                 return message
                 
             elif message_type == 'task':
                 message = TaskQueueMessage(**data)
-                logger.info(f"✅ Task queue message validated: {message.taskId} parent={message.parentJobId[:16]}...")
+                logger.info(f"✅ Task queue message validated: {message.task_id} parent={message.job_id[:16]}...")
                 return message
                 
             else:
@@ -293,7 +293,7 @@ class SchemaValidator:
             if not current_record.status.can_transition_to(new_status):
                 raise ValueError(
                     f"Invalid task status transition: {current_record.status} → {new_status} "
-                    f"for task {current_record.taskId}"
+                    f"for task {current_record.task_id}"
                 )
                 
         else:
@@ -347,97 +347,6 @@ class SchemaEvolution:
     Handles evolution of schemas over time while maintaining strict validation.
     """
     
-    @staticmethod
-    def migrate_legacy_job(legacy_data: Dict[str, Any]) -> JobRecord:
-        """
-        Migrate legacy job data to current schema format
-        
-        Args:
-            legacy_data: Job data in legacy format
-            
-        Returns:
-            JobRecord in current schema format
-        """
-        logger.info("Migrating legacy job data to current schema")
-        
-        # Handle common legacy field mappings
-        migrated_data = {}
-        
-        # Map legacy field names to current schema
-        field_mappings = {
-            'job_id': 'jobId',
-            'job_type': 'jobType',  # Legacy field name
-            'job_type': 'jobType',        # Current field name
-            'created_at': 'createdAt',
-            'updated_at': 'updatedAt',
-            'stage_results': 'stageResults',
-            'result_data': 'resultData',  
-            'error_details': 'errorDetails',
-            'total_stages': 'totalStages'
-        }
-        
-        for legacy_key, current_key in field_mappings.items():
-            if legacy_key in legacy_data:
-                migrated_data[current_key] = legacy_data[legacy_key]
-        
-        # Copy all other fields directly
-        for key, value in legacy_data.items():
-            if key not in field_mappings:
-                migrated_data[key] = value
-        
-        # Validate and return migrated record
-        return SchemaValidator.validate_job_record(migrated_data, strict=True)
-    
-    @staticmethod  
-    def migrate_legacy_task(legacy_data: Dict[str, Any]) -> TaskRecord:
-        """
-        Migrate legacy task data to current schema format
-        
-        Args:
-            legacy_data: Task data in legacy format
-            
-        Returns:
-            TaskRecord in current schema format
-        """
-        logger.info("Migrating legacy task data to current schema")
-        
-        # Handle common legacy field mappings
-        migrated_data = {}
-        
-        field_mappings = {
-            'task_id': 'taskId',
-            'parent_job_id': 'parentJobId',
-            'job_type': 'taskType',  # Legacy task type field
-            'task_type': 'taskType',       # Current task type field
-            'stage_number': 'stage',       # Legacy stage field
-            'task_index': 'taskIndex',
-            'created_at': 'createdAt',
-            'updated_at': 'updatedAt',
-            'result_data': 'resultData',
-            'error_details': 'errorDetails',
-            'retry_count': 'retryCount'
-        }
-        
-        for legacy_key, current_key in field_mappings.items():
-            if legacy_key in legacy_data:
-                migrated_data[current_key] = legacy_data[legacy_key]
-        
-        # Handle task_data JSON blob (common in legacy systems)
-        if 'task_data' in legacy_data and isinstance(legacy_data['task_data'], str):
-            try:
-                task_data_json = json.loads(legacy_data['task_data'])
-                if 'parameters' not in migrated_data:
-                    migrated_data['parameters'] = task_data_json
-            except json.JSONDecodeError:
-                logger.warning("Failed to parse legacy task_data JSON")
-        
-        # Copy remaining fields
-        for key, value in legacy_data.items():
-            if key not in field_mappings and key != 'task_data':
-                migrated_data[key] = value
-        
-        # Validate and return migrated record
-        return SchemaValidator.validate_task_record(migrated_data, strict=True)
 
 
 class ValidationMiddleware:

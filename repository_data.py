@@ -40,6 +40,7 @@ from schema_core import (
     JobRecord, TaskRecord, JobStatus, TaskStatus, 
     generate_job_id, generate_task_id, SchemaConfig
 )
+from model_core import JobCompletionResult
 from validator_schema import SchemaValidator, SchemaValidationError
 from adapter_storage import StorageBackend, StorageAdapterFactory
 
@@ -349,31 +350,60 @@ class TaskRepository(BaseRepository):
             # Generate task ID
             task_id = generate_task_id(parent_job_id, stage, task_index)
             
-            # Create task record
+            # Create task record - CRITICAL: Use snake_case field names to match TaskRecord schema
             now = datetime.utcnow()
             task_data = {
-                'taskId': task_id,
-                'parentJobId': parent_job_id,
-                'taskType': task_type,
+                'task_id': task_id,
+                'parent_job_id': parent_job_id,
+                'task_type': task_type,
                 'status': TaskStatus.QUEUED,
                 'stage': stage,
-                'taskIndex': task_index,
+                'task_index': task_index,
                 'parameters': parameters.copy(),
-                'retryCount': 0,
-                'createdAt': now,
-                'updatedAt': now
+                'retry_count': 0,
+                'created_at': now,
+                'updated_at': now
             }
             
-            # Validate task data
-            task_record = self.validator.validate_task_record(task_data, strict=True)
+            logger.debug(f"🏗️ Creating task record with data: task_id={task_id}, parent_job_id={parent_job_id[:16]}..., task_type={task_type}")
+            logger.debug(f"🏗️ Task creation parameters: stage={stage}, task_index={task_index}")
+            logger.debug(f"🏗️ Full task_data structure: {list(task_data.keys())}")
             
-            # Create in storage
-            created = self.storage.create_task(task_record)
-            if created:
-                logger.info(f"✅ Task created: {task_id} parent={parent_job_id[:16]}... type={task_type}")
-            else:
-                logger.info(f"📋 Task already exists: {task_id} (idempotent)")
+            # Validate task data with enhanced error handling
+            logger.debug(f"🔍 Validating task data against TaskRecord schema")
+            try:
+                task_record = self.validator.validate_task_record(task_data, strict=True)
+                logger.debug(f"✅ Task data validation successful: {task_id}")
+            except Exception as validation_error:
+                logger.error(f"❌ CRITICAL: Task data validation failed for {task_id}")
+                logger.error(f"❌ Validation error: {validation_error}")
+                logger.error(f"❌ Validation error type: {type(validation_error).__name__}")
+                logger.error(f"🔍 Task data that failed validation: {task_data}")
+                import traceback
+                logger.error(f"📍 Validation traceback: {traceback.format_exc()}")
+                raise RuntimeError(f"Task validation failed: {validation_error}")
             
+            # Create in storage with enhanced error handling
+            logger.debug(f"💾 Creating task record in storage backend: {type(self.storage).__name__}")
+            try:
+                created = self.storage.create_task(task_record)
+                if created:
+                    logger.info(f"✅ Task created successfully: {task_id} parent={parent_job_id[:16]}... type={task_type}")
+                    logger.debug(f"✅ Storage backend created task record successfully")
+                else:
+                    logger.info(f"📋 Task already exists: {task_id} (idempotent creation)")
+                    logger.debug(f"📋 Storage backend reported task already exists")
+            except Exception as storage_error:
+                logger.error(f"❌ CRITICAL: Storage backend failed to create task {task_id}")
+                logger.error(f"❌ Storage error: {storage_error}")
+                logger.error(f"❌ Storage error type: {type(storage_error).__name__}")
+                logger.error(f"🏛️ Storage backend type: {type(self.storage).__name__}")
+                logger.error(f"📋 TaskRecord details: task_id={task_record.task_id}, parent_job_id={task_record.parent_job_id}")
+                import traceback
+                logger.error(f"📍 Storage creation traceback: {traceback.format_exc()}")
+                raise RuntimeError(f"Storage backend failed to create task: {storage_error}")
+            
+            logger.debug(f"🎯 Task creation process completed successfully: {task_id}")
             return task_record
     
     def get_task(self, task_id: str) -> Optional[TaskRecord]:
@@ -662,7 +692,7 @@ class PostgreSQLCompletionDetector(CompletionDetector):
             logger.error(f"❌ Atomic stage advancement failed for job {job_id[:16]}...: {e}")
             raise
 
-    def check_job_completion(self, job_id: str) -> bool:
+    def check_job_completion(self, job_id: str) -> JobCompletionResult:
         """
         Check if job workflow is fully complete using PostgreSQL stored procedure.
         
@@ -670,7 +700,7 @@ class PostgreSQLCompletionDetector(CompletionDetector):
             job_id: Job to check
             
         Returns:
-            bool: True if job is complete
+            JobCompletionResult: Complete completion status with task details
         """
         try:
             logger.debug(f"🔍 PostgreSQL job completion check: {job_id[:16]}...")
@@ -678,15 +708,26 @@ class PostgreSQLCompletionDetector(CompletionDetector):
             # Use PostgreSQL adapter's atomic method
             completion_status = self.postgres_adapter.check_job_completion(job_id)
             
+            # Extract all fields from PostgreSQL function result
             job_complete = completion_status['job_complete']
             final_stage = completion_status['final_stage']
+            total_tasks = completion_status['total_tasks']
+            completed_tasks = completion_status['completed_tasks']
+            task_results = completion_status['task_results'] or []
             
             if job_complete:
-                logger.info(f"🎉 Job complete (PostgreSQL): {job_id[:16]}... at stage {final_stage}")
+                logger.info(f"🎉 Job complete (PostgreSQL): {job_id[:16]}... at stage {final_stage} ({completed_tasks}/{total_tasks} tasks)")
             else:
-                logger.debug(f"📊 Job incomplete (PostgreSQL): {job_id[:16]}... at stage {final_stage}")
+                logger.debug(f"📊 Job incomplete (PostgreSQL): {job_id[:16]}... at stage {final_stage} ({completed_tasks}/{total_tasks} tasks)")
             
-            return job_complete
+            # Return structured result object
+            return JobCompletionResult(
+                is_complete=job_complete,
+                final_stage=final_stage,
+                total_tasks=total_tasks,
+                completed_tasks=completed_tasks,
+                task_results=task_results if isinstance(task_results, list) else []
+            )
             
         except Exception as e:
             logger.error(f"❌ PostgreSQL job completion check failed for {job_id[:16]}...: {e}")

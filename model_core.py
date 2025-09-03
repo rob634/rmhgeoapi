@@ -104,11 +104,12 @@ from datetime import datetime
 
 # Status Enumerations
 class JobStatus(Enum):
-    """Job status enumeration"""
+    """Job status enumeration - Jobs can have mixed outcomes"""
     QUEUED = "queued"
     PROCESSING = "processing"
     COMPLETED = "completed" 
     FAILED = "failed"
+    COMPLETED_WITH_ERRORS = "completed_with_errors"  # Job succeeded but some tasks failed
 
 
 class StageStatus(Enum):
@@ -120,11 +121,12 @@ class StageStatus(Enum):
 
 
 class TaskStatus(Enum):
-    """Task status enumeration"""
+    """Task status enumeration - Tasks are atomic: succeed or fail only"""
     QUEUED = "queued"
     PROCESSING = "processing" 
     COMPLETED = "completed"
     FAILED = "failed"
+    # NOTE: Tasks cannot be "completed_with_errors" - they either succeed or fail
 
 
 # Definition Classes
@@ -293,41 +295,8 @@ class JobRecord:
         )
 
 
-@dataclass
-class TaskRecord:
-    """Task record for database storage"""
-    id: str
-    job_id: str
-    task_type: str
-    status: str
-    stage: int
-    parameters: Dict[str, Any]
-    metadata: Dict[str, Any]
-    result_data: Optional[str] = None  # JSON string
-    error_details: Optional[str] = None
-    heartbeat: Optional[datetime] = None
-    retry_count: int = 0
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
-    
-    @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'TaskRecord':
-        """Create TaskRecord from dictionary"""
-        return cls(
-            id=data['id'],
-            job_id=data['job_id'],
-            task_type=data['task_type'],
-            status=data['status'],
-            stage=data['stage'],
-            parameters=data['parameters'],
-            metadata=data['metadata'],
-            result_data=data.get('result_data'),
-            error_details=data.get('error_details'),
-            heartbeat=data.get('heartbeat'),
-            retry_count=data.get('retry_count', 0),
-            created_at=data.get('created_at'),
-            updated_at=data.get('updated_at')
-        )
+# TaskRecord has been moved to schema_core.py as a Pydantic model
+# Import from schema_core instead: from schema_core import TaskRecord
 
 
 # Queue Message Classes
@@ -373,6 +342,29 @@ class TaskQueueMessage:
             'parameters': self.parameters,
             'retry_count': self.retry_count
         }
+
+
+# Completion Result Classes
+@dataclass
+class JobCompletionResult:
+    """Result from job completion check"""
+    is_complete: bool
+    final_stage: int
+    total_tasks: int
+    completed_tasks: int
+    task_results: List[Dict[str, Any]] = field(default_factory=list)
+    
+    @property
+    def completion_percentage(self) -> float:
+        """Calculate completion percentage"""
+        if self.total_tasks == 0:
+            return 100.0
+        return (self.completed_tasks / self.total_tasks) * 100.0
+    
+    @property
+    def remaining_tasks(self) -> int:
+        """Number of tasks remaining"""
+        return max(0, self.total_tasks - self.completed_tasks)
 
 
 # Result Classes

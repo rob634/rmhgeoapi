@@ -46,6 +46,7 @@ Endpoints:
     GET  /api/jobs/{job_id} - Get job status and results
     GET  /api/monitor/poison - Check poison queue status
     POST /api/monitor/poison - Process poison messages
+    GET  /api/admin/database - Database query endpoint for debugging
 
 Supported Operations:
     Pydantic Workflow Definition Pattern (Job→Task Architecture):
@@ -123,6 +124,14 @@ from trigger_health import health_check_trigger
 from trigger_submit_job import submit_job_trigger
 from trigger_get_job_status import get_job_status_trigger
 from trigger_poison_monitor import poison_monitor_trigger
+from trigger_db_query import (
+    jobs_query_trigger, 
+    tasks_query_trigger, 
+    db_stats_trigger, 
+    enum_diagnostic_trigger,
+    schema_nuke_trigger,
+    function_test_trigger
+)
 
 # Initialize function app with HTTP auth level
 app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
@@ -132,7 +141,7 @@ app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
 
 
 @app.route(route="health", methods=["GET"])
-def health_check(req: func.HttpRequest) -> func.HttpResponse:
+def health(req: func.HttpRequest) -> func.HttpResponse:
     """Health check endpoint using HTTP trigger base class."""
     return health_check_trigger.handle_request(req)
 
@@ -148,6 +157,56 @@ def submit_job(req: func.HttpRequest) -> func.HttpResponse:
 def get_job_status(req: func.HttpRequest) -> func.HttpResponse:
     """Job status retrieval endpoint using HTTP trigger base class."""
     return get_job_status_trigger.handle_request(req)
+
+
+# Database Query Endpoints - Phase 2 Database Monitoring
+@app.route(route="db/jobs", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def query_jobs(req: func.HttpRequest) -> func.HttpResponse:
+    """Query jobs with filtering: GET /api/db/jobs?limit=10&status=processing&hours=24"""
+    return jobs_query_trigger.handle_request(req)
+
+
+@app.route(route="db/jobs/{job_id}", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS) 
+def query_job_by_id(req: func.HttpRequest) -> func.HttpResponse:
+    """Get specific job by ID: GET /api/db/jobs/{job_id}"""
+    return jobs_query_trigger.handle_request(req)
+
+
+@app.route(route="db/tasks", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def query_tasks(req: func.HttpRequest) -> func.HttpResponse:
+    """Query tasks with filtering: GET /api/db/tasks?status=failed&limit=20"""
+    return tasks_query_trigger.handle_request(req)
+
+
+@app.route(route="db/tasks/{job_id}", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def query_tasks_for_job(req: func.HttpRequest) -> func.HttpResponse:
+    """Get all tasks for a job: GET /api/db/tasks/{job_id}"""
+    return tasks_query_trigger.handle_request(req)
+
+
+@app.route(route="db/stats", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def database_stats(req: func.HttpRequest) -> func.HttpResponse:
+    """Database statistics and health metrics: GET /api/db/stats"""
+    return db_stats_trigger.handle_request(req)
+
+
+@app.route(route="db/enums/diagnostic", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def diagnose_enums(req: func.HttpRequest) -> func.HttpResponse:
+    """Diagnose PostgreSQL enum types: GET /api/db/enums/diagnostic"""
+    return enum_diagnostic_trigger.handle_request(req)
+
+
+# 🚨 NUCLEAR RED BUTTON - DEVELOPMENT ONLY
+@app.route(route="db/schema/nuke", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
+def nuclear_schema_reset(req: func.HttpRequest) -> func.HttpResponse:
+    """🚨 NUCLEAR: Complete schema wipe and rebuild: POST /api/db/schema/nuke?confirm=yes"""
+    return schema_nuke_trigger.handle_request(req)
+
+
+@app.route(route="db/functions/test", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def test_database_functions(req: func.HttpRequest) -> func.HttpResponse:
+    """Test PostgreSQL functions: GET /api/db/functions/test"""
+    return function_test_trigger.handle_request(req)
 
 
 @app.queue_trigger(
@@ -506,7 +565,7 @@ def process_task_queue(msg: func.QueueMessage) -> None:
                 task_repo.update_task_status(
                     task_message.task_id, 
                     TaskStatus.COMPLETED, 
-                    result_data=result
+                    additional_updates={'result_data': result}
                 )
                 logger.debug(f"✅ Task status updated to COMPLETED with result data")
                 logger.info(f"✅ Task {task_message.task_id} completed successfully")
@@ -528,19 +587,23 @@ def process_task_queue(msg: func.QueueMessage) -> None:
             task_repo.update_task_status(
                 task_message.task_id, 
                 TaskStatus.FAILED, 
-                error_message=error_msg
+                additional_updates={'error_details': error_msg}
             )
         
         # CRITICAL: Check if parent job is complete (distributed detection)
         logger.debug(f"🔍 Checking job completion for parent: {task_message.parent_job_id}")
+        logger.debug(f"🎯 Current task: {task_message.task_id} (just completed)")
         try:
             completion_result = completion_detector.check_job_completion(task_message.parent_job_id)
             logger.debug(f"📊 Completion check result: is_complete={completion_result.is_complete}, task_count={len(completion_result.task_results) if hasattr(completion_result, 'task_results') else 'unknown'}")
+            logger.debug(f"📊 Completion details: final_stage={getattr(completion_result, 'final_stage', 'unknown')}, completed_tasks={getattr(completion_result, 'completed_tasks', 'unknown')}, total_tasks={getattr(completion_result, 'total_tasks', 'unknown')}")
         except Exception as completion_error:
-            logger.error(f"❌ Failed to check job completion: {completion_error}")
-            logger.debug(f"🔍 Completion check error type: {type(completion_error).__name__}")
+            logger.error(f"❌ COMPLETION DETECTION FAILED: {completion_error}")
+            logger.error(f"⚠️ This error occurs AFTER task was marked as COMPLETED")
+            logger.error(f"🔍 Completion check error type: {type(completion_error).__name__}")
             import traceback
-            logger.debug(f"📍 Completion check traceback: {traceback.format_exc()}")
+            logger.error(f"📍 Completion check traceback: {traceback.format_exc()}")
+            logger.error(f"🚨 This will trigger the outer exception handler that tries to mark completed tasks as failed")
             raise RuntimeError(f"Job completion check failed: {completion_error}")
         
         if completion_result.is_complete:
@@ -566,25 +629,46 @@ def process_task_queue(msg: func.QueueMessage) -> None:
                 logger.debug(f"✅ Job results aggregated and completed successfully: {job_result}")
                 logger.info(f"✅ Job {task_message.parent_job_id[:16]}... marked as completed by complete_job()")
             except Exception as aggregation_error:
-                logger.error(f"❌ Failed to complete job: {aggregation_error}")
-                logger.debug(f"🔍 Job completion error type: {type(aggregation_error).__name__}")
+                logger.error(f"❌ JOB AGGREGATION FAILED: {aggregation_error}")
+                logger.error(f"⚠️ This error occurs AFTER task was marked as COMPLETED") 
+                logger.error(f"🔍 Job aggregation error type: {type(aggregation_error).__name__}")
                 import traceback
-                logger.debug(f"📍 Job completion traceback: {traceback.format_exc()}")
+                logger.error(f"📍 Job aggregation traceback: {traceback.format_exc()}")
+                logger.error(f"🚨 This will trigger the outer exception handler that tries to mark completed tasks as failed")
                 raise RuntimeError(f"Job completion failed: {aggregation_error}")
             
     except Exception as e:
         logger.error(f"❌ Error processing task: {str(e)}")
         
-        # Try to mark task as failed
+        # CRITICAL: Check current task status before attempting to mark as failed
+        # This prevents invalid COMPLETED → FAILED transitions
         try:
-            if 'task_message' in locals():
-                task_repo.update_task_status(
-                    task_message.task_id,
-                    TaskStatus.FAILED,
-                    error_message=str(e)
-                )
+            if 'task_message' in locals() and 'task_repo' in locals():
+                logger.debug(f"🔍 Checking current task status before error handling for: {task_message.task_id}")
+                
+                # Get current task status to avoid invalid transitions
+                current_task = task_repo.get_task(task_message.task_id)
+                logger.debug(f"📋 Current task status: {current_task.status if current_task else 'NOT_FOUND'}")
+                
+                # Only mark as failed if not already in a terminal state
+                if current_task and not current_task.status.is_terminal():
+                    logger.debug(f"🔄 Marking non-terminal task as FAILED: {task_message.task_id}")
+                    task_repo.update_task_status(
+                        task_message.task_id,
+                        TaskStatus.FAILED,
+                        additional_updates={'error_details': str(e)}
+                    )
+                    logger.debug(f"✅ Task marked as FAILED successfully")
+                elif current_task and current_task.status.is_terminal():
+                    logger.warning(f"⚠️ Skipping status update - task already in terminal state: {current_task.status}")
+                    logger.warning(f"⚠️ Error occurred after task completion: {str(e)}")
+                    logger.warning(f"⚠️ This suggests an issue in job completion detection or aggregation")
+                else:
+                    logger.error(f"❌ Cannot update status - task not found: {task_message.task_id}")
+                    
         except Exception as update_error:
-            logger.error(f"Failed to update task status: {update_error}")
+            logger.error(f"❌ Failed to safely update task status: {update_error}")
+            logger.debug(f"🔍 Status update error type: {type(update_error).__name__}")
         
         # Re-raise so Azure Functions knows it failed
         raise
@@ -597,6 +681,57 @@ def process_task_queue(msg: func.QueueMessage) -> None:
 def check_poison_queues(req: func.HttpRequest) -> func.HttpResponse:
     """Poison queue monitoring endpoint using HTTP trigger base class."""
     return poison_monitor_trigger.handle_request(req)
+
+
+@app.route(route="admin/database", methods=["GET"])
+def query_database(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Legacy database query endpoint - DEPRECATED.
+    
+    🚨 DEPRECATED: Use new database monitoring endpoints instead:
+        GET /api/db/jobs - Query jobs
+        GET /api/db/tasks - Query tasks  
+        GET /api/db/stats - Database statistics
+        GET /api/db/functions/test - Test functions
+        GET /api/health - Enhanced health with database metrics
+    """
+    import json
+    from datetime import datetime, timezone
+    
+    return func.HttpResponse(
+        body=json.dumps({
+            "deprecated": True,
+            "message": "This endpoint is deprecated. Use new database monitoring endpoints.",
+            "new_endpoints": {
+                "jobs": "/api/db/jobs",
+                "tasks": "/api/db/tasks", 
+                "statistics": "/api/db/stats",
+                "function_tests": "/api/db/functions/test",
+                "enhanced_health": "/api/health"
+            },
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }),
+        status_code=200,
+        mimetype="application/json"
+    )
+
+
+@app.route(route="admin/test", methods=["GET"])
+def test_endpoint(req: func.HttpRequest) -> func.HttpResponse:
+    """Simple test endpoint to verify route registration works."""
+    import json
+    from datetime import datetime
+    
+    return func.HttpResponse(
+        body=json.dumps({
+            "status": "test_endpoint_working",
+            "message": "Route registration is working",
+            "timestamp": datetime.utcnow().isoformat(),
+            "query_params": dict(req.params)
+        }),
+        status_code=200,
+        headers={'Content-Type': 'application/json'}
+    )
 
 
 # Chunk processing now handled in process_task_queue function above
@@ -650,5 +785,61 @@ def check_poison_queues(req: func.HttpRequest) -> func.HttpResponse:
 #             
 #     except Exception as e:
 #         logger.error(f"Error in poison queue timer: {str(e)}")
+
+
+@app.function_name(name="force_create_functions")
+@app.route(route="admin/functions/create", methods=["POST"])
+def force_create_functions(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Force creation of PostgreSQL functions bypassing validation.
+    
+    This endpoint directly creates the required PostgreSQL functions without 
+    checking table status, used when tables exist but function deployment is blocked.
+    """
+    from service_schema_manager import SchemaManagerFactory
+    from datetime import datetime
+    import json
+    
+    try:
+        # Get schema manager
+        schema_manager = SchemaManagerFactory.create_schema_manager()
+        
+        # Force create functions
+        result = schema_manager.force_create_functions()
+        
+        if result['success']:
+            return func.HttpResponse(
+                body=json.dumps({
+                    "status": "success",
+                    "message": result['message'],
+                    "functions_created": result['functions_created'],
+                    "functions_count": result['functions_count'],
+                    "timestamp": datetime.now().isoformat()
+                }),
+                status_code=200,
+                headers={'Content-Type': 'application/json'}
+            )
+        else:
+            return func.HttpResponse(
+                body=json.dumps({
+                    "status": "error",
+                    "error": result['error'],
+                    "functions_created": result.get('functions_created', []),
+                    "timestamp": datetime.now().isoformat()
+                }),
+                status_code=500,
+                headers={'Content-Type': 'application/json'}
+            )
+            
+    except Exception as e:
+        return func.HttpResponse(
+            body=json.dumps({
+                "status": "error",
+                "error": f"Function creation failed: {str(e)}",
+                "timestamp": datetime.now().isoformat()
+            }),
+            status_code=500,
+            headers={'Content-Type': 'application/json'}
+        )
 
 

@@ -223,8 +223,8 @@ class AzureTableStorageAdapter:
         entity['RowKey'] = job.job_id
         
         # Schema fields - direct mapping from Pydantic model
-        entity['jobId'] = job.job_id
-        entity['jobType'] = job.job_type
+        entity['job_id'] = job.job_id
+        entity['job_type'] = job.job_type
         # Debug logging for enum handling
         logger.debug(f"🔍 job.status type: {type(job.status)}, value: {job.status}")
         entity['status'] = job.status if isinstance(job.status, str) else job.status.value  # Handle enum or string
@@ -243,13 +243,13 @@ class AzureTableStorageAdapter:
         
         # Optional fields
         if job.result_data:
-            entity['resultData'] = json.dumps(job.result_data, default=str)
+            entity['result_data'] = json.dumps(job.result_data, default=str)
         if job.error_details:
-            entity['errorDetails'] = job.error_details
+            entity['error_details'] = job.error_details
         
         # Timestamps - ensure timezone awareness
-        entity['createdAt'] = job.created_at.replace(tzinfo=timezone.utc).isoformat()
-        entity['updatedAt'] = job.updated_at.replace(tzinfo=timezone.utc).isoformat()
+        entity['created_at'] = job.created_at.replace(tzinfo=timezone.utc).isoformat()
+        entity['updated_at'] = job.updated_at.replace(tzinfo=timezone.utc).isoformat()
         
         logger.debug(f"🔄 Converted JobRecord to Azure entity: {job.job_id[:16]}...")
         return entity
@@ -267,13 +267,13 @@ class AzureTableStorageAdapter:
         try:
             # Extract data from entity
             job_data = {
-                'job_id': entity['jobId'],
-                'job_type': entity['jobType'],
+                'job_id': entity['job_id'],
+                'job_type': entity['job_type'],
                 'status': entity['status'],
                 'stage': entity['stage'],
-                'total_stages': entity['totalStages'],
-                'created_at': entity['createdAt'],
-                'updated_at': entity['updatedAt']
+                'total_stages': entity['total_stages'],
+                'created_at': entity['created_at'],
+                'updated_at': entity['updated_at']
             }
             
             # Parse JSON fields with error handling
@@ -290,15 +290,15 @@ class AzureTableStorageAdapter:
                 job_data['stage_results'] = {}
             
             # Optional fields
-            if 'resultData' in entity and entity['resultData']:
+            if 'result_data' in entity and entity['result_data']:
                 try:
-                    job_data['result_data'] = json.loads(entity['resultData'])
+                    job_data['result_data'] = json.loads(entity['result_data'])
                 except json.JSONDecodeError:
-                    logger.warning(f"Invalid resultData JSON for job {entity['jobId']}")
+                    logger.warning(f"Invalid result_data JSON for job {entity['jobId']}")
                     job_data['result_data'] = None
             
-            if 'errorDetails' in entity:
-                job_data['error_details'] = entity['errorDetails']
+            if 'error_details' in entity:
+                job_data['error_details'] = entity['error_details']
             
             # Validate and return schema-compliant record
             job_record = SchemaValidator.validate_job_record(job_data, strict=True)
@@ -316,73 +316,73 @@ class AzureTableStorageAdapter:
         
         # Azure Table Storage required fields  
         entity['PartitionKey'] = 'tasks'  # All tasks in same partition
-        entity['RowKey'] = task.taskId
+        entity['RowKey'] = task.task_id
         
         # Schema fields
-        entity['taskId'] = task.taskId
-        entity['parentJobId'] = task.parentJobId
-        entity['taskType'] = task.taskType
+        entity['task_id'] = task.task_id
+        entity['parent_job_id'] = task.parent_job_id
+        entity['task_type'] = task.task_type
         entity['status'] = task.status if isinstance(task.status, str) else task.status.value  # Handle enum or string
         entity['stage'] = task.stage
-        entity['taskIndex'] = task.taskIndex
-        entity['retryCount'] = task.retryCount
+        entity['task_index'] = task.task_index
+        entity['retry_count'] = task.retry_count
         
         # JSON field
         entity['parameters'] = json.dumps(task.parameters, default=str)
         
         # Optional fields
-        if task.resultData:
-            entity['resultData'] = json.dumps(task.resultData, default=str)
-        if task.errorDetails:
-            entity['errorDetails'] = task.errorDetails
+        if task.result_data:
+            entity['result_data'] = json.dumps(task.result_data, default=str)
+        if task.error_details:
+            entity['error_details'] = task.error_details
         if task.heartbeat:
             entity['heartbeat'] = task.heartbeat.replace(tzinfo=timezone.utc).isoformat()
         
         # Timestamps
-        entity['createdAt'] = task.createdAt.replace(tzinfo=timezone.utc).isoformat()
-        entity['updatedAt'] = task.updatedAt.replace(tzinfo=timezone.utc).isoformat()
+        entity['created_at'] = task.created_at.replace(tzinfo=timezone.utc).isoformat()
+        entity['updated_at'] = task.updated_at.replace(tzinfo=timezone.utc).isoformat()
         
-        logger.debug(f"🔄 Converted TaskRecord to Azure entity: {task.taskId}")
+        logger.debug(f"🔄 Converted TaskRecord to Azure entity: {task.task_id}")
         return entity
     
     def _entity_to_task_record(self, entity: TableEntity) -> TaskRecord:
         """Convert Azure Table entity to TaskRecord with validation"""
         try:
             task_data = {
-                'taskId': entity['taskId'],
-                'parentJobId': entity['parentJobId'], 
-                'taskType': entity['taskType'],
+                'task_id': entity['task_id'],
+                'parent_job_id': entity['parent_job_id'], 
+                'task_type': entity['task_type'],
                 'status': entity['status'],
                 'stage': entity['stage'],
-                'taskIndex': entity['taskIndex'],
-                'retryCount': entity.get('retryCount', 0),
-                'createdAt': entity['createdAt'],
-                'updatedAt': entity['updatedAt']
+                'task_index': entity['task_index'],
+                'retry_count': entity.get('retry_count', 0),
+                'created_at': entity['created_at'],
+                'updated_at': entity['updated_at']
             }
             
             # Parse JSON parameters
             try:
                 task_data['parameters'] = json.loads(entity.get('parameters', '{}'))
             except json.JSONDecodeError:
-                logger.warning(f"Invalid parameters JSON for task {entity['taskId']}")
+                logger.warning(f"Invalid parameters JSON for task {entity['task_id']}")
                 task_data['parameters'] = {}
             
             # Optional fields
-            if 'resultData' in entity and entity['resultData']:
+            if 'result_data' in entity and entity['result_data']:
                 try:
-                    task_data['resultData'] = json.loads(entity['resultData'])
+                    task_data['result_data'] = json.loads(entity['result_data'])
                 except json.JSONDecodeError:
-                    logger.warning(f"Invalid resultData JSON for task {entity['taskId']}")
+                    logger.warning(f"Invalid result_data JSON for task {entity['task_id']}")
             
-            if 'errorDetails' in entity:
-                task_data['errorDetails'] = entity['errorDetails']
+            if 'error_details' in entity:
+                task_data['error_details'] = entity['error_details']
             
             if 'heartbeat' in entity and entity['heartbeat']:
                 task_data['heartbeat'] = entity['heartbeat']
             
             # Validate and return
             task_record = SchemaValidator.validate_task_record(task_data, strict=True)
-            logger.debug(f"🔄 Converted Azure entity to TaskRecord: {task_record.taskId}")
+            logger.debug(f"🔄 Converted Azure entity to TaskRecord: {task_record.task_id}")
             return task_record
             
         except Exception as e:
@@ -462,7 +462,7 @@ class AzureTableStorageAdapter:
             # Merge updates with current data
             current_data = current_job.dict()
             current_data.update(updates)
-            current_data['updatedAt'] = datetime.utcnow()
+            current_data['updated_at'] = datetime.utcnow()
             
             # Validate updated data
             updated_job = SchemaValidator.validate_job_record(current_data, strict=True)
@@ -522,8 +522,8 @@ class AzureTableStorageAdapter:
             
             # Check if task already exists (idempotent)
             try:
-                existing = table_client.get_entity('tasks', task.taskId)
-                logger.info(f"📋 Task already exists: {task.taskId}")
+                existing = table_client.get_entity('tasks', task.task_id)
+                logger.info(f"📋 Task already exists: {task.task_id}")
                 return False
             except ResourceNotFoundError:
                 pass
@@ -532,11 +532,11 @@ class AzureTableStorageAdapter:
             entity = self._task_record_to_entity(task)
             table_client.create_entity(entity)
             
-            logger.info(f"✅ Task created: {task.taskId} parent={task.parentJobId[:16]}... status={task.status}")
+            logger.info(f"✅ Task created: {task.task_id} parent={task.parent_job_id[:16]}... status={task.status}")
             return True
             
         except Exception as e:
-            logger.error(f"❌ Failed to create task {task.taskId}: {e}")
+            logger.error(f"❌ Failed to create task {task.task_id}: {e}")
             raise
     
     def get_task(self, task_id: str) -> Optional[TaskRecord]:
@@ -570,7 +570,7 @@ class AzureTableStorageAdapter:
             # Merge updates
             current_data = current_task.dict()
             current_data.update(updates)
-            current_data['updatedAt'] = datetime.utcnow()
+            current_data['updated_at'] = datetime.utcnow()
             
             # Validate
             updated_task = SchemaValidator.validate_task_record(current_data, strict=True)
@@ -592,7 +592,7 @@ class AzureTableStorageAdapter:
             table_client = self.table_service.get_table_client(self.tasks_table_name)
             
             # Query tasks for specific job
-            query_filter = f"PartitionKey eq 'tasks' and parentJobId eq '{job_id}'"
+            query_filter = f"PartitionKey eq 'tasks' and parent_job_id eq '{job_id}'"
             entities = table_client.query_entities(query_filter)
             
             # Convert with validation
@@ -619,8 +619,8 @@ class AzureTableStorageAdapter:
             
             # Query with status filter
             status_value = status if isinstance(status, str) else status.value
-            query_filter = f"PartitionKey eq 'tasks' and parentJobId eq '{job_id}' and status eq '{status_value}'"
-            entities = table_client.query_entities(query_filter, select=['taskId'])
+            query_filter = f"PartitionKey eq 'tasks' and parent_job_id eq '{job_id}' and status eq '{status_value}'"
+            entities = table_client.query_entities(query_filter, select=['task_id'])
             
             # Count entities
             count = sum(1 for _ in entities)
@@ -1077,9 +1077,9 @@ class PostgresAdapter:
             with self._get_connection() as conn:
                 with conn.cursor() as cursor:
                     # Check if task already exists (idempotent)
-                    cursor.execute("SELECT task_id FROM tasks WHERE task_id = %s", (task.taskId,))
+                    cursor.execute("SELECT task_id FROM tasks WHERE task_id = %s", (task.task_id,))
                     if cursor.fetchone():
-                        logger.info(f"📋 Task already exists: {task.taskId} (idempotent)")
+                        logger.info(f"📋 Task already exists: {task.task_id} (idempotent)")
                         return False
                     
                     # Insert new task
@@ -1092,27 +1092,27 @@ class PostgresAdapter:
                             %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
                         )
                     """, (
-                        task.taskId,
-                        task.parentJobId,
-                        task.taskType,
+                        task.task_id,
+                        task.parent_job_id,
+                        task.task_type,
                         convert_task_status_to_postgres(task.status),
                         task.stage,
-                        task.taskIndex,
+                        task.task_index,
                         json.dumps(task.parameters),
-                        json.dumps(task.resultData) if task.resultData else None,
-                        task.errorDetails,
-                        task.retryCount,
+                        json.dumps(task.result_data) if task.result_data else None,
+                        task.error_details,
+                        task.retry_count,
                         task.heartbeat,
-                        task.createdAt,
-                        task.updatedAt
+                        task.created_at,
+                        task.updated_at
                     ))
                     
                     conn.commit()
-                    logger.info(f"✅ Task created in PostgreSQL: {task.taskId} parent={task.parentJobId[:16]}...")
+                    logger.info(f"✅ Task created in PostgreSQL: {task.task_id} parent={task.parent_job_id[:16]}...")
                     return True
                     
         except Exception as e:
-            logger.error(f"❌ Failed to create task {task.taskId}: {e}")
+            logger.error(f"❌ Failed to create task {task.task_id}: {e}")
             raise
     
     def get_task(self, task_id: str) -> Optional[TaskRecord]:
@@ -1144,19 +1144,19 @@ class PostgresAdapter:
                     
                     # Convert row to TaskRecord
                     task_data = {
-                        'taskId': row[0],
-                        'parentJobId': row[1],
-                        'taskType': row[2],
+                        'task_id': row[0],
+                        'parent_job_id': row[1],
+                        'task_type': row[2],
                         'status': convert_task_status_from_postgres(row[3]),  # Robust enum conversion
                         'stage': row[4],
-                        'taskIndex': row[5],
+                        'task_index': row[5],
                         'parameters': row[6] if row[6] else {},
-                        'resultData': row[7] if row[7] else None,
-                        'errorDetails': row[8],
-                        'retryCount': row[9],
+                        'result_data': row[7] if row[7] else None,
+                        'error_details': row[8],
+                        'retry_count': row[9],
                         'heartbeat': row[10],
-                        'createdAt': row[11],
-                        'updatedAt': row[12]
+                        'created_at': row[11],
+                        'updated_at': row[12]
                     }
                     
                     # Validate and return
@@ -1194,7 +1194,7 @@ class PostgresAdapter:
             # Merge updates with current data
             current_data = current_task.dict()
             current_data.update(updates)
-            current_data['updatedAt'] = datetime.utcnow()
+            current_data['updated_at'] = datetime.utcnow()
             
             # Validate updated data
             updated_task = SchemaValidator.validate_task_record(current_data, strict=True)
@@ -1210,11 +1210,11 @@ class PostgresAdapter:
                     """, (
                         convert_task_status_to_postgres(updated_task.status),
                         json.dumps(updated_task.parameters),
-                        json.dumps(updated_task.resultData) if updated_task.resultData else None,
-                        updated_task.errorDetails,
-                        updated_task.retryCount,
+                        json.dumps(updated_task.result_data) if updated_task.result_data else None,
+                        updated_task.error_details,
+                        updated_task.retry_count,
                         updated_task.heartbeat,
-                        updated_task.updatedAt,
+                        updated_task.updated_at,
                         task_id
                     ))
                     
@@ -1254,19 +1254,19 @@ class PostgresAdapter:
                     for row in cursor.fetchall():
                         try:
                             task_data = {
-                                'taskId': row[0],
-                                'parentJobId': row[1], 
-                                'taskType': row[2],
+                                'task_id': row[0],
+                                'parent_job_id': row[1], 
+                                'task_type': row[2],
                                 'status': convert_task_status_from_postgres(row[3]),  # Robust enum conversion
                                 'stage': row[4],
-                                'taskIndex': row[5],
+                                'task_index': row[5],
                                 'parameters': row[6] if row[6] else {},
-                                'resultData': row[7] if row[7] else None,
-                                'errorDetails': row[8],
-                                'retryCount': row[9],
+                                'result_data': row[7] if row[7] else None,
+                                'error_details': row[8],
+                                'retry_count': row[9],
                                 'heartbeat': row[10],
-                                'createdAt': row[11],
-                                'updatedAt': row[12]
+                                'created_at': row[11],
+                                'updated_at': row[12]
                             }
                             
                             task_record = SchemaValidator.validate_task_record(task_data, strict=True)
@@ -1424,7 +1424,10 @@ class PostgresAdapter:
         Returns:
             Dict containing:
                 - job_complete: Boolean indicating if job is complete
-                - final_stage: Current/final stage number
+                - final_stage: Current/final stage number  
+                - total_tasks: Total number of tasks in job
+                - completed_tasks: Number of completed tasks
+                - task_results: JSONB array of task result data
                 
         Raises:
             Exception: If check operation fails
@@ -1436,7 +1439,7 @@ class PostgresAdapter:
                 with conn.cursor() as cursor:
                     # Call PostgreSQL stored procedure for completion check
                     cursor.execute("""
-                        SELECT job_complete, final_stage
+                        SELECT job_complete, final_stage, total_tasks, completed_tasks, task_results
                         FROM check_job_completion(%s)
                     """, (job_id,))
                     
@@ -1446,7 +1449,10 @@ class PostgresAdapter:
                     
                     completion_status = {
                         'job_complete': result[0],
-                        'final_stage': result[1]
+                        'final_stage': result[1],
+                        'total_tasks': result[2],
+                        'completed_tasks': result[3],
+                        'task_results': result[4]
                     }
                     
                     logger.debug(f"🔍 Job {job_id[:16]}... completion status: {completion_status}")

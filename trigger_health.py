@@ -263,12 +263,14 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
         return self.check_component_health("storage_tables", check_tables)
     
     def _check_database(self) -> Dict[str, Any]:
-        """Check PostgreSQL database health (optional)."""
+        """Enhanced PostgreSQL database health check with query metrics."""
         def check_pg():
             import psycopg
+            import time
             from config import get_config
             
             config = get_config()
+            start_time = time.time()
             
             # Build connection string
             # NOTE: Using config.postgis_password here (vs direct env var used by PostgreSQL adapter)
@@ -283,6 +285,8 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
             
             with psycopg.connect(conn_str) as conn:
                 with conn.cursor() as cur:
+                    # Track connection time
+                    connection_time_ms = round((time.time() - start_time) * 1000, 2)
                     # Check PostgreSQL version
                     cur.execute("SELECT version()")
                     pg_version = cur.fetchone()[0]
@@ -362,14 +366,207 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                                         
                         except Exception as schema_error:
                             # Fallback error handling
-                            table_management_results['schema_manager_error'] = f"error: {str(schema_error)[:100]}"
+                            table_management_results['schema_manager_error'] = f"error: {str(schema_error)}"
                             app_tables_status['jobs'] = "error"
                             app_tables_status['tasks'] = "error"
+                    
+                    # DETAILED SCHEMA INSPECTION - Added for debugging function signature mismatches
+                    detailed_schema_info = {}
+                    try:
+                        # Inspect actual table columns in the database
+                        for table_name in ['jobs', 'tasks']:
+                            cur.execute("""
+                                SELECT column_name, data_type, is_nullable, column_default
+                                FROM information_schema.columns 
+                                WHERE table_schema = %s AND table_name = %s
+                                ORDER BY ordinal_position
+                            """, (config.app_schema, table_name))
+                            
+                            columns = cur.fetchall()
+                            detailed_schema_info[f"{table_name}_columns"] = [
+                                {
+                                    "column_name": col[0],
+                                    "data_type": col[1], 
+                                    "is_nullable": col[2],
+                                    "column_default": col[3]
+                                } for col in columns
+                            ]
+                        
+                        # Inspect PostgreSQL function signatures
+                        cur.execute("""
+                            SELECT 
+                                routine_name,
+                                data_type as return_type,
+                                routine_definition
+                            FROM information_schema.routines 
+                            WHERE routine_schema = %s 
+                            AND routine_name IN ('check_job_completion', 'complete_task_and_check_stage', 'advance_job_stage')
+                            ORDER BY routine_name
+                        """, (config.app_schema,))
+                        
+                        functions = cur.fetchall()
+                        detailed_schema_info['postgresql_functions'] = [
+                            {
+                                "function_name": func[0],
+                                "return_type": func[1],
+                                "definition_snippet": func[2][:200] + "..." if func[2] and len(func[2]) > 200 else func[2]
+                            } for func in functions
+                        ]
+                        
+                        # Test the problematic function call directly
+                        try:
+                            cur.execute(f"SELECT job_complete, final_stage, total_tasks, completed_tasks, task_results FROM {config.app_schema}.check_job_completion('test_job_id')")
+                            detailed_schema_info['function_test'] = "SUCCESS - Function signature matches query"
+                        except Exception as func_error:
+                            detailed_schema_info['function_test'] = f"ERROR: {str(func_error)}"
+                            detailed_schema_info['function_error_type'] = type(func_error).__name__
+                            
+                    except Exception as inspect_error:
+                        detailed_schema_info['inspection_error'] = f"Failed to inspect schema: {str(inspect_error)}"
+                    
+                    # NEW: Enhanced database query metrics for monitoring
+                    query_metrics = {}
+                    job_metrics = {}
+                    task_metrics = {}
+                    function_metrics = {}
+                    
+                    if app_schema_exists and app_tables_status.get('jobs', False) and app_tables_status.get('tasks', False):
+                        try:
+                            # Job counts and status breakdown (last 24h)
+                            query_start = time.time()
+                            cur.execute(f"""
+                                SELECT 
+                                    status::text,
+                                    COUNT(*) as count
+                                FROM {config.app_schema}.jobs 
+                                WHERE created_at >= NOW() - INTERVAL '24 hours'
+                                GROUP BY status::text
+                            """)
+                            job_status_counts = dict(cur.fetchall())
+                            
+                            # Total jobs in last 24h
+                            cur.execute(f"""
+                                SELECT COUNT(*) 
+                                FROM {config.app_schema}.jobs 
+                                WHERE created_at >= NOW() - INTERVAL '24 hours'
+                            """)
+                            total_jobs_24h = cur.fetchone()[0]
+                            
+                            job_query_time = round((time.time() - query_start) * 1000, 2)
+                            
+                            job_metrics = {
+                                "total_last_24h": total_jobs_24h,
+                                "status_breakdown": {
+                                    "queued": job_status_counts.get('queued', 0),
+                                    "processing": job_status_counts.get('processing', 0),
+                                    "completed": job_status_counts.get('completed', 0),
+                                    "failed": job_status_counts.get('failed', 0),
+                                    "completed_with_errors": job_status_counts.get('completed_with_errors', 0)
+                                },
+                                "query_time_ms": job_query_time
+                            }
+                            
+                            # Task counts and status breakdown (last 24h)
+                            query_start = time.time()
+                            cur.execute(f"""
+                                SELECT 
+                                    status::text,
+                                    COUNT(*) as count
+                                FROM {config.app_schema}.tasks 
+                                WHERE created_at >= NOW() - INTERVAL '24 hours'
+                                GROUP BY status::text
+                            """)
+                            task_status_counts = dict(cur.fetchall())
+                            
+                            # Total tasks in last 24h
+                            cur.execute(f"""
+                                SELECT COUNT(*) 
+                                FROM {config.app_schema}.tasks 
+                                WHERE created_at >= NOW() - INTERVAL '24 hours'
+                            """)
+                            total_tasks_24h = cur.fetchone()[0]
+                            
+                            task_query_time = round((time.time() - query_start) * 1000, 2)
+                            
+                            task_metrics = {
+                                "total_last_24h": total_tasks_24h,
+                                "status_breakdown": {
+                                    "queued": task_status_counts.get('queued', 0),
+                                    "processing": task_status_counts.get('processing', 0),
+                                    "completed": task_status_counts.get('completed', 0),
+                                    "failed": task_status_counts.get('failed', 0)
+                                },
+                                "query_time_ms": task_query_time
+                            }
+                            
+                            # Test PostgreSQL functions with performance timing
+                            function_tests = []
+                            
+                            for func_name in ['complete_task_and_check_stage', 'advance_job_stage', 'check_job_completion']:
+                                try:
+                                    func_start = time.time()
+                                    # Set search_path and execute function in separate transactions
+                                    if func_name == 'complete_task_and_check_stage':
+                                        cur.execute(f"SET search_path TO {config.app_schema}, public")
+                                        cur.execute(f"SELECT task_updated, is_last_task_in_stage, job_id, stage_number, remaining_tasks FROM {config.app_schema}.complete_task_and_check_stage('test_nonexistent_task')")
+                                    elif func_name == 'advance_job_stage':
+                                        cur.execute(f"SET search_path TO {config.app_schema}, public") 
+                                        cur.execute(f"SELECT job_updated, new_stage, is_final_stage FROM {config.app_schema}.advance_job_stage('test_nonexistent_job', 1)")
+                                    elif func_name == 'check_job_completion':
+                                        cur.execute(f"SET search_path TO {config.app_schema}, public")
+                                        cur.execute(f"SELECT job_complete, final_stage, total_tasks, completed_tasks, task_results FROM {config.app_schema}.check_job_completion('test_nonexistent_job')")
+                                    
+                                    result = cur.fetchone()
+                                    func_time = round((time.time() - func_start) * 1000, 2)
+                                    function_tests.append({
+                                        "function_name": func_name,
+                                        "status": "available",
+                                        "execution_time_ms": func_time,
+                                        "test_result": "function_callable"
+                                    })
+                                except Exception as func_error:
+                                    function_tests.append({
+                                        "function_name": func_name,
+                                        "status": "error",
+                                        "error": str(func_error)[:200],
+                                        "execution_time_ms": 0
+                                    })
+                            
+                            function_metrics = {
+                                "functions_available": [f["function_name"] for f in function_tests if f["status"] == "available"],
+                                "function_tests": function_tests,
+                                "avg_function_time_ms": round(
+                                    sum(f["execution_time_ms"] for f in function_tests if f["status"] == "available") / 
+                                    max(len([f for f in function_tests if f["status"] == "available"]), 1), 2
+                                )
+                            }
+                            
+                            # Overall query performance metrics
+                            query_metrics = {
+                                "connection_time_ms": connection_time_ms,
+                                "avg_query_time_ms": round((job_query_time + task_query_time) / 2, 2),
+                                "total_queries_executed": 4 + len(function_tests),
+                                "all_queries_successful": True
+                            }
+                            
+                        except Exception as metrics_error:
+                            query_metrics = {
+                                "connection_time_ms": connection_time_ms,
+                                "metrics_error": f"Failed to collect database metrics: {str(metrics_error)}",
+                                "all_queries_successful": False
+                            }
+                    else:
+                        query_metrics = {
+                            "connection_time_ms": connection_time_ms,
+                            "metrics_status": "tables_not_ready",
+                            "all_queries_successful": False
+                        }
                     
                     return {
                         "postgresql_version": pg_version.split()[0],
                         "postgis_version": postgis_version,
                         "connection": "successful",
+                        "connection_time_ms": connection_time_ms,
                         "schema_health": {
                             "app_schema_name": config.app_schema,
                             "app_schema_exists": app_schema_exists,
@@ -385,7 +582,12 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                         "stac_data": {
                             "items_count": stac_count,
                             "schema_accessible": postgis_schema_exists
-                        }
+                        },
+                        "detailed_schema_inspection": detailed_schema_info,
+                        "jobs_last_24h": job_metrics,
+                        "tasks_last_24h": task_metrics,
+                        "function_availability": function_metrics,
+                        "query_performance": query_metrics
                     }
         
         return self.check_component_health("database", check_pg)

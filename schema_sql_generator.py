@@ -122,32 +122,47 @@ class PydanticToSQL:
         # Default to JSONB for complex types
         return "JSONB"
         
-    def generate_enum(self, enum_name: str, enum_class: Type[Enum]) -> sql.Composed:
+    def generate_enum(self, enum_name: str, enum_class: Type[Enum]) -> list:
         """
         Generate PostgreSQL ENUM using psycopg.sql composition.
         
-        NO STRING CONCATENATION - Uses proper SQL composition for safety.
+        For PostgreSQL 14.x compatibility:
+        - First DROP TYPE IF EXISTS
+        - Then CREATE TYPE
+        This ensures clean deployment without DO blocks.
         
         Args:
             enum_name: Name for the ENUM type
             enum_class: Python Enum class
             
         Returns:
-            Composed SQL object for direct execution
+            List of composed SQL objects for direct execution
         """
         values_list = [member.value for member in enum_class]
         
         self.logger.debug(f"🔧 Generating ENUM {enum_name} with values: {values_list}")
         
-        # Build properly composed SQL - no DO blocks, no string concatenation
-        composed = sql.SQL("CREATE TYPE IF NOT EXISTS {}.{} AS ENUM ({})").format(
+        # PostgreSQL 14 doesn't support IF NOT EXISTS for CREATE TYPE
+        # Solution: DROP IF EXISTS + CREATE (atomic within transaction)
+        statements = []
+        
+        # First drop if exists
+        drop_stmt = sql.SQL("DROP TYPE IF EXISTS {}.{} CASCADE").format(
+            sql.Identifier(self.schema_name),
+            sql.Identifier(enum_name)
+        )
+        statements.append(drop_stmt)
+        
+        # Then create
+        create_stmt = sql.SQL("CREATE TYPE {}.{} AS ENUM ({})").format(
             sql.Identifier(self.schema_name),
             sql.Identifier(enum_name),
             sql.SQL(', ').join(sql.Literal(v) for v in values_list)
         )
+        statements.append(create_stmt)
         
-        self.logger.debug(f"✅ ENUM {enum_name} composed successfully")
-        return composed
+        self.logger.debug(f"✅ ENUM {enum_name} composed successfully (2 statements)")
+        return statements
         
     def generate_table_composed(self, model: Type[BaseModel], table_name: str) -> sql.Composed:
         """
@@ -212,7 +227,7 @@ class PydanticToSQL:
                     column_parts.extend([sql.SQL(" DEFAULT "), sql.Literal(field_info.default)])
             elif hasattr(field_info, 'default_factory') and field_info.default_factory is not None:
                 if field_name in ["parameters", "stage_results"]:
-                    column_parts.extend([sql.SQL(" DEFAULT "), sql.Literal({})])
+                    column_parts.extend([sql.SQL(" DEFAULT "), sql.SQL("'{}'")])  # JSONB empty object
                 elif field_name in ["created_at", "updated_at"]:
                     column_parts.extend([sql.SQL(" DEFAULT NOW()")])
             
@@ -222,9 +237,9 @@ class PydanticToSQL:
             elif field_name == "updated_at" and " DEFAULT" not in str(sql.SQL("").join(column_parts)):
                 column_parts.extend([sql.SQL(" DEFAULT NOW()")])
             elif field_name == "parameters" and " DEFAULT" not in str(sql.SQL("").join(column_parts)):
-                column_parts.extend([sql.SQL(" DEFAULT "), sql.Literal({})])
+                column_parts.extend([sql.SQL(" DEFAULT '{}'")])  # JSONB empty object
             elif field_name == "stage_results" and " DEFAULT" not in str(sql.SQL("").join(column_parts)):
-                column_parts.extend([sql.SQL(" DEFAULT "), sql.Literal({})])
+                column_parts.extend([sql.SQL(" DEFAULT '{}'")])  # JSONB empty object
             
             columns.append(sql.SQL("").join(column_parts))
         
@@ -885,9 +900,9 @@ CREATE TRIGGER {table}_update_updated_at
             )
         )
         
-        # Generate ENUMs using composed SQL
-        composed.append(self.generate_enum("job_status", JobStatus))
-        composed.append(self.generate_enum("task_status", TaskStatus))
+        # Generate ENUMs using composed SQL (returns list of statements)
+        composed.extend(self.generate_enum("job_status", JobStatus))
+        composed.extend(self.generate_enum("task_status", TaskStatus))
         
         # For tables, indexes, functions, and triggers, we still need string format
         # because they are complex multi-line statements

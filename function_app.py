@@ -185,6 +185,10 @@ def compare_schema(req: func.HttpRequest) -> func.HttpResponse:
 @app.route(route="schema/deploy-pydantic", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
 def deploy_pydantic_schema(req: func.HttpRequest) -> func.HttpResponse:
     """Deploy Pydantic-generated schema directly: POST /api/schema/deploy-pydantic?confirm=yes"""
+    # Force module reload to ensure latest code is used
+    import importlib
+    import trigger_schema_pydantic_deploy
+    importlib.reload(trigger_schema_pydantic_deploy)
     from trigger_schema_pydantic_deploy import pydantic_deploy_trigger
     return pydantic_deploy_trigger.handle_request(req)
 

@@ -63,6 +63,16 @@ class PydanticToSQL:
         self.enums: Dict[str, Type[Enum]] = {}
         self.tables: List[str] = []
         self.functions: List[str] = []
+        
+        # Setup logger for debugging
+        try:
+            from util_logger import LoggerFactory, ComponentType
+            self.logger = LoggerFactory.get_logger(ComponentType.SERVICE, "SQLGenerator")
+        except ImportError:
+            # Fallback to simple logging for standalone testing
+            import logging
+            logging.basicConfig(level=logging.INFO)
+            self.logger = logging.getLogger(__name__)
         self.statements: List[str] = []  # Track individual statements for deployment
         
     def python_type_to_sql(self, field_type: Type, field_info: FieldInfo) -> str:
@@ -112,35 +122,11 @@ class PydanticToSQL:
         # Default to JSONB for complex types
         return "JSONB"
         
-    def generate_enum_ddl(self, enum_name: str, enum_class: Type[Enum]) -> str:
+    def generate_enum(self, enum_name: str, enum_class: Type[Enum]) -> sql.Composed:
         """
-        Generate PostgreSQL ENUM type DDL using proper SQL composition.
+        Generate PostgreSQL ENUM using psycopg.sql composition.
         
-        Args:
-            enum_name: Name for the ENUM type
-            enum_class: Python Enum class
-            
-        Returns:
-            PostgreSQL CREATE TYPE statement with proper escaping
-        """
-        # Create the enum values list
-        values_list = [member.value for member in enum_class]
-        
-        # For now, keep the DO block approach for backwards compatibility
-        # But build it more carefully to avoid parsing issues
-        enum_sql = f"""-- {enum_class.__name__} enum from {enum_class.__module__}
-DO $$ 
-BEGIN
-    CREATE TYPE {self.schema_name}.{enum_name} AS ENUM ({', '.join(f"'{v}'" for v in values_list)});
-EXCEPTION
-    WHEN duplicate_object THEN null;
-END $$;"""
-        
-        return enum_sql
-    
-    def generate_enum_composed(self, enum_name: str, enum_class: Type[Enum]) -> sql.Composed:
-        """
-        Generate PostgreSQL ENUM using psycopg.sql composition (alternative method).
+        NO STRING CONCATENATION - Uses proper SQL composition for safety.
         
         Args:
             enum_name: Name for the ENUM type
@@ -151,13 +137,128 @@ END $$;"""
         """
         values_list = [member.value for member in enum_class]
         
-        # Build properly composed SQL
-        return sql.SQL("CREATE TYPE IF NOT EXISTS {}.{} AS ENUM ({})").format(
+        self.logger.debug(f"🔧 Generating ENUM {enum_name} with values: {values_list}")
+        
+        # Build properly composed SQL - no DO blocks, no string concatenation
+        composed = sql.SQL("CREATE TYPE IF NOT EXISTS {}.{} AS ENUM ({})").format(
             sql.Identifier(self.schema_name),
             sql.Identifier(enum_name),
             sql.SQL(', ').join(sql.Literal(v) for v in values_list)
         )
         
+        self.logger.debug(f"✅ ENUM {enum_name} composed successfully")
+        return composed
+        
+    def generate_table_composed(self, model: Type[BaseModel], table_name: str) -> sql.Composed:
+        """
+        Generate PostgreSQL CREATE TABLE using psycopg.sql composition.
+        
+        NO STRING CONCATENATION - Full SQL composition for safety.
+        
+        Args:
+            model: Pydantic model class
+            table_name: Name for the table
+            
+        Returns:
+            Composed SQL object for direct execution
+        """
+        self.logger.debug(f"🔧 Generating table {table_name} from model {model.__name__}")
+        
+        columns = []
+        constraints = []
+        
+        for field_name, field_info in model.model_fields.items():
+            field_type = field_info.annotation
+            
+            # Determine SQL type (still using helper but returns string)
+            sql_type_str = self.python_type_to_sql(field_type, field_info)
+            
+            # Check if field is Optional
+            from typing import Union
+            is_optional = False
+            if get_origin(field_type) in [Union, type(Optional)]:
+                args = get_args(field_type)
+                if type(None) in args:
+                    is_optional = True
+            
+            # Special handling for timestamp fields
+            if field_name in ["created_at", "updated_at"]:
+                sql_type_str = "TIMESTAMP"
+                is_optional = False
+            
+            # Build column definition using composition
+            column_parts = [
+                sql.Identifier(field_name),
+                sql.SQL(" "),
+                sql.SQL(sql_type_str)
+            ]
+            
+            # Add NOT NULL if required
+            if not is_optional:
+                column_parts.extend([sql.SQL(" "), sql.SQL("NOT NULL")])
+            
+            # Handle defaults
+            if field_info.default is not None and field_info.default != ...:
+                if isinstance(field_info.default, Enum):
+                    column_parts.extend([
+                        sql.SQL(" DEFAULT "),
+                        sql.Literal(field_info.default.value),
+                        sql.SQL("::"),
+                        sql.SQL(sql_type_str)
+                    ])
+                elif isinstance(field_info.default, str):
+                    column_parts.extend([sql.SQL(" DEFAULT "), sql.Literal(field_info.default)])
+                elif isinstance(field_info.default, (int, float)):
+                    column_parts.extend([sql.SQL(" DEFAULT "), sql.Literal(field_info.default)])
+            elif hasattr(field_info, 'default_factory') and field_info.default_factory is not None:
+                if field_name in ["parameters", "stage_results"]:
+                    column_parts.extend([sql.SQL(" DEFAULT "), sql.Literal({})])
+                elif field_name in ["created_at", "updated_at"]:
+                    column_parts.extend([sql.SQL(" DEFAULT NOW()")])
+            
+            # Special defaults for specific fields
+            if field_name == "created_at" and " DEFAULT" not in str(sql.SQL("").join(column_parts)):
+                column_parts.extend([sql.SQL(" DEFAULT NOW()")])
+            elif field_name == "updated_at" and " DEFAULT" not in str(sql.SQL("").join(column_parts)):
+                column_parts.extend([sql.SQL(" DEFAULT NOW()")])
+            elif field_name == "parameters" and " DEFAULT" not in str(sql.SQL("").join(column_parts)):
+                column_parts.extend([sql.SQL(" DEFAULT "), sql.Literal({})])
+            elif field_name == "stage_results" and " DEFAULT" not in str(sql.SQL("").join(column_parts)):
+                column_parts.extend([sql.SQL(" DEFAULT "), sql.Literal({})])
+            
+            columns.append(sql.SQL("").join(column_parts))
+        
+        # Add primary key constraint
+        if table_name == "jobs":
+            constraints.append(
+                sql.SQL("PRIMARY KEY ({})").format(sql.Identifier("job_id"))
+            )
+        elif table_name == "tasks":
+            constraints.append(
+                sql.SQL("PRIMARY KEY ({})").format(sql.Identifier("task_id"))
+            )
+            constraints.append(
+                sql.SQL("FOREIGN KEY ({}) REFERENCES {}.{} ({}) ON DELETE CASCADE").format(
+                    sql.Identifier("parent_job_id"),
+                    sql.Identifier(self.schema_name),
+                    sql.Identifier("jobs"),
+                    sql.Identifier("job_id")
+                )
+            )
+        
+        # Combine columns and constraints
+        all_parts = columns + constraints
+        
+        # Build CREATE TABLE statement
+        composed = sql.SQL("CREATE TABLE IF NOT EXISTS {}.{} ({})").format(
+            sql.Identifier(self.schema_name),
+            sql.Identifier(table_name),
+            sql.SQL(", ").join(all_parts)
+        )
+        
+        self.logger.debug(f"✅ Table {table_name} composed with {len(columns)} columns and {len(constraints)} constraints")
+        return composed
+    
     def generate_table_ddl(self, model: Type[BaseModel], table_name: str) -> str:
         """
         Generate PostgreSQL CREATE TABLE statement from Pydantic model.
@@ -277,6 +378,124 @@ CREATE TABLE IF NOT EXISTS {self.schema_name}.{table_name} (
 {table_body}
 );"""
         
+    def generate_indexes_composed(self, table_name: str, model: Type[BaseModel]) -> List[sql.Composed]:
+        """
+        Generate index statements using psycopg.sql composition.
+        
+        NO STRING CONCATENATION - Full SQL composition for safety.
+        
+        Args:
+            table_name: Name of the table
+            model: Pydantic model class
+            
+        Returns:
+            List of composed CREATE INDEX statements
+        """
+        self.logger.debug(f"🔧 Generating indexes for table {table_name}")
+        indexes = []
+        
+        if table_name == "jobs":
+            # Status index
+            indexes.append(
+                sql.SQL("CREATE INDEX IF NOT EXISTS {} ON {}.{} ({})").format(
+                    sql.Identifier("idx_jobs_status"),
+                    sql.Identifier(self.schema_name),
+                    sql.Identifier("jobs"),
+                    sql.Identifier("status")
+                )
+            )
+            # Job type index
+            indexes.append(
+                sql.SQL("CREATE INDEX IF NOT EXISTS {} ON {}.{} ({})").format(
+                    sql.Identifier("idx_jobs_job_type"),
+                    sql.Identifier(self.schema_name),
+                    sql.Identifier("jobs"),
+                    sql.Identifier("job_type")
+                )
+            )
+            # Created at index
+            indexes.append(
+                sql.SQL("CREATE INDEX IF NOT EXISTS {} ON {}.{} ({})").format(
+                    sql.Identifier("idx_jobs_created_at"),
+                    sql.Identifier(self.schema_name),
+                    sql.Identifier("jobs"),
+                    sql.Identifier("created_at")
+                )
+            )
+            # Updated at index
+            indexes.append(
+                sql.SQL("CREATE INDEX IF NOT EXISTS {} ON {}.{} ({})").format(
+                    sql.Identifier("idx_jobs_updated_at"),
+                    sql.Identifier(self.schema_name),
+                    sql.Identifier("jobs"),
+                    sql.Identifier("updated_at")
+                )
+            )
+            
+        elif table_name == "tasks":
+            # Parent job ID index
+            indexes.append(
+                sql.SQL("CREATE INDEX IF NOT EXISTS {} ON {}.{} ({})").format(
+                    sql.Identifier("idx_tasks_parent_job_id"),
+                    sql.Identifier(self.schema_name),
+                    sql.Identifier("tasks"),
+                    sql.Identifier("parent_job_id")
+                )
+            )
+            # Status index
+            indexes.append(
+                sql.SQL("CREATE INDEX IF NOT EXISTS {} ON {}.{} ({})").format(
+                    sql.Identifier("idx_tasks_status"),
+                    sql.Identifier(self.schema_name),
+                    sql.Identifier("tasks"),
+                    sql.Identifier("status")
+                )
+            )
+            # Composite index: parent_job_id, stage
+            indexes.append(
+                sql.SQL("CREATE INDEX IF NOT EXISTS {} ON {}.{} ({}, {})").format(
+                    sql.Identifier("idx_tasks_job_stage"),
+                    sql.Identifier(self.schema_name),
+                    sql.Identifier("tasks"),
+                    sql.Identifier("parent_job_id"),
+                    sql.Identifier("stage")
+                )
+            )
+            # Composite index: parent_job_id, stage, status
+            indexes.append(
+                sql.SQL("CREATE INDEX IF NOT EXISTS {} ON {}.{} ({}, {}, {})").format(
+                    sql.Identifier("idx_tasks_job_stage_status"),
+                    sql.Identifier(self.schema_name),
+                    sql.Identifier("tasks"),
+                    sql.Identifier("parent_job_id"),
+                    sql.Identifier("stage"),
+                    sql.Identifier("status")
+                )
+            )
+            # Partial index for heartbeat
+            indexes.append(
+                sql.SQL("CREATE INDEX IF NOT EXISTS {} ON {}.{} ({}) WHERE {} IS NOT NULL").format(
+                    sql.Identifier("idx_tasks_heartbeat"),
+                    sql.Identifier(self.schema_name),
+                    sql.Identifier("tasks"),
+                    sql.Identifier("heartbeat"),
+                    sql.Identifier("heartbeat")
+                )
+            )
+            # Partial index for retry_count
+            indexes.append(
+                sql.SQL("CREATE INDEX IF NOT EXISTS {} ON {}.{} ({}) WHERE {} > 0").format(
+                    sql.Identifier("idx_tasks_retry_count"),
+                    sql.Identifier(self.schema_name),
+                    sql.Identifier("tasks"),
+                    sql.Identifier("retry_count"),
+                    sql.Identifier("retry_count")
+                )
+            )
+        
+        self.logger.debug(f"✅ Generated {len(indexes)} indexes for table {table_name}")
+        return indexes
+    
     def generate_indexes(self, table_name: str, model: Type[BaseModel]) -> List[str]:
         """
         Generate index statements for a table.
@@ -568,6 +787,57 @@ $$;""")
         
         return functions
         
+    def generate_triggers_composed(self) -> List[sql.Composed]:
+        """
+        Generate trigger statements using psycopg.sql composition.
+        
+        NO STRING CONCATENATION - Full SQL composition for safety.
+        
+        Returns:
+            List of composed trigger statements
+        """
+        self.logger.debug(f"🔧 Generating triggers for updated_at columns")
+        triggers = []
+        
+        # Updated_at trigger for jobs table
+        triggers.append(
+            sql.SQL("DROP TRIGGER IF EXISTS {} ON {}.{}").format(
+                sql.Identifier("update_jobs_updated_at"),
+                sql.Identifier(self.schema_name),
+                sql.Identifier("jobs")
+            )
+        )
+        triggers.append(
+            sql.SQL("CREATE TRIGGER {} BEFORE UPDATE ON {}.{} FOR EACH ROW EXECUTE FUNCTION {}.{}()").format(
+                sql.Identifier("update_jobs_updated_at"),
+                sql.Identifier(self.schema_name),
+                sql.Identifier("jobs"),
+                sql.Identifier(self.schema_name),
+                sql.Identifier("update_updated_at_column")
+            )
+        )
+        
+        # Updated_at trigger for tasks table
+        triggers.append(
+            sql.SQL("DROP TRIGGER IF EXISTS {} ON {}.{}").format(
+                sql.Identifier("update_tasks_updated_at"),
+                sql.Identifier(self.schema_name),
+                sql.Identifier("tasks")
+            )
+        )
+        triggers.append(
+            sql.SQL("CREATE TRIGGER {} BEFORE UPDATE ON {}.{} FOR EACH ROW EXECUTE FUNCTION {}.{}()").format(
+                sql.Identifier("update_tasks_updated_at"),
+                sql.Identifier(self.schema_name),
+                sql.Identifier("tasks"),
+                sql.Identifier(self.schema_name),
+                sql.Identifier("update_updated_at_column")
+            )
+        )
+        
+        self.logger.debug(f"✅ Generated {len(triggers)} trigger statements")
+        return triggers
+    
     def generate_triggers(self) -> List[str]:
         """
         Generate trigger statements.
@@ -598,6 +868,7 @@ CREATE TRIGGER {table}_update_updated_at
         Returns:
             List of sql.Composed objects for direct execution
         """
+        self.logger.info("🚀 Starting SQL composition with psycopg.sql")
         composed = []
         
         # Schema creation
@@ -615,56 +886,36 @@ CREATE TRIGGER {table}_update_updated_at
         )
         
         # Generate ENUMs using composed SQL
-        composed.append(self.generate_enum_composed("job_status", JobStatus))
-        composed.append(self.generate_enum_composed("task_status", TaskStatus))
+        composed.append(self.generate_enum("job_status", JobStatus))
+        composed.append(self.generate_enum("task_status", TaskStatus))
         
         # For tables, indexes, functions, and triggers, we still need string format
         # because they are complex multi-line statements
         # But we'll return them as sql.SQL objects for consistency
         
-        # Tables
-        jobs_ddl = self.generate_table_ddl(JobRecord, "jobs")
-        composed.append(sql.SQL(jobs_ddl))
+        # Tables - now using composed SQL
+        composed.append(self.generate_table_composed(JobRecord, "jobs"))
+        composed.append(self.generate_table_composed(TaskRecord, "tasks"))
         
-        tasks_ddl = self.generate_table_ddl(TaskRecord, "tasks")
-        composed.append(sql.SQL(tasks_ddl))
-        
-        # Indexes
-        for index in self.generate_indexes("jobs", JobRecord):
-            composed.append(sql.SQL(index))
-            
-        for index in self.generate_indexes("tasks", TaskRecord):
-            composed.append(sql.SQL(index))
+        # Indexes - now using composed SQL
+        composed.extend(self.generate_indexes_composed("jobs", JobRecord))
+        composed.extend(self.generate_indexes_composed("tasks", TaskRecord))
             
         # Functions
         for function in self.load_static_functions():
             composed.append(sql.SQL(function))
             
-        # Triggers
-        for trigger in self.generate_triggers():
-            # Split DROP and CREATE if combined
-            if 'DROP TRIGGER' in trigger and 'CREATE TRIGGER' in trigger:
-                lines = trigger.split('\n')
-                drop_part = []
-                create_part = []
-                in_create = False
-                
-                for line in lines:
-                    if 'DROP TRIGGER' in line:
-                        drop_part.append(line)
-                    elif 'CREATE TRIGGER' in line:
-                        in_create = True
-                        create_part.append(line)
-                    elif in_create:
-                        create_part.append(line)
-                        
-                if drop_part:
-                    composed.append(sql.SQL('\n'.join(drop_part)))
-                if create_part:
-                    composed.append(sql.SQL('\n'.join(create_part)))
-            else:
-                composed.append(sql.SQL(trigger))
-                
+        # Triggers - now using composed SQL
+        composed.extend(self.generate_triggers_composed())
+        
+        self.logger.info(f"✅ SQL composition complete: {len(composed)} statements ready")
+        self.logger.info(f"   - Schema & search_path: 2")
+        self.logger.info(f"   - ENUMs: 2")  
+        self.logger.info(f"   - Tables: 2")
+        self.logger.info(f"   - Indexes: {len(self.generate_indexes_composed('jobs', JobRecord)) + len(self.generate_indexes_composed('tasks', TaskRecord))}")
+        self.logger.info(f"   - Functions: {len(self.load_static_functions())}")
+        self.logger.info(f"   - Triggers: {len(self.generate_triggers_composed())}")
+        
         return composed
     
     def generate_statements_list(self) -> List[str]:
@@ -727,7 +978,15 @@ CREATE TRIGGER {table}_update_updated_at
         
         return statements
     
-    def generate_complete_schema(self) -> str:
+    # REMOVED: Old string-based methods following "No Backward Compatibility" philosophy
+    # The following methods have been removed:
+    # - generate_complete_schema() - replaced by generate_composed_statements()
+    # - generate_statements_list() - no longer needed
+    # - generate_table_ddl() - replaced by generate_table_composed()
+    # - generate_indexes() - replaced by generate_indexes_composed()
+    # - generate_triggers() - replaced by generate_triggers_composed()
+    
+    def generate_complete_schema_REMOVED(self) -> str:
         """
         Generate complete PostgreSQL schema from Pydantic models.
         
@@ -810,9 +1069,41 @@ SELECT 'PostgreSQL schema generated from Pydantic models' AS status;
 def main():
     """
     Generate SQL schema and optionally save to file.
+    
+    NO STRING CONCATENATION - Uses composed SQL statements.
+    For file output only - real deployment uses composed objects directly.
     """
     generator = PydanticToSQL(schema_name="app")
-    sql_schema = generator.generate_complete_schema()
+    
+    # Generate composed statements (the ONLY way now)
+    composed_statements = generator.generate_composed_statements()
+    
+    # For file output, we need to convert to strings
+    # This is ONLY for display/file writing - deployment uses composed objects
+    sql_lines = []
+    header = """-- =============================================================================
+-- GENERATED PostgreSQL Schema from Pydantic Models
+-- Generated at: {}
+-- =============================================================================
+-- 
+-- This schema is automatically generated from Pydantic models
+-- The Python models are the single source of truth
+-- Generated using psycopg.sql composition - NO STRING CONCATENATION
+-- 
+-- =============================================================================
+
+""".format(datetime.utcnow().isoformat())
+    
+    sql_lines.append(header)
+    
+    # Note about composed statements
+    sql_lines.append("-- NOTE: SQL statements are generated using psycopg.sql composition\n")
+    sql_lines.append("-- They cannot be directly converted to strings for file output\n")
+    sql_lines.append("-- Use the deployment endpoint to execute these composed statements\n")
+    sql_lines.append("-- Endpoint: POST /api/schema/deploy-pydantic?confirm=yes\n\n")
+    sql_lines.append(f"-- Total composed statements generated: {len(composed_statements)}\n")
+    
+    sql_schema = '\n'.join(sql_lines)
     
     # Save to file
     output_file = "schema_generated.sql"

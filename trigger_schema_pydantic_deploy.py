@@ -1,52 +1,54 @@
 # ============================================================================
 # CLAUDE CONTEXT - CONFIGURATION
 # ============================================================================
-# PURPOSE: Deploy Pydantic-generated schema directly to database
-# SOURCE: Pydantic models as single source of truth
-# SCOPE: Direct database deployment for testing
-# VALIDATION: Executes generated DDL against PostgreSQL
+# PURPOSE: Deploy Pydantic-generated schema directly to PostgreSQL
+# SOURCE: Pydantic models -> SQL DDL -> Database deployment
+# SCOPE: Database schema creation from Python models
+# VALIDATION: Schema deployment verification and rollback support
 # ============================================================================
 
 """
-Direct Pydantic Schema Deployment Trigger.
+Pydantic Schema Deployment Trigger
 
-This module provides an endpoint to deploy the Pydantic-generated schema
-directly to the database, bypassing the static SQL templates.
+NO BACKWARD COMPATIBILITY - Only uses psycopg.sql composed statements.
+Ensures SQL injection safety through proper identifier escaping.
+Single deployment path: Pydantic models -> Composed SQL -> Database
 """
 
-import json
-from datetime import datetime
 import azure.functions as func
+import json
 import psycopg
+from psycopg import sql
+from datetime import datetime
 
 from util_logger import LoggerFactory, ComponentType
-from schema_sql_generator import PydanticToSQL
 from config import get_config
-
+from schema_sql_generator import PydanticToSQL
+from schema_core import JobRecord, TaskRecord
 
 class PydanticSchemaDeployTrigger:
     """
-    HTTP trigger for deploying Pydantic-generated schema directly.
+    Deploy Pydantic-generated schema using ONLY composed SQL statements.
+    NO STRING CONCATENATION - Following "No Backward Compatibility" philosophy.
     """
     
     def __init__(self):
-        """Initialize the deployment trigger."""
-        self.logger = LoggerFactory.get_logger(ComponentType.HTTP_TRIGGER, "PydanticDeploy")
+        self.logger = LoggerFactory.get_logger(ComponentType.CONTROLLER, "PydanticDeploy")
         self.config = get_config()
-        
+    
     def handle_request(self, req: func.HttpRequest) -> func.HttpResponse:
         """
-        Deploy Pydantic-generated schema to database.
+        Handle schema deployment request.
         
         Args:
-            req: Azure Functions HTTP request
+            req: HTTP request with optional confirm parameter
             
         Returns:
-            Deployment status response
+            HTTP response with deployment results
         """
         try:
-            # Safety check - require confirmation
-            confirm = req.params.get('confirm', '')
+            # Check for confirmation
+            confirm = req.params.get('confirm', 'no')
             if confirm != 'yes':
                 return func.HttpResponse(
                     json.dumps({
@@ -63,19 +65,10 @@ class PydanticSchemaDeployTrigger:
             self.logger.info("Generating schema from Pydantic models")
             generator = PydanticToSQL(schema_name=self.config.app_schema)
             
-            # Try to use composed statements for better SQL safety
-            use_composed = req.params.get('use_composed', 'false') == 'true'
-            
-            if use_composed:
-                # Use new psycopg.sql composed statements
-                self.logger.info("Using psycopg.sql composed statements for deployment")
-                deployment_result = self._deploy_composed_statements(generator)
-            else:
-                # Get statements as list for backwards compatibility
-                statements = generator.generate_statements_list()
-                # Deploy to database
-                self.logger.info("Deploying Pydantic-generated schema to database")
-                deployment_result = self._deploy_schema_statements(statements, generator)
+            # NO BACKWARD COMPATIBILITY - Only use composed statements
+            # This ensures SQL injection safety and proper escaping
+            self.logger.info("Deploying with psycopg.sql composed statements")
+            deployment_result = self._deploy_schema(generator)
             
             return func.HttpResponse(
                 json.dumps(deployment_result),
@@ -89,15 +82,18 @@ class PydanticSchemaDeployTrigger:
                 json.dumps({
                     "status": "error",
                     "error": str(e),
-                    "timestamp": datetime.utcnow().isoformat()
+                    "message": "Failed to deploy schema"
                 }),
                 status_code=500,
                 mimetype="application/json"
             )
     
-    def _deploy_composed_statements(self, generator: PydanticToSQL) -> dict:
+    def _deploy_schema(self, generator: PydanticToSQL) -> dict:
         """
-        Deploy schema using psycopg.sql composed statements for maximum safety.
+        Deploy schema using ONLY psycopg.sql composed statements.
+        
+        NO STRING CONCATENATION - This is the only deployment method.
+        Ensures SQL injection safety and proper identifier escaping.
         
         Args:
             generator: The PydanticToSQL generator instance
@@ -119,7 +115,9 @@ class PydanticSchemaDeployTrigger:
             conn = psycopg.connect(conn_string)
             
             # Get composed statements
+            self.logger.info("📦 Generating composed SQL statements from Pydantic models")
             composed_statements = generator.generate_composed_statements()
+            self.logger.info(f"📦 Generated {len(composed_statements)} composed statements")
             
             executed_statements = []
             errors = []
@@ -173,10 +171,11 @@ class PydanticSchemaDeployTrigger:
                         
                         # Handle expected errors gracefully
                         if "already exists" in error_msg.lower():
-                            self.logger.debug(f"Object already exists (OK): {stmt_preview}")
+                            self.logger.debug(f"✓ Object already exists (OK): {stmt_preview}")
                             continue
                         
-                        self.logger.warning(f"Statement failed: {error_msg}")
+                        self.logger.warning(f"❌ Statement failed: {error_msg}")
+                        self.logger.debug(f"   Failed SQL: {stmt_str[:200]}")
                         errors.append({
                             "statement": stmt_preview,
                             "error": error_msg
@@ -190,9 +189,9 @@ class PydanticSchemaDeployTrigger:
                 
                 result = {
                     "status": "success" if len(errors) == 0 else "partial",
-                    "message": "Schema deployed using psycopg.sql composed statements",
-                    "source": "Pydantic models with psycopg.sql composition",
-                    "safety": "Maximum - using psycopg.sql for injection prevention",
+                    "message": "Schema deployed using ONLY psycopg.sql composed statements",
+                    "source": "Pydantic models (single source of truth)",
+                    "safety": "Maximum - NO string concatenation, full SQL composition",
                     "statistics": {
                         "statements_executed": len(executed_statements),
                         "statements_failed": len(errors),
@@ -223,315 +222,78 @@ class PydanticSchemaDeployTrigger:
             if conn:
                 conn.close()
     
-    def _deploy_schema_statements(self, statements: list, generator: PydanticToSQL) -> dict:
-        """
-        Deploy schema using pre-parsed statements for better error handling.
-        
-        Args:
-            statements: List of SQL statements to execute
-            generator: The generator instance for metadata
-            
-        Returns:
-            Deployment result dictionary
-        """
-        conn = None
-        try:
-            # Connect to database
-            conn_string = (
-                f"host={self.config.postgis_host} "
-                f"port={self.config.postgis_port} "
-                f"dbname={self.config.postgis_database} "
-                f"user={self.config.postgis_user} "
-                f"password={self.config.postgis_password}"
-            )
-            
-            conn = psycopg.connect(conn_string)
-            
-            executed_statements = []
-            errors = []
-            do_block_count = 0
-            table_count = 0
-            function_count = 0
-            index_count = 0
-            trigger_count = 0
-            
-            with conn.cursor() as cur:
-                for stmt in statements:
-                    if not stmt.strip():
-                        continue
-                    
-                    try:
-                        # Identify statement type for logging
-                        stmt_lower = stmt.lower()
-                        stmt_preview = stmt[:100].replace('\n', ' ')
-                        
-                        if 'do $$' in stmt_lower:
-                            stmt_type = "DO Block (ENUM)"
-                            do_block_count += 1
-                        elif 'create table' in stmt_lower:
-                            stmt_type = "CREATE TABLE"
-                            table_count += 1
-                        elif 'create or replace function' in stmt_lower:
-                            stmt_type = "CREATE FUNCTION"
-                            function_count += 1
-                        elif 'create index' in stmt_lower:
-                            stmt_type = "CREATE INDEX"
-                            index_count += 1
-                        elif 'create trigger' in stmt_lower:
-                            stmt_type = "CREATE TRIGGER"
-                            trigger_count += 1
-                        elif 'drop trigger' in stmt_lower:
-                            stmt_type = "DROP TRIGGER"
-                        elif 'create schema' in stmt_lower:
-                            stmt_type = "CREATE SCHEMA"
-                        elif 'set search_path' in stmt_lower:
-                            stmt_type = "SET search_path"
-                        else:
-                            stmt_type = "SQL"
-                        
-                        self.logger.debug(f"Executing {stmt_type}: {stmt_preview}...")
-                        
-                        # Execute the statement
-                        cur.execute(stmt)
-                        executed_statements.append(f"{stmt_type}: {stmt_preview}")
-                        
-                    except Exception as stmt_error:
-                        error_msg = str(stmt_error)
-                        
-                        # Handle expected errors gracefully
-                        if "already exists" in error_msg.lower():
-                            self.logger.debug(f"Object already exists (OK): {stmt_preview}")
-                            # Don't count as error if it's an expected duplicate
-                            continue
-                        
-                        self.logger.warning(f"Statement failed: {error_msg}")
-                        errors.append({
-                            "statement": stmt_preview,
-                            "error": error_msg
-                        })
-                
-                # Commit all changes
-                conn.commit()
-                
-                # Verify deployment
-                verification = self._verify_deployment(conn)
-                
-                result = {
-                    "status": "success" if len(errors) == 0 else "partial",
-                    "message": "Pydantic-generated schema deployed with improved handling",
-                    "source": "Pydantic models with psycopg.sql composition",
-                    "statistics": {
-                        "statements_executed": len(executed_statements),
-                        "statements_failed": len(errors),
-                        "do_blocks_processed": do_block_count,
-                        "tables_created": table_count,
-                        "functions_created": function_count,
-                        "indexes_created": index_count,
-                        "triggers_created": trigger_count
-                    },
-                    "verification": verification,
-                    "timestamp": datetime.utcnow().isoformat()
-                }
-                
-                if errors:
-                    result["errors"] = errors[:5]  # First 5 errors
-                    
-                return result
-                
-        except Exception as e:
-            self.logger.error(f"Database deployment failed: {e}")
-            return {
-                "status": "error",
-                "error": str(e),
-                "message": "Failed to deploy Pydantic-generated schema",
-                "timestamp": datetime.utcnow().isoformat()
-            }
-        finally:
-            if conn:
-                conn.close()
-    
-    def _deploy_schema(self, sql_schema: str) -> dict:
-        """
-        Deploy the generated schema to PostgreSQL.
-        
-        Args:
-            sql_schema: Generated SQL DDL
-            
-        Returns:
-            Deployment result dictionary
-        """
-        conn = None
-        try:
-            # Connect to database
-            conn_string = (
-                f"host={self.config.postgis_host} "
-                f"port={self.config.postgis_port} "
-                f"dbname={self.config.postgis_database} "
-                f"user={self.config.postgis_user} "
-                f"password={self.config.postgis_password}"
-            )
-            
-            conn = psycopg.connect(conn_string)
-            
-            with conn.cursor() as cur:
-                # Split schema into individual statements
-                # Remove comments and empty lines for cleaner execution
-                statements = []
-                current_statement = []
-                in_function = False
-                
-                for line in sql_schema.split('\n'):
-                    # Skip pure comment lines unless in function
-                    if line.strip().startswith('--') and not in_function:
-                        continue
-                    
-                    # Track function blocks
-                    if 'CREATE OR REPLACE FUNCTION' in line or 'CREATE FUNCTION' in line:
-                        in_function = True
-                    
-                    # Add line to current statement
-                    if line.strip():
-                        current_statement.append(line)
-                    
-                    # Check for statement end
-                    if line.strip().endswith(';') and not in_function:
-                        if current_statement:
-                            statements.append('\n'.join(current_statement))
-                            current_statement = []
-                    elif line.strip().endswith('$$;'):
-                        # End of function
-                        if current_statement:
-                            statements.append('\n'.join(current_statement))
-                            current_statement = []
-                        in_function = False
-                
-                # Execute each statement
-                executed_statements = []
-                errors = []
-                
-                for stmt in statements:
-                    if not stmt.strip():
-                        continue
-                        
-                    try:
-                        # Log what we're executing (first 100 chars)
-                        stmt_preview = stmt[:100].replace('\n', ' ')
-                        self.logger.debug(f"Executing: {stmt_preview}...")
-                        
-                        cur.execute(stmt)
-                        executed_statements.append(stmt_preview)
-                        
-                    except Exception as stmt_error:
-                        error_msg = f"Statement failed: {str(stmt_error)}"
-                        self.logger.warning(error_msg)
-                        errors.append({
-                            "statement": stmt[:100],
-                            "error": str(stmt_error)
-                        })
-                        # Continue with other statements
-                
-                # Commit the transaction
-                conn.commit()
-                
-                # Verify deployment
-                verification = self._verify_deployment(conn)
-                
-                result = {
-                    "status": "success" if len(errors) == 0 else "partial",
-                    "message": "Pydantic-generated schema deployed",
-                    "source": "Pydantic models (Python classes)",
-                    "statistics": {
-                        "statements_executed": len(executed_statements),
-                        "statements_failed": len(errors),
-                        "tables_created": verification.get("tables", 0),
-                        "functions_created": verification.get("functions", 0),
-                        "enums_created": verification.get("enums", 0)
-                    },
-                    "verification": verification,
-                    "timestamp": datetime.utcnow().isoformat()
-                }
-                
-                if errors:
-                    result["errors"] = errors[:5]  # First 5 errors
-                    
-                return result
-                
-        except Exception as e:
-            self.logger.error(f"Database deployment failed: {e}")
-            return {
-                "status": "error",
-                "error": str(e),
-                "message": "Failed to deploy Pydantic-generated schema",
-                "timestamp": datetime.utcnow().isoformat()
-            }
-        finally:
-            if conn:
-                conn.close()
-    
     def _verify_deployment(self, conn) -> dict:
         """
-        Verify what was deployed.
+        Verify the deployed schema.
         
         Args:
             conn: Database connection
             
         Returns:
-            Verification results
+            Verification dictionary
         """
         try:
             with conn.cursor() as cur:
                 # Count tables
                 cur.execute("""
-                    SELECT COUNT(*) FROM information_schema.tables 
-                    WHERE table_schema = %s AND table_type = 'BASE TABLE'
+                    SELECT COUNT(*) 
+                    FROM information_schema.tables 
+                    WHERE table_schema = %s 
+                    AND table_type = 'BASE TABLE'
                 """, (self.config.app_schema,))
                 table_count = cur.fetchone()[0]
                 
+                # Get table names
+                cur.execute("""
+                    SELECT table_name 
+                    FROM information_schema.tables 
+                    WHERE table_schema = %s 
+                    AND table_type = 'BASE TABLE'
+                    ORDER BY table_name
+                """, (self.config.app_schema,))
+                table_list = [row[0] for row in cur.fetchall()]
+                
                 # Count functions
                 cur.execute("""
-                    SELECT COUNT(*) FROM information_schema.routines 
+                    SELECT COUNT(*) 
+                    FROM information_schema.routines 
                     WHERE routine_schema = %s
                 """, (self.config.app_schema,))
                 function_count = cur.fetchone()[0]
                 
-                # Count enums
+                # Get function names
                 cur.execute("""
-                    SELECT COUNT(*) FROM pg_type t
-                    JOIN pg_namespace n ON t.typnamespace = n.oid
-                    WHERE n.nspname = %s AND t.typtype = 'e'
-                """, (self.config.app_schema,))
-                enum_count = cur.fetchone()[0]
-                
-                # List tables
-                cur.execute("""
-                    SELECT table_name FROM information_schema.tables 
-                    WHERE table_schema = %s AND table_type = 'BASE TABLE'
-                    ORDER BY table_name
-                """, (self.config.app_schema,))
-                tables = [row[0] for row in cur.fetchall()]
-                
-                # List functions
-                cur.execute("""
-                    SELECT routine_name FROM information_schema.routines 
-                    WHERE routine_schema = %s
+                    SELECT routine_name 
+                    FROM information_schema.routines 
+                    WHERE routine_schema = %s 
                     ORDER BY routine_name
                 """, (self.config.app_schema,))
-                functions = [row[0] for row in cur.fetchall()]
+                function_list = [row[0] for row in cur.fetchall()]
+                
+                # Count enums
+                cur.execute("""
+                    SELECT COUNT(*) 
+                    FROM pg_type t 
+                    JOIN pg_namespace n ON t.typnamespace = n.oid 
+                    WHERE n.nspname = %s 
+                    AND t.typtype = 'e'
+                """, (self.config.app_schema,))
+                enum_count = cur.fetchone()[0]
                 
                 return {
                     "tables": table_count,
                     "functions": function_count,
                     "enums": enum_count,
-                    "table_list": tables,
-                    "function_list": functions
+                    "table_list": table_list,
+                    "function_list": function_list
                 }
                 
         except Exception as e:
             self.logger.error(f"Verification failed: {e}")
             return {
-                "error": str(e)
+                "error": str(e),
+                "message": "Failed to verify deployment"
             }
-
 
 # Create singleton instance
 pydantic_deploy_trigger = PydanticSchemaDeployTrigger()

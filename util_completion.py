@@ -22,8 +22,9 @@ import json
 from datetime import datetime
 
 from util_logger import LoggerFactory, ComponentType
+from schema_core import JobStatus, TaskStatus  # Use canonical Pydantic enums
 from model_core import (
-    JobStatus, StageStatus, TaskStatus, JobExecutionContext,
+    StageStatus, JobExecutionContext,
     StageExecutionContext, TaskResult, StageResult, JobResult
 )
 

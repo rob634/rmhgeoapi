@@ -409,40 +409,102 @@ class TaskRepository(BaseRepository):
     def get_task(self, task_id: str) -> Optional[TaskRecord]:
         """Retrieve task with schema validation"""
         with self._error_context("task retrieval", task_id):
-            task_record = self.storage.get_task(task_id)
-            
-            if task_record:
-                logger.debug(f"📋 Retrieved task: {task_id} status={task_record.status}")
-            else:
-                logger.debug(f"📋 Task not found: {task_id}")
-            
-            return task_record
+            # 🚨 ENHANCED DEBUG: Capture raw data before validation
+            try:
+                logger.error(f"🔧 PRE-VALIDATION: Attempting to get task {task_id}")
+                
+                # Get raw data from storage before validation
+                raw_task_data = self.storage.get_task_raw_data(task_id)
+                if raw_task_data:
+                    logger.error(f"📋 RAW TASK DATA RETRIEVED: {raw_task_data}")
+                    logger.error(f"📊 RAW DATA TYPES: {[(k, type(v).__name__) for k, v in raw_task_data.items()]}")
+                
+                # Now proceed with normal validation
+                task_record = self.storage.get_task(task_id)
+                
+                if task_record:
+                    logger.debug(f"📋 Retrieved task: {task_id} status={task_record.status}")
+                    logger.error(f"✅ VALIDATION SUCCESS: Task {task_id} retrieved and validated")
+                else:
+                    logger.debug(f"📋 Task not found: {task_id}")
+                    logger.error(f"❌ TASK NOT FOUND: {task_id}")
+                
+                return task_record
+                
+            except Exception as get_task_error:
+                logger.error(f"❌ GET_TASK ERROR: {type(get_task_error).__name__}: {get_task_error}")
+                if hasattr(get_task_error, '__traceback__'):
+                    import traceback
+                    logger.error(f"📋 GET_TASK TRACEBACK: {traceback.format_exc()}")
+                raise
     
     def update_task_status(self, task_id: str, new_status: TaskStatus,
                           additional_updates: Optional[Dict[str, Any]] = None) -> bool:
-        """Update task status with validation"""
+        """Update task status with validation - ENHANCED EXCEPTION HANDLING"""
+        logger.error(f"🔧 REPO LAYER: Starting task status update for {task_id}")
+        logger.error(f"📊 Status transition: ? → {new_status}")
+        logger.error(f"📋 Additional updates: {additional_updates}")
+        
         with self._error_context("task status update", task_id):
-            current_task = self.get_task(task_id)
-            if not current_task:
-                logger.warning(f"📋 Cannot update non-existent task: {task_id}")
-                return False
-            
-            # Validate status transition
-            self._validate_status_transition(current_task, new_status)
-            
-            # Prepare updates
-            updates = {'status': new_status}
-            if additional_updates:
-                updates.update(additional_updates)
-            
-            # Update heartbeat for processing status
-            if new_status == TaskStatus.PROCESSING:
-                updates['heartbeat'] = datetime.utcnow()
-            
-            success = self.storage.update_task(task_id, updates)
-            
-            if success:
-                logger.info(f"✅ Task status updated: {task_id} {current_task.status} → {new_status}")
+            try:
+                logger.error(f"🔧 REPO STEP 1: Getting current task for validation...")
+                current_task = self.get_task(task_id)
+                if not current_task:
+                    logger.error(f"❌ REPO STEP 1 FAILED: Task not found: {task_id}")
+                    logger.warning(f"📋 Cannot update non-existent task: {task_id}")
+                    return False
+                
+                logger.error(f"✅ REPO STEP 1 SUCCESS: Current task retrieved")
+                logger.error(f"📊 Current task status: {current_task.status}")
+                
+                # Validate status transition
+                logger.error(f"🔧 REPO STEP 2: Validating status transition...")
+                try:
+                    self._validate_status_transition(current_task, new_status)
+                    logger.error(f"✅ REPO STEP 2 SUCCESS: Status transition validation passed")
+                except Exception as transition_error:
+                    logger.error(f"❌ REPO STEP 2 FAILED: Status transition validation failed")
+                    logger.error(f"📋 Transition error: {type(transition_error).__name__}: {transition_error}")
+                    raise
+                
+                # Prepare updates
+                logger.error(f"🔧 REPO STEP 3: Preparing updates...")
+                updates = {'status': new_status}
+                if additional_updates:
+                    logger.error(f"📋 Merging additional updates: {list(additional_updates.keys())}")
+                    updates.update(additional_updates)
+                
+                # Update heartbeat for processing status
+                if new_status == TaskStatus.PROCESSING:
+                    updates['heartbeat'] = datetime.utcnow()
+                    logger.error(f"📋 Added heartbeat for PROCESSING status")
+                
+                logger.error(f"✅ REPO STEP 3 SUCCESS: Updates prepared")
+                logger.error(f"📊 Final updates: {list(updates.keys())}")
+                
+                logger.error(f"🔧 REPO STEP 4: Calling storage.update_task()...")
+                try:
+                    success = self.storage.update_task(task_id, updates)
+                    logger.error(f"✅ REPO STEP 4 SUCCESS: Storage update completed, result: {success}")
+                except Exception as storage_error:
+                    logger.error(f"❌ REPO STEP 4 FAILED: Storage update failed")
+                    logger.error(f"📋 Storage error: {type(storage_error).__name__}: {storage_error}")
+                    import traceback
+                    logger.error(f"📍 Storage error traceback: {traceback.format_exc()}")
+                    raise
+                
+                if success:
+                    logger.error(f"✅ REPO FINAL SUCCESS: Task status updated: {task_id} {current_task.status} → {new_status}")
+                    logger.info(f"✅ Task status updated: {task_id} {current_task.status} → {new_status}")
+                else:
+                    logger.error(f"❌ REPO FINAL FAILURE: Storage update returned False")
+                    
+            except Exception as repo_error:
+                logger.error(f"❌ REPOSITORY LAYER EXCEPTION: {type(repo_error).__name__}")
+                logger.error(f"📋 Repository error message: {str(repo_error)}")
+                import traceback
+                logger.error(f"📍 Repository error traceback: {traceback.format_exc()}")
+                raise
             
             return success
     
@@ -522,89 +584,101 @@ class CompletionDetector:
         self.task_repo = task_repo
         logger.info("🔍 CompletionDetector initialized")
     
-    def check_stage_completion(self, job_id: str, stage: int) -> Dict[str, Any]:
-        """
-        Check if all tasks in a stage are complete
-        
-        Args:
-            job_id: Job ID to check
-            stage: Stage number to check
-            
-        Returns:
-            Dictionary with completion status and next actions
-        """
-        with self.task_repo._error_context("stage completion check", job_id):
-            # Get all tasks for the job
-            all_tasks = self.task_repo.list_tasks_for_job(job_id)
-            
-            # Filter tasks for this stage
-            stage_tasks = [task for task in all_tasks if task.stage == stage]
-            
-            if not stage_tasks:
-                logger.warning(f"📊 No tasks found for job {job_id[:16]}... stage {stage}")
-                return {'stage_complete': False, 'reason': 'no_tasks_in_stage'}
-            
-            # Count task statuses
-            completed_count = sum(1 for task in stage_tasks if task.status == TaskStatus.COMPLETED)
-            failed_count = sum(1 for task in stage_tasks if task.status == TaskStatus.FAILED)
-            processing_count = sum(1 for task in stage_tasks if task.status == TaskStatus.PROCESSING)
-            queued_count = sum(1 for task in stage_tasks if task.status == TaskStatus.QUEUED)
-            
-            total_tasks = len(stage_tasks)
-            terminal_tasks = completed_count + failed_count
-            
-            # Stage is complete when all tasks are terminal
-            stage_complete = terminal_tasks == total_tasks
-            
-            completion_info = {
-                'stage_complete': stage_complete,
-                'total_tasks': total_tasks,
-                'completed_tasks': completed_count,
-                'failed_tasks': failed_count,
-                'processing_tasks': processing_count,
-                'queued_tasks': queued_count,
-                'success_rate': (completed_count / total_tasks * 100) if total_tasks > 0 else 0
-            }
-            
-            if stage_complete:
-                logger.info(f"🎯 Stage {stage} complete for job {job_id[:16]}... "
-                          f"({completed_count}/{total_tasks} successful, "
-                          f"{completion_info['success_rate']:.1f}% success rate)")
-            else:
-                logger.debug(f"📊 Stage {stage} progress for job {job_id[:16]}... "
-                           f"{terminal_tasks}/{total_tasks} complete")
-            
-            return completion_info
+    # DEPRECATED: Non-atomic stage completion check with race conditions
+    # This method is replaced by complete_task_and_check_stage() which uses PostgreSQL atomic operations
+    # def check_stage_completion(self, job_id: str, stage: int) -> Dict[str, Any]:
+    #     """
+    #     Check if all tasks in a stage are complete
+    #     
+    #     ❌ DEPRECATED: This method has race conditions where multiple tasks
+    #     can simultaneously think they are the "last task" in a stage.
+    #     
+    #     Use complete_task_and_check_stage() instead for atomic completion detection.
+    #     
+    #     Args:
+    #         job_id: Job ID to check
+    #         stage: Stage number to check
+    #         
+    #     Returns:
+    #         Dictionary with completion status and next actions
+    #     """
+    #     with self.task_repo._error_context("stage completion check", job_id):
+    #         # Get all tasks for the job
+    #         all_tasks = self.task_repo.list_tasks_for_job(job_id)
+    #         
+    #         # Filter tasks for this stage
+    #         stage_tasks = [task for task in all_tasks if task.stage == stage]
+    #         
+    #         if not stage_tasks:
+    #             logger.warning(f"📊 No tasks found for job {job_id[:16]}... stage {stage}")
+    #             return {'stage_complete': False, 'reason': 'no_tasks_in_stage'}
+    #         
+    #         # Count task statuses
+    #         completed_count = sum(1 for task in stage_tasks if task.status == TaskStatus.COMPLETED)
+    #         failed_count = sum(1 for task in stage_tasks if task.status == TaskStatus.FAILED)
+    #         processing_count = sum(1 for task in stage_tasks if task.status == TaskStatus.PROCESSING)
+    #         queued_count = sum(1 for task in stage_tasks if task.status == TaskStatus.QUEUED)
+    #         
+    #         total_tasks = len(stage_tasks)
+    #         terminal_tasks = completed_count + failed_count
+    #         
+    #         # Stage is complete when all tasks are terminal
+    #         stage_complete = terminal_tasks == total_tasks
+    #         
+    #         completion_info = {
+    #             'stage_complete': stage_complete,
+    #             'total_tasks': total_tasks,
+    #             'completed_tasks': completed_count,
+    #             'failed_tasks': failed_count,
+    #             'processing_tasks': processing_count,
+    #             'queued_tasks': queued_count,
+    #             'success_rate': (completed_count / total_tasks * 100) if total_tasks > 0 else 0
+    #         }
+    #         
+    #         if stage_complete:
+    #             logger.info(f"🎯 Stage {stage} complete for job {job_id[:16]}... "
+    #                       f"({completed_count}/{total_tasks} successful, "
+    #                       f"{completion_info['success_rate']:.1f}% success rate)")
+    #         else:
+    #             logger.debug(f"📊 Stage {stage} progress for job {job_id[:16]}... "
+    #                        f"{terminal_tasks}/{total_tasks} complete")
+    #         
+    #         return completion_info
     
-    def check_job_completion(self, job_id: str) -> bool:
-        """
-        Check if entire job is complete (all stages finished)
-        
-        Args:
-            job_id: Job ID to check
-            
-        Returns:
-            True if job is complete
-        """
-        with self.job_repo._error_context("job completion check", job_id):
-            job_record = self.job_repo.get_job(job_id)
-            if not job_record:
-                logger.warning(f"📊 Cannot check completion of non-existent job: {job_id[:16]}...")
-                return False
-            
-            # Check completion of current stage
-            current_stage_status = self.check_stage_completion(job_id, job_record.stage)
-            
-            if not current_stage_status['stage_complete']:
-                return False
-            
-            # If current stage complete, check if this is the final stage
-            if job_record.stage >= job_record.total_stages:
-                logger.info(f"🎉 Job complete: {job_id[:16]}... (all {job_record.total_stages} stages finished)")
-                return True
-            
-            logger.debug(f"📊 Job {job_id[:16]}... stage {job_record.stage}/{job_record.total_stages} complete")
-            return False
+    # DEPRECATED: Non-atomic job completion check that calls deprecated stage completion
+    # This method is replaced by the PostgreSQL-based check_job_completion() in PostgreSQLCompletionDetector
+    # def check_job_completion(self, job_id: str) -> bool:
+    #     """
+    #     Check if entire job is complete (all stages finished)
+    #     
+    #     ❌ DEPRECATED: This method calls the deprecated check_stage_completion() method
+    #     which has race conditions. Use the PostgreSQL atomic version instead.
+    #     
+    #     Args:
+    #         job_id: Job ID to check
+    #         
+    #     Returns:
+    #         True if job is complete
+    #     """
+    #     with self.job_repo._error_context("job completion check", job_id):
+    #         job_record = self.job_repo.get_job(job_id)
+    #         if not job_record:
+    #             logger.warning(f"📊 Cannot check completion of non-existent job: {job_id[:16]}...")
+    #             return False
+    #         
+    #         # Check completion of current stage
+    #         current_stage_status = self.check_stage_completion(job_id, job_record.stage)
+    #         
+    #         if not current_stage_status['stage_complete']:
+    #             return False
+    #         
+    #         # If current stage complete, check if this is the final stage
+    #         if job_record.stage >= job_record.total_stages:
+    #             logger.info(f"🎉 Job complete: {job_id[:16]}... (all {job_record.total_stages} stages finished)")
+    #             return True
+    #         
+    #         logger.debug(f"📊 Job {job_id[:16]}... stage {job_record.stage}/{job_record.total_stages} complete")
+    #         return False
 
 
 # ============================================================================

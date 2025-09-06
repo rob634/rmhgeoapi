@@ -1168,6 +1168,57 @@ class PostgresAdapter:
             logger.error(f"❌ Failed to retrieve task {task_id}: {e}")
             raise
     
+    def get_task_raw_data(self, task_id: str) -> Optional[Dict[str, Any]]:
+        """🔧 DEBUG: Get raw task data WITHOUT validation for debugging purposes.
+        
+        Args:
+            task_id: Task identifier
+            
+        Returns:
+            Dict containing raw task data before validation, or None if not found
+        """
+        try:
+            with self._get_connection() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute(
+                        f"""
+                        SELECT task_id, parent_job_id, task_type, status, stage, 
+                               parameters, heartbeat, retry_count, metadata, result_data,
+                               created_at, updated_at
+                        FROM {self.config.app_schema}.tasks 
+                        WHERE task_id = %s
+                        """,
+                        (task_id,)
+                    )
+                    
+                    row = cursor.fetchone()
+                    if not row:
+                        logger.error(f"🔍 RAW DATA: Task {task_id} not found in database")
+                        return None
+                    
+                    # Return raw data without any validation
+                    raw_data = {
+                        'task_id': row[0],
+                        'parent_job_id': row[1], 
+                        'task_type': row[2],
+                        'status': row[3],
+                        'stage': row[4],
+                        'parameters': row[5],  # JSONB - already dict
+                        'heartbeat': row[6],
+                        'retry_count': row[7],
+                        'metadata': row[8],  # JSONB - already dict  
+                        'result_data': row[9],  # JSONB - already dict
+                        'created_at': row[10],
+                        'updated_at': row[11]
+                    }
+                    
+                    logger.error(f"🔍 RAW DATA RETRIEVED: {json.dumps(raw_data, default=str, indent=2)}")
+                    return raw_data
+                    
+        except Exception as e:
+            logger.error(f"❌ Failed to retrieve raw task data {task_id}: {e}")
+            return None
+    
     def update_task(self, task_id: str, updates: Dict[str, Any]) -> bool:
         """Update task record in PostgreSQL with schema validation.
         
@@ -1346,18 +1397,20 @@ class PostgresAdapter:
                 with conn.cursor() as cursor:
                     # Call PostgreSQL stored procedure for atomic completion
                     cursor.execute("""
-                        SELECT stage_complete, remaining_tasks, job_id
-                        FROM complete_task_and_check_stage(%s, %s, %s, %s)
-                    """, (task_id, job_id, stage, json.dumps(result_data) if result_data else None))
+                        SELECT task_updated, is_last_task_in_stage, job_id, stage_number, remaining_tasks
+                        FROM app.complete_task_and_check_stage(%s, %s)
+                    """, (task_id, json.dumps(result_data) if result_data else None))
                     
                     result = cursor.fetchone()
                     if not result:
                         raise Exception(f"Failed to complete task {task_id} - no result from stored procedure")
                     
                     completion_result = {
-                        'stage_complete': result[0],
-                        'remaining_tasks': result[1], 
-                        'job_id': result[2]
+                        'task_updated': result[0],
+                        'stage_complete': result[1],  # is_last_task_in_stage
+                        'job_id': result[2],
+                        'stage_number': result[3],
+                        'remaining_tasks': result[4]
                     }
                     
                     logger.info(f"✅ Task {task_id} completed atomically. Stage complete: {completion_result['stage_complete']}, remaining: {completion_result['remaining_tasks']}")
@@ -1395,18 +1448,25 @@ class PostgresAdapter:
                 with conn.cursor() as cursor:
                     # Call PostgreSQL stored procedure for atomic advancement
                     cursor.execute("""
-                        SELECT advance_job_stage(%s, %s, %s, %s)
-                    """, (job_id, current_stage, next_stage, json.dumps(stage_results) if stage_results else None))
+                        SELECT job_updated, new_stage, is_final_stage
+                        FROM app.advance_job_stage(%s, %s, %s)
+                    """, (job_id, current_stage, json.dumps(stage_results) if stage_results else None))
                     
                     result = cursor.fetchone()
-                    success = result[0] if result else False
+                    if not result:
+                        logger.warning(f"⚠️ Job {job_id[:16]}... stage advancement failed - no result from PostgreSQL function")
+                        return False
+                        
+                    job_updated = result[0]
+                    new_stage = result[1] 
+                    is_final_stage = result[2]
                     
-                    if success:
-                        logger.info(f"✅ Job {job_id[:16]}... advanced atomically to stage {next_stage}")
+                    if job_updated:
+                        logger.info(f"✅ Job {job_id[:16]}... advanced atomically to stage {new_stage} (final: {is_final_stage})")
                     else:
                         logger.warning(f"⚠️ Job {job_id[:16]}... stage advancement failed - possible concurrent update")
                     
-                    return success
+                    return job_updated
                     
         except Exception as e:
             logger.error(f"❌ Failed to atomically advance job {job_id[:16]}... to stage {next_stage}: {e}")
@@ -1437,10 +1497,10 @@ class PostgresAdapter:
             
             with self._get_connection() as conn:
                 with conn.cursor() as cursor:
-                    # Call PostgreSQL stored procedure for completion check
+                    # Call PostgreSQL stored procedure for completion check  
                     cursor.execute("""
                         SELECT job_complete, final_stage, total_tasks, completed_tasks, task_results
-                        FROM check_job_completion(%s)
+                        FROM app.check_job_completion(%s)
                     """, (job_id,))
                     
                     result = cursor.fetchone()

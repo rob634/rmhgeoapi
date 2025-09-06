@@ -229,9 +229,9 @@ class JobRecord(BaseModel):
     # Error handling (OPTIONAL but structured)
     error_details: Optional[str] = Field(None, description="Error details if job failed")
     
-    # Audit trail (IMMUTABLE timestamps)
-    created_at: datetime = Field(..., description="Job creation timestamp")
-    updated_at: datetime = Field(..., description="Last update timestamp")
+    # Audit trail (IMMUTABLE timestamps) - Optional with defaults to match PostgreSQL DEFAULT NOW()
+    created_at: Optional[datetime] = Field(default_factory=lambda: datetime.utcnow(), description="Job creation timestamp")
+    updated_at: Optional[datetime] = Field(default_factory=lambda: datetime.utcnow(), description="Last update timestamp")
     
     # Validation rules
     @field_validator('job_id')
@@ -311,9 +311,9 @@ class TaskRecord(BaseModel):
     # Health monitoring (MUTABLE for heartbeat updates)
     heartbeat: Optional[datetime] = Field(None, description="Last heartbeat timestamp")
     
-    # Audit trail (IMMUTABLE timestamps)
-    created_at: datetime = Field(..., description="Task creation timestamp")
-    updated_at: datetime = Field(..., description="Last update timestamp")
+    # Audit trail (IMMUTABLE timestamps) - Optional with defaults to match PostgreSQL DEFAULT NOW()
+    created_at: Optional[datetime] = Field(default_factory=lambda: datetime.utcnow(), description="Task creation timestamp")
+    updated_at: Optional[datetime] = Field(default_factory=lambda: datetime.utcnow(), description="Last update timestamp")
     
     # Validation rules  
     @field_validator('task_id')

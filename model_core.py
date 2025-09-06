@@ -101,32 +101,19 @@ from dataclasses import dataclass, field
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 
+# Import canonical status enums from schema_core (Pydantic models)
+from schema_core import JobStatus, TaskStatus
 
-# Status Enumerations
-class JobStatus(Enum):
-    """Job status enumeration - Jobs can have mixed outcomes"""
-    QUEUED = "queued"
-    PROCESSING = "processing"
-    COMPLETED = "completed" 
-    FAILED = "failed"
-    COMPLETED_WITH_ERRORS = "completed_with_errors"  # Job succeeded but some tasks failed
 
+# Status enumerations moved to schema_core.py for consistency
+# Import from schema_core: from schema_core import JobStatus, TaskStatus
 
 class StageStatus(Enum):
-    """Stage status enumeration"""
+    """Stage status enumeration - Stage-specific statuses"""
     PENDING = "pending"
     PROCESSING = "processing"
     COMPLETED = "completed"
     FAILED = "failed"
-
-
-class TaskStatus(Enum):
-    """Task status enumeration - Tasks are atomic: succeed or fail only"""
-    QUEUED = "queued"
-    PROCESSING = "processing" 
-    COMPLETED = "completed"
-    FAILED = "failed"
-    # NOTE: Tasks cannot be "completed_with_errors" - they either succeed or fail
 
 
 # Definition Classes

@@ -32,6 +32,12 @@ test_api_local.py
 test_api.py
 test_container_list.py
 
+# Debug, example, and deployment scripts
+debug_completion.py
+debug_queue_processing.py
+deploy_schema.py
+EXAMPLE_HTTP_TRIGGER_USAGE.py
+
 # Documentation files
 *.md
 README.md

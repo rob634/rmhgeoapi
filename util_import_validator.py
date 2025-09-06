@@ -1,10 +1,12 @@
 # ============================================================================
-# CLAUDE CONTEXT - CONFIGURATION  
+# CLAUDE CONTEXT - AUTO-DISCOVERY IMPORT VALIDATION SYSTEM
 # ============================================================================
-# PURPOSE: Fail-first import validation for Azure Functions startup and health monitoring
-# SOURCE: Environment detection and cached validation results
-# SCOPE: Global application import validation with structured logging
-# VALIDATION: Critical dependency validation with fail-fast startup behavior
+# PURPOSE: Zero-configuration import validation with auto-discovery of application modules
+# SOURCE: Filesystem scanning + predefined critical modules + environment detection  
+# SCOPE: Global application health monitoring with persistent registry tracking
+# VALIDATION: Two-tier system (critical external deps + auto-discovered app modules)
+# REGISTRY: import_validation_registry.json with module status and last validation timestamps
+# AUTO-DISCOVERY: Scans *.py files using naming patterns (controller_*, service_*, model_*, etc.)
 # ============================================================================
 
 """
@@ -56,14 +58,73 @@ from util_logger import LoggerFactory, ComponentType
 
 class ImportValidator:
     """
-    Singleton class for centralized import validation with auto-discovery and config tracking.
+    Auto-Discovery Import Validation System for Azure Functions.
     
-    Features:
-    - Auto-discovery of application modules via filesystem scanning
-    - Persistent registry tracking in import_validation_registry.json
-    - Cached validation results with 5-minute TTL
-    - Historical tracking of module discovery and validation success
-    - Fail-fast startup validation with detailed error reporting
+    This singleton class provides zero-configuration import validation by automatically 
+    discovering application modules through filesystem scanning and maintaining a persistent
+    registry of validation status for both critical external dependencies and application code.
+    
+    ## Two-Tier Validation System:
+    
+    **1. Critical Modules (External Dependencies):**
+        - azure.functions, azure.identity, azure.storage.queue
+        - pydantic, psycopg, json, logging, os, sys
+        - Predefined list of essential dependencies
+        
+    **2. Application Modules (Auto-Discovered):**
+        - Scans filesystem for Python files using naming patterns
+        - controller_*.py → "* workflow controller"  
+        - service_*.py → "* service implementation"
+        - model_*.py → "* Pydantic model definitions"
+        - repository_*.py → "* repository layer"
+        - trigger_*.py → "* HTTP trigger class"  
+        - util_*.py → "* utility module"
+        - validator_*.py → "* validation utilities"
+    
+    ## Registry Structure (import_validation_registry.json):
+    
+    ```json
+    {
+      "critical_modules": {
+        "azure.functions": {
+          "description": "Azure Functions runtime",
+          "discovered_date": "2025-09-05T...",
+          "last_successful_validation": "2025-09-05T...",
+          "auto_discovered": false
+        }
+      },
+      "application_modules": {
+        "controller_hello_world": {
+          "description": "Hello World workflow controller", 
+          "discovered_date": "2025-09-05T...",
+          "last_successful_validation": "2025-09-05T...",
+          "auto_discovered": true
+        }
+      },
+      "metadata": {
+        "created": "2025-09-05T...",
+        "last_updated": "2025-09-05T...",
+        "version": "1.0"
+      }
+    }
+    ```
+    
+    ## Key Benefits:
+        - **Zero Configuration**: New classes automatically included when following naming conventions
+        - **Early Detection**: Import failures caught before runtime in Azure Functions
+        - **Health Monitoring**: Real-time status via /api/health endpoint
+        - **Development Workflow**: Clean registry shows only essential data (last validation timestamp)
+        - **Azure Functions Ready**: Skips file writes in read-only filesystem environments
+        
+    ## Usage in Development:
+        When adding new classes like `controller_geospatial.py` or `service_raster_processor.py`,
+        they are automatically discovered and included in import validation within 6 minutes
+        (health check interval). No manual configuration required.
+    
+    ## Caching & Performance:
+        - 5-minute cache TTL prevents repeated filesystem scanning
+        - Registry updates only on module discovery or validation status changes
+        - Singleton pattern ensures consistent state across Azure Functions runtime
     """
     
     _instance: Optional['ImportValidator'] = None
@@ -163,6 +224,11 @@ class ImportValidator:
         Args:
             registry: Registry data to save.
         """
+        # Skip file operations in Azure Functions (read-only filesystem)
+        if self.is_azure_functions:
+            self.logger.debug(f"⚠️ Skipping registry save in Azure Functions (read-only filesystem)")
+            return
+            
         try:
             # Update metadata
             registry['metadata']['last_updated'] = datetime.now().isoformat()
@@ -208,6 +274,10 @@ class ImportValidator:
                 # Convert file path to module name (remove .py extension)
                 module_name = Path(file_path).stem
                 
+                # Skip __init__ files - they don't import like regular modules
+                if module_name == '__init__':
+                    continue
+                    
                 # Create descriptive name based on module name and pattern
                 if module_name.startswith('controller_'):
                     description = f"{module_name.replace('controller_', '').replace('_', ' ').title()} {description_suffix}"
@@ -262,7 +332,6 @@ class ImportValidator:
                     'description': description,
                     'discovered_date': current_time,
                     'last_successful_validation': None,
-                    'validation_history': [],
                     'auto_discovered': True
                 }
                 self.logger.info(f"📝 Registered new module: {module_name} - {description}")
@@ -294,41 +363,16 @@ class ImportValidator:
                     'description': details.get('description', 'Critical dependency'),
                     'discovered_date': current_time,
                     'last_successful_validation': None,
-                    'validation_history': [],
                     'auto_discovered': False
                 }
-            
-            # Record validation attempt
-            validation_entry = {
-                'timestamp': current_time,
-                'status': details['status'],
-                'success': details['status'] == 'success'
-            }
-            
-            if details['status'] != 'success':
-                validation_entry['error'] = details.get('error', 'Unknown error')
-            
-            registry['critical_modules'][module_name]['validation_history'].append(validation_entry)
             
             # Update last successful validation timestamp
             if details['status'] == 'success':
                 registry['critical_modules'][module_name]['last_successful_validation'] = current_time
         
-        # Update application modules validation history
+        # Update application modules validation status
         for module_name, details in validation_results['application_modules']['details'].items():
             if module_name in registry['application_modules']:
-                # Record validation attempt
-                validation_entry = {
-                    'timestamp': current_time,
-                    'status': details['status'], 
-                    'success': details['status'] == 'success'
-                }
-                
-                if details['status'] != 'success':
-                    validation_entry['error'] = details.get('error', 'Unknown error')
-                
-                registry['application_modules'][module_name]['validation_history'].append(validation_entry)
-                
                 # Update last successful validation timestamp
                 if details['status'] == 'success':
                     registry['application_modules'][module_name]['last_successful_validation'] = current_time

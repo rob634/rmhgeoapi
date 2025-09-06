@@ -706,23 +706,54 @@ class SchemaNukeQueryTrigger(DatabaseQueryTrigger):
             "details": result.get("error", "Tables dropped")
         })
         
-        # Step 3: Drop all enums
+        # Step 3: Drop all enums with thorough cleanup
         enum_drop_query = f"""
             DO $$
             DECLARE
                 enum_record RECORD;
+                retry_count INTEGER := 0;
+                max_retries INTEGER := 3;
             BEGIN
-                FOR enum_record IN 
-                    SELECT 
-                        t.typname as enum_name,
-                        n.nspname as schema_name
-                    FROM pg_type t 
-                    JOIN pg_namespace n ON t.typnamespace = n.oid
-                    WHERE n.nspname = '{app_schema}' AND t.typtype = 'e'
-                LOOP
-                    EXECUTE 'DROP TYPE IF EXISTS ' || enum_record.schema_name || '.' || enum_record.enum_name || ' CASCADE';
-                    RAISE NOTICE 'Dropped enum: %', enum_record.enum_name;
+                -- Drop enum types with CASCADE, retry if needed
+                WHILE retry_count < max_retries LOOP
+                    BEGIN
+                        FOR enum_record IN 
+                            SELECT 
+                                t.typname as enum_name,
+                                n.nspname as schema_name
+                            FROM pg_type t 
+                            JOIN pg_namespace n ON t.typnamespace = n.oid
+                            WHERE n.nspname = '{app_schema}' AND t.typtype = 'e'
+                        LOOP
+                            EXECUTE 'DROP TYPE IF EXISTS ' || enum_record.schema_name || '.' || enum_record.enum_name || ' CASCADE';
+                            RAISE NOTICE 'Dropped enum: %', enum_record.enum_name;
+                        END LOOP;
+                        
+                        -- Check if any enums remain
+                        IF NOT EXISTS (
+                            SELECT 1 FROM pg_type t 
+                            JOIN pg_namespace n ON t.typnamespace = n.oid
+                            WHERE n.nspname = '{app_schema}' AND t.typtype = 'e'
+                        ) THEN
+                            RAISE NOTICE 'All enums successfully dropped';
+                            EXIT;  -- Success, exit retry loop
+                        END IF;
+                        
+                        retry_count := retry_count + 1;
+                        RAISE NOTICE 'Retry % of % for enum cleanup', retry_count, max_retries;
+                        PERFORM pg_sleep(0.1);  -- Brief pause before retry
+                        
+                    EXCEPTION WHEN OTHERS THEN
+                        retry_count := retry_count + 1;
+                        RAISE NOTICE 'Error dropping enums (attempt %): %', retry_count, SQLERRM;
+                        IF retry_count >= max_retries THEN
+                            RAISE;  -- Re-raise the error after max retries
+                        END IF;
+                        PERFORM pg_sleep(0.1);
+                    END;
                 END LOOP;
+                
+                RAISE NOTICE 'Enum cleanup complete';
             END $$;
         """
         

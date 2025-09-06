@@ -89,9 +89,10 @@ from datetime import datetime
 
 from util_logger import LoggerFactory, ComponentType
 from controller_base import BaseController
+from schema_core import TaskStatus  # Use canonical Pydantic enum
 from model_core import (
     TaskDefinition, JobExecutionContext, 
-    StageExecutionContext, TaskStatus
+    StageExecutionContext
 )
 
 

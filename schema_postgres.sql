@@ -331,8 +331,8 @@ CREATE OR REPLACE FUNCTION check_job_completion(
 RETURNS TABLE (
     job_complete BOOLEAN,
     final_stage INTEGER,
-    total_tasks INTEGER,
-    completed_tasks INTEGER,
+    total_tasks BIGINT,
+    completed_tasks BIGINT,
     task_results JSONB
 )
 LANGUAGE plpgsql
@@ -354,8 +354,8 @@ BEGIN
         RETURN QUERY SELECT 
             FALSE,              -- job_complete
             0,                  -- final_stage
-            0,                  -- total_tasks
-            0,                  -- completed_tasks  
+            0::BIGINT,          -- total_tasks
+            0::BIGINT,          -- completed_tasks  
             '[]'::jsonb;        -- task_results
         RETURN;
     END IF;

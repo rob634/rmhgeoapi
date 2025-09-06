@@ -114,9 +114,8 @@ import logging
 import time
 from datetime import datetime
 
-from model_core import (
-    TaskStatus, TaskExecutionContext, TaskRecord, TaskQueueMessage, TaskResult
-)
+from schema_core import TaskStatus, TaskRecord, TaskQueueMessage  # Use canonical Pydantic models
+from model_core import TaskExecutionContext, TaskResult
 
 
 class BaseTask(ABC):

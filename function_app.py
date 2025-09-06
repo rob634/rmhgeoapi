@@ -88,6 +88,7 @@ Last Updated: January 2025
 
 # Native Python modules
 import logging
+import datetime
 
 # Azure SDK modules (3rd party - Microsoft)
 import azure.functions as func
@@ -207,6 +208,93 @@ def nuclear_schema_reset(req: func.HttpRequest) -> func.HttpResponse:
 def test_database_functions(req: func.HttpRequest) -> func.HttpResponse:
     """Test PostgreSQL functions: GET /api/db/functions/test"""
     return function_test_trigger.handle_request(req)
+
+
+# 🧪 SINGLE STAGE TEST - DEVELOPMENT ONLY  
+@app.route(route="test/single-stage", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
+def test_single_stage(req: func.HttpRequest) -> func.HttpResponse:
+    """Test single-stage job completion: POST /api/test/single-stage"""
+    try:
+        from repository_data import DataRepository
+        from controller_hello_world import HelloWorldController
+        import json
+        import time
+        
+        # Create a minimal single-stage job manually
+        repo = DataRepository()
+        controller = HelloWorldController()
+        
+        # Create job record manually with total_stages=1
+        job_data = {
+            'job_id': 'test_single_stage_' + str(int(time.time())),
+            'job_type': 'hello_world',
+            'status': 'processing',
+            'stage': 1,  
+            'total_stages': 1,  # Single stage
+            'parameters': {'n': 1, 'message': 'single stage test'},
+            'stage_results': {},
+            'result_data': None,
+            'error_details': None
+        }
+        
+        # Insert job
+        success = repo.storage_adapter.raw_create_job(job_data)
+        
+        # Create and complete task manually
+        task_data = {
+            'task_id': f"{job_data['job_id']}_stage1_task0",
+            'parent_job_id': job_data['job_id'],
+            'task_type': 'hello_world_greeting',
+            'status': 'completed',  # Already completed
+            'stage': 1,
+            'task_index': 0,
+            'parameters': {'message': 'single stage test', 'greeting': 'Hello!'},
+            'result_data': {'greeting': 'Hello from single stage!'},
+            'error_details': None,
+            'retry_count': 0,
+            'heartbeat': None
+        }
+        
+        # Insert completed task
+        task_success = repo.storage_adapter.raw_create_task(task_data)
+        
+        # Test atomic completion detection
+        from adapter_storage import PostgreSQLCompletionDetector
+        completion_detector = PostgreSQLCompletionDetector()
+        
+        result = completion_detector.complete_task_and_check_stage(
+            task_data['task_id'],
+            task_data['parent_job_id'], 
+            task_data['stage'],
+            task_data['result_data']
+        )
+        
+        return func.HttpResponse(
+            json.dumps({
+                'test': 'single_stage_completion',
+                'job_created': success,
+                'task_created': task_success,
+                'completion_result': result,
+                'job_id': job_data['job_id'],
+                'should_trigger_completion': result.get('stage_complete', False)
+            }),
+            mimetype="application/json"
+        )
+        
+    except Exception as e:
+        return func.HttpResponse(
+            json.dumps({'error': str(e)}),
+            status_code=500,
+            mimetype="application/json"
+        )
+
+
+# 🚨 VALIDATION DEBUGGING ENDPOINT - DEVELOPMENT ONLY
+@app.route(route="debug/validation/task", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
+def debug_task_validation(req: func.HttpRequest) -> func.HttpResponse:
+    """🔧 DEBUG: Test TaskRecord validation with raw data: POST /api/debug/validation/task"""
+    from trigger_validation_debug import main as validation_debug_trigger
+    return validation_debug_trigger(req)
 
 
 @app.queue_trigger(
@@ -452,89 +540,85 @@ def process_task_queue(msg: func.QueueMessage) -> None:
     logger.info("🔄 Task queue trigger activated - processing with Pydantic architecture")
     logger.debug(f"📨 Raw task queue message received: {msg}")
     
+    # ========================================================================
+    # PHASE 1: MESSAGE VALIDATION (No task context yet)
+    # ========================================================================
     try:
-        # Parse and validate message using Pydantic schema
-        logger.debug(f"🔍 Decoding task queue message body")
-        try:
-            message_content = msg.get_body().decode('utf-8')
-            logger.debug(f"📋 Decoded task message content: {message_content}")
-        except Exception as decode_error:
-            logger.error(f"❌ Failed to decode task message body: {decode_error}")
-            logger.debug(f"🔍 Task message decode error type: {type(decode_error).__name__}")
-            raise ValueError(f"Task message decode failed: {decode_error}")
-        
-        logger.debug(f"🔧 Validating message with TaskQueueMessage schema")
-        try:
-            task_message = TaskQueueMessage.model_validate_json(message_content)
-            logger.debug(f"✅ Task message validation successful: {task_message}")
-        except Exception as validation_error:
-            logger.error(f"❌ Task message validation failed: {validation_error}")
-            logger.debug(f"🔍 Task validation error type: {type(validation_error).__name__}")
-            logger.debug(f"📋 Invalid task message content: {message_content}")
-            raise ValueError(f"Task message validation failed: {validation_error}")
-        
-        # Update logger context with task details for better correlation
-        logger.update_context(
-            task_id=task_message.task_id,
-            job_id=task_message.parent_job_id,
-            task_type=task_message.task_type,
-            stage=task_message.stage
-        )
-        
-        logger.info(f"📋 Processing task: {task_message.task_id} type={task_message.task_type}")
-        logger.debug(f"📊 Full task message details: task_id={task_message.task_id}, parent_job_id={task_message.parent_job_id}, task_type={task_message.task_type}, parameters={task_message.parameters}")
-        
-        # Get repositories (imports validated at startup)
-        logger.debug(f"🏗️ Creating repositories for task processing")
+        message_content = msg.get_body().decode('utf-8')
+        task_message = TaskQueueMessage.model_validate_json(message_content)
+        logger.info(f"✅ Task message validated: {task_message.task_id}")
+    except Exception as validation_error:
+        # Can't mark task as failed - we don't have a valid task_id
+        logger.error(f"❌ Invalid queue message: {validation_error}")
+        raise  # Let Azure Functions handle the retry/poison queue logic
+    
+    # Update logger context now that we have valid task details
+    logger.update_context(
+        task_id=task_message.task_id,
+        job_id=task_message.parent_job_id,
+        task_type=task_message.task_type,
+        stage=task_message.stage
+    )
+    
+    # ========================================================================
+    # PHASE 2: REPOSITORY SETUP (Infrastructure)
+    # ========================================================================
+    try:
         from repository_data import RepositoryFactory
-        
-        try:
-            job_repo, task_repo, completion_detector = RepositoryFactory.create_repositories('postgres')
-            logger.debug(f"✅ Repositories created with PostgreSQL backend")
-        except Exception as repo_error:
-            logger.error(f"❌ Failed to create repositories for tasks: {repo_error}")
-            raise RuntimeError(f"Task repository creation failed: {repo_error}")
-        
-        # Load task record
-        logger.debug(f"🔍 Loading task record for: {task_message.task_id}")
-        try:
-            task_record = task_repo.get_task(task_message.task_id)
-            logger.debug(f"📋 Task record retrieval result: {task_record}")
-        except Exception as load_error:
-            logger.error(f"❌ Failed to load task record: {load_error}")
-            logger.debug(f"🔍 Task load error type: {type(load_error).__name__}")
-            raise RuntimeError(f"Task record load failed: {load_error}")
-        
+        job_repo, task_repo, completion_detector = RepositoryFactory.create_repositories('postgres')
+        logger.debug("✅ Repositories created")
+    except Exception as repo_error:
+        # Infrastructure failure - can't even access database to mark task failed
+        logger.error(f"❌ Repository creation failed: {repo_error}")
+        raise
+    
+    # ========================================================================
+    # PHASE 3: TASK LOADING & VALIDATION
+    # ========================================================================
+    try:
+        task_record = task_repo.get_task(task_message.task_id)
         if not task_record:
-            logger.error(f"❌ Task record not found: {task_message.task_id}")
             raise ValueError(f"Task record not found: {task_message.task_id}")
         
-        logger.debug(f"✅ Task record loaded successfully: status={task_record.status if hasattr(task_record, 'status') else 'unknown'}")
-        
         # Update task status to processing
-        logger.debug(f"🔄 Updating task status to PROCESSING for: {task_message.task_id}")
-        try:
-            task_repo.update_task_status(task_message.task_id, TaskStatus.PROCESSING)
-            logger.debug(f"✅ Task status updated to PROCESSING")
-        except Exception as status_error:
-            logger.error(f"❌ Failed to update task status to PROCESSING: {status_error}")
-            logger.debug(f"🔍 Task status update error type: {type(status_error).__name__}")
-            raise RuntimeError(f"Task status update failed: {status_error}")
+        task_repo.update_task_status(task_message.task_id, TaskStatus.PROCESSING)
+        logger.info(f"📋 Processing task: {task_message.task_id}")
         
-        # Route to task handler based on task type (imports validated at startup)
-        logger.debug(f"🎯 Routing to task handler for task type: {task_message.task_type}")
+    except Exception as load_error:
+        logger.error(f"❌ Task loading failed: {load_error}")
+        try:
+            # Try to mark task as failed if possible
+            logger.debug(f"🔧 Attempting to mark task as failed: {task_message.task_id}")
+            task_repo.update_task_status(
+                task_message.task_id, 
+                TaskStatus.FAILED,
+                additional_updates={'error_details': f"Failed to load task: {load_error}"}
+            )
+        except:
+            logger.error(f"❌ Failed to mark task as failed: {task_message.task_id}")
+            pass  # Best effort - database might be unreachable
+        raise
+    
+    # ========================================================================
+    # PHASE 4: TASK EXECUTION (Business Logic)
+    # ========================================================================
+    task_result = None
+    
+    try:
+        # Route to task handler based on task type
+
+######## ROBERT'S NOTES
+######## This needs to be if task_message.task_type in <dynamically generated list of tasks based on the job type> 
+######## TODO Task registry object from which to retrieve the business logic services
+######## e.g. TaskServicesFactory.from_task_type(task_message.task_type)
+######## For now, hardcoded hello world is ok until hello world is completely working
         if task_message.task_type in ["hello_world_greeting", "hello_world_reply"]:
             from service_hello_world import get_hello_world_task
             from model_core import TaskExecutionContext
             
-            try:
-                task_handler = get_hello_world_task(task_message.task_type)
-                logger.debug(f"✅ Task handler instantiated")
-            except Exception as service_error:
-                logger.error(f"❌ Failed to instantiate task handler: {service_error}")
-                raise RuntimeError(f"Task handler instantiation failed: {service_error}")
+            task_handler = get_hello_world_task(task_message.task_type)
             
-            # Create proper execution context
+            # Create execution context
             context = TaskExecutionContext(
                 task_id=task_message.task_id,
                 parent_job_id=task_message.parent_job_id,
@@ -542,139 +626,259 @@ def process_task_queue(msg: func.QueueMessage) -> None:
                 task_index=task_message.task_index,
                 parameters=task_message.parameters
             )
-            logger.debug(f"✅ Task execution context created: {context}")
             
-            # Execute task with modern interface
-            try:
-                task_result = task_handler.execute(context)
-                logger.debug(f"✅ Task execution result: {task_result}")
+            # Execute task
+            task_result = task_handler.execute(context)
+            
+            if not hasattr(task_result, 'result'):
+                raise ValueError(f"Invalid task result object: {task_result}")
                 
-                # Extract result data from TaskResult object
-                result = task_result.result if hasattr(task_result, 'result') else task_result
-                logger.debug(f"✅ Extracted result data: {result}")
-            except Exception as task_error:
-                logger.error(f"❌ Task execution failed: {task_error}")
-                logger.debug(f"🔍 Task execution error type: {type(task_error).__name__}")
-                import traceback
-                logger.debug(f"📍 Task execution traceback: {traceback.format_exc()}")
-                raise RuntimeError(f"Task execution failed: {task_error}")
-            
-            # Update task with result
-            logger.debug(f"💾 Updating task with completion status and result")
-            try:
-                task_repo.update_task_status(
-                    task_message.task_id, 
-                    TaskStatus.COMPLETED, 
-                    additional_updates={'result_data': result}
-                )
-                logger.debug(f"✅ Task status updated to COMPLETED with result data")
-                logger.info(f"✅ Task {task_message.task_id} completed successfully")
-            except Exception as update_error:
-                logger.error(f"❌ Failed to update task completion status: {update_error}")
-                logger.debug(f"🔍 Task completion update error type: {type(update_error).__name__}")
-                raise RuntimeError(f"Task completion update failed: {update_error}")
+            logger.info(f"✅ Task executed successfully")
             
         else:
-            # Task handler not implemented
-            error_msg = f"Task handler not implemented for task type: {task_message.task_type}"
-            logger.error(f"❌ {error_msg}")
-            
-            # Get available task types (imports validated at startup)
+            # Get available task types for error message
             from service_hello_world import HELLO_WORLD_TASKS
             available_types = list(HELLO_WORLD_TASKS.keys())
-            logger.debug(f"📋 Available task types: {', '.join(available_types)}")
-            
-            task_repo.update_task_status(
-                task_message.task_id, 
-                TaskStatus.FAILED, 
-                additional_updates={'error_details': error_msg}
+            raise NotImplementedError(
+                f"Handler not implemented for: {task_message.task_type}. "
+                f"Available types: {', '.join(available_types)}"
             )
+            
+    except Exception as exec_error:
+        logger.error(f"❌ Task execution failed: {exec_error}")
         
-        # CRITICAL: Check if parent job is complete (distributed detection)
-        logger.debug(f"🔍 Checking job completion for parent: {task_message.parent_job_id}")
-        logger.debug(f"🎯 Current task: {task_message.task_id} (just completed)")
+        # Mark task as failed
         try:
-            completion_result = completion_detector.check_job_completion(task_message.parent_job_id)
-            logger.debug(f"📊 Completion check result: is_complete={completion_result.is_complete}, task_count={len(completion_result.task_results) if hasattr(completion_result, 'task_results') else 'unknown'}")
-            logger.debug(f"📊 Completion details: final_stage={getattr(completion_result, 'final_stage', 'unknown')}, completed_tasks={getattr(completion_result, 'completed_tasks', 'unknown')}, total_tasks={getattr(completion_result, 'total_tasks', 'unknown')}")
-        except Exception as completion_error:
-            logger.error(f"❌ COMPLETION DETECTION FAILED: {completion_error}")
-            logger.error(f"⚠️ This error occurs AFTER task was marked as COMPLETED")
-            logger.error(f"🔍 Completion check error type: {type(completion_error).__name__}")
-            import traceback
-            logger.error(f"📍 Completion check traceback: {traceback.format_exc()}")
-            logger.error(f"🚨 This will trigger the outer exception handler that tries to mark completed tasks as failed")
-            raise RuntimeError(f"Job completion check failed: {completion_error}")
-        
-        if completion_result.is_complete:
-            logger.info(f"🎉 Job {task_message.parent_job_id[:16]}... completed - all tasks finished!")
-            
-            # This is the last task - complete the parent job (imports validated at startup)
-            from controller_hello_world import HelloWorldController
-            
-            try:
-                controller = HelloWorldController()
-                logger.debug(f"✅ Controller instantiated for aggregation")
-            except Exception as controller_error:
-                logger.error(f"❌ Failed to instantiate controller for aggregation: {controller_error}")
-                raise RuntimeError(f"Controller aggregation instantiation failed: {controller_error}")
-            
-            logger.debug(f"🔄 Aggregating job results with task count: {len(completion_result.task_results) if hasattr(completion_result, 'task_results') else 'unknown'}")
-            try:
-                # Use the complete_job method which handles JobExecutionContext properly
-                job_result = controller.complete_job(
-                    job_id=task_message.parent_job_id,
-                    all_task_results=completion_result.task_results
-                )
-                logger.debug(f"✅ Job results aggregated and completed successfully: {job_result}")
-                logger.info(f"✅ Job {task_message.parent_job_id[:16]}... marked as completed by complete_job()")
-            except Exception as aggregation_error:
-                logger.error(f"❌ JOB AGGREGATION FAILED: {aggregation_error}")
-                logger.error(f"⚠️ This error occurs AFTER task was marked as COMPLETED") 
-                logger.error(f"🔍 Job aggregation error type: {type(aggregation_error).__name__}")
-                import traceback
-                logger.error(f"📍 Job aggregation traceback: {traceback.format_exc()}")
-                logger.error(f"🚨 This will trigger the outer exception handler that tries to mark completed tasks as failed")
-                raise RuntimeError(f"Job completion failed: {aggregation_error}")
-            
-    except Exception as e:
-        logger.error(f"❌ Error processing task: {str(e)}")
-        
-        # CRITICAL: Check current task status before attempting to mark as failed
-        # This prevents invalid COMPLETED → FAILED transitions
-        try:
-            if 'task_message' in locals() and 'task_repo' in locals():
-                logger.debug(f"🔍 Checking current task status before error handling for: {task_message.task_id}")
-                
-                # Get current task status to avoid invalid transitions
-                current_task = task_repo.get_task(task_message.task_id)
-                logger.debug(f"📋 Current task status: {current_task.status if current_task else 'NOT_FOUND'}")
-                
-                # Only mark as failed if not already in a terminal state
-                if current_task and not current_task.status.is_terminal():
-                    logger.debug(f"🔄 Marking non-terminal task as FAILED: {task_message.task_id}")
-                    task_repo.update_task_status(
-                        task_message.task_id,
-                        TaskStatus.FAILED,
-                        additional_updates={'error_details': str(e)}
-                    )
-                    logger.debug(f"✅ Task marked as FAILED successfully")
-                elif current_task and current_task.status.is_terminal():
-                    logger.warning(f"⚠️ Skipping status update - task already in terminal state: {current_task.status}")
-                    logger.warning(f"⚠️ Error occurred after task completion: {str(e)}")
-                    logger.warning(f"⚠️ This suggests an issue in job completion detection or aggregation")
-                else:
-                    logger.error(f"❌ Cannot update status - task not found: {task_message.task_id}")
-                    
+            task_repo.update_task_status(
+                task_message.task_id,
+                TaskStatus.FAILED,
+                additional_updates={'error_details': str(exec_error)}
+            )
         except Exception as update_error:
-            logger.error(f"❌ Failed to safely update task status: {update_error}")
-            logger.debug(f"🔍 Status update error type: {type(update_error).__name__}")
+            logger.error(f"❌ Failed to update task status: {update_error}")
         
-        # Re-raise so Azure Functions knows it failed
+        raise  # Re-raise for Azure Functions retry logic
+    
+    # ========================================================================
+    # PHASE 5: ATOMIC COMPLETION & STAGE DETECTION
+    # ========================================================================
+
+    if hasattr(completion_detector,'complete_task_and_check_stage'):
+        logger.debug(f"Proceeding to atomic completion complete_task_and_check_stage")
+    else:
+        logger.error(f"Completion detector object is broken: lacks complete_task_and_check_stage method")
+        raise RuntimeError("Completion detector is not functional")
+
+    try:
+        # Atomic "last task turns out lights" pattern
+        stage_completion_result = completion_detector.complete_task_and_check_stage(
+            task_message.task_id,
+            task_message.parent_job_id,
+            task_message.stage,
+            task_result.result
+        )
+        
+        logger.info(f"✅ Task marked as completed")
+        stage_complete = stage_completion_result.get('stage_complete', False)
+        
+    except Exception as completion_error:
+        logger.error(f"❌ Failed to mark task complete: {completion_error}")
+        # This is critical - task executed but not marked complete
         raise
-
-
-
+    
+    # ========================================================================
+    # PHASE 6: STAGE ADVANCEMENT (CRITICAL - Job stuck without this)
+    # ========================================================================
+    if stage_complete:
+        try:
+            logger.info(f"🎯 Stage {task_message.stage} completed")
+            
+            # Get job status to determine next action
+            job_record = job_repo.get_job(task_message.parent_job_id)
+            if not job_record:
+                raise ValueError(f"Job not found: {task_message.parent_job_id}")
+            
+            if job_record.stage >= job_record.total_stages:
+                # Final stage - complete the job
+                logger.info(f"🏁 Final stage - completing job")
+                
+                try:
+                    # Get controller for job completion
+                    from controller_hello_world import HelloWorldController
+                    controller = HelloWorldController()
+                    
+                    # Get all task results from completed job
+                    final_job_check = completion_detector.check_job_completion(task_message.parent_job_id)
+                    
+                    if not final_job_check.job_complete:
+                        raise RuntimeError(f"Job completion check failed - job not ready for completion: {task_message.parent_job_id}")
+                    
+                    # Complete the job with aggregated results
+                    logger.info(f"🎯 Completing job with {final_job_check.total_tasks} total tasks, {final_job_check.completed_tasks} completed")
+                    
+                    job_result = controller.complete_job(
+                        job_id=task_message.parent_job_id,
+                        all_task_results=final_job_check.task_results
+                    )
+                    
+                    if not job_result:
+                        raise RuntimeError(f"Job completion failed - no result returned: {task_message.parent_job_id}")
+                    
+                    # Update job status to completed with final results
+                    final_status = job_repo.update_job_status(
+                        job_id=task_message.parent_job_id,
+                        new_status=JobStatus.COMPLETED,
+                        additional_updates={'result_data': job_result}
+                    )
+                    
+                    logger.info(f"🎊 Job {task_message.parent_job_id[:16]}... COMPLETED successfully")
+                    logger.info(f"📊 Final job status: {final_status}")
+                    
+                except Exception as completion_error:
+                    logger.error(f"❌ CRITICAL: Job completion failed: {completion_error}")
+                    # Mark job as completed_with_errors instead of failed to acknowledge partial success
+                    try:
+                        job_repo.update_job_status(
+                            job_id=task_message.parent_job_id,
+                            new_status=JobStatus.COMPLETED_WITH_ERRORS,
+                            additional_updates={'error_details': f"Job completion failed: {str(completion_error)}"}
+                        )
+                        logger.error(f"🟡 Job {task_message.parent_job_id} marked as COMPLETED_WITH_ERRORS")
+                    except Exception as status_error:
+                        logger.error(f"❌ Failed to update job status: {status_error}")
+                    raise  # Re-raise for proper error handling
+                
+            else:
+                logger.info(f"🔄 Advancing to stage {job_record.stage + 1}")
+                
+                # STAGE ADVANCEMENT IMPLEMENTATION
+                try:
+                    # Get controller for job orchestration
+                    from controller_hello_world import HelloWorldController
+                    controller = HelloWorldController()
+                    
+                    # Collect current stage results
+                    current_stage_result = completion_detector.check_job_completion(task_message.parent_job_id)
+                    stage_task_results = current_stage_result.task_results or []
+                    
+                    # Create stage result summary
+                    stage_result = {
+                        'stage_number': task_message.stage,
+                        'completed_tasks': len(stage_task_results),
+                        'task_results': stage_task_results,
+                        'stage_completed_at': datetime.datetime.utcnow().isoformat()
+                    }
+                    
+                    # Advance job to next stage atomically
+                    advancement_result = completion_detector.advance_job_stage(
+                        job_id=task_message.parent_job_id,
+                        current_stage=task_message.stage,
+                        stage_result=stage_result
+                    )
+                    
+                    if not advancement_result.get('job_updated', False):
+                        raise RuntimeError(f"Failed to advance job {task_message.parent_job_id} from stage {task_message.stage}")
+                    
+                    new_stage = advancement_result.get('new_stage')
+                    is_final = advancement_result.get('is_final_stage', False)
+                    
+                    logger.info(f"✅ Job advanced from stage {task_message.stage} → stage {new_stage}")
+                    
+                    if is_final:
+                        logger.info(f"🏁 Reached final stage {new_stage} - job should complete on next task completion")
+                    else:
+                        # Create tasks for next stage
+                        logger.info(f"🔄 Creating tasks for stage {new_stage}")
+                        
+                        # Create stage execution context for next stage
+                        from model_core import StageExecutionContext
+                        next_stage_context = StageExecutionContext(
+                            job_id=task_message.parent_job_id,
+                            job_type=job_record.job_type,
+                            stage_number=new_stage,
+                            total_stages=job_record.total_stages,
+                            parameters=job_record.parameters,
+                            stage_results=job_record.stage_results or {}
+                        )
+                        
+                        # Create tasks for next stage
+                        next_stage_tasks = controller.create_stage_tasks(next_stage_context)
+                        
+                        if not next_stage_tasks:
+                            raise RuntimeError(f"No tasks created for stage {new_stage} - job would be stuck")
+                        
+                        # Queue tasks for next stage
+                        tasks_queued = 0
+                        for task_def in next_stage_tasks:
+                            try:
+                                # Create task record
+                                success = task_repo.create_task(task_def)
+                                if success:
+                                    # Queue task for execution  
+                                    task_queue_message = TaskQueueMessage(
+                                        task_id=task_def.task_id,
+                                        parent_job_id=task_def.parent_job_id,
+                                        task_type=task_def.task_type,
+                                        stage=task_def.stage,
+                                        task_index=task_def.task_index,
+                                        parameters=task_def.parameters
+                                    )
+                                    
+                                    # Send to task queue
+                                    from azure.storage.queue import QueueServiceClient
+                                    from config import get_config
+                                    
+                                    config = get_config()
+                                    queue_service = QueueServiceClient(account_url=config.storage_account_url, credential=config.azure_credential)
+                                    task_queue = queue_service.get_queue_client(config.task_processing_queue)
+                                    
+                                    task_queue.send_message(task_queue_message.model_dump_json())
+                                    tasks_queued += 1
+                                    logger.info(f"📨 Queued task {task_def.task_id}")
+                                    
+                            except Exception as task_error:
+                                logger.error(f"❌ Failed to queue task {task_def.task_id}: {task_error}")
+                                # Continue with other tasks - partial failure handling
+                        
+                        logger.info(f"🎯 Stage {new_stage} started with {tasks_queued}/{len(next_stage_tasks)} tasks queued")
+                        
+                        if tasks_queued == 0:
+                            raise RuntimeError(f"No tasks successfully queued for stage {new_stage}")
+                            
+                except Exception as stage_error:
+                    logger.error(f"❌ CRITICAL: Stage advancement failed: {stage_error}")
+                    # Update job status to failed to prevent infinite stuck state
+                    try:
+                        job_repo.update_job_status(
+                            job_id=task_message.parent_job_id,
+                            new_status=JobStatus.FAILED,
+                            additional_updates={'error_details': f"Stage advancement failed: {str(stage_error)}"}
+                        )
+                        logger.error(f"🔴 Job {task_message.parent_job_id} marked as FAILED due to stage advancement error")
+                    except Exception as status_error:
+                        logger.error(f"❌ Failed to mark job as failed: {status_error}")
+                    raise  # Re-raise original error
+                
+        except Exception as advancement_error:
+            # CRITICAL FAILURE - Job workflow is broken
+            logger.error(f"❌ CRITICAL: Stage advancement failed - job stuck: {advancement_error}")
+            raise  # Must re-raise - this is a critical failure
+    else:
+        logger.warning(f"⚠️ Job {task_message.parent_job_id} is not complete")
+    # ========================================================================
+    # PHASE 7: JOB COMPLETION CHECK (CRITICAL - Final verification)
+    # ========================================================================
+    try:
+        final_job_check = completion_detector.check_job_completion(task_message.parent_job_id)
+        if final_job_check.is_complete:
+            logger.info(f"🎉 Job fully complete: {task_message.parent_job_id[:16]}...")
+        else:
+            logger.debug(f"📊 Job not yet complete: more stages or tasks pending")
+            
+    except Exception as job_check_error:
+        # Final verification failure
+        logger.error(f"❌ Job completion check failed: {job_check_error}")
+        raise
 
 
 @app.route(route="monitor/poison", methods=["GET", "POST"])
@@ -720,13 +924,13 @@ def query_database(req: func.HttpRequest) -> func.HttpResponse:
 def test_endpoint(req: func.HttpRequest) -> func.HttpResponse:
     """Simple test endpoint to verify route registration works."""
     import json
-    from datetime import datetime
+    from datetime import datetime, timezone
     
     return func.HttpResponse(
         body=json.dumps({
             "status": "test_endpoint_working",
             "message": "Route registration is working",
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "query_params": dict(req.params)
         }),
         status_code=200,

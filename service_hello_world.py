@@ -82,7 +82,8 @@ from datetime import datetime
 
 from util_logger import LoggerFactory, ComponentType
 from model_task_base import BaseTask
-from model_core import TaskStatus, TaskExecutionContext, TaskResult
+from schema_core import TaskStatus  # Use canonical Pydantic enum
+from model_core import TaskExecutionContext, TaskResult
 
 
 class HelloWorldGreetingTask(BaseTask):

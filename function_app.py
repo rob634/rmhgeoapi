@@ -160,6 +160,35 @@ def get_job_status(req: func.HttpRequest) -> func.HttpResponse:
     return get_job_status_trigger.handle_request(req)
 
 
+# Schema Generation Endpoints - Phase 1 Pydantic to SQL
+@app.route(route="schema/generate", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def generate_schema(req: func.HttpRequest) -> func.HttpResponse:
+    """Generate SQL schema from Pydantic models: GET /api/schema/generate"""
+    from trigger_schema_generate import schema_generate_trigger
+    return schema_generate_trigger.handle_request(req)
+
+
+@app.route(route="schema/deploy", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
+def deploy_schema(req: func.HttpRequest) -> func.HttpResponse:
+    """Deploy generated schema: POST /api/schema/deploy"""
+    from trigger_schema_generate import schema_generate_trigger
+    return schema_generate_trigger.handle_request(req)
+
+
+@app.route(route="schema/compare", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def compare_schema(req: func.HttpRequest) -> func.HttpResponse:
+    """Compare generated vs current schema: GET /api/schema/compare"""
+    from trigger_schema_generate import schema_generate_trigger
+    return schema_generate_trigger.handle_request(req)
+
+
+@app.route(route="schema/deploy-pydantic", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
+def deploy_pydantic_schema(req: func.HttpRequest) -> func.HttpResponse:
+    """Deploy Pydantic-generated schema directly: POST /api/schema/deploy-pydantic?confirm=yes"""
+    from trigger_schema_pydantic_deploy import pydantic_deploy_trigger
+    return pydantic_deploy_trigger.handle_request(req)
+
+
 # Database Query Endpoints - Phase 2 Database Monitoring
 @app.route(route="db/jobs", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
 def query_jobs(req: func.HttpRequest) -> func.HttpResponse:
@@ -750,9 +779,10 @@ def process_task_queue(msg: func.QueueMessage) -> None:
                 
             else:
                 logger.info(f"🔄 Advancing to stage {job_record.stage + 1}")
-                
+           
                 # STAGE ADVANCEMENT IMPLEMENTATION
                 try:
+                    ###### This is where the job-stage specific controller needs to be created instead of hardcoded helloworld     
                     # Get controller for job orchestration
                     from controller_hello_world import HelloWorldController
                     controller = HelloWorldController()
@@ -773,7 +803,7 @@ def process_task_queue(msg: func.QueueMessage) -> None:
                     advancement_result = completion_detector.advance_job_stage(
                         job_id=task_message.parent_job_id,
                         current_stage=task_message.stage,
-                        stage_result=stage_result
+                        stage_results=stage_result
                     )
                     
                     if not advancement_result.get('job_updated', False):

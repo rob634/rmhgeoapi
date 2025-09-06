@@ -1,33 +1,94 @@
--- PostgreSQL Functions Only - Extracted from schema_postgres.sql
--- This file contains only the function definitions needed for task completion
+-- =============================================================================
+-- GENERATED PostgreSQL Schema from Pydantic Models
+-- Generated at: 2025-09-05T23:10:16.016278
+-- =============================================================================
+-- 
+-- This schema is automatically generated from Pydantic models
+-- The Python models are the single source of truth
+-- 
+-- =============================================================================
 
--- ENUMS - Type-safe status management (must exist before functions)
--- Job status enum matching JobStatus in schema_core.py
-DO $$ BEGIN
-    CREATE TYPE job_status AS ENUM (
-        'queued',               -- Initial state after creation
-        'processing',           -- Job is actively processing stages
-        'completed',           -- All stages completed successfully
-        'failed',              -- Job failed with unrecoverable error
-        'completed_with_errors' -- Job completed but some tasks had errors
-    );
+-- Create schema if not exists
+CREATE SCHEMA IF NOT EXISTS app;
+
+-- Set search path
+SET search_path TO app, public;
+
+-- JobStatus enum from schema_core
+DO $$ 
+BEGIN
+    CREATE TYPE app.job_status AS ENUM ('queued', 'processing', 'completed', 'failed');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+-- TaskStatus enum from schema_core
+DO $$ 
+BEGIN
+    CREATE TYPE app.task_status AS ENUM ('queued', 'processing', 'completed', 'failed');
 EXCEPTION
     WHEN duplicate_object THEN null;
 END $$;
 
--- Task status enum matching TaskStatus in schema_core.py
-DO $$ BEGIN
-    CREATE TYPE task_status AS ENUM (
-        'queued',      -- Task created but not started
-        'processing',  -- Task actively running
-        'completed',   -- Task finished successfully
-        'failed'       -- Task failed with error
-    );
-EXCEPTION
-    WHEN duplicate_object THEN null;
-END $$;
+-- JobRecord table from schema_core
+CREATE TABLE IF NOT EXISTS app.jobs (
+    job_id VARCHAR NOT NULL
+        CHECK (length(job_id) = 64 AND job_id ~ '^[a-f0-9]+$'),
+    job_type VARCHAR NOT NULL,
+    status app.job_status NOT NULL DEFAULT 'queued'::app.job_status,
+    stage INTEGER NOT NULL DEFAULT 1
+        CHECK (stage >= 1 AND stage <= 100),
+    total_stages INTEGER NOT NULL DEFAULT 1
+        CHECK (total_stages >= 1 AND total_stages <= 100),
+    parameters JSONB NOT NULL DEFAULT '{}',
+    stage_results JSONB NOT NULL DEFAULT '{}',
+    result_data JSONB NULL,
+    error_details VARCHAR NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (job_id)
+);
 
--- Function to atomically complete a task and detect stage completion
+-- TaskRecord table from schema_core
+CREATE TABLE IF NOT EXISTS app.tasks (
+    task_id VARCHAR NOT NULL,
+    parent_job_id VARCHAR NOT NULL
+        CHECK (length(parent_job_id) = 64 AND parent_job_id ~ '^[a-f0-9]+$'),
+    task_type VARCHAR NOT NULL,
+    status app.task_status NOT NULL DEFAULT 'queued'::app.task_status,
+    stage INTEGER NOT NULL
+        CHECK (stage >= 1 AND stage <= 100),
+    task_index INTEGER NOT NULL
+        CHECK (task_index >= 0 AND task_index <= 10000),
+    parameters JSONB NOT NULL DEFAULT '{}',
+    result_data JSONB NULL,
+    error_details VARCHAR NULL,
+    retry_count INTEGER NOT NULL DEFAULT 0
+        CHECK (retry_count >= 0 AND retry_count <= 10),
+    heartbeat TIMESTAMP NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (task_id),
+    FOREIGN KEY (parent_job_id) REFERENCES app.jobs(job_id) ON DELETE CASCADE
+);
+
+-- =============================================================================
+-- PERFORMANCE INDEXES
+-- =============================================================================
+CREATE INDEX IF NOT EXISTS idx_jobs_status ON app.jobs(status);
+CREATE INDEX IF NOT EXISTS idx_jobs_job_type ON app.jobs(job_type);
+CREATE INDEX IF NOT EXISTS idx_jobs_created_at ON app.jobs(created_at);
+CREATE INDEX IF NOT EXISTS idx_jobs_updated_at ON app.jobs(updated_at);
+CREATE INDEX IF NOT EXISTS idx_tasks_parent_job_id ON app.tasks(parent_job_id);
+CREATE INDEX IF NOT EXISTS idx_tasks_status ON app.tasks(status);
+CREATE INDEX IF NOT EXISTS idx_tasks_job_stage ON app.tasks(parent_job_id, stage);
+CREATE INDEX IF NOT EXISTS idx_tasks_job_stage_status ON app.tasks(parent_job_id, stage, status);
+CREATE INDEX IF NOT EXISTS idx_tasks_heartbeat ON app.tasks(heartbeat) WHERE heartbeat IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_tasks_retry_count ON app.tasks(retry_count) WHERE retry_count > 0;
+
+-- =============================================================================
+-- ATOMIC FUNCTIONS - Critical for workflow orchestration
+-- Phase 1: Using static function templates
+-- =============================================================================
 CREATE OR REPLACE FUNCTION complete_task_and_check_stage(
     p_task_id VARCHAR(100),
     p_result_data JSONB DEFAULT NULL,
@@ -86,8 +147,6 @@ BEGIN
         v_remaining;                   -- remaining_tasks
 END;
 $$;
-
--- Function to atomically advance job to next stage
 CREATE OR REPLACE FUNCTION advance_job_stage(
     p_job_id VARCHAR(64),
     p_current_stage INTEGER,
@@ -137,8 +196,6 @@ BEGIN
         v_new_stage > v_total_stages;     -- is_final_stage
 END;
 $$;
-
--- Function to check if job is complete and gather results
 CREATE OR REPLACE FUNCTION check_job_completion(
     p_job_id VARCHAR(64)
 )
@@ -156,6 +213,7 @@ DECLARE
     v_task_counts RECORD;
 BEGIN
     -- Get job info with row-level lock to prevent race conditions
+    -- FOR UPDATE prevents other transactions from checking completion simultaneously
     SELECT job_id, job_type, status, stage, total_stages, stage_results
     INTO v_job_record
     FROM app.jobs 
@@ -197,6 +255,10 @@ BEGIN
     WHERE parent_job_id = p_job_id;
     
     -- Determine completion status
+    -- Job is complete when:
+    -- 1. There are tasks (total_tasks > 0)
+    -- 2. All tasks are either completed or failed (no queued/processing tasks)
+    -- 3. Job has reached its final stage
     RETURN QUERY SELECT 
         (
             v_task_counts.total_tasks > 0 AND 
@@ -209,8 +271,6 @@ BEGIN
         v_task_counts.task_results;
 END;
 $$;
-
--- Trigger function for updating updated_at timestamp
 CREATE OR REPLACE FUNCTION update_updated_at_column()
 RETURNS TRIGGER 
 LANGUAGE plpgsql
@@ -221,15 +281,25 @@ BEGIN
 END;
 $$;
 
--- Create triggers to use the function (drop first to avoid conflicts)
-DROP TRIGGER IF EXISTS jobs_update_updated_at ON jobs;
-CREATE TRIGGER jobs_update_updated_at 
-    BEFORE UPDATE ON jobs
-    FOR EACH ROW 
-    EXECUTE FUNCTION update_updated_at_column();
+-- =============================================================================
+-- TRIGGERS
+-- =============================================================================
 
-DROP TRIGGER IF EXISTS tasks_update_updated_at ON tasks;
-CREATE TRIGGER tasks_update_updated_at
-    BEFORE UPDATE ON tasks  
-    FOR EACH ROW
-    EXECUTE FUNCTION update_updated_at_column();
+-- Update trigger for jobs
+DROP TRIGGER IF EXISTS jobs_update_updated_at ON app.jobs;
+CREATE TRIGGER jobs_update_updated_at 
+    BEFORE UPDATE ON app.jobs
+    FOR EACH ROW 
+    EXECUTE FUNCTION app.update_updated_at_column();
+
+-- Update trigger for tasks
+DROP TRIGGER IF EXISTS tasks_update_updated_at ON app.tasks;
+CREATE TRIGGER tasks_update_updated_at 
+    BEFORE UPDATE ON app.tasks
+    FOR EACH ROW 
+    EXECUTE FUNCTION app.update_updated_at_column();
+
+-- =============================================================================
+-- Schema generation complete
+-- =============================================================================
+SELECT 'PostgreSQL schema generated from Pydantic models' AS status;

@@ -256,7 +256,7 @@ BEGIN
     END IF;
     
     -- Count remaining non-completed tasks in the same stage
-    SELECT COUNT(*) INTO v_remaining
+    SELECT COUNT(*)::INTEGER INTO v_remaining
     FROM app.tasks 
     WHERE parent_job_id = v_job_id 
       AND stage = v_stage 
@@ -276,7 +276,7 @@ $$;
 CREATE OR REPLACE FUNCTION advance_job_stage(
     p_job_id VARCHAR(64),
     p_current_stage INTEGER,
-    p_stage_result JSONB DEFAULT NULL
+    p_stage_results JSONB DEFAULT NULL
 )
 RETURNS TABLE (
     job_updated BOOLEAN,
@@ -294,8 +294,8 @@ BEGIN
     SET 
         stage = stage + 1,
         stage_results = CASE 
-            WHEN p_stage_result IS NOT NULL THEN
-                stage_results || jsonb_build_object(p_current_stage::text, p_stage_result)
+            WHEN p_stage_results IS NOT NULL THEN
+                stage_results || jsonb_build_object(p_current_stage::text, p_stage_results)
             ELSE stage_results
         END,
         status = CASE 
@@ -353,7 +353,7 @@ BEGIN
     IF v_job_record.job_id IS NULL THEN
         RETURN QUERY SELECT 
             FALSE,              -- job_complete
-            0,                  -- final_stage
+            0::INTEGER,         -- final_stage
             0::BIGINT,          -- total_tasks
             0::BIGINT,          -- completed_tasks  
             '[]'::jsonb;        -- task_results

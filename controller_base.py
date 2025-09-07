@@ -261,10 +261,13 @@ class BaseController(ABC):
 
     def create_job_record(self, job_id: str, parameters: Dict[str, Any]) -> JobRecord:
         """Create and store the initial job record for database storage"""
-        from repository_data import RepositoryFactory
+        from repository_consolidated import RepositoryFactory
         
         # Store the job record using repository interface
-        job_repo, task_repo, completion_detector = RepositoryFactory.create_repositories('postgres')
+        repos = RepositoryFactory.create_repositories()
+        job_repo = repos['job_repo']
+        task_repo = repos['task_repo']
+        completion_detector = repos['completion_detector']
         job_record = job_repo.create_job(
             job_type=self.job_type,
             parameters=parameters,
@@ -368,9 +371,11 @@ class BaseController(ABC):
         Returns:
             List of task records for the specified stage
         """
-        from repository_data import RepositoryFactory
+        from repository_consolidated import RepositoryFactory
         
-        job_repo, task_repo, _ = RepositoryFactory.create_repositories('postgres')
+        repos = RepositoryFactory.create_repositories()
+        job_repo = repos['job_repo']
+        task_repo = repos['task_repo']
         tasks = task_repo.get_tasks_by_stage(job_id, stage_number)
         
         self.logger.debug(f"Found {len(tasks)} tasks in stage {stage_number} for job {job_id[:16]}...")
@@ -583,8 +588,9 @@ class BaseController(ABC):
         self.logger.debug(f"Job aggregation complete: {list(final_result.keys()) if isinstance(final_result, dict) else 'non-dict result'}")
         
         # Store completion in database
-        from repository_data import RepositoryFactory
-        job_repo, _, _ = RepositoryFactory.create_repositories('postgres')
+        from repository_consolidated import RepositoryFactory
+        repos = RepositoryFactory.create_repositories()
+        job_repo = repos['job_repo']
         
         self.logger.debug(f"Updating job status to COMPLETED in database")
         success = job_repo.complete_job(job_id, final_result)
@@ -714,7 +720,7 @@ class BaseController(ABC):
         # Create and store task records, then queue them
         self.logger.debug(f"🏗️ Starting task creation and queueing process")
         try:
-            from repository_data import RepositoryFactory
+            from repository_consolidated import RepositoryFactory
             self.logger.debug(f"📦 RepositoryFactory import successful")
         except Exception as repo_import_error:
             self.logger.error(f"❌ CRITICAL: Failed to import RepositoryFactory: {repo_import_error}")
@@ -723,7 +729,9 @@ class BaseController(ABC):
             raise RuntimeError(f"Failed to import RepositoryFactory: {repo_import_error}")
         
         try:
-            job_repo, task_repo, _ = RepositoryFactory.create_repositories('postgres')
+            repos = RepositoryFactory.create_repositories()
+            job_repo = repos['job_repo']
+            task_repo = repos['task_repo']
             self.logger.debug(f"✅ Repositories created successfully: task_repo={type(task_repo)}")
         except Exception as repo_create_error:
             self.logger.error(f"❌ CRITICAL: Failed to create repositories: {repo_create_error}")

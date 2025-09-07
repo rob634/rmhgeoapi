@@ -105,14 +105,16 @@ def handle_database_query(req: func.HttpRequest) -> func.HttpResponse:
         
         logger.debug(f"📋 Query parameters: option={option}, job_id={job_id}, limit={limit}")
         
-        # Get database adapter
-        logger.debug(f"🏗️ Creating PostgreSQL adapter")
-        from adapter_storage import PostgreSQLAdapter
+        # Get database repository
+        logger.debug(f"🏗️ Creating PostgreSQL repository")
+        from repository_postgresql import PostgreSQLRepository
         
-        adapter = PostgreSQLAdapter()
-        logger.debug(f"✅ PostgreSQL adapter created")
+        repo = PostgreSQLRepository()
+        logger.debug(f"✅ PostgreSQL repository created")
         
         # Execute query based on option
+        # TODO: Update these functions to use repository instead of adapter
+        adapter = repo  # Temporary compatibility - functions need updating
         if option == 'summary':
             result = _get_database_summary(adapter, logger)
         elif option == 'full':

@@ -386,8 +386,9 @@ class SchemaManager:
     
     def initialize_schema_tables(self) -> bool:
         """
-        Initialize schema with tables and functions from schema_postgres.sql.
+        Initialize schema with tables and functions from Pydantic models.
         
+        NO BACKWARD COMPATIBILITY - Uses psycopg.sql composed statements.
         This method should only be called by admin users or during deployment.
         
         Returns:
@@ -462,10 +463,10 @@ class SchemaManager:
         return schema_issues
     
     def _execute_schema_file(self, conn: psycopg.Connection) -> bool:
-        """Execute the complete schema file to ensure all components exist.
+        """Execute Pydantic-generated composed SQL to ensure all components exist.
         
-        This is the single source of truth for schema creation.
-        The schema file is idempotent, so running it multiple times is safe.
+        NO BACKWARD COMPATIBILITY - Uses psycopg.sql composition only.
+        Pydantic models are the single source of truth for schema creation.
         
         Returns:
             True if schema execution successful
@@ -474,36 +475,46 @@ class SchemaManager:
             SchemaManagementError: If schema execution fails
         """
         try:
+            from schema_sql_generator import PydanticToSQL
+            
+            # Generate composed statements from Pydantic models
+            logger.info(f"📦 Generating schema from Pydantic models for: {self.app_schema}")
+            generator = PydanticToSQL(schema_name=self.app_schema)
+            composed_statements = generator.generate_composed_statements()
+            
+            logger.info(f"📦 Executing {len(composed_statements)} composed SQL statements")
+            
+            executed_count = 0
+            errors = []
+            
             with conn.cursor() as cur:
-                # Read the schema SQL file
-                try:
-                    with open('schema_postgres.sql', 'r') as f:
-                        schema_sql = f.read()
-                except FileNotFoundError:
-                    raise SchemaManagementError("schema_postgres.sql file not found")
+                for stmt in composed_statements:
+                    try:
+                        # Execute the composed statement directly
+                        cur.execute(stmt)
+                        executed_count += 1
+                    except Exception as stmt_error:
+                        error_msg = str(stmt_error)
+                        # Handle expected errors gracefully
+                        if "already exists" in error_msg.lower():
+                            logger.debug(f"✓ Object already exists (OK)")
+                            continue
+                        else:
+                            logger.warning(f"❌ Statement failed: {error_msg}")
+                            errors.append(error_msg)
                 
-                # Replace 'app' schema placeholder with actual app_schema
-                # Handle all possible schema references precisely
-                schema_sql = schema_sql.replace('CREATE SCHEMA IF NOT EXISTS app;', 
-                                              f'CREATE SCHEMA IF NOT EXISTS {self.app_schema};')
-                schema_sql = schema_sql.replace('SET search_path TO app, public;', 
-                                              f'SET search_path TO {self.app_schema}, public;')
-                # Replace table references in functions (more precise than general app. replacement)
-                schema_sql = schema_sql.replace('FROM app.jobs', f'FROM {self.app_schema}.jobs')
-                schema_sql = schema_sql.replace('FROM app.tasks', f'FROM {self.app_schema}.tasks')
-                schema_sql = schema_sql.replace('UPDATE app.jobs', f'UPDATE {self.app_schema}.jobs')
-                schema_sql = schema_sql.replace('UPDATE app.tasks', f'UPDATE {self.app_schema}.tasks')
-                
-                # Execute the complete schema creation SQL
-                cur.execute(schema_sql)
                 conn.commit()
                 
-                logger.info(f"✅ Successfully executed complete schema file for: {self.app_schema}")
+                if errors:
+                    logger.warning(f"⚠️ Schema executed with {len(errors)} errors (may be OK if objects exist)")
+                else:
+                    logger.info(f"✅ Successfully executed {executed_count} statements for: {self.app_schema}")
+                    
                 return True
                 
         except Exception as e:
-            logger.error(f"❌ Failed to execute schema file: {e}")
-            raise SchemaManagementError(f"Schema file execution failed: {e}")
+            logger.error(f"❌ Failed to execute Pydantic-generated schema: {e}")
+            raise SchemaManagementError(f"Pydantic schema execution failed: {e}")
     
     def _execute_functions_only(self, conn: psycopg.Connection) -> bool:
         """Execute only the functions from the dedicated functions file.

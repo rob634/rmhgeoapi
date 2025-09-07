@@ -1,0 +1,334 @@
+# ============================================================================
+# CLAUDE CONTEXT - CONFIGURATION
+# ============================================================================
+# PURPOSE: Single source of truth for ALL repository method signatures and parameters
+# SOURCE: Defines canonical parameter names to prevent mismatches across layers
+# SCOPE: Global enforcement of method signatures for repository pattern
+# VALIDATION: ABC enforcement + type hints ensure compile-time consistency
+# ============================================================================
+
+"""
+Repository Abstract Base Classes - Single Point of Truth
+
+This module enforces EXACT method signatures across all repository implementations,
+preventing parameter name mismatches that have caused bugs. All parameter names,
+return types, and method signatures are defined HERE and nowhere else.
+
+Philosophy: "Define once, enforce everywhere"
+
+The current bug where advance_job_stage() has different signatures in different
+files would be IMPOSSIBLE with this pattern.
+"""
+
+from abc import ABC, abstractmethod
+from typing import Dict, Any, List, Optional, Protocol, Final
+from dataclasses import dataclass
+from enum import Enum
+
+from schema_core import JobRecord, TaskRecord, JobStatus, TaskStatus
+
+
+# ============================================================================
+# CANONICAL PARAMETER NAMES - Single source of truth
+# ============================================================================
+
+class ParamNames:
+    """
+    ALL parameter names used across the system.
+    Using class attributes as constants ensures consistency.
+    
+    This prevents bugs like 'stage_result' vs 'stage_results' mismatches.
+    """
+    
+    # Job parameters
+    JOB_ID: Final[str] = "job_id"
+    JOB_TYPE: Final[str] = "job_type"
+    JOB_STATUS: Final[str] = "status"
+    
+    # Stage parameters
+    CURRENT_STAGE: Final[str] = "current_stage"
+    STAGE_RESULTS: Final[str] = "stage_results"  # ALWAYS plural
+    STAGE_NUMBER: Final[str] = "stage"
+    TOTAL_STAGES: Final[str] = "total_stages"
+    
+    # Task parameters
+    TASK_ID: Final[str] = "task_id"
+    TASK_TYPE: Final[str] = "task_type"
+    TASK_STATUS: Final[str] = "status"
+    PARENT_JOB_ID: Final[str] = "parent_job_id"
+    
+    # Result parameters
+    RESULT_DATA: Final[str] = "result_data"
+    ERROR_DETAILS: Final[str] = "error_details"
+    
+    # Return value keys
+    JOB_UPDATED: Final[str] = "job_updated"
+    NEW_STAGE: Final[str] = "new_stage"
+    IS_FINAL_STAGE: Final[str] = "is_final_stage"
+    STAGE_COMPLETE: Final[str] = "stage_complete"
+    REMAINING_TASKS: Final[str] = "remaining_tasks"
+    JOB_COMPLETE: Final[str] = "job_complete"
+    FINAL_STAGE: Final[str] = "final_stage"
+    TOTAL_TASKS: Final[str] = "total_tasks"
+    COMPLETED_TASKS: Final[str] = "completed_tasks"
+    TASK_RESULTS: Final[str] = "task_results"
+
+
+# ============================================================================
+# RETURN TYPE DEFINITIONS - Enforce return structure
+# ============================================================================
+
+@dataclass
+class StageAdvancementResult:
+    """Return type for advance_job_stage - enforces structure"""
+    job_updated: bool
+    new_stage: Optional[int]
+    is_final_stage: Optional[bool]
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dict with canonical keys"""
+        return {
+            ParamNames.JOB_UPDATED: self.job_updated,
+            ParamNames.NEW_STAGE: self.new_stage,
+            ParamNames.IS_FINAL_STAGE: self.is_final_stage
+        }
+
+
+@dataclass
+class TaskCompletionResult:
+    """Return type for complete_task_and_check_stage"""
+    task_updated: bool
+    stage_complete: bool
+    job_id: Optional[str]
+    stage_number: Optional[int]
+    remaining_tasks: int
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dict with canonical keys"""
+        return {
+            'task_updated': self.task_updated,
+            ParamNames.STAGE_COMPLETE: self.stage_complete,
+            ParamNames.JOB_ID: self.job_id,
+            ParamNames.STAGE_NUMBER: self.stage_number,
+            ParamNames.REMAINING_TASKS: self.remaining_tasks
+        }
+
+
+@dataclass
+class JobCompletionResult:
+    """Return type for check_job_completion"""
+    job_complete: bool
+    final_stage: int
+    total_tasks: int
+    completed_tasks: int
+    task_results: List[Dict[str, Any]]
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dict with canonical keys"""
+        return {
+            ParamNames.JOB_COMPLETE: self.job_complete,
+            ParamNames.FINAL_STAGE: self.final_stage,
+            ParamNames.TOTAL_TASKS: self.total_tasks,
+            ParamNames.COMPLETED_TASKS: self.completed_tasks,
+            ParamNames.TASK_RESULTS: self.task_results
+        }
+
+
+# ============================================================================
+# ABSTRACT BASE CLASSES - Enforce exact signatures
+# ============================================================================
+
+class IJobRepository(ABC):
+    """
+    Job repository interface with EXACT method signatures.
+    All implementations MUST use these exact parameter names.
+    """
+    
+    @abstractmethod
+    def create_job(self, job: JobRecord) -> bool:
+        """Create a new job record"""
+        pass
+    
+    @abstractmethod
+    def get_job(self, job_id: str) -> Optional[JobRecord]:
+        """Get job by ID - parameter MUST be named 'job_id'"""
+        pass
+    
+    @abstractmethod
+    def update_job(self, job_id: str, updates: Dict[str, Any]) -> bool:
+        """Update job - parameters MUST be named 'job_id' and 'updates'"""
+        pass
+    
+    @abstractmethod
+    def list_jobs(self, status_filter: Optional[JobStatus] = None) -> List[JobRecord]:
+        """List jobs with optional filtering"""
+        pass
+
+
+class ITaskRepository(ABC):
+    """
+    Task repository interface with EXACT method signatures.
+    """
+    
+    @abstractmethod
+    def create_task(self, task: TaskRecord) -> bool:
+        """Create a new task record"""
+        pass
+    
+    @abstractmethod
+    def get_task(self, task_id: str) -> Optional[TaskRecord]:
+        """Get task by ID - parameter MUST be named 'task_id'"""
+        pass
+    
+    @abstractmethod
+    def update_task(self, task_id: str, updates: Dict[str, Any]) -> bool:
+        """Update task - parameters MUST be named 'task_id' and 'updates'"""
+        pass
+    
+    @abstractmethod
+    def list_tasks_for_job(self, job_id: str) -> List[TaskRecord]:
+        """List all tasks for a job - parameter MUST be named 'job_id'"""
+        pass
+
+
+class ICompletionDetector(ABC):
+    """
+    Completion detection interface with EXACT method signatures.
+    
+    THIS IS THE CANONICAL DEFINITION - These signatures match the SQL functions.
+    """
+    
+    @abstractmethod
+    def complete_task_and_check_stage(
+        self,
+        task_id: str,  # MUST be 'task_id'
+        job_id: str,   # MUST be 'job_id'
+        stage: int,    # MUST be 'stage'
+        result_data: Dict[str, Any]  # MUST be 'result_data'
+    ) -> TaskCompletionResult:
+        """
+        Atomically complete task and check stage completion.
+        
+        SQL Function Signature:
+        complete_task_and_check_stage(
+            p_task_id VARCHAR(100),
+            p_result_data JSONB,
+            p_error_details TEXT
+        )
+        """
+        pass
+    
+    @abstractmethod
+    def advance_job_stage(
+        self,
+        job_id: str,           # MUST be 'job_id'
+        current_stage: int,    # MUST be 'current_stage'
+        stage_results: Dict[str, Any]  # MUST be 'stage_results' (plural!)
+    ) -> StageAdvancementResult:
+        """
+        Advance job to next stage.
+        
+        CRITICAL: Only 3 parameters! No 'next_stage' parameter!
+        
+        SQL Function Signature:
+        advance_job_stage(
+            p_job_id VARCHAR(64),
+            p_current_stage INTEGER,
+            p_stage_results JSONB  -- Note: only 3 parameters!
+        )
+        """
+        pass
+    
+    @abstractmethod
+    def check_job_completion(
+        self,
+        job_id: str  # MUST be 'job_id'
+    ) -> JobCompletionResult:
+        """
+        Check if job is complete.
+        
+        SQL Function Signature:
+        check_job_completion(p_job_id VARCHAR(64))
+        """
+        pass
+
+
+# ============================================================================
+# PROTOCOL DEFINITIONS - For type checking
+# ============================================================================
+
+class RepositoryProtocol(Protocol):
+    """
+    Protocol combining all repository interfaces.
+    Used for type checking that implementations provide all methods.
+    """
+    
+    # From IJobRepository
+    def create_job(self, job: JobRecord) -> bool: ...
+    def get_job(self, job_id: str) -> Optional[JobRecord]: ...
+    def update_job(self, job_id: str, updates: Dict[str, Any]) -> bool: ...
+    def list_jobs(self, status_filter: Optional[JobStatus] = None) -> List[JobRecord]: ...
+    
+    # From ITaskRepository  
+    def create_task(self, task: TaskRecord) -> bool: ...
+    def get_task(self, task_id: str) -> Optional[TaskRecord]: ...
+    def update_task(self, task_id: str, updates: Dict[str, Any]) -> bool: ...
+    def list_tasks_for_job(self, job_id: str) -> List[TaskRecord]: ...
+    
+    # From ICompletionDetector
+    def complete_task_and_check_stage(
+        self, task_id: str, job_id: str, stage: int, result_data: Dict[str, Any]
+    ) -> TaskCompletionResult: ...
+    
+    def advance_job_stage(
+        self, job_id: str, current_stage: int, stage_results: Dict[str, Any]
+    ) -> StageAdvancementResult: ...
+    
+    def check_job_completion(self, job_id: str) -> JobCompletionResult: ...
+
+
+# ============================================================================
+# USAGE EXAMPLE - How implementations should use this
+# ============================================================================
+
+"""
+Example implementation:
+
+from repository_abc import (
+    IJobRepository, ITaskRepository, ICompletionDetector,
+    ParamNames, StageAdvancementResult, TaskCompletionResult
+)
+
+class PostgreSQLRepository(IJobRepository, ITaskRepository, ICompletionDetector):
+    
+    def advance_job_stage(
+        self,
+        job_id: str,
+        current_stage: int, 
+        stage_results: Dict[str, Any]  # MUST match ABC signature!
+    ) -> StageAdvancementResult:
+        
+        # Build SQL with canonical parameter names
+        sql = f'''
+            SELECT {ParamNames.JOB_UPDATED}, 
+                   {ParamNames.NEW_STAGE},
+                   {ParamNames.IS_FINAL_STAGE}
+            FROM app.advance_job_stage(%s, %s, %s)
+        '''
+        
+        cursor.execute(sql, (job_id, current_stage, json.dumps(stage_results)))
+        result = cursor.fetchone()
+        
+        # Return strongly-typed result
+        return StageAdvancementResult(
+            job_updated=result[0],
+            new_stage=result[1],
+            is_final_stage=result[2]
+        )
+
+This pattern makes parameter mismatches IMPOSSIBLE because:
+1. ABC enforces exact method signatures
+2. ParamNames provides single source of truth for names
+3. Typed return values ensure consistent structure
+4. Any deviation causes immediate type checker errors
+"""

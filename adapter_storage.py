@@ -1420,7 +1420,7 @@ class PostgresAdapter:
             logger.error(f"❌ Failed to atomically complete task {task_id}: {e}")
             raise
 
-    def advance_job_stage(self, job_id: str, current_stage: int, next_stage: int, stage_results: Dict[str, Any]) -> bool:
+    def advance_job_stage(self, job_id: str, current_stage: int, next_stage: int, stage_results: Dict[str, Any]) -> Dict[str, Any]:
         """
         Atomically advance job to the next stage.
         
@@ -1436,7 +1436,10 @@ class PostgresAdapter:
             stage_results: Results from completed stage
             
         Returns:
-            bool: True if stage advancement succeeded, False otherwise
+            Dict containing:
+                - job_updated: Boolean indicating if job was updated
+                - new_stage: New stage number if updated
+                - is_final_stage: Boolean indicating if this is the final stage
             
         Raises:
             Exception: If atomic operation fails or stage mismatch
@@ -1455,7 +1458,11 @@ class PostgresAdapter:
                     result = cursor.fetchone()
                     if not result:
                         logger.warning(f"⚠️ Job {job_id[:16]}... stage advancement failed - no result from PostgreSQL function")
-                        return False
+                        return {
+                            'job_updated': False,
+                            'new_stage': None,
+                            'is_final_stage': None
+                        }
                         
                     job_updated = result[0]
                     new_stage = result[1] 
@@ -1466,7 +1473,12 @@ class PostgresAdapter:
                     else:
                         logger.warning(f"⚠️ Job {job_id[:16]}... stage advancement failed - possible concurrent update")
                     
-                    return job_updated
+                    # Return full result dict as expected by function_app.py
+                    return {
+                        'job_updated': job_updated,
+                        'new_stage': new_stage,
+                        'is_final_stage': is_final_stage
+                    }
                     
         except Exception as e:
             logger.error(f"❌ Failed to atomically advance job {job_id[:16]}... to stage {next_stage}: {e}")

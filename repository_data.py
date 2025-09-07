@@ -734,7 +734,7 @@ class PostgreSQLCompletionDetector(CompletionDetector):
             logger.error(f"❌ Atomic task completion failed for {task_id}: {e}")
             raise
 
-    def advance_job_stage(self, job_id: str, current_stage: int, stage_results: Dict[str, Any]) -> bool:
+    def advance_job_stage(self, job_id: str, current_stage: int, stage_results: Dict[str, Any]) -> Dict[str, Any]:
         """
         Atomically advance job to next stage.
         
@@ -744,23 +744,26 @@ class PostgreSQLCompletionDetector(CompletionDetector):
             stage_results: Results from completed stage
             
         Returns:
-            bool: True if advancement succeeded
+            Dict containing:
+                - job_updated: Boolean indicating if job was updated
+                - new_stage: New stage number if updated
+                - is_final_stage: Boolean indicating if this is the final stage
         """
         try:
             next_stage = current_stage + 1
             logger.debug(f"🔄 PostgreSQL atomic stage advancement: job {job_id[:16]}... {current_stage} -> {next_stage}")
             
-            # Use PostgreSQL adapter's atomic method
-            success = self.postgres_adapter.advance_job_stage(
+            # Use PostgreSQL adapter's atomic method which now returns a dict
+            result = self.postgres_adapter.advance_job_stage(
                 job_id, current_stage, next_stage, stage_results
             )
             
-            if success:
-                logger.info(f"✅ Atomic stage advancement: job {job_id[:16]}... -> stage {next_stage}")
+            if result.get('job_updated'):
+                logger.info(f"✅ Atomic stage advancement: job {job_id[:16]}... -> stage {result.get('new_stage')}")
             else:
                 logger.warning(f"⚠️ Atomic stage advancement failed: job {job_id[:16]}... (concurrent update?)")
             
-            return success
+            return result
             
         except Exception as e:
             logger.error(f"❌ Atomic stage advancement failed for job {job_id[:16]}...: {e}")

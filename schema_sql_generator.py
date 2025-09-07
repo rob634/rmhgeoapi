@@ -5,6 +5,7 @@
 # SOURCE: Pydantic models in schema_core.py and model_core.py
 # SCOPE: Database schema generation from Python models
 # VALIDATION: Ensures PostgreSQL schema always matches Pydantic definitions
+# DEPLOYMENT: Use psycopg.sql composition to avoid SQL injection EXCEPT for database functions which can use f string for the time being
 # ============================================================================
 
 """
@@ -274,124 +275,10 @@ class PydanticToSQL:
         self.logger.debug(f"✅ Table {table_name} composed with {len(columns)} columns and {len(constraints)} constraints")
         return composed
     
-    def generate_table_ddl(self, model: Type[BaseModel], table_name: str) -> str:
-        """
-        Generate PostgreSQL CREATE TABLE statement from Pydantic model.
-        
-        Args:
-            model: Pydantic model class
-            table_name: Name for the table
-            
-        Returns:
-            PostgreSQL CREATE TABLE statement
-        """
-        columns = []
-        constraints = []
-        
-        for field_name, field_info in model.model_fields.items():
-            field_type = field_info.annotation
-            
-            # Determine SQL type
-            sql_type = self.python_type_to_sql(field_type, field_info)
-            
-            # Handle field naming (Pydantic uses underscores, SQL can match)
-            column_name = field_name
-            
-            # Check if field is Optional
-            from typing import Union
-            is_optional = False
-            if get_origin(field_type) in [Union, type(Optional)]:
-                args = get_args(field_type)
-                # Check if it's Optional (Union with None)
-                if type(None) in args:
-                    is_optional = True
-                    # Get the actual type (non-None type)
-                    for arg in args:
-                        if arg != type(None):
-                            sql_type = self.python_type_to_sql(arg, field_info)
-                            break
-            
-            # Special handling for timestamp fields
-            if field_name in ["created_at", "updated_at"]:
-                sql_type = "TIMESTAMP"
-                is_optional = False  # These should NOT NULL with defaults
-            
-            # Determine nullability
-            null_clause = "NULL" if is_optional else "NOT NULL"
-            
-            # Handle defaults - check for both default and default_factory
-            default_clause = ""
-            if field_info.default is not None and field_info.default != ...:
-                if isinstance(field_info.default, Enum):
-                    default_clause = f"DEFAULT '{field_info.default.value}'::{sql_type}"
-                elif isinstance(field_info.default, str):
-                    default_clause = f"DEFAULT '{field_info.default}'"
-                elif isinstance(field_info.default, (int, float)):
-                    default_clause = f"DEFAULT {field_info.default}"
-                elif field_info.default == {}:
-                    default_clause = "DEFAULT '{}'"
-                elif field_info.default == []:
-                    default_clause = "DEFAULT '[]'"
-            elif hasattr(field_info, 'default_factory') and field_info.default_factory is not None:
-                # Handle default_factory fields
-                if field_name in ["parameters", "stage_results"]:
-                    default_clause = "DEFAULT '{}'"
-                elif field_name == "created_at":
-                    default_clause = "DEFAULT NOW()"
-                elif field_name == "updated_at":
-                    default_clause = "DEFAULT NOW()"
-                    
-            # Special handling for specific fields
-            if field_name == "created_at" and not default_clause:
-                default_clause = "DEFAULT NOW()"
-            elif field_name == "updated_at" and not default_clause:
-                default_clause = "DEFAULT NOW()"
-            elif field_name == "parameters" and not default_clause:
-                default_clause = "DEFAULT '{}'"
-            elif field_name == "stage_results" and not default_clause:
-                default_clause = "DEFAULT '{}'"
-                
-            # Add CHECK constraints based on field validation
-            check_clause = ""
-            if field_name == "job_id":
-                check_clause = "CHECK (length(job_id) = 64 AND job_id ~ '^[a-f0-9]+$')"
-            elif field_name == "parent_job_id":
-                check_clause = "CHECK (length(parent_job_id) = 64 AND parent_job_id ~ '^[a-f0-9]+$')"
-            elif field_name == "stage":
-                check_clause = "CHECK (stage >= 1 AND stage <= 100)"
-            elif field_name == "total_stages":
-                check_clause = "CHECK (total_stages >= 1 AND total_stages <= 100)"
-            elif field_name == "task_index":
-                check_clause = "CHECK (task_index >= 0 AND task_index <= 10000)"
-            elif field_name == "retry_count":
-                check_clause = "CHECK (retry_count >= 0 AND retry_count <= 10)"
-                
-            # Build column definition
-            column_def = f"    {column_name} {sql_type} {null_clause}"
-            if default_clause:
-                column_def += f" {default_clause}"
-            if check_clause:
-                column_def += f"\n        {check_clause}"
-                
-            columns.append(column_def)
-            
-        # Add primary key
-        if table_name == "jobs":
-            constraints.append("    PRIMARY KEY (job_id)")
-        elif table_name == "tasks":
-            constraints.append("    PRIMARY KEY (task_id)")
-            constraints.append(f"    FOREIGN KEY (parent_job_id) REFERENCES {self.schema_name}.jobs(job_id) ON DELETE CASCADE")
-            
-        # Build CREATE TABLE statement
-        # Combine columns and constraints, filtering out empty strings
-        all_parts = columns + constraints
-        table_body = ",\n".join(all_parts)
-        
-        return f"""
--- {model.__name__} table from {model.__module__}
-CREATE TABLE IF NOT EXISTS {self.schema_name}.{table_name} (
-{table_body}
-);"""
+    # REMOVED: generate_table_ddl() - replaced by generate_table_composed()
+    # Following "No Backward Compatibility" philosophy
+    # This method used string concatenation which is unsafe
+    # All table generation now uses psycopg.sql composition
         
     def generate_indexes_composed(self, table_name: str, model: Type[BaseModel]) -> List[sql.Composed]:
         """
@@ -511,86 +398,7 @@ CREATE TABLE IF NOT EXISTS {self.schema_name}.{table_name} (
         self.logger.debug(f"✅ Generated {len(indexes)} indexes for table {table_name}")
         return indexes
     
-    def generate_indexes(self, table_name: str, model: Type[BaseModel]) -> List[str]:
-        """
-        Generate index statements for a table.
-        
-        Args:
-            table_name: Name of the table
-            model: Pydantic model class
-            
-        Returns:
-            List of CREATE INDEX statements
-        """
-        indexes = []
-        
-        if table_name == "jobs":
-            indexes = [
-                f"CREATE INDEX IF NOT EXISTS idx_jobs_status ON {self.schema_name}.jobs(status);",
-                f"CREATE INDEX IF NOT EXISTS idx_jobs_job_type ON {self.schema_name}.jobs(job_type);",
-                f"CREATE INDEX IF NOT EXISTS idx_jobs_created_at ON {self.schema_name}.jobs(created_at);",
-                f"CREATE INDEX IF NOT EXISTS idx_jobs_updated_at ON {self.schema_name}.jobs(updated_at);",
-            ]
-        elif table_name == "tasks":
-            indexes = [
-                f"CREATE INDEX IF NOT EXISTS idx_tasks_parent_job_id ON {self.schema_name}.tasks(parent_job_id);",
-                f"CREATE INDEX IF NOT EXISTS idx_tasks_status ON {self.schema_name}.tasks(status);",
-                f"CREATE INDEX IF NOT EXISTS idx_tasks_job_stage ON {self.schema_name}.tasks(parent_job_id, stage);",
-                f"CREATE INDEX IF NOT EXISTS idx_tasks_job_stage_status ON {self.schema_name}.tasks(parent_job_id, stage, status);",
-                f"CREATE INDEX IF NOT EXISTS idx_tasks_heartbeat ON {self.schema_name}.tasks(heartbeat) WHERE heartbeat IS NOT NULL;",
-                f"CREATE INDEX IF NOT EXISTS idx_tasks_retry_count ON {self.schema_name}.tasks(retry_count) WHERE retry_count > 0;",
-            ]
-            
-        return indexes
-        
-    def load_static_functions(self) -> List[str]:
-        """
-        Load static function definitions from the existing SQL template.
-        
-        Phase 1 approach: Keep functions as static templates to ensure
-        they work correctly while we generate tables/enums from Pydantic.
-        
-        Returns:
-            List of CREATE FUNCTION statements from template
-        """
-        import os
-        
-        # Try to load from the canonical SQL file
-        sql_file_path = "schema_postgres.sql"
-        if not os.path.exists(sql_file_path):
-            # Fallback to functions_only file if main schema not found
-            sql_file_path = "functions_only.sql"
-            
-        if os.path.exists(sql_file_path):
-            with open(sql_file_path, 'r') as f:
-                content = f.read()
-                
-            # Extract function definitions
-            functions = []
-            lines = content.split('\n')
-            in_function = False
-            current_function = []
-            
-            for line in lines:
-                if 'CREATE OR REPLACE FUNCTION' in line:
-                    in_function = True
-                    current_function = [line]
-                elif in_function:
-                    current_function.append(line)
-                    if line.strip().endswith('$$;'):
-                        # End of function
-                        function_text = '\n'.join(current_function)
-                        # Replace schema references
-                        function_text = function_text.replace('app.', f'{self.schema_name}.')
-                        functions.append(function_text)
-                        in_function = False
-                        current_function = []
-                        
-            return functions
-        else:
-            # Return embedded static functions as fallback
-            return self.generate_static_functions()
-    
+####### database functions are the ONLY f string SQL allowed right now
     def generate_static_functions(self) -> List[str]:
         """
         Generate static PostgreSQL function definitions.
@@ -853,25 +661,10 @@ $$;""")
         self.logger.debug(f"✅ Generated {len(triggers)} trigger statements")
         return triggers
     
-    def generate_triggers(self) -> List[str]:
-        """
-        Generate trigger statements.
-        
-        Returns:
-            List of CREATE TRIGGER statements
-        """
-        triggers = []
-        
-        for table in ["jobs", "tasks"]:
-            triggers.append(f"""
--- Update trigger for {table}
-DROP TRIGGER IF EXISTS {table}_update_updated_at ON {self.schema_name}.{table};
-CREATE TRIGGER {table}_update_updated_at 
-    BEFORE UPDATE ON {self.schema_name}.{table}
-    FOR EACH ROW 
-    EXECUTE FUNCTION {self.schema_name}.update_updated_at_column();""")
-            
-        return triggers
+    # REMOVED: generate_triggers() - replaced by generate_triggers_composed()
+    # Following "No Backward Compatibility" philosophy
+    # This method used string concatenation which is unsafe
+    # All trigger generation now uses psycopg.sql composition
         
     def generate_composed_statements(self) -> List[sql.Composed]:
         """
@@ -917,7 +710,7 @@ CREATE TRIGGER {table}_update_updated_at
         composed.extend(self.generate_indexes_composed("tasks", TaskRecord))
             
         # Functions
-        for function in self.load_static_functions():
+        for function in self.generate_static_functions():
             composed.append(sql.SQL(function))
             
         # Triggers - now using composed SQL
@@ -928,70 +721,15 @@ CREATE TRIGGER {table}_update_updated_at
         self.logger.info(f"   - ENUMs: 2")  
         self.logger.info(f"   - Tables: 2")
         self.logger.info(f"   - Indexes: {len(self.generate_indexes_composed('jobs', JobRecord)) + len(self.generate_indexes_composed('tasks', TaskRecord))}")
-        self.logger.info(f"   - Functions: {len(self.load_static_functions())}")
+        self.logger.info(f"   - Functions: {len(self.generate_static_functions())}")
         self.logger.info(f"   - Triggers: {len(self.generate_triggers_composed())}")
         
         return composed
     
-    def generate_statements_list(self) -> List[str]:
-        """
-        Generate PostgreSQL schema as a list of individual statements.
-        
-        This method generates each DDL statement separately for better
-        error handling during deployment. DO blocks are kept as single
-        statements to preserve their transactional nature.
-        
-        Returns:
-            List of SQL DDL statements
-        """
-        statements = []
-        
-        # Schema creation
-        statements.append(f"CREATE SCHEMA IF NOT EXISTS {self.schema_name}")
-        
-        # Set search path (this affects the session, not a DDL statement)
-        statements.append(f"SET search_path TO {self.schema_name}, public")
-        
-        # Generate ENUMs - each as a complete DO block
-        statements.append(self.generate_enum_ddl("job_status", JobStatus))
-        statements.append(self.generate_enum_ddl("task_status", TaskStatus))
-        
-        # Generate tables - each as a single statement
-        statements.append(self.generate_table_ddl(JobRecord, "jobs"))
-        statements.append(self.generate_table_ddl(TaskRecord, "tasks"))
-        
-        # Generate indexes - each as a separate statement
-        for index in self.generate_indexes("jobs", JobRecord):
-            statements.append(index)
-            
-        for index in self.generate_indexes("tasks", TaskRecord):
-            statements.append(index)
-            
-        # Generate functions - each as a complete statement
-        for function in self.load_static_functions():
-            statements.append(function)
-            
-        # Generate triggers - each as separate statements
-        for trigger in self.generate_triggers():
-            # Split DROP TRIGGER and CREATE TRIGGER if they're combined
-            trigger_lines = trigger.strip().split('\n')
-            drop_line = None
-            create_lines = []
-            
-            for line in trigger_lines:
-                if line.strip().startswith('DROP TRIGGER'):
-                    drop_line = line.strip()
-                elif line.strip().startswith('CREATE TRIGGER'):
-                    create_lines = [line]
-                elif create_lines:
-                    create_lines.append(line)
-            
-            if drop_line:
-                statements.append(drop_line)
-            if create_lines:
-                statements.append('\n'.join(create_lines))
-        
-        return statements
+    # REMOVED: generate_statements_list() - replaced by generate_composed_statements()
+    # Following "No Backward Compatibility" philosophy
+    # This method generated string-based SQL statements
+    # All SQL generation now uses psycopg.sql composition for safety
     
     # REMOVED: Old string-based methods following "No Backward Compatibility" philosophy
     # The following methods have been removed:
@@ -1001,84 +739,10 @@ CREATE TRIGGER {table}_update_updated_at
     # - generate_indexes() - replaced by generate_indexes_composed()
     # - generate_triggers() - replaced by generate_triggers_composed()
     
-    def generate_complete_schema_REMOVED(self) -> str:
-        """
-        Generate complete PostgreSQL schema from Pydantic models.
-        
-        Returns:
-            Complete SQL DDL script
-        """
-        sql_parts = []
-        
-        # Header
-        sql_parts.append(f"""-- =============================================================================
--- GENERATED PostgreSQL Schema from Pydantic Models
--- Generated at: {datetime.now().isoformat()}
--- =============================================================================
--- 
--- This schema is automatically generated from Pydantic models
--- The Python models are the single source of truth
--- 
--- =============================================================================
-
--- Create schema if not exists
-CREATE SCHEMA IF NOT EXISTS {self.schema_name};
-
--- Set search path
-SET search_path TO {self.schema_name}, public;
-""")
-        
-        # Generate ENUMs first
-        enum_ddl = self.generate_enum_ddl("job_status", JobStatus)
-        sql_parts.append(enum_ddl)
-        
-        enum_ddl = self.generate_enum_ddl("task_status", TaskStatus)
-        sql_parts.append(enum_ddl)
-        
-        # Generate tables
-        jobs_ddl = self.generate_table_ddl(JobRecord, "jobs")
-        sql_parts.append(jobs_ddl)
-        
-        tasks_ddl = self.generate_table_ddl(TaskRecord, "tasks")
-        sql_parts.append(tasks_ddl)
-        
-        # Generate indexes
-        sql_parts.append("\n-- =============================================================================")
-        sql_parts.append("-- PERFORMANCE INDEXES")
-        sql_parts.append("-- =============================================================================")
-        
-        for index in self.generate_indexes("jobs", JobRecord):
-            sql_parts.append(index)
-            
-        for index in self.generate_indexes("tasks", TaskRecord):
-            sql_parts.append(index)
-            
-        # Generate functions (Phase 1: Using static templates)
-        sql_parts.append("\n-- =============================================================================")
-        sql_parts.append("-- ATOMIC FUNCTIONS - Critical for workflow orchestration")
-        sql_parts.append("-- Phase 1: Using static function templates")
-        sql_parts.append("-- =============================================================================")
-        
-        for function in self.load_static_functions():
-            sql_parts.append(function)
-            
-        # Generate triggers
-        sql_parts.append("\n-- =============================================================================")
-        sql_parts.append("-- TRIGGERS")
-        sql_parts.append("-- =============================================================================")
-        
-        for trigger in self.generate_triggers():
-            sql_parts.append(trigger)
-            
-        # Footer
-        sql_parts.append(f"""
--- =============================================================================
--- Schema generation complete
--- =============================================================================
-SELECT 'PostgreSQL schema generated from Pydantic models' AS status;
-""")
-        
-        return "\n".join(sql_parts)
+    # REMOVED: generate_complete_schema_REMOVED() - replaced by generate_composed_statements()
+    # Following "No Backward Compatibility" philosophy
+    # This method used string concatenation and called non-existent methods
+    # All SQL generation now uses psycopg.sql composition ONLY
 
 
 def main():

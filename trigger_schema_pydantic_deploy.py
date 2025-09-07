@@ -38,6 +38,133 @@ class PydanticSchemaDeployTrigger:
     
     def handle_request(self, req: func.HttpRequest) -> func.HttpResponse:
         """
+        Handle schema operations - info, deploy, compare.
+        
+        Routes based on HTTP method and action parameter:
+        - GET with action=info or no action: Show schema info
+        - GET with action=compare: Show comparison info  
+        - POST: Deploy schema (requires confirm=yes)
+        
+        Args:
+            req: HTTP request
+            
+        Returns:
+            HTTP response with operation results
+        """
+        method = req.method.upper()
+        
+        try:
+            if method == "GET":
+                # Check for action parameter
+                action = req.params.get('action', 'info')
+                
+                if action == 'info' or action == 'generate':
+                    return self._get_schema_info(req)
+                elif action == 'compare':
+                    return self._compare_schema(req)
+                else:
+                    return self._error_response(f"Unknown action: {action}", 400)
+                    
+            elif method == "POST":
+                # Deploy schema
+                return self._deploy_schema_handler(req)
+            else:
+                return self._error_response(f"Method {method} not supported", 405)
+                
+        except Exception as e:
+            self.logger.error(f"Schema operation failed: {e}")
+            return self._error_response(str(e), 500)
+    
+    def _get_schema_info(self, req: func.HttpRequest) -> func.HttpResponse:
+        """
+        Get information about schema that would be generated.
+        
+        Args:
+            req: HTTP request
+            
+        Returns:
+            Schema generation info
+        """
+        try:
+            # Get options from query params
+            schema_name = req.params.get('schema', self.config.app_schema)
+            
+            # Generate schema using composed statements
+            generator = PydanticToSQL(schema_name=schema_name)
+            composed_statements = generator.generate_composed_statements()
+            
+            # Prepare response with statistics
+            response = {
+                "status": "success",
+                "message": "Schema info from Pydantic models",
+                "note": "Using psycopg.sql composition for SQL injection safety",
+                "deployment": "Use POST /api/schema/deploy?confirm=yes to deploy",
+                "statistics": {
+                    "total_statements": len(composed_statements),
+                    "enums_generated": len(generator.enums),
+                    "tables_generated": 2,  # jobs and tasks
+                    "functions_included": len(generator.load_static_functions()),
+                    "indexes_created": 10,
+                    "triggers_created": 4
+                },
+                "schema_name": schema_name,
+                "generated_at": datetime.utcnow().isoformat(),
+                "method": "psycopg.sql composition"
+            }
+            
+            return func.HttpResponse(
+                json.dumps(response),
+                status_code=200,
+                mimetype="application/json"
+            )
+            
+        except Exception as e:
+            self.logger.error(f"Schema info generation failed: {e}")
+            return self._error_response(f"Info generation failed: {e}", 500)
+    
+    def _compare_schema(self, req: func.HttpRequest) -> func.HttpResponse:
+        """
+        Compare generated schema info with current database.
+        
+        Args:
+            req: HTTP request
+            
+        Returns:
+            Comparison information
+        """
+        try:
+            generator = PydanticToSQL(schema_name=self.config.app_schema)
+            composed_statements = generator.generate_composed_statements()
+            
+            comparison = {
+                "status": "info",
+                "message": "Schema comparison info",
+                "explanation": "Using psycopg.sql composition for safety",
+                "composed_statements_count": len(composed_statements),
+                "statement_types": {
+                    "schema_and_path": 2,
+                    "enums": len(generator.enums) * 2,  # DROP + CREATE for each
+                    "tables": 2,
+                    "indexes": 10,
+                    "functions": len(generator.load_static_functions()),
+                    "triggers": 4  # 2 drops + 2 creates
+                },
+                "deployment_method": "Use POST /api/schema/deploy?confirm=yes",
+                "timestamp": datetime.utcnow().isoformat()
+            }
+            
+            return func.HttpResponse(
+                json.dumps(comparison),
+                status_code=200,
+                mimetype="application/json"
+            )
+            
+        except Exception as e:
+            self.logger.error(f"Schema comparison failed: {e}")
+            return self._error_response(f"Comparison failed: {e}", 500)
+    
+    def _deploy_schema_handler(self, req: func.HttpRequest) -> func.HttpResponse:
+        """
         Handle schema deployment request.
         
         Args:
@@ -221,6 +348,27 @@ class PydanticSchemaDeployTrigger:
         finally:
             if conn:
                 conn.close()
+    
+    def _error_response(self, message: str, status_code: int) -> func.HttpResponse:
+        """
+        Create error response.
+        
+        Args:
+            message: Error message
+            status_code: HTTP status code
+            
+        Returns:
+            Error HTTP response
+        """
+        return func.HttpResponse(
+            json.dumps({
+                "status": "error",
+                "error": message,
+                "timestamp": datetime.utcnow().isoformat()
+            }),
+            status_code=status_code,
+            mimetype="application/json"
+        )
     
     def _verify_deployment(self, conn) -> dict:
         """

@@ -1,0 +1,227 @@
+{
+  "application_modules": {
+    "config": {
+      "auto_discovered": true,
+      "description": "Application configuration management",
+      "discovered_date": "2025-09-08T12:34:03.334035",
+      "last_successful_validation": "2025-09-08T12:34:47.468171"
+    },
+    "controller_base": {
+      "auto_discovered": true,
+      "description": "Base workflow controller",
+      "discovered_date": "2025-09-08T12:34:03.334035",
+      "last_successful_validation": "2025-09-08T12:34:47.468171"
+    },
+    "controller_factories": {
+      "auto_discovered": true,
+      "description": "Factories workflow controller",
+      "discovered_date": "2025-09-08T12:34:03.334035",
+      "last_successful_validation": "2025-09-08T12:34:47.468171"
+    },
+    "controller_hello_world": {
+      "auto_discovered": true,
+      "description": "Hello World workflow controller",
+      "discovered_date": "2025-09-08T12:34:03.334035",
+      "last_successful_validation": "2025-09-08T12:34:47.468171"
+    },
+    "function_app": {
+      "auto_discovered": true,
+      "description": "Azure Functions entry point",
+      "discovered_date": "2025-09-08T12:34:03.334035",
+      "last_successful_validation": null
+    },
+    "repository_abc": {
+      "auto_discovered": true,
+      "description": "Repository Abc repository layer",
+      "discovered_date": "2025-09-08T12:34:03.334035",
+      "last_successful_validation": "2025-09-08T12:34:47.468171"
+    },
+    "repository_base": {
+      "auto_discovered": true,
+      "description": "Repository Base repository layer",
+      "discovered_date": "2025-09-08T12:34:03.334035",
+      "last_successful_validation": "2025-09-08T12:34:47.468171"
+    },
+    "repository_consolidated": {
+      "auto_discovered": true,
+      "description": "Repository Consolidated repository layer",
+      "discovered_date": "2025-09-08T12:34:03.334035",
+      "last_successful_validation": "2025-09-08T12:34:47.468171"
+    },
+    "repository_postgresql": {
+      "auto_discovered": true,
+      "description": "Repository Postgresql repository layer",
+      "discovered_date": "2025-09-08T12:34:03.334035",
+      "last_successful_validation": "2025-09-08T12:34:47.468171"
+    },
+    "repository_vault": {
+      "auto_discovered": true,
+      "description": "Repository Vault repository layer",
+      "discovered_date": "2025-09-08T12:34:03.334035",
+      "last_successful_validation": "2025-09-08T12:34:47.468171"
+    },
+    "schema_base": {
+      "auto_discovered": true,
+      "description": "Schema Base schema definitions",
+      "discovered_date": "2025-09-08T12:34:03.334035",
+      "last_successful_validation": "2025-09-08T12:34:47.468171"
+    },
+    "schema_manager": {
+      "auto_discovered": true,
+      "description": "Schema Manager schema definitions",
+      "discovered_date": "2025-09-08T12:34:03.334035",
+      "last_successful_validation": "2025-09-08T12:34:47.468171"
+    },
+    "schema_sql_generator": {
+      "auto_discovered": true,
+      "description": "Schema Sql Generator schema definitions",
+      "discovered_date": "2025-09-08T12:34:03.334035",
+      "last_successful_validation": "2025-09-08T12:34:47.468171"
+    },
+    "schema_workflow": {
+      "auto_discovered": true,
+      "description": "Schema Workflow schema definitions",
+      "discovered_date": "2025-09-08T12:34:03.334035",
+      "last_successful_validation": "2025-09-08T12:34:47.468171"
+    },
+    "service_hello_world": {
+      "auto_discovered": true,
+      "description": "Hello World service implementation",
+      "discovered_date": "2025-09-08T12:34:03.334035",
+      "last_successful_validation": "2025-09-08T12:34:47.468171"
+    },
+    "trigger_database_query": {
+      "auto_discovered": true,
+      "description": "Database Query HTTP trigger class",
+      "discovered_date": "2025-09-08T12:34:03.334035",
+      "last_successful_validation": "2025-09-08T12:34:47.468171"
+    },
+    "trigger_db_query": {
+      "auto_discovered": true,
+      "description": "Db Query HTTP trigger class",
+      "discovered_date": "2025-09-08T12:34:03.334035",
+      "last_successful_validation": null
+    },
+    "trigger_get_job_status": {
+      "auto_discovered": true,
+      "description": "Get Job Status HTTP trigger class",
+      "discovered_date": "2025-09-08T12:34:03.334035",
+      "last_successful_validation": "2025-09-08T12:34:47.468171"
+    },
+    "trigger_health": {
+      "auto_discovered": true,
+      "description": "Health HTTP trigger class",
+      "discovered_date": "2025-09-08T12:34:03.334035",
+      "last_successful_validation": "2025-09-08T12:34:47.468171"
+    },
+    "trigger_http_base": {
+      "auto_discovered": true,
+      "description": "Http Base HTTP trigger class",
+      "discovered_date": "2025-09-08T12:34:03.334035",
+      "last_successful_validation": "2025-09-08T12:34:47.468171"
+    },
+    "trigger_poison_monitor": {
+      "auto_discovered": true,
+      "description": "Poison Monitor HTTP trigger class",
+      "discovered_date": "2025-09-08T12:34:03.334035",
+      "last_successful_validation": "2025-09-08T12:34:47.468171"
+    },
+    "trigger_schema_pydantic_deploy": {
+      "auto_discovered": true,
+      "description": "Schema Pydantic Deploy HTTP trigger class",
+      "discovered_date": "2025-09-08T12:34:03.334035",
+      "last_successful_validation": null
+    },
+    "trigger_submit_job": {
+      "auto_discovered": true,
+      "description": "Submit Job HTTP trigger class",
+      "discovered_date": "2025-09-08T12:34:03.334035",
+      "last_successful_validation": "2025-09-08T12:34:47.468171"
+    },
+    "trigger_validation_debug": {
+      "auto_discovered": true,
+      "description": "Validation Debug HTTP trigger class",
+      "discovered_date": "2025-09-08T12:34:03.334035",
+      "last_successful_validation": null
+    },
+    "util_import_validator": {
+      "auto_discovered": true,
+      "description": "Import Validator utility module",
+      "discovered_date": "2025-09-08T12:34:03.334035",
+      "last_successful_validation": "2025-09-08T12:34:47.468171"
+    },
+    "util_logger": {
+      "auto_discovered": true,
+      "description": "Logger utility module",
+      "discovered_date": "2025-09-08T12:34:03.334035",
+      "last_successful_validation": "2025-09-08T12:34:47.468171"
+    },
+    "validator_schema": {
+      "auto_discovered": true,
+      "description": "Validator Schema validation utilities",
+      "discovered_date": "2025-09-08T12:34:03.334035",
+      "last_successful_validation": "2025-09-08T12:34:47.468171"
+    },
+    "validator_schema_database": {
+      "auto_discovered": true,
+      "description": "Validator Schema Database validation utilities",
+      "discovered_date": "2025-09-08T12:34:03.334035",
+      "last_successful_validation": "2025-09-08T12:34:47.468171"
+    }
+  },
+  "critical_modules": {
+    "azure.functions": {
+      "auto_discovered": false,
+      "description": "Azure Functions runtime",
+      "discovered_date": "2025-09-08T12:34:03.934744",
+      "last_successful_validation": "2025-09-08T12:34:47.468171"
+    },
+    "azure.identity": {
+      "auto_discovered": false,
+      "description": "Azure authentication",
+      "discovered_date": "2025-09-08T12:34:03.934744",
+      "last_successful_validation": "2025-09-08T12:34:47.468171"
+    },
+    "azure.storage.queue": {
+      "auto_discovered": false,
+      "description": "Azure Storage Queue client",
+      "discovered_date": "2025-09-08T12:34:03.934744",
+      "last_successful_validation": "2025-09-08T12:34:47.468171"
+    },
+    "json": {
+      "auto_discovered": false,
+      "description": "JSON processing",
+      "discovered_date": "2025-09-08T12:34:03.934744",
+      "last_successful_validation": "2025-09-08T12:34:47.468171"
+    },
+    "logging": {
+      "auto_discovered": false,
+      "description": "Python logging",
+      "discovered_date": "2025-09-08T12:34:03.934744",
+      "last_successful_validation": "2025-09-08T12:34:47.468171"
+    },
+    "os": {
+      "auto_discovered": false,
+      "description": "Operating system interface",
+      "discovered_date": "2025-09-08T12:34:03.934744",
+      "last_successful_validation": "2025-09-08T12:34:47.468171"
+    },
+    "pydantic": {
+      "auto_discovered": false,
+      "description": "Pydantic data validation",
+      "discovered_date": "2025-09-08T12:34:03.934744",
+      "last_successful_validation": "2025-09-08T12:34:47.468171"
+    },
+    "sys": {
+      "auto_discovered": false,
+      "description": "System-specific parameters",
+      "discovered_date": "2025-09-08T12:34:03.934744",
+      "last_successful_validation": "2025-09-08T12:34:47.468171"
+    }
+  },
+  "metadata": {
+    "created": "2025-09-08T12:34:03.332927",
+    "last_updated": "2025-09-08T12:34:47.468189",
+    "version": "1.0"
+  }
+}

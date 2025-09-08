@@ -1,10 +1,17 @@
 # ============================================================================
-# CLAUDE CONTEXT - CONFIGURATION
+# CLAUDE CONTEXT - SERVICE
 # ============================================================================
-# PURPOSE: Workflow definition system for declarative multi-stage job orchestration
-# SOURCE: No direct configuration - provides workflow specification and validation patterns
-# SCOPE: Workflow-specific orchestration schemas for job type implementations and stage management
-# VALIDATION: Pydantic v2 workflow validation with stage dependencies and execution constraints
+# PURPOSE: Workflow definition system providing declarative multi-stage job orchestration patterns
+# EXPORTS: WorkflowDefinition, WorkflowStageDefinition, StageParameterDefinition, StageParameterType, get_workflow_definition, WORKFLOW_REGISTRY
+# INTERFACES: Pydantic BaseModel for all workflow schemas with validation
+# PYDANTIC_MODELS: WorkflowDefinition, WorkflowStageDefinition, StageParameterDefinition (workflow specifications)
+# DEPENDENCIES: pydantic, typing, enum, datetime
+# SOURCE: No data source - defines workflow patterns and stage sequences declaratively
+# SCOPE: Workflow orchestration layer - defines job types, stages, and parameter validation
+# VALIDATION: Parameter type validation, constraint enforcement, stage dependency validation
+# PATTERNS: Registry pattern (WORKFLOW_REGISTRY), Factory pattern (create_*_workflow), Builder pattern
+# ENTRY_POINTS: workflow = get_workflow_definition('hello_world'); WorkflowDefinition.model_validate(data)
+# INDEX: StageParameterType:129, WorkflowStageDefinition:242, WorkflowDefinition:318, WORKFLOW_REGISTRY:556, get_workflow_definition:562
 # ============================================================================
 
 """

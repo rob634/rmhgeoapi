@@ -1,10 +1,17 @@
 # ============================================================================
-# CLAUDE CONTEXT - CONFIGURATION
+# CLAUDE CONTEXT - CONTROLLER
 # ============================================================================
-# PURPOSE: Azure Functions entry point for geospatial ETL pipeline
-# SOURCE: Environment variables for function bindings and configuration
-# SCOPE: Global application entry point with HTTP triggers and queue processing
-# VALIDATION: Azure Function binding validation and HTTP request validation
+# PURPOSE: Azure Functions entry point orchestrating the geospatial ETL pipeline with HTTP and queue triggers
+# EXPORTS: app (Function App), HTTP routes (health, jobs/*, db/*, schema/*), queue processors
+# INTERFACES: Azure Functions triggers (HttpTrigger, QueueTrigger), controller classes
+# PYDANTIC_MODELS: JobQueueMessage, TaskQueueMessage, JobSubmissionRequest (via triggers)
+# DEPENDENCIES: azure.functions, trigger_* modules, controller_*, repository_consolidated, util_logger
+# SOURCE: HTTP requests, Azure Storage Queues (job-processing, task-processing), timer triggers
+# SCOPE: Global application entry point managing all Azure Function triggers and orchestration
+# VALIDATION: Request validation via trigger classes, queue message validation via Pydantic
+# PATTERNS: Front Controller pattern, Message Queue pattern, Dependency Injection (via triggers)
+# ENTRY_POINTS: Azure Functions runtime calls app routes; HTTP POST /api/jobs/{job_type}
+# INDEX: Routes:144-238, Queue processors:629-825, Health monitoring:144, Job submission:150
 # ============================================================================
 
 """
@@ -117,7 +124,7 @@ validator.ensure_startup_ready()
 # ========================================================================
 
 # Application modules (our code) - Core schemas and logging
-from schema_core import JobStatus, TaskStatus, JobQueueMessage, TaskQueueMessage
+from schema_base import JobStatus, TaskStatus, JobQueueMessage, TaskQueueMessage
 from util_logger import LoggerFactory, ComponentType
 
 # Application modules (our code) - HTTP Trigger Classes  
@@ -252,13 +259,14 @@ def test_single_stage(req: func.HttpRequest) -> func.HttpResponse:
             status_code=501,
             mimetype="application/json"
         )
-        from controller_hello_world import HelloWorldController
+        from controller_factories import JobFactory
+        import controller_hello_world  # Import to trigger registration
         import json
         import time
         
         # Create a minimal single-stage job manually
         repo = DataRepository()
-        controller = HelloWorldController()
+        controller = JobFactory.create_controller("hello_world")
         
         # Create job record manually with total_stages=1
         job_data = {
@@ -293,18 +301,6 @@ def test_single_stage(req: func.HttpRequest) -> func.HttpResponse:
         
         # Insert completed task
         task_success = repo.storage_adapter.raw_create_task(task_data)
-        
-        # Test atomic completion detection
-        # NOTE: This test code is commented out as it was using incorrect imports
-        # from repository_data import PostgreSQLCompletionDetector
-        # completion_detector = PostgreSQLCompletionDetector(job_repo, task_repo)
-        # result = completion_detector.complete_task_and_check_stage(
-        #     task_data['task_id'],
-        #     task_data['parent_job_id'], 
-        #     task_data['stage'],
-        #     task_data['result_data']
-        # )
-        result = {'stage_complete': False, 'remaining_tasks': 0}  # Dummy result for test
         
         return func.HttpResponse(
             json.dumps({
@@ -455,15 +451,17 @@ def process_job_queue(msg: func.QueueMessage) -> None:
         
         # Route to controller based on job type (imports validated at startup)
         logger.debug(f"🎯 Routing to controller for job type: {job_message.job_type}")
-        if job_message.job_type == "hello_world":
-            from controller_hello_world import HelloWorldController
-            
-            try:
-                controller = HelloWorldController()
-                logger.debug(f"✅ HelloWorldController instantiated")
-            except Exception as controller_error:
-                logger.error(f"❌ Failed to instantiate HelloWorldController: {controller_error}")
-                raise RuntimeError(f"HelloWorldController instantiation failed: {controller_error}")
+        
+        # Use JobFactory to get the appropriate controller
+        from controller_factories import JobFactory
+        import controller_hello_world  # Import to trigger registration
+        
+        try:
+            controller = JobFactory.create_controller(job_message.job_type)
+            logger.debug(f"✅ Controller for {job_message.job_type} instantiated via JobFactory")
+        except Exception as controller_error:
+            logger.error(f"❌ Failed to create controller for {job_message.job_type}: {controller_error}")
+            raise RuntimeError(f"Controller creation failed for {job_message.job_type}: {controller_error}")
             
             # Process the job stage
             stage_params = {
@@ -475,13 +473,13 @@ def process_job_queue(msg: func.QueueMessage) -> None:
             logger.debug(f"🚀 Processing job stage with params: {stage_params}")
             
             try:
-                stage_result = controller.process_job_stage(
+                stage_results = controller.process_job_stage(
                     job_record=job_record,
                     stage=job_message.stage,
                     parameters=job_message.parameters,
                     stage_results=job_message.stage_results
                 )
-                logger.debug(f"✅ Stage processing result: {stage_result}")
+                logger.debug(f"✅ Stage processing result: {stage_results}")
                 logger.info(f"✅ Job {job_message.job_id[:16]}... stage {job_message.stage} completed")
             except Exception as stage_error:
                 logger.error(f"❌ Failed to process job stage: {stage_error}")
@@ -657,7 +655,7 @@ def process_task_queue(msg: func.QueueMessage) -> None:
 ######## For now, hardcoded hello world is ok until hello world is completely working
         if task_message.task_type in ["hello_world_greeting", "hello_world_reply"]:
             from service_hello_world import get_hello_world_task
-            from model_core import TaskExecutionContext
+            from schema_base import TaskExecutionContext
             
             task_handler = get_hello_world_task(task_message.task_type)
             
@@ -690,7 +688,21 @@ def process_task_queue(msg: func.QueueMessage) -> None:
     except Exception as exec_error:
         logger.error(f"❌ Task execution failed: {exec_error}")
         
-        # Mark task as failed
+        # Create a failed task result for proper error tracking
+        from schema_base import TaskResult
+        task_result = TaskResult(
+            task_id=task_message.task_id,
+            job_id=task_message.parent_job_id,
+            stage_number=task_message.stage,
+            task_type=task_message.task_type,
+            status=TaskStatus.FAILED.value,
+            success=False,
+            result={},  # Empty result for failures
+            error=str(exec_error),  # Capture error details
+            execution_time_seconds=0.0
+        )
+        
+        # Mark task as failed in database
         try:
             task_repo.update_task_status(
                 task_message.task_id,
@@ -700,7 +712,7 @@ def process_task_queue(msg: func.QueueMessage) -> None:
         except Exception as update_error:
             logger.error(f"❌ Failed to update task status: {update_error}")
         
-        raise  # Re-raise for Azure Functions retry logic
+        # Don't re-raise - continue to completion phase with error details
     
     # ========================================================================
     # PHASE 5: ATOMIC COMPLETION & STAGE DETECTION
@@ -714,19 +726,52 @@ def process_task_queue(msg: func.QueueMessage) -> None:
 
     try:
         # Atomic "last task turns out lights" pattern
-        stage_completion_result = completion_detector.complete_task_and_check_stage(
-            task_message.task_id,
-            task_message.parent_job_id,
-            task_message.stage,
-            task_result.result
-        )
+        # PostgreSQL function now properly validates job_id and stage match the task
         
-        logger.info(f"✅ Task marked as completed")
+        if task_result and hasattr(task_result, 'success') and task_result.success:
+            # Task succeeded - pass result data
+            logger.debug(f"✅ Task {task_message.task_id} succeeded, marking as completed")
+            stage_completion_result = completion_detector.complete_task_and_check_stage(
+                task_id=task_message.task_id,
+                job_id=task_message.parent_job_id,
+                stage=task_message.stage,
+                result_data=task_result.result if task_result.result else {},
+                error_details=None  # Explicit None for successful tasks
+            )
+        else:
+            # Task failed - pass error details as separate parameter
+            error_msg = getattr(task_result, 'error', 'No result returned from task execution') if task_result else 'Task execution failed'
+            logger.warning(f"⚠️ Task {task_message.task_id} failed with error: {error_msg}")
+            stage_completion_result = completion_detector.complete_task_and_check_stage(
+                task_id=task_message.task_id,
+                job_id=task_message.parent_job_id,
+                stage=task_message.stage,
+                result_data={},  # Empty result for failures
+                error_details=error_msg  # Pass error as separate parameter
+            )
+        
+        logger.info(f"✅ Task {task_message.task_id} marked as completed")
+        
+        # Check if this was the last task in the stage
         stage_complete = stage_completion_result.get('stage_complete', False)
+        if stage_complete:
+            logger.info(f"🎯 Stage {task_message.stage} is now complete - last task turned out the lights")
+        else:
+            remaining = stage_completion_result.get('remaining_tasks', 'unknown')
+            logger.info(f"⏳ Stage {task_message.stage} has {remaining} tasks remaining")
         
     except Exception as completion_error:
         logger.error(f"❌ Failed to mark task complete: {completion_error}")
         # This is critical - task executed but not marked complete
+        # Try to update task status directly as fallback
+        try:
+            task_repo.update_task_status(
+                task_message.task_id,
+                TaskStatus.FAILED,
+                additional_updates={'error_details': f'Completion detection failed: {str(completion_error)}'}
+            )
+        except:
+            pass  # Best effort fallback
         raise
     
     # ========================================================================
@@ -747,8 +792,9 @@ def process_task_queue(msg: func.QueueMessage) -> None:
                 
                 try:
                     # Get controller for job completion
-                    from controller_hello_world import HelloWorldController
-                    controller = HelloWorldController()
+                    from controller_factories import JobFactory
+                    import controller_hello_world  # Import to trigger registration
+                    controller = JobFactory.create_controller(job_record.job_type)
                     
                     # Get all task results from completed job
                     final_job_check = completion_detector.check_job_completion(task_message.parent_job_id)
@@ -756,22 +802,42 @@ def process_task_queue(msg: func.QueueMessage) -> None:
                     if not final_job_check.job_complete:
                         raise RuntimeError(f"Job completion check failed - job not ready for completion: {task_message.parent_job_id}")
                     
-                    # Complete the job with aggregated results
-                    logger.info(f"🎯 Completing job with {final_job_check.total_tasks} total tasks, {final_job_check.completed_tasks} completed")
+                    # Convert JSONB task results to TaskResult objects
+                    from schema_base import TaskResult, TaskStatus
+                    task_result_objects = []
+                    for task_data in final_job_check.task_results or []:
+                        # task_data is a dict from PostgreSQL JSONB
+                        if isinstance(task_data, dict):
+                            # Create TaskResult from the JSONB data
+                            task_result = TaskResult(
+                                task_id=task_data.get('task_id', ''),
+                                job_id=task_data.get('job_id', task_message.parent_job_id),
+                                stage_number=task_data.get('stage', job_record.stage),
+                                task_type=task_data.get('task_type', job_record.job_type),
+                                status=task_data.get('status', TaskStatus.COMPLETED.value),
+                                result=task_data.get('result_data', {}),
+                                error=task_data.get('error_details'),
+                                execution_time_seconds=task_data.get('execution_time_seconds', 0.0),
+                                completed_at=task_data.get('completed_at')
+                            )
+                            task_result_objects.append(task_result)
                     
-                    job_result = controller.complete_job(
-                        job_id=task_message.parent_job_id,
-                        all_task_results=final_job_check.task_results
+                    # Aggregate results from all tasks in the final stage
+                    logger.info(f"🎯 Aggregating results from {len(task_result_objects)} tasks for job completion")
+                    
+                    aggregated_results = controller.aggregate_stage_results(
+                        stage_number=job_record.stage,
+                        task_results=task_result_objects
                     )
                     
-                    if not job_result:
-                        raise RuntimeError(f"Job completion failed - no result returned: {task_message.parent_job_id}")
+                    if not aggregated_results:
+                        raise RuntimeError(f"Stage aggregation failed - no results returned: {task_message.parent_job_id}")
                     
-                    # Update job status to completed with final results
+                    # Update job status to completed with aggregated results
                     final_status = job_repo.update_job_status(
                         job_id=task_message.parent_job_id,
                         new_status=JobStatus.COMPLETED,
-                        additional_updates={'result_data': job_result}
+                        additional_updates={'result_data': aggregated_results}
                     )
                     
                     logger.info(f"🎊 Job {task_message.parent_job_id[:16]}... COMPLETED successfully")
@@ -796,17 +862,17 @@ def process_task_queue(msg: func.QueueMessage) -> None:
            
                 # STAGE ADVANCEMENT IMPLEMENTATION
                 try:
-                    ###### This is where the job-stage specific controller needs to be created instead of hardcoded helloworld     
-                    # Get controller for job orchestration
-                    from controller_hello_world import HelloWorldController
-                    controller = HelloWorldController()
+                    # Get controller for job orchestration using JobFactory
+                    from controller_factories import JobFactory
+                    import controller_hello_world  # Import to trigger registration
+                    controller = JobFactory.create_controller(job_record.job_type)
                     
                     # Collect current stage results
                     current_stage_result = completion_detector.check_job_completion(task_message.parent_job_id)
                     stage_task_results = current_stage_result.task_results or []
                     
                     # Create stage result summary
-                    stage_result = {
+                    stage_results = {
                         'stage_number': task_message.stage,
                         'completed_tasks': len(stage_task_results),
                         'task_results': stage_task_results,
@@ -817,7 +883,7 @@ def process_task_queue(msg: func.QueueMessage) -> None:
                     advancement_result = completion_detector.advance_job_stage(
                         job_id=task_message.parent_job_id,
                         current_stage=task_message.stage,
-                        stage_results=stage_result
+                        stage_results=stage_results
                     )
                     
                     if not advancement_result.get('job_updated', False):
@@ -834,19 +900,24 @@ def process_task_queue(msg: func.QueueMessage) -> None:
                         # Create tasks for next stage
                         logger.info(f"🔄 Creating tasks for stage {new_stage}")
                         
-                        # Create stage execution context for next stage
-                        from model_core import StageExecutionContext
-                        next_stage_context = StageExecutionContext(
-                            job_id=task_message.parent_job_id,
-                            job_type=job_record.job_type,
-                            stage_number=new_stage,
-                            total_stages=job_record.total_stages,
-                            parameters=job_record.parameters,
-                            stage_results=job_record.stage_results or {}
-                        )
+                        # Prepare previous stage results for next stage
+                        # This includes the results from the stage that just completed
+                        previous_stage_results = {
+                            'stage_number': task_message.stage,
+                            'completed_tasks': len(stage_task_results),
+                            'task_results': stage_task_results,
+                            'stage_completed_at': datetime.datetime.utcnow().isoformat(),
+                            # Include any accumulated results from job record
+                            'accumulated_results': job_record.stage_results or {}
+                        }
                         
-                        # Create tasks for next stage
-                        next_stage_tasks = controller.create_stage_tasks(next_stage_context)
+                        # Create tasks for next stage with correct parameters
+                        next_stage_tasks = controller.create_stage_tasks(
+                            stage_number=new_stage,
+                            job_id=task_message.parent_job_id,
+                            job_parameters=job_record.parameters,
+                            previous_stage_results=previous_stage_results
+                        )
                         
                         if not next_stage_tasks:
                             raise RuntimeError(f"No tasks created for stage {new_stage} - job would be stuck")
@@ -861,10 +932,10 @@ def process_task_queue(msg: func.QueueMessage) -> None:
                                     # Queue task for execution  
                                     task_queue_message = TaskQueueMessage(
                                         task_id=task_def.task_id,
-                                        parent_job_id=task_def.parent_job_id,
+                                        parent_job_id=task_def.job_id,  # TaskDefinition uses job_id not parent_job_id
                                         task_type=task_def.task_type,
-                                        stage=task_def.stage,
-                                        task_index=task_def.task_index,
+                                        stage=task_def.stage_number,  # TaskDefinition uses stage_number not stage
+                                        task_index=0,  # Default task_index since TaskDefinition doesn't have this field
                                         parameters=task_def.parameters
                                     )
                                     
@@ -1044,7 +1115,7 @@ def force_create_functions(req: func.HttpRequest) -> func.HttpResponse:
     This endpoint directly creates the required PostgreSQL functions without 
     checking table status, used when tables exist but function deployment is blocked.
     """
-    from service_schema_manager import SchemaManagerFactory
+    from schema_manager import SchemaManagerFactory
     from datetime import datetime
     import json
     

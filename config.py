@@ -1,10 +1,17 @@
 # ============================================================================
 # CLAUDE CONTEXT - CONFIGURATION
 # ============================================================================
-# PURPOSE: Central configuration management with Pydantic v2 validation
-# SOURCE: Environment variables with fallback defaults and computed properties
+# PURPOSE: Central configuration management with Pydantic v2 validation for Azure Geospatial ETL Pipeline
+# EXPORTS: AppConfig, get_config(), QueueNames, debug_config()
+# INTERFACES: Pydantic BaseModel for configuration management
+# PYDANTIC_MODELS: AppConfig (main configuration model with all settings)
+# DEPENDENCIES: pydantic, os, typing, json
+# SOURCE: Environment variables with fallback defaults, Azure Key Vault for secrets
 # SCOPE: Global application configuration for all services and components
-# VALIDATION: Pydantic v2 runtime validation with Azure naming convention checks
+# VALIDATION: Pydantic v2 runtime validation with Azure naming convention checks and custom validators
+# PATTERNS: Settings pattern, Singleton (via cached get_config), Factory method pattern
+# ENTRY_POINTS: from config import get_config; config = get_config(); url = config.blob_service_url
+# INDEX: AppConfig:55, PostgreSQL config:94, Queue config:171, get_config:324, QueueNames:355, debug_config:365
 # ============================================================================
 
 """
@@ -393,9 +400,3 @@ def debug_config() -> dict:
     except Exception as e:
         return {'error': f'Configuration validation failed: {e}'}
 
-
-if __name__ == "__main__":
-    # Quick test/debug when run directly
-    import json
-    print("Configuration Debug:")
-    print(json.dumps(debug_config(), indent=2))

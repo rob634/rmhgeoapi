@@ -1,16 +1,23 @@
 # ============================================================================
-# CLAUDE CONTEXT - CONFIGURATION
+# CLAUDE CONTEXT - SCHEMA
 # ============================================================================
-# PURPOSE: PostgreSQL schema management service for database initialization
-# SOURCE: Environment variables for PostgreSQL connection (POSTGIS_PASSWORD)
-# SCOPE: Database-specific schema creation and validation for application tables
-# VALIDATION: Schema creation validation + database permission verification
+# PURPOSE: PostgreSQL schema deployment and management orchestrating database initialization and validation
+# EXPORTS: SchemaManager, SchemaManagerFactory, SchemaManagementError, InsufficientPrivilegesError
+# INTERFACES: None - schema management class that deploys schemas defined in schema_base and schema_sql_generator
+# PYDANTIC_MODELS: None - uses dict returns for schema information
+# DEPENDENCIES: psycopg, psycopg.sql, config, util_logger, typing, os
+# SOURCE: PostgreSQL database via config, schema_postgres.sql file for DDL
+# SCOPE: Database schema operations - creation, validation, table/function management
+# VALIDATION: Schema existence checks, table validation, function availability, permission verification
+# PATTERNS: Factory pattern (SchemaManagerFactory), Service pattern, Exception hierarchy
+# ENTRY_POINTS: manager = SchemaManager(); result = manager.validate_and_initialize_schema()
+# INDEX: SchemaManager:50, validate_and_initialize_schema:130, _execute_schema_file:465, SchemaManagerFactory:611
 # ============================================================================
 
 """
-PostgreSQL Schema Management Service
+PostgreSQL Schema Deployment and Management
 
-Handles schema validation, creation, and management for the application database.
+Orchestrates schema deployment for schemas defined in schema_base and schema_sql_generator.
 Ensures APP_SCHEMA exists and has required tables before repository operations.
 
 Critical Features:

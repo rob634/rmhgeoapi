@@ -1,10 +1,17 @@
 # ============================================================================
-# CLAUDE CONTEXT - CONFIGURATION
+# CLAUDE CONTEXT - SERVICE
 # ============================================================================
-# PURPOSE: HelloWorld business logic service implementing task execution patterns
-# SOURCE: Inherited from controller configuration for task parameter validation
-# SCOPE: Service-specific HelloWorld task execution with two-stage workflow logic
-# VALIDATION: Task parameter validation + HelloWorld business rule validation
+# PURPOSE: HelloWorld business logic service implementing concrete task execution for two-stage workflow
+# EXPORTS: HelloWorldGreetingTask, HelloWorldReplyTask, get_hello_world_task()
+# INTERFACES: BaseTask (from schema_base) - implements abstract execute() method
+# PYDANTIC_MODELS: TaskExecutionContext, TaskResult (from schema_base), inherits BaseTask validation
+# DEPENDENCIES: schema_base, schema_core, util_logger, typing, datetime, time
+# SOURCE: Task parameters from queue messages, execution context from controller
+# SCOPE: Task-level business logic execution for HelloWorld greeting and reply stages
+# VALIDATION: Inherited Pydantic validation from BaseTask, parameter validation in execute()
+# PATTERNS: Strategy pattern (task types), Factory pattern (get_hello_world_task), Template Method
+# ENTRY_POINTS: task = get_hello_world_task('hello_world_greeting'); result = task.execute(context)
+# INDEX: HelloWorldGreetingTask:89, HelloWorldReplyTask:189, get_hello_world_task:298
 # ============================================================================
 
 """
@@ -81,9 +88,9 @@ import time
 from datetime import datetime
 
 from util_logger import LoggerFactory, ComponentType
-from model_task_base import BaseTask
-from schema_core import TaskStatus  # Use canonical Pydantic enum
-from model_core import TaskExecutionContext, TaskResult
+# Use unified base classes from schema_base instead of split model/schema files
+from schema_base import BaseTask, TaskExecutionContext, TaskResult
+from schema_base import TaskStatus  # Still use canonical enum from schema_core
 
 
 class HelloWorldGreetingTask(BaseTask):
@@ -94,20 +101,24 @@ class HelloWorldGreetingTask(BaseTask):
     Simulates the business logic layer within the redesigned architecture.
     """
     
-    def __init__(self):
-        super().__init__("hello_world_greeting")
+    def __init__(self, **kwargs):
+        # Set default task_type if not provided
+        if 'task_type' not in kwargs:
+            kwargs['task_type'] = "hello_world_greeting"
+        super().__init__(**kwargs)
         self.logger = LoggerFactory.get_logger(ComponentType.SERVICE, "HelloWorldGreetingTask")
     
-    def validate_task_parameters(self, context: TaskExecutionContext) -> bool:
+    def validate_parameters(self) -> bool:
         """Validate greeting task parameters"""
+        # Note: In unified model, parameters are accessed via self.parameters
         required_params = ['task_number', 'message', 'greeting']
         
         for param in required_params:
-            if param not in context.parameters:
+            if param not in self.parameters:
                 self.logger.error(f"Missing required parameter: {param}")
                 return False
         
-        task_number = context.parameters.get('task_number')
+        task_number = self.parameters.get('task_number')
         if not isinstance(task_number, int) or task_number < 1:
             self.logger.error(f"Invalid task_number: {task_number}")
             return False
@@ -165,7 +176,7 @@ class HelloWorldGreetingTask(BaseTask):
                 result=result_data,
                 execution_time_seconds=time.time() - start_time,
                 processed_items=1,
-                completed_at=datetime.utcnow().isoformat()
+                completed_at=datetime.utcnow()
             )
             
         except Exception as e:
@@ -190,20 +201,24 @@ class HelloWorldReplyTask(BaseTask):
     Demonstrates inter-stage data passing in the redesigned architecture.
     """
     
-    def __init__(self):
-        super().__init__("hello_world_reply")
+    def __init__(self, **kwargs):
+        # Set default task_type if not provided
+        if 'task_type' not in kwargs:
+            kwargs['task_type'] = "hello_world_reply"
+        super().__init__(**kwargs)
         self.logger = LoggerFactory.get_logger(ComponentType.SERVICE, "HelloWorldReplyTask")
     
-    def validate_task_parameters(self, context: TaskExecutionContext) -> bool:
+    def validate_parameters(self) -> bool:
         """Validate reply task parameters"""
+        # Note: In unified model, parameters are accessed via self.parameters
         required_params = ['task_number', 'replying_to', 'reply']
         
         for param in required_params:
-            if param not in context.parameters:
+            if param not in self.parameters:
                 self.logger.error(f"Missing required parameter: {param}")
                 return False
         
-        task_number = context.parameters.get('task_number')
+        task_number = self.parameters.get('task_number')
         if not isinstance(task_number, int) or task_number < 1:
             self.logger.error(f"Invalid task_number: {task_number}")
             return False
@@ -263,7 +278,7 @@ class HelloWorldReplyTask(BaseTask):
                 result=result_data,
                 execution_time_seconds=time.time() - start_time,
                 processed_items=1,
-                completed_at=datetime.utcnow().isoformat()
+                completed_at=datetime.utcnow()
             )
             
         except Exception as e:

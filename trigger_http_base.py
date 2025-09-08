@@ -1,10 +1,17 @@
 # ============================================================================
-# CLAUDE CONTEXT - CONFIGURATION
+# CLAUDE CONTEXT - CONTROLLER
 # ============================================================================
-# PURPOSE: Abstract HTTP trigger foundation for Azure Functions endpoints
-# SOURCE: Environment variables for logging and request handling configuration
-# SCOPE: Global HTTP infrastructure foundation for all API endpoints
-# VALIDATION: HTTP request/response validation and structured error handling
+# PURPOSE: Abstract HTTP trigger base class providing consistent request/response handling for Azure Functions
+# EXPORTS: BaseHttpTrigger, JobManagementTrigger, SystemMonitoringTrigger
+# INTERFACES: ABC (Abstract Base Class) - defines contract for HTTP trigger implementations
+# PYDANTIC_MODELS: None - uses dict validation for request/response data
+# DEPENDENCIES: abc, azure.functions, util_logger, typing, json, datetime, uuid
+# SOURCE: HTTP requests from Azure Functions runtime, environment variables for configuration
+# SCOPE: HTTP infrastructure layer - request validation, response formatting, error handling
+# VALIDATION: Request method validation, required parameter checking, JSON body parsing
+# PATTERNS: Template Method pattern, Abstract Factory (for trigger types), Chain of Responsibility
+# ENTRY_POINTS: class SubmitJobTrigger(BaseHttpTrigger); trigger.handle_request(req)
+# INDEX: BaseHttpTrigger:40, handle_request:99, extract_path_params:199, JobManagementTrigger:365, SystemMonitoringTrigger:409
 # ============================================================================
 
 """

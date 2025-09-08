@@ -1,10 +1,17 @@
 # ============================================================================
-# CLAUDE CONTEXT - CONFIGURATION
+# CLAUDE CONTEXT - CONTROLLER
 # ============================================================================
-# PURPOSE: Abstract base controller for Job→Stage→Task orchestration
-# SOURCE: Environment variables (PostgreSQL) + Managed Identity (Azure Storage)
-# SCOPE: Global job orchestration foundation for all workflow types
-# VALIDATION: Pydantic workflow validation + Azure credential validation
+# PURPOSE: Abstract base controller implementing Job→Stage→Task orchestration pattern for complex workflows
+# EXPORTS: BaseController (abstract base class for all workflow controllers)
+# INTERFACES: ABC (Abstract Base Class) - defines controller contract for job orchestration
+# PYDANTIC_MODELS: WorkflowDefinition, JobExecutionContext, StageExecutionContext, TaskDefinition
+# DEPENDENCIES: abc, hashlib, json, util_logger, schema_core, schema_base, model_core, schema_workflow
+# SOURCE: Workflow definitions from schema_workflow, job parameters from HTTP requests
+# SCOPE: Job orchestration across all workflow types - defines stage sequences and task coordination
+# VALIDATION: Pydantic workflow validation, parameter schema validation, idempotency via SHA256
+# PATTERNS: Template Method pattern, Strategy pattern (workflow definitions), Factory pattern (task creation)
+# ENTRY_POINTS: class HelloWorldController(BaseController); controller.submit_job(params)
+# INDEX: BaseController:78, submit_job:120, create_tasks_for_stage:180, aggregate_results:250
 # ============================================================================
 
 """
@@ -62,16 +69,16 @@ Author: Azure Geospatial ETL Team
 """
 
 from abc import ABC, abstractmethod
+from datetime import datetime
 import hashlib
 import json
 
 from util_logger import LoggerFactory, ComponentType
-from schema_core import (
+from schema_base import (
     JobStatus, TaskStatus, JobRecord, JobQueueMessage
 )
-from model_core import (
-    TaskDefinition, JobExecutionContext, StageExecutionContext
-)
+from schema_base import JobExecutionContext, StageExecutionContext
+from schema_base import TaskDefinition
 from typing import List, Dict, Any, Optional
 from schema_workflow import WorkflowDefinition, get_workflow_definition
 
@@ -122,7 +129,13 @@ class BaseController(ABC):
 
 
     @abstractmethod
-    def create_stage_tasks(self, context: StageExecutionContext) -> List[TaskDefinition]:
+    def create_stage_tasks(
+        self,
+        stage_number: int,
+        job_id: str,
+        job_parameters: Dict[str, Any],
+        previous_stage_results: Optional[Dict[str, Any]] = None
+    ) -> List[TaskDefinition]:
         """
         Create tasks for a specific stage.
         
@@ -130,7 +143,10 @@ class BaseController(ABC):
         Tasks contain the business logic (Service + Repository layers).
         
         Args:
-            context: Stage execution context with job parameters and previous results
+            stage_number: The stage to create tasks for
+            job_id: The parent job ID
+            job_parameters: Original job parameters
+            previous_stage_results: Results from previous stage (if any)
             
         Returns:
             List of TaskDefinition objects for parallel execution
@@ -152,6 +168,103 @@ class BaseController(ABC):
             Final aggregated job result dictionary
         """
         pass
+
+    # ========================================================================
+    # COMPLETION METHODS - Can be overridden for job-specific logic
+    # ========================================================================
+
+    def aggregate_stage_results(
+        self,
+        stage_number: int,
+        task_results: List[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        """
+        Aggregate results from all tasks in a stage.
+        
+        Called when all tasks in a stage are complete. The aggregated
+        results are stored in the job record and passed to the next stage.
+        
+        This default implementation provides basic aggregation. Controllers
+        can override to add job-specific aggregation logic.
+        
+        Args:
+            stage_number: The stage that completed
+            task_results: Results from all tasks in the stage
+            
+        Returns:
+            Aggregated results dictionary to store in job record
+        """
+        if not task_results:
+            return {
+                'stage_number': stage_number,
+                'status': 'failed',
+                'task_count': 0,
+                'successful_tasks': 0,
+                'failed_tasks': 0,
+                'success_rate': 0.0,
+                'completed_at': datetime.utcnow().isoformat()
+            }
+        
+        # Count successes and failures
+        successful_tasks = sum(
+            1 for task in task_results 
+            if task.get('status') == 'completed' or task.get('success', False)
+        )
+        failed_tasks = len(task_results) - successful_tasks
+        success_rate = (successful_tasks / len(task_results)) * 100
+        
+        # Determine overall stage status
+        if successful_tasks == len(task_results):
+            status = 'completed'
+        elif successful_tasks > 0:
+            status = 'partial_success'
+        else:
+            status = 'failed'
+        
+        return {
+            'stage_number': stage_number,
+            'status': status,
+            'task_count': len(task_results),
+            'successful_tasks': successful_tasks,
+            'failed_tasks': failed_tasks,
+            'success_rate': success_rate,
+            'task_results': task_results,
+            'completed_at': datetime.utcnow().isoformat()
+        }
+    
+    def should_advance_stage(
+        self,
+        stage_number: int,
+        stage_results: Dict[str, Any]
+    ) -> bool:
+        """
+        Determine if job should advance to next stage.
+        
+        Default implementation: advance if at least one task succeeded.
+        Controllers can override for stricter requirements.
+        
+        Args:
+            stage_number: Current stage number
+            stage_results: Aggregated results from current stage
+            
+        Returns:
+            True if should advance, False if job should fail
+        """
+        # Don't advance if stage completely failed
+        if stage_results.get('status') == 'failed':
+            return False
+        
+        # Don't advance if no tasks succeeded
+        if stage_results.get('successful_tasks', 0) == 0:
+            return False
+        
+        # Check if we're at the final stage
+        if self.is_final_stage(stage_number):
+            return False  # This is the final stage
+        
+        # Default: advance if any tasks succeeded
+        # Controllers can override for stricter logic
+        return True
 
     # ========================================================================
     # CONCRETE METHODS - Provided by base class for all controllers
@@ -711,7 +824,15 @@ class BaseController(ABC):
         
         # Create tasks for this stage using the abstract method
         try:
-            task_definitions = self.create_stage_tasks(stage_context)
+            # Extract previous stage results if available
+            previous_stage_results = stage_results.get(stage - 1) if stage_results and stage > 1 else None
+            
+            task_definitions = self.create_stage_tasks(
+                stage_number=stage,
+                job_id=job_id,
+                job_parameters=parameters,
+                previous_stage_results=previous_stage_results
+            )
             self.logger.info(f"Created {len(task_definitions)} task definitions for stage {stage}")
         except Exception as e:
             self.logger.error(f"Failed to create stage tasks: {e}")
@@ -777,7 +898,7 @@ class BaseController(ABC):
                 # === STEP 2: CREATE TASK QUEUE MESSAGE ===
                 self.logger.debug(f"📨 Creating task queue message for: {task_record.task_id}")
                 try:
-                    from schema_core import TaskQueueMessage
+                    from schema_base import TaskQueueMessage
                     task_message = TaskQueueMessage(
                         task_id=task_record.task_id,
                         parent_job_id=task_record.parent_job_id,
@@ -884,7 +1005,7 @@ class BaseController(ABC):
             self.logger.info(f"✅ Successfully queued {queued_tasks} tasks for stage {stage}")
             self.logger.info(f"🎯 Tasks should now process via geospatial-tasks queue trigger")
         
-        stage_result = {
+        stage_results = {
             "stage_number": stage,
             "stage_name": stage_context.stage_name,
             "tasks_created": len(task_definitions),
@@ -894,7 +1015,7 @@ class BaseController(ABC):
         }
         
         self.logger.info(f"Stage {stage} processing complete: {queued_tasks}/{len(task_definitions)} tasks queued successfully")
-        return stage_result
+        return stage_results
 
     def __repr__(self):
         return f"<{self.__class__.__name__}(job_type='{self.job_type}', stages={len(self.workflow_definition.stages)})>"

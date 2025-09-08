@@ -1,11 +1,17 @@
 # ============================================================================
-# CLAUDE CONTEXT - CONFIGURATION
+# CLAUDE CONTEXT - SERVICE
 # ============================================================================
-# PURPOSE: Generate PostgreSQL DDL from Pydantic models - single source of truth
-# SOURCE: Pydantic models in schema_core.py and model_core.py
-# SCOPE: Database schema generation from Python models
-# VALIDATION: Ensures PostgreSQL schema always matches Pydantic definitions
-# DEPLOYMENT: Use psycopg.sql composition to avoid SQL injection EXCEPT for database functions which can use f string for the time being
+# PURPOSE: Generate PostgreSQL DDL from Pydantic models ensuring database schema matches Python definitions
+# EXPORTS: PydanticToSQL, main() (generates complete schema SQL)
+# INTERFACES: None - utility class for SQL generation from Pydantic models
+# PYDANTIC_MODELS: JobRecord, TaskRecord (imported from schema_core for SQL generation)
+# DEPENDENCIES: pydantic, psycopg.sql, typing, datetime, enum, schema_core
+# SOURCE: Pydantic model definitions from schema_core.py - single source of truth
+# SCOPE: Database schema generation including tables, enums, indexes, and functions
+# VALIDATION: Type mapping validation, field constraint generation, enum type creation
+# PATTERNS: Builder pattern (SQL generation), Visitor pattern (model introspection), Template Method
+# ENTRY_POINTS: generator = PydanticToSQL(); sql = generator.generate_schema([JobRecord, TaskRecord])
+# INDEX: PydanticToSQL:33, TYPE_MAP:43, generate_create_table:200, generate_schema:550, main:778
 # ============================================================================
 
 """
@@ -27,7 +33,7 @@ from pydantic.fields import FieldInfo
 from psycopg import sql
 
 # Import the core models
-from schema_core import JobRecord, TaskRecord, JobStatus, TaskStatus
+from schema_base import JobRecord, TaskRecord, JobStatus, TaskStatus
 
 
 class PydanticToSQL:
@@ -105,7 +111,8 @@ class PydanticToSQL:
             # Convert CamelCase to snake_case for PostgreSQL
             enum_name = re.sub(r'(?<!^)(?=[A-Z])', '_', field_type.__name__).lower()
             self.enums[enum_name] = field_type
-            return f"{self.schema_name}.{enum_name}"
+            # Return just the enum name - schema will be handled by composition
+            return enum_name
             
         # Handle string fields with max_length
         if field_type == str:
@@ -205,9 +212,18 @@ class PydanticToSQL:
             # Build column definition using composition
             column_parts = [
                 sql.Identifier(field_name),
-                sql.SQL(" "),
-                sql.SQL(sql_type_str)
+                sql.SQL(" ")
             ]
+            
+            # Handle enum types with proper schema qualification
+            if sql_type_str in self.enums:
+                column_parts.extend([
+                    sql.Identifier(self.schema_name),
+                    sql.SQL("."),
+                    sql.Identifier(sql_type_str)
+                ])
+            else:
+                column_parts.append(sql.SQL(sql_type_str))
             
             # Add NOT NULL if required
             if not is_optional:
@@ -398,25 +414,71 @@ class PydanticToSQL:
         self.logger.debug(f"✅ Generated {len(indexes)} indexes for table {table_name}")
         return indexes
     
-####### database functions are the ONLY f string SQL allowed right now
-    def generate_static_functions(self) -> List[str]:
+    def generate_static_functions(self) -> List[sql.Composed]:
         """
-        Generate static PostgreSQL function definitions.
+        Generate static PostgreSQL function definitions using proper SQL composition.
         
-        Fallback if template files are not available.
-        These functions are critical for the "last task turns out the lights"
-        pattern and must match the signatures expected by the Python code.
+        Uses psycopg.sql composition for all identifiers and schema references
+        to avoid SQL injection and properly handle special characters.
         
         Returns:
-            List of CREATE FUNCTION statements
+            List of sql.Composed CREATE FUNCTION statements
         """
         functions = []
         
-        # complete_task_and_check_stage function with FIXED BIGINT return types
-        functions.append(f"""
--- Atomic task completion with stage detection
-CREATE OR REPLACE FUNCTION {self.schema_name}.complete_task_and_check_stage(
+        # 1. complete_task_and_check_stage function
+        body_complete_task = """
+DECLARE
+    v_job_id VARCHAR(64);
+    v_stage INTEGER;
+    v_remaining INTEGER;
+    v_task_status {schema}.task_status;
+BEGIN
+    -- Get task info and update atomically
+    -- Now validates that p_job_id and p_stage match the task's actual values
+    UPDATE {schema}.tasks 
+    SET 
+        status = CASE 
+            WHEN p_error_details IS NOT NULL THEN 'failed'::{schema}.task_status
+            ELSE 'completed'::{schema}.task_status
+        END,
+        result_data = p_result_data,
+        error_details = p_error_details,
+        updated_at = NOW()
+    WHERE 
+        task_id = p_task_id 
+        AND parent_job_id = p_job_id  -- Validate job_id matches
+        AND stage = p_stage            -- Validate stage matches
+        AND status = 'processing'
+    RETURNING parent_job_id, stage, status
+    INTO v_job_id, v_stage, v_task_status;
+    
+    IF v_job_id IS NULL THEN
+        RETURN QUERY SELECT FALSE, FALSE, NULL::VARCHAR(64), NULL::INTEGER, NULL::INTEGER;
+        RETURN;
+    END IF;
+    
+    -- Count remaining non-completed tasks in the same stage
+    SELECT COUNT(*)::INTEGER INTO v_remaining
+    FROM {schema}.tasks 
+    WHERE parent_job_id = v_job_id 
+      AND stage = v_stage 
+      AND status NOT IN ('completed', 'failed');
+    
+    RETURN QUERY SELECT 
+        TRUE,
+        v_remaining = 0,
+        v_job_id,
+        v_stage,
+        v_remaining;
+END;
+""".format(schema=self.schema_name)  # Safe - schema_name is controlled
+        
+        functions.append(sql.SQL("""
+CREATE OR REPLACE FUNCTION {}.{}(
     p_task_id VARCHAR(100),
+    p_job_id VARCHAR(64),         -- Added to match Python interface
+    p_stage INTEGER,              -- Added to match Python interface
     p_result_data JSONB DEFAULT NULL,
     p_error_details TEXT DEFAULT NULL
 )
@@ -429,70 +491,21 @@ RETURNS TABLE (
 )
 LANGUAGE plpgsql
 AS $$
-DECLARE
-    v_job_id VARCHAR(64);
-    v_stage INTEGER;
-    v_remaining INTEGER;
-    v_task_status {self.schema_name}.task_status;
-BEGIN
-    -- Get task info and update atomically
-    UPDATE {self.schema_name}.tasks 
-    SET 
-        status = CASE 
-            WHEN p_error_details IS NOT NULL THEN 'failed'::{self.schema_name}.task_status
-            ELSE 'completed'::{self.schema_name}.task_status
-        END,
-        result_data = p_result_data,
-        error_details = p_error_details,
-        updated_at = NOW()
-    WHERE 
-        task_id = p_task_id 
-        AND status = 'processing'
-    RETURNING parent_job_id, stage, status
-    INTO v_job_id, v_stage, v_task_status;
-    
-    IF v_job_id IS NULL THEN
-        RETURN QUERY SELECT FALSE, FALSE, NULL::VARCHAR(64), NULL::INTEGER, NULL::INTEGER;
-        RETURN;
-    END IF;
-    
-    -- Count remaining non-completed tasks in the same stage
-    SELECT COUNT(*)::INTEGER INTO v_remaining
-    FROM {self.schema_name}.tasks 
-    WHERE parent_job_id = v_job_id 
-      AND stage = v_stage 
-      AND status NOT IN ('completed', 'failed');
-    
-    RETURN QUERY SELECT 
-        TRUE,
-        v_remaining = 0,
-        v_job_id,
-        v_stage,
-        v_remaining;
-END;
-$$;""")
+{}
+$$""").format(
+            sql.Identifier(self.schema_name),
+            sql.Identifier("complete_task_and_check_stage"),
+            sql.SQL(body_complete_task)
+        ))
         
-        # advance_job_stage function - FIXED: using p_stage_results consistently
-        functions.append(f"""
--- Atomic job stage advancement
-CREATE OR REPLACE FUNCTION {self.schema_name}.advance_job_stage(
-    p_job_id VARCHAR(64),
-    p_current_stage INTEGER,
-    p_stage_results JSONB DEFAULT NULL
-)
-RETURNS TABLE (
-    job_updated BOOLEAN,
-    new_stage INTEGER,
-    is_final_stage BOOLEAN
-)
-LANGUAGE plpgsql  
-AS $$
+        # 2. advance_job_stage function  
+        body_advance_stage = """
 DECLARE
     v_total_stages INTEGER;
     v_new_stage INTEGER;
 BEGIN
     -- Update job stage and stage results atomically
-    UPDATE {self.schema_name}.jobs
+    UPDATE {schema}.jobs
     SET 
         stage = stage + 1,
         stage_results = CASE 
@@ -501,8 +514,8 @@ BEGIN
             ELSE stage_results
         END,
         status = CASE 
-            WHEN stage + 1 > total_stages THEN 'completed'::{self.schema_name}.job_status
-            ELSE 'processing'::{self.schema_name}.job_status
+            WHEN stage + 1 > total_stages THEN 'completed'::{schema}.job_status
+            ELSE 'processing'::{schema}.job_status
         END,
         updated_at = NOW()
     WHERE 
@@ -521,23 +534,30 @@ BEGIN
         v_new_stage,
         v_new_stage > v_total_stages;
 END;
-$$;""")
+""".format(schema=self.schema_name)
         
-        # check_job_completion function with FIXED BIGINT types
-        functions.append(f"""
--- Check job completion and gather results
-CREATE OR REPLACE FUNCTION {self.schema_name}.check_job_completion(
-    p_job_id VARCHAR(64)
+        functions.append(sql.SQL("""
+CREATE OR REPLACE FUNCTION {}.{}(
+    p_job_id VARCHAR(64),
+    p_current_stage INTEGER,
+    p_stage_results JSONB DEFAULT NULL
 )
 RETURNS TABLE (
-    job_complete BOOLEAN,
-    final_stage INTEGER,
-    total_tasks BIGINT,
-    completed_tasks BIGINT,
-    task_results JSONB
+    job_updated BOOLEAN,
+    new_stage INTEGER,
+    is_final_stage BOOLEAN
 )
-LANGUAGE plpgsql
+LANGUAGE plpgsql  
 AS $$
+{}
+$$""").format(
+            sql.Identifier(self.schema_name),
+            sql.Identifier("advance_job_stage"),
+            sql.SQL(body_advance_stage)
+        ))
+        
+        # 3. check_job_completion function
+        body_check_completion = """
 DECLARE
     v_job_record RECORD;
     v_task_counts RECORD;
@@ -545,7 +565,7 @@ BEGIN
     -- Get job info with row-level lock
     SELECT job_id, job_type, status, stage, total_stages, stage_results
     INTO v_job_record
-    FROM {self.schema_name}.jobs 
+    FROM {schema}.jobs 
     WHERE job_id = p_job_id
     FOR UPDATE;
     
@@ -559,7 +579,7 @@ BEGIN
         RETURN;
     END IF;
     
-    -- Count tasks for this job (with explicit BIGINT casting)
+    -- Count tasks for this job
     SELECT 
         COUNT(*)::BIGINT as total_tasks,
         COUNT(CASE WHEN status = 'completed' THEN 1 END)::BIGINT as completed_tasks,
@@ -579,7 +599,7 @@ BEGIN
             '[]'::jsonb
         ) as task_results
     INTO v_task_counts
-    FROM {self.schema_name}.tasks 
+    FROM {schema}.tasks 
     WHERE parent_job_id = p_job_id;
     
     RETURN QUERY SELECT 
@@ -593,12 +613,31 @@ BEGIN
         v_task_counts.completed_tasks,
         v_task_counts.task_results;
 END;
-$$;""")
+""".format(schema=self.schema_name)
         
-        # update_updated_at trigger function
-        functions.append(f"""
--- Trigger function for updating timestamps
-CREATE OR REPLACE FUNCTION {self.schema_name}.update_updated_at_column()
+        functions.append(sql.SQL("""
+CREATE OR REPLACE FUNCTION {}.{}(
+    p_job_id VARCHAR(64)
+)
+RETURNS TABLE (
+    job_complete BOOLEAN,
+    final_stage INTEGER,
+    total_tasks BIGINT,
+    completed_tasks BIGINT,
+    task_results JSONB
+)
+LANGUAGE plpgsql
+AS $$
+{}
+$$""").format(
+            sql.Identifier(self.schema_name),
+            sql.Identifier("check_job_completion"),
+            sql.SQL(body_check_completion)
+        ))
+        
+        # 4. update_updated_at_column trigger function
+        functions.append(sql.SQL("""
+CREATE OR REPLACE FUNCTION {}.{}()
 RETURNS TRIGGER 
 LANGUAGE plpgsql
 AS $$
@@ -606,7 +645,10 @@ BEGIN
     NEW.updated_at = NOW();
     RETURN NEW;
 END;
-$$;""")
+$$""").format(
+            sql.Identifier(self.schema_name),
+            sql.Identifier("update_updated_at_column")
+        ))
         
         return functions
         
@@ -709,9 +751,8 @@ $$;""")
         composed.extend(self.generate_indexes_composed("jobs", JobRecord))
         composed.extend(self.generate_indexes_composed("tasks", TaskRecord))
             
-        # Functions
-        for function in self.generate_static_functions():
-            composed.append(sql.SQL(function))
+        # Functions - already sql.Composed objects
+        composed.extend(self.generate_static_functions())
             
         # Triggers - now using composed SQL
         composed.extend(self.generate_triggers_composed())
@@ -743,58 +784,153 @@ $$;""")
     # Following "No Backward Compatibility" philosophy
     # This method used string concatenation and called non-existent methods
     # All SQL generation now uses psycopg.sql composition ONLY
+    
+    def inspect(self, connection=None, verbose=True) -> Dict[str, List[str]]:
+        """
+        Inspect and display SQL statements that would be generated.
+        
+        This method provides a formatted view of all SQL statements that would
+        be executed, organized by category. Useful for debugging and verification
+        without actually executing the SQL.
+        
+        Args:
+            connection: Optional psycopg connection for rendering SQL
+            verbose: If True, print formatted output to console
+            
+        Returns:
+            Dictionary with categorized SQL statements
+        """
+        # Generate the composed statements
+        composed_statements = self.generate_composed_statements()
+        
+        # Categorize statements for better organization
+        categories = {
+            "SCHEMA & SETUP": [],
+            "ENUM TYPES": [],
+            "TABLES": [],
+            "INDEXES": [],
+            "FUNCTIONS": [],
+            "TRIGGERS": []
+        }
+        
+        # Process each statement
+        for stmt in composed_statements:
+            # Render the statement
+            if connection:
+                try:
+                    stmt_str = stmt.as_string(connection)
+                except Exception as e:
+                    stmt_str = f"[Unable to render: {e}]"
+            else:
+                # Basic string representation without connection
+                stmt_str = str(stmt)
+            
+            # Categorize based on content
+            stmt_lower = stmt_str.lower()
+            if 'create schema' in stmt_lower or 'set search_path' in stmt_lower:
+                categories["SCHEMA & SETUP"].append(stmt_str)
+            elif 'create type' in stmt_lower:
+                categories["ENUM TYPES"].append(stmt_str)
+            elif 'create table' in stmt_lower:
+                categories["TABLES"].append(stmt_str)
+            elif 'create index' in stmt_lower:
+                categories["INDEXES"].append(stmt_str)
+            elif 'create' in stmt_lower and 'function' in stmt_lower:
+                categories["FUNCTIONS"].append(stmt_str)
+            elif 'trigger' in stmt_lower:
+                categories["TRIGGERS"].append(stmt_str)
+        
+        if verbose:
+            print("=" * 80)
+            print("SQL SCHEMA INSPECTION")
+            print("=" * 80)
+            print(f"\nSchema: {self.schema_name}")
+            print(f"Total statements: {len(composed_statements)}")
+            print("=" * 80)
+            
+            for category, statements in categories.items():
+                if statements:
+                    print(f"\n{category} ({len(statements)} statements):")
+                    print("-" * 80)
+                    for stmt_str in statements:
+                        # Truncate very long statements for display
+                        if len(stmt_str) > 2000:
+                            lines = stmt_str.split('\n')
+                            if len(lines) > 30:
+                                for line in lines[:20]:
+                                    print(line)
+                                print("\n... [truncated] ...\n")
+                                for line in lines[-5:]:
+                                    print(line)
+                            else:
+                                print(stmt_str)
+                        else:
+                            print(stmt_str)
+                        print(";")
+            
+            print("\n" + "=" * 80)
+            print("SUMMARY")
+            print("=" * 80)
+            for category, statements in categories.items():
+                if statements:
+                    print(f"  {category:20} {len(statements):3} statements")
+            
+            if not connection:
+                print("\n⚠️  Note: SQL shown without PostgreSQL rendering")
+                print("  For properly formatted SQL, provide a connection")
+        
+        return categories
 
 
 def main():
     """
-    Generate SQL schema and optionally save to file.
+    Inspect SQL schema generation without executing.
     
-    NO STRING CONCATENATION - Uses composed SQL statements.
-    For file output only - real deployment uses composed objects directly.
+    This is now a simple wrapper around the PydanticToSQL.inspect() method,
+    following proper OOP hierarchy.
     """
-    generator = PydanticToSQL(schema_name="app")
+    import sys
+    import psycopg
+    import os
     
-    # Generate composed statements (the ONLY way now)
-    composed_statements = generator.generate_composed_statements()
+    # Get schema name from config or use default
+    try:
+        from config import get_config
+        config = get_config()
+        schema_name = config.app_schema
+    except:
+        schema_name = "app"
     
-    # For file output, we need to convert to strings
-    # This is ONLY for display/file writing - deployment uses composed objects
-    sql_lines = []
-    header = """-- =============================================================================
--- GENERATED PostgreSQL Schema from Pydantic Models
--- Generated at: {}
--- =============================================================================
--- 
--- This schema is automatically generated from Pydantic models
--- The Python models are the single source of truth
--- Generated using psycopg.sql composition - NO STRING CONCATENATION
--- 
--- =============================================================================
-
-""".format(datetime.utcnow().isoformat())
+    # Create generator instance
+    generator = PydanticToSQL(schema_name=schema_name)
     
-    sql_lines.append(header)
-    
-    # Note about composed statements
-    sql_lines.append("-- NOTE: SQL statements are generated using psycopg.sql composition\n")
-    sql_lines.append("-- They cannot be directly converted to strings for file output\n")
-    sql_lines.append("-- Use the deployment endpoint to execute these composed statements\n")
-    sql_lines.append("-- Endpoint: POST /api/schema/deploy-pydantic?confirm=yes\n\n")
-    sql_lines.append(f"-- Total composed statements generated: {len(composed_statements)}\n")
-    
-    sql_schema = '\n'.join(sql_lines)
-    
-    # Save to file
-    output_file = "schema_generated.sql"
-    with open(output_file, "w") as f:
-        f.write(sql_schema)
+    # Try to get a connection for proper SQL rendering (optional)
+    connection = None
+    if '--with-connection' in sys.argv:
+        # Try to connect for proper SQL rendering
+        connection_attempts = [
+            os.environ.get("DATABASE_URL"),
+            "host=localhost port=5432 dbname=postgres user=postgres",
+        ]
         
-    print(f"✅ Schema generated and saved to {output_file}")
-    print(f"📊 Generated {len(generator.enums)} ENUMs")
-    print(f"📊 Generated 2 tables (jobs, tasks)")
-    print(f"📊 Generated 4 critical functions")
+        for conn_str in connection_attempts:
+            if not conn_str:
+                continue
+            try:
+                connection = psycopg.connect(conn_str, connect_timeout=2)
+                print("✅ Connected to PostgreSQL for SQL rendering\n")
+                break
+            except:
+                continue
     
-    return sql_schema
+    # Use the inspect method for formatted output
+    categories = generator.inspect(connection=connection, verbose=True)
+    
+    # Clean up connection if we created one
+    if connection:
+        connection.close()
+    
+    return categories
 
 
 if __name__ == "__main__":

@@ -1,10 +1,17 @@
 # ============================================================================
-# CLAUDE CONTEXT - CONFIGURATION
+# CLAUDE CONTEXT - CONTROLLER
 # ============================================================================
-# PURPOSE: Deploy Pydantic-generated schema directly to PostgreSQL
-# SOURCE: Pydantic models -> SQL DDL -> Database deployment
-# SCOPE: Database schema creation from Python models
-# VALIDATION: Schema deployment verification and rollback support
+# PURPOSE: HTTP trigger for deploying Pydantic-generated schema directly to PostgreSQL database
+# EXPORTS: PydanticSchemaDeployTrigger (HTTP trigger class for schema deployment)
+# INTERFACES: Azure Functions HttpTrigger interface (func.HttpRequest -> func.HttpResponse)
+# PYDANTIC_MODELS: JobRecord, TaskRecord (imported from schema_core for SQL generation)
+# DEPENDENCIES: azure.functions, psycopg, psycopg.sql, schema_sql_generator, schema_core, config, util_logger
+# SOURCE: HTTP GET/POST requests, Pydantic models for schema generation
+# SCOPE: Database schema deployment - DDL generation, execution, verification
+# VALIDATION: Schema comparison, deployment confirmation, rollback on error
+# PATTERNS: Command pattern (deployment), Template Method (request handling), Builder (SQL generation)
+# ENTRY_POINTS: trigger = PydanticSchemaDeployTrigger(); response = trigger.handle_request(req)
+# INDEX: PydanticSchemaDeployTrigger:29, handle_request:39, _deploy_schema:218, _verify_deployment:373
 # ============================================================================
 
 """
@@ -24,7 +31,7 @@ from datetime import datetime
 from util_logger import LoggerFactory, ComponentType
 from config import get_config
 from schema_sql_generator import PydanticToSQL
-from schema_core import JobRecord, TaskRecord
+from schema_base import JobRecord, TaskRecord
 
 class PydanticSchemaDeployTrigger:
     """

@@ -1,10 +1,17 @@
 # ============================================================================
-# CLAUDE CONTEXT - CONFIGURATION
+# CLAUDE CONTEXT - CONTROLLER
 # ============================================================================
-# PURPOSE: Primary job submission HTTP endpoint with controller routing
-# SOURCE: Environment variables (PostgreSQL) + Managed Identity (Azure Storage)
-# SCOPE: HTTP-specific job submission with queue integration and validation
-# VALIDATION: Job parameter validation + controller schema validation
+# PURPOSE: Primary job submission HTTP trigger handling POST /api/jobs/{job_type} requests
+# EXPORTS: JobSubmissionTrigger (HTTP trigger class for job submission)
+# INTERFACES: JobManagementTrigger (inherited from trigger_http_base)
+# PYDANTIC_MODELS: None directly - uses controller validation for job parameters
+# DEPENDENCIES: trigger_http_base, typing, azure.functions (implicit via base class)
+# SOURCE: HTTP POST requests with JSON body containing job parameters
+# SCOPE: HTTP endpoint for job creation, validation, and queue submission
+# VALIDATION: Job type validation, parameter schema validation via controllers, DDH parameter checks
+# PATTERNS: Template Method (implements base class abstract methods), Strategy (controller routing)
+# ENTRY_POINTS: trigger = JobSubmissionTrigger(); response = trigger.handle_request(req)
+# INDEX: JobSubmissionTrigger:88, process_request:120, _validate_ddh_parameters:200
 # ============================================================================
 
 """
@@ -201,26 +208,26 @@ class JobSubmissionTrigger(JobManagementTrigger):
         """
         self.logger.debug(f"🎯 Loading controller for job_type: {job_type}")
         
-        if job_type == "hello_world":
-            self.logger.debug(f"🏗️ Importing HelloWorldController")
-            try:
-                from controller_hello_world import HelloWorldController
-                self.logger.debug(f"✅ HelloWorldController imported successfully")
-                
-                self.logger.debug(f"🏗️ Instantiating HelloWorldController")
-                controller = HelloWorldController()
-                self.logger.debug(f"✅ HelloWorldController instantiated successfully")
-                return controller
-            except Exception as hello_error:
-                self.logger.error(f"❌ Failed to create HelloWorldController: {hello_error}")
-                raise RuntimeError(f"HelloWorldController creation failed: {hello_error}")
-        else:
-            # Explicitly fail for operations without controllers
+        # Use JobFactory to create controllers
+        self.logger.debug(f"🏗️ Using JobFactory to create controller for {job_type}")
+        try:
+            from controller_factories import JobFactory
+            import controller_hello_world  # Import to trigger registration
+            
+            controller = JobFactory.create_controller(job_type)
+            self.logger.debug(f"✅ Controller for {job_type} created successfully via JobFactory")
+            return controller
+        except ValueError as e:
+            # JobFactory raises ValueError for unknown job types
+            self.logger.error(f"❌ Unknown job type {job_type}: {e}")
             raise NotImplementedError(
                 f"Operation '{job_type}' requires a controller implementation. "
                 f"All operations must use the controller pattern. "
-                f"Required: Create {job_type.title()}Controller class inheriting from BaseController"
+                f"Required: Create controller and register with @JobRegistry decorator"
             )
+        except Exception as error:
+            self.logger.error(f"❌ Failed to create controller for {job_type}: {error}")
+            raise RuntimeError(f"Controller creation failed for {job_type}: {error}")
 
 
 # Create singleton instance for use in function_app.py  

@@ -1,10 +1,17 @@
 # ============================================================================
-# CLAUDE CONTEXT - CONFIGURATION
+# CLAUDE CONTEXT - REPOSITORY
 # ============================================================================
-# PURPOSE: Single source of truth for ALL repository method signatures and parameters
-# SOURCE: Defines canonical parameter names to prevent mismatches across layers
-# SCOPE: Global enforcement of method signatures for repository pattern
-# VALIDATION: ABC enforcement + type hints ensure compile-time consistency
+# PURPOSE: Single source of truth for ALL repository method signatures preventing parameter mismatches
+# EXPORTS: IJobRepository, ITaskRepository, ICompletionDetector, ParamNames, StageAdvancementResult, TaskCompletionResult, JobCompletionResult
+# INTERFACES: ABC interfaces defining canonical repository contracts for all implementations
+# PYDANTIC_MODELS: JobRecord, TaskRecord (imported from schema_core for type hints)
+# DEPENDENCIES: abc, typing, dataclasses, enum, schema_core
+# SOURCE: No data source - defines abstract interfaces and contracts
+# SCOPE: Global repository pattern enforcement - all repository implementations must follow these interfaces
+# VALIDATION: ABC enforcement ensures method signature compliance, type hints provide compile-time checking
+# PATTERNS: Interface Segregation, Repository pattern, Protocol pattern, Parameter Object pattern
+# ENTRY_POINTS: class JobRepository(IJobRepository); must implement all abstract methods
+# INDEX: ParamNames:35, IJobRepository:141, ITaskRepository:168, ICompletionDetector:194, StageAdvancementResult:82
 # ============================================================================
 
 """
@@ -25,7 +32,7 @@ from typing import Dict, Any, List, Optional, Protocol, Final
 from dataclasses import dataclass
 from enum import Enum
 
-from schema_core import JobRecord, TaskRecord, JobStatus, TaskStatus
+from schema_base import JobRecord, TaskRecord, JobStatus, TaskStatus
 
 
 # ============================================================================
@@ -37,7 +44,7 @@ class ParamNames:
     ALL parameter names used across the system.
     Using class attributes as constants ensures consistency.
     
-    This prevents bugs like 'stage_result' vs 'stage_results' mismatches.
+    This prevents bugs like 'stage_results' vs 'stage_results' mismatches.
     """
     
     # Job parameters
@@ -204,7 +211,8 @@ class ICompletionDetector(ABC):
         task_id: str,  # MUST be 'task_id'
         job_id: str,   # MUST be 'job_id'
         stage: int,    # MUST be 'stage'
-        result_data: Dict[str, Any]  # MUST be 'result_data'
+        result_data: Optional[Dict[str, Any]] = None,  # MUST be 'result_data'
+        error_details: Optional[str] = None  # MUST be 'error_details'
     ) -> TaskCompletionResult:
         """
         Atomically complete task and check stage completion.
@@ -277,7 +285,9 @@ class RepositoryProtocol(Protocol):
     
     # From ICompletionDetector
     def complete_task_and_check_stage(
-        self, task_id: str, job_id: str, stage: int, result_data: Dict[str, Any]
+        self, task_id: str, job_id: str, stage: int, 
+        result_data: Optional[Dict[str, Any]] = None,
+        error_details: Optional[str] = None
     ) -> TaskCompletionResult: ...
     
     def advance_job_stage(

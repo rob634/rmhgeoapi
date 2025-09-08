@@ -1,10 +1,17 @@
 # ============================================================================
-# CLAUDE CONTEXT - CONFIGURATION
+# CLAUDE CONTEXT - REPOSITORY
 # ============================================================================
-# PURPOSE: PostgreSQL-specific repository implementation with direct database access
-# SOURCE: Consolidation of adapter_storage.py PostgreSQL logic without adapter abstraction
-# SCOPE: PostgreSQL database operations for jobs and tasks
-# VALIDATION: Uses psycopg.sql composition for SQL safety, atomic operations for race prevention
+# PURPOSE: PostgreSQL-specific repository implementation with direct database access and atomic operations
+# EXPORTS: PostgreSQLRepository, PostgreSQLJobRepository, PostgreSQLTaskRepository, PostgreSQLCompletionDetector
+# INTERFACES: BaseRepository, IJobRepository, ITaskRepository, ICompletionDetector (from repository_abc)
+# PYDANTIC_MODELS: JobRecord, TaskRecord, StageAdvancementResult, TaskCompletionResult, JobCompletionResult
+# DEPENDENCIES: psycopg, psycopg.sql, config, schema_core, repository_base, repository_abc
+# SOURCE: PostgreSQL database (connection from AppConfig), app schema tables (jobs, tasks)
+# SCOPE: Database operations for job/task persistence and atomic completion detection
+# VALIDATION: SQL injection prevention via psycopg.sql composition, transaction atomicity for race prevention
+# PATTERNS: Repository pattern, Unit of Work (transactions), Template Method, Connection pooling
+# ENTRY_POINTS: repo = JobRepository(); job = repo.get_job(job_id); detector.complete_task_and_check_stage()
+# INDEX: PostgreSQLRepository:61, JobRepository:514, TaskRepository:736, CompletionDetector:949
 # ============================================================================
 
 """
@@ -40,7 +47,7 @@ from contextlib import contextmanager
 import logging
 
 from config import AppConfig, get_config
-from schema_core import (
+from schema_base import (
     JobRecord, TaskRecord, JobStatus, TaskStatus,
     generate_job_id, generate_task_id
 )
@@ -511,7 +518,7 @@ class PostgreSQLRepository(BaseRepository):
 # JOB REPOSITORY - PostgreSQL implementation
 # ============================================================================
 
-class JobRepository(PostgreSQLRepository, IJobRepository):
+class PostgreSQLJobRepository(PostgreSQLRepository, IJobRepository):
     """
     PostgreSQL implementation of job repository.
     
@@ -733,7 +740,7 @@ class JobRepository(PostgreSQLRepository, IJobRepository):
 # TASK REPOSITORY - PostgreSQL implementation
 # ============================================================================
 
-class TaskRepository(PostgreSQLRepository, ITaskRepository):
+class PostgreSQLTaskRepository(PostgreSQLRepository, ITaskRepository):
     """
     PostgreSQL implementation of task repository.
     
@@ -946,7 +953,7 @@ class TaskRepository(PostgreSQLRepository, ITaskRepository):
 # COMPLETION DETECTOR - Atomic PostgreSQL operations
 # ============================================================================
 
-class CompletionDetector(PostgreSQLRepository, ICompletionDetector):
+class PostgreSQLCompletionDetector(PostgreSQLRepository, ICompletionDetector):
     """
     PostgreSQL implementation of completion detection.
     
@@ -959,7 +966,8 @@ class CompletionDetector(PostgreSQLRepository, ICompletionDetector):
         task_id: str,
         job_id: str,
         stage: int,
-        result_data: Dict[str, Any]
+        result_data: Optional[Dict[str, Any]] = None,
+        error_details: Optional[str] = None
     ) -> TaskCompletionResult:
         """
         Atomically complete a task and check if stage is complete.
@@ -970,20 +978,25 @@ class CompletionDetector(PostgreSQLRepository, ICompletionDetector):
             task_id: Task to complete
             job_id: Parent job ID (for validation)
             stage: Current stage number
-            result_data: Task results
+            result_data: Task results (None for failures)
+            error_details: Error message if task failed (None for success)
             
         Returns:
             TaskCompletionResult with completion status
         """
         with self._error_context("task completion", task_id):
             query = sql.SQL("""
-                SELECT * FROM {}.complete_task_and_check_stage(%s, %s, %s)
+                SELECT * FROM {}.complete_task_and_check_stage(%s, %s, %s, %s, %s)
             """).format(sql.Identifier(self.schema_name))
             
+            # Updated to match new PostgreSQL function signature
+            # Now passes all 5 parameters: task_id, job_id, stage, result_data, error_details
             params = (
                 task_id,
+                job_id,
+                stage,
                 json.dumps(result_data) if result_data else None,
-                None  # error_details is NULL for successful completion
+                error_details  # Pass error_details for failed tasks, None for success
             )
             
             row = self._execute_query(query, params, fetch='one')

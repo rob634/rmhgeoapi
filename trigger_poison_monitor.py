@@ -1,10 +1,17 @@
 # ============================================================================
-# CLAUDE CONTEXT - CONFIGURATION
+# CLAUDE CONTEXT - CONTROLLER
 # ============================================================================
-# PURPOSE: Poison queue monitoring HTTP trigger for failed message detection and cleanup
-# SOURCE: Environment variables for Azure Storage queue access and timer configuration
-# SCOPE: Timer-specific poison queue monitoring with HTTP endpoint for manual triggering
-# VALIDATION: Queue monitoring validation + poison message cleanup verification
+# PURPOSE: Poison queue monitoring HTTP trigger for detecting and processing failed queue messages
+# EXPORTS: PoisonQueueMonitorTrigger (HTTP trigger class for poison queue monitoring)
+# INTERFACES: SystemMonitoringTrigger (inherited from trigger_http_base)
+# PYDANTIC_MODELS: None directly - uses dict for monitoring results
+# DEPENDENCIES: trigger_http_base, poison_queue_monitor (service), typing, azure.functions (implicit)
+# SOURCE: HTTP GET/POST requests, Azure Storage poison queues via service layer
+# SCOPE: Queue health monitoring - poison message detection, processing, and cleanup
+# VALIDATION: Queue existence validation, poison message correlation with jobs/tasks
+# PATTERNS: Template Method (implements base class), Observer pattern (monitoring), Command pattern (cleanup)
+# ENTRY_POINTS: trigger = PoisonQueueMonitorTrigger(); response = trigger.handle_request(req)
+# INDEX: PoisonQueueMonitorTrigger:117, process_request:140, _check_poison_status:200, _process_poison_messages:300
 # ============================================================================
 
 """

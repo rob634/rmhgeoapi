@@ -1,40 +1,54 @@
 # ============================================================================
-# CLAUDE CONTEXT - CONFIGURATION
+# CLAUDE CONTEXT - REPOSITORY
 # ============================================================================
-# PURPOSE: Consolidated repository implementation with proper inheritance hierarchy
-# SOURCE: Merger of repository_data.py logic with new PostgreSQL-only architecture
-# SCOPE: Complete repository implementation for jobs, tasks, and completion detection
-# VALIDATION: Uses repository_base.py for common logic, PostgreSQL for storage
+# PURPOSE: Business logic repository layer extending PostgreSQL implementations with validation and orchestration
+# EXPORTS: JobRepository, TaskRepository, CompletionDetector, RepositoryFactory
+# INTERFACES: Extends PostgreSQLJobRepository, PostgreSQLTaskRepository, PostgreSQLCompletionDetector
+# PYDANTIC_MODELS: JobRecord, TaskRecord, JobStatus, TaskStatus (from schema_core)
+# DEPENDENCIES: repository_postgresql, schema_core, util_logger, typing, datetime
+# SOURCE: PostgreSQL database via inherited base classes, business logic layer
+# SCOPE: Business-level repository operations with validation and workflow orchestration
+# VALIDATION: Business rule validation, idempotency checks, status transition validation
+# PATTERNS: Repository pattern, Factory pattern, Template Method, Facade (for complex workflows)
+# ENTRY_POINTS: repos = RepositoryFactory.create_repositories(); job = repos['job_repo'].create_job_from_params()
+# INDEX: JobRepository:47, TaskRepository:216, CompletionDetector:385, RepositoryFactory:521
 # ============================================================================
 
 """
-Consolidated Repository Implementation
+Business Logic Repository Implementation
 
-This module provides the complete repository implementation with the proper
-inheritance hierarchy:
-    BaseRepository (from repository_base.py)
-        ↓
-    PostgreSQLRepository (from repository_postgresql.py)
-        ↓
-    JobRepository, TaskRepository, CompletionDetector (this file)
+This module provides business logic repositories that extend the PostgreSQL
+implementations with additional validation and workflow orchestration:
 
-This consolidation eliminates the adapter pattern and provides direct
-PostgreSQL access with proper separation of concerns.
+    PostgreSQLJobRepository (from repository_postgresql.py)
+        ↓
+    JobRepository (this file - adds business logic)
+    
+    PostgreSQLTaskRepository (from repository_postgresql.py)
+        ↓
+    TaskRepository (this file - adds business logic)
+    
+    PostgreSQLCompletionDetector (from repository_postgresql.py)
+        ↓
+    CompletionDetector (this file - adds business logic)
+
+The RepositoryFactory creates these business logic repositories
+which are used throughout the application.
 """
 
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 
 from util_logger import LoggerFactory, ComponentType
-from schema_core import (
+from schema_base import (
     JobRecord, TaskRecord, JobStatus, TaskStatus,
     generate_job_id, generate_task_id
 )
 from repository_postgresql import (
     PostgreSQLRepository,
-    JobRepository as PostgreSQLJobRepository,
-    TaskRepository as PostgreSQLTaskRepository,
-    CompletionDetector as PostgreSQLCompletionDetector
+    PostgreSQLJobRepository,
+    PostgreSQLTaskRepository,
+    PostgreSQLCompletionDetector
 )
 
 logger = LoggerFactory.get_logger(ComponentType.REPOSITORY, "ConsolidatedRepository")

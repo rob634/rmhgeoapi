@@ -1,12 +1,17 @@
 # ============================================================================
-# CLAUDE CONTEXT - AUTO-DISCOVERY IMPORT VALIDATION SYSTEM
+# CLAUDE CONTEXT - UTILITY
 # ============================================================================
 # PURPOSE: Zero-configuration import validation with auto-discovery of application modules
-# SOURCE: Filesystem scanning + predefined critical modules + environment detection  
+# EXPORTS: ImportValidator, validator (singleton instance)
+# INTERFACES: None - utility class for import validation
+# PYDANTIC_MODELS: None - uses dict for validation results
+# DEPENDENCIES: os, sys, time, traceback, json, glob, importlib, pathlib, typing, datetime
+# SOURCE: Filesystem scanning for *.py files, predefined critical modules list, environment variables
 # SCOPE: Global application health monitoring with persistent registry tracking
-# VALIDATION: Two-tier system (critical external deps + auto-discovered app modules)
-# REGISTRY: import_validation_registry.json with module status and last validation timestamps
-# AUTO-DISCOVERY: Scans *.py files using naming patterns (controller_*, service_*, model_*, etc.)
+# VALIDATION: Two-tier system (critical external deps + auto-discovered app modules), import testing
+# PATTERNS: Singleton pattern, Registry pattern, Auto-discovery pattern, Health Check pattern
+# ENTRY_POINTS: validator.ensure_startup_ready(); health = validator.get_health_status()
+# INDEX: ImportValidator:59, validate_all_imports:390, ensure_startup_ready:604, get_health_status:644
 # ============================================================================
 
 """

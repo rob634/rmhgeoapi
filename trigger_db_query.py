@@ -1,10 +1,17 @@
 # ============================================================================
-# CLAUDE CONTEXT - CONFIGURATION
+# CLAUDE CONTEXT - CONTROLLER
 # ============================================================================
-# PURPOSE: Database query HTTP endpoints for production monitoring and debugging
-# SOURCE: PostgreSQL connection (POSTGIS_PASSWORD) + HTTP request parameters
-# SCOPE: HTTP-specific database query endpoints with filtering and validation
-# VALIDATION: Query parameter validation + PostgreSQL result validation
+# PURPOSE: Database query HTTP triggers providing direct PostgreSQL access for monitoring and debugging
+# EXPORTS: DatabaseQueryTrigger, JobsQueryTrigger, TasksQueryTrigger, DatabaseStatsQueryTrigger, EnumDiagnosticTrigger, SchemaNukeQueryTrigger
+# INTERFACES: BaseHttpTrigger (inherited from trigger_http_base)
+# PYDANTIC_MODELS: None directly - uses dict for query results
+# DEPENDENCIES: trigger_http_base, config, util_logger, psycopg, azure.functions, typing, datetime
+# SOURCE: HTTP GET/POST requests with query parameters, PostgreSQL database via psycopg
+# SCOPE: HTTP endpoints for database queries, statistics, diagnostics, and schema management
+# VALIDATION: Query parameter validation, job ID validation, SQL injection prevention
+# PATTERNS: Template Method (implements base class), Query Object pattern, Factory (trigger types)
+# ENTRY_POINTS: trigger = JobsQueryTrigger(); response = trigger.handle_request(req)
+# INDEX: DatabaseQueryTrigger:48, JobsQueryTrigger:182, TasksQueryTrigger:268, DatabaseStatsQueryTrigger:424, SchemaNukeQueryTrigger:620
 # ============================================================================
 
 """

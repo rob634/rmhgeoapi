@@ -1,10 +1,17 @@
 # ============================================================================
-# CLAUDE CONTEXT - CONFIGURATION
+# CLAUDE CONTEXT - CONTROLLER
 # ============================================================================
-# PURPOSE: Advanced validation debugging trigger for TaskRecord errors
-# SOURCE: Azure Functions HTTP trigger for development debugging
-# SCOPE: Development-specific diagnostic endpoint  
-# VALIDATION: Bypasses normal flow to test validation in isolation
+# PURPOSE: Development-only HTTP trigger for debugging TaskRecord validation errors in isolation
+# EXPORTS: main() (Azure Functions entry point for validation debugging)
+# INTERFACES: Azure Functions HttpTrigger interface (func.HttpRequest -> func.HttpResponse)
+# PYDANTIC_MODELS: TaskRecord (from schema_core) - being validated for debugging
+# DEPENDENCIES: azure.functions, util_logger, validator_schema, schema_core, json, logging, traceback
+# SOURCE: HTTP POST requests with raw task data JSON for validation testing
+# SCOPE: Development debugging - isolated validation testing outside normal workflow
+# VALIDATION: TaskRecord schema validation with detailed field-by-field diagnostics
+# PATTERNS: Debugging pattern, Diagnostic pattern, Bypass pattern (skips normal workflow)
+# ENTRY_POINTS: main(req) called by Azure Functions runtime at POST /api/debug/validation/task
+# INDEX: main:31, validation logic:70, diagnostic response:120
 # ============================================================================
 
 """
@@ -21,8 +28,8 @@ from typing import Any, Dict
 
 import azure.functions as func
 from util_logger import LoggerFactory
-from validator_schema import SchemaValidator
-from schema_core import TaskRecord
+# Removed redundant SchemaValidator - Pydantic does validation automatically
+from schema_base import TaskRecord
 
 # Get specialized logger for validation debugging
 logger = LoggerFactory.get_logger(LoggerFactory.ComponentType.SERVICE)
@@ -79,17 +86,12 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
             direct_success = False
             direct_error = str(direct_exc)
         
-        # Test 2: SchemaValidator validation  
-        logger.error("🔬 TEST 2: SchemaValidator.validate_task_record()")
-        try:
-            validator_task = SchemaValidator.validate_task_record(request_body, strict=True)
-            logger.error(f"✅ VALIDATOR SUCCESS: {validator_task.task_id}")
-            validator_success = True
-            validator_error = None
-        except Exception as validator_exc:
-            logger.error(f"❌ VALIDATOR FAILED: {type(validator_exc).__name__}: {validator_exc}")
-            validator_success = False  
-            validator_error = str(validator_exc)
+        # Test 2: Direct Pydantic validation (removed redundant SchemaValidator)
+        logger.error("🔬 TEST 2: Direct Pydantic validation")
+        # Pydantic already validates - no need for extra wrapper
+        validator_success = pydantic_success
+        validator_error = pydantic_error
+        logger.error(f"📊 Using Pydantic result: success={validator_success}")
         
         # Test 3: Field-by-field analysis
         logger.error("🔬 TEST 3: Field-by-field schema analysis")

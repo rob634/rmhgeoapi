@@ -1,10 +1,17 @@
 # ============================================================================
-# CLAUDE CONTEXT - CONFIGURATION
+# CLAUDE CONTEXT - CONTROLLER
 # ============================================================================
-# PURPOSE: Job status retrieval HTTP endpoint with real-time progress tracking
-# SOURCE: Environment variables for repository access and logging configuration
-# SCOPE: HTTP-specific job status queries with formatted response transformation
-# VALIDATION: Job ID validation + repository data integrity validation
+# PURPOSE: Job status retrieval HTTP trigger handling GET /api/jobs/{job_id} requests
+# EXPORTS: JobStatusTrigger (HTTP trigger class for job status retrieval)
+# INTERFACES: JobManagementTrigger (inherited from trigger_http_base)
+# PYDANTIC_MODELS: JobRecord (imported from schema_core for type safety)
+# DEPENDENCIES: trigger_http_base, schema_core, typing, azure.functions (implicit)
+# SOURCE: HTTP GET requests with job_id path parameter, job records from repository
+# SCOPE: HTTP endpoint for retrieving job status, progress, and results
+# VALIDATION: Job ID format validation, job existence validation
+# PATTERNS: Template Method (implements base class abstract methods), Adapter (field name transformation)
+# ENTRY_POINTS: trigger = JobStatusTrigger(); response = trigger.handle_request(req)
+# INDEX: JobStatusTrigger:92, process_request:110, _transform_to_camel_case:180, _format_job_response:220
 # ============================================================================
 
 """
@@ -86,7 +93,7 @@ from typing import Dict, Any, List, Optional
 
 import azure.functions as func
 from trigger_http_base import JobManagementTrigger
-from schema_core import JobRecord
+from schema_base import JobRecord
 
 
 class JobStatusTrigger(JobManagementTrigger):

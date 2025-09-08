@@ -1,0 +1,574 @@
+# Architecture File Index
+
+**Azure Geospatial ETL Pipeline - File Catalog & Architecture Alignment**
+
+*Updated: 2025-09-09*
+
+## 📁 File Overview
+
+This document provides a comprehensive index of all files in the Azure Geospatial ETL Pipeline, organized by architectural layer. It serves as a companion to ARCHITECTURE_CORE.md, mapping implementation files to the architecture patterns described there.
+
+**Total Python Files: 26**
+- **Controllers**: 3 files (controller_base, controller_factories, controller_hello_world)
+- **Repositories**: 5 files (repository_abc, repository_base, repository_consolidated, repository_postgresql, repository_vault)
+- **Services**: 1 file (service_hello_world)
+- **Schemas**: 4 files (schema_base, schema_manager, schema_sql_generator, schema_workflow)
+- **Triggers**: 8 files (trigger_db_query, trigger_get_job_status, trigger_health, trigger_http_base, trigger_poison_monitor, trigger_schema_pydantic_deploy, trigger_submit_job, trigger_validation_debug)
+- **Utilities**: 3 files (util_import_validator, util_logger, poison_queue_monitor)
+- **Core/Config**: 2 files (function_app, config)
+
+---
+
+## 🚀 **Core Application Files**
+
+### **function_app.py** ⭐ ENHANCED ✅ **[HEADER COMPLETE]**
+- **Primary Azure Functions entry point**
+- HTTP triggers for job submission (`/api/jobs/{job_type}`)
+- Queue triggers for job and task processing (`geospatial-jobs`, `geospatial-tasks`)
+- Timer triggers for poison queue monitoring
+- Controller routing for Pydantic Job→Task architecture
+- **Enhanced with strongly typed LoggerFactory for comprehensive debugging**
+- **Status**: ✅ **FULLY OPERATIONAL** - Queue processing working, poison queue issues resolved! 🎊
+
+### **host.json**
+- **Azure Functions runtime configuration**
+- Logging levels and Application Insights setup
+- Queue processing settings (batch size: 16, max dequeue: 5)
+- Function timeout configuration (5 minutes)
+- Extension bundle configuration for Azure Functions v4
+
+### **requirements.txt**
+- **Python package dependencies**
+- Azure SDK packages (functions, storage, identity, data-tables)
+- Geospatial libraries (rasterio, rio-cogeo)
+- **Pydantic v2+ for strong typing discipline**
+- PostgreSQL driver (psycopg[binary])
+
+---
+
+### **📋 Core Architecture Prefixes**
+
+#### **`controller_`** - Orchestration Layer
+**Purpose**: Job→Stage→Task orchestration, workflow management
+**Examples**: `controller_base.py`, `controller_hello_world.py`
+
+#### **`repository_`** - Data Access Layer
+**Purpose**: Storage abstraction, data persistence, CRUD operations
+**Examples**: `repository_consolidated.py`, `repository_postgresql.py`, `repository_abc.py`
+
+#### **`service_`** - Business Logic Layer
+**Purpose**: Domain-specific business operations, processing logic
+**Examples**: `service_hello_world.py`
+
+#### **`schema_`** - Data Schema Definitions
+**Purpose**: Pydantic models, data validation, type definitions
+**Examples**: `schema_core.py`, `schema_workflow.py`
+
+
+#### **`util_`** - Utility Functions
+**Purpose**: Common helpers, shared utilities, infrastructure support
+**Examples**: `util_logger.py`, `util_import_validator.py`
+
+#### **`trigger_`** - HTTP/Timer Triggers ✅ **[ALL HEADERS COMPLETE]**
+**Purpose**: Azure Functions HTTP and timer trigger implementations
+**Examples**: All trigger files now have complete standardized headers:
+- `trigger_http_base.py` - Base class for all HTTP triggers
+- `trigger_submit_job.py` - Job submission endpoint
+- `trigger_get_job_status.py` - Status retrieval endpoint  
+- `trigger_health.py` - System health monitoring
+- `trigger_db_query.py` - Database query endpoints (/api/db/*)
+- `trigger_poison_monitor.py` - Poison queue monitoring
+- `trigger_schema_pydantic_deploy.py` - Schema deployment
+- `trigger_validation_debug.py` - Validation debugging
+
+## ⚙️ **Configuration Files**
+
+### **config.py** ✅ **[HEADER COMPLETE]**
+- **Strongly typed configuration management with Pydantic v2**
+- Centralized environment variable validation and documentation
+- Azure storage, PostgreSQL, and queue configuration
+- Single source of truth for all application settings
+- Built-in validation with clear error messages
+
+
+### **local.settings.json**
+- **Local development configuration**
+- Environment variables for Azure Functions local runtime
+- Managed identity configuration for storage services
+- **Contains sensitive data - not for production deployment**
+
+### **local.settings.example.json**
+- **Template for local development setup**
+- Example configuration without sensitive values
+- Reference for required environment variables
+
+### **INFRA_CONFIG.md**
+- **Azure infrastructure documentation**
+- Function app configuration (rmhgeoapibeta)
+- Storage account setup with managed identity
+- Environment variables and RBAC permissions
+- Local development setup instructions
+
+---
+
+## 🏗️ **Architecture & Factory Pattern**
+
+### **controller_factories.py** ✅ **[HEADER COMPLETE]**
+- **Factory pattern for controller instantiation**
+- JobRegistry singleton for decorator-based registration
+- Controller creation via `JobFactory.create_controller(job_type)`
+- Workflow validation and job type management
+- Prevents direct controller instantiation
+
+---
+
+## 🎛️ **Controllers (Job→Task Pattern)**
+
+### **controller_base.py** ✅ **[HEADER COMPLETE]**
+- **Abstract base controller for all job types**
+- Workflow definition integration and parameter validation
+- Job ID generation (SHA256 hash for idempotency)
+- Stage orchestration and task creation patterns
+- **Core architecture foundation for extensibility**
+
+### **controller_hello_world.py** ✅ **[HEADER COMPLETE]**
+- **Hello World controller implementation**
+- Demonstrates complete Job→Task workflow
+- Multi-task creation with parameter validation (n parameter)
+- Result aggregation and completion detection
+- **Status**: Fully implemented and tested
+
+---
+
+## 📋 **Schema & Validation**
+
+### **schema_core.py** ✅ **[HEADER COMPLETE]**
+- **Core schema definitions for strong typing**
+- Parameter validation schemas
+- Error handling and validation patterns
+- Type safety enforcement classes
+
+### **schema_workflow.py** ✅ **[HEADER COMPLETE]**
+- **Workflow definition schemas**
+- Stage-based workflow validation
+- Operation type definitions and routing
+- Parameter schema validation per workflow stage
+
+
+### **schema_base.py** ✅ **[HEADER COMPLETE]**
+- **Unified Pydantic + ABC base classes**
+- Single source of truth for data and behavior
+- BaseTask, BaseJob, BaseStage definitions
+- Execution context models
+
+### **schema_sql_generator.py** ✅ **[HEADER COMPLETE]**
+- **PostgreSQL DDL generation from Pydantic models**
+- Automatic schema generation
+- Type mapping from Python to PostgreSQL
+- Single source of truth for database schema
+
+---
+
+## 🔧 **Services & Processing**
+
+### **service_hello_world.py** ✅ **[HEADER COMPLETE]**
+- **Hello World service implementation**
+- Demonstrates service layer patterns
+- Task processing and result generation
+- **Status**: Implementation for Job→Task architecture
+
+### **schema_manager.py** ✅ **[HEADER COMPLETE]**
+- **PostgreSQL schema management infrastructure**
+- Database initialization and validation
+- Schema creation and table management
+- Permission verification
+- NOTE: Part of schema infrastructure, not a business service
+
+
+### **repository_base.py** ✅ **[HEADER COMPLETE]**
+- **Pure abstract base repository class**
+- Common validation and error handling patterns
+- No storage dependencies
+- Template method pattern implementation
+
+### **repository_postgresql.py** ✅ **[HEADER COMPLETE]**
+- **PostgreSQL-specific repository implementation**
+- Direct database access with psycopg
+- Atomic operations for race condition prevention
+- Connection pooling and transaction support
+
+### **repository_consolidated.py** ✅ **[HEADER COMPLETE]**
+- **Extended repository with business logic**
+- Inherits from PostgreSQL base classes
+- Job/Task/CompletionDetector implementations
+- RepositoryFactory for instance creation
+
+### **repository_abc.py** ✅ **[HEADER COMPLETE]**
+- **Single source of truth for repository signatures**
+- Prevents parameter name mismatches
+- ABC interfaces for all repository methods
+- Canonical parameter definitions
+
+### **repository_vault.py** ✅ **[HEADER COMPLETE]**
+- **Azure Key Vault credential management**
+- Currently disabled pending RBAC setup
+- Secure password retrieval patterns
+- Caching with TTL support
+
+---
+
+## 🛠️ **Utilities**
+
+
+### **util_logger.py** ⭐ ENHANCED ✅ **[HEADER COMPLETE]**
+- **Strongly typed logger factory implementation**
+- Component-specific loggers (Queue, Controller, Service, Repository)
+- Correlation ID tracing for end-to-end request tracking
+- Azure Application Insights integration with custom dimensions
+- Visual error indicators with emojis for rapid log parsing
+- **Status**: ✅ **DEPLOYED** - Enhanced debugging infrastructure operational
+
+
+### **util_import_validator.py** ✅ **[HEADER COMPLETE]**
+- **Zero-configuration import validation system**
+- Auto-discovery of application modules
+- Two-tier validation (critical deps + app modules)
+- Persistent registry tracking with health checks
+
+### **poison_queue_monitor.py** ✅ **[HEADER COMPLETE]**
+- **Basic poison queue monitoring utility**
+- Failed message detection (stub implementation)
+- Queue health dashboard
+- Currently returns mock data
+- NOTE: Utility for monitoring, not a business service
+
+
+---
+
+## 📚 **Documentation**
+
+### **ARCHITECTURE_CORE.md** ⭐ **PRIMARY REFERENCE**
+- **Detailed technical architecture specification**
+- Job→Stage→Task pattern implementation details
+- Queue message schemas and state transitions
+- PostgreSQL atomic operations and functions
+- TaskFactory for high-volume task creation
+
+### **CLAUDE.md**
+- **Primary project context and instructions for Claude AI**
+- Quick navigation index for easy reference
+- Current priorities and operational status
+- Development philosophy (No Backward Compatibility)
+
+### **ARCHITECTURE_FILE_INDEX.md**
+- **This document - comprehensive file catalog**
+- Maps files to architecture patterns in ARCHITECTURE_CORE.md
+- Organized by architectural layer
+- File naming conventions and standards
+
+### **TODO.md** 🎯 **ACTIVE**
+- **Current development priorities**
+- Error handling implementation phases
+- Stage advancement logic tasks
+- Future enhancements roadmap
+
+### **HISTORY.md** 📜
+- **Completed architectural changes**
+- Repository cleanup achievements (7 September 2025)
+- Factory pattern implementation (7 September 2025)
+- Database monitoring system (3 September 2025)
+
+### **ERROR_HANDLING_PLAN.md** 🔴 **CURRENT PRIORITY**
+- **5-phase error handling implementation**
+- Task failure handling patterns
+- Retry logic and circuit breakers
+- Error categorization strategy
+
+### **claude_log_access.md** 🔑 **DEPLOYMENT CRITICAL**
+- **Application Insights log access instructions**
+- Bearer token authentication setup
+- Log streaming configuration
+- Debugging guidance for Azure Functions
+
+### **POSTGRESQL_WORKFLOW_IMPLEMENTATION.md**
+- **PostgreSQL workflow function details**
+- Atomic operation specifications
+- Stage advancement logic
+- Job completion detection patterns
+
+### **CONFIGURATION_USAGE.md**
+- **Comprehensive configuration usage guide**
+- Strongly typed configuration examples with Pydantic v2
+- Environment variable documentation and validation
+- Migration guide from scattered configuration approach
+
+
+### **INFRA_CONFIG.md**
+- **Azure infrastructure documentation**
+- Function app configuration (rmhgeoapibeta)
+- Storage account setup with managed identity
+- Environment variables and RBAC permissions
+
+### **HELLO_WORLD_IMPLEMENTATION_PLAN.md**
+- **Implementation documentation for hello_world controller**
+- Step-by-step implementation details
+- Testing and validation procedures
+- Architecture demonstration patterns
+
+### **POISON_QUEUE_DEBUGGING_REPORT.md** 📚 **HISTORICAL**
+- **Complete poison queue investigation report (Sep 1, 2025)**
+- Four major technical issues identified and resolved
+- Root cause analysis with systematic investigation
+- **Status**: ✅ **RESOLVED** - Issues fixed, see HISTORY.md
+
+### **STRONG_TYPING_ARCHITECTURE_STATUS.md** 📚 **HISTORICAL**
+- **Strong typing implementation status**
+- Pydantic v2 integration documentation
+- Type safety enforcement patterns
+- **Status**: ✅ **COMPLETED** - Strong typing fully implemented
+
+### **consolidated_redesign.md** 📚 **HISTORICAL**
+- **Architecture redesign documentation**
+- Job→Stage→Task pattern specifications
+- Controller orchestration patterns
+- **Historical reference for architecture evolution**
+
+---
+
+## 🔨 **Utility Scripts**
+
+### **FIX_APP_SETTINGS.sh**
+- **Shell script for Azure Function App configuration**
+- Environment variable deployment automation
+- Configuration synchronization utilities
+- **Production deployment helper**
+
+### **fix_sql_functions.py**
+- **PostgreSQL function repair utility**
+- Fixes function signature mismatches
+- Updates SQL functions to match Python interfaces
+- Development-only debugging tool
+
+---
+
+## 📦 **Archive Files**
+
+### **Archive.zip**
+- **Archived previous implementations**
+- Historical code versions
+
+---
+
+## 🎯 **Current Architecture Status (September 2025)**
+
+### **✅ Completed Architecture Components**
+- **Job→Stage→Task Pattern**: Fully implemented with atomic PostgreSQL operations
+- **Factory Pattern**: JobFactory and decorator-based controller registration
+- **Repository Pattern**: Clean hierarchy from interfaces to business logic
+- **Queue Processing**: Both job and task queues operational
+- **Database Integration**: PostgreSQL with atomic completion detection
+- **Strong Typing**: Pydantic v2 throughout with schema-driven validation
+
+### **🔴 Current Priority: Error Handling**
+- Implementing error_details parameter passing
+- Task failure tracking and retry logic
+- Stage-level error aggregation
+- See ERROR_HANDLING_PLAN.md for implementation details
+
+### **webapp_logs.zip**
+- **Archived application logs**
+- Historical debugging information
+- **Reference for troubleshooting patterns**
+
+---
+
+## 🏷️ **System Files**
+
+### **__init__.py**
+- **Python package initialization**
+- Module export definitions
+- Package-level configuration
+
+---
+
+## 📊 **File Organization Summary**
+
+### **By Architectural Layer**
+
+#### Schema Layer - Foundation of Application Architecture
+The `schema_*` files define the **core structure** of the entire application:
+- **Definition**: Data models, workflow patterns, and architectural contracts
+- **Implementation**: SQL generation and database schema deployment
+- **Validation**: Type safety, constraints, and structural integrity across all layers
+
+**Schema Files:**
+- `schema_base.py` - Core data models (JobRecord, TaskRecord), enums, and base controller with completion logic
+- `schema_workflow.py` - Workflow definitions, stage patterns, and orchestration contracts
+- `schema_sql_generator.py` - Converts Pydantic models to PostgreSQL DDL (single source of truth)
+- `schema_manager.py` - Deploys and validates database schemas, ensures structural integrity
+
+#### Repository Layer - State Management for Serverless Architecture
+The `repository_*` files are **critical for serverless state management** - Python handles logic, PostgreSQL manages state:
+- **State Management**: All application state lives in PostgreSQL (serverless functions are stateless)
+- **ACID Guarantees**: PostgreSQL functions ensure atomicity, preventing race conditions
+- **Atomic Operations**: "Last task turns out the lights" pattern via PostgreSQL stored procedures
+- **Transaction Safety**: Critical operations like `complete_task_and_check_stage()` are atomic
+
+**Serverless Architecture Principle:**
+```
+Stateless Python Functions → Repository Layer → Stateful PostgreSQL
+     (Business Logic)        (State Interface)    (ACID State Management)
+```
+
+**Repository Architecture:**
+- `repository_abc.py` - Abstract interfaces defining repository contracts
+- `repository_base.py` - Common validation and error handling patterns  
+- `repository_postgresql.py` - PostgreSQL implementation with atomic stored procedures
+- `repository_consolidated.py` - High-level repositories (JobRepository, TaskRepository) orchestrating state changes
+
+#### Controller-Service-Repository Pattern Flow
+```
+HTTP Request → Trigger → Controller → Service → Repository → Storage
+                            ↓            ↓           ↓           ↓
+                      Orchestration  Business   Data Access  Database/
+                       & Workflow      Logic     Abstraction   Blob
+```
+
+**Responsibilities in Serverless Context:**
+- **Controllers**: Orchestrate workflow, coordinate stages (stateless coordination)
+- **Services**: Execute business logic, process data (stateless computation)
+- **Repositories**: **Manage ALL state**, ensure ACID compliance, prevent race conditions
+
+**Why Repository Layer Owns State Management:**
+- Serverless functions have no persistent memory between invocations
+- PostgreSQL provides ACID guarantees that prevent distributed system race conditions
+- Stored procedures ensure atomic state transitions (e.g., task completion → stage advancement)
+- Repository pattern abstracts this complexity from business logic
+- This is NOT asking too much - it's the **correct serverless pattern**
+
+| Layer | Prefix | Purpose | Key Files |
+|-------|--------|---------|-----------|
+| **Schemas** | `schema_` | Core architecture definition, structure implementation & validation | schema_base, schema_workflow, schema_sql_generator, schema_manager |
+| **Controllers** | `controller_` | Job orchestration & workflow factories | controller_base, controller_factories, controller_hello_world |
+| **Repositories** | `repository_` | State management, ACID operations & serverless persistence | repository_abc, repository_postgresql, repository_consolidated |
+| **Services** | `service_` | Business logic & domain operations | service_hello_world |
+| **Triggers** | `trigger_` | HTTP/Timer entry points | trigger_submit_job, trigger_health |
+| **Utilities** | `util_` | Cross-cutting concerns & helpers | util_logger, util_import_validator |
+
+### **Claude Context Headers**
+
+All production Python files include standardized headers with:
+- **PURPOSE**: Single-sentence description
+- **EXPORTS**: Classes and functions exposed
+- **INTERFACES**: ABC implementations
+- **DEPENDENCIES**: External and internal imports
+- **PATTERNS**: Design patterns used
+- **INDEX**: Line numbers for navigation
+
+## 🎯 **Key Architecture Patterns**
+
+1. **Pydantic Job→Task Architecture**: Strong typing with workflow definitions
+2. **Controller Pattern**: Orchestration layer with parameter validation  
+3. **Managed Identity**: Azure authentication without connection strings
+4. **Queue-Based Processing**: Asynchronous job and task execution
+5. **Distributed Completion**: "Last task turns out the lights" pattern
+
+---
+
+## 🚨 **Development Notes**
+
+- **No Backward Compatibility**: Explicit error handling over fallbacks
+- **Strong Typing Discipline**: Pydantic v2 enforcement throughout
+- **Production Function App**: rmhgeoapibeta (ONLY active deployment)
+- **Resource Group**: rmhazure_rg
+- **Storage Account**: rmhazuregeo with managed identity
+
+---
+
+---
+
+## 📂 **File Naming Convention Standards**
+
+*Integrated from FILE_NAMING_CONVENTION.md*
+
+### **🎯 Naming Philosophy**
+
+**Prefix Pattern**: `{module_prefix}_{descriptive_name}.py`
+
+**Benefits**:
+- ✅ **Instant Recognition**: File purpose clear from name
+- ✅ **Clean Imports**: `from controller_hello_world import HelloWorldController`
+- ✅ **Scalable Organization**: No folder depth needed  
+- ✅ **IDE Support**: Grouped alphabetically by module type
+- ✅ **Dependency Clarity**: Import patterns show architectural layers
+
+### **📐 Naming Rules & Guidelines**
+
+#### **Prefix Rules**
+1. **Always lowercase** - `controller_` not `Controller_`
+2. **Underscore separator** - `controller_hello_world.py` not `controller-hello-world.py`
+3. **Descriptive names** - `controller_hello_world.py` not `controller_hw.py`
+4. **Singular nouns** - `repository_data.py` not `repositories_data.py`
+
+#### **Import Guidelines**
+```python
+# ✅ GOOD - Clear module identification
+from controller_hello_world import HelloWorldController
+from repository_consolidated import JobRepository, TaskRepository
+from schema_base import JobRecord, TaskRecord
+
+# ❌ BAD - Ambiguous module source
+from hello_world import HelloWorldController  # What layer is this?
+from data import JobRepository                 # Too generic
+from core import JobRecord                     # Which core?
+```
+
+### **🚫 Special Files (No Prefix)**
+
+#### **Entry Points & Infrastructure**
+- `function_app.py` - Azure Functions entry point (unchanged)
+- `__init__.py` - Package initialization
+- `config.py` - Configuration management (special case - widely understood)
+
+#### **Test & Documentation Files**
+- `test_*.py` - All test files use `test_` prefix
+- `*.md` - Markdown documentation files
+- `*.json` - JSON configuration files
+
+---
+
+## 📝 **Complete Python File Inventory**
+
+### Alphabetical List (26 files)
+```
+config.py                         # Core configuration management
+controller_base.py                # Abstract base controller
+controller_factories.py           # JobFactory and TaskFactory
+controller_hello_world.py         # Example controller implementation
+function_app.py                   # Azure Functions entry point
+poison_queue_monitor.py           # Poison queue monitoring utility
+repository_abc.py                 # Repository interfaces
+repository_base.py                # Base repository patterns
+repository_consolidated.py        # Business logic repositories
+repository_postgresql.py          # PostgreSQL implementation
+repository_vault.py               # Key Vault integration (disabled)
+schema_base.py                    # Core Pydantic models
+schema_manager.py                 # Schema deployment infrastructure
+schema_sql_generator.py           # Pydantic to SQL converter
+schema_workflow.py                # Workflow definitions
+service_hello_world.py            # Example service implementation
+trigger_db_query.py               # Database query endpoints
+trigger_get_job_status.py         # Job status endpoint
+trigger_health.py                 # Health check endpoint
+trigger_http_base.py              # Base HTTP trigger class
+trigger_poison_monitor.py         # Poison queue endpoint
+trigger_schema_pydantic_deploy.py # Schema deployment endpoint
+trigger_submit_job.py             # Job submission endpoint
+trigger_validation_debug.py       # Validation debug endpoint
+util_import_validator.py          # Import validation system
+util_logger.py                    # Enhanced logging factory
+```
+
+---
+
+*This index reflects the current state of the Azure Geospatial ETL Pipeline as of September 9, 2025. For architecture details, see ARCHITECTURE_CORE.md. For current priorities, see TODO.md and CLAUDE.md.*

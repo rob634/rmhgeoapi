@@ -1,10 +1,17 @@
 # ============================================================================
-# CLAUDE CONTEXT - CONFIGURATION
+# CLAUDE CONTEXT - UTILITY
 # ============================================================================
-# PURPOSE: Poison queue monitoring service for failed message detection and processing
-# SOURCE: Environment variables for Azure Storage queue access and monitoring configuration
-# SCOPE: Service-specific poison queue monitoring for job and task failure detection
-# VALIDATION: Queue access validation + poison message detection and reporting
+# PURPOSE: Basic poison queue monitoring service for failed message detection (stub implementation)
+# EXPORTS: PoisonQueueMonitor, PoisonQueueDashboard
+# INTERFACES: None - standalone service classes for queue monitoring
+# PYDANTIC_MODELS: None - uses dict for monitoring results
+# DEPENDENCIES: logging, typing, datetime
+# SOURCE: Azure Storage poison queues (implementation stubbed - returns mock data)
+# SCOPE: Service-level poison queue monitoring for job and task failure detection
+# VALIDATION: Basic implementation - always returns no poison messages found
+# PATTERNS: Service pattern, Monitoring pattern (stub implementation)
+# ENTRY_POINTS: monitor = PoisonQueueMonitor(); result = monitor.check_poison_queues()
+# INDEX: PoisonQueueMonitor:20, check_poison_queues:23, PoisonQueueDashboard:65
 # ============================================================================
 
 """

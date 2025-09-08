@@ -1,10 +1,17 @@
 # ============================================================================
-# CLAUDE CONTEXT - CONFIGURATION
+# CLAUDE CONTEXT - REPOSITORY
 # ============================================================================
-# PURPOSE: Pure abstract base repository class with no storage dependencies
-# SOURCE: Extracted from repository_data.py to be storage-agnostic
-# SCOPE: Common validation, error handling, and logging for all repositories
-# VALIDATION: Provides schema validation and state transition logic
+# PURPOSE: Pure abstract base repository class providing common validation and error handling patterns
+# EXPORTS: BaseRepository (abstract base class for all repository implementations)
+# INTERFACES: ABC (Abstract Base Class) - defines repository contract for storage implementations
+# PYDANTIC_MODELS: JobRecord, TaskRecord, JobStatus, TaskStatus (imported from schema_core)
+# DEPENDENCIES: abc, contextlib, typing, logging, schema_core, validator_schema
+# SOURCE: No data source - pure abstract class providing patterns only
+# SCOPE: Base-level repository operations applicable to all storage backends
+# VALIDATION: Schema validation via SchemaValidator, state transition validation for jobs/tasks
+# PATTERNS: Repository pattern, Template Method pattern, Error Context Manager pattern
+# ENTRY_POINTS: class JobRepository(BaseRepository); self._validate_status_transition(job, status)
+# INDEX: BaseRepository:50, error_context:80, validate_status_transition:120, validate_stage_progression:180
 # ============================================================================
 
 """
@@ -33,11 +40,10 @@ from contextlib import contextmanager
 from typing import Union, Optional, Dict, Any
 import logging
 
-from schema_core import (
+from schema_base import (
     JobRecord, TaskRecord, JobStatus, TaskStatus,
     SchemaValidationError
 )
-from validator_schema import SchemaValidator
 
 # Logger setup
 logger = logging.getLogger(__name__)
@@ -122,8 +128,6 @@ class BaseRepository(ABC):
         
         Attributes Set:
         --------------
-        validator : SchemaValidator
-            Validates all data against Pydantic schemas
         logger : Logger
             Component-specific logger for this repository
         
@@ -141,10 +145,6 @@ class BaseRepository(ABC):
                 self.connection = psycopg.connect(conn_string)
         ```
         """
-        # Initialize schema validator for data validation
-        # This ensures all data conforms to our Pydantic models
-        self.validator = SchemaValidator()
-        
         # Setup component-specific logger
         # Each repository gets its own logger for better tracing
         self.logger = self._setup_logger()

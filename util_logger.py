@@ -1,10 +1,17 @@
 # ============================================================================
-# CLAUDE CONTEXT - CONFIGURATION
+# CLAUDE CONTEXT - SERVICE
 # ============================================================================
 # PURPOSE: Strongly typed logger factory providing consistent logging across Job→Stage→Task architecture
-# SOURCE: Environment variables for log level configuration and Azure Functions context
+# EXPORTS: LoggerFactory, ComponentType, LogLevel, TypedLogger, get_logger(), log_job_stage(), log_queue_operation()
+# INTERFACES: None - provides logging infrastructure for all components
+# PYDANTIC_MODELS: ComponentConfig, LogContext (dataclasses for type safety)
+# DEPENDENCIES: logging, enum, dataclasses, typing, os, datetime, json, azure.functions (optional)
+# SOURCE: Environment variables (LOG_LEVEL, ENVIRONMENT), Azure Functions context for structured logging
 # SCOPE: Global logging infrastructure for all application components and services
-# VALIDATION: Logger configuration validation + Azure Functions logging integration
+# VALIDATION: Component type validation, log level validation, context validation via dataclasses
+# PATTERNS: Factory pattern, Singleton (LoggerFactory), Strategy pattern (formatters), Decorator (context injection)
+# ENTRY_POINTS: logger = LoggerFactory.get_logger(ComponentType.SERVICE, 'MyService'); logger.info('message')
+# INDEX: ComponentType:67, LogLevel:80, ComponentConfig:101, TypedLogger:208, LoggerFactory:398, get_logger:627
 # ============================================================================
 
 """

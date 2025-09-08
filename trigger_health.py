@@ -1,10 +1,17 @@
 # ============================================================================
-# CLAUDE CONTEXT - CONFIGURATION
+# CLAUDE CONTEXT - CONTROLLER
 # ============================================================================
-# PURPOSE: System health monitoring HTTP endpoint with component validation
-# SOURCE: Environment variables (PostgreSQL) + Managed Identity (Azure Storage)
-# SCOPE: HTTP-specific health checks for all system components and dependencies
-# VALIDATION: Component health validation + infrastructure connectivity checks
+# PURPOSE: System health monitoring HTTP trigger handling GET /api/health requests
+# EXPORTS: HealthCheckTrigger (HTTP trigger class for comprehensive health checks)
+# INTERFACES: SystemMonitoringTrigger (inherited from trigger_http_base)
+# PYDANTIC_MODELS: None directly - uses dict responses for health status
+# DEPENDENCIES: trigger_http_base, config, service_schema_manager, util_import_validator, azure.functions
+# SOURCE: HTTP GET requests, environment variables, component status from various services
+# SCOPE: HTTP endpoint for monitoring all system components - database, storage, queues, imports
+# VALIDATION: Component connectivity checks, schema validation, import validation, configuration checks
+# PATTERNS: Template Method (implements base class), Health Check pattern, Component pattern
+# ENTRY_POINTS: trigger = HealthCheckTrigger(); response = trigger.handle_request(req)
+# INDEX: HealthCheckTrigger:45, process_request:55, handle_request:125, _check_database:265, _check_import_validation:710
 # ============================================================================
 
 """
@@ -38,7 +45,7 @@ import sys
 import azure.functions as func
 from trigger_http_base import SystemMonitoringTrigger
 from config import get_config
-from service_schema_manager import SchemaManagerFactory
+from schema_manager import SchemaManagerFactory
 from util_import_validator import validator
 
 

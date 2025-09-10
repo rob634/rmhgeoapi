@@ -49,11 +49,12 @@ Key Features:
 
 Endpoints:
     GET  /api/health - System health check with component status
-    POST /api/jobs/{job_type} - Submit processing job
-    GET  /api/jobs/{job_id} - Get job status and results
+    POST /api/jobs/submit/{job_type} - Submit processing job
+    GET  /api/jobs/status/{job_id} - Get job status and results
     GET  /api/monitor/poison - Check poison queue status
     POST /api/monitor/poison - Process poison messages
-    GET  /api/admin/database - Database query endpoint for debugging
+    POST /api/db/schema/nuke - Drop all schema objects (dev only)
+    POST /api/db/schema/redeploy - Nuke and redeploy schema (dev only)
 
 Supported Operations:
     Pydantic Workflow Definition Pattern (Job→Task Architecture):
@@ -111,7 +112,7 @@ logging.getLogger("msal").setLevel(logging.WARNING)  # Microsoft Authentication 
 # ========================================================================
 # STARTUP VALIDATION - Fail-fast import validation for critical dependencies
 # ========================================================================
-# CRITICAL: This must run before any other imports to catch missing dependencies
+# FIXED: util_logger now uses dataclasses instead of Pydantic (stdlib only)
 
 # Application modules (our code) - Utilities
 from util_import_validator import validator
@@ -125,7 +126,8 @@ validator.ensure_startup_ready()
 
 # Application modules (our code) - Core schemas and logging
 from schema_base import JobStatus, TaskStatus, JobQueueMessage, TaskQueueMessage
-from util_logger import LoggerFactory, ComponentType
+from util_logger import LoggerFactory
+from util_logger import ComponentType
 
 # Application modules (our code) - HTTP Trigger Classes  
 from trigger_health import health_check_trigger
@@ -154,47 +156,19 @@ def health(req: func.HttpRequest) -> func.HttpResponse:
     return health_check_trigger.handle_request(req)
 
 
-@app.route(route="jobs/{job_type}", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="jobs/submit/{job_type}", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
 def submit_job(req: func.HttpRequest) -> func.HttpResponse:
     """Job submission endpoint using HTTP trigger base class."""
     return submit_job_trigger.handle_request(req)
 
 
 
-@app.route(route="jobs/{job_id}", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="jobs/status/{job_id}", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
 def get_job_status(req: func.HttpRequest) -> func.HttpResponse:
     """Job status retrieval endpoint using HTTP trigger base class."""
     return get_job_status_trigger.handle_request(req)
 
 
-# Schema Generation Endpoints - Pydantic to SQL with psycopg.sql composition
-@app.route(route="schema/generate", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
-def generate_schema(req: func.HttpRequest) -> func.HttpResponse:
-    """Get schema info from Pydantic models: GET /api/schema/generate"""
-    from trigger_schema_pydantic_deploy import pydantic_deploy_trigger
-    return pydantic_deploy_trigger.handle_request(req)
-
-
-@app.route(route="schema/deploy", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
-def deploy_schema(req: func.HttpRequest) -> func.HttpResponse:
-    """Deploy Pydantic-generated schema: POST /api/schema/deploy?confirm=yes"""
-    from trigger_schema_pydantic_deploy import pydantic_deploy_trigger
-    return pydantic_deploy_trigger.handle_request(req)
-
-
-@app.route(route="schema/compare", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
-def compare_schema(req: func.HttpRequest) -> func.HttpResponse:
-    """Get schema comparison info: GET /api/schema/compare"""
-    from trigger_schema_pydantic_deploy import pydantic_deploy_trigger
-    return pydantic_deploy_trigger.handle_request(req)
-
-
-# Legacy endpoint - redirects to /api/schema/deploy
-@app.route(route="schema/deploy-pydantic", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
-def deploy_pydantic_schema(req: func.HttpRequest) -> func.HttpResponse:
-    """Legacy endpoint - use POST /api/schema/deploy?confirm=yes instead"""
-    from trigger_schema_pydantic_deploy import pydantic_deploy_trigger
-    return pydantic_deploy_trigger.handle_request(req)
 
 
 # Database Query Endpoints - Phase 2 Database Monitoring
@@ -241,93 +215,362 @@ def nuclear_schema_reset(req: func.HttpRequest) -> func.HttpResponse:
     return schema_nuke_trigger.handle_request(req)
 
 
+# 🔄 CONSOLIDATED REBUILD - DEVELOPMENT ONLY
+@app.route(route="db/schema/redeploy", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)  
+def redeploy_schema(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    🔄 REDEPLOY: Clean schema reset for development.
+    POST /api/db/schema/redeploy?confirm=yes
+    
+    Single unified endpoint that:
+    1. Drops ALL objects using Python discovery (no DO blocks)
+    2. Deploys fresh schema from Pydantic models
+    3. Uses psycopg.sql composition throughout
+    
+    Perfect for development deployments and testing.
+    """
+    import json
+    from datetime import datetime, timezone
+    
+    # Check for confirmation
+    confirm = req.params.get('confirm')
+    if confirm != 'yes':
+        return func.HttpResponse(
+            body=json.dumps({
+                "error": "Schema redeploy requires explicit confirmation",
+                "usage": "POST /api/db/schema/redeploy?confirm=yes",
+                "warning": "This will DESTROY ALL DATA and rebuild the schema",
+                "implementation": "Clean Python-based discovery with psycopg.sql composition"
+            }),
+            status_code=400,
+            headers={'Content-Type': 'application/json'}
+        )
+    
+    results = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "operation": "schema_redeploy",
+        "steps": []
+    }
+    
+    # Step 1: Nuke the schema (clean Python implementation)
+    nuke_response = schema_nuke_trigger.handle_request(req)
+    nuke_data = json.loads(nuke_response.get_body())
+    results["steps"].append({
+        "step": "nuke_schema",
+        "status": nuke_data.get("status", "failed"),
+        "objects_dropped": nuke_data.get("total_objects_dropped", 0),
+        "details": nuke_data.get("operations", [])
+    })
+    
+    # Only proceed with deploy if nuke succeeded
+    if nuke_response.status_code == 200:
+        # Step 2: Deploy fresh schema
+        from trigger_schema_pydantic_deploy import pydantic_deploy_trigger
+        deploy_response = pydantic_deploy_trigger.handle_request(req)
+        deploy_data = json.loads(deploy_response.get_body())
+        results["steps"].append({
+            "step": "deploy_schema",
+            "status": deploy_data.get("status", "failed"),
+            "objects_created": deploy_data.get("statistics", {}),
+            "verification": deploy_data.get("verification", {})
+        })
+        
+        # Overall status
+        overall_success = deploy_response.status_code == 200
+        results["overall_status"] = "success" if overall_success else "partial_failure"
+        results["message"] = "Schema redeployed successfully" if overall_success else "Nuke succeeded but deploy failed"
+        
+        return func.HttpResponse(
+            body=json.dumps(results),
+            status_code=200 if overall_success else 500,
+            headers={'Content-Type': 'application/json'}
+        )
+    else:
+        results["overall_status"] = "failed"
+        results["message"] = "Schema nuke failed - deploy not attempted"
+        
+        return func.HttpResponse(
+            body=json.dumps(results),
+            status_code=500,
+            headers={'Content-Type': 'application/json'}
+        )
+
+
 @app.route(route="db/functions/test", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
 def test_database_functions(req: func.HttpRequest) -> func.HttpResponse:
     """Test PostgreSQL functions: GET /api/db/functions/test"""
     return function_test_trigger.handle_request(req)
 
 
-# 🧪 SINGLE STAGE TEST - DEVELOPMENT ONLY  
-@app.route(route="test/single-stage", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
-def test_single_stage(req: func.HttpRequest) -> func.HttpResponse:
-    """Test single-stage job completion: POST /api/test/single-stage"""
+@app.route(route="db/debug/all", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def debug_dump_all(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    🔍 DEBUG: Dump all jobs and tasks for debugging.
+    GET /api/db/debug/all?limit=100
+    
+    Returns complete data from both jobs and tasks tables for debugging.
+    Perfect for when you don't have DBeaver access.
+    """
+    import json
+    from datetime import datetime, timezone
+    from repository_consolidated import RepositoryFactory
+    
+    limit = int(req.params.get('limit', '100'))
+    
     try:
-        # NOTE: This test function needs to be updated to use new repository architecture
-        import json
-        return func.HttpResponse(
-            json.dumps({"error": "Test function needs update for new repository architecture"}),
-            status_code=501,
-            mimetype="application/json"
-        )
-        from controller_factories import JobFactory
-        import controller_hello_world  # Import to trigger registration
-        import json
-        import time
+        repos = RepositoryFactory.create_repositories()
+        job_repo = repos['job_repo']
         
-        # Create a minimal single-stage job manually
-        repo = DataRepository()
-        controller = JobFactory.create_controller("hello_world")
-        
-        # Create job record manually with total_stages=1
-        job_data = {
-            'job_id': 'test_single_stage_' + str(int(time.time())),
-            'job_type': 'hello_world',
-            'status': 'processing',
-            'stage': 1,  
-            'total_stages': 1,  # Single stage
-            'parameters': {'n': 1, 'message': 'single stage test'},
-            'stage_results': {},
-            'result_data': None,
-            'error_details': None
-        }
-        
-        # Insert job
-        success = repo.storage_adapter.raw_create_job(job_data)
-        
-        # Create and complete task manually
-        task_data = {
-            'task_id': f"{job_data['job_id']}_stage1_task0",
-            'parent_job_id': job_data['job_id'],
-            'task_type': 'hello_world_greeting',
-            'status': 'completed',  # Already completed
-            'stage': 1,
-            'task_index': 0,
-            'parameters': {'message': 'single stage test', 'greeting': 'Hello!'},
-            'result_data': {'greeting': 'Hello from single stage!'},
-            'error_details': None,
-            'retry_count': 0,
-            'heartbeat': None
-        }
-        
-        # Insert completed task
-        task_success = repo.storage_adapter.raw_create_task(task_data)
-        
-        return func.HttpResponse(
-            json.dumps({
-                'test': 'single_stage_completion',
-                'job_created': success,
-                'task_created': task_success,
-                'completion_result': result,
-                'job_id': job_data['job_id'],
-                'should_trigger_completion': result.get('stage_complete', False)
-            }),
-            mimetype="application/json"
-        )
-        
+        # Get connection from repository
+        from repository_postgresql import PostgreSQLRepository
+        if isinstance(job_repo, PostgreSQLRepository):
+            conn = job_repo._get_connection()
+            cursor = conn.cursor()
+            
+            # Get all jobs
+            cursor.execute(f"""
+                SELECT 
+                    job_id, job_type, status, stage, total_stages,
+                    parameters, stage_results, result_data, error_details,
+                    created_at, updated_at
+                FROM {job_repo.schema_name}.jobs
+                ORDER BY created_at DESC
+                LIMIT %s
+            """, (limit,))
+            
+            jobs = []
+            for row in cursor.fetchall():
+                jobs.append({
+                    "job_id": row[0],
+                    "job_type": row[1],
+                    "status": row[2],
+                    "stage": row[3],
+                    "total_stages": row[4],
+                    "parameters": row[5],
+                    "stage_results": row[6],
+                    "result_data": row[7],
+                    "error_details": row[8],
+                    "created_at": row[9].isoformat() if row[9] else None,
+                    "updated_at": row[10].isoformat() if row[10] else None
+                })
+            
+            # Get all tasks
+            cursor.execute(f"""
+                SELECT 
+                    task_id, job_id, task_type, status, stage,
+                    parameters, result_data, error_details, retry_count,
+                    created_at, updated_at
+                FROM {job_repo.schema_name}.tasks
+                ORDER BY created_at DESC
+                LIMIT %s
+            """, (limit,))
+            
+            tasks = []
+            for row in cursor.fetchall():
+                tasks.append({
+                    "task_id": row[0],
+                    "job_id": row[1],
+                    "task_type": row[2],
+                    "status": row[3],
+                    "stage": row[4],
+                    "parameters": row[5],
+                    "result_data": row[6],
+                    "error_details": row[7],
+                    "retry_count": row[8],
+                    "created_at": row[9].isoformat() if row[9] else None,
+                    "updated_at": row[10].isoformat() if row[10] else None
+                })
+            
+            cursor.close()
+            conn.close()
+            
+            return func.HttpResponse(
+                body=json.dumps({
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "jobs_count": len(jobs),
+                    "tasks_count": len(tasks),
+                    "jobs": jobs,
+                    "tasks": tasks
+                }, default=str),
+                status_code=200,
+                headers={'Content-Type': 'application/json'}
+            )
+            
     except Exception as e:
         return func.HttpResponse(
-            json.dumps({'error': str(e)}),
+            body=json.dumps({
+                "error": f"Debug dump failed: {str(e)}",
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }),
             status_code=500,
-            mimetype="application/json"
+            headers={'Content-Type': 'application/json'}
         )
 
 
-# 🚨 VALIDATION DEBUGGING ENDPOINT - DEVELOPMENT ONLY
-@app.route(route="debug/validation/task", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
-def debug_task_validation(req: func.HttpRequest) -> func.HttpResponse:
-    """🔧 DEBUG: Test TaskRecord validation with raw data: POST /api/debug/validation/task"""
-    from trigger_validation_debug import main as validation_debug_trigger
-    return validation_debug_trigger(req)
+
+# ============================================================================
+# JOB QUEUE PROCESSING HELPER FUNCTIONS
+# ============================================================================
+
+def _validate_and_parse_queue_message(msg: func.QueueMessage, logger) -> 'JobQueueMessage':
+    """
+    Phase 1 Helper: Validate and parse queue message.
+    
+    Handles message decoding and schema validation with clear error reporting.
+    Fails fast if message is invalid to prevent unnecessary processing.
+    
+    Args:
+        msg: Azure Functions queue message
+        logger: Configured logger instance
+        
+    Returns:
+        JobQueueMessage: Validated Pydantic message object
+        
+    Raises:
+        ValueError: If message cannot be decoded or validated
+    """
+    logger.debug(f"🔍 Decoding queue message body")
+    try:
+        message_content = msg.get_body().decode('utf-8')
+        logger.debug(f"📋 Decoded message content: {message_content}")
+    except Exception as decode_error:
+        logger.error(f"❌ Failed to decode message body: {decode_error}")
+        raise ValueError(f"Message decode failed: {decode_error}")
+    
+    logger.debug(f"🔧 Validating message with JobQueueMessage schema")
+    try:
+        from schema_base import JobQueueMessage
+        job_message = JobQueueMessage.model_validate_json(message_content)
+        logger.debug(f"✅ Message validation successful: {job_message}")
+        return job_message
+    except Exception as validation_error:
+        logger.error(f"❌ Message validation failed: {validation_error}")
+        logger.debug(f"📋 Invalid message content: {message_content}")
+        raise ValueError(f"Message validation failed: {validation_error}")
+
+
+def _load_job_record_safely(job_message: 'JobQueueMessage', logger) -> tuple:
+    """
+    Phase 1 Helper: Load job record and create repositories.
+    
+    Handles repository creation and job record loading with defensive programming.
+    Returns both repositories and job record for use in main processing.
+    
+    Args:
+        job_message: Validated job queue message
+        logger: Configured logger instance
+        
+    Returns:
+        tuple: (repositories_dict, job_record)
+        
+    Raises:
+        RuntimeError: If repositories cannot be created or job not found
+    """
+    logger.debug(f"🏗️ Creating repositories for job processing")
+    from repository_consolidated import RepositoryFactory
+    
+    try:
+        repos = RepositoryFactory.create_repositories()
+        job_repo = repos['job_repo']
+        task_repo = repos['task_repo']
+        completion_detector = repos['completion_detector']
+        logger.debug(f"✅ Repositories created with PostgreSQL backend")
+    except Exception as repo_error:
+        logger.error(f"❌ Failed to create repositories: {repo_error}")
+        raise RuntimeError(f"Repository creation failed: {repo_error}")
+    
+    logger.debug(f"🔍 Loading job record for: {job_message.job_id}")
+    try:
+        job_record = job_repo.get_job(job_message.job_id)
+        logger.debug(f"📋 Job record retrieval result: {job_record}")
+    except Exception as load_error:
+        logger.error(f"❌ Failed to load job record: {load_error}")
+        raise RuntimeError(f"Job record load failed: {load_error}")
+    
+    if not job_record:
+        logger.error(f"❌ Job record not found: {job_message.job_id}")
+        raise ValueError(f"Job record not found: {job_message.job_id}")
+    
+    logger.debug(f"✅ Job record loaded successfully: status={job_record.status}")
+    return repos, job_record
+
+
+def _verify_task_creation_success(job_id: str, task_repo, logger) -> list:
+    """
+    Phase 2 Helper: Verify tasks were actually created in database.
+    
+    Queries the database to confirm tasks exist for this job.
+    This prevents jobs from being marked as PROCESSING when no tasks were created.
+    
+    Args:
+        job_id: Job identifier to check for tasks
+        task_repo: Task repository instance
+        logger: Configured logger instance
+        
+    Returns:
+        list: Created task records (empty list if no tasks found)
+    """
+    logger.debug(f"🔍 Verifying task creation for job: {job_id}")
+    try:
+        created_tasks = task_repo.list_tasks_for_job(job_id)
+        task_count = len(created_tasks) if created_tasks else 0
+        logger.debug(f"📊 Task verification result: {task_count} tasks found")
+        return created_tasks or []
+    except Exception as verification_error:
+        logger.error(f"❌ Failed to verify task creation: {verification_error}")
+        # Return empty list to indicate no tasks found
+        return []
+
+
+def _mark_job_failed_safely(job_id: str, error: Exception, job_repo, logger) -> None:
+    """
+    Phase 3 Helper: Safely mark job as failed with error details.
+    
+    Single point of failure handling with defensive programming.
+    Ensures job status is updated even if error details cannot be formatted.
+    
+    Args:
+        job_id: Job identifier to mark as failed
+        error: Original exception that caused the failure
+        job_repo: Job repository instance (may be None)
+        logger: Configured logger instance
+    """
+    if not job_repo:
+        logger.error(f"❌ Cannot mark job as failed - no job repository available")
+        return
+    
+    logger.debug(f"🔧 Marking job as failed: {job_id}")
+    try:
+        from datetime import datetime, timezone
+        import traceback
+        
+        error_details = {
+            "error_type": type(error).__name__,
+            "error_message": str(error),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "operation": "job_queue_processing"
+        }
+        
+        # Try to get more detailed error information
+        try:
+            error_details["traceback"] = traceback.format_exc()
+        except Exception:
+            # Don't fail the failure handling due to traceback issues
+            pass
+        
+        from schema_base import JobStatus
+        job_repo.update_job_status_with_validation(
+            job_id, 
+            JobStatus.FAILED, 
+            additional_updates={"error_details": error_details}
+        )
+        logger.debug(f"✅ Job marked as failed successfully")
+        logger.info(f"❌ Job {job_id[:16]}... marked as FAILED")
+        
+    except Exception as failure_error:
+        logger.error(f"❌ CRITICAL: Failed to mark job as failed: {failure_error}")
+        logger.error(f"❌ Original error: {error}")
+        # This is critical but we don't want to raise here as it would mask the original error
 
 
 @app.queue_trigger(
@@ -336,182 +579,133 @@ def debug_task_validation(req: func.HttpRequest) -> func.HttpResponse:
         connection="AzureWebJobsStorage")
 def process_job_queue(msg: func.QueueMessage) -> None:
     """
-    Process jobs from the geospatial-jobs queue using Pydantic Job→Task architecture.
+    Process jobs from the geospatial-jobs queue using restructured exception handling.
     
-    Modern Pydantic-based job processing with strong typing discipline and workflow definitions.
-    Jobs are orchestrated through controllers that create tasks for parallel processing.
+    IMPROVED ARCHITECTURE (10 September 2025):
+    - Clean phase-based processing with helper functions
+    - Job status updated to PROCESSING only AFTER successful task creation
+    - Single point of failure handling with defensive programming
+    - Task creation verification to prevent stuck PROCESSING jobs
     
-    Args:
-        msg: Azure Functions queue message containing job data.
-            
-    Queue Message Format (Pydantic Job→Task Architecture):
-        {
-            "job_id": "SHA256_hash",
-            "job_type": "hello_world",
-            "parameters": {
-                "dataset_id": "container_name",
-                "resource_id": "file_or_folder",
-                "version_id": "v1",
-                "system": false
-            },
-            "stage": 1,
-            "retry_count": 0
-        }
-        
     Processing Flow:
-        1. Decode and validate message using JobQueueMessage schema
-        2. Load job record from storage with schema validation
-        3. Route to appropriate controller based on jobType
-        4. Controller processes stage and creates tasks if needed
-        5. Update job status with stage results
+        Phase 1: Message validation and job loading (fail fast)
+        Phase 2: Task creation with immediate status updates
+        Phase 3: Success/failure handling based on verified results
         
-    Error Handling:
-        - Schema validation failures: Message rejected, job marked failed
-        - Controller errors: Job marked failed with error details
-        - After 5 attempts: Message moved to poison queue automatically
+    Critical Improvements:
+        - No premature job status updates
+        - Tasks verified in database before status change
+        - Immediate FAILED status on any task creation failure
+        - Defensive error handling with resource cleanup
     """
-    # Initialize queue-specific logger for poison queue debugging
-    logger = LoggerFactory.get_queue_logger("geospatial-jobs")
-    
-    logger.info("🔄 Job queue trigger activated - processing with Pydantic architecture")
+    # Initialize logger
+    logger = LoggerFactory.create_logger(ComponentType.SERVICE, "QueueProcessor.Jobs")
+    logger.info("🔄 Job queue trigger activated - using restructured processing")
     logger.debug(f"📨 Raw queue message received: {msg}")
     
-    # Note: Import validation now handled at startup via util_import_validator
+    # Initialize variables for cleanup
+    job_message = None
+    repos = None
     
     try:
-        # Parse and validate message using Pydantic schema
-        logger.debug(f"🔍 Decoding queue message body")
-        try:
-            message_content = msg.get_body().decode('utf-8')
-            logger.debug(f"📋 Decoded message content: {message_content}")
-        except Exception as decode_error:
-            logger.error(f"❌ Failed to decode message body: {decode_error}")
-            logger.debug(f"🔍 Message decode error type: {type(decode_error).__name__}")
-            raise ValueError(f"Message decode failed: {decode_error}")
+        # ================================================================
+        # PHASE 1: EARLY VALIDATION AND SETUP (fail fast)
+        # ================================================================
         
-        logger.debug(f"🔧 Validating message with JobQueueMessage schema")
-        try:
-            job_message = JobQueueMessage.model_validate_json(message_content)
-            logger.debug(f"✅ Message validation successful: {job_message}")
-        except Exception as validation_error:
-            logger.error(f"❌ Message validation failed: {validation_error}")
-            logger.debug(f"🔍 Validation error type: {type(validation_error).__name__}")
-            logger.debug(f"📋 Invalid message content: {message_content}")
-            raise ValueError(f"Message validation failed: {validation_error}")
-        
-        # Update logger context with job details for better correlation
-        logger.update_context(
-            job_id=job_message.job_id,
-            job_type=job_message.job_type,
-            stage=job_message.stage
-        )
-        
+        # Parse and validate message
+        job_message = _validate_and_parse_queue_message(msg, logger)
         logger.info(f"📨 Processing job: {job_message.job_id[:16]}... type={job_message.job_type}")
-        logger.debug(f"📊 Full job message details: job_id={job_message.job_id}, job_type={job_message.job_type}, stage={job_message.stage}, parameters={job_message.parameters}")
         
-        # Get repositories (imports validated at startup)
-        logger.debug(f"🏗️ Creating repositories for job processing")
-        from repository_consolidated import RepositoryFactory
+        # Load job record and create repositories
+        repos, job_record = _load_job_record_safely(job_message, logger)
+        job_repo = repos['job_repo']
+        task_repo = repos['task_repo']
         
-        try:
-            repos = RepositoryFactory.create_repositories()
-            job_repo = repos['job_repo']
-            task_repo = repos['task_repo']
-            completion_detector = repos['completion_detector']
-            logger.debug(f"✅ Repositories created with PostgreSQL backend")
-        except Exception as repo_error:
-            logger.error(f"❌ Failed to create repositories: {repo_error}")
-            raise RuntimeError(f"Repository creation failed: {repo_error}")
+        # ================================================================
+        # PHASE 2: TASK CREATION (critical section)
+        # ================================================================
         
-        # Load job record
-        logger.debug(f"🔍 Loading job record for: {job_message.job_id}")
-        try:
-            job_record = job_repo.get_job(job_message.job_id)
-            logger.debug(f"📋 Job record retrieval result: {job_record}")
-        except Exception as load_error:
-            logger.error(f"❌ Failed to load job record: {load_error}")
-            logger.debug(f"🔍 Job load error type: {type(load_error).__name__}")
-            raise RuntimeError(f"Job record load failed: {load_error}")
-        
-        if not job_record:
-            logger.error(f"❌ Job record not found: {job_message.job_id}")
-            raise ValueError(f"Job record not found: {job_message.job_id}")
-        
-        logger.debug(f"✅ Job record loaded successfully: status={job_record.status}")
-        
-        # Update job status to processing
-        logger.debug(f"🔄 Updating job status to PROCESSING for: {job_message.job_id}")
-        try:
-            job_repo.update_job_status(job_message.job_id, JobStatus.PROCESSING)
-            logger.debug(f"✅ Job status updated to PROCESSING")
-        except Exception as status_error:
-            logger.error(f"❌ Failed to update job status to PROCESSING: {status_error}")
-            logger.debug(f"🔍 Status update error type: {type(status_error).__name__}")
-            raise RuntimeError(f"Job status update failed: {status_error}")
-        
-        # Route to controller based on job type (imports validated at startup)
-        logger.debug(f"🎯 Routing to controller for job type: {job_message.job_type}")
-        
-        # Use JobFactory to get the appropriate controller
+        # Import and create controller
         from controller_factories import JobFactory
-        import controller_hello_world  # Import to trigger registration
+        logger.debug(f"🎯 Creating controller for job type: {job_message.job_type}")
         
         try:
             controller = JobFactory.create_controller(job_message.job_type)
-            logger.debug(f"✅ Controller for {job_message.job_type} instantiated via JobFactory")
+            logger.debug(f"✅ Controller created successfully")
         except Exception as controller_error:
-            logger.error(f"❌ Failed to create controller for {job_message.job_type}: {controller_error}")
-            raise RuntimeError(f"Controller creation failed for {job_message.job_type}: {controller_error}")
+            logger.error(f"❌ Controller creation failed: {controller_error}")
+            raise RuntimeError(f"Controller creation failed: {controller_error}")
+        
+        # Execute task creation through controller
+        logger.debug(f"🚀 Starting task creation for stage {job_message.stage}")
+        
+        try:
+            # Process job stage (creates tasks)
+            stage_results = controller.process_job_stage(
+                job_record=job_record,
+                stage=job_message.stage,
+                parameters=job_message.parameters,
+                stage_results=job_message.stage_results
+            )
+            logger.debug(f"🎯 Controller returned stage results: {stage_results}")
             
-            # Process the job stage
-            stage_params = {
-                'job_record': job_record,
-                'stage': job_message.stage,
-                'parameters': job_message.parameters,
-                'stage_results': job_message.stage_results
-            }
-            logger.debug(f"🚀 Processing job stage with params: {stage_params}")
+        except Exception as task_creation_error:
+            logger.error(f"❌ Task creation failed: {task_creation_error}")
+            # Immediate failure handling - mark job as failed
+            _mark_job_failed_safely(job_message.job_id, task_creation_error, job_repo, logger)
+            raise RuntimeError(f"Task creation failed: {task_creation_error}")
+        
+        # ================================================================
+        # PHASE 3: VERIFICATION AND STATUS UPDATE
+        # ================================================================
+        
+        # Verify tasks were actually created in database
+        created_tasks = _verify_task_creation_success(job_message.job_id, task_repo, logger)
+        
+        if created_tasks:
+            # SUCCESS: Tasks verified in database, safe to update status
+            logger.debug(f"✅ Task creation verified: {len(created_tasks)} tasks found")
             
             try:
-                stage_results = controller.process_job_stage(
-                    job_record=job_record,
-                    stage=job_message.stage,
-                    parameters=job_message.parameters,
-                    stage_results=job_message.stage_results
-                )
-                logger.debug(f"✅ Stage processing result: {stage_results}")
-                logger.info(f"✅ Job {job_message.job_id[:16]}... stage {job_message.stage} completed")
-            except Exception as stage_error:
-                logger.error(f"❌ Failed to process job stage: {stage_error}")
-                logger.debug(f"🔍 Stage processing error type: {type(stage_error).__name__}")
-                import traceback
-                logger.debug(f"📍 Stage processing traceback: {traceback.format_exc()}")
-                raise RuntimeError(f"Job stage processing failed: {stage_error}")
-            
+                from schema_base import JobStatus
+                job_repo.update_job_status_with_validation(job_message.job_id, JobStatus.PROCESSING)
+                logger.info(f"✅ Job {job_message.job_id[:16]}... advanced to PROCESSING with {len(created_tasks)} tasks")
+                
+            except Exception as status_error:
+                logger.error(f"❌ Status update failed after successful task creation: {status_error}")
+                logger.warning(f"⚠️ Tasks created successfully but status update failed - job may need manual correction")
+                # Don't raise - tasks were created successfully
+                
         else:
-            # Controller not implemented
-            error_msg = f"Controller not implemented for job type: {job_message.job_type}"
+            # FAILURE: No tasks found despite controller success
+            error_msg = "Task creation reported success but no tasks found in database"
             logger.error(f"❌ {error_msg}")
-            logger.debug(f"🔧 Marking job as failed due to missing controller")
-            job_repo.fail_job(job_message.job_id, error_msg)
+            verification_error = RuntimeError(error_msg)
+            _mark_job_failed_safely(job_message.job_id, verification_error, job_repo, logger)
+            raise verification_error
             
-    except Exception as e:
-        logger.error(f"❌ Error processing job: {str(e)}")
-        logger.debug(f"🔍 Error details: {type(e).__name__}: {str(e)}")
+    except Exception as processing_error:
+        # ================================================================
+        # SINGLE POINT OF FAILURE HANDLING
+        # ================================================================
+        
+        logger.error(f"❌ Job processing failed: {processing_error}")
+        
+        # Log job details if available
+        if job_message:
+            logger.error(f"📋 Job details - ID: {job_message.job_id}, Type: {job_message.job_type}, Stage: {job_message.stage}")
+        
+        # Additional error context
         import traceback
-        logger.debug(f"📍 Full error traceback: {traceback.format_exc()}")
+        logger.debug(f"📍 Error traceback: {traceback.format_exc()}")
         
-        # Try to mark job as failed
-        try:
-            if 'job_message' in locals():
-                logger.debug(f"🔧 Attempting to mark job as failed: {job_message.job_id}")
-                job_repo.fail_job(job_message.job_id, str(e))
-                logger.debug(f"✅ Job marked as failed successfully")
-        except Exception as update_error:
-            logger.error(f"❌ Failed to update job status: {update_error}")
-            logger.debug(f"🔍 Update error details: {type(update_error).__name__}: {str(update_error)}")
+        # Attempt to mark job as failed if we have the necessary resources
+        if job_message and repos and repos.get('job_repo'):
+            _mark_job_failed_safely(job_message.job_id, processing_error, repos['job_repo'], logger)
+        else:
+            logger.error(f"❌ CRITICAL: Cannot mark job as failed - insufficient resources")
         
-        # Re-raise so Azure Functions knows it failed
+        # Re-raise for Azure Functions runtime
         logger.debug(f"🔄 Re-raising exception for Azure Functions runtime")
         raise
 
@@ -573,10 +767,13 @@ def process_task_queue(msg: func.QueueMessage) -> None:
         - Failed tasks counted in parent job statistics
     """
     # Initialize task queue-specific logger
-    logger = LoggerFactory.get_queue_logger("geospatial-tasks")
+    logger = LoggerFactory.create_logger(ComponentType.SERVICE, "QueueProcessor.Tasks")
     
     logger.info("🔄 Task queue trigger activated - processing with Pydantic architecture")
     logger.debug(f"📨 Raw task queue message received: {msg}")
+    
+    # Import controller factory once at the beginning
+    from controller_factories import JobFactory
     
     # ========================================================================
     # PHASE 1: MESSAGE VALIDATION (No task context yet)
@@ -590,13 +787,8 @@ def process_task_queue(msg: func.QueueMessage) -> None:
         logger.error(f"❌ Invalid queue message: {validation_error}")
         raise  # Let Azure Functions handle the retry/poison queue logic
     
-    # Update logger context now that we have valid task details
-    logger.update_context(
-        task_id=task_message.task_id,
-        job_id=task_message.parent_job_id,
-        task_type=task_message.task_type,
-        stage=task_message.stage
-    )
+    # Log task details for context
+    logger.info(f"📋 Task: {task_message.task_id} for job {task_message.parent_job_id[:16]}...")
     
     # ========================================================================
     # PHASE 2: REPOSITORY SETUP (Infrastructure)
@@ -622,7 +814,7 @@ def process_task_queue(msg: func.QueueMessage) -> None:
             raise ValueError(f"Task record not found: {task_message.task_id}")
         
         # Update task status to processing
-        task_repo.update_task_status(task_message.task_id, TaskStatus.PROCESSING)
+        task_repo.update_task_status_with_validation(task_message.task_id, TaskStatus.PROCESSING)
         logger.info(f"📋 Processing task: {task_message.task_id}")
         
     except Exception as load_error:
@@ -630,7 +822,7 @@ def process_task_queue(msg: func.QueueMessage) -> None:
         try:
             # Try to mark task as failed if possible
             logger.debug(f"🔧 Attempting to mark task as failed: {task_message.task_id}")
-            task_repo.update_task_status(
+            task_repo.update_task_status_with_validation(
                 task_message.task_id, 
                 TaskStatus.FAILED,
                 additional_updates={'error_details': f"Failed to load task: {load_error}"}
@@ -648,45 +840,44 @@ def process_task_queue(msg: func.QueueMessage) -> None:
     try:
         # Route to task handler based on task type
 
-######## ROBERT'S NOTES
-######## This needs to be if task_message.task_type in <dynamically generated list of tasks based on the job type> 
-######## TODO Task registry object from which to retrieve the business logic services
-######## e.g. TaskServicesFactory.from_task_type(task_message.task_type)
-######## For now, hardcoded hello world is ok until hello world is completely working
-        if task_message.task_type in ["hello_world_greeting", "hello_world_reply"]:
-            from service_hello_world import get_hello_world_task
-            from schema_base import TaskExecutionContext
-            
-            task_handler = get_hello_world_task(task_message.task_type)
-            
-            # Create execution context
-            context = TaskExecutionContext(
-                task_id=task_message.task_id,
-                parent_job_id=task_message.parent_job_id,
-                stage=task_message.stage,
-                task_index=task_message.task_index,
-                parameters=task_message.parameters
+        # Custom exception for internal task registration errors
+        class TaskNotRegisteredException(Exception):
+            """Internal error when task type is not registered in the system."""
+            pass
+        
+        # Use TaskHandlerFactory with Robert's implicit lineage pattern
+        # The factory automatically injects predecessor data access for multi-stage workflows
+        from service_factories import TaskHandlerFactory, TaskRegistry
+        
+        # Auto-discover and register task handlers
+        # Task handlers are registered via decorators at import time
+        
+        # Verify handler is registered
+        registry = TaskRegistry.instance()
+        if not registry.is_registered(task_message.task_type):
+            available_types = registry.list_task_types()
+            raise TaskNotRegisteredException(
+                f"INTERNAL ERROR: No handler registered for task_type '{task_message.task_type}'. "
+                f"This is a system configuration error. "
+                f"Available types: {', '.join(available_types) if available_types else 'none'}. "
+                f"Required: Register handler using @TaskRegistry.register(task_type) decorator"
             )
-            
-            # Execute task
-            task_result = task_handler.execute(context)
-            
-            if not hasattr(task_result, 'result'):
-                raise ValueError(f"Invalid task result object: {task_result}")
-                
-            logger.info(f"✅ Task executed successfully")
-            
-        else:
-            # Get available task types for error message
-            from service_hello_world import HELLO_WORLD_TASKS
-            available_types = list(HELLO_WORLD_TASKS.keys())
-            raise NotImplementedError(
-                f"Handler not implemented for: {task_message.task_type}. "
-                f"Available types: {', '.join(available_types)}"
-            )
+        
+        # Get handler with lineage context
+        # This implements Robert's pattern: tasks in stage N can access stage N-1 data
+        handler = TaskHandlerFactory.get_handler(task_message, task_repo)
+        
+        # Execute task - handler returns TaskResult
+        task_result = handler(task_message.parameters)
+        
+        if not task_result.success:
+            raise RuntimeError(f"Task execution failed: {task_result.error_message}")
+        
+        logger.info(f"✅ Task executed via TaskHandlerFactory with lineage support")
             
     except Exception as exec_error:
         logger.error(f"❌ Task execution failed: {exec_error}")
+        logger.error(f"Task details - ID: {task_message.task_id}, Type: {task_message.task_type}, Stage: {task_message.stage}")
         
         # Create a failed task result for proper error tracking
         from schema_base import TaskResult
@@ -698,16 +889,19 @@ def process_task_queue(msg: func.QueueMessage) -> None:
             status=TaskStatus.FAILED.value,
             success=False,
             result={},  # Empty result for failures
-            error=str(exec_error),  # Capture error details
+            error=f"{type(exec_error).__name__}: {str(exec_error)}",  # Include error type
             execution_time_seconds=0.0
         )
         
         # Mark task as failed in database
         try:
-            task_repo.update_task_status(
+            import traceback
+            task_repo.update_task_status_with_validation(
                 task_message.task_id,
                 TaskStatus.FAILED,
-                additional_updates={'error_details': str(exec_error)}
+                additional_updates={
+                    'error_details': f"{type(exec_error).__name__}: {str(exec_error)}\n{traceback.format_exc()}"
+                }
             )
         except Exception as update_error:
             logger.error(f"❌ Failed to update task status: {update_error}")
@@ -735,12 +929,12 @@ def process_task_queue(msg: func.QueueMessage) -> None:
                 task_id=task_message.task_id,
                 job_id=task_message.parent_job_id,
                 stage=task_message.stage,
-                result_data=task_result.result if task_result.result else {},
+                result_data=task_result.result_data if task_result.result_data else {},
                 error_details=None  # Explicit None for successful tasks
             )
         else:
             # Task failed - pass error details as separate parameter
-            error_msg = getattr(task_result, 'error', 'No result returned from task execution') if task_result else 'Task execution failed'
+            error_msg = getattr(task_result, 'error_message', 'No result returned from task execution') if task_result else 'Task execution failed'
             logger.warning(f"⚠️ Task {task_message.task_id} failed with error: {error_msg}")
             stage_completion_result = completion_detector.complete_task_and_check_stage(
                 task_id=task_message.task_id,
@@ -765,7 +959,7 @@ def process_task_queue(msg: func.QueueMessage) -> None:
         # This is critical - task executed but not marked complete
         # Try to update task status directly as fallback
         try:
-            task_repo.update_task_status(
+            task_repo.update_task_status_with_validation(
                 task_message.task_id,
                 TaskStatus.FAILED,
                 additional_updates={'error_details': f'Completion detection failed: {str(completion_error)}'}
@@ -792,8 +986,6 @@ def process_task_queue(msg: func.QueueMessage) -> None:
                 
                 try:
                     # Get controller for job completion
-                    from controller_factories import JobFactory
-                    import controller_hello_world  # Import to trigger registration
                     controller = JobFactory.create_controller(job_record.job_type)
                     
                     # Get all task results from completed job
@@ -834,7 +1026,7 @@ def process_task_queue(msg: func.QueueMessage) -> None:
                         raise RuntimeError(f"Stage aggregation failed - no results returned: {task_message.parent_job_id}")
                     
                     # Update job status to completed with aggregated results
-                    final_status = job_repo.update_job_status(
+                    final_status = job_repo.update_job_status_with_validation(
                         job_id=task_message.parent_job_id,
                         new_status=JobStatus.COMPLETED,
                         additional_updates={'result_data': aggregated_results}
@@ -847,7 +1039,7 @@ def process_task_queue(msg: func.QueueMessage) -> None:
                     logger.error(f"❌ CRITICAL: Job completion failed: {completion_error}")
                     # Mark job as completed_with_errors instead of failed to acknowledge partial success
                     try:
-                        job_repo.update_job_status(
+                        job_repo.update_job_status_with_validation(
                             job_id=task_message.parent_job_id,
                             new_status=JobStatus.COMPLETED_WITH_ERRORS,
                             additional_updates={'error_details': f"Job completion failed: {str(completion_error)}"}
@@ -863,8 +1055,6 @@ def process_task_queue(msg: func.QueueMessage) -> None:
                 # STAGE ADVANCEMENT IMPLEMENTATION
                 try:
                     # Get controller for job orchestration using JobFactory
-                    from controller_factories import JobFactory
-                    import controller_hello_world  # Import to trigger registration
                     controller = JobFactory.create_controller(job_record.job_type)
                     
                     # Collect current stage results
@@ -876,7 +1066,7 @@ def process_task_queue(msg: func.QueueMessage) -> None:
                         'stage_number': task_message.stage,
                         'completed_tasks': len(stage_task_results),
                         'task_results': stage_task_results,
-                        'stage_completed_at': datetime.datetime.utcnow().isoformat()
+                        'stage_completed_at': datetime.datetime.now(datetime.timezone.utc).isoformat()
                     }
                     
                     # Advance job to next stage atomically
@@ -906,7 +1096,7 @@ def process_task_queue(msg: func.QueueMessage) -> None:
                             'stage_number': task_message.stage,
                             'completed_tasks': len(stage_task_results),
                             'task_results': stage_task_results,
-                            'stage_completed_at': datetime.datetime.utcnow().isoformat(),
+                            'stage_completed_at': datetime.datetime.now(datetime.timezone.utc).isoformat(),
                             # Include any accumulated results from job record
                             'accumulated_results': job_record.stage_results or {}
                         }
@@ -964,7 +1154,7 @@ def process_task_queue(msg: func.QueueMessage) -> None:
                     logger.error(f"❌ CRITICAL: Stage advancement failed: {stage_error}")
                     # Update job status to failed to prevent infinite stuck state
                     try:
-                        job_repo.update_job_status(
+                        job_repo.update_job_status_with_validation(
                             job_id=task_message.parent_job_id,
                             new_status=JobStatus.FAILED,
                             additional_updates={'error_details': f"Stage advancement failed: {str(stage_error)}"}
@@ -1000,165 +1190,3 @@ def process_task_queue(msg: func.QueueMessage) -> None:
 def check_poison_queues(req: func.HttpRequest) -> func.HttpResponse:
     """Poison queue monitoring endpoint using HTTP trigger base class."""
     return poison_monitor_trigger.handle_request(req)
-
-
-@app.route(route="admin/database", methods=["GET"])
-def query_database(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    Legacy database query endpoint - DEPRECATED.
-    
-    🚨 DEPRECATED: Use new database monitoring endpoints instead:
-        GET /api/db/jobs - Query jobs
-        GET /api/db/tasks - Query tasks  
-        GET /api/db/stats - Database statistics
-        GET /api/db/functions/test - Test functions
-        GET /api/health - Enhanced health with database metrics
-    """
-    import json
-    from datetime import datetime, timezone
-    
-    return func.HttpResponse(
-        body=json.dumps({
-            "deprecated": True,
-            "message": "This endpoint is deprecated. Use new database monitoring endpoints.",
-            "new_endpoints": {
-                "jobs": "/api/db/jobs",
-                "tasks": "/api/db/tasks", 
-                "statistics": "/api/db/stats",
-                "function_tests": "/api/db/functions/test",
-                "enhanced_health": "/api/health"
-            },
-            "timestamp": datetime.now(timezone.utc).isoformat()
-        }),
-        status_code=200,
-        mimetype="application/json"
-    )
-
-
-@app.route(route="admin/test", methods=["GET"])
-def test_endpoint(req: func.HttpRequest) -> func.HttpResponse:
-    """Simple test endpoint to verify route registration works."""
-    import json
-    from datetime import datetime, timezone
-    
-    return func.HttpResponse(
-        body=json.dumps({
-            "status": "test_endpoint_working",
-            "message": "Route registration is working",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "query_params": dict(req.params)
-        }),
-        status_code=200,
-        headers={'Content-Type': 'application/json'}
-    )
-
-
-# Chunk processing now handled in process_task_queue function above
-
-
-# @app.timer_trigger(schedule="0 */5 * * * *", arg_name="timer", run_on_startup=False)
-# def poison_queue_timer(timer: func.TimerRequest) -> None:
-#     """
-#     Automated poison queue monitoring timer.
-#     
-#     Runs every 5 minutes to check for messages in poison queues and
-#     automatically mark corresponding jobs and tasks as failed. This ensures
-#     failed processing attempts are properly tracked and visible in job status.
-#     
-#     Args:
-#         timer: Azure Functions timer request object (unused but required).
-#         
-#     Schedule:
-#         Runs every 5 minutes (0 */5 * * * *)
-#         Does not run on startup to avoid immediate processing
-#         
-#     Processing:
-#         1. Checks geospatial-jobs-poison queue for failed job messages
-#         2. Checks geospatial-tasks-poison queue for failed task messages
-#         3. Extracts job/task IDs from poison messages
-#         4. Updates corresponding records in Table Storage to 'failed' status
-#         5. Logs summary of actions taken
-#         
-#     Note:
-#         - Does not delete poison messages (kept for audit trail)
-#         - Runs silently unless messages are found
-#         - Errors are logged but don't fail the timer trigger
-#     """
-#     # Initialize poison queue monitor logger
-#     logger = LoggerFactory.get_logger(ComponentType.POISON_MONITOR, "PoisonQueueTimer")
-#     
-#     logger.info("Poison queue timer trigger fired")
-#     
-#     try:
-#         from poison_queue_monitor import PoisonQueueMonitor
-#         
-#         monitor = PoisonQueueMonitor()
-#         summary = monitor.check_poison_queues()
-#         
-#         if summary["poison_messages_found"] > 0:
-#             logger.warning(f"Found {summary['poison_messages_found']} messages in poison queues. "
-#                          f"Marked {summary['jobs_marked_failed']} jobs and "
-#                          f"{summary['tasks_marked_failed']} tasks as failed.")
-#         else:
-#             logger.debug("No messages found in poison queues")
-#             
-#     except Exception as e:
-#         logger.error(f"Error in poison queue timer: {str(e)}")
-
-
-@app.function_name(name="force_create_functions")
-@app.route(route="admin/functions/create", methods=["POST"])
-def force_create_functions(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    Force creation of PostgreSQL functions bypassing validation.
-    
-    This endpoint directly creates the required PostgreSQL functions without 
-    checking table status, used when tables exist but function deployment is blocked.
-    """
-    from schema_manager import SchemaManagerFactory
-    from datetime import datetime
-    import json
-    
-    try:
-        # Get schema manager
-        schema_manager = SchemaManagerFactory.create_schema_manager()
-        
-        # Force create functions
-        result = schema_manager.force_create_functions()
-        
-        if result['success']:
-            return func.HttpResponse(
-                body=json.dumps({
-                    "status": "success",
-                    "message": result['message'],
-                    "functions_created": result['functions_created'],
-                    "functions_count": result['functions_count'],
-                    "timestamp": datetime.now().isoformat()
-                }),
-                status_code=200,
-                headers={'Content-Type': 'application/json'}
-            )
-        else:
-            return func.HttpResponse(
-                body=json.dumps({
-                    "status": "error",
-                    "error": result['error'],
-                    "functions_created": result.get('functions_created', []),
-                    "timestamp": datetime.now().isoformat()
-                }),
-                status_code=500,
-                headers={'Content-Type': 'application/json'}
-            )
-            
-    except Exception as e:
-        return func.HttpResponse(
-            body=json.dumps({
-                "status": "error",
-                "error": f"Function creation failed: {str(e)}",
-                "timestamp": datetime.now().isoformat()
-            }),
-            status_code=500,
-            headers={'Content-Type': 'application/json'}
-        )
-
-

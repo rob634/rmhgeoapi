@@ -58,7 +58,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 # Initialize logging first - critical for debugging import issues
-from util_logger import LoggerFactory, ComponentType
+from util_logger import LoggerFactory
+from util_logger import ComponentType, LogLevel, LogContext
 
 
 class ImportValidator:
@@ -150,7 +151,7 @@ class ImportValidator:
         if hasattr(self, '_initialized') and self._initialized:
             return
             
-        self.logger = LoggerFactory.get_logger(ComponentType.VALIDATOR, "ImportValidator")
+        self.logger = LoggerFactory.create_logger(ComponentType.VALIDATOR, "ImportValidator")
         self.is_azure_functions = self._detect_azure_functions_environment()
         self.force_validation = os.getenv('VALIDATE_IMPORTS', '').lower() == 'true'
         self._initialized = True

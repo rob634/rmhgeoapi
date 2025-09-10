@@ -33,14 +33,15 @@ Integration with Database Repository:
 """
 
 from typing import Optional, Dict, Any
-from datetime import datetime, timedelta
+from datetime import datetime, timezone, timedelta
 from azure.keyvault.secrets import SecretClient
 from azure.identity import DefaultAzureCredential
 from azure.core.exceptions import AzureError
 
-from util_logger import LoggerFactory, ComponentType
+from util_logger import LoggerFactory
+from util_logger import ComponentType, LogLevel, LogContext
 
-logger = LoggerFactory.get_logger(ComponentType.REPOSITORY, "VaultRepository")
+logger = LoggerFactory.create_logger(ComponentType.REPOSITORY, "VaultRepository")
 
 
 class VaultAccessError(Exception):
@@ -181,7 +182,7 @@ class VaultRepository:
         cached_time = self._secret_cache[secret_name]['cached_at']
         expiry_time = cached_time + timedelta(minutes=self._cache_ttl_minutes)
         
-        if datetime.utcnow() > expiry_time:
+        if datetime.now(timezone.utc) > expiry_time:
             # Cache expired, remove it
             del self._secret_cache[secret_name]
             return False
@@ -192,7 +193,7 @@ class VaultRepository:
         """Cache secret value with timestamp."""
         self._secret_cache[secret_name] = {
             'value': secret_value,
-            'cached_at': datetime.utcnow()
+            'cached_at': datetime.now(timezone.utc)
         }
         logger.debug(f"🔐 Cached secret: {secret_name}")
     

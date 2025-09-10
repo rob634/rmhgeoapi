@@ -42,15 +42,16 @@ import json
 import psycopg
 from psycopg import sql
 from typing import Dict, Any, Optional, List, Tuple
-from datetime import datetime
+from datetime import datetime, timezone
 from contextlib import contextmanager
 import logging
 
 from config import AppConfig, get_config
 from schema_base import (
     JobRecord, TaskRecord, JobStatus, TaskStatus,
-    generate_job_id, generate_task_id
+    generate_job_id
 )
+# generate_task_id moved to Controller layer - repository no longer needs it
 from repository_base import BaseRepository
 from repository_abc import (
     IJobRepository, ITaskRepository, ICompletionDetector,
@@ -206,15 +207,30 @@ class PostgreSQLRepository(BaseRepository):
         - SSL is enforced by default (sslmode=require)
         - Consider using managed identity to avoid password management
         """
+        logger.debug("🔌 Getting PostgreSQL connection string...")
+        
         # Check for complete connection string in environment
         env_conn_string = os.getenv('POSTGRESQL_CONNECTION_STRING')
         if env_conn_string:
-            logger.debug("Using POSTGRESQL_CONNECTION_STRING from environment")
+            logger.debug("📋 Using POSTGRESQL_CONNECTION_STRING from environment")
+            # Mask password in log
+            masked = env_conn_string
+            if '@' in masked and ':' in masked[:masked.index('@')]:
+                # Find password portion and mask it
+                user_pass_end = masked.index('@')
+                user_start = masked.index('://') + 3
+                if ':' in masked[user_start:user_pass_end]:
+                    pass_start = masked.index(':', user_start) + 1
+                    masked = masked[:pass_start] + '****' + masked[user_pass_end:]
+            logger.debug(f"  Connection string from env: {masked}")
             return env_conn_string
         
         # Use connection string from config
         # This is built from config.postgis_* properties
-        return self.config.postgis_connection_string
+        logger.debug("📋 Building connection string from AppConfig")
+        conn_str = self.config.postgis_connection_string
+        logger.debug(f"  Final connection string will be used for connection")
+        return conn_str
     
     @contextmanager
     def _get_connection(self):
@@ -269,12 +285,41 @@ class PostgreSQLRepository(BaseRepository):
         try:
             # Create connection with connection string
             # psycopg3 handles connection pooling internally
+            logger.debug(f"🔗 Attempting PostgreSQL connection...")
+            logger.debug(f"  Connection string length: {len(self.conn_string)} chars")
+            
+            # Extract and log the host being connected to
+            if '@' in self.conn_string and '/' in self.conn_string:
+                try:
+                    # Extract host from connection string
+                    after_at = self.conn_string.split('@')[1]
+                    host_port = after_at.split('/')[0]
+                    host = host_port.split(':')[0] if ':' in host_port else host_port
+                    logger.debug(f"  Connecting to host: {host}")
+                except:
+                    pass  # Don't fail on parsing errors
+            
             conn = psycopg.connect(self.conn_string)
+            logger.debug(f"✅ PostgreSQL connection established successfully")
             yield conn
             
         except psycopg.Error as e:
             # Log connection errors with context
             logger.error(f"❌ PostgreSQL connection error: {e}")
+            logger.error(f"  Error type: {type(e).__name__}")
+            logger.error(f"  Error details: {str(e)}")
+            
+            # Try to extract more details about DNS errors
+            if "Name or service not known" in str(e) or "could not translate host name" in str(e):
+                logger.error(f"  🚨 DNS Resolution Error - Cannot resolve database hostname")
+                if '@' in self.conn_string and '/' in self.conn_string:
+                    try:
+                        after_at = self.conn_string.split('@')[1]
+                        host_port = after_at.split('/')[0]
+                        host = host_port.split(':')[0] if ':' in host_port else host_port
+                        logger.error(f"  Failed to resolve hostname: {host}")
+                    except:
+                        pass
             
             # Rollback any pending transaction
             if conn:
@@ -539,10 +584,10 @@ class PostgreSQLJobRepository(PostgreSQLRepository, IJobRepository):
             query = sql.SQL("""
                 INSERT INTO {}.{} (
                     job_id, job_type, status, stage, total_stages,
-                    parameters, stage_results, result_data, error_details,
+                    parameters, stage_results, metadata, result_data, error_details,
                     created_at, updated_at
                 ) VALUES (
-                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
                 ) ON CONFLICT (job_id) DO NOTHING
             """).format(
                 sql.Identifier(self.schema_name),
@@ -557,10 +602,11 @@ class PostgreSQLJobRepository(PostgreSQLRepository, IJobRepository):
                 job.total_stages,
                 json.dumps(job.parameters),
                 json.dumps(job.stage_results),
+                json.dumps(job.metadata if hasattr(job, 'metadata') else {}),
                 json.dumps(job.result_data) if job.result_data else None,
                 job.error_details,
-                job.created_at or datetime.utcnow(),
-                job.updated_at or datetime.utcnow()
+                job.created_at or datetime.now(timezone.utc),
+                job.updated_at or datetime.now(timezone.utc)
             )
             
             rowcount = self._execute_query(query, params)
@@ -761,10 +807,10 @@ class PostgreSQLTaskRepository(PostgreSQLRepository, ITaskRepository):
             query = sql.SQL("""
                 INSERT INTO {}.{} (
                     task_id, parent_job_id, task_type, status, stage, task_index,
-                    parameters, result_data, error_details, retry_count,
+                    parameters, result_data, metadata, error_details, retry_count,
                     heartbeat, created_at, updated_at
                 ) VALUES (
-                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
                 ) ON CONFLICT (task_id) DO NOTHING
             """).format(
                 sql.Identifier(self.schema_name),
@@ -780,11 +826,12 @@ class PostgreSQLTaskRepository(PostgreSQLRepository, ITaskRepository):
                 task.task_index,
                 json.dumps(task.parameters),
                 json.dumps(task.result_data) if task.result_data else None,
+                json.dumps(task.metadata) if task.metadata else json.dumps({}),  # ✅ FIXED: Include metadata
                 task.error_details,
                 task.retry_count,
                 task.heartbeat,
-                task.created_at or datetime.utcnow(),
-                task.updated_at or datetime.utcnow()
+                task.created_at or datetime.now(timezone.utc),
+                task.updated_at or datetime.now(timezone.utc)
             )
             
             rowcount = self._execute_query(query, params)

@@ -158,6 +158,9 @@ debug_completion.py
 debug_queue_processing.py
 deploy_schema.py
 EXAMPLE_HTTP_TRIGGER_USAGE.py
+# Local utility scripts
+local_scripts/
+local_scripts*
 
 # Shell scripts
 *.sh

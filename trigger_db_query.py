@@ -45,11 +45,14 @@ import json
 from datetime import datetime, timezone
 
 import azure.functions as func
+import psycopg
+from psycopg import sql
 from trigger_http_base import BaseHttpTrigger
 from config import get_config
-from util_logger import LoggerFactory, ComponentType
+from util_logger import LoggerFactory
+from util_logger import ComponentType, LogLevel, LogContext
 
-logger = LoggerFactory.get_logger(ComponentType.CONTROLLER, "DatabaseQuery")
+logger = LoggerFactory.create_logger(ComponentType.CONTROLLER, "DatabaseQuery")
 
 
 class DatabaseQueryTrigger(BaseHttpTrigger):
@@ -636,12 +639,12 @@ class SchemaNukeQueryTrigger(DatabaseQueryTrigger):
     
     def process_request(self, req: func.HttpRequest) -> Dict[str, Any]:
         """
-        🚨 NUCLEAR OPTION: Completely wipe app schema and force rebuild.
+        🚨 NUCLEAR OPTION: Completely wipe app schema using Python discovery.
         
-        This endpoint:
-        1. Drops ALL objects in app schema (tables, functions, enums, etc.)
-        2. Forces clean rebuild from canonical sources
-        3. Should ONLY be used in development
+        Clean implementation:
+        1. Python discovers all objects
+        2. Generates DROP statements using psycopg.sql
+        3. Executes as simple SQL (no DO blocks)
         
         Authentication: Requires confirm=yes query parameter
         """
@@ -652,198 +655,171 @@ class SchemaNukeQueryTrigger(DatabaseQueryTrigger):
             return {
                 "error": "Schema nuke requires explicit confirmation",
                 "usage": "Add ?confirm=yes to execute schema wipe",
-                "warning": "This will DESTROY ALL DATA in the app schema",
-                "canonical_sources": [
-                    "schema_postgres.sql - Table and function definitions",
-                    "Pydantic models - Data structure validation", 
-                    "Health check initialization - Schema deployment pipeline"
-                ]
+                "warning": "This will DESTROY ALL DATA in the app schema"
             }
         
         nuke_results = []
         app_schema = self.config.app_schema
+        conn = None
         
-        # Step 1: Drop all functions
-        function_drop_query = f"""
-            DO $$
-            DECLARE
-                func_record RECORD;
-            BEGIN
-                FOR func_record IN 
+        try:
+            # Connect to database
+            conn_string = (
+                f"host={self.config.postgis_host} "
+                f"port={self.config.postgis_port} "
+                f"dbname={self.config.postgis_database} "
+                f"user={self.config.postgis_user} "
+                f"password={self.config.postgis_password}"
+            )
+            conn = psycopg.connect(conn_string)
+            
+            with conn.cursor() as cur:
+                # 1. DISCOVER & DROP FUNCTIONS
+                cur.execute(sql.SQL("""
                     SELECT 
-                        routine_name,
-                        routine_schema
-                    FROM information_schema.routines 
-                    WHERE routine_schema = '{app_schema}'
-                LOOP
-                    EXECUTE 'DROP FUNCTION IF EXISTS ' || func_record.routine_schema || '.' || func_record.routine_name || ' CASCADE';
-                    RAISE NOTICE 'Dropped function: %', func_record.routine_name;
-                END LOOP;
-            END $$;
-        """
-        
-        result = self._execute_safe_query(function_drop_query)
-        nuke_results.append({
-            "step": "drop_functions",
-            "success": result["success"],
-            "details": result.get("error", "Functions dropped")
-        })
-        
-        # Step 2: Drop all tables
-        table_drop_query = f"""
-            DO $$
-            DECLARE
-                table_record RECORD;
-            BEGIN
-                FOR table_record IN 
-                    SELECT tablename 
-                    FROM pg_tables 
-                    WHERE schemaname = '{app_schema}'
-                LOOP
-                    EXECUTE 'DROP TABLE IF EXISTS ' || '{app_schema}' || '.' || table_record.tablename || ' CASCADE';
-                    RAISE NOTICE 'Dropped table: %', table_record.tablename;
-                END LOOP;
-            END $$;
-        """
-        
-        result = self._execute_safe_query(table_drop_query)
-        nuke_results.append({
-            "step": "drop_tables", 
-            "success": result["success"],
-            "details": result.get("error", "Tables dropped")
-        })
-        
-        # Step 3: Drop all enums with thorough cleanup
-        enum_drop_query = f"""
-            DO $$
-            DECLARE
-                enum_record RECORD;
-                retry_count INTEGER := 0;
-                max_retries INTEGER := 3;
-            BEGIN
-                -- Drop enum types with CASCADE, retry if needed
-                WHILE retry_count < max_retries LOOP
-                    BEGIN
-                        FOR enum_record IN 
-                            SELECT 
-                                t.typname as enum_name,
-                                n.nspname as schema_name
-                            FROM pg_type t 
-                            JOIN pg_namespace n ON t.typnamespace = n.oid
-                            WHERE n.nspname = '{app_schema}' AND t.typtype = 'e'
-                        LOOP
-                            EXECUTE 'DROP TYPE IF EXISTS ' || enum_record.schema_name || '.' || enum_record.enum_name || ' CASCADE';
-                            RAISE NOTICE 'Dropped enum: %', enum_record.enum_name;
-                        END LOOP;
-                        
-                        -- Check if any enums remain
-                        IF NOT EXISTS (
-                            SELECT 1 FROM pg_type t 
-                            JOIN pg_namespace n ON t.typnamespace = n.oid
-                            WHERE n.nspname = '{app_schema}' AND t.typtype = 'e'
-                        ) THEN
-                            RAISE NOTICE 'All enums successfully dropped';
-                            EXIT;  -- Success, exit retry loop
-                        END IF;
-                        
-                        retry_count := retry_count + 1;
-                        RAISE NOTICE 'Retry % of % for enum cleanup', retry_count, max_retries;
-                        PERFORM pg_sleep(0.1);  -- Brief pause before retry
-                        
-                    EXCEPTION WHEN OTHERS THEN
-                        retry_count := retry_count + 1;
-                        RAISE NOTICE 'Error dropping enums (attempt %): %', retry_count, SQLERRM;
-                        IF retry_count >= max_retries THEN
-                            RAISE;  -- Re-raise the error after max retries
-                        END IF;
-                        PERFORM pg_sleep(0.1);
-                    END;
-                END LOOP;
+                        p.proname AS function_name,
+                        pg_catalog.pg_get_function_identity_arguments(p.oid) AS arguments
+                    FROM pg_catalog.pg_proc p
+                    JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
+                    WHERE n.nspname = %s AND p.prokind = 'f'
+                """), [app_schema])
                 
-                RAISE NOTICE 'Enum cleanup complete';
-            END $$;
-        """
-        
-        result = self._execute_safe_query(enum_drop_query)
-        nuke_results.append({
-            "step": "drop_enums",
-            "success": result["success"], 
-            "details": result.get("error", "Enums dropped")
-        })
-        
-        # Step 4: Drop all sequences
-        sequence_drop_query = f"""
-            DO $$
-            DECLARE
-                seq_record RECORD;
-            BEGIN
-                FOR seq_record IN 
-                    SELECT sequence_name 
-                    FROM information_schema.sequences 
-                    WHERE sequence_schema = '{app_schema}'
-                LOOP
-                    EXECUTE 'DROP SEQUENCE IF EXISTS ' || '{app_schema}' || '.' || seq_record.sequence_name || ' CASCADE';
-                    RAISE NOTICE 'Dropped sequence: %', seq_record.sequence_name;
-                END LOOP;
-            END $$;
-        """
-        
-        result = self._execute_safe_query(sequence_drop_query)
-        nuke_results.append({
-            "step": "drop_sequences",
-            "success": result["success"],
-            "details": result.get("error", "Sequences dropped")
-        })
-        
-        # Step 5: Verify schema is clean
-        verify_query = f"""
-            SELECT 
-                'tables' as object_type,
-                COUNT(*) as remaining_count
-            FROM information_schema.tables 
-            WHERE table_schema = '{app_schema}'
+                functions = cur.fetchall()
+                for func_name, args in functions:
+                    # args is already properly formatted by pg_get_function_identity_arguments
+                    drop_stmt = sql.SQL("DROP FUNCTION IF EXISTS {}.{} CASCADE").format(
+                        sql.Identifier(app_schema),
+                        sql.SQL(f"{func_name}({args})")
+                    )
+                    cur.execute(drop_stmt)
+                    self.logger.debug(f"Dropped function: {func_name}({args})")
+                
+                nuke_results.append({
+                    "step": "drop_functions",
+                    "count": len(functions),
+                    "dropped": [f"{f[0]}({f[1]})" for f in functions[:5]]  # First 5 for visibility
+                })
+                
+                # 2. DISCOVER & DROP TABLES
+                cur.execute(sql.SQL("""
+                    SELECT tablename FROM pg_tables WHERE schemaname = %s
+                """), [app_schema])
+                
+                tables = cur.fetchall()
+                for (table_name,) in tables:
+                    drop_stmt = sql.SQL("DROP TABLE IF EXISTS {}.{} CASCADE").format(
+                        sql.Identifier(app_schema),
+                        sql.Identifier(table_name)
+                    )
+                    cur.execute(drop_stmt)
+                    self.logger.debug(f"Dropped table: {table_name}")
+                
+                nuke_results.append({
+                    "step": "drop_tables",
+                    "count": len(tables),
+                    "dropped": [t[0] for t in tables]
+                })
+                
+                # 3. DISCOVER & DROP ENUMS
+                cur.execute(sql.SQL("""
+                    SELECT t.typname
+                    FROM pg_type t
+                    JOIN pg_namespace n ON t.typnamespace = n.oid
+                    WHERE n.nspname = %s AND t.typtype = 'e'
+                """), [app_schema])
+                
+                enums = cur.fetchall()
+                for (enum_name,) in enums:
+                    drop_stmt = sql.SQL("DROP TYPE IF EXISTS {}.{} CASCADE").format(
+                        sql.Identifier(app_schema),
+                        sql.Identifier(enum_name)
+                    )
+                    cur.execute(drop_stmt)
+                    self.logger.debug(f"Dropped enum: {enum_name}")
+                
+                nuke_results.append({
+                    "step": "drop_enums",
+                    "count": len(enums),
+                    "dropped": [e[0] for e in enums]
+                })
+                
+                # 4. DISCOVER & DROP SEQUENCES
+                cur.execute(sql.SQL("""
+                    SELECT sequence_name
+                    FROM information_schema.sequences
+                    WHERE sequence_schema = %s
+                """), [app_schema])
+                
+                sequences = cur.fetchall()
+                for (seq_name,) in sequences:
+                    drop_stmt = sql.SQL("DROP SEQUENCE IF EXISTS {}.{} CASCADE").format(
+                        sql.Identifier(app_schema),
+                        sql.Identifier(seq_name)
+                    )
+                    cur.execute(drop_stmt)
+                    self.logger.debug(f"Dropped sequence: {seq_name}")
+                
+                nuke_results.append({
+                    "step": "drop_sequences",
+                    "count": len(sequences),
+                    "dropped": [s[0] for s in sequences]
+                })
+                
+                # 5. DISCOVER & DROP VIEWS  
+                cur.execute(sql.SQL("""
+                    SELECT table_name
+                    FROM information_schema.views
+                    WHERE table_schema = %s
+                """), [app_schema])
+                
+                views = cur.fetchall()
+                for (view_name,) in views:
+                    drop_stmt = sql.SQL("DROP VIEW IF EXISTS {}.{} CASCADE").format(
+                        sql.Identifier(app_schema),
+                        sql.Identifier(view_name)
+                    )
+                    cur.execute(drop_stmt)
+                    self.logger.debug(f"Dropped view: {view_name}")
+                
+                nuke_results.append({
+                    "step": "drop_views",
+                    "count": len(views),
+                    "dropped": [v[0] for v in views]
+                })
+                
+                # Commit all drops
+                conn.commit()
+                
+                # Calculate total objects dropped
+                total_dropped = sum(r['count'] for r in nuke_results)
+                
+                return {
+                    "status": "success",
+                    "message": f"🚨 NUCLEAR: Schema {app_schema} completely reset",
+                    "implementation": "Clean Python discovery with psycopg.sql (no DO blocks)",
+                    "total_objects_dropped": total_dropped,
+                    "operations": nuke_results,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "next_steps": [
+                        "Deploy fresh schema using POST /api/schema/deploy?confirm=yes",
+                        "Or use POST /api/db/schema/redeploy?confirm=yes for nuke+deploy"
+                    ]
+                }
+                
+        except Exception as e:
+            self.logger.error(f"Nuke operation failed: {e}")
+            import traceback
+            self.logger.debug(traceback.format_exc())
             
-            UNION ALL
-            
-            SELECT 
-                'functions' as object_type,
-                COUNT(*) as remaining_count
-            FROM information_schema.routines 
-            WHERE routine_schema = '{app_schema}'
-            
-            UNION ALL
-            
-            SELECT 
-                'enums' as object_type,
-                COUNT(*) as remaining_count
-            FROM pg_type t 
-            JOIN pg_namespace n ON t.typnamespace = n.oid
-            WHERE n.nspname = '{app_schema}' AND t.typtype = 'e'
-        """
-        
-        verify_result = self._execute_safe_query(verify_query)
-        verification = {}
-        if verify_result["success"]:
-            for row in verify_result["results"]:
-                verification[row[0]] = row[1]
-        
-        return {
-            "nuclear_nuke_complete": True,
-            "schema_wiped": app_schema,
-            "steps_executed": nuke_results,
-            "verification": verification,
-            "next_steps": [
-                "Call /api/health to trigger schema rebuild from canonical sources",
-                "Check health endpoint database section for rebuild status",
-                "Verify all objects recreated from schema_postgres.sql"
-            ],
-            "canonical_sources_location": {
-                "sql_schema": "schema_postgres.sql",
-                "pydantic_models": "model_core.py, schema_core.py", 
-                "initialization_pipeline": "trigger_health.py -> service_schema_manager.py"
-            },
-            "warning": "🚨 ALL DATA IN APP SCHEMA HAS BEEN DESTROYED 🚨"
-        }
+            return {
+                "status": "error",
+                "error": str(e),
+                "operations_completed": nuke_results,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+        finally:
+            if conn:
+                conn.close()
 
 
 class FunctionTestQueryTrigger(DatabaseQueryTrigger):
@@ -861,7 +837,7 @@ class FunctionTestQueryTrigger(DatabaseQueryTrigger):
         functions_to_test = [
             {
                 "name": "complete_task_and_check_stage",
-                "query": f"SET search_path TO {self.config.app_schema}, public; SELECT task_updated, is_last_task_in_stage, job_id, stage_number, remaining_tasks FROM {self.config.app_schema}.complete_task_and_check_stage('test_nonexistent_task')",
+                "query": f"SET search_path TO {self.config.app_schema}, public; SELECT task_updated, is_last_task_in_stage, job_id, stage_number, remaining_tasks FROM {self.config.app_schema}.complete_task_and_check_stage('test_nonexistent_task', 'test_job_id', 1)",
                 "description": "Tests task completion and stage detection (with search_path fix)"
             },
             {

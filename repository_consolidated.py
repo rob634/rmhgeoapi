@@ -37,13 +37,16 @@ which are used throughout the application.
 """
 
 from typing import Optional, List, Dict, Any
-from datetime import datetime
+from datetime import datetime, timezone
 
-from util_logger import LoggerFactory, ComponentType
+from util_logger import LoggerFactory
+from util_logger import ComponentType, LogLevel, LogContext
 from schema_base import (
     JobRecord, TaskRecord, JobStatus, TaskStatus,
-    generate_job_id, generate_task_id
+    generate_job_id
 )
+# Task ID generation moved to Controller layer (hierarchically correct)
+# Repository no longer generates IDs - Controller provides them
 from repository_postgresql import (
     PostgreSQLRepository,
     PostgreSQLJobRepository,
@@ -51,7 +54,7 @@ from repository_postgresql import (
     PostgreSQLCompletionDetector
 )
 
-logger = LoggerFactory.get_logger(ComponentType.REPOSITORY, "ConsolidatedRepository")
+logger = LoggerFactory.create_logger(ComponentType.REPOSITORY, "ConsolidatedRepository")
 
 
 # ============================================================================
@@ -95,7 +98,7 @@ class JobRepository(PostgreSQLJobRepository):
                 return existing_job
             
             # Create job record
-            now = datetime.utcnow()
+            now = datetime.now(timezone.utc)
             job = JobRecord(
                 job_id=job_id,
                 job_type=job_type,
@@ -104,6 +107,7 @@ class JobRepository(PostgreSQLJobRepository):
                 total_stages=total_stages,
                 parameters=parameters.copy(),  # Defensive copy
                 stage_results={},
+                metadata={},  # Required by database NOT NULL constraint
                 created_at=now,
                 updated_at=now
             )
@@ -132,13 +136,26 @@ class JobRepository(PostgreSQLJobRepository):
         """
         with self._error_context("job status update", job_id):
             # Get current job
+            logger.debug(f"🔍 Getting current job for status update: {job_id[:16]}...")
             current_job = self.get_job(job_id)
             if not current_job:
                 logger.warning(f"📋 Cannot update non-existent job: {job_id[:16]}...")
                 return False
             
+            logger.debug(f"🔍 Current job retrieved: status={current_job.status}, type={type(current_job)}")
+            logger.debug(f"🔍 Target status: {new_status}, type={type(new_status)}")
+            logger.debug(f"🔍 Checking if current job has can_transition_to method: {hasattr(current_job, 'can_transition_to')}")
+            
             # Validate status transition
-            self._validate_status_transition(current_job, new_status)
+            logger.debug(f"🔍 About to validate status transition: {current_job.status} -> {new_status}")
+            try:
+                self._validate_status_transition(current_job, new_status)
+                logger.debug(f"✅ Status transition validation passed")
+            except Exception as validation_error:
+                logger.error(f"❌ Status transition validation failed: {validation_error}")
+                logger.error(f"🔍 Validation error type: {type(validation_error).__name__}")
+                logger.error(f"🔍 Validation error args: {validation_error.args}")
+                raise
             
             # Prepare updates
             updates = {'status': new_status}
@@ -236,30 +253,32 @@ class TaskRepository(PostgreSQLTaskRepository):
     
     def create_task_from_params(
         self,
+        task_id: str,  # Controller provides pre-generated semantic task ID
         parent_job_id: str,
         task_type: str,
         stage: int,
-        task_index: int,
+        task_index: str,  # Semantic task index from Controller
         parameters: Dict[str, Any]
     ) -> TaskRecord:
         """
-        Create task with automatic ID generation and validation.
+        Create task with Controller-provided task ID.
         
-        Business logic wrapper around create_task.
+        HIERARCHICALLY CORRECT: Repository stores what Controller provides.
+        Controller generates semantic task IDs for cross-stage lineage.
         
         Args:
+            task_id: Pre-generated semantic task ID from Controller
             parent_job_id: Parent job ID (must exist)
             task_type: Type of task (snake_case format)
             stage: Stage number task belongs to
-            task_index: Index within stage (0-based)
+            task_index: Semantic task index (e.g., 'greet_0', 'tile_x5_y10')
             parameters: Task parameters
             
         Returns:
             Created TaskRecord
         """
         with self._error_context("task creation from params"):
-            # Generate task ID
-            task_id = generate_task_id(parent_job_id, stage, task_index)
+            # Use Controller-provided task ID (no generation in Repository layer)
             
             # Validate parent-child relationship
             self._validate_parent_child_relationship(task_id, parent_job_id)
@@ -271,7 +290,7 @@ class TaskRepository(PostgreSQLTaskRepository):
                 return existing_task
             
             # Create task record
-            now = datetime.utcnow()
+            now = datetime.now(timezone.utc)
             task = TaskRecord(
                 task_id=task_id,
                 parent_job_id=parent_job_id,
@@ -280,6 +299,7 @@ class TaskRepository(PostgreSQLTaskRepository):
                 stage=stage,
                 task_index=task_index,
                 parameters=parameters.copy(),  # Defensive copy
+                metadata={},  # Required by database NOT NULL constraint
                 retry_count=0,
                 created_at=now,
                 updated_at=now
@@ -369,7 +389,7 @@ class TaskRepository(PostgreSQLTaskRepository):
         Returns:
             True if updated successfully
         """
-        return self.update_task(task_id, {'heartbeat': datetime.utcnow()})
+        return self.update_task(task_id, {'heartbeat': datetime.now(timezone.utc)})
     
     def increment_retry_count(self, task_id: str) -> bool:
         """
@@ -556,10 +576,15 @@ class RepositoryFactory:
             Dictionary with job_repo, task_repo, and completion_detector
         """
         logger.info("🏭 Creating PostgreSQL repositories")
+        logger.debug(f"  Connection string provided: {connection_string is not None}")
+        logger.debug(f"  Schema name: {schema_name}")
         
         # Create repositories
+        logger.debug("📦 Creating JobRepository...")
         job_repo = JobRepository(connection_string, schema_name)
+        logger.debug("📦 Creating TaskRepository...")
         task_repo = TaskRepository(connection_string, schema_name)
+        logger.debug("📦 Creating CompletionDetector...")
         completion_detector = CompletionDetector(connection_string, schema_name)
         
         logger.info("✅ All repositories created successfully")

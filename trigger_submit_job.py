@@ -113,8 +113,7 @@ class JobSubmissionTrigger(JobManagementTrigger):
             Job creation response data
             
         Raises:
-            ValueError: For invalid parameters
-            NotImplementedError: For unsupported job types
+            ValueError: For invalid parameters or unsupported job types
         """
         # Extract job type from path
         path_params = self.extract_path_params(req, ["job_type"])
@@ -204,7 +203,7 @@ class JobSubmissionTrigger(JobManagementTrigger):
             Controller instance
             
         Raises:
-            NotImplementedError: If no controller exists for job type
+            ValueError: If job type is not supported
         """
         self.logger.debug(f"🎯 Loading controller for job_type: {job_type}")
         
@@ -220,10 +219,15 @@ class JobSubmissionTrigger(JobManagementTrigger):
         except ValueError as e:
             # JobFactory raises ValueError for unknown job types
             self.logger.error(f"❌ Unknown job type {job_type}: {e}")
-            raise NotImplementedError(
-                f"Operation '{job_type}' requires a controller implementation. "
-                f"All operations must use the controller pattern. "
-                f"Required: Create controller and register with @JobRegistry decorator"
+            
+            # Get list of supported job types
+            from schema_base import JobRegistry
+            supported_jobs = JobRegistry.instance().list_job_types()
+            
+            raise ValueError(
+                f"Invalid job type: '{job_type}'. "
+                f"Supported job types: {', '.join(supported_jobs) if supported_jobs else 'none configured'}. "
+                f"Please use one of the supported job types."
             )
         except Exception as error:
             self.logger.error(f"❌ Failed to create controller for {job_type}: {error}")

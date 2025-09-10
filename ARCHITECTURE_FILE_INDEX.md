@@ -8,13 +8,13 @@
 
 This document provides a comprehensive index of all files in the Azure Geospatial ETL Pipeline, organized by architectural layer. It serves as a companion to ARCHITECTURE_CORE.md, mapping implementation files to the architecture patterns described there.
 
-**Total Python Files: 26**
+**Total Python Files: 25**
 - **Controllers**: 3 files (controller_base, controller_factories, controller_hello_world)
 - **Repositories**: 5 files (repository_abc, repository_base, repository_consolidated, repository_postgresql, repository_vault)
-- **Services**: 1 file (service_hello_world)
+- **Services**: 2 files (service_factories, service_hello_world)
 - **Schemas**: 4 files (schema_base, schema_manager, schema_sql_generator, schema_workflow)
-- **Triggers**: 8 files (trigger_db_query, trigger_get_job_status, trigger_health, trigger_http_base, trigger_poison_monitor, trigger_schema_pydantic_deploy, trigger_submit_job, trigger_validation_debug)
-- **Utilities**: 3 files (util_import_validator, util_logger, poison_queue_monitor)
+- **Triggers**: 7 files (trigger_db_query, trigger_get_job_status, trigger_health, trigger_http_base, trigger_poison_monitor, trigger_schema_pydantic_deploy, trigger_submit_job)
+- **Utilities**: 2 files (util_import_validator, util_logger)
 - **Core/Config**: 2 files (function_app, config)
 
 ---
@@ -79,7 +79,6 @@ This document provides a comprehensive index of all files in the Azure Geospatia
 - `trigger_db_query.py` - Database query endpoints (/api/db/*)
 - `trigger_poison_monitor.py` - Poison queue monitoring
 - `trigger_schema_pydantic_deploy.py` - Schema deployment
-- `trigger_validation_debug.py` - Validation debugging
 
 ## ⚙️ **Configuration Files**
 
@@ -171,10 +170,19 @@ This document provides a comprehensive index of all files in the Azure Geospatia
 
 ## 🔧 **Services & Processing**
 
+### **service_factories.py** ⭐ **NEW** ✅ **[HEADER COMPLETE]**
+- **Task handler registry and factory implementation**
+- Implements Robert's implicit lineage pattern for multi-stage workflows
+- TaskRegistry singleton for handler registration via decorators
+- TaskHandlerFactory creates handlers with predecessor data access
+- TaskContext provides automatic lineage tracking (a1b2c3d4-s2-tile_x5_y10 → a1b2c3d4-s1-tile_x5_y10)
+- **Status**: Replaces hardcoded task routing in function_app.py
+
 ### **service_hello_world.py** ✅ **[HEADER COMPLETE]**
 - **Hello World service implementation**
 - Demonstrates service layer patterns
 - Task processing and result generation
+- Now registers handlers via @TaskRegistry decorators
 - **Status**: Implementation for Job→Task architecture
 
 ### **schema_manager.py** ✅ **[HEADER COMPLETE]**
@@ -235,12 +243,6 @@ This document provides a comprehensive index of all files in the Azure Geospatia
 - Two-tier validation (critical deps + app modules)
 - Persistent registry tracking with health checks
 
-### **poison_queue_monitor.py** ✅ **[HEADER COMPLETE]**
-- **Basic poison queue monitoring utility**
-- Failed message detection (stub implementation)
-- Queue health dashboard
-- Currently returns mock data
-- NOTE: Utility for monitoring, not a business service
 
 
 ---
@@ -277,12 +279,6 @@ This document provides a comprehensive index of all files in the Azure Geospatia
 - Repository cleanup achievements (7 September 2025)
 - Factory pattern implementation (7 September 2025)
 - Database monitoring system (3 September 2025)
-
-### **ERROR_HANDLING_PLAN.md** 🔴 **CURRENT PRIORITY**
-- **5-phase error handling implementation**
-- Task failure handling patterns
-- Retry logic and circuit breakers
-- Error categorization strategy
 
 ### **claude_log_access.md** 🔑 **DEPLOYMENT CRITICAL**
 - **Application Insights log access instructions**
@@ -369,11 +365,8 @@ This document provides a comprehensive index of all files in the Azure Geospatia
 - **Database Integration**: PostgreSQL with atomic completion detection
 - **Strong Typing**: Pydantic v2 throughout with schema-driven validation
 
-### **🔴 Current Priority: Error Handling**
-- Implementing error_details parameter passing
-- Task failure tracking and retry logic
-- Stage-level error aggregation
-- See ERROR_HANDLING_PLAN.md for implementation details
+### **🔴 Current Priority**
+- See TODO.md for current development priorities and tasks
 
 ### **webapp_logs.zip**
 - **Archived application logs**
@@ -539,14 +532,13 @@ from core import JobRecord                     # Which core?
 
 ## 📝 **Complete Python File Inventory**
 
-### Alphabetical List (26 files)
+### Alphabetical List (25 files)
 ```
 config.py                         # Core configuration management
 controller_base.py                # Abstract base controller
 controller_factories.py           # JobFactory and TaskFactory
 controller_hello_world.py         # Example controller implementation
 function_app.py                   # Azure Functions entry point
-poison_queue_monitor.py           # Poison queue monitoring utility
 repository_abc.py                 # Repository interfaces
 repository_base.py                # Base repository patterns
 repository_consolidated.py        # Business logic repositories
@@ -564,7 +556,6 @@ trigger_http_base.py              # Base HTTP trigger class
 trigger_poison_monitor.py         # Poison queue endpoint
 trigger_schema_pydantic_deploy.py # Schema deployment endpoint
 trigger_submit_job.py             # Job submission endpoint
-trigger_validation_debug.py       # Validation debug endpoint
 util_import_validator.py          # Import validation system
 util_logger.py                    # Enhanced logging factory
 ```

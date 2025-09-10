@@ -41,7 +41,8 @@ import json
 from datetime import datetime, timezone
 
 import azure.functions as func
-from util_logger import LoggerFactory, ComponentType
+from util_logger import LoggerFactory
+from util_logger import ComponentType, LogLevel, LogContext
 
 
 class BaseHttpTrigger(ABC):
@@ -60,7 +61,7 @@ class BaseHttpTrigger(ABC):
             trigger_name: Name of the trigger for logging (e.g., "submit_job", "health_check")
         """
         self.trigger_name = trigger_name
-        self.logger = LoggerFactory.get_logger(ComponentType.HTTP_TRIGGER, f"HttpTrigger.{trigger_name}")
+        self.logger = LoggerFactory.create_logger(ComponentType.TRIGGER, f"HttpTrigger.{trigger_name}")
     
     # ========================================================================
     # ABSTRACT METHODS - Must be implemented by concrete triggers
@@ -84,7 +85,6 @@ class BaseHttpTrigger(ABC):
             ValueError: For client errors (400)
             PermissionError: For authorization errors (403) 
             FileNotFoundError: For not found errors (404)
-            NotImplementedError: For not implemented errors (501)
             Exception: For internal server errors (500)
         """
         pass
@@ -172,16 +172,6 @@ class BaseHttpTrigger(ABC):
                 error="Not found",
                 message=str(e),
                 status_code=404,
-                request_id=request_id
-            )
-            
-        except NotImplementedError as e:
-            # Not implemented errors (501)
-            self.logger.error(f"🚧 [{self.trigger_name}] Not implemented: {e}")
-            return self._create_error_response(
-                error="Not implemented",
-                message=str(e), 
-                status_code=501,
                 request_id=request_id
             )
             

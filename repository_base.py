@@ -181,8 +181,9 @@ class BaseRepository(ABC):
         try:
             # Try to use the enhanced logger factory if available
             # This provides better integration with Azure monitoring
-            from util_logger import LoggerFactory, ComponentType
-            return LoggerFactory.get_logger(
+            from util_logger import LoggerFactory
+            from util_logger import ComponentType, LogLevel, LogContext
+            return LoggerFactory.create_logger(
                 ComponentType.REPOSITORY,
                 self.__class__.__name__
             )
@@ -324,8 +325,9 @@ class BaseRepository(ABC):
         except ValueError as e:
             # Convert to SchemaValidationError for consistent error handling
             raise SchemaValidationError(
-                type(current_record).__name__,
-                [{"msg": str(e), "loc": ["status_transition"]}]
+                f"Status transition validation failed for {type(current_record).__name__}: {str(e)}",
+                field="status_transition",
+                value=f"{current_record.status} → {new_status}"
             )
     
     def _validate_stage_progression(
@@ -405,12 +407,12 @@ class BaseRepository(ABC):
         
         Task ID Format:
         --------------
-        {job_id}_stage{stage_num}_task{task_index}
+        {job_id[:8]}-s{stage}-{semantic_index}
         
         Example:
         -------
-        Job ID: "a1b2c3d4..." (64-char SHA256)
-        Task ID: "a1b2c3d4..._stage1_task0"
+        Job ID: "a1b2c3d4e5f6g7h8..." (64-char SHA256)
+        Task ID: "a1b2c3d4-s1-greet_0"
         
         Parameters:
         ----------
@@ -431,12 +433,13 @@ class BaseRepository(ABC):
         This validation prevents tasks from being associated with the
         wrong job, which could lead to data leakage or corruption.
         """
-        # Task ID must start with parent job ID
-        if not task_id.startswith(parent_job_id):
+        # Task ID must start with first 8 characters of parent job ID
+        job_id_prefix = parent_job_id[:8]
+        if not task_id.startswith(job_id_prefix):
             raise SchemaValidationError(
                 "TaskRecord",
                 [{
-                    "msg": f"Task ID must start with parent job ID. Got task_id={task_id}, parent_job_id={parent_job_id}",
+                    "msg": f"Task ID must start with job ID prefix (8 chars). Got task_id={task_id}, expected prefix={job_id_prefix}, parent_job_id={parent_job_id[:16]}...",
                     "loc": ["task_id", "parent_job_id"]
                 }]
             )

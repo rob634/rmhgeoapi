@@ -26,9 +26,10 @@ import azure.functions as func
 import json
 import psycopg
 from psycopg import sql
-from datetime import datetime
+from datetime import datetime, timezone
 
-from util_logger import LoggerFactory, ComponentType
+from util_logger import LoggerFactory
+from util_logger import ComponentType, LogLevel, LogContext
 from config import get_config
 from schema_sql_generator import PydanticToSQL
 from schema_base import JobRecord, TaskRecord
@@ -40,7 +41,7 @@ class PydanticSchemaDeployTrigger:
     """
     
     def __init__(self):
-        self.logger = LoggerFactory.get_logger(ComponentType.CONTROLLER, "PydanticDeploy")
+        self.logger = LoggerFactory.create_logger(ComponentType.CONTROLLER, "PydanticDeploy")
         self.config = get_config()
     
     def handle_request(self, req: func.HttpRequest) -> func.HttpResponse:
@@ -115,7 +116,7 @@ class PydanticSchemaDeployTrigger:
                     "triggers_created": 4
                 },
                 "schema_name": schema_name,
-                "generated_at": datetime.utcnow().isoformat(),
+                "generated_at": datetime.now(timezone.utc).isoformat(),
                 "method": "psycopg.sql composition"
             }
             
@@ -157,7 +158,7 @@ class PydanticSchemaDeployTrigger:
                     "triggers": 4  # 2 drops + 2 creates
                 },
                 "deployment_method": "Use POST /api/schema/deploy?confirm=yes",
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": datetime.now(timezone.utc).isoformat()
             }
             
             return func.HttpResponse(
@@ -336,7 +337,7 @@ class PydanticSchemaDeployTrigger:
                         "triggers_created": trigger_count
                     },
                     "verification": verification,
-                    "timestamp": datetime.utcnow().isoformat()
+                    "timestamp": datetime.now(timezone.utc).isoformat()
                 }
                 
                 if errors:
@@ -350,7 +351,7 @@ class PydanticSchemaDeployTrigger:
                 "status": "error",
                 "error": str(e),
                 "message": "Failed to deploy schema with composed statements",
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": datetime.now(timezone.utc).isoformat()
             }
         finally:
             if conn:
@@ -371,7 +372,7 @@ class PydanticSchemaDeployTrigger:
             json.dumps({
                 "status": "error",
                 "error": message,
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": datetime.now(timezone.utc).isoformat()
             }),
             status_code=status_code,
             mimetype="application/json"

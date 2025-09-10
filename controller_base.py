@@ -69,11 +69,12 @@ Author: Azure Geospatial ETL Team
 """
 
 from abc import ABC, abstractmethod
-from datetime import datetime
+from datetime import datetime, timezone
 import hashlib
 import json
 
-from util_logger import LoggerFactory, ComponentType
+from util_logger import LoggerFactory
+from util_logger import ComponentType, LogLevel, LogContext
 from schema_base import (
     JobStatus, TaskStatus, JobRecord, JobQueueMessage
 )
@@ -110,7 +111,7 @@ class BaseController(ABC):
                            f"All controllers must have workflow definitions defined in schema_workflow.py. "
                            f"Error: {e}")
         
-        self.logger = LoggerFactory.get_logger(ComponentType.CONTROLLER, self.__class__.__name__)
+        self.logger = LoggerFactory.create_logger(ComponentType.CONTROLLER, self.__class__.__name__)
         self.logger.info(f"Loaded workflow definition for {self.job_type} with {len(self.workflow_definition.stages)} stages")
 
     # ========================================================================
@@ -202,13 +203,13 @@ class BaseController(ABC):
                 'successful_tasks': 0,
                 'failed_tasks': 0,
                 'success_rate': 0.0,
-                'completed_at': datetime.utcnow().isoformat()
+                'completed_at': datetime.now(timezone.utc).isoformat()
             }
         
         # Count successes and failures
         successful_tasks = sum(
             1 for task in task_results 
-            if task.get('status') == 'completed' or task.get('success', False)
+            if task.get('status') == TaskStatus.COMPLETED.value or task.get('success', False)
         )
         failed_tasks = len(task_results) - successful_tasks
         success_rate = (successful_tasks / len(task_results)) * 100
@@ -229,7 +230,7 @@ class BaseController(ABC):
             'failed_tasks': failed_tasks,
             'success_rate': success_rate,
             'task_results': task_results,
-            'completed_at': datetime.utcnow().isoformat()
+            'completed_at': datetime.now(timezone.utc).isoformat()
         }
     
     def should_advance_stage(
@@ -251,7 +252,7 @@ class BaseController(ABC):
             True if should advance, False if job should fail
         """
         # Don't advance if stage completely failed
-        if stage_results.get('status') == 'failed':
+        if stage_results.get('status') == TaskStatus.FAILED.value:
             return False
         
         # Don't advance if no tasks succeeded
@@ -283,6 +284,54 @@ class BaseController(ABC):
         job_id = hashlib.sha256(hash_input.encode()).hexdigest()
         self.logger.debug(f"Generated job_id {job_id[:12]}... for job_type {self.job_type}")
         return job_id
+
+    def generate_task_id(self, job_id: str, stage: int, semantic_index: str) -> str:
+        """
+        Generate semantic task ID for cross-stage lineage tracking.
+        
+        This is a STAGE-LEVEL operation that belongs in the Controller layer
+        because Controllers orchestrate stages and understand semantic meaning
+        of task indices for cross-stage data flow.
+        
+        Format: {job_id[:8]}-s{stage}-{semantic_index} (URL-safe characters only)
+        
+        Examples:
+            job_id="a1b2c3d4...", stage=1, semantic_index="greet-0" 
+            → "a1b2c3d4-s1-greet-0"
+            
+            job_id="a1b2c3d4...", stage=2, semantic_index="tile-x5-y10"
+            → "a1b2c3d4-s2-tile-x5-y10"
+        
+        Cross-Stage Lineage:
+            Tasks in stage N can automatically reference stage N-1 data by
+            constructing the expected predecessor task ID using the same
+            semantic_index but previous stage number.
+        
+        Args:
+            job_id: Parent job ID (64-char SHA256 hash)
+            stage: Stage number (1-based)
+            semantic_index: Semantic task identifier (URL-safe: hyphens, alphanumeric only)
+            
+        Returns:
+            Deterministic task ID enabling cross-stage lineage tracking
+        """
+        # Sanitize semantic_index to ensure URL-safe characters only
+        # Replace underscores and other problematic chars with hyphens
+        import re
+        safe_semantic_index = re.sub(r'[^a-zA-Z0-9\-]', '-', semantic_index)
+        
+        # Use first 8 chars of job ID for readability while maintaining uniqueness
+        readable_id = f"{job_id[:8]}-s{stage}-{safe_semantic_index}"
+        
+        # Ensure it fits in database field (100 chars max)
+        if len(readable_id) <= 100:
+            return readable_id
+        
+        # Fallback for very long semantic indices (shouldn't happen in practice)
+        import hashlib
+        content = f"{job_id}-{stage}-{safe_semantic_index}"
+        hash_id = hashlib.sha256(content.encode()).hexdigest()
+        return f"{hash_id[:8]}-s{stage}-{hash_id[8:16]}"
 
     def validate_job_parameters(self, parameters: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -376,12 +425,21 @@ class BaseController(ABC):
         """Create and store the initial job record for database storage"""
         from repository_consolidated import RepositoryFactory
         
+        self.logger.debug(f"🔧 Creating job record for job_id: {job_id[:16]}...")
+        self.logger.debug(f"  Job type: {self.job_type}")
+        self.logger.debug(f"  Total stages: {len(self.workflow_definition.stages)}")
+        
         # Store the job record using repository interface
+        self.logger.debug("🏭 Creating repository instances via RepositoryFactory...")
         repos = RepositoryFactory.create_repositories()
+        self.logger.debug("✅ Repositories created successfully")
+        
         job_repo = repos['job_repo']
         task_repo = repos['task_repo']
         completion_detector = repos['completion_detector']
-        job_record = job_repo.create_job(
+        
+        self.logger.debug("📝 Creating job record in database...")
+        job_record = job_repo.create_job_from_params(
             job_type=self.job_type,
             parameters=parameters,
             total_stages=len(self.workflow_definition.stages)
@@ -559,14 +617,14 @@ class BaseController(ABC):
             
             # Count task statuses
             for task in tasks:
-                task_status = task.get('status', 'pending')
-                if task_status == 'completed':
+                task_status = task.get('status', TaskStatus.PENDING.value)
+                if task_status == TaskStatus.COMPLETED.value:
                     stage_progress['completed_tasks'] += 1
                     progress['overall']['completed_tasks'] += 1
-                elif task_status == 'failed':
+                elif task_status == TaskStatus.FAILED.value:
                     stage_progress['failed_tasks'] += 1
                     progress['overall']['failed_tasks'] += 1
-                elif task_status == 'processing':
+                elif task_status == TaskStatus.PROCESSING.value:
                     stage_progress['processing_tasks'] += 1
                     progress['overall']['processing_tasks'] += 1
                 else:
@@ -747,7 +805,7 @@ class BaseController(ABC):
             stage_results[stage_num]['task_results'].append(task_result)
             stage_results[stage_num]['total_tasks'] += 1
             
-            if task_result.get('status') == 'completed':
+            if task_result.get('status') == TaskStatus.COMPLETED.value:
                 stage_results[stage_num]['successful_tasks'] += 1
             else:
                 stage_results[stage_num]['failed_tasks'] += 1
@@ -834,6 +892,16 @@ class BaseController(ABC):
                 previous_stage_results=previous_stage_results
             )
             self.logger.info(f"Created {len(task_definitions)} task definitions for stage {stage}")
+            
+            # DEBUG: Log all task definitions created
+            self.logger.debug(f"🔍 TASK DEFINITIONS CREATED:")
+            for i, task_def in enumerate(task_definitions):
+                self.logger.debug(f"  [{i+1}] Task ID: {task_def.task_id}")
+                self.logger.debug(f"  [{i+1}] Task Type: {task_def.task_type}")
+                self.logger.debug(f"  [{i+1}] Stage: {task_def.stage_number}")
+                self.logger.debug(f"  [{i+1}] Job ID: {task_def.job_id[:16]}...")
+                self.logger.debug(f"  [{i+1}] Parameters: {task_def.parameters}")
+                self.logger.debug(f"  [{i+1}] ---")
         except Exception as e:
             self.logger.error(f"Failed to create stage tasks: {e}")
             raise RuntimeError(f"Failed to create tasks for stage {stage}: {e}")
@@ -875,15 +943,47 @@ class BaseController(ABC):
                 # === STEP 1: CREATE TASK RECORD IN DATABASE ===
                 self.logger.debug(f"💾 Creating task record in database for: {task_def.task_id}")
                 try:
-                    task_record = task_repo.create_task(
+                    # REQUIRED: semantic task_index must be in parameters - no fallbacks
+                    if 'task_index' not in task_def.parameters:
+                        raise ValueError(
+                            f"TaskDefinition missing required 'task_index' parameter. "
+                            f"Controller must provide semantic task index (e.g., 'greet_0', 'tile_x5_y10'). "
+                            f"Found parameters: {list(task_def.parameters.keys())}"
+                        )
+                    
+                    semantic_task_index = task_def.parameters['task_index']
+                    if not isinstance(semantic_task_index, str) or not semantic_task_index.strip():
+                        raise ValueError(
+                            f"TaskDefinition 'task_index' must be non-empty string. "
+                            f"Got: {semantic_task_index} (type: {type(semantic_task_index)})"
+                        )
+                    
+                    # DEBUG: Log task record creation attempt
+                    self.logger.debug(f"🔍 CALLING task_repo.create_task_from_params with:")
+                    self.logger.debug(f"    task_id: {task_def.task_id}")
+                    self.logger.debug(f"    parent_job_id: {task_def.job_id[:16]}...")
+                    self.logger.debug(f"    task_type: {task_def.task_type}")
+                    self.logger.debug(f"    stage: {task_def.stage_number}")
+                    self.logger.debug(f"    task_index: {semantic_task_index}")
+                    self.logger.debug(f"    parameters: {task_def.parameters}")
+                    
+                    task_record = task_repo.create_task_from_params(
+                        task_id=task_def.task_id,  # Use task_id from TaskDefinition (Controller-generated)
                         parent_job_id=task_def.job_id,
                         task_type=task_def.task_type,
                         stage=task_def.stage_number,
-                        task_index=i,
+                        task_index=semantic_task_index,
                         parameters=task_def.parameters
                     )
+                    
+                    # DEBUG: Log task record creation result
                     self.logger.debug(f"✅ Task record created successfully: {task_def.task_id}")
-                    self.logger.debug(f"📊 Task record details: type={task_def.task_type}, stage={task_def.stage_number}, index={i}")
+                    self.logger.debug(f"🔍 RETURNED task_record details:")
+                    self.logger.debug(f"    task_record.task_id: {task_record.task_id}")
+                    self.logger.debug(f"    task_record.parent_job_id: {task_record.parent_job_id[:16]}...")
+                    self.logger.debug(f"    task_record.status: {task_record.status}")
+                    self.logger.debug(f"    task_record.created_at: {task_record.created_at}")
+                    self.logger.debug(f"📊 Task record type: {type(task_record)}, index={i}")
                 except Exception as task_create_error:
                     self.logger.error(f"❌ CRITICAL: Failed to create task record: {task_def.task_id}")
                     self.logger.error(f"❌ Task creation error: {task_create_error}")
@@ -961,11 +1061,21 @@ class BaseController(ABC):
                     self.logger.debug(f"📋 Task message JSON length: {len(message_json)} characters")
                     self.logger.debug(f"📋 Task message preview: {message_json[:200]}...")
                     
-                    queue_client.send_message(message_json)
+                    # DEBUG: Log queue send attempt
+                    self.logger.debug(f"🔍 CALLING queue_client.send_message for: {task_record.task_id}")
+                    self.logger.debug(f"    Queue: {config.task_processing_queue}")
+                    self.logger.debug(f"    Message size: {len(message_json)} bytes")
+                    
+                    send_result = queue_client.send_message(message_json)
+                    
+                    # DEBUG: Log queue send result
                     self.logger.debug(f"✅ Task message sent successfully to queue: {task_record.task_id}")
+                    self.logger.debug(f"🔍 Queue send result: {send_result}")
+                    self.logger.debug(f"📨 Message ID: {getattr(send_result, 'message_id', 'N/A')}")
                     
                     queued_tasks += 1
                     self.logger.info(f"✅ Task {i+1}/{len(task_definitions)} completed successfully: {task_record.task_id}")
+                    self.logger.debug(f"📊 Running totals - Queued: {queued_tasks}, Failed: {failed_tasks}")
                     
                 except Exception as message_send_error:
                     self.logger.error(f"❌ CRITICAL: Failed to send task message to queue: {task_record.task_id}")

@@ -8,6 +8,8 @@ This document defines the core idempotent, queue-based orchestration architectur
 
 ## Core Design Principles
 
+**A MAJESTIC PYRAMID OF STRONG TYPES AND ABSTRACT STRUCTURES ENFORCED THROUGH OBJECT ORIENTED INHERITANCE HEIRARCHY!** (According to Robert...)
+
 ### 1. Idempotency Through Deterministic IDs
 - **Job IDs**: SHA256 hash of (job_type + parameters) ensures identical requests produce identical IDs
 - **Task IDs**: Embed job ID, stage number, and task index for complete context recovery

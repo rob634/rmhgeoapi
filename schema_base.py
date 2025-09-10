@@ -49,7 +49,7 @@ Design Philosophy:
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from enum import Enum
 from typing import Dict, Any, List, Optional, Union
@@ -158,10 +158,6 @@ def validate_task_type(task_type: str) -> str:
 # ID GENERATION UTILITIES
 # ============================================================================
 
-def generate_task_id(job_id: str, stage: int, task_index: int) -> str:
-    """Generate hierarchical task ID"""
-    return f"{job_id[:8]}:{stage:02d}:{task_index:04d}"
-
 def generate_job_id(job_type: str, parameters: Dict[str, Any]) -> str:
     """
     Generate deterministic job ID from job type and parameters.
@@ -213,6 +209,48 @@ class JobRecord(BaseModel):
     @classmethod
     def validate_job_type_format(cls, v):
         return validate_job_type(v)
+    
+    def can_transition_to(self, new_status: 'JobStatus') -> bool:
+        """
+        Validate job status transitions based on ARCHITECTURE_CORE.md state machine.
+        
+        Jobs cycle between QUEUED and PROCESSING for stage advancement:
+        - QUEUED ⇄ PROCESSING (multi-stage cycling)
+        - PROCESSING → COMPLETED/FAILED (terminal states)
+        
+        Args:
+            new_status: The proposed new status
+            
+        Returns:
+            True if transition is valid, False otherwise
+        """
+        # Normalize current status to enum (handles both string and enum values from database)
+        if isinstance(self.status, str):
+            current = JobStatus(self.status)
+        else:
+            current = self.status
+        
+        # Allow cycling between QUEUED and PROCESSING for stage advancement
+        if current == JobStatus.QUEUED and new_status == JobStatus.PROCESSING:
+            return True
+        if current == JobStatus.PROCESSING and new_status == JobStatus.QUEUED:
+            return True  # Stage advancement re-queuing
+            
+        # Allow terminal transitions from PROCESSING
+        if current == JobStatus.PROCESSING and new_status in [JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELLED]:
+            return True
+            
+        # Allow error recovery transitions from terminal states
+        if current in JobStatus.terminal_states():
+            return True  # Can restart from any terminal state
+            
+        # Allow PENDING transitions (dependency management)
+        if current == JobStatus.PENDING and new_status in [JobStatus.QUEUED, JobStatus.PROCESSING]:
+            return True
+        if current in [JobStatus.QUEUED, JobStatus.PROCESSING] and new_status == JobStatus.PENDING:
+            return True
+            
+        return False
     
     class Config:
         use_enum_values = True
@@ -271,6 +309,43 @@ class TaskRecord(BaseModel):
     @classmethod
     def validate_task_type_format(cls, v):
         return validate_task_type(v)
+    
+    def can_transition_to(self, new_status: 'TaskStatus') -> bool:
+        """
+        Validate task status transitions based on simple lifecycle.
+        
+        Tasks follow linear progression (no cycling back):
+        - QUEUED → PROCESSING → COMPLETED/FAILED/SKIPPED
+        
+        Args:
+            new_status: The proposed new status
+            
+        Returns:
+            True if transition is valid, False otherwise
+        """
+        # Normalize current status to enum (handles both string and enum values from database)
+        if isinstance(self.status, str):
+            current = TaskStatus(self.status)
+        else:
+            current = self.status
+        
+        # Standard task lifecycle
+        if current == TaskStatus.QUEUED and new_status == TaskStatus.PROCESSING:
+            return True
+        if current == TaskStatus.PROCESSING and new_status in [TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.SKIPPED]:
+            return True
+            
+        # Allow retry transitions from terminal states
+        if current in TaskStatus.terminal_states() and new_status in [TaskStatus.QUEUED, TaskStatus.PROCESSING, TaskStatus.RETRYING]:
+            return True  # Can restart from terminal states
+            
+        # Allow RETRYING transitions
+        if current == TaskStatus.RETRYING and new_status in [TaskStatus.QUEUED, TaskStatus.PROCESSING]:
+            return True
+        if current in [TaskStatus.FAILED, TaskStatus.PROCESSING] and new_status == TaskStatus.RETRYING:
+            return True
+            
+        return False
     
     class Config:
         use_enum_values = True
@@ -863,19 +938,19 @@ class BaseTask(BaseModel, ABC):
     
     def update_heartbeat(self) -> None:
         """Update heartbeat timestamp"""
-        self.heartbeat = datetime.utcnow()
+        self.heartbeat = datetime.now(timezone.utc)
     
     def mark_completed(self, result_data: Dict[str, Any]) -> None:
         """Mark task as completed with results"""
         self.status = TaskStatus.COMPLETED
         self.result_data = result_data
-        self.updated_at = datetime.utcnow()
+        self.updated_at = datetime.now(timezone.utc)
     
     def mark_failed(self, error: str) -> None:
         """Mark task as failed with error"""
         self.status = TaskStatus.FAILED
         self.error_details = error
-        self.updated_at = datetime.utcnow()
+        self.updated_at = datetime.now(timezone.utc)
     
     class Config:
         validate_assignment = True

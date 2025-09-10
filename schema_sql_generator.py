@@ -73,8 +73,9 @@ class PydanticToSQL:
         
         # Setup logger for debugging
         try:
-            from util_logger import LoggerFactory, ComponentType
-            self.logger = LoggerFactory.get_logger(ComponentType.SERVICE, "SQLGenerator")
+            from util_logger import LoggerFactory
+            from util_logger import ComponentType, LogLevel, LogContext
+            self.logger = LoggerFactory.create_logger(ComponentType.SERVICE, "SQLGenerator")
         except ImportError:
             # Fallback to simple logging for standalone testing
             import logging
@@ -443,7 +444,10 @@ BEGIN
             ELSE 'completed'::{schema}.task_status
         END,
         result_data = p_result_data,
-        error_details = p_error_details,
+        error_details = CASE 
+            WHEN p_error_details IS NULL THEN NULL
+            ELSE to_jsonb(p_error_details)
+        END,
         updated_at = NOW()
     WHERE 
         task_id = p_task_id 

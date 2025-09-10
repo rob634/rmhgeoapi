@@ -302,14 +302,15 @@ class RepositoryProtocol(Protocol):
 # ============================================================================
 
 """
-Example implementation:
+Example implementation in repository_postgresql.py:
 
+# Import the interfaces from this module
 from repository_abc import (
     IJobRepository, ITaskRepository, ICompletionDetector,
     ParamNames, StageAdvancementResult, TaskCompletionResult
 )
 
-class PostgreSQLRepository(IJobRepository, ITaskRepository, ICompletionDetector):
+class PostgreSQLJobRepository(IJobRepository):
     
     def advance_job_stage(
         self,

@@ -225,17 +225,37 @@ class AppConfig(BaseModel):
     @property
     def postgis_connection_string(self) -> str:
         """PostgreSQL connection string with or without password"""
+        import logging
+        from urllib.parse import quote_plus
+        logger = logging.getLogger(__name__)
+        
+        # Log the components being used
+        logger.debug(f"🔍 Building PostgreSQL connection string:")
+        logger.debug(f"  Host: {self.postgis_host}")
+        logger.debug(f"  Port: {self.postgis_port}")
+        logger.debug(f"  User: {self.postgis_user}")
+        logger.debug(f"  Database: {self.postgis_database}")
+        logger.debug(f"  Password configured: {bool(self.postgis_password)}")
+        
         if self.postgis_password:
-            return (
-                f"postgresql://{self.postgis_user}:{self.postgis_password}"
+            # URL-encode the password to handle special characters like @
+            encoded_password = quote_plus(self.postgis_password)
+            conn_str = (
+                f"postgresql://{self.postgis_user}:{encoded_password}"
                 f"@{self.postgis_host}:{self.postgis_port}/{self.postgis_database}"
             )
+            # Log connection string with password masked
+            logger.debug(f"  Connection string: postgresql://{self.postgis_user}:****@{self.postgis_host}:{self.postgis_port}/{self.postgis_database}")
+            logger.debug(f"  Password contains special characters: {'@' in self.postgis_password}")
         else:
             # Managed identity or no password authentication
-            return (
+            conn_str = (
                 f"postgresql://{self.postgis_user}"
                 f"@{self.postgis_host}:{self.postgis_port}/{self.postgis_database}"
             )
+            logger.debug(f"  Connection string: {conn_str}")
+        
+        return conn_str
     
     # ========================================================================
     # Validation

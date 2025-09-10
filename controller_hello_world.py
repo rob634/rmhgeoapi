@@ -24,12 +24,12 @@ proper workflow definition and factory patterns.
 This is the reference implementation for all new controllers, showing:
 - Decorator-based registration with JobRegistry
 - WorkflowDefinition with validated stages
-- TaskFactory for bulk task creation
+- BaseController.generate_task_id() for semantic task ID generation
 - Proper stage advancement and result aggregation
 """
 
 from typing import List, Dict, Any, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 
 from controller_base import BaseController
 from schema_base import (
@@ -40,8 +40,9 @@ from schema_base import (
     TaskResult,
     TaskStatus
 )
-from controller_factories import TaskFactory
-from util_logger import LoggerFactory, ComponentType
+# TaskFactory import removed - using BaseController.generate_task_id() instead
+from util_logger import LoggerFactory
+from util_logger import ComponentType, LogLevel, LogContext
 
 
 # ============================================================================
@@ -108,7 +109,7 @@ class HelloWorldController(BaseController):
         Note: Workflow is injected by the decorator, not defined here.
         """
         super().__init__()
-        self.logger = LoggerFactory.get_logger(
+        self.logger = LoggerFactory.create_logger(
             ComponentType.CONTROLLER, 
             "HelloWorldController"
         )
@@ -122,15 +123,15 @@ class HelloWorldController(BaseController):
         """
         return "hello_world"
     
-    def validate_job_parameters(self, parameters: Dict[str, Any]) -> bool:
+    def validate_job_parameters(self, parameters: Dict[str, Any]) -> Dict[str, Any]:
         """
         Validate HelloWorld job parameters.
         
         Args:
-            parameters: Must contain 'n' (number of tasks) and 'name' (greeting target)
+            parameters: Must contain 'n' (number of tasks) and optionally 'name' (greeting target)
             
         Returns:
-            bool: True if valid
+            Dict[str, Any]: Validated and normalized parameters
             
         Raises:
             ValueError: If parameters are invalid
@@ -142,10 +143,19 @@ class HelloWorldController(BaseController):
         if not isinstance(n, int) or n < 1 or n > 100:
             raise ValueError("Parameter 'n' must be an integer between 1 and 100")
         
-        if 'name' not in parameters:
-            parameters['name'] = 'World'  # Default value
+        # Create normalized parameters dictionary
+        validated_params = {
+            'n': n,
+            'name': parameters.get('name', 'World')  # Default to 'World'
+        }
         
-        return True
+        # Preserve any additional parameters like 'message'
+        for key, value in parameters.items():
+            if key not in validated_params and key not in ['dataset_id', 'resource_id', 'version_id', 'system']:
+                validated_params[key] = value
+        
+        self.logger.info(f"✅ Validated HelloWorld job: n={n}, name={validated_params['name']}")
+        return validated_params
     
     def create_stage_tasks(
         self,
@@ -175,7 +185,7 @@ class HelloWorldController(BaseController):
             self.logger.info(f"Creating {n} greeting tasks for job {job_id[:8]}")
             
             for i in range(n):
-                task_id = TaskFactory.generate_task_id(job_id, stage_number, f"greet_{i}")
+                task_id = self.generate_task_id(job_id, stage_number, f"greet-{i}")
                 
                 tasks.append(TaskDefinition(
                     task_id=task_id,
@@ -199,7 +209,7 @@ class HelloWorldController(BaseController):
             self.logger.info(f"Creating {n} reply tasks for job {job_id[:8]}")
             
             for i in range(n):
-                task_id = TaskFactory.generate_task_id(job_id, stage_number, f"reply_{i}")
+                task_id = self.generate_task_id(job_id, stage_number, f"reply-{i}")
                 
                 # Get greeting from previous stage if available
                 greeting = "Hello"
@@ -218,7 +228,7 @@ class HelloWorldController(BaseController):
                         'task_number': i,
                         'original_greeting': greeting,
                         'reply': f"World replies to: {greeting}",
-                        'parent_task_id': TaskFactory.generate_task_id(
+                        'parent_task_id': self.generate_task_id(
                             job_id, 1, f"greet_{i}"
                         )  # Reference to corresponding greeting task
                     }
@@ -264,7 +274,7 @@ class HelloWorldController(BaseController):
                 'failed': len(failed),
                 'greetings': greetings,
                 'execution_time': sum(t.execution_time_seconds for t in task_results),
-                'timestamp': datetime.utcnow().isoformat()
+                'timestamp': datetime.now(timezone.utc).isoformat()
             }
             
         elif stage_number == 2:
@@ -281,7 +291,7 @@ class HelloWorldController(BaseController):
                 'failed': len(failed),
                 'replies': replies,
                 'execution_time': sum(t.execution_time_seconds for t in task_results),
-                'timestamp': datetime.utcnow().isoformat()
+                'timestamp': datetime.now(timezone.utc).isoformat()
             }
         
         return {
@@ -346,7 +356,7 @@ class HelloWorldController(BaseController):
             'total_stages': len(context.stage_results) if hasattr(context, 'stage_results') else 0,
             'stage_results': context.stage_results if hasattr(context, 'stage_results') else {},
             'final_status': 'completed',
-            'completed_at': datetime.utcnow().isoformat()
+            'completed_at': datetime.now(timezone.utc).isoformat()
         }
 
 

@@ -41,6 +41,7 @@ Author: Azure Geospatial ETL Team
 from typing import Dict, Any, List
 import os
 import sys
+from datetime import datetime, timezone
 
 import azure.functions as func
 from trigger_http_base import SystemMonitoringTrigger
@@ -104,12 +105,11 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
         # Key Vault disabled - using environment variables only
         # vault_health = self._check_vault_configuration()
         # health_data["components"]["vault"] = vault_health
-        from datetime import datetime
         health_data["components"]["vault"] = {
             "component": "vault", 
             "status": "disabled",
             "details": {"message": "Key Vault disabled - using environment variables only"},
-            "checked_at": datetime.utcnow().isoformat() + "Z"
+            "checked_at": datetime.now(timezone.utc).isoformat()
         }
         
         # Check database configuration
@@ -515,7 +515,7 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                                     # Set search_path and execute function in separate transactions
                                     if func_name == 'complete_task_and_check_stage':
                                         cur.execute(f"SET search_path TO {config.app_schema}, public")
-                                        cur.execute(f"SELECT task_updated, is_last_task_in_stage, job_id, stage_number, remaining_tasks FROM {config.app_schema}.complete_task_and_check_stage('test_nonexistent_task')")
+                                        cur.execute(f"SELECT task_updated, is_last_task_in_stage, job_id, stage_number, remaining_tasks FROM {config.app_schema}.complete_task_and_check_stage('test_nonexistent_task', 'test_job_id', 1)")
                                     elif func_name == 'advance_job_stage':
                                         cur.execute(f"SET search_path TO {config.app_schema}, public") 
                                         cur.execute(f"SELECT job_updated, new_stage, is_final_stage FROM {config.app_schema}.advance_job_stage('test_nonexistent_job', 1)")

@@ -32,7 +32,7 @@ can be instantiated and provide consistent task ID generation.
 import hashlib
 import importlib
 from typing import List, Dict, Any, Optional, Tuple, Type
-from datetime import datetime
+from datetime import datetime, timezone
 
 from controller_base import BaseController
 from schema_base import (
@@ -240,7 +240,7 @@ class TaskFactory:
                 task_index=task_index,
                 parameters=params,
                 parent_task_id=parent_task_id,
-                timestamp=datetime.utcnow()
+                timestamp=datetime.now(timezone.utc)
             )
             
             task_records.append(record)
@@ -255,18 +255,31 @@ class TaskFactory:
         task_index: str
     ) -> str:
         """
-        Generate deterministic task ID.
+        Generate deterministic task ID with implicit lineage tracking.
         
-        Creates a unique task ID that embeds job context for easy debugging
-        and correlation. Can use either readable format or hash-based.
+        Creates a unique task ID that embeds job context and enables implicit
+        data flow between stages. The ID structure allows tasks in stage N to
+        automatically locate their predecessor data from stage N-1 using the
+        same semantic index.
+        
+        Robert's Lineage Pattern:
+        - Stage 1: a1b2c3d4-s1-tile_x12_y3 writes result_data
+        - Stage 2: a1b2c3d4-s2-tile_x12_y3 reads s1 predecessor by ID pattern
+        - Stage 3: a1b2c3d4-s3-tile_x12_y3 reads s2 predecessor by ID pattern
+        
+        This eliminates explicit handoff mechanisms while maintaining clear
+        data lineage for parallel processing of tiles/chunks.
         
         Args:
             job_id: Parent job ID (SHA256)
-            stage_number: Stage number
-            task_index: Task index (can be semantic like "tile_x5_y10")
+            stage_number: Stage number (1-based)
+            task_index: Semantic index (e.g., "tile_x5_y10", "chunk_42")
+                       Must be consistent across stages for lineage
             
         Returns:
-            Deterministic task ID
+            Deterministic task ID like "a1b2c3d4-s2-tile_x5_y10"
+            
+        Author: Robert and Geospatial Claude Legion
         """
         # Option 1: Readable format (easier debugging)
         # Shows first 8 chars of job ID for correlation
@@ -324,7 +337,7 @@ class TaskFactory:
                 task_index=str(defn.parameters.get('task_index', '0')),
                 parameters=defn.parameters,
                 retry_count=defn.retry_count,
-                timestamp=datetime.utcnow()
+                timestamp=datetime.now(timezone.utc)
             )
             
             task_records.append(record)
@@ -362,7 +375,7 @@ class TaskFactory:
             stage=next_stage,
             parameters=parameters,
             stage_results=stage_results,
-            timestamp=datetime.utcnow()
+            timestamp=datetime.now(timezone.utc)
         )
 
 

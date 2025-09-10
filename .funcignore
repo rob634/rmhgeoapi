@@ -1,68 +1,112 @@
+# ============================================================================
+# Azure Functions Ignore File
+# Only root-level Python files should be deployed
+# All subdirectories and non-essential files are excluded
+# ============================================================================
+
+# Git and IDE
 .git*
 .vscode*
+.idea/
+
+# Azure local storage emulator
 __azurite_db*__.json
 __blobstorage__
 __queuestorage__
+
+# Local settings and environment
 local.settings.json
-.venv
+local.settings.example.json
+.env
+.env.*
+
+# Python virtual environments
+.venv/
 venv/
 env/
-.env
+ENV/
+.Python
+
+# Python cache and compiled files
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
-.Python
-# Test files and directories
-*test*
-test*
-*Test*
-Test*
+*.so
+.pytest_cache/
+.coverage
+htmlcov/
+
+# ============================================================================
+# EXCLUDE ALL SUBDIRECTORIES (only root files should deploy)
+# ============================================================================
+*/
+reference/
+ancient_code/
+scripts/
 tests/
 testing/
-.claude* 
-old_reference*
+backup/
+old/
+temp/
+tmp/
 
-# Local testing and utility scripts (IMPORTANT - these MUST be excluded!)
-direct_table_query.py
-query_jobs_table.py
-manual_process_job.py
-update_job_status.py
-test_api_local.py
+# ============================================================================
+# LOCAL-ONLY FILES (development, testing, utilities)
+# ============================================================================
+
+# Test files (be specific, not using wildcards)
+test_*.py
+*_test.py
 test_api.py
+test_api_local.py
 test_container_list.py
 
-# Debug, example, and deployment scripts
-debug_completion.py
-debug_queue_processing.py
-deploy_schema.py
-EXAMPLE_HTTP_TRIGGER_USAGE.py
+# Local utility scripts
+local_scripts/
+local_scripts*
 
-# Documentation files
+# Example and reference files
+EXAMPLE_*.py
+example_*.py
+
+# Backup files
+*.backup
+*.bak
+*.old
+*_backup.py
+*_old.py
+
+# ============================================================================
+# DOCUMENTATION (not needed in runtime)
+# ============================================================================
 *.md
-README.md
-LOGGING_IMPROVEMENTS.md
-MANAGED_IDENTITY_CONFIG.md
-DEBUG_POISON_QUEUE.md
-TESTING.md
-QUEUE_TRIGGER_FIX.md
+LICENSE
+NOTICE
 
-# Local settings examples
-local.settings.example.json
 
-# Shell scripts
+
+# ============================================================================
+# OTHER EXCLUDED FILE TYPES
+# ============================================================================
 *.sh
-
-
-# Claude context file with sensitive info
-CLAUDE.md
-claude.md
-
-ancient_code/
-ancient_code*
-surprise*
-scripts/
-
+*.bat
+*.ps1
 *.zip
+*.tar
+*.gz
+*.log
+*.csv
+*.xlsx
+*.json.example
 
-reference/
+# Claude-specific files
+.claude*
+CLAUDE*
+claude*
+
+# Surprise or test files
+surprise*
+
+# SQL files (not needed at runtime)
+*.sql

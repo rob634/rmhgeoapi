@@ -38,10 +38,11 @@ import psycopg
 from typing import Dict, Any, List
 from psycopg import sql
 
-from util_logger import LoggerFactory, ComponentType
+from util_logger import LoggerFactory
+from util_logger import ComponentType, LogLevel, LogContext
 from config import get_config
 
-logger = LoggerFactory.get_logger(ComponentType.SERVICE, "SchemaManager")
+logger = LoggerFactory.create_logger(ComponentType.SERVICE, "SchemaManager")
 
 
 class SchemaManagementError(Exception):
@@ -523,95 +524,7 @@ class SchemaManager:
             logger.error(f"❌ Failed to execute Pydantic-generated schema: {e}")
             raise SchemaManagementError(f"Pydantic schema execution failed: {e}")
     
-    def _execute_functions_only(self, conn: psycopg.Connection) -> bool:
-        """Execute only the functions from the dedicated functions file.
-        
-        This reads the functions_only.sql file and creates the required functions,
-        avoiding table creation that would fail if tables already exist.
-        
-        Returns:
-            True if function execution successful
-            
-        Raises:
-            SchemaManagementError: If function execution fails
-        """
-        try:
-            with conn.cursor() as cur:
-                # Read the functions-only SQL file
-                try:
-                    with open('functions_only.sql', 'r') as f:
-                        functions_sql = f.read()
-                except FileNotFoundError:
-                    raise SchemaManagementError("functions_only.sql file not found")
-                
-                # Set search path first
-                cur.execute(f'SET search_path TO {self.app_schema}, public;')
-                
-                # Replace schema references
-                functions_sql = functions_sql.replace('FROM app.jobs', f'FROM {self.app_schema}.jobs')
-                functions_sql = functions_sql.replace('FROM app.tasks', f'FROM {self.app_schema}.tasks')
-                functions_sql = functions_sql.replace('UPDATE app.jobs', f'UPDATE {self.app_schema}.jobs')
-                functions_sql = functions_sql.replace('UPDATE app.tasks', f'UPDATE {self.app_schema}.tasks')
-                
-                # Execute the functions SQL
-                cur.execute(functions_sql)
-                conn.commit()
-                
-                logger.info(f"✅ Successfully executed functions-only for schema: {self.app_schema}")
-                return True
-                
-        except Exception as e:
-            logger.error(f"❌ Failed to execute functions-only: {e}")
-            raise SchemaManagementError(f"Functions execution failed: {e}")
     
-    def force_create_functions(self) -> Dict[str, Any]:
-        """Force creation of PostgreSQL functions without table validation.
-        
-        This bypasses all table checks and directly creates the required functions.
-        Use this when tables exist but function deployment is blocked by validation issues.
-        
-        Returns:
-            Dictionary with function creation results
-        """
-        logger.info(f"🔧 Force creating functions for schema: {self.app_schema}")
-        
-        try:
-            with psycopg.connect(self.connection_string) as conn:
-                # Directly execute functions only
-                functions_executed = self._execute_functions_only(conn)
-                
-                if functions_executed:
-                    # Verify functions were created
-                    with conn.cursor() as cur:
-                        cur.execute("""
-                            SELECT routine_name
-                            FROM information_schema.routines
-                            WHERE routine_schema = %s AND routine_name = ANY(%s)
-                        """, (self.app_schema, ['complete_task_and_check_stage', 'advance_job_stage', 'check_job_completion']))
-                        
-                        created_functions = [row[0] for row in cur.fetchall()]
-                        
-                        return {
-                            'success': True,
-                            'functions_created': created_functions,
-                            'functions_count': len(created_functions),
-                            'message': f"Successfully created {len(created_functions)} functions"
-                        }
-                else:
-                    return {
-                        'success': False,
-                        'error': 'Function execution failed',
-                        'functions_created': []
-                    }
-                    
-        except Exception as e:
-            error_msg = f"Force function creation failed: {e}"
-            logger.error(f"❌ {error_msg}")
-            return {
-                'success': False,
-                'error': error_msg,
-                'functions_created': []
-            }
 
 
 # Factory for creating SchemaManager instances

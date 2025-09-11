@@ -2,15 +2,15 @@
 
 **Azure Geospatial ETL Pipeline - File Catalog & Architecture Alignment**
 
-*Updated: 2025-09-09*
+*Updated: 2025-09-10*
 
 ## 📁 File Overview
 
 This document provides a comprehensive index of all files in the Azure Geospatial ETL Pipeline, organized by architectural layer. It serves as a companion to ARCHITECTURE_CORE.md, mapping implementation files to the architecture patterns described there.
 
-**Total Python Files: 25**
+**Total Python Files: 26**
 - **Controllers**: 3 files (controller_base, controller_factories, controller_hello_world)
-- **Repositories**: 5 files (repository_abc, repository_base, repository_consolidated, repository_postgresql, repository_vault)
+- **Repositories**: 6 files (repository_abc, repository_base, repository_factory, repository_jobs_tasks, repository_postgresql, repository_vault)
 - **Services**: 2 files (service_factories, service_hello_world)
 - **Schemas**: 4 files (schema_base, schema_manager, schema_sql_generator, schema_workflow)
 - **Triggers**: 7 files (trigger_db_query, trigger_get_job_status, trigger_health, trigger_http_base, trigger_poison_monitor, trigger_schema_pydantic_deploy, trigger_submit_job)
@@ -54,7 +54,7 @@ This document provides a comprehensive index of all files in the Azure Geospatia
 
 #### **`repository_`** - Data Access Layer
 **Purpose**: Storage abstraction, data persistence, CRUD operations
-**Examples**: `repository_consolidated.py`, `repository_postgresql.py`, `repository_abc.py`
+**Examples**: `repository_jobs_tasks.py`, `repository_factory.py`, `repository_postgresql.py`, `repository_abc.py`
 
 #### **`service_`** - Business Logic Layer
 **Purpose**: Domain-specific business operations, processing logic
@@ -205,11 +205,17 @@ This document provides a comprehensive index of all files in the Azure Geospatia
 - Atomic operations for race condition prevention
 - Connection pooling and transaction support
 
-### **repository_consolidated.py** ✅ **[HEADER COMPLETE]**
-- **Extended repository with business logic**
+### **repository_jobs_tasks.py** ✅ **[HEADER COMPLETE]**
+- **Business logic repository for job and task management**
 - Inherits from PostgreSQL base classes
-- Job/Task/CompletionDetector implementations
-- RepositoryFactory for instance creation
+- JobRepository, TaskRepository, CompletionDetector implementations
+- Renamed from repository_consolidated.py for clarity
+
+### **repository_factory.py** ⭐ **NEW** ✅ **[HEADER COMPLETE]**
+- **Central factory for creating all repository instances**
+- Extracted from repository_consolidated.py for clean separation
+- Single point for repository instantiation
+- Future support for blob, cosmos, redis repositories
 
 ### **repository_abc.py** ✅ **[HEADER COMPLETE]**
 - **Single source of truth for repository signatures**
@@ -532,7 +538,7 @@ from core import JobRecord                     # Which core?
 
 ## 📝 **Complete Python File Inventory**
 
-### Alphabetical List (25 files)
+### Alphabetical List (26 files)
 ```
 config.py                         # Core configuration management
 controller_base.py                # Abstract base controller
@@ -541,7 +547,8 @@ controller_hello_world.py         # Example controller implementation
 function_app.py                   # Azure Functions entry point
 repository_abc.py                 # Repository interfaces
 repository_base.py                # Base repository patterns
-repository_consolidated.py        # Business logic repositories
+repository_factory.py             # Central repository factory
+repository_jobs_tasks.py         # Job and task repositories
 repository_postgresql.py          # PostgreSQL implementation
 repository_vault.py               # Key Vault integration (disabled)
 schema_base.py                    # Core Pydantic models
@@ -562,4 +569,4 @@ util_logger.py                    # Enhanced logging factory
 
 ---
 
-*This index reflects the current state of the Azure Geospatial ETL Pipeline as of September 9, 2025. For architecture details, see ARCHITECTURE_CORE.md. For current priorities, see TODO.md and CLAUDE.md.*
+*This index reflects the current state of the Azure Geospatial ETL Pipeline as of September 10, 2025. For architecture details, see ARCHITECTURE_CORE.md. For current priorities, see TODO.md and CLAUDE.md.*

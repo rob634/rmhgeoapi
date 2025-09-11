@@ -1,6 +1,7 @@
 # Queue-Based Orchestration Architecture
 
-**Date: September 7, 2025**
+**Date: September 10, 2025**  
+**Version: 2.0**
 
 ## Executive Summary
 
@@ -88,12 +89,25 @@ This document defines the core idempotent, queue-based orchestration architectur
 - Prevent race conditions in distributed execution
 - Examples: `complete_task_and_check_stage()`, `update_job_status()`
 
+**Repository Architecture (Updated Sept 10):**
+- **repository_abc.py**: Interface definitions and contracts
+- **repository_base.py**: Pure abstract base with shared validation
+- **repository_postgresql.py**: PostgreSQL-specific implementation
+- **repository_jobs_tasks.py**: Business logic for job/task management
+- **repository_factory.py**: Central factory for all repository instances
+
 #### Services Layer (Stateless Business Logic)
 **Purpose**: Execute business logic without state persistence
 - Process geospatial data transformations
 - Implement domain rules and calculations
 - Call repositories for any state changes
 - Return results for repository persistence
+
+**Service Pattern (Task Handlers):**
+- Services register handlers via `@TaskRegistry.instance().register(task_type)`
+- TaskHandlerFactory creates handlers with lineage context
+- Handlers return TaskResult for framework processing
+- Auto-discovery of service modules for registration
 
 #### Triggers Layer (Entry Points)
 **Purpose**: Handle external events and route to controllers
@@ -254,8 +268,47 @@ class ProcessRasterController(BaseController):
         pass
 
 # Factory usage in submit_job endpoint
+from controller_factories import JobFactory
+
 controller = JobFactory.create_controller(job_type)
 workflow = JobFactory.get_workflow(job_type)
+
+# Controllers are auto-registered via decorator at import time
+import controller_hello_world  # Triggers @JobRegistry.register()
+```
+
+## Factory Patterns
+
+### Repository Factory (NEW - Sept 10)
+```python
+from repository_factory import RepositoryFactory
+
+# Central factory for all repository types
+repos = RepositoryFactory.create_repositories()
+job_repo = repos['job_repo']
+task_repo = repos['task_repo']
+completion_detector = repos['completion_detector']
+
+# Future extensibility
+# blob_repo = RepositoryFactory.create_blob_repository()
+# cosmos_repo = RepositoryFactory.create_cosmos_repository()
+```
+
+### Task Handler Factory
+```python
+from service_factories import TaskHandlerFactory, TaskRegistry
+
+# Register handler via decorator
+@TaskRegistry.instance().register("process_tile")
+def create_tile_handler():
+    def handler(params: Dict, context: TaskContext) -> Dict:
+        # Business logic here
+        return results
+    return handler
+
+# Factory creates handler with context
+handler = TaskHandlerFactory.get_handler(task_message, task_repo)
+result = handler(task_params)
 ```
 
 ## Task Factory
@@ -355,8 +408,9 @@ class ProcessRasterController(BaseController):
 4. **Next Stage Queuing**: New Jobs Queue message created with next stage number
 
 ### Inter-Stage Task Communication
+
+#### Current Pattern: Explicit Handoff
 ```python
-# Explicit task handoff pattern
 # Stage 1, Task 5 creates results needed by Stage 2, Task 5
 task_1_5.next_stage_params = {
     "tile_boundaries": [100, 200, 300, 400],
@@ -365,6 +419,15 @@ task_1_5.next_stage_params = {
 
 # Stage 2, Task 5 retrieves handoff data
 handoff = get_task_record(f"{job_id}-1-5").next_stage_params
+```
+
+#### Future Pattern: Automatic Lineage (Planned)
+```python
+# Tasks with same semantic ID automatically access predecessor
+# Stage 2: task "abc123-s2-tile_x5_y10" auto-loads from "abc123-s1-tile_x5_y10"
+if context.has_predecessor():
+    predecessor_data = context.get_predecessor_result()
+    # Use predecessor's output paths, metadata, etc.
 ```
 
 ## Queue Message Schemas
@@ -484,17 +547,60 @@ class TaskResult(BaseModel):
 - ✅ Queue message structures
 - ✅ Base controller and task classes
 - ✅ Pydantic validation models
+- ✅ Job type registry with decorators (JobRegistry, JobFactory)
+- ✅ Repository factory pattern (repository_factory.py)
+- ✅ Task handler registration pattern (TaskRegistry)
+- ✅ Controller factory with auto-registration
 
 ### In Progress
-- 🔧 Job type registry with decorators
-- 🔧 Workflow definition schemas
-- 🔧 Task ID generation logic
+- 🔧 TaskResult schema alignment (service_factories.py mismatch)
+- 🔧 Service auto-discovery mechanism
+- 🔧 Cross-stage lineage system for task data access
+
+### Current Issues (Sept 10)
+- ⚠️ TaskResult field mismatch causing validation errors
+- ⚠️ Service modules require manual import for handler registration
 
 ### Future Work
-- 📋 Stage advancement implementation
-- 📋 Task handoff mechanism
-- 📋 Result aggregation logic
+- 📋 Complete stage advancement implementation
+- 📋 Cross-stage lineage system for automatic predecessor data
+- 📋 Result aggregation logic improvements
 - 📋 Job completion webhooks
+- 📋 Circuit breaker pattern for external services
+- 📋 Partial success tracking and recovery
+
+## Key Architectural Patterns (Updated Sept 10)
+
+### Registry Pattern
+- **JobRegistry**: Singleton registry for controller registration
+- **TaskRegistry**: Singleton registry for service handler registration
+- **Auto-registration**: Decorators register at import time
+- **Factory access**: Factories use registries to create instances
+
+### Factory Pattern Hierarchy
+```
+RepositoryFactory → Creates all repository instances
+    ├── JobRepository
+    ├── TaskRepository
+    └── CompletionDetector
+
+JobFactory → Creates controllers from registry
+    └── Uses JobRegistry to find controller class
+
+TaskHandlerFactory → Creates handlers with context
+    └── Uses TaskRegistry to find handler factory
+```
+
+### No Backward Compatibility Philosophy
+- **Clean breaks**: No fallback logic for deprecated patterns
+- **Explicit errors**: Clear migration requirements in error messages
+- **Fast iteration**: No legacy code slowing development
+- **Quality enforcement**: Errors force proper architectural compliance
+
+### Import Organization
+- **Fast failure**: All imports at top of files
+- **Manual registration**: Service modules need explicit import (temporary)
+- **Future**: Auto-discovery mechanism for service modules
 
 ## Summary
 
@@ -506,3 +612,24 @@ This architecture provides a robust, scalable foundation for geospatial ETL proc
 - **Modern Python patterns** with decorators and type safety
 
 The system is designed to handle massive parallel workloads (50GB+ rasters) while maintaining data consistency and providing clear operational visibility.
+
+## Current Deployment Status (Sept 10)
+
+### Production Environment
+- **Function App**: rmhgeoapibeta (Azure Functions Python 3.12)
+- **Database**: rmhpgflex.postgres.database.azure.com (PostgreSQL 14)
+- **Queues**: geospatial-jobs, geospatial-tasks (Azure Storage Queues)
+- **Storage**: rmhazuregeo* containers (Bronze/Silver/Gold tiers)
+
+### Operational Endpoints
+- **Health Check**: `/api/health` - System component status
+- **Job Submission**: `/api/jobs/submit/{job_type}` - Submit new jobs
+- **Job Status**: `/api/jobs/status/{job_id}` - Check job progress
+- **Database Queries**: `/api/db/*` - Direct database access for debugging
+- **Schema Management**: `/api/db/schema/redeploy` - Rebuild database schema
+
+### Known Limitations
+- **Manual service import**: Service modules require explicit import
+- **TaskResult mismatch**: Field naming inconsistency causing validation errors
+- **No auto-discovery**: Task handlers not automatically discovered
+- **Development mode**: Fail-fast error handling without retries

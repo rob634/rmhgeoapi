@@ -22,7 +22,7 @@ ensuring that the database schema always matches the Python models.
 The Pydantic models become the single source of truth for the schema.
 """
 
-from typing import Dict, List, Optional, Type, get_args, get_origin, Any
+from typing import Dict, List, Optional, Type, get_args, get_origin, Any, Union
 from datetime import datetime
 from decimal import Decimal
 from enum import Enum
@@ -31,6 +31,7 @@ import re
 from pydantic import BaseModel
 from pydantic.fields import FieldInfo
 from psycopg import sql
+from annotated_types import MaxLen  # Import at top for health check validation
 
 # Import the core models
 from schema_base import JobRecord, TaskRecord, JobStatus, TaskStatus
@@ -94,37 +95,57 @@ class PydanticToSQL:
         Returns:
             PostgreSQL type string
         """
-        # Handle Optional types
+        # First check if this is a string type (including Optional[str])
+        # and has max_length constraint in metadata
+        # This must be done BEFORE unwrapping Optional to preserve metadata
+        actual_type = field_type
+        is_optional = False
+        
+        # Check if it's Optional and unwrap to get actual type
         origin = get_origin(field_type)
         if origin is not None:
             args = get_args(field_type)
-            if origin is type(Optional):
-                # Optional[X] is Union[X, None]
-                actual_type = args[0] if args else str
-                return self.python_type_to_sql(actual_type, field_info)
+            # Optional[X] is actually Union[X, None] in runtime
+            if origin is Union:
+                # Check if this is an Optional (Union with None)
+                if type(None) in args:
+                    # Get the non-None type
+                    actual_type = args[0] if args[0] is not type(None) else args[1]
+                    is_optional = True
+                else:
+                    # Regular Union, not Optional
+                    actual_type = args[0] if args else str
             elif origin in (dict, Dict):
                 return "JSONB"
             elif origin in (list, List):
                 return "JSONB"
-                
-        # Handle Enums
-        if inspect.isclass(field_type) and issubclass(field_type, Enum):
-            # Convert CamelCase to snake_case for PostgreSQL
-            enum_name = re.sub(r'(?<!^)(?=[A-Z])', '_', field_type.__name__).lower()
-            self.enums[enum_name] = field_type
-            # Return just the enum name - schema will be handled by composition
-            return enum_name
+        
+        # Handle string fields with max_length - check metadata FIRST
+        if actual_type == str:
+            # In Pydantic v2, constraints are stored in metadata
+            max_length = None
+            if hasattr(field_info, 'metadata') and field_info.metadata:
+                # Look for MaxLen constraint in metadata
+                for constraint in field_info.metadata:
+                    if isinstance(constraint, MaxLen):
+                        max_length = constraint.max_length
+                        break
             
-        # Handle string fields with max_length
-        if field_type == str:
-            max_length = getattr(field_info, 'max_length', None)
             if max_length:
                 return f"VARCHAR({max_length})"
             # Default VARCHAR without length for flexibility
             return "VARCHAR"
+                
+        # Handle Enums
+        if inspect.isclass(actual_type) and issubclass(actual_type, Enum):
+            # Convert CamelCase to snake_case for PostgreSQL
+            enum_name = re.sub(r'(?<!^)(?=[A-Z])', '_', actual_type.__name__).lower()
+            self.enums[enum_name] = actual_type
+            # Return just the enum name - schema will be handled by composition
+            return enum_name
             
         # Standard type mapping
-        sql_type = self.TYPE_MAP.get(field_type)
+        sql_type = self.TYPE_MAP.get(actual_type)
         if sql_type:
             return sql_type
             
@@ -444,10 +465,7 @@ BEGIN
             ELSE 'completed'::{schema}.task_status
         END,
         result_data = p_result_data,
-        error_details = CASE 
-            WHEN p_error_details IS NULL THEN NULL
-            ELSE to_jsonb(p_error_details)
-        END,
+        error_details = p_error_details,
         updated_at = NOW()
     WHERE 
         task_id = p_task_id 

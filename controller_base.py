@@ -423,7 +423,7 @@ class BaseController(ABC):
 
     def create_job_record(self, job_id: str, parameters: Dict[str, Any]) -> JobRecord:
         """Create and store the initial job record for database storage"""
-        from repository_consolidated import RepositoryFactory
+        from repository_factory import RepositoryFactory
         
         self.logger.debug(f"🔧 Creating job record for job_id: {job_id[:16]}...")
         self.logger.debug(f"  Job type: {self.job_type}")
@@ -542,7 +542,7 @@ class BaseController(ABC):
         Returns:
             List of task records for the specified stage
         """
-        from repository_consolidated import RepositoryFactory
+        from repository_factory import RepositoryFactory
         
         repos = RepositoryFactory.create_repositories()
         job_repo = repos['job_repo']
@@ -759,7 +759,7 @@ class BaseController(ABC):
         self.logger.debug(f"Job aggregation complete: {list(final_result.keys()) if isinstance(final_result, dict) else 'non-dict result'}")
         
         # Store completion in database
-        from repository_consolidated import RepositoryFactory
+        from repository_factory import RepositoryFactory
         repos = RepositoryFactory.create_repositories()
         job_repo = repos['job_repo']
         
@@ -909,7 +909,7 @@ class BaseController(ABC):
         # Create and store task records, then queue them
         self.logger.debug(f"🏗️ Starting task creation and queueing process")
         try:
-            from repository_consolidated import RepositoryFactory
+            from repository_factory import RepositoryFactory
             self.logger.debug(f"📦 RepositoryFactory import successful")
         except Exception as repo_import_error:
             self.logger.error(f"❌ CRITICAL: Failed to import RepositoryFactory: {repo_import_error}")

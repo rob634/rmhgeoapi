@@ -31,7 +31,7 @@
       "maxPollingInterval": "00:00:02",
       "visibilityTimeout": "00:00:30",
       "batchSize": 16,
-      "maxDequeueCount": 5,
+      "maxDequeueCount": 1,  // DEVELOPMENT: Try once, no retries. Production should be 3-5
       "newBatchThreshold": 8,
       "messageEncoding": "none"
     }

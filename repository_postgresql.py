@@ -54,7 +54,9 @@ from schema_base import (
 # generate_task_id moved to Controller layer - repository no longer needs it
 from repository_base import BaseRepository
 from repository_abc import (
-    IJobRepository, ITaskRepository, ICompletionDetector,
+    IJobRepository, ITaskRepository, ICompletionDetector
+)
+from schema_base import (
     StageAdvancementResult, TaskCompletionResult, JobCompletionResult
 )
 

@@ -6,6 +6,92 @@ This document tracks completed architectural changes and improvements to the Azu
 
 ---
 
+## 10 September 2025: Repository Architecture Consolidation
+
+**Status**: ✅ COMPLETED  
+**Impact**: **HIGH** - Improved code organization and maintainability
+**Timeline**: 23:30-23:55 UTC
+**Author**: Robert and Geospatial Claude Legion
+
+### Repository Consolidation Summary
+
+**Problem**: The name "repository_consolidated.py" was confusing and didn't clearly indicate its purpose. The factory pattern was mixed with business logic in a single file.
+
+**Solution**: Clean separation of concerns with better naming:
+
+#### Files Created:
+1. **repository_factory.py** (NEW)
+   - Central factory for creating all repository instances
+   - Extracted RepositoryFactory class from repository_consolidated.py
+   - Clean extension point for future repository types (blob, cosmos, redis)
+   - Proper header with fast-failing imports at the top
+
+#### Files Renamed:
+2. **repository_consolidated.py → repository_jobs_tasks.py**
+   - Better name that clearly indicates its purpose
+   - Contains JobRepository, TaskRepository, and CompletionDetector
+   - Updated header to reflect new purpose and exports
+
+#### Updates Made:
+3. **Import Updates Across Codebase**:
+   - function_app.py: Updated to import from repository_factory
+   - controller_base.py: Updated 4 imports to use repository_factory
+   - trigger_http_base.py: Updated lazy import to use repository_factory
+   - Test files: Updated to use new module names
+
+4. **Documentation Updates**:
+   - ARCHITECTURE_FILE_INDEX.md: Reflected new file count (26 files)
+   - Added repository_factory.py description
+   - Updated repository_jobs_tasks.py description
+   - Updated date to September 10, 2025
+
+### Benefits Achieved:
+- **Clear Separation**: Factory pattern isolated from business logic
+- **Better Naming**: "repository_consolidated" was confusing - now clearly named
+- **Extensibility**: Easy to add new repository types to the factory
+- **Maintains PYRAMID**: Clean hierarchy from abstract → concrete → business
+- **Fast Failure**: All imports at top of files for immediate failure detection
+
+### New Repository Architecture:
+```
+repository_abc.py         → Interface definitions (contracts)
+    ↓
+repository_base.py        → Pure abstract base (shared validation)
+    ↓
+repository_postgresql.py  → PostgreSQL implementation
+    ↓
+repository_jobs_tasks.py  → Business logic for jobs/tasks
+    ↓
+repository_factory.py     → Central factory for all repositories
+```
+
+The consolidation follows the "No Backward Compatibility" philosophy with clean cuts and no fallback logic.
+
+### Deployment Verification:
+- ✅ Successfully deployed to rmhgeoapibeta
+- ✅ Database schema rebuilt without errors
+- ✅ Health endpoint shows all 34 modules imported successfully
+- ✅ Test jobs submitted and queued properly
+
+### Issues Discovered During Testing:
+
+#### 1. Service Handler Registration Issue (Partially Fixed)
+**Problem**: Task handlers were not being registered because service_hello_world module was never imported
+**Partial Fix**: Added `import service_hello_world` to function_app.py
+**Remaining Work**: Need proper auto-discovery mechanism
+
+#### 2. TaskResult Schema Mismatch (Not Yet Fixed)
+**Problem**: TaskHandlerFactory returns TaskResult with incorrect field names causing Pydantic validation errors
+**Error**: `Task execution failed: 4 validation errors for TaskResult`
+**Root Cause**: 
+- Using `result_data` instead of `result`
+- Using `error_message` instead of `error`
+- Missing required fields: `job_id`, `stage_number`, `task_type`, `status`
+**Impact**: Tasks stuck in "processing" status, unable to complete
+**Fix Required**: Update service_factories.py lines 223-248 to match schema_base.py TaskResult definition
+
+---
+
 ## 10 September 2025: Process Job Queue Restructuring - Deferred Status Updates & URL-Safe Task IDs
 
 **Status**: ✅ COMPLETED  

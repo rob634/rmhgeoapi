@@ -58,14 +58,14 @@ hello_world_workflow = WorkflowDefinition(
         StageDefinition(
             stage_number=1,
             stage_name="greeting",
-            task_type="hello_greeting",
+            task_type="hello_world_greeting",
             max_parallel_tasks=10,
             timeout_minutes=5
         ),
         StageDefinition(
             stage_number=2,
             stage_name="reply",
-            task_type="world_reply",
+            task_type="hello_world_reply",
             max_parallel_tasks=10,
             timeout_minutes=5,
             depends_on_stage=1,
@@ -189,7 +189,7 @@ class HelloWorldController(BaseController):
                 
                 tasks.append(TaskDefinition(
                     task_id=task_id,
-                    task_type="hello_greeting",
+                    task_type="hello_world_greeting",
                     stage_number=stage_number,
                     job_id=job_id,
                     parameters={
@@ -220,7 +220,7 @@ class HelloWorldController(BaseController):
                 
                 tasks.append(TaskDefinition(
                     task_id=task_id,
-                    task_type="world_reply",
+                    task_type="hello_world_reply",
                     stage_number=stage_number,
                     job_id=job_id,
                     parameters={
@@ -264,8 +264,8 @@ class HelloWorldController(BaseController):
             # Greeting stage - collect all greetings
             greetings = []
             for task in successful:
-                if task.result and 'message' in task.result:
-                    greetings.append(task.result['message'])
+                if task.result_data and 'message' in task.result_data:
+                    greetings.append(task.result_data['message'])
             
             return {
                 'stage': 'greeting',
@@ -281,8 +281,8 @@ class HelloWorldController(BaseController):
             # Reply stage - collect all replies
             replies = []
             for task in successful:
-                if task.result and 'reply' in task.result:
-                    replies.append(task.result['reply'])
+                if task.result_data and 'reply' in task.result_data:
+                    replies.append(task.result_data['reply'])
             
             return {
                 'stage': 'reply',

@@ -1,24 +1,24 @@
 # ============================================================================
 # CLAUDE CONTEXT - REPOSITORY
 # ============================================================================
-# PURPOSE: Business logic repository layer extending PostgreSQL implementations with validation and orchestration
-# EXPORTS: JobRepository, TaskRepository, CompletionDetector, RepositoryFactory
+# PURPOSE: Business logic repository layer for job and task management with validation and orchestration
+# EXPORTS: JobRepository, TaskRepository, CompletionDetector
 # INTERFACES: Extends PostgreSQLJobRepository, PostgreSQLTaskRepository, PostgreSQLCompletionDetector
-# PYDANTIC_MODELS: JobRecord, TaskRecord, JobStatus, TaskStatus (from schema_core)
-# DEPENDENCIES: repository_postgresql, schema_core, util_logger, typing, datetime
+# PYDANTIC_MODELS: JobRecord, TaskRecord, JobStatus, TaskStatus (from schema_base)
+# DEPENDENCIES: repository_postgresql, schema_base, util_logger, typing, datetime
 # SOURCE: PostgreSQL database via inherited base classes, business logic layer
-# SCOPE: Business-level repository operations with validation and workflow orchestration
+# SCOPE: Business-level job and task operations with validation and workflow orchestration
 # VALIDATION: Business rule validation, idempotency checks, status transition validation
-# PATTERNS: Repository pattern, Factory pattern, Template Method, Facade (for complex workflows)
-# ENTRY_POINTS: repos = RepositoryFactory.create_repositories(); job = repos['job_repo'].create_job_from_params()
-# INDEX: JobRepository:47, TaskRepository:216, CompletionDetector:385, RepositoryFactory:521
+# PATTERNS: Repository pattern, Template Method, Facade (for complex workflows)
+# ENTRY_POINTS: from repository_jobs_tasks import JobRepository; job_repo = JobRepository()
+# INDEX: JobRepository:64, TaskRepository:235, CompletionDetector:404
 # ============================================================================
 
 """
-Business Logic Repository Implementation
+Job and Task Repository Implementation
 
-This module provides business logic repositories that extend the PostgreSQL
-implementations with additional validation and workflow orchestration:
+This module provides business logic repositories for job and task management,
+extending the PostgreSQL base implementations with validation and orchestration:
 
     PostgreSQLJobRepository (from repository_postgresql.py)
         ↓
@@ -32,15 +32,19 @@ implementations with additional validation and workflow orchestration:
         ↓
     CompletionDetector (this file - adds business logic)
 
-The RepositoryFactory creates these business logic repositories
-which are used throughout the application.
+These repositories handle all job and task persistence operations,
+including idempotency checks, status transitions, and completion detection.
+
+Author: Robert and Geospatial Claude Legion
+Date: 10 September 2025
 """
 
+# Imports at top for fast failure
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timezone
+import logging
 
-from util_logger import LoggerFactory
-from util_logger import ComponentType, LogLevel, LogContext
+from util_logger import LoggerFactory, ComponentType, LogLevel, LogContext
 from schema_base import (
     JobRecord, TaskRecord, JobStatus, TaskStatus,
     generate_job_id
@@ -54,7 +58,7 @@ from repository_postgresql import (
     PostgreSQLCompletionDetector
 )
 
-logger = LoggerFactory.create_logger(ComponentType.REPOSITORY, "ConsolidatedRepository")
+logger = LoggerFactory.create_logger(ComponentType.REPOSITORY, "JobsTasksRepository")
 
 
 # ============================================================================
@@ -337,8 +341,8 @@ class TaskRepository(PostgreSQLTaskRepository):
             # Validate status transition
             self._validate_status_transition(current_task, new_status)
             
-            # Prepare updates
-            updates = {'status': new_status}
+            # Prepare updates (ensure enum is converted to string value)
+            updates = {'status': new_status.value}
             if additional_updates:
                 updates.update(additional_updates)
             
@@ -549,72 +553,11 @@ class CompletionDetector(PostgreSQLCompletionDetector):
 
 
 # ============================================================================
-# REPOSITORY FACTORY - Creates repository instances
+# MODULE EXPORTS
 # ============================================================================
 
-class RepositoryFactory:
-    """
-    Factory for creating repository instances.
-    
-    This replaces the old factory that required storage_backend_type parameter.
-    Now it directly creates PostgreSQL repositories.
-    """
-    
-    @staticmethod
-    def create_repositories(
-        connection_string: Optional[str] = None,
-        schema_name: str = "app"
-    ) -> Dict[str, Any]:
-        """
-        Create all repository instances.
-        
-        Args:
-            connection_string: PostgreSQL connection string (uses env if not provided)
-            schema_name: Database schema name
-            
-        Returns:
-            Dictionary with job_repo, task_repo, and completion_detector
-        """
-        logger.info("🏭 Creating PostgreSQL repositories")
-        logger.debug(f"  Connection string provided: {connection_string is not None}")
-        logger.debug(f"  Schema name: {schema_name}")
-        
-        # Create repositories
-        logger.debug("📦 Creating JobRepository...")
-        job_repo = JobRepository(connection_string, schema_name)
-        logger.debug("📦 Creating TaskRepository...")
-        task_repo = TaskRepository(connection_string, schema_name)
-        logger.debug("📦 Creating CompletionDetector...")
-        completion_detector = CompletionDetector(connection_string, schema_name)
-        
-        logger.info("✅ All repositories created successfully")
-        
-        return {
-            'job_repo': job_repo,
-            'task_repo': task_repo,
-            'completion_detector': completion_detector
-        }
-    
-    @staticmethod
-    def create_job_repository(
-        connection_string: Optional[str] = None,
-        schema_name: str = "app"
-    ) -> JobRepository:
-        """Create job repository instance."""
-        return JobRepository(connection_string, schema_name)
-    
-    @staticmethod
-    def create_task_repository(
-        connection_string: Optional[str] = None,
-        schema_name: str = "app"
-    ) -> TaskRepository:
-        """Create task repository instance."""
-        return TaskRepository(connection_string, schema_name)
-    
-    @staticmethod
-    def create_completion_detector(
-        connection_string: Optional[str] = None,
-        schema_name: str = "app"
-    ) -> CompletionDetector:
-        """Create completion detector instance."""
-        return CompletionDetector(connection_string, schema_name)
+__all__ = [
+    'JobRepository',
+    'TaskRepository', 
+    'CompletionDetector'
+]

@@ -253,7 +253,7 @@ class JobRecord(BaseModel):
         return False
     
     class Config:
-        use_enum_values = True
+        # Removed use_enum_values - enums should remain as enums for type safety
         validate_assignment = True
         json_encoders = {
             datetime: lambda v: v.isoformat(),
@@ -348,7 +348,7 @@ class TaskRecord(BaseModel):
         return False
     
     class Config:
-        use_enum_values = True
+        # Removed use_enum_values - enums should remain as enums for type safety
         validate_assignment = True
         json_encoders = {
             datetime: lambda v: v.isoformat()
@@ -722,14 +722,15 @@ class TaskResult(BaseModel):
     Result from task execution with Pydantic validation.
     
     Validated task results for aggregation.
+    Field names aligned with JobRecord/TaskRecord for consistency.
     """
     task_id: str = Field(..., min_length=1, max_length=100)
     job_id: str = Field(..., min_length=64, max_length=64)
     stage_number: int = Field(..., ge=1, le=100)
     task_type: str = Field(..., min_length=1, max_length=50)
     status: TaskStatus
-    result: Optional[Dict[str, Any]] = Field(None)
-    error: Optional[str] = Field(None)
+    result_data: Optional[Dict[str, Any]] = Field(None, description="Task execution results")
+    error_details: Optional[str] = Field(None, max_length=5000, description="Error details if failed")
     execution_time_seconds: float = Field(default=0.0, ge=0.0)
     memory_usage_mb: float = Field(default=0.0, ge=0.0)
     processed_items: int = Field(default=0, ge=0)
@@ -739,14 +740,12 @@ class TaskResult(BaseModel):
     @property
     def success(self) -> bool:
         """Check if task completed successfully"""
-        # Handle both enum and string values due to use_enum_values
-        if isinstance(self.status, str):
-            return self.status == TaskStatus.COMPLETED.value
+        # Status should always be a TaskStatus enum, not a string
         return self.status == TaskStatus.COMPLETED
     
     class Config:
         validate_assignment = True
-        use_enum_values = True
+        # Removed use_enum_values - enums should remain as enums for type safety
 
 
 @dataclass
@@ -857,14 +856,16 @@ class JobResult:
         }
 
 
-@dataclass
-class JobCompletionResult:
-    """Result from job completion check - lightweight internal model"""
-    is_complete: bool
+class JobCompletionResult(BaseModel):
+    """
+    Result from PostgreSQL check_job_completion() function.
+    Represents the contract between SQL and Python layers.
+    """
+    job_complete: bool  # Standardized field name (was is_complete)
     final_stage: int
     total_tasks: int
     completed_tasks: int
-    task_results: List[Dict[str, Any]] = field(default_factory=list)
+    task_results: List[Dict[str, Any]] = Field(default_factory=list)
     
     @property
     def completion_percentage(self) -> float:
@@ -877,6 +878,28 @@ class JobCompletionResult:
     def remaining_tasks(self) -> int:
         """Number of tasks remaining"""
         return max(0, self.total_tasks - self.completed_tasks)
+
+
+class TaskCompletionResult(BaseModel):
+    """
+    Result from PostgreSQL complete_task_and_check_stage() function.
+    Represents the contract between SQL and Python layers.
+    """
+    task_updated: bool
+    stage_complete: bool
+    job_id: Optional[str] = None
+    stage_number: Optional[int] = None
+    remaining_tasks: int = 0
+
+
+class StageAdvancementResult(BaseModel):
+    """
+    Result from PostgreSQL advance_job_stage() function.
+    Represents the contract between SQL and Python layers.
+    """
+    job_updated: bool
+    new_stage: Optional[int] = None
+    is_final_stage: Optional[bool] = None
 
 
 # ============================================================================
@@ -954,7 +977,7 @@ class BaseTask(BaseModel, ABC):
     
     class Config:
         validate_assignment = True
-        use_enum_values = True
+        # Removed use_enum_values - enums should remain as enums for type safety
         extra = "allow"
 
 
@@ -992,7 +1015,7 @@ class BaseJob(BaseModel, ABC):
     
     class Config:
         validate_assignment = True
-        use_enum_values = True
+        # Removed use_enum_values - enums should remain as enums for type safety
 
 
 class BaseStage(BaseModel, ABC):

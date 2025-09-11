@@ -222,9 +222,12 @@ class TaskHandlerFactory:
                 # Return success result
                 return TaskResult(
                     task_id=context.task_id,
-                    success=True,
+                    job_id=context.job_id,
+                    stage_number=context.stage,
+                    task_type=context.task_type,
+                    status=TaskStatus.COMPLETED,
                     result_data=result_data,
-                    error_message=None,
+                    error_details=None,
                     completed_at=datetime.now(timezone.utc)
                 )
                 
@@ -241,9 +244,12 @@ class TaskHandlerFactory:
                 # Return failure result
                 return TaskResult(
                     task_id=context.task_id,
-                    success=False,
+                    job_id=context.job_id,
+                    stage_number=context.stage,
+                    task_type=context.task_type,
+                    status=TaskStatus.FAILED,
                     result_data=None,
-                    error_message=str(e),
+                    error_details=str(e),
                     completed_at=datetime.now(timezone.utc)
                 )
         
@@ -503,6 +509,6 @@ repository.complete_task(
     task_message.task_id,
     result.success,
     result.result_data,
-    result.error_message
+    result.error_details
 )
 """

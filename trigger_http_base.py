@@ -372,7 +372,7 @@ class JobManagementTrigger(BaseHttpTrigger):
     def job_repository(self):
         """Lazy-loaded job repository."""
         if self._job_repository is None:
-            from repository_consolidated import RepositoryFactory
+            from repository_factory import RepositoryFactory
             repos = RepositoryFactory.create_repositories()
             job_repo = repos['job_repo']
             self._job_repository = job_repo

@@ -2,16 +2,16 @@
 # CLAUDE CONTEXT - REPOSITORY
 # ============================================================================
 # PURPOSE: Single source of truth for ALL repository method signatures preventing parameter mismatches
-# EXPORTS: IJobRepository, ITaskRepository, ICompletionDetector, ParamNames, StageAdvancementResult, TaskCompletionResult, JobCompletionResult
+# EXPORTS: IJobRepository, ITaskRepository, ICompletionDetector, ParamNames
 # INTERFACES: ABC interfaces defining canonical repository contracts for all implementations
 # PYDANTIC_MODELS: JobRecord, TaskRecord (imported from schema_core for type hints)
-# DEPENDENCIES: abc, typing, dataclasses, enum, schema_core
+# DEPENDENCIES: abc, typing, enum, schema_base
 # SOURCE: No data source - defines abstract interfaces and contracts
 # SCOPE: Global repository pattern enforcement - all repository implementations must follow these interfaces
 # VALIDATION: ABC enforcement ensures method signature compliance, type hints provide compile-time checking
 # PATTERNS: Interface Segregation, Repository pattern, Protocol pattern, Parameter Object pattern
 # ENTRY_POINTS: class JobRepository(IJobRepository); must implement all abstract methods
-# INDEX: ParamNames:35, IJobRepository:141, ITaskRepository:168, ICompletionDetector:194, StageAdvancementResult:82
+# INDEX: ParamNames:43, IJobRepository:93, ITaskRepository:120, ICompletionDetector:146
 # ============================================================================
 
 """
@@ -29,10 +29,12 @@ files would be IMPOSSIBLE with this pattern.
 
 from abc import ABC, abstractmethod
 from typing import Dict, Any, List, Optional, Protocol, Final
-from dataclasses import dataclass
 from enum import Enum
 
-from schema_base import JobRecord, TaskRecord, JobStatus, TaskStatus
+from schema_base import (
+    JobRecord, TaskRecord, JobStatus, TaskStatus,
+    JobCompletionResult, TaskCompletionResult, StageAdvancementResult
+)
 
 
 # ============================================================================
@@ -82,68 +84,11 @@ class ParamNames:
 
 
 # ============================================================================
-# RETURN TYPE DEFINITIONS - Enforce return structure
-# ============================================================================
-
-@dataclass
-class StageAdvancementResult:
-    """Return type for advance_job_stage - enforces structure"""
-    job_updated: bool
-    new_stage: Optional[int]
-    is_final_stage: Optional[bool]
-    
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert to dict with canonical keys"""
-        return {
-            ParamNames.JOB_UPDATED: self.job_updated,
-            ParamNames.NEW_STAGE: self.new_stage,
-            ParamNames.IS_FINAL_STAGE: self.is_final_stage
-        }
-
-
-@dataclass
-class TaskCompletionResult:
-    """Return type for complete_task_and_check_stage"""
-    task_updated: bool
-    stage_complete: bool
-    job_id: Optional[str]
-    stage_number: Optional[int]
-    remaining_tasks: int
-    
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert to dict with canonical keys"""
-        return {
-            'task_updated': self.task_updated,
-            ParamNames.STAGE_COMPLETE: self.stage_complete,
-            ParamNames.JOB_ID: self.job_id,
-            ParamNames.STAGE_NUMBER: self.stage_number,
-            ParamNames.REMAINING_TASKS: self.remaining_tasks
-        }
-
-
-@dataclass
-class JobCompletionResult:
-    """Return type for check_job_completion"""
-    job_complete: bool
-    final_stage: int
-    total_tasks: int
-    completed_tasks: int
-    task_results: List[Dict[str, Any]]
-    
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert to dict with canonical keys"""
-        return {
-            ParamNames.JOB_COMPLETE: self.job_complete,
-            ParamNames.FINAL_STAGE: self.final_stage,
-            ParamNames.TOTAL_TASKS: self.total_tasks,
-            ParamNames.COMPLETED_TASKS: self.completed_tasks,
-            ParamNames.TASK_RESULTS: self.task_results
-        }
-
-
-# ============================================================================
 # ABSTRACT BASE CLASSES - Enforce exact signatures
 # ============================================================================
+# Note: Return type models (JobCompletionResult, TaskCompletionResult, 
+# StageAdvancementResult) are now imported from schema_base.py as they are
+# core data models that belong in the schema layer, not the repository layer.
 
 class IJobRepository(ABC):
     """

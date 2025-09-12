@@ -772,10 +772,9 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
             validation_timestamp = validation_results.get('timestamp', 'unknown')
             cache_age = "unknown"
             if validation_timestamp != 'unknown':
-                from datetime import datetime
                 try:
                     val_time = datetime.fromisoformat(validation_timestamp.replace('Z', '+00:00'))
-                    cache_age = (datetime.now() - val_time.replace(tzinfo=None)).total_seconds()
+                    cache_age = (datetime.now(timezone.utc).replace(tzinfo=None) - val_time.replace(tzinfo=None)).total_seconds()
                     cache_age = f"{int(cache_age)}s ago"
                 except:
                     cache_age = "parse_error"

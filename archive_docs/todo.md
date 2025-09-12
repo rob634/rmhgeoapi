@@ -1,6 +1,46 @@
 # TODO
 
-**Last Updated**: 11 September 2025 - Deployment Testing
+**Last Updated**: 12 September 2025 01:45 UTC - Stage Advancement Working!
+
+## 🎯 HANDOFF SUMMARY FOR NEXT CLAUDE
+
+### Current State
+✅ **Major Progress**: Core workflow mechanics are now functioning!
+- Stage 1 tasks complete successfully
+- Tasks persist to database with result_data
+- Stage advancement from stage 1 to stage 2 works
+- Jobs correctly update status and advance stages
+
+### Critical Issue to Solve
+🔴 **Stage 2 Task Creation Failure**
+- **Problem**: After stage 1 completes, job advances to stage 2 but fails with "No tasks successfully queued for stage 2"
+- **Test Job**: 487cc76ef65adc3a1062765b5ebf087709dfb6ca02e8ee49351541033ca1b58b
+- **Where to look**: 
+  - `controller_hello_world.py` - Check `create_stage_tasks()` for stage 2
+  - `function_app.py` lines 1103-1130 - Task creation logic after stage advancement
+  - Check if stage 2 tasks are being created but failing to queue
+
+### What Was Fixed Today (See HISTORY.md for details)
+1. ✅ DateTime import conflicts resolved
+2. ✅ Pydantic object .get() usage fixed  
+3. ✅ Transaction commit issue resolved
+4. ✅ All 12 Pydantic models migrated to v2
+
+### Testing Commands
+```bash
+# Submit test job
+curl -X POST https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/jobs/submit/hello_world \
+  -H "Content-Type: application/json" \
+  -d '{"message": "test", "n": 3}'
+
+# Check job status (use job_id from above)
+curl https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/jobs/status/{JOB_ID}
+
+# Check tasks for job
+curl https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/db/tasks/{JOB_ID}
+```
+
+---
 
 ## 🏗️ ARCHITECTURAL REFACTORING - Clear Separation of Data vs Behavior (11 Sept 2025)
 
@@ -51,127 +91,23 @@
 
 ## 🚨 CRITICAL - Current Blocking Issues
 
-### 0. Task Completion Not Persisting to Database 🟢 FIX DEPLOYED (11 Sept 2025)
+### 0. Stage 2 Task Creation Failure 🔴 ACTIVE (11 Sept 2025)
 
-**Status**: Fix deployed to production, ready for testing
+**Problem**: Stage 2 tasks fail to queue with "No tasks successfully queued for stage 2"
+**Impact**: Jobs advance to stage 2 but fail immediately
+**Test Job**: 487cc76ef65adc3a1062765b5ebf087709dfb6ca02e8ee49351541033ca1b58b
+**Evidence**: Stage 1 completes, stage advancement works, but stage 2 task creation fails
+**Current Status**: Stage advancement now works after fixing datetime and Pydantic issues
+**Next Steps**: 
+- [ ] Investigate why stage 2 tasks aren't being created by controller
+- [ ] Check create_stage_tasks() implementation for stage 2
+- [ ] Verify task queueing logic for stage 2
 
-**Problem**: Tasks execute successfully but remain in "processing" status in database
 
-**Root Cause Identified**: 
-- `_execute_query()` in repository_postgresql.py wasn't committing transactions for functions that return data
-- PostgreSQL functions with `RETURNS TABLE` have `cursor.description` set, bypassing commit logic
-- Affects: `complete_task_and_check_stage`, `advance_job_stage`, `check_job_completion`
-
-**Fix Applied**: 
-- ✅ Rewrote `_execute_query()` to ALWAYS commit for ALL operations
-- ✅ Added comprehensive error handling for commit failures
-- ✅ Verified error propagation to task/job records
-- ⏳ Awaiting deployment to Azure Functions
-
-**Proposed Fix - Enhanced Option 1: ALWAYS COMMIT with Loud Failures**
-
-#### Implementation Steps:
-
-1. **Update `_execute_query()` method in repository_postgresql.py** ✅ COMPLETED (11 Sept 2025)
-   
-   **Current Buggy Code** (simplified):
-   ```python
-   # BUG: Functions with RETURNS TABLE never commit!
-   if fetch == 'one':
-       return cursor.fetchone()  # Returns here, no commit!
-   elif cursor.description is None:
-       conn.commit()  # Only DML operations commit
-   ```
-   
-   **Proposed Fix**:
-   ```python
-   def _execute_query(self, query: sql.Composed, params: Optional[Tuple] = None,
-                     fetch: str = None) -> Optional[Any]:
-       # Validation
-       if not isinstance(query, sql.Composed):
-           raise TypeError(f"❌ SECURITY: Query must be sql.Composed")
-       if fetch and fetch not in ['one', 'all', 'many']:
-           raise ValueError(f"❌ INVALID FETCH MODE: {fetch}")
-       
-       with self._get_connection() as conn:
-           try:
-               with conn.cursor() as cursor:
-                   cursor.execute(query, params)
-                   
-                   # Fetch if needed
-                   result = None
-                   if fetch == 'one':
-                       result = cursor.fetchone()
-                   elif fetch == 'all':
-                       result = cursor.fetchall()
-                   elif fetch == 'many':
-                       result = cursor.fetchmany()
-                   
-                   # ALWAYS COMMIT - THE FIX!
-                   conn.commit()
-                   logger.debug("✅ Transaction committed")
-                   
-                   # Return appropriate result
-                   if fetch:
-                       return result
-                   else:
-                       return cursor.rowcount
-                       
-           except psycopg.Error as e:
-               logger.error(f"❌ DATABASE OPERATION FAILED: {e}")
-               conn.rollback()
-               raise RuntimeError(f"Database operation failed: {e}") from e
-   ```
-
-2. **Add comprehensive commit error handling**: ✅ COMPLETED (11 Sept 2025)
-   - ✅ Catch `psycopg.errors.InFailedSqlTransaction` - transaction already aborted
-   - ✅ Catch `psycopg.errors.SerializationFailure` - concurrent conflicts
-   - ✅ Catch `psycopg.errors.IntegrityError` - constraint violations at commit
-   - ✅ Catch `psycopg.OperationalError` - connection lost during commit
-   - ✅ Re-raise all exceptions as RuntimeError with clear context
-
-3. **Ensure error propagation to task/job records**: ✅ VERIFIED (11 Sept 2025)
-   - ✅ Errors from commit failures will bubble up to function_app.py (RuntimeError)
-   - ✅ function_app.py catches exceptions at line 971 and records in task.error_details
-   - ✅ Failed tasks are marked as FAILED via fallback at lines 976-982
-   - ✅ Job failure propagation handled in stage advancement logic
-   
-   **Error Propagation Flow**:
-   ```
-   repository_postgresql._execute_query() 
-     ↓ (raises RuntimeError on commit failure)
-   repository_jobs_tasks.complete_task_and_check_stage()
-     ↓ (exception propagates up)
-   function_app.process_task_queue()
-     ↓ (catches exception, marks task as FAILED)
-   Task record: status=FAILED, error_details="Transaction commit failed: ..."
-   ```
-
-4. **Testing Plan**:
-   - [ ] Test successful task completion persists to database
-   - [ ] Test task failure records error_details and marks as FAILED
-   - [ ] Test stage advancement when all tasks complete
-   - [ ] Test job completion when all stages complete
-   - [ ] Test concurrent task completion (race condition handling)
-   - [ ] Test connection loss during commit (should fail loudly)
-
-5. **Deployment Steps**: ✅ COMPLETED (11 Sept 2025, 22:33 UTC)
-   - ✅ Apply fix to repository_postgresql.py 
-   - ✅ Deploy to Azure Functions: `func azure functionapp publish rmhgeoapibeta --python --build remote`
-   - ✅ Redeploy database schema to ensure functions are current
-   - [ ] Submit test job and verify task persistence
-   - [ ] Monitor Application Insights for any commit failures
-
-**Success Criteria**:
-- Tasks marked as COMPLETED or FAILED (never stuck in PROCESSING)
-- Stage advancement occurs when all tasks complete
-- Jobs marked as COMPLETED or FAILED appropriately
-- Clear error messages in logs when failures occur
-- No silent transaction rollbacks
-
-### 1. Pydantic v1 Legacy Patterns - ✅ RESOLVED (11 Sept 2025)
+### 1. ~~Pydantic v1 Legacy Patterns~~ - ✅ RESOLVED (11 Sept 2025)
 **Status**: All 12 models migrated to Pydantic v2 patterns (100% complete)
 **Impact**: Full performance improvements achieved, modern serialization patterns
+**Moved to**: HISTORY.md
 
 ### Service Handler Registration
 **Problem**: Service modules not auto-imported, handlers never registered
@@ -570,15 +506,22 @@ error: {
 
 ## ✅ Recently Completed (See HISTORY.md for full details)
 
+### 11 September 2025 - Transaction Commit Fix:
+- ✅ Fixed critical bug preventing task completion persistence
+- ✅ Implemented ALWAYS COMMIT pattern in _execute_query()
+- ✅ Tasks now properly save result_data and complete
+- ✅ Verified with test job - stage 1 tasks completed successfully
+
 ### 11 September 2025 - Pydantic v2 Migration Complete:
 - ✅ Migrated all 12 models from Pydantic v1 to v2 patterns
 - ✅ Replaced json_encoders with field_serializer for 3 models
 - ✅ Full ConfigDict adoption across all models
 
-### 11 September 2025 - Architectural Refactoring Phases 3-4:
+### 11 September 2025 - Architectural Refactoring Phases 3-5:
 - ✅ Created schema_queue.py separating queue models from database models
 - ✅ Updated ARCHITECTURE_CORE.md with complete naming conventions
-- ✅ Documented layer separation and import rules
+- ✅ Documented interface/implementation separation pattern
+- ✅ Phase 5 documentation complete
 
 ### 10 September 2025 - Repository Consolidation:
 - ✅ Created repository_factory.py - Central factory for all repository types

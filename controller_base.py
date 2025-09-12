@@ -1,6 +1,7 @@
 # ============================================================================
 # CLAUDE CONTEXT - CONTROLLER
 # ============================================================================
+# IMPORTANT TODO: Identify Pydantic model imports to determine if these classes are defining behavior or data structures-
 # PURPOSE: Abstract base controller implementing Job→Stage→Task orchestration pattern for complex workflows
 # EXPORTS: BaseController (abstract base class for all workflow controllers)
 # INTERFACES: ABC (Abstract Base Class) - defines controller contract for job orchestration

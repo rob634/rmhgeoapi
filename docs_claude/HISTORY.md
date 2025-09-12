@@ -1,8 +1,121 @@
 # Project History
 
-**Last Updated**: 11 September 2025
+**Last Updated**: 11 September 2025 - 01:45 UTC
 
 This document tracks completed architectural changes and improvements to the Azure Geospatial ETL Pipeline.
+
+---
+
+## 11 September 2025: Critical Workflow Fixes - Stage Advancement Working
+
+**Status**: ✅ MULTIPLE CRITICAL FIXES COMPLETED
+**Impact**: **CRITICAL** - Core workflow now functioning through stage advancement
+**Timeline**: 00:30-01:45 UTC (12 Sept UTC)
+**Author**: Robert and Geospatial Claude Legion
+
+### Issues Fixed
+
+#### 1. DateTime Import Conflict Resolution
+**Problem**: Stage advancement failed with "type object 'datetime.datetime' has no attribute 'datetime'"
+**Root Cause**: Conflicting imports - both `import datetime` and `from datetime import datetime`
+**Solution**: 
+- Removed module import `import datetime` from function_app.py line 99
+- Fixed all references to use `datetime.now(timezone.utc)` instead of `datetime.datetime.now()`
+- Fixed similar issues in util_import_validator.py and trigger_health.py
+**Result**: ✅ DateTime operations now work correctly
+
+#### 2. Pydantic Object Dict Access Fix  
+**Problem**: Stage advancement failed with "'StageAdvancementResult' object has no attribute 'get'"
+**Root Cause**: Treating Pydantic objects as dictionaries with `.get()` method
+**Solution**:
+- Fixed function_app.py lines 1092-1096 to use attribute access
+- Changed from `advancement_result.get('job_updated')` to `advancement_result.job_updated`
+- Changed from `advancement_result.get('new_stage')` to `advancement_result.new_stage`
+- Changed from `advancement_result.get('is_final_stage')` to `advancement_result.is_final_stage or False`
+**Result**: ✅ Pydantic objects accessed correctly
+
+#### 3. PostgreSQL Column Type Investigation
+**Problem**: Initial error suggested error_details column was JSONB instead of VARCHAR
+**Investigation**: Confirmed via DBeaver that column is correctly VARCHAR(5000)
+**Solution**: Reverted attempted SQL workaround, real issue was elsewhere
+**Result**: ✅ Schema correctly defines column types
+
+### Test Results
+- ✅ Stage 1 tasks complete successfully (3 greeting tasks)
+- ✅ Tasks persist with correct result_data
+- ✅ Stage advancement from stage 1 to stage 2 now works
+- ✅ Job correctly advances to stage 2
+- ⚠️ New issue: Stage 2 task creation fails (separate issue to investigate)
+
+### Code Changes
+- Modified `function_app.py`: Fixed datetime imports and Pydantic object access
+- Modified `util_import_validator.py`: Added timezone to all datetime.now() calls
+- Modified `trigger_health.py`: Fixed datetime usage with timezone
+- Modified `schema_sql_generator.py`: Reverted JSONB workaround
+
+**Overall Result**: Core workflow mechanics now functioning. Jobs can advance through stages, but stage 2 task creation needs investigation.
+
+---
+
+## 11 September 2025: Transaction Commit Fix - Task Persistence Resolved
+
+**Status**: ✅ COMPLETED AND VERIFIED
+**Impact**: **CRITICAL** - Tasks now persist to database correctly
+**Timeline**: 22:00-23:00 UTC
+**Author**: Robert and Geospatial Claude Legion
+
+### Problem Solved
+Tasks were executing successfully but remaining stuck in "processing" status with null result_data in the database.
+
+### Root Cause
+The `_execute_query()` method in repository_postgresql.py wasn't committing transactions for PostgreSQL functions that return data. Functions with `RETURNS TABLE` have `cursor.description` set, causing them to bypass the commit logic.
+
+### Solution Implemented
+1. **Rewrote `_execute_query()` to ALWAYS commit** - Every database operation now commits
+2. **Added comprehensive error handling** - Specific catches for all psycopg exception types
+3. **Fixed context manager usage** - Corrected improper direct call to generator
+4. **Implemented fail-fast principle** - Clear, loud errors instead of silent failures
+
+### Test Results
+- ✅ Tasks now complete and persist result_data successfully
+- ✅ Task status correctly updates to "completed" not stuck in "processing"
+- ✅ Errors propagate correctly (jobs marked as FAILED with clear messages)
+- ✅ Stage 1 tasks completed successfully in test job 8e2e30cd...
+
+### Code Changes
+- Modified `repository_postgresql.py` lines 451-585
+- Changed from conditional commit to ALWAYS commit pattern
+- Added proper context manager usage with `with self._get_connection() as conn:`
+
+**Result**: Database transaction issue completely resolved. Tasks complete and persist correctly.
+
+---
+
+## 11 September 2025: Pydantic v2 Migration - Phase 3 Complete
+
+**Status**: ✅ ALL 12 MODELS MIGRATED
+**Impact**: **HIGH** - Performance improvements and modern patterns
+**Timeline**: 23:30-00:00 UTC  
+**Author**: Robert and Geospatial Claude Legion
+
+### Migration Summary
+Successfully migrated all 12 Pydantic models from v1 to v2 patterns:
+
+#### Models Migrated (Phase 1-3)
+1. **Phase 1**: 7 simple models in schema_base.py (BaseController, StageExecutionContext, etc.)
+2. **Phase 2**: 2 queue models in schema_queue.py (JobQueueMessage, TaskQueueMessage)
+3. **Phase 3**: 3 models with json_encoders:
+   - JobRecord: Migrated datetime & Decimal encoders to field_serializer
+   - TaskRecord: Migrated datetime encoder to field_serializer  
+   - JobRegistration: Migrated datetime encoder to field_serializer
+
+#### Key Changes
+- Replaced all `Config` classes with `ConfigDict`
+- Migrated `json_encoders` to `@field_serializer` decorators
+- Fixed `.dict()` calls to `.model_dump()`
+- Ensured all validators use v2 `@field_validator` pattern
+
+**Result**: Full Pydantic v2 compatibility achieved with performance benefits.
 
 ---
 

@@ -54,7 +54,7 @@ import traceback
 import json
 import glob
 from typing import Dict, List, Optional, Any, Tuple
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 # Initialize logging first - critical for debugging import issues
@@ -196,8 +196,8 @@ class ImportValidator:
             self.logger.debug(f"📂 Registry file not found, creating new registry: {self._registry_file}")
             return {
                 'metadata': {
-                    'created': datetime.now().isoformat(),
-                    'last_updated': datetime.now().isoformat(),
+                    'created': datetime.now(timezone.utc).isoformat(),
+                    'last_updated': datetime.now(timezone.utc).isoformat(),
                     'version': '1.0'
                 },
                 'critical_modules': {},
@@ -214,8 +214,8 @@ class ImportValidator:
             self.logger.warning(f"⚠️ Failed to load registry file, creating new: {e}")
             return {
                 'metadata': {
-                    'created': datetime.now().isoformat(),
-                    'last_updated': datetime.now().isoformat(),
+                    'created': datetime.now(timezone.utc).isoformat(),
+                    'last_updated': datetime.now(timezone.utc).isoformat(),
                     'version': '1.0',
                     'load_error': str(e)
                 },
@@ -237,7 +237,7 @@ class ImportValidator:
             
         try:
             # Update metadata
-            registry['metadata']['last_updated'] = datetime.now().isoformat()
+            registry['metadata']['last_updated'] = datetime.now(timezone.utc).isoformat()
             
             registry_path = Path(self._registry_file)
             with open(registry_path, 'w') as f:
@@ -328,7 +328,7 @@ class ImportValidator:
         Returns:
             Updated registry data.
         """
-        current_time = datetime.now().isoformat()
+        current_time = datetime.now(timezone.utc).isoformat()
         
         # Update application modules section
         for module_name, description in discovered_modules:
@@ -360,7 +360,7 @@ class ImportValidator:
         Returns:
             Updated registry with validation history.
         """
-        current_time = datetime.now().isoformat()
+        current_time = datetime.now(timezone.utc).isoformat()
         
         # Update critical modules validation history
         for module_name, details in validation_results['critical_imports']['details'].items():
@@ -390,7 +390,7 @@ class ImportValidator:
         if self._last_validation is None or self._validation_timestamp is None:
             return False
             
-        age = datetime.now() - self._validation_timestamp
+        age = datetime.now(timezone.utc) - self._validation_timestamp
         return age < self._cache_duration
     
     def validate_all_imports(self, force_recheck: bool = False) -> Dict[str, Any]:
@@ -413,7 +413,7 @@ class ImportValidator:
         """
         # Return cached results if valid and not forcing recheck
         if not force_recheck and self._is_cache_valid():
-            self.logger.debug(f"📋 Using cached validation results (age: {datetime.now() - self._validation_timestamp})")
+            self.logger.debug(f"📋 Using cached validation results (age: {datetime.now(timezone.utc) - self._validation_timestamp})")
             return self._last_validation
         
         self.logger.info(f"🔍 Starting comprehensive import validation with auto-discovery (force_recheck={force_recheck})")
@@ -430,7 +430,7 @@ class ImportValidator:
         # Initialize validation result structure
         validation_result = {
             'success': True,
-            'timestamp': datetime.now().isoformat(),
+            'timestamp': datetime.now(timezone.utc).isoformat(),
             'critical_imports': {'success': True, 'failed': [], 'details': {}},
             'application_modules': {'success': True, 'failed': [], 'details': {}},
             'warnings': [],
@@ -462,7 +462,7 @@ class ImportValidator:
         
         # Cache results for performance
         self._last_validation = validation_result
-        self._validation_timestamp = datetime.now()
+        self._validation_timestamp = datetime.now(timezone.utc)
         
         # Log summary with auto-discovery info
         status_icon = "✅" if validation_result['success'] else "❌"
@@ -670,7 +670,7 @@ class ImportValidator:
             
             health_status = {
                 'status': 'healthy' if validation_result['success'] else 'unhealthy',
-                'timestamp': datetime.now().isoformat(),
+                'timestamp': datetime.now(timezone.utc).isoformat(),
                 'imports': validation_result,
                 'overall_success': validation_result['success'],
                 'summary': self._generate_health_summary(validation_result)
@@ -687,7 +687,7 @@ class ImportValidator:
             
             return {
                 'status': 'error',
-                'timestamp': datetime.now().isoformat(),
+                'timestamp': datetime.now(timezone.utc).isoformat(),
                 'error': error_msg,
                 'traceback': traceback.format_exc(),
                 'overall_success': False,

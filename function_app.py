@@ -96,7 +96,6 @@ Last Updated: January 2025
 
 # Native Python modules
 import logging
-import datetime
 import json
 import traceback
 from datetime import datetime, timezone
@@ -104,6 +103,7 @@ from datetime import datetime, timezone
 # Azure SDK modules (3rd party - Microsoft)
 import azure.functions as func
 from azure.storage.queue import QueueServiceClient
+from azure.identity import DefaultAzureCredential
 
 # Suppress Azure Identity and Azure SDK authentication/HTTP logging
 logging.getLogger("azure.identity").setLevel(logging.WARNING)
@@ -129,7 +129,7 @@ validator.ensure_startup_ready()
 # ========================================================================
 
 # Application modules (our code) - Core schemas and logging
-from schema_base import JobStatus, TaskStatus, TaskResult
+from schema_base import JobStatus, TaskStatus, TaskResult, TaskRecord
 from schema_queue import JobQueueMessage, TaskQueueMessage
 from util_logger import LoggerFactory
 from util_logger import ComponentType
@@ -1080,7 +1080,7 @@ def process_task_queue(msg: func.QueueMessage) -> None:
                         'stage_number': task_message.stage,
                         'completed_tasks': len(stage_task_results),
                         'task_results': stage_task_results,
-                        'stage_completed_at': datetime.datetime.now(datetime.timezone.utc).isoformat()
+                        'stage_completed_at': datetime.now(timezone.utc).isoformat()
                     }
                     
                     # Advance job to next stage atomically
@@ -1090,11 +1090,11 @@ def process_task_queue(msg: func.QueueMessage) -> None:
                         stage_results=stage_results
                     )
                     
-                    if not advancement_result.get('job_updated', False):
+                    if not advancement_result.job_updated:
                         raise RuntimeError(f"Failed to advance job {task_message.parent_job_id} from stage {task_message.stage}")
                     
-                    new_stage = advancement_result.get('new_stage')
-                    is_final = advancement_result.get('is_final_stage', False)
+                    new_stage = advancement_result.new_stage
+                    is_final = advancement_result.is_final_stage or False
                     
                     logger.info(f"✅ Job advanced from stage {task_message.stage} → stage {new_stage}")
                     
@@ -1110,7 +1110,7 @@ def process_task_queue(msg: func.QueueMessage) -> None:
                             'stage_number': task_message.stage,
                             'completed_tasks': len(stage_task_results),
                             'task_results': stage_task_results,
-                            'stage_completed_at': datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                            'stage_completed_at': datetime.now(timezone.utc).isoformat(),
                             # Include any accumulated results from job record
                             'accumulated_results': job_record.stage_results or {}
                         }
@@ -1130,32 +1130,58 @@ def process_task_queue(msg: func.QueueMessage) -> None:
                         tasks_queued = 0
                         for task_def in next_stage_tasks:
                             try:
+                                # Convert TaskDefinition to TaskRecord for database insertion
+                                task_record = TaskRecord(
+                                    task_id=task_def.task_id,
+                                    parent_job_id=task_def.job_id,  # TaskDefinition uses job_id
+                                    task_type=task_def.task_type,
+                                    status=TaskStatus.QUEUED,
+                                    stage=task_def.stage_number,  # TaskDefinition uses stage_number
+                                    task_index=task_def.parameters.get('task_index', '0'),  # Extract from params if available
+                                    parameters=task_def.parameters,
+                                    metadata={},
+                                    retry_count=task_def.retry_count
+                                )
+                                
                                 # Create task record
-                                success = task_repo.create_task(task_def)
+                                success = task_repo.create_task(task_record)
                                 if success:
+                                    logger.info(f"✅ Task {task_def.task_id} created in database, now queuing...")
                                     # Queue task for execution  
                                     task_queue_message = TaskQueueMessage(
                                         task_id=task_def.task_id,
                                         parent_job_id=task_def.job_id,  # TaskDefinition uses job_id not parent_job_id
                                         task_type=task_def.task_type,
                                         stage=task_def.stage_number,  # TaskDefinition uses stage_number not stage
-                                        task_index=0,  # Default task_index since TaskDefinition doesn't have this field
+                                        task_index=str(task_def.parameters.get('task_index', '0')),  # Ensure it's a string
                                         parameters=task_def.parameters
                                     )
                                     
                                     # Send to task queue
-                                    # Imports moved to top of file
-                                    
+                                    # Create fresh credential for queue operations
                                     config = get_config()
-                                    queue_service = QueueServiceClient(account_url=config.storage_account_url, credential=config.azure_credential)
+                                    logger.info(f"📤 Attempting to queue task {task_def.task_id} to {config.task_processing_queue}")
+                                    logger.debug(f"Config loaded, queue URL: {config.queue_service_url}")
+                                    credential = DefaultAzureCredential()
+                                    logger.debug(f"Credential created")
+                                    queue_service = QueueServiceClient(account_url=config.queue_service_url, credential=credential)
+                                    logger.debug(f"Queue service created")
                                     task_queue = queue_service.get_queue_client(config.task_processing_queue)
+                                    logger.debug(f"Queue client created for {config.task_processing_queue}")
                                     
-                                    task_queue.send_message(task_queue_message.model_dump_json())
+                                    message_json = task_queue_message.model_dump_json()
+                                    logger.debug(f"Message JSON created, length: {len(message_json)}")
+                                    task_queue.send_message(message_json)
+                                    logger.debug(f"Message sent successfully")
                                     tasks_queued += 1
                                     logger.info(f"📨 Queued task {task_def.task_id}")
                                     
                             except Exception as task_error:
                                 logger.error(f"❌ Failed to queue task {task_def.task_id}: {task_error}")
+                                logger.error(f"❌ Error type: {type(task_error).__name__}")
+                                logger.error(f"❌ Error details: {str(task_error)}")
+                                import traceback
+                                logger.error(f"❌ Traceback: {traceback.format_exc()}")
                                 # Continue with other tasks - partial failure handling
                         
                         logger.info(f"🎯 Stage {new_stage} started with {tasks_queued}/{len(next_stage_tasks)} tasks queued")
@@ -1190,6 +1216,26 @@ def process_task_queue(msg: func.QueueMessage) -> None:
         final_job_check = completion_detector.check_job_completion(task_message.parent_job_id)
         if final_job_check.job_complete:
             logger.info(f"🎉 Job fully complete: {task_message.parent_job_id[:16]}...")
+            
+            # Update job status to COMPLETED
+            job_repo.update_job_status_with_validation(
+                job_id=task_message.parent_job_id,
+                new_status=JobStatus.COMPLETED
+            )
+            logger.info(f"✅ Job status updated to COMPLETED: {task_message.parent_job_id[:16]}...")
+            
+            # Optionally, aggregate final results
+            final_results = {
+                "total_tasks": final_job_check.total_tasks,
+                "completed_tasks": final_job_check.completed_tasks,
+                "final_stage": final_job_check.final_stage,
+                "completion_timestamp": datetime.utcnow().isoformat()
+            }
+            job_repo.update_job(
+                job_id=task_message.parent_job_id,
+                updates={"result_data": final_results}
+            )
+            
         else:
             logger.debug(f"📊 Job not yet complete: more stages or tasks pending")
             

@@ -202,7 +202,7 @@ curl https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/db/f
 ## Storage Access
 ```
 Account: rmhazuregeo
-Key: drfLsaBC3OdvYjoq+NoESWn03KuQ8HyZkPzDaQ5b2xBvB8bp7Eu/HIpN7R51P0iOpp2WVDIyByR++AStDuHM0w==
+Key: [REDACTED - See Azure Portal or Key Vault for actual key]
 ```
 
 ---

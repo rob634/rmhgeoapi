@@ -194,7 +194,7 @@ Create `local.settings.json`:
     "AzureWebJobsStorage": "UseDevelopmentStorage=true",
     "FUNCTIONS_WORKER_RUNTIME": "python",
     "STORAGE_ACCOUNT_NAME": "rmhazuregeo",
-    "STORAGE_ACCOUNT_KEY": "drfLsaBC3OdvYjoq+NoESWn03KuQ8HyZkPzDaQ5b2xBvB8bp7Eu/HIpN7R51P0iOpp2WVDIyByR++AStDuHM0w==",
+    "STORAGE_ACCOUNT_KEY": "[REDACTED - See Azure Portal or Key Vault for actual key]",
     "POSTGRES_HOST": "rmhpgflex.postgres.database.azure.com",
     "POSTGRES_DB": "postgres",
     "POSTGRES_USER": "your_username",
@@ -306,7 +306,7 @@ az functionapp deployment source config-zip \
 ### Storage Access
 ```
 Account: rmhazuregeo
-Key: drfLsaBC3OdvYjoq+NoESWn03KuQ8HyZkPzDaQ5b2xBvB8bp7Eu/HIpN7R51P0iOpp2WVDIyByR++AStDuHM0w==
+Key: [REDACTED - See Azure Portal or Key Vault for actual key]
 ```
 **Note**: This key is for development only. Production will use managed identity.
 

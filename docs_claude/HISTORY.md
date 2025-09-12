@@ -1560,6 +1560,63 @@ Implemented Nuclear Red Button system that enforces schema-as-code discipline th
 
 ---
 
+## 12 SEP 2025 - Stage 2 Task Creation & Job Completion Fixes
+
+### Critical Issues Resolved
+Successfully fixed the complete Job→Stage→Task orchestration workflow, enabling end-to-end job completion.
+
+### Problems Fixed
+
+1. **TaskDefinition to TaskRecord Conversion Issue**
+   - **Problem**: Stage 2 tasks were failing to queue because TaskDefinition was passed to create_task() which expects TaskRecord
+   - **Location**: function_app.py lines 1133-1146
+   - **Fix**: Added conversion logic to transform TaskDefinition to TaskRecord before database insertion
+   - **Code Added**:
+     ```python
+     task_record = TaskRecord(
+         task_id=task_def.task_id,
+         parent_job_id=task_def.job_id,
+         task_type=task_def.task_type,
+         status=TaskStatus.QUEUED,
+         stage=task_def.stage_number,
+         task_index=task_def.parameters.get('task_index', '0'),
+         parameters=task_def.parameters,
+         metadata={},
+         retry_count=task_def.retry_count
+     )
+     ```
+
+2. **Config Attribute Error**
+   - **Problem**: AttributeError: 'AppConfig' object has no attribute 'storage_account_url'
+   - **Location**: function_app.py line 1167
+   - **Fix**: Changed `config.storage_account_url` to `config.queue_service_url`
+   - **Result**: Queue service client now initializes correctly
+
+3. **Job Completion Status Not Updating**
+   - **Problem**: Job completion was detected but status remained "processing" instead of "completed"
+   - **Location**: function_app.py lines 1221-1237
+   - **Fix**: Added job status update after completion detection
+   - **Code Added**:
+     ```python
+     job_repo.update_job_status_with_validation(
+         job_id=task_message.parent_job_id,
+         new_status=JobStatus.COMPLETED
+     )
+     ```
+
+### Testing & Verification
+- **Test Progression**: Successfully tested with n=2, 3, 5, 10, and 100 tasks
+- **Scale Test**: n=100 resulted in 200 total tasks (100 per stage), all completed successfully
+- **Idempotency Test**: Confirmed duplicate job submissions return same job_id (SHA256 hash working)
+- **Performance**: n=100 job completed in under 1 minute
+
+### Impact
+- **Before**: Jobs stuck after Stage 1, no Stage 2 tasks created
+- **After**: Full workflow completion with proper stage transitions and job completion
+- **Result**: Job→Stage→Task orchestration now fully operational
+
+---
+
 ## Historical Context
 
 ### Original Architecture Challenges

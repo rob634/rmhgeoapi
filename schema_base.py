@@ -4,7 +4,7 @@
 # PURPOSE: Unified schema for Job→Stage→Task architecture - single source of truth for all workflow components
 # EXPORTS: All status enums, record models, queue messages, execution contexts, results, BaseController with completion logic
 # INTERFACES: BaseController (ABC with completion methods), Pydantic BaseModel for validation, dataclasses for internals
-# PYDANTIC_MODELS: JobRecord, TaskRecord, JobQueueMessage, TaskQueueMessage, execution contexts, TaskResult
+# PYDANTIC_MODELS: JobRecord, TaskRecord, execution contexts, TaskResult (Queue models moved to schema_queue.py)
 # DEPENDENCIES: pydantic, abc, dataclasses, typing, datetime, enum, hashlib, json, uuid
 # SOURCE: No data source - defines all data structures and contracts for the workflow system
 # SCOPE: Complete Job→Stage→Task architecture including persistence, queuing, execution, results, and completion logic
@@ -47,13 +47,12 @@ Design Philosophy:
 - Single inheritance chain for clean OOP design
 """
 
-from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from decimal import Decimal
 from enum import Enum
 from typing import Dict, Any, List, Optional, Union
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, ConfigDict, field_serializer
 import hashlib
 import json
 import uuid
@@ -252,13 +251,17 @@ class JobRecord(BaseModel):
             
         return False
     
-    class Config:
-        # Removed use_enum_values - enums should remain as enums for type safety
-        validate_assignment = True
-        json_encoders = {
-            datetime: lambda v: v.isoformat(),
-            Decimal: lambda v: float(v)
-        }
+    model_config = ConfigDict(validate_assignment=True)
+    
+    @field_serializer('created_at', 'updated_at')
+    def serialize_datetime(self, value: datetime) -> str:
+        """Serialize datetime fields to ISO format"""
+        return value.isoformat() if value else None
+    
+    # Note: Add Decimal serializer if any Decimal fields are added in future
+    # @field_serializer('amount', 'price')  # Example for Decimal fields
+    # def serialize_decimal(self, value: Decimal) -> float:
+    #     return float(value) if value else None
 
 
 class TaskRecord(BaseModel):
@@ -347,65 +350,18 @@ class TaskRecord(BaseModel):
             
         return False
     
-    class Config:
-        # Removed use_enum_values - enums should remain as enums for type safety
-        validate_assignment = True
-        json_encoders = {
-            datetime: lambda v: v.isoformat()
-        }
+    model_config = ConfigDict(validate_assignment=True)
+    
+    @field_serializer('created_at', 'updated_at', 'heartbeat')
+    def serialize_datetime(self, value: datetime) -> str:
+        """Serialize datetime fields to ISO format"""
+        return value.isoformat() if value else None
 
 
 # ============================================================================
-# QUEUE MESSAGE MODELS (Pydantic) - For Azure Queue Storage
+# NOTE: Queue message models moved to schema_queue.py for better separation
+# Import from schema_queue: JobQueueMessage, TaskQueueMessage
 # ============================================================================
-
-class JobQueueMessage(BaseModel):
-    """
-    Job queue message for Azure Queue Storage.
-    
-    Validated message format for job orchestration via queues.
-    """
-    job_id: str = Field(..., min_length=64, max_length=64)
-    job_type: str = Field(..., min_length=1, max_length=50)
-    stage: int = Field(..., ge=1, le=100)
-    parameters: Dict[str, Any] = Field(default_factory=dict)
-    stage_results: Optional[Dict[str, Any]] = Field(default_factory=dict)
-    retry_count: int = Field(default=0, ge=0, le=10)
-    timestamp: datetime = Field(default_factory=datetime.utcnow, description="Message creation time")
-    
-    @field_validator('job_id')
-    @classmethod
-    def validate_job_id_format(cls, v):
-        return validate_job_id(v)
-    
-    class Config:
-        validate_assignment = True
-
-
-class TaskQueueMessage(BaseModel):
-    """
-    Task queue message for Azure Queue Storage.
-    
-    Validated message format for task execution via queues.
-    """
-    task_id: str = Field(..., min_length=1, max_length=100)
-    parent_job_id: str = Field(..., min_length=64, max_length=64)
-    task_type: str = Field(..., min_length=1, max_length=50)
-    stage: int = Field(..., ge=1, le=100)
-    task_index: str = Field(default="0", max_length=50, description="Can be semantic like 'tile_x5_y10'")
-    parameters: Dict[str, Any] = Field(default_factory=dict)
-    parent_task_id: Optional[str] = Field(None, max_length=100, description="For explicit handoff from previous stage")
-    retry_count: int = Field(default=0, ge=0, le=10)
-    timestamp: datetime = Field(default_factory=datetime.utcnow, description="Message creation time")
-    
-    @field_validator('parent_job_id')
-    @classmethod
-    def validate_parent_job_id_format(cls, v):
-        return validate_job_id(v)
-    
-    class Config:
-        validate_assignment = True
-
 
 # ============================================================================
 # EXECUTION CONTEXT MODELS (Pydantic) - Runtime state management
@@ -439,8 +395,7 @@ class JobExecutionContext(BaseModel):
         """Set results for a specific stage"""
         self.stage_results[stage_number] = result
     
-    class Config:
-        validate_assignment = True
+    model_config = ConfigDict(validate_assignment=True)
 
 
 class StageExecutionContext(BaseModel):
@@ -472,8 +427,7 @@ class StageExecutionContext(BaseModel):
             return 0.0
         return (self.completed_tasks / total_finished) * 100.0
     
-    class Config:
-        validate_assignment = True
+    model_config = ConfigDict(validate_assignment=True)
 
 
 class TaskExecutionContext(BaseModel):
@@ -511,8 +465,7 @@ class TaskExecutionContext(BaseModel):
         """Check if task can be retried"""
         return self.retry_count < self.max_retries
     
-    class Config:
-        validate_assignment = True
+    model_config = ConfigDict(validate_assignment=True)
 
 
 # ============================================================================
@@ -544,8 +497,7 @@ class StageDefinition(BaseModel):
                 raise ValueError(f"Stage {info.data['stage_number']} cannot depend on stage {v} (must depend on earlier stage)")
         return v
     
-    class Config:
-        validate_assignment = True
+    model_config = ConfigDict(validate_assignment=True)
 
 
 class WorkflowDefinition(BaseModel):
@@ -587,8 +539,7 @@ class WorkflowDefinition(BaseModel):
         
         return v
     
-    class Config:
-        validate_assignment = True
+    model_config = ConfigDict(validate_assignment=True)
 
 
 class JobRegistration(BaseModel):
@@ -607,11 +558,12 @@ class JobRegistration(BaseModel):
     timeout_minutes: int = Field(default=60, ge=1, le=1440, description="Job timeout in minutes")
     created_at: datetime = Field(default_factory=datetime.utcnow, description="Registration timestamp")
     
-    class Config:
-        validate_assignment = True
-        json_encoders = {
-            datetime: lambda v: v.isoformat()
-        }
+    model_config = ConfigDict(validate_assignment=True)
+    
+    @field_serializer('created_at')
+    def serialize_datetime(self, value: datetime) -> str:
+        """Serialize datetime fields to ISO format"""
+        return value.isoformat() if value else None
 
 
 # Singleton instance holder (outside class to avoid Pydantic issues)
@@ -639,8 +591,7 @@ class JobRegistry(BaseModel):
         description="Map of job_type to JobRegistration"
     )
     
-    class Config:
-        validate_assignment = True
+    model_config = ConfigDict(validate_assignment=True)
     
     @classmethod
     def instance(cls) -> 'JobRegistry':
@@ -743,8 +694,7 @@ class TaskResult(BaseModel):
         # Status should always be a TaskStatus enum, not a string
         return self.status == TaskStatus.COMPLETED
     
-    class Config:
-        validate_assignment = True
+    model_config = ConfigDict(validate_assignment=True)
         # Removed use_enum_values - enums should remain as enums for type safety
 
 
@@ -792,7 +742,7 @@ class StageResult:
             'success_rate': self.success_rate,
             'execution_time_seconds': self.execution_time_seconds,
             'completed_at': self.completed_at,
-            'task_results': [task.dict() if hasattr(task, 'dict') else task.to_dict() for task in self.task_results]
+            'task_results': [task.model_dump() if hasattr(task, 'model_dump') else task.to_dict() for task in self.task_results]
         }
 
 
@@ -909,144 +859,9 @@ class StageAdvancementResult(BaseModel):
 # Note: BaseController has been moved to controller_base.py to avoid duplication
 # Import from controller_base when needed: from controller_base import BaseController
 
-
-class BaseTask(BaseModel, ABC):
-    """
-    Unified base task combining Pydantic validation with ABC behavior contracts.
-    
-    All task implementations inherit validated fields AND must implement required methods.
-    """
-    
-    # Pydantic fields - become database columns
-    task_id: str = Field(..., description="Unique task identifier", min_length=1, max_length=100)
-    parent_job_id: str = Field(..., description="Parent job ID", min_length=64, max_length=64)
-    task_type: str = Field(..., description="Type of task", min_length=1, max_length=50)
-    status: TaskStatus = Field(default=TaskStatus.QUEUED, description="Current task status")
-    stage: int = Field(..., ge=1, le=100, description="Stage number")
-    task_index: int = Field(default=0, ge=0, le=10000, description="Index within stage")
-    parameters: Dict[str, Any] = Field(default_factory=dict, description="Task parameters")
-    result_data: Optional[Dict[str, Any]] = Field(None, description="Task result data")
-    error_details: Optional[str] = Field(None, description="Error details if failed")
-    retry_count: int = Field(default=0, ge=0, le=10, description="Retry attempts")
-    created_at: Optional[datetime] = Field(default_factory=datetime.utcnow)
-    updated_at: Optional[datetime] = Field(default_factory=datetime.utcnow)
-    heartbeat: Optional[datetime] = Field(None, description="Last heartbeat")
-    
-    # Field validators
-    @field_validator('task_id')
-    @classmethod
-    def validate_task_id_format(cls, v):
-        return validate_task_id(v)
-    
-    @field_validator('parent_job_id')
-    @classmethod
-    def validate_parent_job_id_format(cls, v):
-        return validate_job_id(v)
-    
-    # Abstract methods - must be implemented
-    @abstractmethod
-    def execute(self, context: TaskExecutionContext) -> TaskResult:
-        """Execute the task with the given context"""
-        pass
-    
-    @abstractmethod
-    def validate_parameters(self) -> bool:
-        """Validate task-specific parameters"""
-        pass
-    
-    # Concrete helper methods
-    def can_retry(self) -> bool:
-        """Check if task can be retried"""
-        return self.retry_count < 10
-    
-    def update_heartbeat(self) -> None:
-        """Update heartbeat timestamp"""
-        self.heartbeat = datetime.now(timezone.utc)
-    
-    def mark_completed(self, result_data: Dict[str, Any]) -> None:
-        """Mark task as completed with results"""
-        self.status = TaskStatus.COMPLETED
-        self.result_data = result_data
-        self.updated_at = datetime.now(timezone.utc)
-    
-    def mark_failed(self, error: str) -> None:
-        """Mark task as failed with error"""
-        self.status = TaskStatus.FAILED
-        self.error_details = error
-        self.updated_at = datetime.now(timezone.utc)
-    
-    class Config:
-        validate_assignment = True
-        # Removed use_enum_values - enums should remain as enums for type safety
-        extra = "allow"
-
-
-class BaseJob(BaseModel, ABC):
-    """
-    Unified base job combining Pydantic validation with ABC behavior contracts.
-    
-    NOTE: Currently not actively used - BaseController is used instead.
-    Included for architectural completeness.
-    """
-    
-    # Pydantic fields
-    job_id: str = Field(..., min_length=64, max_length=64)
-    job_type: str = Field(..., min_length=1, max_length=50)
-    status: JobStatus = Field(default=JobStatus.QUEUED)
-    stage: int = Field(default=1, ge=1, le=100)
-    total_stages: int = Field(default=1, ge=1, le=100)
-    parameters: Dict[str, Any] = Field(default_factory=dict)
-    stage_results: Dict[int, Dict[str, Any]] = Field(default_factory=dict)
-    result_data: Optional[Dict[str, Any]] = Field(None)
-    error_details: Optional[str] = Field(None)
-    created_at: Optional[datetime] = Field(default_factory=datetime.utcnow)
-    updated_at: Optional[datetime] = Field(default_factory=datetime.utcnow)
-    
-    # Abstract methods
-    @abstractmethod
-    def get_workflow_definition(self) -> Dict[str, Any]:
-        """Get the workflow definition for this job type"""
-        pass
-    
-    @abstractmethod
-    def validate_parameters(self) -> bool:
-        """Validate job-specific parameters"""
-        pass
-    
-    class Config:
-        validate_assignment = True
-        # Removed use_enum_values - enums should remain as enums for type safety
-
-
-class BaseStage(BaseModel, ABC):
-    """
-    Unified base stage combining Pydantic validation with ABC behavior contracts.
-    
-    NOTE: Currently not actively used.
-    Included for architectural completeness.
-    """
-    
-    # Pydantic fields
-    stage_number: int = Field(..., ge=1, le=100)
-    stage_name: str = Field(..., min_length=1, max_length=100)
-    task_type: str = Field(..., min_length=1, max_length=50)
-    is_final_stage: bool = Field(default=False)
-    depends_on_stage: Optional[int] = Field(None, ge=1, le=99)
-    max_parallel_tasks: Optional[int] = Field(None, ge=1)
-    
-    # Abstract methods
-    @abstractmethod
-    def create_tasks(self, context: StageExecutionContext) -> List[Dict[str, Any]]:
-        """Create tasks for this stage"""
-        pass
-    
-    @abstractmethod
-    def aggregate_results(self, task_results: List[TaskResult]) -> Dict[str, Any]:
-        """Aggregate task results for stage completion"""
-        pass
-    
-    class Config:
-        validate_assignment = True
+# NOTE: BaseTask, BaseJob, and BaseStage classes removed (11 Sept 2025)
+# These mixed data+behavior classes violated separation of concerns.
+# Use schema_* files for data models and controller_* files for behavior.
 
 
 # ============================================================================

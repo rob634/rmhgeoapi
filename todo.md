@@ -1,60 +1,177 @@
 # TODO
 
-**Last Updated**: 10 September 2025
+**Last Updated**: 11 September 2025 - Deployment Testing
+
+## 🏗️ ARCHITECTURAL REFACTORING - Clear Separation of Data vs Behavior (11 Sept 2025)
+
+### Overview
+**Goal**: Establish clear naming conventions and separation between data structures and behavior contracts
+**Principle**: `schema_*` = data structure, `interface_*` = behavior contracts, `*_impl` = concrete implementations
+**Benefits**: Clear architecture, no mixed concerns, easier to understand and maintain
+
+### Current Architecture Layers (PYRAMID)
+```
+┌─────────────────────────────────────────────────────┐
+│                   HTTP TRIGGERS                      │ <- Entry Points
+├─────────────────────────────────────────────────────┤
+│                   CONTROLLERS                        │ <- Orchestration
+├─────────────────────────────────────────────────────┤
+│                    SERVICES                          │ <- Business Logic
+├─────────────────────────────────────────────────────┤
+│                  REPOSITORIES                        │ <- Data Access
+├─────────────────────────────────────────────────────┤
+│                    SCHEMAS                           │ <- Data Models
+└─────────────────────────────────────────────────────┘
+```
+
+### File Naming Convention (Enforced)
+- `trigger_*.py` → HTTP entry points (Azure Functions)
+- `controller_*.py` → Job orchestration logic
+- `service_*.py` → Task execution & business logic  
+- `repository_*.py` → Concrete data access implementations
+- `interface_*.py` → Abstract behavior contracts (ABCs)
+- `schema_*.py` → Pure data structures (Pydantic models)
+- `model_*.py` → DEPRECATED - being migrated to schema_*
+
+### Key Architectural Principles
+1. **Single Responsibility**: Each layer has one clear purpose
+2. **Dependency Inversion**: Upper layers depend on interfaces, not implementations
+3. **Data/Behavior Separation**: Models define structure, services define operations
+4. **Factory Pattern**: All object creation through factories for consistency
+5. **Registry Pattern**: Auto-discovery and registration of implementations
+
+### Remaining Refactoring Tasks
+
+#### Phase 5: Final Documentation Updates ✅ COMPLETED (11 Sept 2025)
+- ✅ Updated ARCHITECTURE_FILE_INDEX.md with new structure
+- ✅ Documented the interface/implementation separation pattern
+- ✅ Added comprehensive interface/implementation architecture diagram
+- ✅ Updated file counts to reflect interface_repository.py rename
+- ✅ Documented benefits of separation (testability, flexibility, no circular deps)
 
 ## 🚨 CRITICAL - Current Blocking Issues
 
-### 1. TaskResult Field Name Mismatch ✅ FIXED (11 Sept 2025)
-**Problem**: TaskResult model uses different field names than JobRecord/TaskRecord
-**Impact**: Tasks stuck in "processing" status, validation errors prevent completion
-**Root Cause**: TaskResult had `result` and `error` instead of `result_data` and `error_details`
+### 0. Task Completion Not Persisting to Database 🟢 FIX DEPLOYED (11 Sept 2025)
 
-**Completed Fixes**:
-- ✅ Fixed TaskResult model definition (schema_base.py:720-735)
-  - Changed field `result` → `result_data`
-  - Changed field `error` → `error_details`
-- ✅ Updated TaskHandlerFactory in service_factories.py (lines 223-248)
-  - Using correct field names when constructing TaskResult
-- ✅ Tested field alignment - all models now consistent
+**Status**: Fix deployed to production, ready for testing
 
-### 2. PostgreSQL Schema Type Mismatch ✅ FIXED (11 Sept 2025)
-**Problem**: Database column `error_details` created as JSONB instead of VARCHAR(5000)
-**Root Cause**: SQL generator using Pydantic v1 style field access + Union type checking bug
-**Status**: ✅ SQL generator fully fixed and tested
+**Problem**: Tasks execute successfully but remain in "processing" status in database
 
-**Fixes Applied**:
-- ✅ Fixed Union vs Optional type checking in python_type_to_sql
-- ✅ Properly extracting MaxLen constraints from Pydantic v2 metadata
-- ✅ Tested all field types - correct mapping confirmed
+**Root Cause Identified**: 
+- `_execute_query()` in repository_postgresql.py wasn't committing transactions for functions that return data
+- PostgreSQL functions with `RETURNS TABLE` have `cursor.description` set, bypassing commit logic
+- Affects: `complete_task_and_check_stage`, `advance_job_stage`, `check_job_completion`
 
-**Deployment Steps Required**:
-- [ ] Deploy updated code (schema_base.py, schema_sql_generator.py, service_factories.py)
-- [ ] Run database schema redeploy: `POST /api/db/schema/redeploy?confirm=yes`
-- [ ] Submit test hello_world job to verify task completion
-- [ ] Check task status progression and stage advancement
+**Fix Applied**: 
+- ✅ Rewrote `_execute_query()` to ALWAYS commit for ALL operations
+- ✅ Added comprehensive error handling for commit failures
+- ✅ Verified error propagation to task/job records
+- ⏳ Awaiting deployment to Azure Functions
 
-### 3. Repository Return Type Models in Wrong Layer ✅ FIXED (11 Sept 2025)
-**Problem**: JobCompletionResult, TaskCompletionResult, StageAdvancementResult defined in repository_abc.py instead of schema layer
-**Impact**: Violates pyramid architecture, causes field name inconsistencies, using dataclass instead of Pydantic
-**Root Cause**: Models created to enforce SQL function return types but placed in wrong architectural layer
+**Proposed Fix - Enhanced Option 1: ALWAYS COMMIT with Loud Failures**
 
-**Completed Fixes**:
-- ✅ Moved JobCompletionResult from repository_abc.py to schema_base.py
-- ✅ Moved TaskCompletionResult from repository_abc.py to schema_base.py  
-- ✅ Moved StageAdvancementResult from repository_abc.py to schema_base.py
-- ✅ Converted all three from @dataclass to Pydantic BaseModel
-- ✅ Updated repository_abc.py to import these models from schema_base
-- ✅ Fixed field name: standardized on `job_complete` (not `is_complete`)
-- ✅ Verified function_app.py line 1190 already uses correct field name
-- ✅ No circular imports detected during migration
-- ✅ All imports tested successfully
+#### Implementation Steps:
 
-### 4. Pydantic v1 Legacy Patterns (PERFORMANCE & MAINTENANCE ISSUE)
-**Problem**: 15 models using v1 Config classes instead of v2 ConfigDict
-**Impact**: Missing 5-50x performance improvements, maintenance burden
-**Audit**: ✅ Complete - see PYDANTIC_REVIEW.md
+1. **Update `_execute_query()` method in repository_postgresql.py** ✅ COMPLETED (11 Sept 2025)
+   
+   **Current Buggy Code** (simplified):
+   ```python
+   # BUG: Functions with RETURNS TABLE never commit!
+   if fetch == 'one':
+       return cursor.fetchone()  # Returns here, no commit!
+   elif cursor.description is None:
+       conn.commit()  # Only DML operations commit
+   ```
+   
+   **Proposed Fix**:
+   ```python
+   def _execute_query(self, query: sql.Composed, params: Optional[Tuple] = None,
+                     fetch: str = None) -> Optional[Any]:
+       # Validation
+       if not isinstance(query, sql.Composed):
+           raise TypeError(f"❌ SECURITY: Query must be sql.Composed")
+       if fetch and fetch not in ['one', 'all', 'many']:
+           raise ValueError(f"❌ INVALID FETCH MODE: {fetch}")
+       
+       with self._get_connection() as conn:
+           try:
+               with conn.cursor() as cursor:
+                   cursor.execute(query, params)
+                   
+                   # Fetch if needed
+                   result = None
+                   if fetch == 'one':
+                       result = cursor.fetchone()
+                   elif fetch == 'all':
+                       result = cursor.fetchall()
+                   elif fetch == 'many':
+                       result = cursor.fetchmany()
+                   
+                   # ALWAYS COMMIT - THE FIX!
+                   conn.commit()
+                   logger.debug("✅ Transaction committed")
+                   
+                   # Return appropriate result
+                   if fetch:
+                       return result
+                   else:
+                       return cursor.rowcount
+                       
+           except psycopg.Error as e:
+               logger.error(f"❌ DATABASE OPERATION FAILED: {e}")
+               conn.rollback()
+               raise RuntimeError(f"Database operation failed: {e}") from e
+   ```
 
-**See Phase 1B below for detailed fix list**
+2. **Add comprehensive commit error handling**: ✅ COMPLETED (11 Sept 2025)
+   - ✅ Catch `psycopg.errors.InFailedSqlTransaction` - transaction already aborted
+   - ✅ Catch `psycopg.errors.SerializationFailure` - concurrent conflicts
+   - ✅ Catch `psycopg.errors.IntegrityError` - constraint violations at commit
+   - ✅ Catch `psycopg.OperationalError` - connection lost during commit
+   - ✅ Re-raise all exceptions as RuntimeError with clear context
+
+3. **Ensure error propagation to task/job records**: ✅ VERIFIED (11 Sept 2025)
+   - ✅ Errors from commit failures will bubble up to function_app.py (RuntimeError)
+   - ✅ function_app.py catches exceptions at line 971 and records in task.error_details
+   - ✅ Failed tasks are marked as FAILED via fallback at lines 976-982
+   - ✅ Job failure propagation handled in stage advancement logic
+   
+   **Error Propagation Flow**:
+   ```
+   repository_postgresql._execute_query() 
+     ↓ (raises RuntimeError on commit failure)
+   repository_jobs_tasks.complete_task_and_check_stage()
+     ↓ (exception propagates up)
+   function_app.process_task_queue()
+     ↓ (catches exception, marks task as FAILED)
+   Task record: status=FAILED, error_details="Transaction commit failed: ..."
+   ```
+
+4. **Testing Plan**:
+   - [ ] Test successful task completion persists to database
+   - [ ] Test task failure records error_details and marks as FAILED
+   - [ ] Test stage advancement when all tasks complete
+   - [ ] Test job completion when all stages complete
+   - [ ] Test concurrent task completion (race condition handling)
+   - [ ] Test connection loss during commit (should fail loudly)
+
+5. **Deployment Steps**: ✅ COMPLETED (11 Sept 2025, 22:33 UTC)
+   - ✅ Apply fix to repository_postgresql.py 
+   - ✅ Deploy to Azure Functions: `func azure functionapp publish rmhgeoapibeta --python --build remote`
+   - ✅ Redeploy database schema to ensure functions are current
+   - [ ] Submit test job and verify task persistence
+   - [ ] Monitor Application Insights for any commit failures
+
+**Success Criteria**:
+- Tasks marked as COMPLETED or FAILED (never stuck in PROCESSING)
+- Stage advancement occurs when all tasks complete
+- Jobs marked as COMPLETED or FAILED appropriately
+- Clear error messages in logs when failures occur
+- No silent transaction rollbacks
+
+### 1. Pydantic v1 Legacy Patterns - ✅ RESOLVED (11 Sept 2025)
+**Status**: All 12 models migrated to Pydantic v2 patterns (100% complete)
+**Impact**: Full performance improvements achieved, modern serialization patterns
 
 ### Service Handler Registration
 **Problem**: Service modules not auto-imported, handlers never registered
@@ -127,44 +244,29 @@ Pydantic v2 (June 2023) was a complete rewrite with 5-50x performance improvemen
 - ✅ **Serialization** - Found 1 .dict() usage, needs .model_dump()
 - ✅ **JSON Encoders** - 3 models using v1 json_encoders
 
-### Phase 1B: Critical Fixes from Audit (IMMEDIATE ACTION REQUIRED)
 
-#### 🔴 Priority 1: CRITICAL - Blocking Production ✅ COMPLETED (11 Sept 2025)
-- ✅ **Fix TaskResult Field Alignment** (schema_base.py:720-735)
-  - ✅ Changed field `result` → `result_data` to match JobRecord/TaskRecord
-  - ✅ Changed field `error` → `error_details` to match JobRecord/TaskRecord
-  - ✅ Updated all references in service_factories.py
-  - ✅ Fixed SQL generator to properly handle Pydantic v2 metadata and Union types
-  - ✅ All imports moved to top of files for health check validation
+#### 🟠 Priority 2: Pydantic v2 Migration - Remaining Work (11 Sept 2025)
+**Status**: 9 of 12 models migrated to ConfigDict ✅
 
-#### 🟠 Priority 2: HIGH - Core Model Migrations
-- [ ] **Migrate 15 Config Classes to ConfigDict** (schema_base.py)
-  - [ ] JobRecord (line 255-261) - Core model
-  - [ ] TaskRecord (line 350-355) - Core model
-  - [ ] JobQueueMessage (line 381-383) - Queue processing
-  - [ ] TaskQueueMessage (line 406-408) - Queue processing
-  - [ ] JobExecutionContext (line 442-444)
-  - [ ] TaskExecutionContext (line 475-477)
-  - [ ] TaskCreationRequest (line 514-516)
-  - [ ] StageDefinition (line 547-549)
-  - [ ] WorkflowDefinition (line 590-592)
-  - [ ] JobStatus (line 610-614)
-  - [ ] TaskCompletionReport (line 642-644)
-  - [ ] TaskResult (line 747-749)
-  - [ ] ExecutionContext (line 955-957)
-  - [ ] TaskStatusUpdate (line 993-995)
-  - [ ] CompletionDetectorResult (line 1025-1027)
+**Phases 1 & 2**: ✅ COMPLETED (Moved to HISTORY.md)
+- Migrated 7 simple models in schema_base.py
+- Migrated 2 queue models in schema_queue.py
 
-- [ ] **Fix Serialization Methods**
-  - [ ] Replace `.dict()` with `.model_dump()` (schema_base.py:796)
-  - [ ] Audit repository_*.py files for any .dict() usage
-  - [ ] Standardize on model_dump() throughout codebase
+**Phase 3: Models with json_encoders** ✅ COMPLETED (11 Sept 2025)
+- ✅ JobRecord - migrated datetime & Decimal encoders to field_serializer
+- ✅ TaskRecord - migrated datetime encoder to field_serializer
+- ✅ JobRegistration - migrated datetime encoder to field_serializer
+
+- ✅ **Fix Serialization Methods** - COMPLETED (11 Sept 2025)
+  - ✅ Replaced `.dict()` with `.model_dump()` (schema_base.py:745)
+  - ✅ Audited all .py files for .dict() usage - none remaining
+  - ✅ Standardized on model_dump() throughout codebase
 
 #### 🟡 Priority 3: MEDIUM - Optimization & Best Practices
-- [ ] **Migrate json_encoders to Field Serializers**
-  - [ ] JobRecord - datetime and Decimal serializers (line 258-260)
-  - [ ] TaskRecord - datetime serializer (line 353-355)
-  - [ ] JobStatus - datetime serializer (line 612-614)
+- ✅ **Migrate json_encoders to Field Serializers** - COMPLETED (11 Sept 2025)
+  - ✅ JobRecord - datetime and Decimal serializers migrated
+  - ✅ TaskRecord - datetime serializer migrated
+  - ✅ JobRegistration - datetime serializer migrated
   
 - [ ] **SQL Generator Enhancements**
   - [ ] Test field metadata extraction with other constraint types (MinLen, Gt, Lt, etc.)
@@ -467,6 +569,16 @@ error: {
 ---
 
 ## ✅ Recently Completed (See HISTORY.md for full details)
+
+### 11 September 2025 - Pydantic v2 Migration Complete:
+- ✅ Migrated all 12 models from Pydantic v1 to v2 patterns
+- ✅ Replaced json_encoders with field_serializer for 3 models
+- ✅ Full ConfigDict adoption across all models
+
+### 11 September 2025 - Architectural Refactoring Phases 3-4:
+- ✅ Created schema_queue.py separating queue models from database models
+- ✅ Updated ARCHITECTURE_CORE.md with complete naming conventions
+- ✅ Documented layer separation and import rules
 
 ### 10 September 2025 - Repository Consolidation:
 - ✅ Created repository_factory.py - Central factory for all repository types

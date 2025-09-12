@@ -76,10 +76,11 @@ import json
 from util_logger import LoggerFactory
 from util_logger import ComponentType, LogLevel, LogContext
 from schema_base import (
-    JobStatus, TaskStatus, JobRecord, JobQueueMessage
+    JobStatus, TaskStatus, JobRecord
 )
 from schema_base import JobExecutionContext, StageExecutionContext
 from schema_base import TaskDefinition
+from schema_queue import JobQueueMessage
 from typing import List, Dict, Any, Optional
 from schema_workflow import WorkflowDefinition, get_workflow_definition
 
@@ -998,7 +999,7 @@ class BaseController(ABC):
                 # === STEP 2: CREATE TASK QUEUE MESSAGE ===
                 self.logger.debug(f"📨 Creating task queue message for: {task_record.task_id}")
                 try:
-                    from schema_base import TaskQueueMessage
+                    from schema_queue import TaskQueueMessage
                     task_message = TaskQueueMessage(
                         task_id=task_record.task_id,
                         parent_job_id=task_record.parent_job_id,

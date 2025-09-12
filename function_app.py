@@ -129,7 +129,8 @@ validator.ensure_startup_ready()
 # ========================================================================
 
 # Application modules (our code) - Core schemas and logging
-from schema_base import JobStatus, TaskStatus, JobQueueMessage, TaskQueueMessage, TaskResult
+from schema_base import JobStatus, TaskStatus, TaskResult
+from schema_queue import JobQueueMessage, TaskQueueMessage
 from util_logger import LoggerFactory
 from util_logger import ComponentType
 from config import get_config

@@ -53,7 +53,7 @@ from schema_base import (
 )
 # generate_task_id moved to Controller layer - repository no longer needs it
 from repository_base import BaseRepository
-from repository_abc import (
+from interface_repository import (
     IJobRepository, ITaskRepository, ICompletionDetector
 )
 from schema_base import (
@@ -451,93 +451,138 @@ class PostgreSQLRepository(BaseRepository):
     def _execute_query(self, query: sql.Composed, params: Optional[Tuple] = None, 
                       fetch: str = None) -> Optional[Any]:
         """
-        Execute a PostgreSQL query safely with SQL injection prevention.
+        Execute a PostgreSQL query with GUARANTEED commit and LOUD failures.
         
-        This is the core method for executing SQL queries. It uses psycopg's
-        sql.Composed objects to prevent SQL injection by separating SQL
-        structure from data values.
+        CRITICAL FIX (11 Sept 2025): Functions with RETURNS TABLE were not committing
+        because they have cursor.description set, causing them to bypass commit logic.
+        This version ALWAYS commits for ALL operations.
         
-        SQL Safety:
+        Principles:
         ----------
-        - Query MUST be a sql.Composed object (not a string)
-        - Parameters are always escaped/quoted by psycopg
-        - Table/column names use sql.Identifier()
-        - Values use parameterized queries with %s placeholders
+        1. ALWAYS commit (no silent rollbacks)
+        2. FAIL LOUD on any error  
+        3. NO ambiguous elif chains
+        4. EXPLICIT validation
         
         Parameters:
         ----------
         query : sql.Composed
-            SQL query built using psycopg.sql composition.
-            Example: sql.SQL("SELECT {} FROM {}").format(
-                sql.Identifier("column"), sql.Identifier("table")
-            )
+            SQL query built using psycopg.sql composition for injection safety.
         
         params : Optional[Tuple]
-            Query parameters for %s placeholders. These are safely
-            escaped by psycopg to prevent injection.
+            Query parameters for %s placeholders, safely escaped by psycopg.
         
         fetch : Optional[str]
-            Fetch behavior for SELECT queries:
-            - None: No fetch (for INSERT/UPDATE/DELETE)
-            - 'one': Fetch one row (cursor.fetchone)
-            - 'all': Fetch all rows (cursor.fetchall)
-            - 'many': Fetch multiple rows (cursor.fetchmany)
+            Fetch behavior: None | 'one' | 'all' | 'many'
         
         Returns:
         -------
         Optional[Any]
-            - For SELECT with fetch: Row(s) as tuple(s)
-            - For INSERT/UPDATE/DELETE: Number of affected rows
-            - For other operations: None
+            - For fetch operations: Row(s) as tuple(s)
+            - For DML operations: Number of affected rows
+            - For DDL operations: None
         
         Raises:
         ------
-        psycopg.Error
-            Database errors (constraint violations, syntax errors, etc.)
+        TypeError
+            If query is not sql.Composed (security requirement)
         
         ValueError
             If fetch parameter is invalid
         
-        Usage Examples:
-        --------------
-        ```python
-        # Safe SELECT with identifier and parameter
-        query = sql.SQL("SELECT * FROM {} WHERE id = %s").format(
-            sql.Identifier("jobs")
-        )
-        result = self._execute_query(query, (job_id,), fetch='one')
-        
-        # Safe INSERT with return value
-        query = sql.SQL("INSERT INTO {} (id, name) VALUES (%s, %s)").format(
-            sql.Identifier("jobs")
-        )
-        rowcount = self._execute_query(query, (id, name))
-        ```
+        RuntimeError
+            For any database operation failure (wraps psycopg errors)
         """
+        # Pre-validation for security and correctness
+        if not isinstance(query, sql.Composed):
+            raise TypeError(f"❌ SECURITY: Query must be sql.Composed, got {type(query)}")
+        
+        if fetch and fetch not in ['one', 'all', 'many']:
+            raise ValueError(f"❌ INVALID FETCH MODE: {fetch}")
+        
         with self._get_connection() as conn:
-            with conn.cursor() as cursor:
-                # Execute query with parameters
-                cursor.execute(query, params)
+            try:
+                with conn.cursor() as cursor:
+                    # Execute query with error handling
+                    try:
+                        cursor.execute(query, params)
+                        logger.debug(f"✅ Query executed successfully")
+                    except psycopg.errors.Error as e:
+                        logger.error(f"❌ QUERY EXECUTION FAILED: {e}")
+                        logger.error(f"   SQL State: {e.sqlstate}")
+                        logger.error(f"   Query: {str(query)[:200]}")
+                        raise RuntimeError(f"Query execution failed: {e}") from e
+                    
+                    # Handle fetch operations
+                    result = None
+                    if fetch == 'one':
+                        result = cursor.fetchone()
+                    elif fetch == 'all':
+                        result = cursor.fetchall()
+                    elif fetch == 'many':
+                        result = cursor.fetchmany()
+                    
+                    # ALWAYS COMMIT - THE CRITICAL FIX!
+                    # This ensures PostgreSQL functions that modify data commit their changes
+                    try:
+                        conn.commit()
+                        logger.debug("✅ Transaction committed successfully")
+                        
+                    except psycopg.errors.InFailedSqlTransaction as e:
+                        # Transaction was already aborted
+                        logger.error(f"❌ TRANSACTION ALREADY FAILED: {e}")
+                        logger.error(f"   Cannot commit - transaction aborted earlier")
+                        raise RuntimeError("Transaction in failed state - cannot commit") from e
+                        
+                    except psycopg.errors.SerializationFailure as e:
+                        # Concurrent transaction conflict
+                        logger.error(f"❌ SERIALIZATION FAILURE: {e}")
+                        logger.error(f"   Concurrent transaction conflict detected")
+                        raise RuntimeError("Concurrent transaction conflict") from e
+                        
+                    except psycopg.errors.IntegrityError as e:
+                        # Constraint violation at commit time
+                        logger.error(f"❌ INTEGRITY CONSTRAINT VIOLATION AT COMMIT: {e}")
+                        logger.error(f"   Constraint: {e.diag.constraint_name if e.diag else 'unknown'}")
+                        raise RuntimeError(f"Constraint violation: {e}") from e
+                        
+                    except psycopg.OperationalError as e:
+                        # Connection/network issues
+                        logger.error(f"❌ CONNECTION LOST DURING COMMIT: {e}")
+                        raise RuntimeError("Database connection lost during commit") from e
+                        
+                    except psycopg.Error as e:
+                        # Any other psycopg error
+                        logger.error(f"❌ COMMIT FAILED: {e}")
+                        logger.error(f"   SQL State: {getattr(e, 'sqlstate', 'unknown')}")
+                        raise RuntimeError(f"Transaction commit failed: {e}") from e
+                        
+                    except Exception as e:
+                        # Unexpected error
+                        logger.error(f"❌ UNEXPECTED COMMIT ERROR: {e}")
+                        raise RuntimeError(f"Unexpected error during commit: {e}") from e
+                    
+                    # Return appropriate result based on operation type
+                    if fetch:
+                        # Fetch operations return the fetched data
+                        return result
+                    elif cursor.description is None:
+                        # DML operations (INSERT/UPDATE/DELETE) return affected rows
+                        return cursor.rowcount
+                    else:
+                        # DDL or other operations return None
+                        return None
+                        
+            except Exception as e:
+                # Rollback on any error
+                try:
+                    conn.rollback()
+                    logger.info("🔄 Transaction rolled back due to error")
+                except Exception as rollback_error:
+                    logger.error(f"❌ ROLLBACK ALSO FAILED: {rollback_error}")
                 
-                # Handle different fetch modes for SELECT
-                if fetch == 'one':
-                    return cursor.fetchone()
-                elif fetch == 'all':
-                    return cursor.fetchall()
-                elif fetch == 'many':
-                    return cursor.fetchmany()
-                elif fetch:
-                    raise ValueError(f"Invalid fetch parameter: {fetch}")
-                
-                # For DML statements (INSERT/UPDATE/DELETE)
-                # cursor.description is None for non-SELECT queries
-                if cursor.description is None:
-                    conn.commit()
-                    return cursor.rowcount  # Number of affected rows
-                
-                # For other operations (CREATE, ALTER, etc.)
-                conn.commit()
-                return None
+                # Re-raise the original error for upstream handling
+                raise
     
     def _table_exists(self, table_name: str) -> bool:
         """

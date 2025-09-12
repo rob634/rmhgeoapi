@@ -1,7 +1,8 @@
 # Queue-Based Orchestration Architecture
 
-**Date: September 10, 2025**  
-**Version: 2.0**
+**Date: September 11, 2025**  
+**Version: 2.1**  
+**Updates**: Added File Naming Convention, documented architectural separation achieved in refactoring phases 1-3
 
 ## Executive Summary
 
@@ -54,6 +55,49 @@ This document defines the core idempotent, queue-based orchestration architectur
         ┌──────┴──────┐
         │  Utilities  │  Cross-Cutting: Logging, helpers
         └─────────────┘  (Shared tools)
+```
+
+### Enhanced Architecture with Separation of Concerns
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│                         ENTRY POINTS                              │
+│  trigger_*.py (HTTP handlers, Queue processors, Timer functions)  │
+└────────────────────────────┬─────────────────────────────────────┘
+                             ↓
+┌──────────────────────────────────────────────────────────────────┐
+│                      ORCHESTRATION LAYER                          │
+│        controller_*.py (Job→Stage→Task orchestration)             │
+│            ↓                           ↓                          │
+│     Uses Interfaces              Creates via Factories           │
+│  (interface_repository.py)    (JobFactory, TaskFactory)           │
+└────────────────────────────┬─────────────────────────────────────┘
+                             ↓
+┌──────────────────────────────────────────────────────────────────┐
+│                     BUSINESS LOGIC LAYER                          │
+│         service_*.py (Task execution, domain operations)          │
+│                      Pure functions, no state                     │
+└────────────────────────────┬─────────────────────────────────────┘
+                             ↓
+┌──────────────────────────────────────────────────────────────────┐
+│                    STATE MANAGEMENT LAYER                         │
+│     repository_*.py (PostgreSQL, Blob Storage, Key Vault)         │
+│              All state operations happen here!                    │
+│     ┌─────────────────────────────────────────────────┐          │
+│     │  PostgreSQL Functions (Atomic Operations):       │          │
+│     │  - complete_task_and_check_stage()              │          │
+│     │  - advance_job_stage()                          │          │
+│     │  - check_job_completion()                       │          │
+│     └─────────────────────────────────────────────────┘          │
+└────────────────────────────┬─────────────────────────────────────┘
+                             ↓
+┌──────────────────────────────────────────────────────────────────┐
+│                      DATA MODELS LAYER                            │
+│  schema_base.py: Database models (JobRecord, TaskRecord)          │
+│  schema_queue.py: Queue messages (JobQueueMessage, TaskQueueMessage)│
+│  schema_workflow.py: Workflow definitions                         │
+│  interface_*.py: Behavior contracts (ABCs)                        │
+└──────────────────────────────────────────────────────────────────┘
 ```
 
 **Why This Pyramid Architecture is Magnificent:**
@@ -135,6 +179,68 @@ Python Functions (Stateless)  →  Repository Layer  →  PostgreSQL (Stateful)
 2. **Scalability**: Stateless functions scale horizontally
 3. **Reliability**: ACID transactions prevent distributed system issues
 4. **Maintainability**: Each layer has a single, clear responsibility
+
+## File Naming Convention and Architectural Separation
+
+### Naming Convention (Enforced as of September 11, 2025)
+
+The codebase follows a strict file naming convention that immediately identifies each file's architectural role and responsibilities:
+
+```
+File Prefix          | Layer              | Purpose                                    | Example
+-------------------- | ------------------ | ------------------------------------------ | -------------------------
+schema_*             | Schema/Foundation  | Pure data structures (Pydantic models)    | schema_base.py, schema_queue.py
+interface_*          | Contracts          | Abstract behavior contracts (ABCs)        | interface_repository.py
+controller_*         | Orchestration      | Job workflow orchestration (stateless)    | controller_hello_world.py
+service_*            | Business Logic     | Task execution & domain logic (stateless) | service_hello_world.py
+repository_*         | State Management   | Data access implementations (stateful)    | repository_postgresql.py
+trigger_*            | Entry Points       | HTTP/Queue/Timer handlers                 | trigger_submit_job.py
+util_*               | Utilities          | Cross-cutting concerns                    | util_logger.py
+validator_*          | Validation         | Input/output validation utilities         | validator_imports.py
+```
+
+### Architectural Separation Achieved (Phases 1-3)
+
+#### Phase 1: Eliminated Mixed Concerns (September 11, 2025)
+**Problem**: Classes mixing data structure definitions with behavior (BaseTask, BaseJob, BaseStage)
+**Solution**: Deleted mixed classes, enforcing pure data models in schema_* files
+
+#### Phase 2: Clear Interface/Implementation Separation (September 11, 2025)
+**Change**: Renamed `repository_abc.py` → `interface_repository.py`
+**Benefit**: Clear distinction between contracts (interface_*) and implementations (repository_*)
+
+#### Phase 3: Queue/Database Schema Separation (September 11, 2025)
+**Change**: Created `schema_queue.py`, moved queue messages from `schema_base.py`
+**Benefit**: Queue schemas (transient) can evolve independently from database schemas (persistent)
+
+### Key Architectural Principles
+
+1. **Single Responsibility**: Each file has ONE clear purpose indicated by its prefix
+2. **Dependency Inversion**: Upper layers depend on interfaces, never on implementations
+3. **Data/Behavior Separation**: 
+   - `schema_*` files: Define WHAT (structure)
+   - `service_*` files: Define HOW (operations)
+   - `controller_*` files: Define WHEN (orchestration)
+4. **Factory Pattern**: All object creation through factories (JobFactory, TaskFactory, RepositoryFactory)
+5. **Registry Pattern**: Auto-discovery and registration of implementations
+
+### Import Rules
+
+```python
+# ✅ CORRECT: Upper layers import from interfaces
+from interface_repository import IJobRepository
+from schema_base import JobRecord
+
+# ❌ WRONG: Upper layers importing implementations
+from repository_postgresql import PostgreSQLRepository  # Never do this above repository layer
+
+# ✅ CORRECT: Use factories for instantiation
+from repository_factory import RepositoryFactory
+repo = RepositoryFactory.create_repository("postgresql")
+
+# ❌ WRONG: Direct instantiation
+repo = PostgreSQLRepository()  # Violates dependency inversion
+```
 
 ## Architecture Components
 

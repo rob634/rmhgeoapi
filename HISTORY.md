@@ -1,8 +1,172 @@
 # Project History
 
-**Last Updated**: 10 September 2025
+**Last Updated**: 11 September 2025
 
 This document tracks completed architectural changes and improvements to the Azure Geospatial ETL Pipeline.
+
+---
+
+## 11 September 2025: Architectural Refactoring Phase 5 - Documentation Complete
+
+**Status**: ✅ PHASE 5 COMPLETED - Final documentation updates
+**Impact**: **MEDIUM** - Comprehensive documentation of new architecture
+**Timeline**: 21:00 UTC
+**Author**: Robert and Geospatial Claude Legion
+
+### Documentation Updates
+
+**Completed Phase 5**: Final architectural documentation:
+1. **ARCHITECTURE_FILE_INDEX.md Updates**:
+   - Added interface/implementation separation pattern documentation
+   - Created comprehensive architecture diagram showing contract/implementation layers
+   - Updated file counts (28 files total, including interface_repository.py)
+   - Documented benefits: testability, flexibility, no circular dependencies
+
+2. **Interface Pattern Documentation**:
+   - Explained pure ABC interfaces vs concrete implementations
+   - Showed example usage patterns
+   - Documented how dependency inversion is achieved
+   - Added visual diagram of separation layers
+
+**Result**: Complete documentation of the refactored architecture with clear separation of data, behavior contracts, and implementations.
+
+---
+
+## 11 September 2025: Pydantic v2 Migration - Phase 3 Completion
+
+**Status**: ✅ PHASE 3 COMPLETED - All models migrated to Pydantic v2
+**Impact**: **MEDIUM** - Modernized serialization patterns for future compatibility  
+**Timeline**: 20:30 UTC
+**Author**: Robert and Geospatial Claude Legion
+
+### Migration Summary
+
+**Completed Phase 3**: Migrated last 3 models with `json_encoders` to Pydantic v2 `field_serializer`:
+1. **JobRecord** (schema_base.py:254-260) - Migrated datetime and Decimal encoders
+2. **TaskRecord** (schema_base.py:349-354) - Migrated datetime encoder  
+3. **JobRegistration** (schema_base.py:557-561) - Migrated datetime encoder
+
+**Migration Pattern Applied**:
+```python
+# FROM (Pydantic v1):
+class Config:
+    json_encoders = {
+        datetime: lambda v: v.isoformat()
+    }
+
+# TO (Pydantic v2):
+model_config = ConfigDict(validate_assignment=True)
+
+@field_serializer('created_at', 'updated_at', 'heartbeat')
+def serialize_datetime(self, value: datetime) -> str:
+    return value.isoformat() if value else None
+```
+
+**Result**: All 12 Pydantic models in schema_base.py now use v2 patterns. No backward compatibility maintained per project philosophy.
+
+---
+
+## 11 September 2025: Architectural Refactoring - Clear Separation of Data vs Behavior
+
+**Status**: ✅ PHASES 1-4 COMPLETED  
+**Impact**: **HIGH** - Established clear architectural boundaries and naming conventions
+**Timeline**: 14:00-19:00 UTC
+**Author**: Robert and Geospatial Claude Legion
+
+### Refactoring Summary
+
+**Problem**: Mixed concerns in base classes (BaseTask, BaseJob, BaseStage) violating separation of concerns. Unclear naming between repository interfaces and implementations.
+
+**Solution**: Complete architectural cleanup with clear naming conventions:
+- `schema_*` = Pure data structures (Pydantic models)
+- `interface_*` = Pure behavior contracts (ABC interfaces)
+- `controller_*` = Job orchestration behavior
+- `repository_*` = Concrete data access implementations
+
+### Phase 1: Clean Up Mixed Classes ✅ COMPLETED
+- Deleted BaseTask class (schema_base.py:913) - Mixed data+behavior, not used
+- Deleted BaseJob class (schema_base.py:984) - Mixed data+behavior, not used  
+- Deleted BaseStage class (schema_base.py:1021) - Mixed data+behavior, not used
+- Removed ABC import from schema_base.py (no longer needed)
+- Kept dataclass import (still used by TaskDefinition, StageResult, JobResult)
+
+### Phase 2: Rename Files for Clarity ✅ COMPLETED
+- Renamed `repository_abc.py` → `interface_repository.py` (contains interfaces only)
+- Updated all imports from `repository_abc` to `interface_repository`
+  - Updated repository_postgresql.py imports
+  - Updated docstring example in interface_repository.py itself
+  - Updated file header from REPOSITORY to INTERFACE
+
+### Critical Bug Fixes Completed
+
+#### 1. TaskResult Field Name Mismatch ✅ FIXED
+- Changed field `result` → `result_data` in TaskResult model
+- Changed field `error` → `error_details` in TaskResult model
+- Updated TaskHandlerFactory in service_factories.py to use correct field names
+- Tested field alignment - all models now consistent
+
+#### 2. PostgreSQL Schema Type Mismatch ✅ FIXED
+- Fixed Union vs Optional type checking in python_type_to_sql
+- Properly extracting MaxLen constraints from Pydantic v2 metadata
+- Tested all field types - correct mapping confirmed
+
+#### 3. Repository Return Type Models Moved ✅ FIXED
+- Moved JobCompletionResult from repository_abc.py to schema_base.py
+- Moved TaskCompletionResult from repository_abc.py to schema_base.py  
+- Moved StageAdvancementResult from repository_abc.py to schema_base.py
+- Converted all three from @dataclass to Pydantic BaseModel
+- Fixed field name: standardized on `job_complete` (not `is_complete`)
+
+### Benefits Achieved
+- **Clear Separation**: Data models completely separated from behavior
+- **Consistent Naming**: Clear understanding of file purpose from name alone
+- **No Mixed Concerns**: Each class has single responsibility
+- **Type Safety**: Proper Pydantic v2 models throughout
+
+### Phase 3: Queue Message Separation ✅ COMPLETED (11 Sept 2025)
+- Created `schema_queue.py` with JobQueueMessage and TaskQueueMessage
+- Removed queue models from schema_base.py
+- Updated imports in 4 files (function_app, controller_base, service_factories, controller_factories)
+- No circular dependencies detected
+
+### Phase 4: Documentation Updates ✅ COMPLETED (11 Sept 2025)
+- Updated ARCHITECTURE_CORE.md with complete naming convention table
+- Added enhanced architecture diagram showing layer separation
+- Documented import rules (correct vs incorrect patterns)
+- Version bumped to 2.1 with comprehensive update notes
+
+### Pydantic v2 Migration - Phases 1 & 2 ✅ COMPLETED (11 Sept 2025)
+
+#### Phase 1: Simple Config → ConfigDict Migrations (7 models)
+Successfully migrated models with only `validate_assignment = True`:
+- JobExecutionContext (schema_base.py)
+- StageExecutionContext (schema_base.py)
+- TaskExecutionContext (schema_base.py)
+- StageDefinition (schema_base.py)
+- WorkflowDefinition (schema_base.py)
+- JobRegistry (schema_base.py)
+- TaskResult (schema_base.py)
+
+#### Phase 2: Queue Model Migrations (2 models)
+Successfully migrated queue message models:
+- JobQueueMessage (schema_queue.py)
+- TaskQueueMessage (schema_queue.py)
+
+**Migration Pattern Used:**
+```python
+# FROM (v1):
+class Config:
+    validate_assignment = True
+
+# TO (v2):
+model_config = ConfigDict(validate_assignment=True)
+```
+
+**Impact**: 9 of 12 models now use Pydantic v2 ConfigDict pattern. Remaining 3 models have json_encoders requiring field_serializer migration.
+
+### Remaining Work (Moved to TODO.md)
+- Phase 3: Migrate models with json_encoders (JobRecord, TaskRecord, JobRegistration)
+- Phase 5: Update ARCHITECTURE_FILE_INDEX.md with new structure
 
 ---
 

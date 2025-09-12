@@ -2,17 +2,18 @@
 
 **Azure Geospatial ETL Pipeline - File Catalog & Architecture Alignment**
 
-*Updated: 2025-09-10*
+*Updated: 2025-09-11 - Phase 5 Documentation Complete*
 
 ## 📁 File Overview
 
 This document provides a comprehensive index of all files in the Azure Geospatial ETL Pipeline, organized by architectural layer. It serves as a companion to ARCHITECTURE_CORE.md, mapping implementation files to the architecture patterns described there.
 
-**Total Python Files: 26**
+**Total Python Files: 28**
 - **Controllers**: 3 files (controller_base, controller_factories, controller_hello_world)
-- **Repositories**: 6 files (repository_abc, repository_base, repository_factory, repository_jobs_tasks, repository_postgresql, repository_vault)
-- **Services**: 2 files (service_factories, service_hello_world)
-- **Schemas**: 4 files (schema_base, schema_manager, schema_sql_generator, schema_workflow)
+- **Interfaces**: 1 file (interface_repository - behavior contracts)
+- **Repositories**: 5 files (repository_base, repository_factory, repository_jobs_tasks, repository_postgresql, repository_vault)
+- **Services**: 3 files (service_factories, service_hello_world, schema_manager)
+- **Schemas**: 5 files (schema_base, schema_queue, schema_sql_generator, schema_workflow, + queue separation)
 - **Triggers**: 7 files (trigger_db_query, trigger_get_job_status, trigger_health, trigger_http_base, trigger_poison_monitor, trigger_schema_pydantic_deploy, trigger_submit_job)
 - **Utilities**: 2 files (util_import_validator, util_logger)
 - **Core/Config**: 2 files (function_app, config)
@@ -52,17 +53,31 @@ This document provides a comprehensive index of all files in the Azure Geospatia
 **Purpose**: Job→Stage→Task orchestration, workflow management
 **Examples**: `controller_base.py`, `controller_hello_world.py`
 
-#### **`repository_`** - Data Access Layer
+#### **`interface_`** - Behavior Contracts (Pure ABCs) ⭐ NEW
+**Purpose**: Abstract base classes defining behavior contracts without implementation
+**Key Principle**: Pure interfaces with no data, only method signatures
+**Examples**: `interface_repository.py` - Repository method contracts
+**Benefits**: 
+- Clear separation between contracts and implementations
+- Prevents circular dependencies
+- Enables dependency inversion principle
+
+#### **`repository_`** - Data Access Layer (Concrete Implementations)
 **Purpose**: Storage abstraction, data persistence, CRUD operations
-**Examples**: `repository_jobs_tasks.py`, `repository_factory.py`, `repository_postgresql.py`, `repository_abc.py`
+**Implementation Pattern**: Implements interfaces from `interface_*.py` files
+**Examples**: 
+- `repository_postgresql.py` - Implements IJobRepository, ITaskRepository
+- `repository_jobs_tasks.py` - Business logic repositories
+- `repository_factory.py` - Factory for creating repository instances
 
 #### **`service_`** - Business Logic Layer
 **Purpose**: Domain-specific business operations, processing logic
-**Examples**: `service_hello_world.py`
+**Examples**: `service_hello_world.py`, `service_factories.py`
 
-#### **`schema_`** - Data Schema Definitions
+#### **`schema_`** - Data Schema Definitions (Pure Data Models)
 **Purpose**: Pydantic models, data validation, type definitions
-**Examples**: `schema_core.py`, `schema_workflow.py`
+**Key Principle**: Pure data structures with no behavior (except validation)
+**Examples**: `schema_base.py`, `schema_workflow.py`, `schema_queue.py`
 
 
 #### **`util_`** - Utility Functions
@@ -160,6 +175,19 @@ This document provides a comprehensive index of all files in the Azure Geospatia
 - BaseTask, BaseJob, BaseStage definitions
 - Execution context models
 
+### **schema_queue.py** ✅ **[HEADER COMPLETE]**
+**Layer**: Schema/Data Models  
+**Purpose**: Queue-specific message schemas for Azure Queue Storage  
+**Key Components**:
+- `JobQueueMessage`: Job queue message format
+- `TaskQueueMessage`: Task queue message format
+- Queue message validation utilities
+
+**Relationships**:
+- Separated from `schema_base.py` for better modularity
+- Used by `function_app.py`, `controller_base.py`, `service_factories.py`
+- Enables queue message evolution independent of database schemas
+
 ### **schema_sql_generator.py** ✅ **[HEADER COMPLETE]**
 - **PostgreSQL DDL generation from Pydantic models**
 - Automatic schema generation
@@ -217,11 +245,13 @@ This document provides a comprehensive index of all files in the Azure Geospatia
 - Single point for repository instantiation
 - Future support for blob, cosmos, redis repositories
 
-### **repository_abc.py** ✅ **[HEADER COMPLETE]**
-- **Single source of truth for repository signatures**
-- Prevents parameter name mismatches
-- ABC interfaces for all repository methods
-- Canonical parameter definitions
+### **interface_repository.py** ✅ **[HEADER COMPLETE]** ⭐ RENAMED
+- **Pure behavior contracts for all repository operations**
+- Renamed from `repository_abc.py` for clarity (11 Sept 2025)
+- Abstract base classes with no implementation
+- Defines IJobRepository, ITaskRepository, ICompletionDetector
+- Single source of truth for method signatures
+- Prevents circular dependencies through clean separation
 
 ### **repository_vault.py** ✅ **[HEADER COMPLETE]**
 - **Azure Key Vault credential management**
@@ -419,11 +449,19 @@ Stateless Python Functions → Repository Layer → Stateful PostgreSQL
      (Business Logic)        (State Interface)    (ACID State Management)
 ```
 
-**Repository Architecture:**
-- `repository_abc.py` - Abstract interfaces defining repository contracts
+**Repository Architecture (Interface/Implementation Pattern):**
+- `interface_repository.py` - Pure abstract interfaces (IJobRepository, ITaskRepository)
 - `repository_base.py` - Common validation and error handling patterns  
 - `repository_postgresql.py` - PostgreSQL implementation with atomic stored procedures
-- `repository_consolidated.py` - High-level repositories (JobRepository, TaskRepository) orchestrating state changes
+- `repository_jobs_tasks.py` - High-level repositories implementing interfaces
+- `repository_factory.py` - Factory pattern for repository instantiation
+
+**Interface/Implementation Separation Benefits:**
+1. **Clean Contracts**: Interfaces define "what" without "how"
+2. **No Circular Dependencies**: Interfaces have no imports from implementations
+3. **Testability**: Easy to mock interfaces for testing
+4. **Flexibility**: Multiple implementations can satisfy same interface
+5. **Dependency Inversion**: Upper layers depend on interfaces, not concrete classes
 
 #### Controller-Service-Repository Pattern Flow
 ```
@@ -445,14 +483,76 @@ HTTP Request → Trigger → Controller → Service → Repository → Storage
 - Repository pattern abstracts this complexity from business logic
 - This is NOT asking too much - it's the **correct serverless pattern**
 
+## 🏛️ **Interface/Implementation Separation Pattern**
+
+### **Architectural Principle: Separation of Contracts from Implementation**
+
+The codebase follows a strict separation between behavior contracts (interfaces) and their implementations:
+
+```
+┌─────────────────────────────────────────────────────┐
+│              BEHAVIOR CONTRACTS                      │
+│         interface_*.py (Pure ABCs)                   │
+│     No implementation, no dependencies               │
+└──────────────────┬──────────────────────────────────┘
+                   ↓ implements
+┌─────────────────────────────────────────────────────┐
+│           CONCRETE IMPLEMENTATIONS                   │
+│    repository_*.py, service_*.py, controller_*.py   │
+│         Implements interfaces, adds behavior         │
+└─────────────────────────────────────────────────────┘
+```
+
+### **Pattern Application:**
+
+1. **Interfaces (`interface_*.py`)**:
+   - Pure abstract base classes
+   - Only method signatures, no implementation
+   - No dependencies on concrete classes
+   - Example: `IJobRepository`, `ITaskRepository` in `interface_repository.py`
+
+2. **Implementations (`repository_*.py`, etc.)**:
+   - Concrete classes implementing interfaces
+   - Contains actual business logic
+   - Can have dependencies on other layers
+   - Example: `JobRepository` implements `IJobRepository`
+
+3. **Benefits Achieved:**
+   - **Testability**: Mock interfaces easily for unit testing
+   - **Flexibility**: Swap implementations without changing contracts
+   - **Clear Architecture**: Obvious separation of concerns
+   - **No Circular Dependencies**: Interfaces don't import implementations
+
+### **Example Usage:**
+```python
+# interface_repository.py
+class IJobRepository(ABC):
+    @abstractmethod
+    def create_job(self, job_record: JobRecord) -> JobRecord:
+        pass
+
+# repository_jobs_tasks.py  
+class JobRepository(PostgreSQLJobRepository, IJobRepository):
+    def create_job(self, job_record: JobRecord) -> JobRecord:
+        # Actual implementation
+        return self._execute_insert(...)
+
+# controller_base.py
+def __init__(self, job_repo: IJobRepository):  # Depends on interface
+    self.job_repo = job_repo
+```
+
+---
+
 | Layer | Prefix | Purpose | Key Files |
-|-------|--------|---------|-----------|
-| **Schemas** | `schema_` | Core architecture definition, structure implementation & validation | schema_base, schema_workflow, schema_sql_generator, schema_manager |
-| **Controllers** | `controller_` | Job orchestration & workflow factories | controller_base, controller_factories, controller_hello_world |
-| **Repositories** | `repository_` | State management, ACID operations & serverless persistence | repository_abc, repository_postgresql, repository_consolidated |
-| **Services** | `service_` | Business logic & domain operations | service_hello_world |
+|-------|--------|-----------|-----------|
+| **Interfaces** | `interface_` | Pure behavior contracts (ABCs) | interface_repository |
+| **Schemas** | `schema_` | Pure data models (Pydantic) | schema_base, schema_workflow, schema_queue |
+| **Controllers** | `controller_` | Job orchestration & workflow | controller_base, controller_hello_world |
+| **Repositories** | `repository_` | Data access implementations | repository_postgresql, repository_jobs_tasks |
+| **Services** | `service_` | Business logic & operations | service_hello_world, service_factories |
 | **Triggers** | `trigger_` | HTTP/Timer entry points | trigger_submit_job, trigger_health |
-| **Utilities** | `util_` | Cross-cutting concerns & helpers | util_logger, util_import_validator |
+| **Utilities** | `util_` | Cross-cutting concerns | util_logger, util_import_validator |
 
 ### **Claude Context Headers**
 
@@ -538,14 +638,14 @@ from core import JobRecord                     # Which core?
 
 ## 📝 **Complete Python File Inventory**
 
-### Alphabetical List (26 files)
+### Alphabetical List (28 files)
 ```
 config.py                         # Core configuration management
 controller_base.py                # Abstract base controller
 controller_factories.py           # JobFactory and TaskFactory
 controller_hello_world.py         # Example controller implementation
 function_app.py                   # Azure Functions entry point
-repository_abc.py                 # Repository interfaces
+interface_repository.py           # Repository behavior contracts (renamed from repository_abc.py)
 repository_base.py                # Base repository patterns
 repository_factory.py             # Central repository factory
 repository_jobs_tasks.py         # Job and task repositories
@@ -553,6 +653,7 @@ repository_postgresql.py          # PostgreSQL implementation
 repository_vault.py               # Key Vault integration (disabled)
 schema_base.py                    # Core Pydantic models
 schema_manager.py                 # Schema deployment infrastructure
+schema_queue.py                   # Queue message schemas (separated from DB schemas)
 schema_sql_generator.py           # Pydantic to SQL converter
 schema_workflow.py                # Workflow definitions
 service_hello_world.py            # Example service implementation

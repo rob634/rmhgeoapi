@@ -41,10 +41,9 @@ from schema_base import (
     WorkflowDefinition,
     TaskDefinition,
     TaskRecord,
-    TaskQueueMessage,
-    TaskStatus,
-    JobQueueMessage
+    TaskStatus
 )
+from schema_queue import JobQueueMessage, TaskQueueMessage
 
 
 # ============================================================================

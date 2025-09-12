@@ -1,16 +1,16 @@
 # ============================================================================
-# CLAUDE CONTEXT - REPOSITORY
+# CLAUDE CONTEXT - INTERFACE
 # ============================================================================
-# PURPOSE: Single source of truth for ALL repository method signatures preventing parameter mismatches
+# PURPOSE: Abstract interfaces defining behavior contracts for repository implementations
 # EXPORTS: IJobRepository, ITaskRepository, ICompletionDetector, ParamNames
 # INTERFACES: ABC interfaces defining canonical repository contracts for all implementations
-# PYDANTIC_MODELS: JobRecord, TaskRecord (imported from schema_core for type hints)
+# PYDANTIC_MODELS: JobRecord, TaskRecord (imported from schema_base for type hints)
 # DEPENDENCIES: abc, typing, enum, schema_base
 # SOURCE: No data source - defines abstract interfaces and contracts
 # SCOPE: Global repository pattern enforcement - all repository implementations must follow these interfaces
 # VALIDATION: ABC enforcement ensures method signature compliance, type hints provide compile-time checking
 # PATTERNS: Interface Segregation, Repository pattern, Protocol pattern, Parameter Object pattern
-# ENTRY_POINTS: class JobRepository(IJobRepository); must implement all abstract methods
+# ENTRY_POINTS: class PostgreSQLRepository(IJobRepository); must implement all abstract methods
 # INDEX: ParamNames:43, IJobRepository:93, ITaskRepository:120, ICompletionDetector:146
 # ============================================================================
 
@@ -250,9 +250,12 @@ class RepositoryProtocol(Protocol):
 Example implementation in repository_postgresql.py:
 
 # Import the interfaces from this module
-from repository_abc import (
+from interface_repository import (
     IJobRepository, ITaskRepository, ICompletionDetector,
-    ParamNames, StageAdvancementResult, TaskCompletionResult
+    ParamNames
+)
+from schema_base import (
+    StageAdvancementResult, TaskCompletionResult, JobCompletionResult
 )
 
 class PostgreSQLJobRepository(IJobRepository):

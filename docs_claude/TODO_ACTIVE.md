@@ -110,29 +110,65 @@
 
 ## 🟢 READY TO START (Prioritized)
 
-### 1. Cross-Stage Lineage System
+### 1. Blob Storage Operations Implementation 🆕
+**Goal**: Implement centralized blob storage operations with dynamic orchestration  
+**Reference**: See `STORAGE_OPERATIONS_PLAN.md` for complete design  
+**Status**: Design complete, ready for implementation
+
+#### Phase 1: Core Infrastructure (PRIORITY)
+- [ ] Implement `repository_blob.py` with DefaultAzureCredential
+- [ ] Update `repository_factory.py` to add `create_blob_repository()` method
+- [ ] Test singleton pattern and authentication
+- [ ] Verify connection pooling works
+
+#### Phase 2: Basic Operations
+- [ ] Create `schema_blob.py` with BlobMetadata and ContainerInventory models
+- [ ] Implement `service_blob.py` with task handlers:
+  - [ ] `analyze_and_orchestrate` handler (Stage 1 orchestrator)
+  - [ ] `extract_metadata` handler (Stage 2 file processor)
+  - [ ] `summarize_container` handler
+- [ ] Create `controller_container.py` with:
+  - [ ] `SummarizeContainerController` (single or multi-stage)
+  - [ ] `ListContainerController` (dynamic task generation)
+- [ ] Register controllers with JobRegistry
+
+#### Phase 3: Testing & Validation
+- [ ] Test with small containers (<500 files)
+- [ ] Test with medium containers (500-2500 files)
+- [ ] Verify NotImplementedError for >5000 files
+- [ ] Test dynamic task generation pattern
+- [ ] Verify metadata storage in task.result_data
+
+#### Phase 4: Advanced Features
+- [ ] Add GDAL mounting support for geospatial operations
+- [ ] Implement batch download operations
+- [ ] Add SAS URL generation for external access
+- [ ] Performance optimization for large containers
+
+### 2. Cross-Stage Lineage System (Analysis Complete)
 **Goal**: Tasks automatically access predecessor data by semantic ID  
-**Implementation**:
-- [ ] Add `is_lineage_task: bool` to TaskRecord schema
-- [ ] Add `predecessor_data: Optional[Dict]` field
-- [ ] Implement `TaskRecord.load_predecessor_data()` method
+**Note**: Analysis revealed lineage is already implemented via TaskContext!
+**Implementation**: Consider adding `is_lineage_task` for optimization at scale
+- [ ] Review existing TaskContext implementation
+- [ ] Add `is_lineage_task: bool` to TaskRecord schema (optional optimization)
+- [ ] Document lineage patterns for new developers
 - [ ] Test with multi-stage workflow
 
-### 2. Progress Calculation
+### 3. Progress Calculation
 **Goal**: Remove placeholder return values  
 **Files**: `schema_base.py`
 - [ ] Implement `calculate_stage_progress()` with real percentages
 - [ ] Implement `calculate_overall_progress()` with actual math
 - [ ] Implement `calculate_estimated_completion()` with time estimates
 
-### 3. SQL Generator Enhancements
+### 4. SQL Generator Enhancements
 **Goal**: Support all Pydantic v2 field constraints  
 **Files**: `schema_sql_generator.py`
 - [ ] Test field metadata with MinLen, Gt, Lt constraints
 - [ ] Add support for all annotated_types constraints
 - [ ] Verify complex nested model handling
 
-### 4. Repository Vault Integration
+### 5. Repository Vault Integration
 **Goal**: Enable Key Vault for production  
 **Files**: `repository_vault.py`
 - [ ] Complete RBAC setup for Key Vault

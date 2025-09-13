@@ -73,16 +73,27 @@ from abc import ABC, abstractmethod
 from datetime import datetime, timezone
 import hashlib
 import json
+import re
+import traceback
+from typing import List, Dict, Any, Optional
 
+# Azure imports
+from azure.storage.queue import QueueServiceClient
+from azure.identity import DefaultAzureCredential
+
+# Local application imports
+from config import get_config
+from repository_factory import RepositoryFactory
+from repository_jobs_tasks import CompletionDetector
+from task_factory import TaskHandlerFactory
 from util_logger import LoggerFactory
 from util_logger import ComponentType, LogLevel, LogContext
 from schema_base import (
     JobStatus, TaskStatus, JobRecord
 )
 from schema_base import JobExecutionContext, StageExecutionContext
-from schema_base import TaskDefinition
-from schema_queue import JobQueueMessage
-from typing import List, Dict, Any, Optional
+from schema_base import TaskDefinition, TaskResult, TaskRecord
+from schema_queue import JobQueueMessage, TaskQueueMessage
 from schema_workflow import WorkflowDefinition, get_workflow_definition
 
 
@@ -319,7 +330,6 @@ class BaseController(ABC):
         """
         # Sanitize semantic_index to ensure URL-safe characters only
         # Replace underscores and other problematic chars with hyphens
-        import re
         safe_semantic_index = re.sub(r'[^a-zA-Z0-9\-]', '-', semantic_index)
         
         # Use first 8 chars of job ID for readability while maintaining uniqueness
@@ -330,7 +340,6 @@ class BaseController(ABC):
             return readable_id
         
         # Fallback for very long semantic indices (shouldn't happen in practice)
-        import hashlib
         content = f"{job_id}-{stage}-{safe_semantic_index}"
         hash_id = hashlib.sha256(content.encode()).hexdigest()
         return f"{hash_id[:8]}-s{stage}-{hash_id[8:16]}"
@@ -425,7 +434,6 @@ class BaseController(ABC):
 
     def create_job_record(self, job_id: str, parameters: Dict[str, Any]) -> JobRecord:
         """Create and store the initial job record for database storage"""
-        from repository_factory import RepositoryFactory
         
         self.logger.debug(f"🔧 Creating job record for job_id: {job_id[:16]}...")
         self.logger.debug(f"  Job type: {self.job_type}")
@@ -475,10 +483,6 @@ class BaseController(ABC):
         Returns:
             Dictionary with queue operation results
         """
-        from azure.storage.queue import QueueServiceClient
-        from azure.identity import DefaultAzureCredential
-        from config import get_config
-        import json
         
         config = get_config()
         
@@ -544,7 +548,6 @@ class BaseController(ABC):
         Returns:
             List of task records for the specified stage
         """
-        from repository_factory import RepositoryFactory
         
         repos = RepositoryFactory.create_repositories()
         job_repo = repos['job_repo']
@@ -761,7 +764,6 @@ class BaseController(ABC):
         self.logger.debug(f"Job aggregation complete: {list(final_result.keys()) if isinstance(final_result, dict) else 'non-dict result'}")
         
         # Store completion in database
-        from repository_factory import RepositoryFactory
         repos = RepositoryFactory.create_repositories()
         job_repo = repos['job_repo']
         
@@ -911,11 +913,9 @@ class BaseController(ABC):
         # Create and store task records, then queue them
         self.logger.debug(f"🏗️ Starting task creation and queueing process")
         try:
-            from repository_factory import RepositoryFactory
-            self.logger.debug(f"📦 RepositoryFactory import successful")
+                self.logger.debug(f"📦 RepositoryFactory import successful")
         except Exception as repo_import_error:
             self.logger.error(f"❌ CRITICAL: Failed to import RepositoryFactory: {repo_import_error}")
-            import traceback
             self.logger.error(f"📍 RepositoryFactory import traceback: {traceback.format_exc()}")
             raise RuntimeError(f"Failed to import RepositoryFactory: {repo_import_error}")
         
@@ -926,7 +926,6 @@ class BaseController(ABC):
             self.logger.debug(f"✅ Repositories created successfully: task_repo={type(task_repo)}")
         except Exception as repo_create_error:
             self.logger.error(f"❌ CRITICAL: Failed to create repositories: {repo_create_error}")
-            import traceback
             self.logger.error(f"📍 Repository creation traceback: {traceback.format_exc()}")
             raise RuntimeError(f"Failed to create repositories: {repo_create_error}")
         
@@ -990,7 +989,6 @@ class BaseController(ABC):
                     self.logger.error(f"❌ CRITICAL: Failed to create task record: {task_def.task_id}")
                     self.logger.error(f"❌ Task creation error: {task_create_error}")
                     self.logger.error(f"🔍 Task creation error type: {type(task_create_error).__name__}")
-                    import traceback
                     self.logger.error(f"📍 Task creation traceback: {traceback.format_exc()}")
                     self.logger.error(f"📋 Task definition details: {task_def}")
                     task_creation_failures += 1
@@ -1000,7 +998,6 @@ class BaseController(ABC):
                 # === STEP 2: CREATE TASK QUEUE MESSAGE ===
                 self.logger.debug(f"📨 Creating task queue message for: {task_record.task_id}")
                 try:
-                    from schema_queue import TaskQueueMessage
                     task_message = TaskQueueMessage(
                         task_id=task_record.task_id,
                         parent_job_id=task_record.parent_job_id,
@@ -1015,7 +1012,6 @@ class BaseController(ABC):
                     self.logger.error(f"❌ CRITICAL: Failed to create task queue message: {task_def.task_id}")
                     self.logger.error(f"❌ Message creation error: {message_create_error}")
                     self.logger.error(f"🔍 Message creation error type: {type(message_create_error).__name__}")
-                    import traceback
                     self.logger.error(f"📍 Message creation traceback: {traceback.format_exc()}")
                     task_queueing_failures += 1
                     failed_tasks += 1
@@ -1024,9 +1020,6 @@ class BaseController(ABC):
                 # === STEP 3: SETUP AZURE QUEUE CLIENT ===
                 self.logger.debug(f"🔗 Setting up Azure Queue client for task: {task_record.task_id}")
                 try:
-                    from azure.storage.queue import QueueServiceClient
-                    from azure.identity import DefaultAzureCredential
-                    from config import get_config
                     
                     config = get_config()
                     account_url = config.queue_service_url
@@ -1048,7 +1041,6 @@ class BaseController(ABC):
                     self.logger.error(f"❌ CRITICAL: Failed to setup Azure Queue client for task: {task_record.task_id}")
                     self.logger.error(f"❌ Queue setup error: {queue_setup_error}")
                     self.logger.error(f"🔍 Queue setup error type: {type(queue_setup_error).__name__}")
-                    import traceback
                     self.logger.error(f"📍 Queue setup traceback: {traceback.format_exc()}")
                     self.logger.error(f"🌐 Account URL: {account_url if 'account_url' in locals() else 'undefined'}")
                     self.logger.error(f"📤 Task queue name: {config.task_processing_queue if 'config' in locals() else 'undefined'}")
@@ -1083,7 +1075,6 @@ class BaseController(ABC):
                     self.logger.error(f"❌ CRITICAL: Failed to send task message to queue: {task_record.task_id}")
                     self.logger.error(f"❌ Message send error: {message_send_error}")
                     self.logger.error(f"🔍 Message send error type: {type(message_send_error).__name__}")
-                    import traceback
                     self.logger.error(f"📍 Message send traceback: {traceback.format_exc()}")
                     self.logger.error(f"📋 Message JSON length: {len(message_json) if 'message_json' in locals() else 'undefined'}")
                     task_queueing_failures += 1
@@ -1095,7 +1086,6 @@ class BaseController(ABC):
                 task_id_for_error = getattr(locals().get('task_record'), 'task_id', task_def.task_id) if 'task_record' in locals() else task_def.task_id
                 self.logger.error(f"❌ CRITICAL: Unexpected error processing task {task_id_for_error}: {overall_task_error}")
                 self.logger.error(f"🔍 Overall task error type: {type(overall_task_error).__name__}")
-                import traceback
                 self.logger.error(f"📍 Overall task error traceback: {traceback.format_exc()}")
                 failed_tasks += 1
         
@@ -1128,6 +1118,567 @@ class BaseController(ABC):
         
         self.logger.info(f"Stage {stage} processing complete: {queued_tasks}/{len(task_definitions)} tasks queued successfully")
         return stage_results
+
+    # ========================================================================
+    # QUEUE ORCHESTRATION METHODS - Moved from function_app.py
+    # ========================================================================
+    # These methods handle the full lifecycle of queue message processing,
+    # delegating to appropriate controllers and services for execution.
+    # Added 12 SEP 2025 as part of function_app.py modularization effort.
+    
+    def process_job_queue_message(self, job_message: 'JobQueueMessage') -> Dict[str, Any]:
+        """
+        Process a job queue message by creating and queuing tasks for the current stage.
+        
+        This method orchestrates the job processing flow:
+        1. Validates the job message
+        2. Loads the job record from database
+        3. Creates tasks for the current stage
+        4. Queues tasks for execution
+        5. Updates job status
+        
+        Args:
+            job_message: Validated JobQueueMessage from queue
+            
+        Returns:
+            Dict with processing results including task creation status
+            
+        Raises:
+            ValueError: If job validation fails
+            RuntimeError: If task creation or queueing fails
+        """
+        
+        config = get_config()
+        
+        # Load job record
+        repo_factory = RepositoryFactory()
+        job_repo = repo_factory.create_job_repository()
+        task_repo = repo_factory.create_task_repository()
+        
+        job_record = job_repo.get_job(job_message.job_id)
+        if not job_record:
+            raise ValueError(f"Job not found: {job_message.job_id}")
+        
+        # Check if job is already completed or past this stage
+        if job_record.status == JobStatus.COMPLETED:
+            self.logger.info(f"Job {job_message.job_id[:16]}... already completed, skipping stage {job_message.stage} processing")
+            return {
+                'status': 'skipped',
+                'reason': 'job_already_completed',
+                'job_status': job_record.status.value,
+                'message': f'Job already completed with results'
+            }
+        
+        if job_record.stage > job_message.stage:
+            self.logger.info(f"Job {job_message.job_id[:16]}... already at stage {job_record.stage}, skipping stage {job_message.stage}")
+            return {
+                'status': 'skipped', 
+                'reason': 'stage_already_processed',
+                'current_stage': job_record.stage,
+                'requested_stage': job_message.stage,
+                'message': f'Job already advanced past stage {job_message.stage}'
+            }
+        
+        self.logger.info(f"Processing job {job_message.job_id[:16]}... stage {job_message.stage}")
+        
+        # Get previous stage results if not first stage
+        previous_stage_results = None
+        if job_message.stage > 1:
+            # Get aggregated results from previous stage
+            previous_stage_results = job_record.metadata.get(f'stage_{job_message.stage - 1}_results')
+        
+        # Create tasks for current stage
+        tasks = self.create_stage_tasks(
+            stage_number=job_message.stage,
+            job_id=job_message.job_id,
+            job_parameters=job_message.parameters,
+            previous_stage_results=previous_stage_results
+        )
+        
+        if not tasks:
+            raise RuntimeError(f"No tasks created for stage {job_message.stage}")
+        
+        self.logger.info(f"Created {len(tasks)} tasks for stage {job_message.stage}")
+        
+        # Queue all tasks
+        tasks_queued = 0
+        tasks_failed = 0
+        
+        # Setup queue client
+        credential = DefaultAzureCredential()
+        queue_service = QueueServiceClient(
+            account_url=config.queue_service_url,
+            credential=credential
+        )
+        queue_client = queue_service.get_queue_client(config.task_processing_queue)
+        
+        for task_def in tasks:
+            try:
+                # Check if task already exists (idempotency)
+                existing_task = task_repo.get_task(task_def.task_id)
+                if existing_task:
+                    self.logger.info(f"Task {task_def.task_id} already exists with status {existing_task.status}, skipping creation")
+                    # If task exists and is not failed, consider it queued
+                    if existing_task.status != TaskStatus.FAILED:
+                        tasks_queued += 1
+                    continue
+                
+                # NEW: Using factory methods for clean conversion
+                task_record = task_def.to_task_record()
+                success = task_repo.create_task(task_record)
+                
+                if not success:
+                    self.logger.warning(f"Failed to create task record for {task_def.task_id}")
+                    tasks_failed += 1
+                    continue
+                
+                task_message = task_def.to_queue_message()
+                message_json = task_message.model_dump_json()
+                queue_client.send_message(message_json)
+                tasks_queued += 1
+                
+                # OLD CODE - Commented out for testing
+                # # Create TaskRecord in database
+                # task_record = TaskRecord(
+                #     task_id=task_def.task_id,
+                #     parent_job_id=task_def.job_id,
+                #     task_type=task_def.task_type,
+                #     status=TaskStatus.QUEUED,
+                #     stage=task_def.stage_number,
+                #     task_index=task_def.parameters.get('task_index', '0'),
+                #     parameters=task_def.parameters,
+                #     metadata={}
+                # )
+                # success = task_repo.create_task(task_record)
+                # 
+                # # Create queue message
+                # task_message = TaskQueueMessage(
+                #     task_id=task_def.task_id,
+                #     parent_job_id=task_def.job_id,
+                #     job_type=job_message.job_type,
+                #     task_type=task_def.task_type,
+                #     stage=task_def.stage_number,
+                #     task_index=task_def.parameters.get('task_index', '0'),
+                #     parameters=task_def.parameters,
+                #     retry_count=0
+                # )
+                # 
+                # # Send to queue
+                # message_json = task_message.model_dump_json()
+                # queue_client.send_message(message_json)
+                # tasks_queued += 1
+                
+            except Exception as e:
+                self.logger.error(f"Failed to queue task {task_def.task_id}: {e}")
+                tasks_failed += 1
+        
+        # Update job status based on results
+        if tasks_queued > 0:
+            # Only update status if not already PROCESSING (e.g., Stage 2+ messages)
+            if job_record.status != JobStatus.PROCESSING:
+                job_repo.update_job_status_with_validation(
+                    job_id=job_message.job_id,
+                    new_status=JobStatus.PROCESSING
+                )
+            result = {
+                'status': 'success',
+                'tasks_created': len(tasks),
+                'tasks_queued': tasks_queued,
+                'tasks_failed': tasks_failed
+            }
+        else:
+            job_repo.update_job_status_with_validation(
+                job_id=job_message.job_id,
+                new_status=JobStatus.FAILED,
+                additional_updates={'error_details': 'No tasks successfully queued'}
+            )
+            raise RuntimeError(f"Failed to queue any tasks for stage {job_message.stage}")
+        
+        return result
+    
+    def process_task_queue_message(self, task_message: 'TaskQueueMessage') -> Dict[str, Any]:
+        """
+        Process a task queue message by executing the task and handling completion.
+        
+        This method orchestrates the task execution flow:
+        1. Executes the task via appropriate service handler
+        2. Updates task status
+        3. Detects stage completion
+        4. Triggers stage advancement or job completion as needed
+        
+        Args:
+            task_message: Validated TaskQueueMessage from queue
+            
+        Returns:
+            Dict with task execution results and completion status
+        """
+        
+        # Setup repositories
+        repo_factory = RepositoryFactory()
+        job_repo = repo_factory.create_job_repository()
+        task_repo = repo_factory.create_task_repository()
+        completion_detector = CompletionDetector()
+        
+        # DEBUG: Query task state BEFORE updating
+        self.logger.debug(f"[TASK_COMPLETION_DEBUG] Starting processing for task {task_message.task_id}")
+        existing_task = task_repo.get_task(task_message.task_id)
+        if not existing_task:
+            error_msg = f"Task {task_message.task_id} does not exist in database"
+            self.logger.error(f"[TASK_COMPLETION_ERROR] {error_msg}")
+            raise ValueError(error_msg)
+        
+        self.logger.debug(f"[TASK_COMPLETION_DEBUG] Task {task_message.task_id} current status: {existing_task.status}")
+        
+        # Enhanced logging for status validation debugging
+        self.logger.debug(f"[STATUS_VALIDATION_DEBUG] Checking task status for {task_message.task_id}")
+        self.logger.debug(f"[STATUS_VALIDATION_DEBUG] existing_task.status type: {type(existing_task.status)}")
+        self.logger.debug(f"[STATUS_VALIDATION_DEBUG] existing_task.status value: {existing_task.status}")
+        self.logger.debug(f"[STATUS_VALIDATION_DEBUG] existing_task.status repr: {repr(existing_task.status)}")
+        self.logger.debug(f"[STATUS_VALIDATION_DEBUG] TaskStatus.QUEUED type: {type(TaskStatus.QUEUED)}")
+        self.logger.debug(f"[STATUS_VALIDATION_DEBUG] TaskStatus.QUEUED value: {TaskStatus.QUEUED}")
+        self.logger.debug(f"[STATUS_VALIDATION_DEBUG] TaskStatus.QUEUED repr: {repr(TaskStatus.QUEUED)}")
+        
+        # Test the comparison explicitly
+        comparison_result = existing_task.status != TaskStatus.QUEUED
+        self.logger.debug(f"[STATUS_VALIDATION_DEBUG] Comparison (status != QUEUED): {comparison_result}")
+        self.logger.debug(f"[STATUS_VALIDATION_DEBUG] Are they equal? (status == QUEUED): {existing_task.status == TaskStatus.QUEUED}")
+        
+        # Validate task is in correct state for processing
+        if existing_task.status != TaskStatus.QUEUED:
+            self.logger.warning(f"[STATUS_VALIDATION_WARNING] Task {task_message.task_id} is not in QUEUED status")
+            self.logger.warning(f"[STATUS_VALIDATION_WARNING] Current status: {existing_task.status}, Expected: {TaskStatus.QUEUED}")
+            
+            # Check if it's already processing or completed (might be a retry)
+            if existing_task.status == TaskStatus.PROCESSING:
+                self.logger.warning(f"[STATUS_VALIDATION_WARNING] Task already in PROCESSING status - possible retry or race condition")
+            elif existing_task.status == TaskStatus.COMPLETED:
+                self.logger.warning(f"[STATUS_VALIDATION_WARNING] Task already COMPLETED - duplicate message?")
+            elif existing_task.status == TaskStatus.FAILED:
+                self.logger.warning(f"[STATUS_VALIDATION_WARNING] Task previously FAILED - retry attempt?")
+            
+            error_msg = f"Task {task_message.task_id} has invalid status for processing: {existing_task.status} (expected: QUEUED)"
+            self.logger.error(f"[TASK_COMPLETION_ERROR] {error_msg}")
+            raise ValueError(error_msg)
+        
+        # Update task status to processing before execution
+        self.logger.info(f"[TASK_COMPLETION] Updating task {task_message.task_id} from {existing_task.status} to PROCESSING")
+        task_updated = task_repo.update_task(
+            task_id=task_message.task_id,
+            updates={'status': TaskStatus.PROCESSING}
+        )
+        
+        if not task_updated:
+            error_msg = f"Failed to update task {task_message.task_id} to processing status"
+            self.logger.error(f"[TASK_COMPLETION_ERROR] {error_msg}")
+            raise RuntimeError(error_msg)
+        
+        # DEBUG: Verify update succeeded
+        updated_task = task_repo.get_task(task_message.task_id)
+        self.logger.debug(f"[TASK_COMPLETION_DEBUG] Task {task_message.task_id} status after update: {updated_task.status}")
+        
+        # Execute task - separate try block for task execution only
+        task_result = None
+        self.logger.debug(f"[TASK_EXECUTION_DEBUG] Starting execution for task {task_message.task_id}")
+        
+        try:
+            # Get task handler with context injection via TaskHandlerFactory
+            handler = TaskHandlerFactory.get_handler(task_message, task_repo)
+            self.logger.debug(f"[TASK_EXECUTION_DEBUG] Got handler for task type: {task_message.task_type}")
+            
+            # Execute handler - it returns a TaskResult object
+            import time
+            start_time = time.time()
+            task_result = handler(task_message.parameters)
+            execution_time = time.time() - start_time
+            
+            self.logger.debug(f"[TASK_EXECUTION_DEBUG] Task {task_message.task_id} execution completed in {execution_time:.3f}s")
+            self.logger.debug(f"[TASK_EXECUTION_DEBUG] Task result success: {task_result.success}, has error: {task_result.error_details is not None}")
+            
+        except Exception as exec_error:
+            error_msg = f"Task execution failed for {task_message.task_id}: {type(exec_error).__name__}: {str(exec_error)}"
+            self.logger.error(f"[TASK_EXECUTION_ERROR] {error_msg}")
+            self.logger.error(f"[TASK_EXECUTION_ERROR] Traceback: {traceback.format_exc()}")
+            
+            # No fallback - create explicit failure result
+            task_result = TaskResult(
+                task_id=task_message.task_id,
+                job_id=task_message.parent_job_id,
+                stage_number=task_message.stage,
+                task_type=task_message.task_type,
+                status=TaskStatus.FAILED,
+                result_data={},
+                error_details=error_msg,
+                execution_time_seconds=0.0
+            )
+        
+        # Mark task complete and check stage - separate try block with detailed logging
+        stage_completion = None
+        self.logger.debug(f"[TASK_COMPLETION_SQL_DEBUG] Starting SQL completion for task {task_message.task_id}")
+        
+        # DEBUG: Verify task is still in 'processing' status before SQL call
+        pre_sql_task = task_repo.get_task(task_message.task_id)
+        self.logger.debug(f"[TASK_COMPLETION_SQL_DEBUG] Task status before SQL function: {pre_sql_task.status}")
+        
+        if pre_sql_task.status != TaskStatus.PROCESSING:
+            error_msg = f"Task {task_message.task_id} has unexpected status before SQL completion: {pre_sql_task.status} (expected: PROCESSING)"
+            self.logger.error(f"[TASK_COMPLETION_SQL_ERROR] {error_msg}")
+            raise RuntimeError(error_msg)
+        
+        try:
+            # Log SQL function parameters
+            sql_params = {
+                'task_id': task_message.task_id,
+                'job_id': task_message.parent_job_id,
+                'stage': task_message.stage,
+                'has_result_data': task_result.result_data is not None if task_result else False,
+                'has_error': task_result.error_details is not None if task_result else True,
+                'task_success': task_result.success if task_result else False
+            }
+            self.logger.debug(f"[TASK_COMPLETION_SQL_DEBUG] SQL function params: {sql_params}")
+            
+            if task_result and task_result.success:
+                self.logger.debug(f"[TASK_COMPLETION_SQL_DEBUG] Calling SQL completion for successful task")
+                stage_completion = completion_detector.complete_task_and_check_stage(
+                    task_id=task_message.task_id,
+                    job_id=task_message.parent_job_id,
+                    stage=task_message.stage,
+                    result_data=task_result.result_data if task_result.result_data else {},
+                    error_details=None
+                )
+            else:
+                error_msg = task_result.error_details if task_result else 'Task execution failed - no result object'
+                self.logger.debug(f"[TASK_COMPLETION_SQL_DEBUG] Calling SQL completion for failed task: {error_msg[:100]}")
+                stage_completion = completion_detector.complete_task_and_check_stage(
+                    task_id=task_message.task_id,
+                    job_id=task_message.parent_job_id,
+                    stage=task_message.stage,
+                    result_data={},
+                    error_details=error_msg
+                )
+            
+            # Log SQL function results
+            self.logger.debug(f"[TASK_COMPLETION_SQL_DEBUG] SQL function returned:")
+            self.logger.debug(f"  - task_updated: {stage_completion.task_updated}")
+            self.logger.debug(f"  - stage_complete: {stage_completion.stage_complete}")
+            self.logger.debug(f"  - job_id: {stage_completion.job_id}")
+            self.logger.debug(f"  - stage_number: {stage_completion.stage_number}")
+            self.logger.debug(f"  - remaining_tasks: {stage_completion.remaining_tasks}")
+                
+            # Check if task was actually updated
+            if not stage_completion.task_updated:
+                error_msg = f"SQL function failed to update task {task_message.task_id}"
+                self.logger.error(f"[TASK_COMPLETION_SQL_ERROR] {error_msg}")
+                
+                # Query current task state for debugging
+                current_task = task_repo.get_task(task_message.task_id)
+                self.logger.error(f"[TASK_COMPLETION_SQL_ERROR] Current task status: {current_task.status if current_task else 'NOT FOUND'}")
+                
+                raise RuntimeError(error_msg)
+                
+        except Exception as completion_error:
+            error_msg = f"Task completion SQL failed for {task_message.task_id}: {type(completion_error).__name__}: {str(completion_error)}"
+            self.logger.error(f"[TASK_COMPLETION_SQL_ERROR] {error_msg}")
+            self.logger.error(f"[TASK_COMPLETION_SQL_ERROR] Traceback: {traceback.format_exc()}")
+            
+            # No fallback - raise the error
+            raise RuntimeError(error_msg) from completion_error
+        
+        # Handle stage completion
+        stage_advancement_result = None
+        if stage_completion and stage_completion.stage_complete:
+            self.logger.info(f"[STAGE_ADVANCEMENT] Stage {task_message.stage} complete - handling advancement")
+            self.logger.debug(f"[STAGE_ADVANCEMENT_DEBUG] Stage completion detected with 0 remaining tasks")
+            
+            try:
+                stage_advancement_result = self._handle_stage_completion(
+                    job_id=task_message.parent_job_id,
+                    stage=task_message.stage,
+                    job_repo=job_repo,
+                    completion_detector=completion_detector
+                )
+                self.logger.debug(f"[STAGE_ADVANCEMENT_DEBUG] Stage advancement result: {stage_advancement_result}")
+            except Exception as stage_error:
+                error_msg = f"Stage advancement failed: {type(stage_error).__name__}: {str(stage_error)}"
+                self.logger.error(f"[STAGE_ADVANCEMENT_ERROR] {error_msg}")
+                self.logger.error(f"[STAGE_ADVANCEMENT_ERROR] Traceback: {traceback.format_exc()}")
+                raise RuntimeError(error_msg) from stage_error
+        else:
+            self.logger.debug(f"[STAGE_ADVANCEMENT_DEBUG] Stage not complete - remaining tasks: {stage_completion.remaining_tasks if stage_completion else 'N/A'}")
+        
+        # Build response with all debug info
+        result = {
+            'task_id': task_message.task_id,
+            'status': 'completed' if task_result and task_result.success else 'failed',
+            'stage_complete': stage_completion.stage_complete if stage_completion else False,
+            'remaining_tasks': stage_completion.remaining_tasks if stage_completion else 0
+        }
+        
+        # Add stage advancement details if stage completed
+        if stage_advancement_result:
+            result['stage_advancement'] = stage_advancement_result
+        
+        self.logger.info(f"✅ Task processing complete: {result}")    
+        return result
+    
+    def _handle_stage_completion(
+        self, 
+        job_id: str, 
+        stage: int, 
+        job_repo: 'BaseRepository',
+        completion_detector: 'CompletionDetector'
+    ) -> Dict[str, Any]:
+        """
+        Handle stage completion by advancing to next stage or completing job.
+        
+        Private helper method that determines whether to:
+        - Advance to the next stage and create new tasks
+        - Complete the job if this was the final stage
+        
+        Args:
+            job_id: The job ID
+            stage: The completed stage number
+            job_repo: Job repository instance
+            completion_detector: Completion detection service
+            
+        Returns:
+            Dict with completion status and results
+        """
+        
+        config = get_config()
+        
+        # Get job record
+        job_record = job_repo.get_job(job_id)
+        if not job_record:
+            raise ValueError(f"Job not found: {job_id}")
+        
+        # Check if final stage
+        if stage >= job_record.total_stages:
+            # Final stage - complete the job
+            self.logger.info(f"Final stage complete - completing job {job_id[:16]}...")
+            
+            # Get all task results
+            job_completion = completion_detector.check_job_completion(job_id)
+            
+            if not job_completion.job_complete:
+                raise RuntimeError(f"Job completion check failed: {job_id}")
+            
+            # Convert task results to TaskResult objects
+            task_results = []
+            for task_data in job_completion.task_results or []:
+                if isinstance(task_data, dict):
+                    task_result = TaskResult(
+                        task_id=task_data.get('task_id', ''),
+                        job_id=task_data.get('job_id', job_id),
+                        stage_number=task_data.get('stage', stage),
+                        task_type=task_data.get('task_type', ''),
+                        status=task_data.get('status', TaskStatus.COMPLETED.value),
+                        result_data=task_data.get('result_data', {}),
+                        error_details=task_data.get('error_details'),
+                        execution_time_seconds=task_data.get('execution_time_seconds', 0.0)
+                    )
+                    task_results.append(task_result)
+            
+            # Aggregate results
+            aggregated_results = self.aggregate_stage_results(
+                stage_number=stage,
+                task_results=task_results
+            )
+            
+            # Update job to completed
+            job_repo.update_job_status_with_validation(
+                job_id=job_id,
+                new_status=JobStatus.COMPLETED,
+                additional_updates={'result_data': aggregated_results}
+            )
+            
+            self.logger.info(f"Job {job_id[:16]}... completed successfully")
+            
+            # FUTURE ENHANCEMENT: Outbound HTTP webhook notifications
+            # When job completes, send HTTP POST to external applications
+            # This will enable:
+            # - Real-time notifications to client systems  
+            # - Integration with external workflows
+            # - Event-driven architecture patterns
+            # - Async result delivery to subscribers
+            # 
+            # Example implementation:
+            # if job_record.parameters.get('webhook_url'):
+            #     webhook_payload = {
+            #         'job_id': job_id,
+            #         'status': 'completed',
+            #         'results': aggregated_results,
+            #         'timestamp': datetime.now(timezone.utc).isoformat()
+            #     }
+            #     send_webhook_notification(
+            #         url=job_record.parameters['webhook_url'],
+            #         payload=webhook_payload,
+            #         hmac_secret=config.webhook_secret
+            #     )
+            
+            # Return completion result
+            return {
+                'status': 'completed',
+                'job_id': job_id,
+                'final_stage': stage,
+                'total_stages': job_record.total_stages,
+                'aggregated_results': aggregated_results,
+                'message': f'Job {job_id[:16]}... completed all {job_record.total_stages} stages successfully'
+            }
+            
+        else:
+            # Not final stage - advance to next stage
+            next_stage = stage + 1
+            self.logger.info(f"Advancing job {job_id[:16]}... to stage {next_stage}")
+            
+            # Get current stage results
+            stage_completion = completion_detector.check_job_completion(job_id)
+            stage_results = {
+                'stage_number': stage,
+                'completed_tasks': len(stage_completion.task_results or []),
+                'task_results': stage_completion.task_results or [],
+                'completed_at': datetime.now(timezone.utc).isoformat()
+            }
+            
+            # Advance stage
+            advancement = completion_detector.advance_job_stage(
+                job_id=job_id,
+                current_stage=stage,
+                stage_results=stage_results
+            )
+            
+            if not advancement.job_updated:
+                raise RuntimeError(f"Failed to advance job {job_id} to stage {next_stage}")
+            
+            # Queue job for next stage processing
+            credential = DefaultAzureCredential()
+            queue_service = QueueServiceClient(
+                account_url=config.queue_service_url,
+                credential=credential
+            )
+            queue_client = queue_service.get_queue_client(config.job_processing_queue)
+            
+            # Create job message for next stage
+            job_message = JobQueueMessage(
+                job_id=job_id,
+                job_type=job_record.job_type,
+                stage=next_stage,
+                parameters=job_record.parameters
+            )
+            
+            message_json = job_message.model_dump_json()
+            queue_client.send_message(message_json)
+            
+            self.logger.info(f"Job {job_id[:16]}... queued for stage {next_stage}")
+            
+            # Return stage advancement result
+            return {
+                'status': 'stage_advanced',
+                'job_id': job_id,
+                'completed_stage': stage,
+                'next_stage': next_stage,
+                'stage_results': stage_results,
+                'message': f'Job {job_id[:16]}... advanced from stage {stage} to stage {next_stage}'
+            }
 
     def __repr__(self):
         return f"<{self.__class__.__name__}(job_type='{self.job_type}', stages={len(self.workflow_definition.stages)})>"

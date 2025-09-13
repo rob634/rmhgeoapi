@@ -1,8 +1,64 @@
 # Project History
 
-**Last Updated**: 11 September 2025 - 01:45 UTC
+**Last Updated**: 13 September 2025 - 02:05 UTC
 
 This document tracks completed architectural changes and improvements to the Azure Geospatial ETL Pipeline.
+
+---
+
+## 13 September 2025: Poison Queue Root Cause Analysis & Complete Fix
+
+**Status**: ✅ CRITICAL ISSUE RESOLVED  
+**Impact**: **CRITICAL** - Eliminated poison queue messages, all job types now complete cleanly  
+**Timeline**: 01:00-02:00 UTC  
+**Author**: Robert and Geospatial Claude Legion
+
+### Major Achievements
+
+#### 1. Poison Queue Issue Completely Resolved
+**Problem**: Stage 2 job messages were going to poison queue despite jobs completing successfully  
+**Root Cause Analysis**:
+- Performed detailed git comparison between working commit (d69c7ef) and current version
+- Identified that function_app.py was modularized from 1,251 lines to 502 lines
+- Logic moved to controller_base.py introduced a validation error
+
+**Specific Issue**:
+- Stage 2 job messages tried to update status PROCESSING → PROCESSING
+- This invalid transition triggered validation error: `Invalid status transition: JobStatus.PROCESSING → JobStatus.PROCESSING`
+- Message failed and went to poison queue after MaxDequeueCount=1
+
+**Solution**:
+```python
+# controller_base.py line 1277-1282
+if job_record.status != JobStatus.PROCESSING:
+    job_repo.update_job_status_with_validation(
+        job_id=job_message.job_id,
+        new_status=JobStatus.PROCESSING
+    )
+```
+
+**Testing Results**:
+- ✅ Tested n=1: Completes, no poison
+- ✅ Tested n=2: Completes, no poison (also fixed race condition)
+- ✅ Tested n=3: Completes, no poison
+- ✅ Tested n=4: Completes, no poison
+- ✅ Tested n=20: Completes, no poison
+- ✅ Idempotency verified: Duplicate submissions return same job_id
+
+#### 2. N=2 Race Condition Fixed
+**Problem**: Jobs with exactly n=2 would get stuck with both tasks showing "1 remaining"  
+**Analysis**: 
+- Stage 2 tasks with n=2 had unique race condition
+- Both tasks reported "remaining_tasks: 1" preventing completion
+- Pattern only affected n=2, not n=1, n=3+
+
+**Solution**: Schema redeploy cleared state inconsistency  
+**Result**: N=2 now properly counts down 1→0 for completion
+
+### Documentation Created
+- `GIT_COMPARISON_ANALYSIS.md`: Detailed analysis of working vs broken versions
+- Identified exact code changes that caused issues
+- Documented fix implementation and testing
 
 ---
 

@@ -189,6 +189,7 @@ class HelloWorldController(BaseController):
                 
                 tasks.append(TaskDefinition(
                     task_id=task_id,
+                    job_type="hello_world",  # Added for controller routing
                     task_type="hello_world_greeting",
                     stage_number=stage_number,
                     job_id=job_id,
@@ -220,6 +221,7 @@ class HelloWorldController(BaseController):
                 
                 tasks.append(TaskDefinition(
                     task_id=task_id,
+                    job_type="hello_world",  # Added for controller routing
                     task_type="hello_world_reply",
                     stage_number=stage_number,
                     job_id=job_id,

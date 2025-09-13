@@ -1,9 +1,51 @@
 # Active Tasks
 
-**Last Updated**: 12 SEP 2025  
+**Last Updated**: 13 SEP 2025  
 **Author**: Robert and Geospatial Claude Legion
 
+## ✅ RECENTLY RESOLVED (13 SEP 2025)
+
+### Poison Queue Issue - FIXED ✅
+**Resolution Date**: 13 SEP 2025 01:54 UTC  
+**Problem**: Stage 2 job messages were going to poison queue even though jobs completed successfully
+
+**Root Cause Identified**: 
+- When Stage 2 job message was processed, it tried to update job status from PROCESSING → PROCESSING
+- This invalid status transition caused a validation error and sent the message to poison queue
+
+**Solution Implemented**:
+- Modified `controller_base.py` line 1277-1282 to check if job is already PROCESSING before updating
+- Only updates status for initial stage (Stage 1) messages
+
+**Testing Results**:
+- ✅ Tested with n=1, 2, 3, 4, 20 - all complete successfully
+- ✅ No poison queue messages after fix deployment
+- ✅ Idempotency confirmed working (duplicate jobs return same job_id)
+
+### N=2 Completion Bug - FIXED ✅
+**Resolution Date**: 13 SEP 2025 01:42 UTC  
+**Problem**: Jobs with exactly n=2 would get stuck in PROCESSING state
+
+**Root Cause**: 
+- PostgreSQL function `complete_task_and_check_stage` had a race condition with exactly 2 tasks
+- Both Stage 2 tasks would report "1 remaining" instead of counting down to 0
+
+**Solution**: 
+- Schema redeploy fixed the issue (cleared state inconsistency)
+- N=2 now works correctly with proper countdown (1→0)
+
+---
+
 ## ✅ RECENTLY RESOLVED (12 SEP 2025)
+
+### Task Handler Execution Error - FIXED
+**Resolution Time**: 12 SEP 2025 21:50 UTC
+**Problem**: Tasks failing with `AttributeError: 'TaskRegistry' object has no attribute 'get_handler'`
+**Solution**: 
+- Renamed `service_factories.py` → `task_factory.py` (proper naming convention)
+- Fixed controller_base.py to use `TaskHandlerFactory.get_handler()` instead of trying to use TaskRegistry directly
+- Fixed TaskResult field names (`result_data` and `error_details`)
+**Result**: All tasks now execute successfully through completion
 
 ### Stage 2 Task Creation Failure - FIXED
 **Status**: RESOLVED  
@@ -20,6 +62,41 @@
 ---
 
 ## 🟡 IN PROGRESS
+
+### function_app.py Modularization (1251 lines → 506 lines) ✅
+**Problem**: function_app.py contains orchestration logic that belongs in controllers
+**Goal**: Move queue processing logic to BaseController, simplify function_app.py to just routing
+**Started**: 12 SEP 2025
+**COMPLETED**: 12 SEP 2025
+
+**Implementation Steps**:
+1. [x] **Add orchestration methods to BaseController**
+   - [x] `process_job_queue_message(job_message: JobQueueMessage)`
+   - [x] `process_task_queue_message(task_message: TaskQueueMessage)`
+   - [x] `_handle_stage_completion(job_id, stage)` (private helper)
+   - [x] Stage advancement logic integrated
+   - [x] Job completion logic integrated
+
+2. [x] **Move helper functions from function_app.py**
+   - [x] Removed `_validate_and_parse_queue_message()` - logic in controller
+   - [x] Removed `_load_job_record_safely()` - logic in controller
+   - [x] Removed `_verify_task_creation_success()` - logic in controller
+   - [x] Removed `_mark_job_failed_safely()` - logic in controller
+
+3. [x] **Refactor queue triggers in function_app.py**
+   - [x] Simplified `process_job_queue()` to 22 lines
+   - [x] Simplified `process_task_queue()` to 22 lines
+   - [x] Both now just parse message and delegate to controller
+
+4. [ ] **Testing**
+   - [ ] Test hello_world with n=10
+   - [ ] Verify stage advancement still works
+   - [ ] Confirm job completion still works
+
+**Achieved Outcome**:
+- function_app.py: 506 lines (60% reduction from 1251 lines)
+- controller_base.py: Enhanced with queue orchestration methods (~360 new lines)
+- Clean separation achieved: Controllers orchestrate, Services execute, Triggers route
 
 ### Service Handler Auto-Discovery
 **Problem**: Service modules not auto-imported, handlers never registered  

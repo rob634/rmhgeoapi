@@ -115,6 +115,7 @@ class TaskQueueMessage(BaseModel):
     """
     task_id: str = Field(..., min_length=1, max_length=100)
     parent_job_id: str = Field(..., min_length=64, max_length=64)
+    job_type: str = Field(..., min_length=1, max_length=50, description="Parent job type for controller routing")
     task_type: str = Field(..., min_length=1, max_length=50)
     stage: int = Field(..., ge=1, le=100)
     task_index: str = Field(default="0", max_length=50, description="Can be semantic like 'tile_x5_y10'")

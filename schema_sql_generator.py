@@ -476,7 +476,7 @@ BEGIN
     INTO v_job_id, v_stage, v_task_status;
     
     IF v_job_id IS NULL THEN
-        RETURN QUERY SELECT FALSE, FALSE, NULL::VARCHAR(64), NULL::INTEGER, NULL::INTEGER;
+        RETURN QUERY SELECT FALSE, FALSE, NULL::VARCHAR(64), NULL::INTEGER, 0::INTEGER;
         RETURN;
     END IF;
     

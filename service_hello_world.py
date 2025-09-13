@@ -60,7 +60,7 @@ Lineage Pattern Example:
     Stage 2, Task 3: job123-s2-task_3 → automatically gets s1-task_3 data
 
 Usage Pattern for New Services:
-    1. Import TaskRegistry and TaskContext from service_factories
+    1. Import TaskRegistry and TaskContext from task_factory
     2. Define handler factory function with @TaskRegistry.instance().register("task_type")
     3. Factory returns actual handler function that processes params
     4. Use context.has_predecessor() and context.get_predecessor_result() for lineage
@@ -74,7 +74,7 @@ from datetime import datetime, timezone
 
 # Import the TaskRegistry for handler registration
 # This provides the decorator pattern and lineage support
-from service_factories import TaskRegistry, TaskContext
+from task_factory import TaskRegistry, TaskContext
 
 
 # ============================================================================
@@ -227,7 +227,7 @@ def create_reply_handler():
 Template for Creating New Service Handlers:
 
 1. Import Requirements:
-   from service_factories import TaskRegistry, TaskContext
+   from task_factory import TaskRegistry, TaskContext
    from datetime import datetime, timezone
    from typing import Dict, Any
 

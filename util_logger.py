@@ -318,43 +318,48 @@ class LoggerFactory:
     """
     
     # Default configurations per component type
+    # Check environment variable for debug mode
+    import os
+    default_level = LogLevel.DEBUG if os.getenv('DEBUG_LOGGING', '').lower() == 'true' else LogLevel.INFO
+    
     DEFAULT_CONFIGS = {
         ComponentType.CONTROLLER: ComponentConfig(
             component_type=ComponentType.CONTROLLER,
-            log_level=LogLevel.INFO,
-            enable_performance_logging=True
+            log_level=default_level,
+            enable_performance_logging=True,
+            enable_debug_context=True if default_level == LogLevel.DEBUG else False
         ),
         ComponentType.SERVICE: ComponentConfig(
             component_type=ComponentType.SERVICE,
-            log_level=LogLevel.INFO,
+            log_level=default_level,
             enable_performance_logging=True
         ),
         ComponentType.REPOSITORY: ComponentConfig(
             component_type=ComponentType.REPOSITORY,
-            log_level=LogLevel.WARNING,
-            enable_debug_context=False
+            log_level=LogLevel.DEBUG,  # Always debug for repositories to track SQL
+            enable_debug_context=True
         ),
         ComponentType.FACTORY: ComponentConfig(
             component_type=ComponentType.FACTORY,
-            log_level=LogLevel.INFO
+            log_level=default_level
         ),
         ComponentType.SCHEMA: ComponentConfig(
             component_type=ComponentType.SCHEMA,
-            log_level=LogLevel.WARNING
+            log_level=LogLevel.DEBUG  # Always debug for schema operations
         ),
         ComponentType.TRIGGER: ComponentConfig(
             component_type=ComponentType.TRIGGER,
-            log_level=LogLevel.INFO,
+            log_level=default_level,
             enable_performance_logging=True
         ),
         ComponentType.ADAPTER: ComponentConfig(
             component_type=ComponentType.ADAPTER,
-            log_level=LogLevel.INFO,
+            log_level=default_level,
             enable_performance_logging=True
         ),
         ComponentType.VALIDATOR: ComponentConfig(
             component_type=ComponentType.VALIDATOR,
-            log_level=LogLevel.INFO
+            log_level=default_level
         )
     }
     

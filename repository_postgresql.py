@@ -853,11 +853,11 @@ class PostgreSQLTaskRepository(PostgreSQLRepository, ITaskRepository):
         with self._error_context("task creation", task.task_id):
             query = sql.SQL("""
                 INSERT INTO {}.{} (
-                    task_id, parent_job_id, task_type, status, stage, task_index,
+                    task_id, parent_job_id, job_type, task_type, status, stage, task_index,
                     parameters, result_data, metadata, error_details, retry_count,
                     heartbeat, created_at, updated_at
                 ) VALUES (
-                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
                 ) ON CONFLICT (task_id) DO NOTHING
             """).format(
                 sql.Identifier(self.schema_name),
@@ -867,6 +867,7 @@ class PostgreSQLTaskRepository(PostgreSQLRepository, ITaskRepository):
             params = (
                 task.task_id,
                 task.parent_job_id,
+                task.job_type,  # Added job_type field
                 task.task_type,
                 task.status.value if isinstance(task.status, TaskStatus) else task.status,
                 task.stage,
@@ -903,7 +904,7 @@ class PostgreSQLTaskRepository(PostgreSQLRepository, ITaskRepository):
         """
         with self._error_context("task retrieval", task_id):
             query = sql.SQL("""
-                SELECT task_id, parent_job_id, task_type, status, stage, task_index,
+                SELECT task_id, parent_job_id, job_type, task_type, status, stage, task_index,
                        parameters, result_data, error_details, retry_count,
                        heartbeat, created_at, updated_at
                 FROM {}.{}
@@ -923,17 +924,18 @@ class PostgreSQLTaskRepository(PostgreSQLRepository, ITaskRepository):
             task_data = {
                 'task_id': row[0],
                 'parent_job_id': row[1],
-                'task_type': row[2],
-                'status': row[3],
-                'stage': row[4],
-                'task_index': row[5],
-                'parameters': row[6] if isinstance(row[6], dict) else json.loads(row[6]) if row[6] else {},
-                'result_data': row[7] if isinstance(row[7], dict) else json.loads(row[7]) if row[7] else None,
-                'error_details': row[8],
-                'retry_count': row[9],
-                'heartbeat': row[10],
-                'created_at': row[11],
-                'updated_at': row[12]
+                'job_type': row[2],  # Added job_type field
+                'task_type': row[3],
+                'status': row[4],
+                'stage': row[5],
+                'task_index': row[6],
+                'parameters': row[7] if isinstance(row[7], dict) else json.loads(row[7]) if row[7] else {},
+                'result_data': row[8] if isinstance(row[8], dict) else json.loads(row[8]) if row[8] else None,
+                'error_details': row[9],
+                'retry_count': row[10],
+                'heartbeat': row[11],
+                'created_at': row[12],
+                'updated_at': row[13]
             }
             
             task_record = TaskRecord(**task_data)
@@ -1083,8 +1085,7 @@ class PostgreSQLCompletionDetector(PostgreSQLRepository, ICompletionDetector):
                 SELECT * FROM {}.complete_task_and_check_stage(%s, %s, %s, %s, %s)
             """).format(sql.Identifier(self.schema_name))
             
-            # Updated to match new PostgreSQL function signature
-            # Now passes all 5 parameters: task_id, job_id, stage, result_data, error_details
+            # Log all parameters being passed to SQL function
             params = (
                 task_id,
                 job_id,
@@ -1093,10 +1094,33 @@ class PostgreSQLCompletionDetector(PostgreSQLRepository, ICompletionDetector):
                 error_details  # Pass error_details for failed tasks, None for success
             )
             
+            logger.debug(f"[SQL_FUNCTION_DEBUG] Calling complete_task_and_check_stage with:")
+            logger.debug(f"  - task_id: {task_id}")
+            logger.debug(f"  - job_id: {job_id}")
+            logger.debug(f"  - stage: {stage}")
+            logger.debug(f"  - has_result_data: {result_data is not None}")
+            logger.debug(f"  - has_error_details: {error_details is not None}")
+            
+            # Also query current task status before SQL function for debugging
+            with self._get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT status FROM app.tasks WHERE task_id = %s",
+                        (task_id,)
+                    )
+                    current_status = cur.fetchone()
+                    logger.debug(f"[SQL_FUNCTION_DEBUG] Task {task_id} current DB status before SQL function: {current_status[0] if current_status else 'NOT FOUND'}")
+            
+            import time
+            start_time = time.time()
             row = self._execute_query(query, params, fetch='one')
+            sql_time = time.time() - start_time
+            
+            logger.debug(f"[SQL_FUNCTION_DEBUG] SQL function executed in {sql_time:.3f}s")
             
             if not row:
-                logger.error(f"❌ Task completion failed: {task_id}")
+                logger.error(f"[SQL_FUNCTION_ERROR] Task completion returned NULL for {task_id}")
+                logger.error(f"[SQL_FUNCTION_ERROR] This means UPDATE matched no rows (task not in 'processing' status?)")
                 return TaskCompletionResult(
                     task_updated=False,
                     stage_complete=False,
@@ -1104,6 +1128,9 @@ class PostgreSQLCompletionDetector(PostgreSQLRepository, ICompletionDetector):
                     stage_number=None,
                     remaining_tasks=0
                 )
+            
+            # Log raw SQL result before parsing
+            logger.debug(f"[SQL_FUNCTION_DEBUG] Raw SQL result: {row}")
             
             result = TaskCompletionResult(
                 task_updated=row[0],
@@ -1113,10 +1140,40 @@ class PostgreSQLCompletionDetector(PostgreSQLRepository, ICompletionDetector):
                 remaining_tasks=row[4]
             )
             
+            # Log parsed result
+            logger.debug(f"[SQL_FUNCTION_DEBUG] Parsed result:")
+            logger.debug(f"  - task_updated: {result.task_updated}")
+            logger.debug(f"  - stage_complete: {result.stage_complete}")
+            logger.debug(f"  - job_id: {result.job_id}")
+            logger.debug(f"  - stage_number: {result.stage_number}")
+            logger.debug(f"  - remaining_tasks: {result.remaining_tasks}")
+            
+            # If not stage complete, query to see what tasks are still pending
+            if result.task_updated and not result.stage_complete and result.remaining_tasks > 0:
+                with self._get_connection() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            """
+                            SELECT task_id, status 
+                            FROM app.tasks 
+                            WHERE parent_job_id = %s 
+                              AND stage = %s 
+                              AND status NOT IN ('completed', 'failed')
+                            """,
+                            (result.job_id, result.stage_number)
+                        )
+                        pending_tasks = cur.fetchall()
+                        if pending_tasks:
+                            logger.debug(f"[SQL_FUNCTION_DEBUG] Pending tasks in stage {result.stage_number}:")
+                            for task in pending_tasks:
+                                logger.debug(f"  - {task[0]}: {task[1]}")
+            
             if result.task_updated:
                 logger.info(f"✅ Task completed: {task_id} (remaining in stage: {result.remaining_tasks})")
                 if result.stage_complete:
                     logger.info(f"🎯 Stage {result.stage_number} complete for job {result.job_id[:16]}...")
+            else:
+                logger.error(f"[SQL_FUNCTION_ERROR] Task update failed for {task_id}")
             
             return result
     

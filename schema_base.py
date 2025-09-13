@@ -273,6 +273,7 @@ class TaskRecord(BaseModel):
     """
     task_id: str = Field(..., min_length=1, max_length=100, description="Unique task ID")
     parent_job_id: str = Field(..., min_length=64, max_length=64, description="Parent job ID")
+    job_type: str = Field(..., min_length=1, max_length=50, description="Parent job type for controller routing")
     task_type: str = Field(..., min_length=1, max_length=50, description="Type of task")
     status: TaskStatus = Field(default=TaskStatus.QUEUED, description="Current task status")
     
@@ -653,15 +654,65 @@ class JobRegistry(BaseModel):
 
 @dataclass
 class TaskDefinition:
-    """Task definition for stage execution - lightweight internal model"""
+    """
+    Task definition for stage execution - lightweight internal model.
+    
+    Now includes factory methods for converting to TaskRecord and TaskQueueMessage,
+    ensuring consistency across all task data structures.
+    """
     task_id: str
+    job_type: str  # Added for controller routing
     task_type: str
     stage_number: int
     job_id: str
-    parameters: Dict[str, Any]
+    parameters: Dict[str, Any] = field(default_factory=dict)
     depends_on_tasks: Optional[List[str]] = None
     retry_count: int = 0
     max_retries: int = 3
+    
+    def to_task_record(self, status: TaskStatus = TaskStatus.QUEUED) -> 'TaskRecord':
+        """
+        Convert TaskDefinition to TaskRecord for database storage.
+        
+        Args:
+            status: Initial task status (default: QUEUED)
+            
+        Returns:
+            TaskRecord ready for database insertion
+        """
+        return TaskRecord(
+            task_id=self.task_id,
+            parent_job_id=self.job_id,
+            job_type=self.job_type,
+            task_type=self.task_type,
+            status=status,
+            stage=self.stage_number,
+            task_index=self.parameters.get('task_index', '0'),
+            parameters=self.parameters,
+            metadata={},
+            retry_count=self.retry_count
+        )
+    
+    def to_queue_message(self) -> 'TaskQueueMessage':
+        """
+        Convert TaskDefinition to TaskQueueMessage for queue processing.
+        
+        Returns:
+            TaskQueueMessage ready for Azure Queue
+        """
+        # Import here to avoid circular dependency
+        from schema_queue import TaskQueueMessage
+        
+        return TaskQueueMessage(
+            task_id=self.task_id,
+            parent_job_id=self.job_id,
+            job_type=self.job_type,
+            task_type=self.task_type,
+            stage=self.stage_number,
+            task_index=self.parameters.get('task_index', '0'),
+            parameters=self.parameters,
+            retry_count=self.retry_count
+        )
 
 
 # ============================================================================

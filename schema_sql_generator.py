@@ -480,7 +480,15 @@ BEGIN
         RETURN;
     END IF;
     
+    -- Use advisory lock to prevent race conditions without row-level locks
+    -- This avoids deadlocks when many tasks complete simultaneously
+    -- Lock key is hash of job_id and stage to serialize per stage
+    PERFORM pg_advisory_xact_lock(
+        hashtext(v_job_id || ':stage:' || v_stage::text)
+    );
+    
     -- Count remaining non-completed tasks in the same stage
+    -- Now that we have the lock, this count will be accurate
     SELECT COUNT(*)::INTEGER INTO v_remaining
     FROM {schema}.tasks 
     WHERE parent_job_id = v_job_id 

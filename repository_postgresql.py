@@ -1261,8 +1261,10 @@ class PostgreSQLCompletionDetector(PostgreSQLRepository, ICompletionDetector):
                     task_results=[]
                 )
             
-            # Parse task_results from JSONB
-            task_results = row[4] if isinstance(row[4], list) else json.loads(row[4]) if row[4] else []
+            # Parse task_results from JSONB - fail fast on incorrect type
+            if not isinstance(row[4], list):
+                raise ValueError(f"Invalid task_results from database: expected list, got {type(row[4])}")
+            task_results = row[4] if row[4] is not None else []
             
             result = JobCompletionResult(
                 job_complete=row[0],

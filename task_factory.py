@@ -220,6 +220,23 @@ class TaskHandlerFactory:
                     # Class-based handler
                     result_data = base_handler.execute(params, context)
                 
+                # Check if handler returned a failure response
+                if isinstance(result_data, dict) and not result_data.get("success", True):
+                    # Handler returned a failure dict - convert to failed TaskResult
+                    error_msg = result_data.get("error", "Task execution failed")
+                    logger.warning(f"Task handler returned failure: {error_msg}")
+                    
+                    return TaskResult(
+                        task_id=context.task_id,
+                        job_id=context.job_id,
+                        stage_number=context.stage,
+                        task_type=context.task_type,
+                        status=TaskStatus.FAILED,
+                        result_data=result_data,  # Keep the full result for debugging
+                        error_details=error_msg,   # Extract error message
+                        completed_at=datetime.now(timezone.utc)
+                    )
+                
                 # Return success result
                 return TaskResult(
                     task_id=context.task_id,

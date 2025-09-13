@@ -1562,16 +1562,21 @@ class BaseController(ABC):
             if not job_completion.job_complete:
                 raise RuntimeError(f"Job completion check failed: {job_id}")
             
-            # Convert task results to TaskResult objects
+            # Convert task results to TaskResult objects and check for failures
             task_results = []
+            has_failed_tasks = False
             for task_data in job_completion.task_results or []:
                 if isinstance(task_data, dict):
+                    task_status = task_data.get('status', TaskStatus.COMPLETED.value)
+                    if task_status == TaskStatus.FAILED.value or task_status == 'failed':
+                        has_failed_tasks = True
+                    
                     task_result = TaskResult(
                         task_id=task_data.get('task_id', ''),
                         job_id=task_data.get('job_id', job_id),
                         stage_number=task_data.get('stage', stage),
                         task_type=task_data.get('task_type', ''),
-                        status=task_data.get('status', TaskStatus.COMPLETED.value),
+                        status=task_status,
                         result_data=task_data.get('result_data', {}),
                         error_details=task_data.get('error_details'),
                         execution_time_seconds=task_data.get('execution_time_seconds', 0.0)
@@ -1584,14 +1589,20 @@ class BaseController(ABC):
                 task_results=task_results
             )
             
-            # Update job to completed
+            # Determine final job status based on task results
+            if has_failed_tasks:
+                final_status = JobStatus.FAILED
+                self.logger.warning(f"Job {job_id[:16]}... has failed tasks - marking as FAILED")
+            else:
+                final_status = JobStatus.COMPLETED
+                self.logger.info(f"Job {job_id[:16]}... completed successfully")
+            
+            # Update job with final status
             job_repo.update_job_status_with_validation(
                 job_id=job_id,
-                new_status=JobStatus.COMPLETED,
+                new_status=final_status,
                 additional_updates={'result_data': aggregated_results}
             )
-            
-            self.logger.info(f"Job {job_id[:16]}... completed successfully")
             
             # FUTURE ENHANCEMENT: Outbound HTTP webhook notifications
             # When job completes, send HTTP POST to external applications
@@ -1626,11 +1637,10 @@ class BaseController(ABC):
             }
             
         else:
-            # Not final stage - advance to next stage
+            # Not final stage - check if we should advance to next stage
             next_stage = stage + 1
-            self.logger.info(f"Advancing job {job_id[:16]}... to stage {next_stage}")
             
-            # Get current stage results
+            # Get current stage results and check for failures
             stage_completion = completion_detector.check_job_completion(job_id)
             stage_results = {
                 'stage_number': stage,
@@ -1638,6 +1648,40 @@ class BaseController(ABC):
                 'task_results': stage_completion.task_results or [],
                 'completed_at': datetime.now(timezone.utc).isoformat()
             }
+            
+            # Check if any tasks in this stage failed
+            has_failed_tasks = False
+            for task_data in stage_completion.task_results or []:
+                if isinstance(task_data, dict):
+                    task_status = task_data.get('status', TaskStatus.COMPLETED.value)
+                    if task_status == TaskStatus.FAILED.value or task_status == 'failed':
+                        has_failed_tasks = True
+                        break
+            
+            if has_failed_tasks:
+                # Stage has failed tasks - mark job as failed
+                self.logger.warning(f"Stage {stage} has failed tasks - marking job {job_id[:16]}... as FAILED")
+                
+                # Update job to failed status
+                job_repo.update_job_status_with_validation(
+                    job_id=job_id,
+                    new_status=JobStatus.FAILED,
+                    additional_updates={
+                        'result_data': stage_results,
+                        'error_details': f'Stage {stage} failed with one or more task failures'
+                    }
+                )
+                
+                return {
+                    'status': 'job_failed',
+                    'job_id': job_id,
+                    'failed_stage': stage,
+                    'stage_results': stage_results,
+                    'message': f'Job {job_id[:16]}... failed at stage {stage} due to task failures'
+                }
+            
+            # No failures - advance to next stage
+            self.logger.info(f"Advancing job {job_id[:16]}... to stage {next_stage}")
             
             # Advance stage
             advancement = completion_detector.advance_job_stage(

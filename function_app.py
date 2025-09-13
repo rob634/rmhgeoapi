@@ -137,6 +137,7 @@ from controller_factories import JobFactory
 # Import service modules to trigger handler registration via decorators
 # NOTE: This import is required! It registers handlers via decorators on import
 import service_hello_world  # Registers hello_world_greeting and hello_world_reply handlers
+import service_blob  # Registers blob storage task handlers (analyze_and_orchestrate, extract_metadata, etc.)
 
 # Auto-discover and import all service modules to trigger handler registration
 from task_factory import auto_discover_handlers

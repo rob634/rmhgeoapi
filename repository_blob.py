@@ -1,0 +1,572 @@
+# ============================================================================
+# CLAUDE CONTEXT - REPOSITORY
+# ============================================================================
+# PURPOSE: Centralized Azure Blob Storage repository with managed authentication
+# EXPORTS: BlobRepository singleton with DefaultAzureCredential authentication
+# INTERFACES: IBlobRepository for dependency injection
+# DEPENDENCIES: azure-storage-blob, azure-identity, io.BytesIO, typing
+# SOURCE: Azure Blob Storage containers (Bronze/Silver/Gold tiers)
+# SCOPE: ALL blob operations for entire ETL pipeline
+# VALIDATION: Blob existence, size limits, content type validation
+# PATTERNS: Singleton, Repository, DefaultAzureCredential, connection pooling
+# ENTRY_POINTS: BlobRepository.instance() for singleton access
+# INDEX: IBlobRepository:60, BlobRepository:100, get_blob_repository:470
+# ============================================================================
+
+"""
+Blob Storage Repository - Central Authentication Point
+
+This module provides THE centralized blob storage repository with managed
+authentication using DefaultAzureCredential. It serves as the single point
+of authentication for all blob operations across the entire ETL pipeline.
+
+Key Features:
+- DefaultAzureCredential for seamless authentication across environments
+- Singleton pattern ensures connection reuse
+- Connection pooling for container clients
+- All ETL services use this for blob access
+- No credential management needed in services
+
+Authentication Hierarchy:
+1. Environment variables (AZURE_CLIENT_ID, etc.)
+2. Managed Identity (in Azure)
+3. Azure CLI (local development)
+4. Visual Studio Code
+5. Azure PowerShell
+
+Usage:
+    from repository_factory import RepositoryFactory
+    
+    # Get authenticated repository
+    blob_repo = RepositoryFactory.create_blob_repository()
+    
+    # Use without worrying about credentials
+    data = blob_repo.read_blob('bronze', 'path/to/file.tif')
+    
+Author: Robert and Geospatial Claude Legion
+Date: 9 December 2025
+"""
+
+# ============================================================================
+# IMPORTS - Top of file for fail-fast behavior
+# ============================================================================
+
+# Standard library imports
+import os
+import logging
+import concurrent.futures
+from abc import ABC, abstractmethod
+from datetime import datetime, timedelta
+from io import BytesIO
+from typing import List, Dict, Any, Optional, Iterator, BinaryIO, Union
+
+# Azure SDK imports - These will fail fast if not installed
+from azure.storage.blob import BlobServiceClient, ContainerClient, BlobClient
+from azure.identity import DefaultAzureCredential
+from azure.core.exceptions import ResourceNotFoundError
+
+# Application imports
+from util_logger import LoggerFactory, ComponentType
+
+logger = LoggerFactory.create_logger(ComponentType.REPOSITORY, __name__)
+
+
+# ============================================================================
+# BLOB REPOSITORY INTERFACE
+# ============================================================================
+
+class IBlobRepository(ABC):
+    """
+    Interface for blob storage operations.
+    
+    Enables dependency injection and testing/mocking of blob operations.
+    All blob repositories must implement this interface.
+    """
+    
+    @abstractmethod
+    def read_blob(self, container: str, blob_path: str) -> bytes:
+        """Read entire blob to memory"""
+        pass
+    
+    @abstractmethod
+    def write_blob(self, container: str, blob_path: str, data: Union[bytes, BinaryIO],
+                   overwrite: bool = True, content_type: str = "application/octet-stream",
+                   metadata: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
+        """Write blob from bytes or stream"""
+        pass
+    
+    @abstractmethod
+    def list_blobs(self, container: str, prefix: str = "", limit: Optional[int] = None) -> List[Dict[str, Any]]:
+        """List blobs with metadata"""
+        pass
+    
+    @abstractmethod
+    def blob_exists(self, container: str, blob_path: str) -> bool:
+        """Check if blob exists"""
+        pass
+    
+    @abstractmethod
+    def delete_blob(self, container: str, blob_path: str) -> bool:
+        """Delete a blob"""
+        pass
+
+
+# ============================================================================
+# BLOB REPOSITORY IMPLEMENTATION
+# ============================================================================
+
+class BlobRepository(IBlobRepository):
+    """
+    Centralized blob storage repository with managed authentication.
+    
+    CRITICAL: This is THE authentication point for all blob operations.
+    - Uses DefaultAzureCredential for seamless auth across environments
+    - Singleton pattern ensures connection reuse
+    - All ETL services use this for blob access
+    
+    Design Principles:
+    - Single source of authentication for all blob operations
+    - Connection pooling for performance
+    - Thread-safe singleton implementation
+    - Consistent error handling and logging
+    
+    Usage:
+        # Get singleton instance
+        blob_repo = BlobRepository.instance()
+        
+        # Or through factory (recommended)
+        blob_repo = RepositoryFactory.create_blob_repository()
+    """
+    
+    _instance: Optional['BlobRepository'] = None
+    _initialized: bool = False
+    
+    def __new__(cls, connection_string: Optional[str] = None, *args, **kwargs):
+        """
+        Thread-safe singleton creation.
+        
+        Modified to accept connection_string for pattern consistency with
+        other repositories, though DefaultAzureCredential is preferred.
+        """
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+    
+    def __init__(self, connection_string: Optional[str] = None, storage_account: Optional[str] = None):
+        """
+        Initialize with DefaultAzureCredential - happens once.
+        
+        Args:
+            connection_string: Optional connection string for compatibility
+            storage_account: Storage account name (uses env if not provided)
+        """
+        if not self._initialized:
+            try:
+                if connection_string:
+                    # Use connection string (for consistency with other repos)
+                    logger.info("Initializing BlobRepository with connection string")
+                    self.blob_service = BlobServiceClient.from_connection_string(connection_string)
+                    self.storage_account = self.blob_service.account_name
+                else:
+                    # Use DefaultAzureCredential (preferred for blob storage)
+                    storage_account = storage_account or os.environ.get('STORAGE_ACCOUNT_NAME', 'rmhazuregeo')
+                    self.storage_account = storage_account
+                    self.account_url = f"https://{storage_account}.blob.core.windows.net"
+                    
+                    logger.info(f"Initializing BlobRepository with DefaultAzureCredential for account: {storage_account}")
+                    
+                    # Create credential
+                    self.credential = DefaultAzureCredential()
+                    
+                    # Create blob service client
+                    self.blob_service = BlobServiceClient(
+                        account_url=self.account_url,
+                        credential=self.credential
+                    )
+                
+                # Cache frequently used container clients
+                self._container_clients: Dict[str, ContainerClient] = {}
+                
+                # Pre-initialize common containers for connection pooling
+                common_containers = [
+                    'rmhazuregeobronze',
+                    'rmhazuregeosilver', 
+                    'rmhazuregeogold'
+                ]
+                
+                for container in common_containers:
+                    try:
+                        self._get_container_client(container)
+                        logger.debug(f"Pre-cached container client: {container}")
+                    except Exception as e:
+                        logger.warning(f"Could not pre-cache container {container}: {e}")
+                
+                BlobRepository._initialized = True
+                logger.info(f"✅ BlobRepository initialized successfully for account: {self.storage_account}")
+                
+            except Exception as e:
+                logger.error(f"Failed to initialize BlobRepository: {e}")
+                raise
+    
+    @classmethod
+    def instance(cls, connection_string: Optional[str] = None) -> 'BlobRepository':
+        """
+        Get singleton instance.
+        
+        Args:
+            connection_string: Optional connection string
+            
+        Returns:
+            BlobRepository singleton instance
+        """
+        if cls._instance is None:
+            cls._instance = cls(connection_string)
+        return cls._instance
+    
+    def _get_container_client(self, container: str) -> ContainerClient:
+        """
+        Get or create cached container client.
+        
+        Uses connection pooling by caching container clients.
+        
+        Args:
+            container: Container name
+            
+        Returns:
+            Cached or new ContainerClient
+        """
+        if container not in self._container_clients:
+            self._container_clients[container] = self.blob_service.get_container_client(container)
+            logger.debug(f"Created new container client for: {container}")
+        return self._container_clients[container]
+    
+    # ========================================================================
+    # CORE BLOB OPERATIONS
+    # ========================================================================
+    
+    def read_blob(self, container: str, blob_path: str) -> bytes:
+        """
+        Read entire blob to memory.
+        
+        Best for small files (<100MB). For larger files, use read_blob_chunked.
+        
+        Args:
+            container: Container name
+            blob_path: Path to blob
+            
+        Returns:
+            Blob content as bytes
+            
+        Raises:
+            ResourceNotFoundError: If blob doesn't exist
+        """
+        try:
+            container_client = self._get_container_client(container)
+            blob_client = container_client.get_blob_client(blob_path)
+            
+            logger.debug(f"Reading blob: {container}/{blob_path}")
+            data = blob_client.download_blob().readall()
+            
+            logger.debug(f"Successfully read {len(data)} bytes from {container}/{blob_path}")
+            return data
+            
+        except ResourceNotFoundError:
+            logger.error(f"Blob not found: {container}/{blob_path}")
+            raise
+        except Exception as e:
+            logger.error(f"Failed to read blob {container}/{blob_path}: {e}")
+            raise
+    
+    def read_blob_to_stream(self, container: str, blob_path: str) -> BytesIO:
+        """
+        Read blob to BytesIO stream.
+        
+        Memory efficient way to read blobs for processing.
+        
+        Args:
+            container: Container name
+            blob_path: Path to blob
+            
+        Returns:
+            BytesIO stream with blob content
+        """
+        data = self.read_blob(container, blob_path)
+        return BytesIO(data)
+    
+    def read_blob_chunked(self, container: str, blob_path: str, chunk_size: int = 4*1024*1024) -> Iterator[bytes]:
+        """
+        Stream blob in chunks for large files.
+        
+        Args:
+            container: Container name
+            blob_path: Path to blob
+            chunk_size: Size of each chunk (default 4MB)
+            
+        Yields:
+            Chunks of blob data
+        """
+        try:
+            container_client = self._get_container_client(container)
+            blob_client = container_client.get_blob_client(blob_path)
+            
+            logger.debug(f"Streaming blob in chunks: {container}/{blob_path}")
+            stream = blob_client.download_blob()
+            
+            for chunk in stream.chunks():
+                yield chunk
+                
+        except Exception as e:
+            logger.error(f"Failed to stream blob {container}/{blob_path}: {e}")
+            raise
+    
+    def write_blob(self, container: str, blob_path: str, data: Union[bytes, BinaryIO],
+                   overwrite: bool = True, content_type: str = "application/octet-stream",
+                   metadata: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
+        """
+        Write blob from bytes or stream.
+        
+        Args:
+            container: Container name
+            blob_path: Path for blob
+            data: Bytes or stream to write
+            overwrite: Whether to overwrite existing blob
+            content_type: MIME type for blob
+            metadata: Optional metadata dictionary
+            
+        Returns:
+            Dict with blob properties (etag, last_modified, size)
+        """
+        try:
+            container_client = self._get_container_client(container)
+            blob_client = container_client.get_blob_client(blob_path)
+            
+            logger.debug(f"Writing blob: {container}/{blob_path} (overwrite={overwrite})")
+            
+            blob_client.upload_blob(
+                data, 
+                overwrite=overwrite, 
+                content_settings={'content_type': content_type},
+                metadata=metadata or {}
+            )
+            
+            # Get properties of written blob
+            properties = blob_client.get_blob_properties()
+            
+            result = {
+                'container': container,
+                'blob_path': blob_path,
+                'size': properties.size,
+                'etag': properties.etag,
+                'last_modified': properties.last_modified.isoformat() if properties.last_modified else None
+            }
+            
+            logger.info(f"✅ Wrote blob: {container}/{blob_path} ({properties.size} bytes)")
+            return result
+            
+        except Exception as e:
+            logger.error(f"Failed to write blob {container}/{blob_path}: {e}")
+            raise
+    
+    def copy_blob(self, source_container: str, source_path: str,
+                  dest_container: str, dest_path: str) -> Dict[str, Any]:
+        """
+        Server-side blob copy (no data transfer to client).
+        
+        Args:
+            source_container: Source container name
+            source_path: Source blob path
+            dest_container: Destination container name
+            dest_path: Destination blob path
+            
+        Returns:
+            Dict with copy operation details
+        """
+        try:
+            source_url = f"{self.account_url}/{source_container}/{source_path}"
+            dest_client = self._get_container_client(dest_container).get_blob_client(dest_path)
+            
+            logger.debug(f"Copying blob: {source_container}/{source_path} → {dest_container}/{dest_path}")
+            
+            copy_operation = dest_client.start_copy_from_url(source_url)
+            
+            result = {
+                'copy_id': copy_operation.get('copy_id'),
+                'copy_status': copy_operation.get('copy_status')
+            }
+            
+            logger.info(f"✅ Copy initiated: {source_container}/{source_path} → {dest_container}/{dest_path}")
+            return result
+            
+        except Exception as e:
+            logger.error(f"Failed to copy blob: {e}")
+            raise
+    
+    def list_blobs(self, container: str, prefix: str = "", limit: Optional[int] = None) -> List[Dict[str, Any]]:
+        """
+        List blobs with metadata.
+        
+        Args:
+            container: Container name
+            prefix: Optional path prefix filter
+            limit: Maximum number of blobs to return
+            
+        Returns:
+            List of blob metadata dictionaries
+        """
+        try:
+            container_client = self._get_container_client(container)
+            blobs = []
+            count = 0
+            
+            logger.debug(f"Listing blobs in {container} with prefix='{prefix}', limit={limit}")
+            
+            for blob in container_client.list_blobs(name_starts_with=prefix):
+                blobs.append({
+                    'name': blob.name,
+                    'size': blob.size,
+                    'last_modified': blob.last_modified.isoformat() if blob.last_modified else None,
+                    'content_type': blob.content_settings.content_type if blob.content_settings else None,
+                    'etag': blob.etag,
+                    'metadata': blob.metadata
+                })
+                count += 1
+                if limit and count >= limit:
+                    break
+            
+            logger.debug(f"Found {len(blobs)} blobs in {container} with prefix '{prefix}'")
+            return blobs
+            
+        except Exception as e:
+            logger.error(f"Failed to list blobs in {container}: {e}")
+            raise
+    
+    def blob_exists(self, container: str, blob_path: str) -> bool:
+        """
+        Check if blob exists.
+        
+        Args:
+            container: Container name
+            blob_path: Path to blob
+            
+        Returns:
+            True if blob exists, False otherwise
+        """
+        try:
+            container_client = self._get_container_client(container)
+            blob_client = container_client.get_blob_client(blob_path)
+            blob_client.get_blob_properties()
+            return True
+        except ResourceNotFoundError:
+            return False
+        except Exception as e:
+            logger.error(f"Error checking blob existence: {e}")
+            raise
+    
+    def delete_blob(self, container: str, blob_path: str) -> bool:
+        """
+        Delete a blob.
+        
+        Args:
+            container: Container name
+            blob_path: Path to blob
+            
+        Returns:
+            True if deleted, False if not found
+        """
+        try:
+            container_client = self._get_container_client(container)
+            blob_client = container_client.get_blob_client(blob_path)
+            blob_client.delete_blob()
+            
+            logger.info(f"Deleted blob: {container}/{blob_path}")
+            return True
+            
+        except ResourceNotFoundError:
+            logger.warning(f"Blob not found for deletion: {container}/{blob_path}")
+            return False
+        except Exception as e:
+            logger.error(f"Failed to delete blob: {e}")
+            raise
+    
+    def get_blob_properties(self, container: str, blob_path: str) -> Dict[str, Any]:
+        """
+        Get detailed blob properties.
+        
+        Args:
+            container: Container name
+            blob_path: Path to blob
+            
+        Returns:
+            Dict with blob properties
+        """
+        try:
+            container_client = self._get_container_client(container)
+            blob_client = container_client.get_blob_client(blob_path)
+            props = blob_client.get_blob_properties()
+            
+            return {
+                'name': props.name,
+                'size': props.size,
+                'last_modified': props.last_modified.isoformat() if props.last_modified else None,
+                'etag': props.etag,
+                'content_type': props.content_settings.content_type if props.content_settings else None,
+                'metadata': props.metadata or {}
+            }
+            
+        except Exception as e:
+            logger.error(f"Failed to get blob properties: {e}")
+            raise
+    
+    # ========================================================================
+    # ADVANCED OPERATIONS
+    # ========================================================================
+    
+    def batch_download(self, container: str, blob_paths: List[str], max_workers: int = 10) -> Dict[str, BytesIO]:
+        """
+        Download multiple blobs in parallel.
+        
+        Args:
+            container: Container name
+            blob_paths: List of blob paths to download
+            max_workers: Maximum concurrent downloads
+            
+        Returns:
+            Dict mapping blob paths to BytesIO streams
+        """
+        results = {}
+        
+        def download_single(path):
+            return path, self.read_blob_to_stream(container, path)
+        
+        logger.info(f"Starting batch download of {len(blob_paths)} blobs")
+        
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = [executor.submit(download_single, path) for path in blob_paths]
+            
+            for future in concurrent.futures.as_completed(futures):
+                try:
+                    path, stream = future.result()
+                    results[path] = stream
+                except Exception as e:
+                    logger.error(f"Failed to download blob in batch: {e}")
+        
+        logger.info(f"Batch download complete: {len(results)}/{len(blob_paths)} successful")
+        return results
+
+
+# ============================================================================
+# FACTORY FUNCTION
+# ============================================================================
+
+def get_blob_repository() -> BlobRepository:
+    """
+    Factory function for dependency injection.
+    
+    Returns:
+        BlobRepository singleton instance
+    """
+    return BlobRepository.instance()
+
+
+# Export the main components
+__all__ = ['BlobRepository', 'IBlobRepository', 'get_blob_repository']

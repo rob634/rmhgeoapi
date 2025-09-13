@@ -212,6 +212,7 @@ class JobSubmissionTrigger(JobManagementTrigger):
         try:
             from controller_factories import JobFactory
             import controller_hello_world  # Import to trigger registration
+            import controller_container  # Import to trigger registration of container controllers
             
             controller = JobFactory.create_controller(job_type)
             self.logger.debug(f"✅ Controller for {job_type} created successfully via JobFactory")

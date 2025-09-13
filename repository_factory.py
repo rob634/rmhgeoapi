@@ -172,18 +172,46 @@ class RepositoryFactory:
     @staticmethod
     def create_blob_repository(
         storage_account: Optional[str] = None,
-        container_name: Optional[str] = None
-    ) -> Any:
+        use_default_credential: bool = True,
+        connection_string: Optional[str] = None
+    ) -> 'BlobRepository':
         """
-        Future: Create blob storage repository.
+        Create blob storage repository with authentication.
         
-        This will create repositories for Azure Blob Storage operations
-        when implemented.
+        This is THE centralized authentication point for all blob operations.
+        Uses DefaultAzureCredential for seamless auth across environments.
+        
+        Args:
+            storage_account: Storage account name (uses env if not provided)
+            use_default_credential: Use DefaultAzureCredential (True) or connection string (False)
+            connection_string: Optional connection string (alternative to DefaultAzureCredential)
+            
+        Returns:
+            BlobRepository singleton instance
+            
+        Example:
+            # Recommended usage
+            blob_repo = RepositoryFactory.create_blob_repository()
+            
+            # With specific account
+            blob_repo = RepositoryFactory.create_blob_repository(
+                storage_account="myaccount"
+            )
         """
-        raise NotImplementedError(
-            "Blob storage repository not yet implemented. "
-            "This is a placeholder for future functionality."
-        )
+        from repository_blob import BlobRepository
+        
+        logger.info("🏭 Creating Blob Storage repository")
+        logger.debug(f"  Storage account: {storage_account or 'from environment'}")
+        logger.debug(f"  Use DefaultAzureCredential: {use_default_credential}")
+        
+        # Create repository based on authentication method
+        if connection_string:
+            blob_repo = BlobRepository.instance(connection_string=connection_string)
+        else:
+            blob_repo = BlobRepository.instance(storage_account=storage_account)
+        
+        logger.info("✅ Blob repository created successfully")
+        return blob_repo
     
     @staticmethod
     def create_cosmos_repository(

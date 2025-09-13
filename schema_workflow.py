@@ -568,10 +568,20 @@ WORKFLOW_REGISTRY = {
 
 def get_workflow_definition(job_type: str) -> WorkflowDefinition:
     """Get workflow definition for a job type"""
-    if job_type not in WORKFLOW_REGISTRY:
-        raise ValueError(f"No workflow definition found for job_type: {job_type}")
+    # First check the registry for factory functions
+    if job_type in WORKFLOW_REGISTRY:
+        return WORKFLOW_REGISTRY[job_type]()
     
-    return WORKFLOW_REGISTRY[job_type]()
+    # For container workflows, import them directly from controller_container
+    # This allows workflows to be defined alongside their controllers
+    if job_type in ["summarize_container", "list_container"]:
+        from controller_container import summarize_container_workflow, list_container_workflow
+        if job_type == "summarize_container":
+            return summarize_container_workflow
+        elif job_type == "list_container":
+            return list_container_workflow
+    
+    raise ValueError(f"No workflow definition found for job_type: {job_type}")
 
 
 # Export all public classes and functions

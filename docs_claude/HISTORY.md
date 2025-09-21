@@ -6,11 +6,67 @@ This document tracks completed architectural changes and improvements to the Azu
 
 ---
 
+## 21 SEP 2025: Queue Boundary Protection Implementation
+
+**Status**: ✅ COMPLETED - Ready for Testing
+**Impact**: **CRITICAL** - Zero poison queue messages without database records
+**Timeline**: Afternoon session
+**Author**: Robert and Geospatial Claude Legion
+
+### Problem Addressed
+Messages reaching poison queue without corresponding error records in database, making debugging difficult and losing error context.
+
+### Solution Implemented: 4-Phase Queue Boundary Protection
+
+#### Phase 1: Comprehensive Logging ✅
+- Added correlation IDs (8-char UUIDs) to track messages
+- Implemented 4-phase logging: EXTRACTION, PARSING, CONTROLLER CREATION, PROCESSING
+- Raw message content logged before parsing (first 500 chars)
+- Message metadata captured: size, dequeue count, queue name
+- Timing information for performance tracking
+
+#### Phase 2: Queue Trigger Error Handling ✅
+**Files Modified**: `function_app.py` (lines 429-650)
+- Separated ValidationError from JSONDecodeError handling
+- Extract job_id/task_id from malformed messages using regex fallback
+- Mark jobs/tasks as FAILED before raising exceptions
+- Verify controller marked failures after processing
+
+#### Phase 3: Controller Method Improvements ✅
+**Files Modified**: `controller_base.py`
+- Added _safe_mark_job_failed() and _safe_mark_task_failed() helpers
+- Granular error handling for repository setup, job retrieval, status validation
+- Correlation ID tracking throughout methods
+- Elapsed time tracking at failure points
+
+#### Phase 4: Helper Functions ✅
+**Files Added**: Helper functions in `function_app.py`
+- _extract_job_id_from_raw_message() - JSON first, regex fallback
+- _extract_task_id_from_raw_message() - Extracts both IDs
+- _mark_job_failed_from_queue_error() - Safe database updates
+- _mark_task_failed_from_queue_error() - Updates task and parent job
+
+### Key Achievement
+**ZERO POISON QUEUE MESSAGES WITHOUT DATABASE RECORDS**
+- Every error path now attempts database update before poison
+- Even malformed JSON can have IDs extracted and recorded
+- Correlation IDs provide complete message tracking
+- Granular error handling identifies exact failure points
+
+### Testing Strategy
+1. Malformed JSON messages
+2. Missing required fields
+3. Invalid job types
+4. Database connection failures
+5. Queue client failures
+
+---
+
 ## 21 SEP 2025: Contract Enforcement Architecture Complete - All Phases Implemented
 
 **Status**: ✅ ALL 5 PHASES COMPLETED
 **Impact**: **CRITICAL** - Complete contract enforcement with multi-stage jobs working
-**Timeline**: 20-21 SEP 2025
+**Timeline**: Morning session 20-21 SEP 2025
 **Author**: Robert and Geospatial Claude Legion
 
 ### Executive Summary

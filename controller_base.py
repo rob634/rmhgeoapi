@@ -1488,6 +1488,8 @@ class BaseController(ABC):
         5. Updates job status
         6. On failure, marks job as FAILED with error details
 
+        ENHANCED (21 SEP 2025): Granular error handling at each step
+
         Args:
             job_message: Validated JobQueueMessage from queue
 
@@ -1499,40 +1501,82 @@ class BaseController(ABC):
             RuntimeError: If task creation or queueing fails
         """
         import traceback
+        import time
+        start_time = time.time()
 
         config = get_config()
 
-        # ENFORCE CONTRACT: Single repository creation pattern
-        repos = RepositoryFactory.create_repositories()
-        job_repo = repos['job_repo']
-        task_repo = repos['task_repo']
+        # Extract correlation ID if present
+        correlation_id = job_message.parameters.get('_correlation_id', 'unknown') if job_message.parameters else 'unknown'
+        self._current_correlation_id = correlation_id
+        self.logger.info(f"[{correlation_id}] 🎬 Starting job stage processing for {job_message.job_id[:16]}... stage {job_message.stage}")
 
-        # Get job record
-        job_record = job_repo.get_job(job_message.job_id)
-        if not job_record:
-            raise ValueError(f"Job not found: {job_message.job_id}")
+        # STEP 1: Repository Setup
+        self.logger.debug(f"[{correlation_id}] STEP 1: Repository initialization")
+        repos = None
+        job_repo = None
+        task_repo = None
+
+        try:
+            repos = RepositoryFactory.create_repositories()
+            job_repo = repos['job_repo']
+            task_repo = repos['task_repo']
+            self.logger.debug(f"[{correlation_id}] ✅ Repositories initialized")
+        except Exception as e:
+            elapsed = time.time() - start_time
+            error_msg = f"Repository initialization failed after {elapsed:.3f}s: {e}"
+            self.logger.error(f"[{correlation_id}] ❌ {error_msg}")
+            # Can't mark job as failed without repository
+            raise RuntimeError(error_msg)
+
+        # STEP 2: Job Record Retrieval
+        self.logger.debug(f"[{correlation_id}] STEP 2: Job record retrieval")
+        job_record = None
+
+        try:
+            job_record = job_repo.get_job(job_message.job_id)
+            if not job_record:
+                raise ValueError(f"Job not found: {job_message.job_id}")
+            self.logger.debug(f"[{correlation_id}] ✅ Job record retrieved, status={job_record.status}")
+        except Exception as e:
+            elapsed = time.time() - start_time
+            error_msg = f"Failed to retrieve job after {elapsed:.3f}s: {e}"
+            self.logger.error(f"[{correlation_id}] ❌ {error_msg}")
+            self._safe_mark_job_failed(job_message.job_id, error_msg, job_repo)
+            raise ValueError(error_msg)
         
-        # Check if job is already completed or past this stage
-        if job_record.status == JobStatus.COMPLETED:
-            self.logger.info(f"Job {job_message.job_id[:16]}... already completed, skipping stage {job_message.stage} processing")
-            return {
-                'status': 'skipped',
-                'reason': 'job_already_completed',
-                'job_status': job_record.status.value,
-                'message': f'Job already completed with results'
-            }
-        
-        if job_record.stage > job_message.stage:
-            self.logger.info(f"Job {job_message.job_id[:16]}... already at stage {job_record.stage}, skipping stage {job_message.stage}")
-            return {
-                'status': 'skipped', 
-                'reason': 'stage_already_processed',
-                'current_stage': job_record.stage,
-                'requested_stage': job_message.stage,
-                'message': f'Job already advanced past stage {job_message.stage}'
-            }
-        
-        self.logger.info(f"Processing job {job_message.job_id[:16]}... stage {job_message.stage}")
+        # STEP 3: Status Validation
+        self.logger.debug(f"[{correlation_id}] STEP 3: Status validation")
+
+        try:
+            if job_record.status == JobStatus.COMPLETED:
+                self.logger.info(f"[{correlation_id}] ⏭ Job already completed, skipping stage {job_message.stage}")
+                return {
+                    'status': 'skipped',
+                    'reason': 'job_already_completed',
+                    'job_status': job_record.status.value,
+                    'message': f'Job already completed with results',
+                    'correlation_id': correlation_id
+                }
+
+            if job_record.stage > job_message.stage:
+                self.logger.info(f"[{correlation_id}] ⏭ Job at stage {job_record.stage}, skipping stage {job_message.stage}")
+                return {
+                    'status': 'skipped',
+                    'reason': 'stage_already_processed',
+                    'current_stage': job_record.stage,
+                    'requested_stage': job_message.stage,
+                    'message': f'Job already advanced past stage {job_message.stage}',
+                    'correlation_id': correlation_id
+                }
+
+            self.logger.debug(f"[{correlation_id}] ✅ Status validated, proceeding with stage {job_message.stage}")
+        except Exception as e:
+            elapsed = time.time() - start_time
+            error_msg = f"Status validation failed after {elapsed:.3f}s: {e}"
+            self.logger.error(f"[{correlation_id}] ❌ {error_msg}")
+            self._safe_mark_job_failed(job_message.job_id, error_msg, job_repo)
+            raise ValueError(error_msg)
         
         # Get previous stage results if not first stage
         # === RETRIEVING PREVIOUS STAGE RESULTS ===
@@ -2152,6 +2196,87 @@ class BaseController(ABC):
                 'stage_results': stage_results,
                 'message': f'Job {job_id[:16]}... advanced from stage {stage} to stage {next_stage}'
             }
+
+    def _safe_mark_job_failed(self, job_id: str, error_msg: str, job_repo=None) -> None:
+        """Safely attempt to mark job as failed, don't raise if it fails.
+
+        Args:
+            job_id: Job ID to mark as failed
+            error_msg: Error message to record
+            job_repo: Optional repository instance to reuse
+        """
+        # Extract correlation ID if available
+        correlation_id = 'unknown'
+        try:
+            if hasattr(self, '_current_correlation_id'):
+                correlation_id = self._current_correlation_id
+        except:
+            pass
+
+        try:
+            if not job_repo:
+                repos = RepositoryFactory.create_repositories()
+                job_repo = repos['job_repo']
+
+            # Check current status first
+            job = job_repo.get_job(job_id)
+            if job and job.status not in [JobStatus.FAILED, JobStatus.COMPLETED]:
+                job_repo.update_job_status_with_validation(
+                    job_id=job_id,
+                    new_status=JobStatus.FAILED,
+                    additional_updates={
+                        'error_details': error_msg,
+                        'failed_at': datetime.now(timezone.utc).isoformat(),
+                        'correlation_id': correlation_id
+                    }
+                )
+                self.logger.info(f"[{correlation_id}] 📝 Job {job_id[:16]}... marked as FAILED: {error_msg[:100]}")
+            elif job and job.status == JobStatus.FAILED:
+                self.logger.debug(f"[{correlation_id}] Job {job_id[:16]}... already FAILED")
+            elif job and job.status == JobStatus.COMPLETED:
+                self.logger.warning(f"[{correlation_id}] Job {job_id[:16]}... is COMPLETED, not updating")
+        except Exception as e:
+            self.logger.error(f"[{correlation_id}] Failed to mark job {job_id[:16]}... as FAILED: {e}")
+
+    def _safe_mark_task_failed(self, task_id: str, error_msg: str, task_repo=None) -> None:
+        """Safely attempt to mark task as failed, don't raise if it fails.
+
+        Args:
+            task_id: Task ID to mark as failed
+            error_msg: Error message to record
+            task_repo: Optional repository instance to reuse
+        """
+        # Extract correlation ID if available
+        correlation_id = 'unknown'
+        try:
+            if hasattr(self, '_current_correlation_id'):
+                correlation_id = self._current_correlation_id
+        except:
+            pass
+
+        try:
+            if not task_repo:
+                repos = RepositoryFactory.create_repositories()
+                task_repo = repos['task_repo']
+
+            # Check current status first
+            task = task_repo.get_task(task_id)
+            if task and task.status not in [TaskStatus.FAILED, TaskStatus.COMPLETED]:
+                task_repo.update_task(
+                    task_id=task_id,
+                    updates={
+                        'status': TaskStatus.FAILED,
+                        'error_details': error_msg,
+                        'correlation_id': correlation_id
+                    }
+                )
+                self.logger.info(f"[{correlation_id}] 📝 Task {task_id} marked as FAILED: {error_msg[:100]}")
+            elif task and task.status == TaskStatus.FAILED:
+                self.logger.debug(f"[{correlation_id}] Task {task_id} already FAILED")
+            elif task and task.status == TaskStatus.COMPLETED:
+                self.logger.warning(f"[{correlation_id}] Task {task_id} is COMPLETED, not updating")
+        except Exception as e:
+            self.logger.error(f"[{correlation_id}] Failed to mark task {task_id} as FAILED: {e}")
 
     def __repr__(self):
         return f"<{self.__class__.__name__}(job_type='{self.job_type}', stages={len(self.workflow_definition.stages)})>"

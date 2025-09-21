@@ -98,6 +98,8 @@ Last Updated: January 2025
 import logging
 import json
 import traceback
+import uuid
+import time
 from datetime import datetime, timezone
 
 # Azure SDK modules (3rd party - Microsoft)
@@ -128,11 +130,15 @@ validator.ensure_startup_ready()
 
 # Application modules (our code) - Core schemas and logging
 from schema_queue import JobQueueMessage, TaskQueueMessage
+from schema_base import JobStatus, TaskStatus
 from util_logger import LoggerFactory
 from util_logger import ComponentType
 from repository_factory import RepositoryFactory
 from repository_postgresql import PostgreSQLRepository
 from controller_factories import JobFactory
+from pydantic import ValidationError
+import re
+from typing import Optional
 
 # Import service modules to trigger handler registration via decorators
 # NOTE: This import is required! It registers handlers via decorators on import
@@ -433,33 +439,195 @@ def debug_dump_all(req: func.HttpRequest) -> func.HttpResponse:
 def process_job_queue(msg: func.QueueMessage) -> None:
     """
     Process job queue messages by delegating to the appropriate controller.
-    
+
     REFACTORED (12 SEP 2025):
     - All orchestration logic moved to BaseController
     - This function only handles message parsing and delegation
     - Controllers handle all job processing logic
+
+    ENHANCED (21 SEP 2025):
+    - Added comprehensive logging at queue boundary
+    - Correlation IDs for message tracking
+    - Raw message logging before parsing
+    - Phase markers for debugging
     """
+    # Generate correlation ID for this message
+    correlation_id = str(uuid.uuid4())[:8]
+    start_time = time.time()
+
     logger = LoggerFactory.create_logger(ComponentType.SERVICE, "QueueProcessor.Jobs")
-    logger.info("🔄 Job queue trigger activated")
-    
+    logger.info(f"[🆔 {correlation_id}] 🔄 Job queue trigger activated")
+
+    # PHASE 1: MESSAGE EXTRACTION
+    logger.info(f"[{correlation_id}] 📨 PHASE 1: MESSAGE EXTRACTION")
+    message_content = None
+    message_metadata = {}
+
     try:
-        # Parse message
+        # Extract message body
         message_content = msg.get_body().decode('utf-8')
-        job_message = JobQueueMessage.model_validate_json(message_content)
-        logger.info(f"📨 Processing job: {job_message.job_id[:16]}... type={job_message.job_type}")
-        
-        # Get controller and delegate all processing
-        controller = JobFactory.create_controller(job_message.job_type)
-        result = controller.process_job_queue_message(job_message)
-        
-        logger.info(f"✅ Job processing complete: {result}")
-        
-    except ValueError as e:
-        logger.error(f"❌ Invalid message or job type: {e}")
-        raise
+        message_size = len(message_content)
+
+        # Gather message metadata
+        message_metadata = {
+            'queue': 'geospatial-jobs',
+            'size_bytes': message_size,
+            'id': getattr(msg, 'id', 'unknown'),
+            'insertion_time': getattr(msg, 'insertion_time', None),
+            'dequeue_count': getattr(msg, 'dequeue_count', 0),
+            'correlation_id': correlation_id
+        }
+
+        # Log raw message content (first 500 chars)
+        logger.info(f"[{correlation_id}] 📋 Raw content (first 500 chars): {message_content[:500]}")
+        logger.info(f"[{correlation_id}] 📊 Metadata: size={message_size} bytes, dequeue_count={message_metadata['dequeue_count']}")
+
     except Exception as e:
-        logger.error(f"❌ Job processing failed: {e}")
-        logger.debug(f"📍 Error traceback: {traceback.format_exc()}")
+        logger.error(f"[{correlation_id}] ❌ Failed to extract message body: {e}")
+        raise
+
+    # PHASE 2: MESSAGE PARSING
+    logger.info(f"[{correlation_id}] 🔍 PHASE 2: MESSAGE PARSING")
+    job_message = None
+
+    try:
+        job_message = JobQueueMessage.model_validate_json(message_content)
+
+        # Log parsed message details
+        logger.info(f"[{correlation_id}] ✅ Successfully parsed JobQueueMessage")
+        logger.info(f"[{correlation_id}] 🎯 Details: job_id={job_message.job_id[:16]}..., type={job_message.job_type}, stage={job_message.stage}")
+
+        # Add correlation ID to parameters for tracking through system
+        if job_message.parameters is None:
+            job_message.parameters = {}
+        job_message.parameters['_correlation_id'] = correlation_id
+
+    except ValidationError as e:
+        # Pydantic validation error - try to extract job_id and record error
+        elapsed = time.time() - start_time
+        logger.error(f"[{correlation_id}] ❌ Message validation failed after {elapsed:.3f}s: {e}")
+        logger.error(f"[{correlation_id}] 📄 Failed message content: {message_content}")
+
+        # Try to extract job_id and mark job as failed BEFORE poison queue
+        job_id = _extract_job_id_from_raw_message(message_content, correlation_id)
+        if job_id:
+            logger.info(f"[{correlation_id}] 🔧 Attempting to mark job {job_id[:16]}... as FAILED before poison queue")
+            _mark_job_failed_from_queue_error(
+                job_id=job_id,
+                error_msg=f"Invalid queue message format: {str(e)}",
+                correlation_id=correlation_id
+            )
+        else:
+            logger.error(f"[{correlation_id}] 😔 Cannot extract job_id - error will not be recorded in database")
+
+        # Re-raise to let message go to poison queue (but now with database record)
+        raise
+
+    except json.JSONDecodeError as e:
+        # Not even valid JSON
+        elapsed = time.time() - start_time
+        logger.error(f"[{correlation_id}] ❌ JSON decode failed after {elapsed:.3f}s: {e}")
+        logger.error(f"[{correlation_id}] 📄 Invalid JSON: {message_content[:200]}")
+
+        # Try regex extraction as last resort
+        job_id = _extract_job_id_from_raw_message(message_content, correlation_id)
+        if job_id:
+            _mark_job_failed_from_queue_error(
+                job_id=job_id,
+                error_msg=f"Invalid JSON in queue message: {str(e)}",
+                correlation_id=correlation_id
+            )
+
+        raise ValueError(f"Invalid JSON in queue message: {e}")
+
+    except Exception as e:
+        # Unexpected error during parsing
+        elapsed = time.time() - start_time
+        logger.error(f"[{correlation_id}] ❌ Unexpected parsing error after {elapsed:.3f}s: {e}")
+        raise
+
+    # PHASE 3: CONTROLLER CREATION
+    logger.info(f"[{correlation_id}] 🎭 PHASE 3: CONTROLLER CREATION")
+    controller = None
+
+    try:
+        controller = JobFactory.create_controller(job_message.job_type)
+        logger.info(f"[{correlation_id}] ✅ Controller created for job_type={job_message.job_type}")
+
+    except ValueError as e:
+        # Unknown job type - mark job as failed
+        elapsed = time.time() - start_time
+        logger.error(f"[{correlation_id}] ❌ Unknown job_type '{job_message.job_type}' after {elapsed:.3f}s: {e}")
+
+        # We have job_message at this point, so we have job_id
+        logger.info(f"[{correlation_id}] 🔧 Marking job {job_message.job_id[:16]}... as FAILED due to unknown job_type")
+        _mark_job_failed_from_queue_error(
+            job_id=job_message.job_id,
+            error_msg=f"Unknown job_type: {job_message.job_type}",
+            correlation_id=correlation_id
+        )
+
+        # Re-raise to let it go to poison queue
+        raise
+
+    except Exception as e:
+        # Unexpected error creating controller
+        elapsed = time.time() - start_time
+        logger.error(f"[{correlation_id}] ❌ Unexpected controller error after {elapsed:.3f}s: {e}")
+
+        if job_message:
+            _mark_job_failed_from_queue_error(
+                job_id=job_message.job_id,
+                error_msg=f"Controller creation failed: {str(e)}",
+                correlation_id=correlation_id
+            )
+
+        raise
+
+    # PHASE 4: JOB PROCESSING
+    logger.info(f"[{correlation_id}] 🔄 PHASE 4: JOB PROCESSING")
+
+    try:
+        result = controller.process_job_queue_message(job_message)
+
+        elapsed = time.time() - start_time
+        logger.info(f"[{correlation_id}] ✅ Job processing complete after {elapsed:.3f}s")
+        logger.info(f"[{correlation_id}] 📦 Result: {result}")
+
+        # Check if result indicates a skip or failure
+        if isinstance(result, dict):
+            if result.get('status') == 'skipped':
+                logger.info(f"[{correlation_id}] ⏭ Job was skipped: {result.get('reason', 'unknown reason')}")
+            elif result.get('status') == 'failed':
+                logger.warning(f"[{correlation_id}] ⚠️ Job reported failure but completed processing")
+
+    except Exception as e:
+        elapsed = time.time() - start_time
+        logger.error(f"[{correlation_id}] ❌ Job processing failed after {elapsed:.3f}s: {e}")
+        logger.debug(f"[{correlation_id}] 📍 Error traceback: {traceback.format_exc()}")
+
+        # Controller should have marked job as failed, but verify
+        if job_message:
+            logger.info(f"[{correlation_id}] 🔍 Verifying job {job_message.job_id[:16]}... is marked as FAILED")
+
+            # Check if job is already marked as failed
+            try:
+                repos = RepositoryFactory.create_repositories()
+                job_repo = repos['job_repo']
+                job = job_repo.get_job(job_message.job_id)
+
+                if job and job.status not in [JobStatus.FAILED, JobStatus.COMPLETED]:
+                    logger.warning(f"[{correlation_id}] ⚠️ Job not marked as FAILED by controller, marking now")
+                    _mark_job_failed_from_queue_error(
+                        job_id=job_message.job_id,
+                        error_msg=f"Processing failed: {str(e)}",
+                        correlation_id=correlation_id
+                    )
+                elif job and job.status == JobStatus.FAILED:
+                    logger.info(f"[{correlation_id}] ✅ Job already marked as FAILED by controller")
+            except Exception as check_error:
+                logger.error(f"[{correlation_id}] ❌ Could not verify job status: {check_error}")
+
         raise
 
 
@@ -470,36 +638,377 @@ def process_job_queue(msg: func.QueueMessage) -> None:
 def process_task_queue(msg: func.QueueMessage) -> None:
     """
     Process task queue messages by delegating to the appropriate controller.
-    
+
     REFACTORED (12 SEP 2025):
     - All orchestration logic moved to BaseController
     - This function only handles message parsing and delegation
     - Controllers handle all task execution and completion logic
-    
+
+    ENHANCED (21 SEP 2025):
+    - Added comprehensive logging at queue boundary
+    - Correlation IDs for message tracking
+    - Raw message logging before parsing
+    - Phase markers for debugging
     """
+    # Generate correlation ID for this message
+    correlation_id = str(uuid.uuid4())[:8]
+    start_time = time.time()
+
     logger = LoggerFactory.create_logger(ComponentType.SERVICE, "QueueProcessor.Tasks")
-    logger.info("🔄 Task queue trigger activated")
-    
+    logger.info(f"[🆔 {correlation_id}] 🔄 Task queue trigger activated")
+
+    # PHASE 1: MESSAGE EXTRACTION
+    logger.info(f"[{correlation_id}] 📨 PHASE 1: MESSAGE EXTRACTION")
+    message_content = None
+    message_metadata = {}
+
     try:
-        # Parse message
+        # Extract message body
         message_content = msg.get_body().decode('utf-8')
-        task_message = TaskQueueMessage.model_validate_json(message_content)
-        logger.info(f"📨 Processing task: {task_message.task_id} type={task_message.task_type}")
-        
-        # Get controller and delegate all processing
-        controller = JobFactory.create_controller(task_message.job_type)
-        result = controller.process_task_queue_message(task_message)
-        
-        logger.info(f"✅ Task processing complete: {result}")
-        
-    except ValueError as e:
-        logger.error(f"❌ Invalid message or task type: {e}")
-        raise
+        message_size = len(message_content)
+
+        # Gather message metadata
+        message_metadata = {
+            'queue': 'geospatial-tasks',
+            'size_bytes': message_size,
+            'id': getattr(msg, 'id', 'unknown'),
+            'insertion_time': getattr(msg, 'insertion_time', None),
+            'dequeue_count': getattr(msg, 'dequeue_count', 0),
+            'correlation_id': correlation_id
+        }
+
+        # Log raw message content (first 500 chars)
+        logger.info(f"[{correlation_id}] 📋 Raw content (first 500 chars): {message_content[:500]}")
+        logger.info(f"[{correlation_id}] 📊 Metadata: size={message_size} bytes, dequeue_count={message_metadata['dequeue_count']}")
+
     except Exception as e:
-        logger.error(f"❌ Task processing failed: {e}")
-        logger.debug(f"📍 Error traceback: {traceback.format_exc()}")
+        logger.error(f"[{correlation_id}] ❌ Failed to extract message body: {e}")
+        raise
+
+    # PHASE 2: MESSAGE PARSING
+    logger.info(f"[{correlation_id}] 🔍 PHASE 2: MESSAGE PARSING")
+    task_message = None
+
+    try:
+        task_message = TaskQueueMessage.model_validate_json(message_content)
+
+        # Log parsed message details
+        logger.info(f"[{correlation_id}] ✅ Successfully parsed TaskQueueMessage")
+        logger.info(f"[{correlation_id}] 🎯 Details: task_id={task_message.task_id}, type={task_message.task_type}, stage={task_message.stage}")
+        logger.info(f"[{correlation_id}] 🔗 Parent job: {task_message.parent_job_id[:16]}..., job_type={task_message.job_type}")
+
+        # Add correlation ID to parameters for tracking through system
+        if task_message.parameters is None:
+            task_message.parameters = {}
+        task_message.parameters['_correlation_id'] = correlation_id
+
+    except ValidationError as e:
+        # Pydantic validation error - try to extract task_id and parent_job_id
+        elapsed = time.time() - start_time
+        logger.error(f"[{correlation_id}] ❌ Message validation failed after {elapsed:.3f}s: {e}")
+        logger.error(f"[{correlation_id}] 📄 Failed message content: {message_content}")
+
+        # Try to extract task_id and parent_job_id
+        task_id, parent_job_id = _extract_task_id_from_raw_message(message_content, correlation_id)
+
+        if task_id:
+            logger.info(f"[{correlation_id}] 🔧 Attempting to mark task {task_id} as FAILED before poison queue")
+            _mark_task_failed_from_queue_error(
+                task_id=task_id,
+                parent_job_id=parent_job_id,
+                error_msg=f"Invalid queue message format: {str(e)}",
+                correlation_id=correlation_id
+            )
+        elif parent_job_id:
+            logger.info(f"[{correlation_id}] 🔧 No task_id found, but marking parent job {parent_job_id[:16]}... as FAILED")
+            _mark_job_failed_from_queue_error(
+                job_id=parent_job_id,
+                error_msg=f"Task message validation failed: {str(e)}",
+                correlation_id=correlation_id
+            )
+        else:
+            logger.error(f"[{correlation_id}] 😔 Cannot extract task_id or parent_job_id - error will not be recorded in database")
+
+        # Re-raise to let message go to poison queue
+        raise
+
+    except json.JSONDecodeError as e:
+        # Not even valid JSON
+        elapsed = time.time() - start_time
+        logger.error(f"[{correlation_id}] ❌ JSON decode failed after {elapsed:.3f}s: {e}")
+        logger.error(f"[{correlation_id}] 📄 Invalid JSON: {message_content[:200]}")
+
+        # Try regex extraction
+        task_id, parent_job_id = _extract_task_id_from_raw_message(message_content, correlation_id)
+
+        if task_id or parent_job_id:
+            _mark_task_failed_from_queue_error(
+                task_id=task_id,
+                parent_job_id=parent_job_id,
+                error_msg=f"Invalid JSON in queue message: {str(e)}",
+                correlation_id=correlation_id
+            )
+
+        raise ValueError(f"Invalid JSON in queue message: {e}")
+
+    except Exception as e:
+        # Unexpected error during parsing
+        elapsed = time.time() - start_time
+        logger.error(f"[{correlation_id}] ❌ Unexpected parsing error after {elapsed:.3f}s: {e}")
+        raise
+
+    # PHASE 3: CONTROLLER CREATION
+    logger.info(f"[{correlation_id}] 🎭 PHASE 3: CONTROLLER CREATION")
+    controller = None
+
+    try:
+        controller = JobFactory.create_controller(task_message.job_type)
+        logger.info(f"[{correlation_id}] ✅ Controller created for job_type={task_message.job_type}")
+
+    except ValueError as e:
+        # Unknown job type - mark task and parent job as failed
+        elapsed = time.time() - start_time
+        logger.error(f"[{correlation_id}] ❌ Unknown job_type '{task_message.job_type}' after {elapsed:.3f}s: {e}")
+
+        logger.info(f"[{correlation_id}] 🔧 Marking task {task_message.task_id} as FAILED due to unknown job_type")
+        _mark_task_failed_from_queue_error(
+            task_id=task_message.task_id,
+            parent_job_id=task_message.parent_job_id,
+            error_msg=f"Unknown job_type: {task_message.job_type}",
+            correlation_id=correlation_id
+        )
+
+        # Re-raise to let it go to poison queue
+        raise
+
+    except Exception as e:
+        # Unexpected error creating controller
+        elapsed = time.time() - start_time
+        logger.error(f"[{correlation_id}] ❌ Unexpected controller error after {elapsed:.3f}s: {e}")
+
+        if task_message:
+            _mark_task_failed_from_queue_error(
+                task_id=task_message.task_id,
+                parent_job_id=task_message.parent_job_id,
+                error_msg=f"Controller creation failed: {str(e)}",
+                correlation_id=correlation_id
+            )
+
+        raise
+
+    # PHASE 4: TASK PROCESSING
+    logger.info(f"[{correlation_id}] 🔄 PHASE 4: TASK PROCESSING")
+
+    try:
+        result = controller.process_task_queue_message(task_message)
+
+        elapsed = time.time() - start_time
+        logger.info(f"[{correlation_id}] ✅ Task processing complete after {elapsed:.3f}s")
+        logger.info(f"[{correlation_id}] 📦 Result: {result}")
+
+        # Check result status
+        if isinstance(result, dict):
+            if result.get('status') == 'skipped':
+                logger.info(f"[{correlation_id}] ⏭ Task was skipped: {result.get('reason', 'unknown reason')}")
+            elif result.get('is_last_task_in_stage'):
+                logger.info(f"[{correlation_id}] 🎆 This was the last task in stage {task_message.stage}")
+
+    except Exception as e:
+        elapsed = time.time() - start_time
+        logger.error(f"[{correlation_id}] ❌ Task processing failed after {elapsed:.3f}s: {e}")
+        logger.debug(f"[{correlation_id}] 📍 Error traceback: {traceback.format_exc()}")
+
+        # Controller should have marked task as failed, but verify
+        if task_message:
+            logger.info(f"[{correlation_id}] 🔍 Verifying task {task_message.task_id} is marked as FAILED")
+
+            # Check if task is already marked as failed
+            try:
+                repos = RepositoryFactory.create_repositories()
+                task_repo = repos['task_repo']
+                task = task_repo.get_task(task_message.task_id)
+
+                if task and task.status not in [TaskStatus.FAILED, TaskStatus.COMPLETED]:
+                    logger.warning(f"[{correlation_id}] ⚠️ Task not marked as FAILED by controller, marking now")
+                    _mark_task_failed_from_queue_error(
+                        task_id=task_message.task_id,
+                        parent_job_id=task_message.parent_job_id,
+                        error_msg=f"Processing failed: {str(e)}",
+                        correlation_id=correlation_id
+                    )
+                elif task and task.status == TaskStatus.FAILED:
+                    logger.info(f"[{correlation_id}] ✅ Task already marked as FAILED by controller")
+            except Exception as check_error:
+                logger.error(f"[{correlation_id}] ❌ Could not verify task status: {check_error}")
+
         raise
 @app.route(route="monitor/poison", methods=["GET", "POST"])
 def check_poison_queues(req: func.HttpRequest) -> func.HttpResponse:
     """Poison queue monitoring endpoint using HTTP trigger base class."""
     return poison_monitor_trigger.handle_request(req)
+
+
+# ============================================================================
+# QUEUE ERROR HANDLING HELPER FUNCTIONS
+# ============================================================================
+
+def _extract_job_id_from_raw_message(message_content: str, correlation_id: str = "unknown") -> Optional[str]:
+    """Try to extract job_id from potentially malformed message.
+
+    Args:
+        message_content: Raw message content that may be malformed
+        correlation_id: Correlation ID for logging
+
+    Returns:
+        job_id if found, None otherwise
+    """
+    logger = LoggerFactory.create_logger(ComponentType.SERVICE, "QueueErrorHandler")
+
+    # Try JSON parsing first
+    try:
+        data = json.loads(message_content)
+        job_id = data.get('job_id')
+        if job_id:
+            logger.info(f"[{correlation_id}] 🔍 Extracted job_id via JSON: {job_id[:16]}...")
+            return job_id
+    except Exception:
+        pass  # Try regex next
+
+    # Try regex as fallback
+    try:
+        match = re.search(r'"job_id"\s*:\s*"([^"]+)"', message_content)
+        if match:
+            job_id = match.group(1)
+            logger.info(f"[{correlation_id}] 🔍 Extracted job_id via regex: {job_id[:16]}...")
+            return job_id
+    except Exception:
+        pass
+
+    logger.warning(f"[{correlation_id}] ⚠️ Could not extract job_id from message")
+    return None
+
+
+def _extract_task_id_from_raw_message(message_content: str, correlation_id: str = "unknown") -> tuple[Optional[str], Optional[str]]:
+    """Try to extract task_id and parent_job_id from potentially malformed message.
+
+    Args:
+        message_content: Raw message content that may be malformed
+        correlation_id: Correlation ID for logging
+
+    Returns:
+        Tuple of (task_id, parent_job_id) if found, (None, None) otherwise
+    """
+    logger = LoggerFactory.create_logger(ComponentType.SERVICE, "QueueErrorHandler")
+    task_id = None
+    parent_job_id = None
+
+    # Try JSON parsing first
+    try:
+        data = json.loads(message_content)
+        task_id = data.get('task_id')
+        parent_job_id = data.get('parent_job_id')
+        if task_id:
+            logger.info(f"[{correlation_id}] 🔍 Extracted task_id via JSON: {task_id}")
+        if parent_job_id:
+            logger.info(f"[{correlation_id}] 🔍 Extracted parent_job_id via JSON: {parent_job_id[:16]}...")
+    except Exception:
+        # Try regex as fallback
+        try:
+            task_match = re.search(r'"task_id"\s*:\s*"([^"]+)"', message_content)
+            if task_match:
+                task_id = task_match.group(1)
+                logger.info(f"[{correlation_id}] 🔍 Extracted task_id via regex: {task_id}")
+
+            job_match = re.search(r'"parent_job_id"\s*:\s*"([^"]+)"', message_content)
+            if job_match:
+                parent_job_id = job_match.group(1)
+                logger.info(f"[{correlation_id}] 🔍 Extracted parent_job_id via regex: {parent_job_id[:16]}...")
+        except Exception:
+            pass
+
+    if not task_id and not parent_job_id:
+        logger.warning(f"[{correlation_id}] ⚠️ Could not extract task_id or parent_job_id from message")
+
+    return task_id, parent_job_id
+
+
+def _mark_job_failed_from_queue_error(job_id: str, error_msg: str, correlation_id: str = "unknown") -> None:
+    """Helper to mark job as failed when queue processing fails.
+
+    Args:
+        job_id: Job ID to mark as failed
+        error_msg: Error message to record
+        correlation_id: Correlation ID for logging
+    """
+    logger = LoggerFactory.create_logger(ComponentType.SERVICE, "QueueErrorHandler")
+
+    try:
+        repos = RepositoryFactory.create_repositories()
+        job_repo = repos['job_repo']
+
+        # Check if job exists and isn't already failed
+        job = job_repo.get_job(job_id)
+        if job and job.status not in [JobStatus.FAILED, JobStatus.COMPLETED]:
+            job_repo.update_job_status_with_validation(
+                job_id=job_id,
+                new_status=JobStatus.FAILED,
+                additional_updates={
+                    'error_details': f"Queue processing error: {error_msg}",
+                    'failed_at': datetime.now(timezone.utc).isoformat(),
+                    'queue_correlation_id': correlation_id
+                }
+            )
+            logger.info(f"[{correlation_id}] 📝 Job {job_id[:16]}... marked as FAILED before poison queue")
+        elif job and job.status == JobStatus.FAILED:
+            logger.info(f"[{correlation_id}] ℹ️ Job {job_id[:16]}... already marked as FAILED")
+        elif job and job.status == JobStatus.COMPLETED:
+            logger.warning(f"[{correlation_id}] ⚠️ Job {job_id[:16]}... is COMPLETED but queue error occurred")
+        else:
+            logger.error(f"[{correlation_id}] ❌ Job {job_id[:16]}... not found in database")
+    except Exception as e:
+        logger.error(f"[{correlation_id}] ❌ Failed to mark job {job_id[:16]}... as failed: {e}")
+
+
+def _mark_task_failed_from_queue_error(task_id: str, parent_job_id: Optional[str], error_msg: str, correlation_id: str = "unknown") -> None:
+    """Helper to mark task as failed when queue processing fails.
+
+    Args:
+        task_id: Task ID to mark as failed
+        parent_job_id: Parent job ID if known
+        error_msg: Error message to record
+        correlation_id: Correlation ID for logging
+    """
+    logger = LoggerFactory.create_logger(ComponentType.SERVICE, "QueueErrorHandler")
+
+    try:
+        repos = RepositoryFactory.create_repositories()
+        task_repo = repos['task_repo']
+
+        # Check if task exists and isn't already failed
+        task = task_repo.get_task(task_id)
+        if task and task.status not in [TaskStatus.FAILED, TaskStatus.COMPLETED]:
+            task_repo.update_task(
+                task_id=task_id,
+                updates={
+                    'status': TaskStatus.FAILED,
+                    'error_details': f"Queue processing error: {error_msg}",
+                    'queue_correlation_id': correlation_id
+                }
+            )
+            logger.info(f"[{correlation_id}] 📝 Task {task_id} marked as FAILED before poison queue")
+
+            # Also update parent job if known
+            if parent_job_id:
+                _mark_job_failed_from_queue_error(
+                    parent_job_id,
+                    f"Task {task_id} failed in queue processing",
+                    correlation_id
+                )
+        elif task and task.status == TaskStatus.FAILED:
+            logger.info(f"[{correlation_id}] ℹ️ Task {task_id} already marked as FAILED")
+        elif task and task.status == TaskStatus.COMPLETED:
+            logger.warning(f"[{correlation_id}] ⚠️ Task {task_id} is COMPLETED but queue error occurred")
+        else:
+            logger.error(f"[{correlation_id}] ❌ Task {task_id} not found in database")
+    except Exception as e:
+        logger.error(f"[{correlation_id}] ❌ Failed to mark task {task_id} as failed: {e}")

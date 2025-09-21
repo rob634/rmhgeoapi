@@ -209,18 +209,19 @@ class BlobRepository(IBlobRepository):
                 raise
     
     @classmethod
-    def instance(cls, connection_string: Optional[str] = None) -> 'BlobRepository':
+    def instance(cls, connection_string: Optional[str] = None, storage_account: Optional[str] = None) -> 'BlobRepository':
         """
         Get singleton instance.
         
         Args:
             connection_string: Optional connection string
+            storage_account: Optional storage account name
             
         Returns:
             BlobRepository singleton instance
         """
         if cls._instance is None:
-            cls._instance = cls(connection_string)
+            cls._instance = cls(connection_string=connection_string, storage_account=storage_account)
         return cls._instance
     
     def _get_container_client(self, container: str) -> ContainerClient:
@@ -404,38 +405,88 @@ class BlobRepository(IBlobRepository):
     def list_blobs(self, container: str, prefix: str = "", limit: Optional[int] = None) -> List[Dict[str, Any]]:
         """
         List blobs with metadata.
-        
+
+        Special handling for .gdb (Esri File Geodatabase) folders:
+        - Treats entire .gdb as a single unit
+        - Aggregates size of all files within .gdb
+        - Returns .gdb as single entry instead of individual files
+
         Args:
             container: Container name
             prefix: Optional path prefix filter
             limit: Maximum number of blobs to return
-            
+
         Returns:
             List of blob metadata dictionaries
         """
         try:
             container_client = self._get_container_client(container)
             blobs = []
+            gdb_aggregates = {}  # Track .gdb folders and their aggregate data
             count = 0
-            
+
             logger.debug(f"Listing blobs in {container} with prefix='{prefix}', limit={limit}")
-            
+
             for blob in container_client.list_blobs(name_starts_with=prefix):
-                blobs.append({
-                    'name': blob.name,
-                    'size': blob.size,
-                    'last_modified': blob.last_modified.isoformat() if blob.last_modified else None,
-                    'content_type': blob.content_settings.content_type if blob.content_settings else None,
-                    'etag': blob.etag,
-                    'metadata': blob.metadata
-                })
-                count += 1
+                blob_name = blob.name
+
+                # Check if this blob is inside a .gdb folder
+                gdb_match = None
+                path_parts = blob_name.split('/')
+                for i, part in enumerate(path_parts):
+                    if part.endswith('.gdb'):
+                        # Found a .gdb folder - construct its path
+                        gdb_path = '/'.join(path_parts[:i+1])
+                        gdb_match = gdb_path
+                        break
+
+                if gdb_match:
+                    # This file is inside a .gdb - aggregate it
+                    if gdb_match not in gdb_aggregates:
+                        gdb_aggregates[gdb_match] = {
+                            'name': gdb_match,
+                            'size': 0,
+                            'last_modified': blob.last_modified,
+                            'content_type': 'application/x-esri-geodatabase',
+                            'etag': None,  # No single etag for aggregate
+                            'metadata': {'type': 'geodatabase', 'file_count': 0}
+                        }
+
+                    # Aggregate size and track latest modification
+                    gdb_aggregates[gdb_match]['size'] += blob.size or 0
+                    gdb_aggregates[gdb_match]['metadata']['file_count'] += 1
+
+                    # Keep the most recent last_modified date
+                    if blob.last_modified and gdb_aggregates[gdb_match]['last_modified']:
+                        if blob.last_modified > gdb_aggregates[gdb_match]['last_modified']:
+                            gdb_aggregates[gdb_match]['last_modified'] = blob.last_modified
+                else:
+                    # Regular file - add it directly
+                    blobs.append({
+                        'name': blob.name,
+                        'size': blob.size,
+                        'last_modified': blob.last_modified.isoformat() if blob.last_modified else None,
+                        'content_type': blob.content_settings.content_type if blob.content_settings else None,
+                        'etag': blob.etag,
+                        'metadata': blob.metadata
+                    })
+                    count += 1
+                    if limit and count >= limit:
+                        break
+
+            # Add aggregated .gdb entries
+            for gdb_path, gdb_data in gdb_aggregates.items():
                 if limit and count >= limit:
                     break
-            
-            logger.debug(f"Found {len(blobs)} blobs in {container} with prefix '{prefix}'")
+                # Convert last_modified to ISO format for consistency
+                if gdb_data['last_modified']:
+                    gdb_data['last_modified'] = gdb_data['last_modified'].isoformat()
+                blobs.append(gdb_data)
+                count += 1
+
+            logger.debug(f"Found {len(blobs)} blobs in {container} with prefix '{prefix}' ({len(gdb_aggregates)} .gdb databases)")
             return blobs
-            
+
         except Exception as e:
             logger.error(f"Failed to list blobs in {container}: {e}")
             raise

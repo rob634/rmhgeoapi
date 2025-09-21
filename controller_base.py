@@ -1,18 +1,17 @@
 # ============================================================================
 # CLAUDE CONTEXT - CONTROLLER
 # ============================================================================
-# IMPORTANT TODO: Identify Pydantic model imports to determine if these classes are defining behavior or data structures-
 # PURPOSE: Abstract base controller implementing Job→Stage→Task orchestration pattern for complex workflows
 # EXPORTS: BaseController (abstract base class for all workflow controllers)
 # INTERFACES: ABC (Abstract Base Class) - defines controller contract for job orchestration
-# PYDANTIC_MODELS: WorkflowDefinition, JobExecutionContext, StageExecutionContext, TaskDefinition
-# DEPENDENCIES: abc, hashlib, json, util_logger, schema_core, schema_base, model_core, schema_workflow
-# SOURCE: Workflow definitions from schema_workflow, job parameters from HTTP requests
+# PYDANTIC_MODELS: JobRecord, TaskRecord, JobExecutionContext, StageExecutionContext, TaskDefinition, TaskResult
+# DEPENDENCIES: abc, hashlib, json, azure.storage.queue, azure.identity, repository_factory, task_factory
+# SOURCE: Workflow definitions from schema_workflow, job parameters from HTTP requests via Azure Queues
 # SCOPE: Job orchestration across all workflow types - defines stage sequences and task coordination
-# VALIDATION: Pydantic workflow validation, parameter schema validation, idempotency via SHA256
-# PATTERNS: Template Method pattern, Strategy pattern (workflow definitions), Factory pattern (task creation)
-# ENTRY_POINTS: class HelloWorldController(BaseController); controller.submit_job(params)
-# INDEX: BaseController:78, submit_job:120, create_tasks_for_stage:180, aggregate_results:250
+# VALIDATION: Pydantic contracts enforced - NO defensive programming, fail fast on contract violations
+# PATTERNS: Template Method (abstract methods), Factory (task creation), Singleton (registries)
+# ENTRY_POINTS: process_job_queue_message(), process_task_queue_message(), concrete controllers inherit
+# INDEX: BaseController:100, Abstract Methods:134, Job Lifecycle:286, Queue Processing:1270, Stage Management:678
 # ============================================================================
 
 """
@@ -84,7 +83,7 @@ from azure.identity import DefaultAzureCredential
 # Local application imports
 from config import get_config
 from repository_factory import RepositoryFactory
-from repository_jobs_tasks import CompletionDetector
+from repository_jobs_tasks import StageCompletionRepository
 from task_factory import TaskHandlerFactory
 from util_logger import LoggerFactory
 from util_logger import ComponentType, LogLevel, LogContext
@@ -95,35 +94,50 @@ from schema_base import JobExecutionContext, StageExecutionContext
 from schema_base import TaskDefinition, TaskResult, TaskRecord
 from schema_queue import JobQueueMessage, TaskQueueMessage
 from schema_workflow import WorkflowDefinition, get_workflow_definition
+from contract_validator import enforce_contract  # Added for queue boundary contracts
 
 
 class BaseController(ABC):
     """
-    Abstract base controller for all job types in the redesign architecture.
-    
-    CONTROLLER LAYER RESPONSIBILITY (Orchestration):
-    - Defines job_type and sequential stages  
-    - Orchestrates stage transitions
-    - Aggregates final job results
-    - Does NOT contain business logic (that lives in Task layer)
-    
+    Abstract base controller for all job types in the Job→Stage→Task architecture.
+
+    CONTROLLER LAYER RESPONSIBILITY (Orchestration Only):
+    - Defines job_type and sequential stages
+    - Orchestrates stage transitions with "last task turns out lights" pattern
+    - Aggregates final job results from all task outputs
+    - Does NOT contain business logic (that lives in Service/Repository layers)
+
+    CONTRACT ENFORCEMENT (Updated 20 SEP 2025):
+    - NO defensive programming - fail fast on contract violations
+    - Pydantic models required at all boundaries (no dict fallbacks)
+    - Factory methods mandatory for object creation
+    - Single repository creation pattern enforced
+
     Implements the Job → Stage → Task pattern:
-    - Job: One or more stages with job_type specific completion
-    - Stage: Sequential operations that create parallel tasks
-    - Task: Where Service + Repository layers live for business logic
+    - Job: One or more stages executing sequentially
+    - Stage: Creates parallel tasks, advances when all complete
+    - Task: Atomic work units with business logic in Service layer
     """
 
     def __init__(self):
+        """Initialize controller with workflow definition and logging.
+
+        Enforces that all controllers MUST have workflow definitions.
+        No fallback behavior - fails if workflow not found.
+        """
+        # Get job type from concrete controller implementation
         self.job_type = self.get_job_type()
-        
-        # Load workflow definition - REQUIRED for all controllers
+
+        # Load workflow definition - REQUIRED, no fallbacks
         try:
             self.workflow_definition = get_workflow_definition(self.job_type)
         except ValueError as e:
+            # CONTRACT: All controllers must have workflow definitions
             raise ValueError(f"No workflow definition found for job_type '{self.job_type}'. "
                            f"All controllers must have workflow definitions defined in schema_workflow.py. "
                            f"Error: {e}")
-        
+
+        # Initialize logging for this controller
         self.logger = LoggerFactory.create_logger(ComponentType.CONTROLLER, self.__class__.__name__)
         self.logger.info(f"Loaded workflow definition for {self.job_type} with {len(self.workflow_definition.stages)} stages")
 
@@ -135,9 +149,12 @@ class BaseController(ABC):
     def get_job_type(self) -> str:
         """
         Return the unique job type identifier for this controller.
-        
+
         This identifies the controller and determines routing.
         Must be unique across all controllers in the system.
+
+        Example:
+            return "process_raster"  # Unique identifier for raster processing
         """
         pass
 
@@ -151,19 +168,23 @@ class BaseController(ABC):
         previous_stage_results: Optional[Dict[str, Any]] = None
     ) -> List[TaskDefinition]:
         """
-        Create tasks for a specific stage.
-        
-        This method defines what parallel tasks should be created for the stage.
+        Create tasks for a specific stage - THE CORE ORCHESTRATION METHOD.
+
+        This method defines what parallel tasks should be created for each stage.
         Tasks contain the business logic (Service + Repository layers).
-        
+
+        CRITICAL: Each TaskDefinition MUST include 'task_index' in parameters.
+        The task_index provides semantic meaning for cross-stage data flow.
+
         Args:
-            stage_number: The stage to create tasks for
-            job_id: The parent job ID
-            job_parameters: Original job parameters
-            previous_stage_results: Results from previous stage (if any)
-            
+            stage_number: The stage to create tasks for (1-based)
+            job_id: The parent job ID (SHA256 hash)
+            job_parameters: Original job parameters from HTTP request
+            previous_stage_results: Aggregated results from previous stage (None for stage 1)
+
         Returns:
-            List of TaskDefinition objects for parallel execution
+            List of TaskDefinition objects for parallel execution.
+            Empty list means no tasks for this stage (stage completes immediately).
         """
         pass
 
@@ -171,15 +192,19 @@ class BaseController(ABC):
     def aggregate_job_results(self, context: JobExecutionContext) -> Dict[str, Any]:
         """
         Aggregate results from all stages into final job result.
-        
+
         This is the job_type specific completion method that creates
         the final result after all stages are complete.
-        
+
+        Called automatically when the final stage completes via
+        the "last task turns out the lights" pattern.
+
         Args:
-            context: Job execution context with results from all stages
-            
+            context: Job execution context with results from ALL stages.
+                    Access via context.stage_results[stage_num]
+
         Returns:
-            Final aggregated job result dictionary
+            Final aggregated job result dictionary to store in JobRecord.result_data
         """
         pass
 
@@ -187,65 +212,99 @@ class BaseController(ABC):
     # COMPLETION METHODS - Can be overridden for job-specific logic
     # ========================================================================
 
+    @enforce_contract(
+        params={
+            'stage_number': int,
+            'task_results': list
+        },
+        returns=dict
+    )
     def aggregate_stage_results(
         self,
         stage_number: int,
         task_results: List[Dict[str, Any]]
     ) -> Dict[str, Any]:
         """
-        Aggregate results from all tasks in a stage.
-        
-        Called when all tasks in a stage are complete. The aggregated
-        results are stored in the job record and passed to the next stage.
-        
-        This default implementation provides basic aggregation. Controllers
-        can override to add job-specific aggregation logic.
-        
+        Aggregate results from all tasks in a stage using StageResultContract.
+
+        Called automatically when all tasks in a stage complete ("last task" pattern).
+        The aggregated results are stored in JobRecord.stage_results[str(stage_number)]
+        and passed to next stage via previous_stage_results parameter.
+
+        This default implementation uses StageResultContract to ensure consistent
+        structure. Controllers can override to add job-specific aggregation logic
+        while still using the contract as a foundation.
+
+        CONTRACT:
+        - Results are stored with STRING keys in stage_results dict
+        - Structure follows StageResultContract specification
+
         Args:
-            stage_number: The stage that completed
+            stage_number: The stage that completed (1-based)
             task_results: Results from all tasks in the stage
-            
+
         Returns:
-            Aggregated results dictionary to store in job record
+            Aggregated results dictionary following StageResultContract structure.
+            This becomes previous_stage_results for next stage.
         """
-        if not task_results:
-            return {
-                'stage_number': stage_number,
-                'status': 'failed',
-                'task_count': 0,
-                'successful_tasks': 0,
-                'failed_tasks': 0,
-                'success_rate': 0.0,
-                'completed_at': datetime.now(timezone.utc).isoformat()
-            }
-        
-        # Count successes and failures
-        successful_tasks = sum(
-            1 for task in task_results 
-            if task.get('status') == TaskStatus.COMPLETED.value or task.get('success', False)
+        from schema_base import StageResultContract, TaskResult
+
+        # Convert task_results dicts to TaskResult objects if needed
+        # This handles the case where task results come as dicts from database
+        task_result_objects = []
+        for task_data in task_results:
+            if isinstance(task_data, TaskResult):
+                task_result_objects.append(task_data)
+            elif isinstance(task_data, dict):
+                # Try to convert dict to TaskResult
+                try:
+                    # Create a minimal TaskResult from dict data
+                    task_result = TaskResult(
+                        task_id=task_data.get('task_id', 'unknown'),
+                        status=task_data.get('status', TaskStatus.FAILED.value),
+                        message=task_data.get('message', ''),
+                        data=task_data.get('data', task_data)
+                    )
+                    task_result_objects.append(task_result)
+                except Exception as e:
+                    self.logger.warning(f"Could not convert task result to TaskResult: {e}")
+                    # Create a failed TaskResult as fallback
+                    task_result = TaskResult(
+                        task_id=task_data.get('task_id', 'unknown'),
+                        status=TaskStatus.FAILED.value,
+                        message=f"Conversion error: {str(e)}",
+                        data=task_data
+                    )
+                    task_result_objects.append(task_result)
+
+        # === CREATING STAGE RESULTS FOR STORAGE ===
+        #
+        # NOTE ON STAGE NUMBERS:
+        # - stage_number is an INTEGER here (e.g., 1, 2, 3)
+        # - StageResultContract stores it as an integer internally
+        # - BUT when this gets stored in stage_results dict, it will use STRING key
+        #
+        # STORAGE PATTERN:
+        # - We return: {"stage_number": 2, "task_results": [...], ...}
+        # - Controller stores as: stage_results["2"] = {...}
+        #                        ^^^^ string key   ^^^^ our returned dict
+        #
+        # Use StageResultContract factory method to create properly structured result
+        stage_result = StageResultContract.from_task_results(
+            stage_number=stage_number,  # INTEGER passed in
+            task_results=task_result_objects
         )
-        failed_tasks = len(task_results) - successful_tasks
-        success_rate = (successful_tasks / len(task_results)) * 100
-        
-        # Determine overall stage status
-        if successful_tasks == len(task_results):
-            status = 'completed'
-        elif successful_tasks > 0:
-            status = 'partial_success'
-        else:
-            status = 'failed'
-        
-        return {
-            'stage_number': stage_number,
-            'status': status,
-            'task_count': len(task_results),
-            'successful_tasks': successful_tasks,
-            'failed_tasks': failed_tasks,
-            'success_rate': success_rate,
-            'task_results': task_results,
-            'completed_at': datetime.now(timezone.utc).isoformat()
-        }
+
+        # Convert to dict for storage (excludes stage_key since that becomes the dict key)
+        return stage_result.to_dict_for_storage()
     
+    @enforce_contract(
+        params={
+            'stage_number': int,
+            'stage_results': dict
+        },
+        returns=bool
+    )
     def should_advance_stage(
         self,
         stage_number: int,
@@ -253,31 +312,33 @@ class BaseController(ABC):
     ) -> bool:
         """
         Determine if job should advance to next stage.
-        
+
         Default implementation: advance if at least one task succeeded.
-        Controllers can override for stricter requirements.
-        
+        Controllers can override for stricter requirements (e.g., all tasks must succeed).
+
+        Called by stage completion handler after aggregating stage results.
+
         Args:
-            stage_number: Current stage number
+            stage_number: Current stage number (1-based)
             stage_results: Aggregated results from current stage
-            
+
         Returns:
-            True if should advance, False if job should fail
+            True if should advance to next stage, False if job should fail
         """
-        # Don't advance if stage completely failed
+        # Check if stage completely failed - no tasks succeeded
         if stage_results.get('status') == TaskStatus.FAILED.value:
             return False
-        
-        # Don't advance if no tasks succeeded
+
+        # Ensure at least one task succeeded
         if stage_results.get('successful_tasks', 0) == 0:
             return False
-        
-        # Check if we're at the final stage
+
+        # Check if we're at the final stage (no more stages to advance to)
         if self.is_final_stage(stage_number):
             return False  # This is the final stage
-        
-        # Default: advance if any tasks succeeded
-        # Controllers can override for stricter logic
+
+        # Default policy: advance if any tasks succeeded
+        # Controllers can override for stricter requirements
         return True
 
     # ========================================================================
@@ -287,14 +348,26 @@ class BaseController(ABC):
     def generate_job_id(self, parameters: Dict[str, Any]) -> str:
         """
         Generate idempotent job ID from parameters hash.
-        
-        Same parameters always generate the same job ID, providing
-        natural deduplication without additional logic.
+
+        CRITICAL: Same parameters always generate same job ID.
+        This provides natural deduplication - duplicate job submissions
+        return the existing job rather than creating a new one.
+
+        Args:
+            parameters: Job parameters that uniquely identify the work
+
+        Returns:
+            64-character SHA256 hash as job ID
         """
-        # Sort parameters for consistent hashing
+        # Sort parameters for deterministic JSON representation
         sorted_params = json.dumps(parameters, sort_keys=True, default=str)
+
+        # Combine job type and parameters for unique hash
         hash_input = f"{self.job_type}:{sorted_params}"
+
+        # Generate SHA256 hash as job ID (64 chars)
         job_id = hashlib.sha256(hash_input.encode()).hexdigest()
+
         self.logger.debug(f"Generated job_id {job_id[:12]}... for job_type {self.job_type}")
         return job_id
 
@@ -347,20 +420,31 @@ class BaseController(ABC):
     def validate_job_parameters(self, parameters: Dict[str, Any]) -> Dict[str, Any]:
         """
         Validate and normalize job parameters using workflow definition.
-        
-        All controllers MUST have workflow definitions for type-safe validation.
+
+        CONTRACT: All controllers MUST have workflow definitions.
+        Validation is mandatory - no fallbacks or defaults.
+
+        Args:
+            parameters: Raw job parameters from HTTP request
+
+        Returns:
+            Validated and normalized parameters
+
+        Raises:
+            ValueError: If parameters fail validation
         """
+        # CONTRACT: Parameters must be a dictionary
         if not isinstance(parameters, dict):
             raise ValueError("Job parameters must be a dictionary")
-        
-        # Ensure job_type matches controller
+
+        # Ensure job_type matches this controller if specified
         if parameters.get('job_type') and parameters['job_type'] != self.job_type:
             raise ValueError(f"Job type mismatch: expected {self.job_type}, got {parameters.get('job_type')}")
-        
-        # Don't mutate original parameters
+
+        # Create copy to avoid mutating original
         parameters = parameters.copy()
-        
-        # Use workflow definition validation - REQUIRED
+
+        # Delegate to workflow definition for validation - NO FALLBACKS
         try:
             validated_params = self.workflow_definition.validate_job_parameters(parameters)
             self.logger.debug(f"Workflow validation successful for job_type {self.job_type}")
@@ -396,6 +480,147 @@ class BaseController(ABC):
         """Check if a stage is the final stage in the workflow"""
         stage_def = self.workflow_definition.get_stage_by_number(stage_number)
         return stage_def.is_final_stage if stage_def else False
+
+    # ============================================================================
+    # DYNAMIC ORCHESTRATION SUPPORT
+    # ============================================================================
+
+    def supports_dynamic_orchestration(self) -> bool:
+        """
+        Override in child controllers to enable dynamic orchestration.
+
+        When True, Stage 1 is expected to return an OrchestrationInstruction
+        that determines how Stage 2 tasks are created.
+
+        Returns:
+            bool: False by default, override to return True for dynamic controllers
+        """
+        return False
+
+    def parse_orchestration_instruction(self, stage_results: Dict[str, Any]) -> Optional['OrchestrationInstruction']:
+        """
+        Parse orchestration instruction from Stage 1 results.
+
+        Args:
+            stage_results: Results from Stage 1 aggregate_stage_results
+
+        Returns:
+            OrchestrationInstruction if found and valid, None otherwise
+        """
+        self.logger.debug(f"🔍 Parsing orchestration instruction from stage results")
+
+        if not self.supports_dynamic_orchestration():
+            self.logger.debug("❌ Controller does not support dynamic orchestration")
+            return None
+
+        self.logger.debug("✅ Controller supports dynamic orchestration")
+        orchestration_data = stage_results.get('orchestration')
+
+        if not orchestration_data:
+            self.logger.warning("⚠️ Dynamic orchestration enabled but no 'orchestration' key in Stage 1 results")
+            self.logger.debug(f"Stage result keys: {list(stage_results.keys())}")
+            return None
+
+        self.logger.debug(f"📦 Found orchestration data of type: {type(orchestration_data)}")
+
+        try:
+            # Import here to avoid circular dependency
+            from schema_orchestration import OrchestrationInstruction
+
+            # Handle both dict and OrchestrationInstruction objects
+            if isinstance(orchestration_data, dict):
+                self.logger.debug(f"📋 Orchestration data is dict with keys: {list(orchestration_data.keys())}")
+                instruction = OrchestrationInstruction(**orchestration_data)
+                self.logger.info(f"✅ Created OrchestrationInstruction with action={instruction.action}, items={len(instruction.items)}")
+                return instruction
+            elif hasattr(orchestration_data, 'action'):  # Duck typing for OrchestrationInstruction
+                self.logger.debug("📦 Orchestration data is already an OrchestrationInstruction object")
+                return orchestration_data
+            else:
+                self.logger.error(f"❌ Invalid orchestration data type: {type(orchestration_data)}")
+                return None
+        except Exception as e:
+            self.logger.error(f"❌ Failed to parse orchestration instruction: {e}")
+            self.logger.debug(f"Orchestration data that failed: {orchestration_data}")
+            return None
+
+    def create_tasks_from_orchestration(
+        self,
+        orchestration: 'OrchestrationInstruction',
+        job_id: str,
+        stage_number: int,
+        job_parameters: Dict[str, Any]
+    ) -> List['TaskDefinition']:
+        """
+        Create Stage 2 tasks based on orchestration instruction.
+
+        This is a helper method for controllers using dynamic orchestration.
+        Override this method to customize task creation from orchestration items.
+
+        Args:
+            orchestration: Parsed orchestration instruction from Stage 1
+            job_id: Parent job ID
+            stage_number: Current stage (usually 2)
+            job_parameters: Original job parameters
+
+        Returns:
+            List of TaskDefinition objects
+        """
+        self.logger.debug(f"🏗️ Creating tasks from orchestration instruction for stage {stage_number}")
+
+        from schema_orchestration import OrchestrationAction
+
+        if orchestration.action != OrchestrationAction.CREATE_TASKS:
+            self.logger.info(f"⏭️ Orchestration action is {orchestration.action}, not creating tasks")
+            return []
+
+        self.logger.debug(f"✅ Orchestration action is CREATE_TASKS")
+
+        if not orchestration.items:
+            self.logger.warning("⚠️ No items in orchestration instruction")
+            return []
+
+        self.logger.debug(f"📊 Found {len(orchestration.items)} items to process")
+
+        tasks = []
+        for idx, item in enumerate(orchestration.items):
+            # Generate unique task ID based on item
+            task_id = self.generate_task_id(job_id, stage_number, f"item-{idx:04d}")
+            self.logger.debug(f"🔑 Generated task_id: {task_id} for item {idx}")
+
+            # Merge item metadata with stage 2 parameters
+            task_params = {
+                **job_parameters,  # Original job parameters
+                **orchestration.stage_2_parameters,  # Stage 2 specific parameters
+                'item_id': item.item_id,
+                'item_type': item.item_type,
+                'item_metadata': item.metadata,
+                'task_index': f"item-{idx:04d}"
+            }
+
+            # Add item-specific fields if present
+            if item.name:
+                task_params['item_name'] = item.name
+                self.logger.debug(f"  Added item_name: {item.name}")
+            if item.size is not None:
+                task_params['item_size'] = item.size
+                self.logger.debug(f"  Added item_size: {item.size}")
+            if item.location:
+                task_params['item_location'] = item.location
+                self.logger.debug(f"  Added item_location: {item.location}")
+
+            task = TaskDefinition(
+                task_id=task_id,
+                job_type=self.get_job_type(),
+                task_type=self.workflow_definition.get_stage_by_number(stage_number).task_type,
+                stage_number=stage_number,
+                job_id=job_id,
+                parameters=task_params
+            )
+            tasks.append(task)
+
+        self.logger.info(f"✅ Created {len(tasks)} tasks from orchestration instruction")
+        return tasks
 
     def create_job_context(self, job_id: str, parameters: Dict[str, Any], 
                           current_stage: int = 1, stage_results: Dict[int, Dict[str, Any]] = None) -> JobExecutionContext:
@@ -433,28 +658,39 @@ class BaseController(ABC):
         )
 
     def create_job_record(self, job_id: str, parameters: Dict[str, Any]) -> JobRecord:
-        """Create and store the initial job record for database storage"""
-        
+        """Create and store the initial job record for database storage.
+
+        Creates JobRecord in PostgreSQL with initial QUEUED status.
+        This establishes the job in the system before any tasks are created.
+
+        Args:
+            job_id: The generated job ID (SHA256 hash)
+            parameters: Validated job parameters
+
+        Returns:
+            JobRecord instance stored in database
+        """
         self.logger.debug(f"🔧 Creating job record for job_id: {job_id[:16]}...")
         self.logger.debug(f"  Job type: {self.job_type}")
         self.logger.debug(f"  Total stages: {len(self.workflow_definition.stages)}")
-        
-        # Store the job record using repository interface
+
+        # Get repository instances via singleton factory
         self.logger.debug("🏭 Creating repository instances via RepositoryFactory...")
         repos = RepositoryFactory.create_repositories()
         self.logger.debug("✅ Repositories created successfully")
-        
+
+        # Extract specific repositories
         job_repo = repos['job_repo']
-        task_repo = repos['task_repo']
-        completion_detector = repos['completion_detector']
-        
+        # Note: task_repo and stage_completion_repo not used here but available
+
+        # Create job record in PostgreSQL
         self.logger.debug("📝 Creating job record in database...")
         job_record = job_repo.create_job_from_params(
             job_type=self.job_type,
             parameters=parameters,
             total_stages=len(self.workflow_definition.stages)
         )
-        
+
         self.logger.info(f"Job record created and stored: {job_id[:16]}...")
         return job_record
 
@@ -472,16 +708,21 @@ class BaseController(ABC):
     def queue_job(self, job_id: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
         """
         Queue job for processing using Azure Storage Queue.
-        
-        Creates a job queue message and sends it to the geospatial-jobs queue
-        for asynchronous processing by the queue trigger.
-        
+
+        Creates a JobQueueMessage and sends it to the geospatial-jobs queue
+        for asynchronous processing. This initiates the job execution flow.
+
+        Uses managed identity (DefaultAzureCredential) for queue access.
+
         Args:
-            job_id: The unique job identifier
+            job_id: The unique job identifier (SHA256 hash)
             parameters: Validated job parameters
-            
+
         Returns:
-            Dictionary with queue operation results
+            Dictionary with queue operation results including job_id and queue_name
+
+        Raises:
+            RuntimeError: If queue operations fail
         """
         
         config = get_config()
@@ -491,13 +732,16 @@ class BaseController(ABC):
         
         # Send to queue
         try:
-            # Initialize queue client using managed identity
+            # Initialize Azure queue client with managed identity
             account_url = config.queue_service_url
+
+            # Create credential for Azure Storage access
             self.logger.debug(f"🔐 Creating DefaultAzureCredential for queue operations")
             try:
                 credential = DefaultAzureCredential()
                 self.logger.debug(f"✅ DefaultAzureCredential created successfully")
             except Exception as cred_error:
+                # CONTRACT: Managed identity must be configured properly
                 self.logger.error(f"❌ CRITICAL: Failed to create DefaultAzureCredential for storage queues: {cred_error}")
                 raise RuntimeError(f"CRITICAL CONFIGURATION ERROR - Managed identity authentication failed for Azure Storage: {cred_error}")
             
@@ -794,9 +1038,10 @@ class BaseController(ABC):
         
         for task_result in all_task_results:
             stage_num = task_result.get('stage_number', task_result.get('stage', 1))
-            
-            if stage_num not in stage_results:
-                stage_results[stage_num] = {
+            stage_key = str(stage_num)  # Always use string key for consistency
+
+            if stage_key not in stage_results:
+                stage_results[stage_key] = {
                     'stage_number': stage_num,
                     'stage_name': f"stage_{stage_num}",
                     'task_results': [],
@@ -806,16 +1051,16 @@ class BaseController(ABC):
                     'failed_tasks': 0
                 }
             
-            stage_results[stage_num]['task_results'].append(task_result)
-            stage_results[stage_num]['total_tasks'] += 1
-            
+            stage_results[stage_key]['task_results'].append(task_result)
+            stage_results[stage_key]['total_tasks'] += 1
+
             if task_result.get('status') == TaskStatus.COMPLETED.value:
-                stage_results[stage_num]['successful_tasks'] += 1
+                stage_results[stage_key]['successful_tasks'] += 1
             else:
-                stage_results[stage_num]['failed_tasks'] += 1
+                stage_results[stage_key]['failed_tasks'] += 1
         
         # Calculate success rates and stage status
-        for stage_num, stage_data in stage_results.items():
+        for stage_key, stage_data in stage_results.items():
             total = stage_data['total_tasks']
             successful = stage_data['successful_tasks']
             
@@ -841,36 +1086,134 @@ class BaseController(ABC):
         
         return job_context
 
+    def _validate_and_get_stage_results(
+        self,
+        job_record: JobRecord,
+        stage_number: int
+    ) -> Dict[str, Any]:
+        """
+        Safely retrieve and validate stage results with CONTRACT enforcement.
+
+        This helper method ensures stage results exist and have the expected structure,
+        failing fast with clear errors if results are missing or malformed.
+
+        Args:
+            job_record: The job record containing stage_results
+            stage_number: Stage number to retrieve (1-based)
+
+        Returns:
+            Stage results dictionary with guaranteed structure
+
+        Raises:
+            ValueError: If stage_results missing or invalid
+            KeyError: If requested stage not found
+        """
+        from schema_base import StageResultContract
+
+        # === THE CRITICAL STRING CONVERSION ===
+        #
+        # THIS IS WHERE THE BOUNDARY CONTRACT IS ENFORCED!
+        #
+        # INPUT: stage_number is an INTEGER (e.g., 1, 2, 3)
+        # OUTPUT: stage_key is a STRING (e.g., "1", "2", "3")
+        #
+        # WHY?
+        # - PostgreSQL stores stage_results as JSONB
+        # - JSON specification REQUIRES object keys to be strings
+        # - When we store {1: "data"}, PostgreSQL converts to {"1": "data"}
+        # - So we MUST use string keys for lookups
+        #
+        # EXAMPLE:
+        # - Requesting stage_number = 1 (integer)
+        # - Convert to stage_key = "1" (string)
+        # - Lookup: job_record.stage_results["1"]
+        #
+        stage_key = str(stage_number)  # THE BOUNDARY CONVERSION
+
+        # Check if any stage results exist
+        if not job_record.stage_results:
+            raise ValueError(
+                f"Job {job_record.job_id[:16]}... has no stage_results at all. "
+                f"This is a contract violation - completed stages should have results."
+            )
+
+        # Check if specific stage exists
+        if stage_key not in job_record.stage_results:
+            available_stages = list(job_record.stage_results.keys())
+            raise KeyError(
+                f"Stage {stage_number} results missing from job {job_record.job_id[:16]}... "
+                f"Available stages: {available_stages}. "
+                f"This indicates Stage {stage_number} hasn't completed yet or failed to store results."
+            )
+
+        stage_data = job_record.stage_results[stage_key]
+
+        # Validate structure matches StageResultContract
+        try:
+            # Try to parse as StageResultContract to validate structure
+            validated = StageResultContract(**stage_data)
+            self.logger.debug(
+                f"✓ Stage {stage_number} results validated: "
+                f"{validated.task_count} tasks, "
+                f"{validated.successful_tasks} successful, "
+                f"status={validated.status}"
+            )
+        except Exception as e:
+            # Log what fields are present for debugging
+            available_fields = list(stage_data.keys()) if isinstance(stage_data, dict) else []
+            raise ValueError(
+                f"Stage {stage_number} results have invalid structure. "
+                f"Available fields: {available_fields}. "
+                f"Validation error: {e}. "
+                f"Results must follow StageResultContract format."
+            )
+
+        return stage_data
+
+    @enforce_contract(
+        params={
+            'job_record': JobRecord,
+            'stage': int,
+            'parameters': dict,
+            'stage_results': Optional[dict]
+        },
+        returns=dict
+    )
     def process_job_stage(self, job_record: 'JobRecord', stage: int, parameters: Dict[str, Any], stage_results: Dict[int, Dict[str, Any]] = None) -> Dict[str, Any]:
         """
         Process a specific stage by creating and queueing tasks.
-        
-        This is the main method called by the job queue processor to handle stage execution.
-        It creates tasks for the stage and queues them to the task queue for parallel processing.
-        
+
+        CRITICAL METHOD: This is the main orchestration point for stage execution.
+        Creates tasks for the stage and queues them for parallel processing.
+        Called by job queue processor when a job needs to execute a stage.
+
+        CONTRACT: job_record MUST be JobRecord type (no dicts).
+
+        Flow:
+        1. Extract job info from record
+        2. Create stage context
+        3. Generate tasks via create_stage_tasks()
+        4. Store tasks in database
+        5. Queue tasks for execution
+
         Args:
-            job_record: The job record from storage
-            stage: Stage number to process
+            job_record: The job record from database (MUST be JobRecord type)
+            stage: Stage number to process (1-based)
             parameters: Job parameters
-            stage_results: Results from previous stages
-            
+            stage_results: Results from previous stages (keyed by stage number)
+
         Returns:
-            Dictionary with stage processing results
+            Dictionary with stage processing results and task counts
         """
-        # Defensive programming - handle both JobRecord object and dict
-        try:
-            if hasattr(job_record, 'job_id'):
-                job_id = job_record.job_id
-                job_type_from_record = getattr(job_record, 'job_type', 'unknown')
-            else:
-                # Fallback for dict-like object
-                job_id = job_record.get('job_id', 'unknown_job_id')
-                job_type_from_record = job_record.get('job_type', 'unknown')
-                self.logger.warning(f"⚠️ job_record is not a JobRecord object, type: {type(job_record)}")
-        except Exception as e:
-            self.logger.error(f"❌ Failed to extract job_id from job_record: {e}")
-            self.logger.error(f"❌ job_record type: {type(job_record)}, content: {job_record}")
-            raise RuntimeError(f"Invalid job_record format: {e}")
+        # ENFORCE CONTRACT: job_record must be JobRecord type
+        if not hasattr(job_record, 'job_id'):
+            raise TypeError(
+                f"job_record must be JobRecord type, got {type(job_record).__name__}. "
+                f"Repository must return JobRecord objects, not dicts."
+            )
+
+        job_id = job_record.job_id
+        job_type_from_record = job_record.job_type
             
         self.logger.info(f"Processing stage {stage} for job {job_id[:16]}... type={self.job_type} (record_type={job_type_from_record})")
         
@@ -884,11 +1227,15 @@ class BaseController(ABC):
         
         stage_context = self.create_stage_context(job_context, stage)
         
-        # Create tasks for this stage using the abstract method
+        # === CRITICAL: Create tasks for this stage via controller's abstract method ===
         try:
-            # Extract previous stage results if available
-            previous_stage_results = stage_results.get(stage - 1) if stage_results and stage > 1 else None
-            
+            # Extract previous stage results if this is stage 2+
+            # Previous stage results enable data flow between stages
+            # Note: stage_results uses string keys (JSON boundary requirement) but stage is int (domain logic)
+            previous_stage_results = stage_results.get(str(stage - 1)) if stage_results and stage > 1 else None
+
+            # Call the concrete controller's implementation to create tasks
+            # This is where job-specific orchestration logic lives
             task_definitions = self.create_stage_tasks(
                 stage_number=stage,
                 job_id=job_id,
@@ -944,14 +1291,16 @@ class BaseController(ABC):
                 # === STEP 1: CREATE TASK RECORD IN DATABASE ===
                 self.logger.debug(f"💾 Creating task record in database for: {task_def.task_id}")
                 try:
-                    # REQUIRED: semantic task_index must be in parameters - no fallbacks
+                    # CONTRACT: Every task MUST have semantic task_index for cross-stage tracking
+                    # The task_index enables tasks in stage N to find their data from stage N-1
                     if 'task_index' not in task_def.parameters:
                         raise ValueError(
                             f"TaskDefinition missing required 'task_index' parameter. "
                             f"Controller must provide semantic task index (e.g., 'greet_0', 'tile_x5_y10'). "
                             f"Found parameters: {list(task_def.parameters.keys())}"
                         )
-                    
+
+                    # Validate task_index is non-empty string
                     semantic_task_index = task_def.parameters['task_index']
                     if not isinstance(semantic_task_index, str) or not semantic_task_index.strip():
                         raise ValueError(
@@ -959,23 +1308,20 @@ class BaseController(ABC):
                             f"Got: {semantic_task_index} (type: {type(semantic_task_index)})"
                         )
                     
-                    # DEBUG: Log task record creation attempt
-                    self.logger.debug(f"🔍 CALLING task_repo.create_task_from_params with:")
+                    # CONTRACT ENFORCEMENT: Use factory method instead of direct creation
+                    # The TaskDefinition already has all required fields including job_type
+                    # from when it was created in create_stage_tasks()
+                    self.logger.debug(f"🔍 Using TaskDefinition factory method for task creation:")
                     self.logger.debug(f"    task_id: {task_def.task_id}")
                     self.logger.debug(f"    parent_job_id: {task_def.job_id[:16]}...")
+                    self.logger.debug(f"    job_type: {task_def.job_type}")
                     self.logger.debug(f"    task_type: {task_def.task_type}")
                     self.logger.debug(f"    stage: {task_def.stage_number}")
                     self.logger.debug(f"    task_index: {semantic_task_index}")
                     self.logger.debug(f"    parameters: {task_def.parameters}")
-                    
-                    task_record = task_repo.create_task_from_params(
-                        task_id=task_def.task_id,  # Use task_id from TaskDefinition (Controller-generated)
-                        parent_job_id=task_def.job_id,
-                        task_type=task_def.task_type,
-                        stage=task_def.stage_number,
-                        task_index=semantic_task_index,
-                        parameters=task_def.parameters
-                    )
+
+                    # Use factory method - this is the ONLY way to create tasks
+                    task_record = task_repo.create_task_from_definition(task_def)
                     
                     # DEBUG: Log task record creation result
                     self.logger.debug(f"✅ Task record created successfully: {task_def.task_id}")
@@ -1126,35 +1472,42 @@ class BaseController(ABC):
     # delegating to appropriate controllers and services for execution.
     # Added 12 SEP 2025 as part of function_app.py modularization effort.
     
+    @enforce_contract(
+        params={'job_message': JobQueueMessage},
+        returns=dict
+    )
     def process_job_queue_message(self, job_message: 'JobQueueMessage') -> Dict[str, Any]:
         """
         Process a job queue message by creating and queuing tasks for the current stage.
-        
+
         This method orchestrates the job processing flow:
         1. Validates the job message
         2. Loads the job record from database
         3. Creates tasks for the current stage
         4. Queues tasks for execution
         5. Updates job status
-        
+        6. On failure, marks job as FAILED with error details
+
         Args:
             job_message: Validated JobQueueMessage from queue
-            
+
         Returns:
             Dict with processing results including task creation status
-            
+
         Raises:
             ValueError: If job validation fails
             RuntimeError: If task creation or queueing fails
         """
-        
+        import traceback
+
         config = get_config()
-        
-        # Load job record
-        repo_factory = RepositoryFactory()
-        job_repo = repo_factory.create_job_repository()
-        task_repo = repo_factory.create_task_repository()
-        
+
+        # ENFORCE CONTRACT: Single repository creation pattern
+        repos = RepositoryFactory.create_repositories()
+        job_repo = repos['job_repo']
+        task_repo = repos['task_repo']
+
+        # Get job record
         job_record = job_repo.get_job(job_message.job_id)
         if not job_record:
             raise ValueError(f"Job not found: {job_message.job_id}")
@@ -1182,21 +1535,89 @@ class BaseController(ABC):
         self.logger.info(f"Processing job {job_message.job_id[:16]}... stage {job_message.stage}")
         
         # Get previous stage results if not first stage
+        # === RETRIEVING PREVIOUS STAGE RESULTS ===
+        #
+        # STAGE KEY BOUNDARY CONTRACT IN ACTION:
+        #
+        # WHAT'S HAPPENING HERE:
+        # - job_message.stage is an INTEGER (e.g., stage = 2)
+        # - We need results from the previous stage (stage - 1 = 1)
+        # - But stage_results uses STRING keys because of JSON
+        #
+        # THE MATH:
+        # - Current stage: 2 (integer from message)
+        # - Previous stage: 2 - 1 = 1 (integer arithmetic)
+        # - Inside _validate_and_get_stage_results: str(1) = "1" (string key)
+        #
+        # WHY CHECK stage > 1?
+        # - Stage 1 has no previous stage (it's the first stage)
+        # - Stage 2+ need results from their previous stage
+        #
+        # VALIDATION:
+        # _validate_and_get_stage_results will:
+        # 1. Convert stage_number to string key: str(stage_number)
+        # 2. Check if that key exists in stage_results
+        # 3. Validate the structure matches StageResultContract
+        # 4. Return the validated results or throw error
+        #
         previous_stage_results = None
         if job_message.stage > 1:
-            # Get aggregated results from previous stage
-            previous_stage_results = job_record.metadata.get(f'stage_{job_message.stage - 1}_results')
-        
+            # Use validation helper to ensure stage results exist and are valid
+            try:
+                previous_stage_results = self._validate_and_get_stage_results(
+                    job_record=job_record,
+                    stage_number=job_message.stage - 1  # INTEGER arithmetic, converted to string inside
+                )
+                self.logger.debug(
+                    f"✓ Retrieved and validated stage {job_message.stage - 1} results"
+                )
+            except (ValueError, KeyError) as e:
+                # Mark job as FAILED when stage validation fails
+                error_msg = f"Cannot process stage {job_message.stage} - previous stage results invalid: {e}"
+                self.logger.error(f"[JOB_STAGE_VALIDATION_FAILED] {error_msg}")
+
+                try:
+                    job_repo.update_job_status_with_validation(
+                        job_id=job_message.job_id,
+                        new_status=JobStatus.FAILED,
+                        additional_updates={'error_details': error_msg}
+                    )
+                    self.logger.error(f"[JOB_FAILED] Job {job_message.job_id[:16]}... marked as FAILED due to stage validation error")
+                except Exception as update_error:
+                    self.logger.error(f"[JOB_FAILED_UPDATE_ERROR] Failed to mark job as FAILED: {update_error}")
+
+                # Re-raise with additional context
+                raise ValueError(error_msg) from e
+
         # Create tasks for current stage
-        tasks = self.create_stage_tasks(
-            stage_number=job_message.stage,
-            job_id=job_message.job_id,
-            job_parameters=job_message.parameters,
-            previous_stage_results=previous_stage_results
-        )
-        
-        if not tasks:
-            raise RuntimeError(f"No tasks created for stage {job_message.stage}")
+        try:
+            tasks = self.create_stage_tasks(
+                stage_number=job_message.stage,
+                job_id=job_message.job_id,
+                job_parameters=job_message.parameters,
+                previous_stage_results=previous_stage_results
+            )
+
+            if not tasks:
+                raise RuntimeError(f"No tasks created for stage {job_message.stage}")
+
+        except Exception as task_creation_error:
+            # Mark job as FAILED when task creation fails
+            error_msg = f"Failed to create tasks for stage {job_message.stage}: {str(task_creation_error)}"
+            self.logger.error(f"[JOB_TASK_CREATION_FAILED] {error_msg}")
+            self.logger.error(f"[JOB_TASK_CREATION_FAILED] Traceback: {traceback.format_exc()}")
+
+            try:
+                job_repo.update_job_status_with_validation(
+                    job_id=job_message.job_id,
+                    new_status=JobStatus.FAILED,
+                    additional_updates={'error_details': error_msg}
+                )
+                self.logger.error(f"[JOB_FAILED] Job {job_message.job_id[:16]}... marked as FAILED due to task creation error")
+            except Exception as update_error:
+                self.logger.error(f"[JOB_FAILED_UPDATE_ERROR] Failed to mark job as FAILED: {update_error}")
+
+            raise RuntimeError(error_msg) from task_creation_error
         
         self.logger.info(f"Created {len(tasks)} tasks for stage {job_message.stage}")
         
@@ -1222,51 +1643,19 @@ class BaseController(ABC):
                     if existing_task.status != TaskStatus.FAILED:
                         tasks_queued += 1
                     continue
-                
-                # NEW: Using factory methods for clean conversion
+
+                # ENFORCE CONTRACT: Use factory methods only
                 task_record = task_def.to_task_record()
                 success = task_repo.create_task(task_record)
-                
+
                 if not success:
-                    self.logger.warning(f"Failed to create task record for {task_def.task_id}")
-                    tasks_failed += 1
-                    continue
-                
+                    # Contract violation - task creation should succeed or throw
+                    raise RuntimeError(f"Failed to create task record for {task_def.task_id}")
+
                 task_message = task_def.to_queue_message()
                 message_json = task_message.model_dump_json()
                 queue_client.send_message(message_json)
                 tasks_queued += 1
-                
-                # OLD CODE - Commented out for testing
-                # # Create TaskRecord in database
-                # task_record = TaskRecord(
-                #     task_id=task_def.task_id,
-                #     parent_job_id=task_def.job_id,
-                #     task_type=task_def.task_type,
-                #     status=TaskStatus.QUEUED,
-                #     stage=task_def.stage_number,
-                #     task_index=task_def.parameters.get('task_index', '0'),
-                #     parameters=task_def.parameters,
-                #     metadata={}
-                # )
-                # success = task_repo.create_task(task_record)
-                # 
-                # # Create queue message
-                # task_message = TaskQueueMessage(
-                #     task_id=task_def.task_id,
-                #     parent_job_id=task_def.job_id,
-                #     job_type=job_message.job_type,
-                #     task_type=task_def.task_type,
-                #     stage=task_def.stage_number,
-                #     task_index=task_def.parameters.get('task_index', '0'),
-                #     parameters=task_def.parameters,
-                #     retry_count=0
-                # )
-                # 
-                # # Send to queue
-                # message_json = task_message.model_dump_json()
-                # queue_client.send_message(message_json)
-                # tasks_queued += 1
                 
             except Exception as e:
                 self.logger.error(f"Failed to queue task {task_def.task_id}: {e}")
@@ -1296,28 +1685,37 @@ class BaseController(ABC):
         
         return result
     
+    @enforce_contract(
+        params={'task_message': TaskQueueMessage},
+        returns=dict
+    )
     def process_task_queue_message(self, task_message: 'TaskQueueMessage') -> Dict[str, Any]:
         """
         Process a task queue message by executing the task and handling completion.
-        
-        This method orchestrates the task execution flow:
-        1. Executes the task via appropriate service handler
-        2. Updates task status
-        3. Detects stage completion
-        4. Triggers stage advancement or job completion as needed
-        
+
+        CRITICAL METHOD: Implements the "last task turns out the lights" pattern.
+        When a task completes, checks if it's the last task in its stage.
+        If so, triggers stage advancement or job completion.
+
+        Flow:
+        1. Validate task is in QUEUED status (no retries)
+        2. Update to PROCESSING status
+        3. Execute task via TaskHandlerFactory (Service layer)
+        4. Call PostgreSQL completion function (atomic check)
+        5. If last task in stage, handle stage/job completion
+
         Args:
             task_message: Validated TaskQueueMessage from queue
-            
+
         Returns:
             Dict with task execution results and completion status
         """
         
-        # Setup repositories
-        repo_factory = RepositoryFactory()
-        job_repo = repo_factory.create_job_repository()
-        task_repo = repo_factory.create_task_repository()
-        completion_detector = CompletionDetector()
+        # ENFORCE CONTRACT: Single repository creation pattern
+        repos = RepositoryFactory.create_repositories()
+        job_repo = repos['job_repo']
+        task_repo = repos['task_repo']
+        stage_completion_repo = repos['stage_completion_repo']
         
         # DEBUG: Query task state BEFORE updating
         self.logger.debug(f"[TASK_COMPLETION_DEBUG] Starting processing for task {task_message.task_id}")
@@ -1343,22 +1741,14 @@ class BaseController(ABC):
         self.logger.debug(f"[STATUS_VALIDATION_DEBUG] Comparison (status != QUEUED): {comparison_result}")
         self.logger.debug(f"[STATUS_VALIDATION_DEBUG] Are they equal? (status == QUEUED): {existing_task.status == TaskStatus.QUEUED}")
         
-        # Validate task is in correct state for processing
+        # ENFORCE CONTRACT: Task must be in QUEUED status
         if existing_task.status != TaskStatus.QUEUED:
-            self.logger.warning(f"[STATUS_VALIDATION_WARNING] Task {task_message.task_id} is not in QUEUED status")
-            self.logger.warning(f"[STATUS_VALIDATION_WARNING] Current status: {existing_task.status}, Expected: {TaskStatus.QUEUED}")
-            
-            # Check if it's already processing or completed (might be a retry)
-            if existing_task.status == TaskStatus.PROCESSING:
-                self.logger.warning(f"[STATUS_VALIDATION_WARNING] Task already in PROCESSING status - possible retry or race condition")
-            elif existing_task.status == TaskStatus.COMPLETED:
-                self.logger.warning(f"[STATUS_VALIDATION_WARNING] Task already COMPLETED - duplicate message?")
-            elif existing_task.status == TaskStatus.FAILED:
-                self.logger.warning(f"[STATUS_VALIDATION_WARNING] Task previously FAILED - retry attempt?")
-            
-            error_msg = f"Task {task_message.task_id} has invalid status for processing: {existing_task.status} (expected: QUEUED)"
-            self.logger.error(f"[TASK_COMPLETION_ERROR] {error_msg}")
-            raise ValueError(error_msg)
+            # No defensive handling - fail fast and loud
+            raise ValueError(
+                f"Task {task_message.task_id} has invalid status for processing: "
+                f"{existing_task.status} (expected: {TaskStatus.QUEUED}). "
+                f"This indicates a contract violation - tasks should only be processed once."
+            )
         
         # Update task status to processing before execution
         self.logger.info(f"[TASK_COMPLETION] Updating task {task_message.task_id} from {existing_task.status} to PROCESSING")
@@ -1376,16 +1766,19 @@ class BaseController(ABC):
         updated_task = task_repo.get_task(task_message.task_id)
         self.logger.debug(f"[TASK_COMPLETION_DEBUG] Task {task_message.task_id} status after update: {updated_task.status}")
         
-        # Execute task - separate try block for task execution only
+        # === EXECUTE TASK VIA SERVICE LAYER ===
+        # Task execution is delegated to Service layer via TaskHandlerFactory
+        # Service layer contains all business logic, controller just orchestrates
         task_result = None
         self.logger.debug(f"[TASK_EXECUTION_DEBUG] Starting execution for task {task_message.task_id}")
-        
+
         try:
-            # Get task handler with context injection via TaskHandlerFactory
+            # Get appropriate service handler for this task type
+            # Factory pattern routes to correct Service implementation
             handler = TaskHandlerFactory.get_handler(task_message, task_repo)
             self.logger.debug(f"[TASK_EXECUTION_DEBUG] Got handler for task type: {task_message.task_type}")
-            
-            # Execute handler - it returns a TaskResult object
+
+            # Execute the business logic - returns TaskResult
             import time
             start_time = time.time()
             task_result = handler(task_message.parameters)
@@ -1411,11 +1804,16 @@ class BaseController(ABC):
                 execution_time_seconds=0.0
             )
         
-        # Mark task complete and check stage - separate try block with detailed logging
+        # === CRITICAL: ATOMIC COMPLETION CHECK ("Last Task Turns Out Lights") ===
+        # This PostgreSQL function atomically:
+        # 1. Updates task status to COMPLETED/FAILED
+        # 2. Checks if this was the last task in the stage
+        # 3. Returns stage completion status
+        # Using advisory locks to prevent race conditions
         stage_completion = None
         self.logger.debug(f"[TASK_COMPLETION_SQL_DEBUG] Starting SQL completion for task {task_message.task_id}")
-        
-        # DEBUG: Verify task is still in 'processing' status before SQL call
+
+        # Verify task is still PROCESSING before completion
         pre_sql_task = task_repo.get_task(task_message.task_id)
         self.logger.debug(f"[TASK_COMPLETION_SQL_DEBUG] Task status before SQL function: {pre_sql_task.status}")
         
@@ -1438,7 +1836,7 @@ class BaseController(ABC):
             
             if task_result and task_result.success:
                 self.logger.debug(f"[TASK_COMPLETION_SQL_DEBUG] Calling SQL completion for successful task")
-                stage_completion = completion_detector.complete_task_and_check_stage(
+                stage_completion = stage_completion_repo.complete_task_and_check_stage(
                     task_id=task_message.task_id,
                     job_id=task_message.parent_job_id,
                     stage=task_message.stage,
@@ -1448,7 +1846,7 @@ class BaseController(ABC):
             else:
                 error_msg = task_result.error_details if task_result else 'Task execution failed - no result object'
                 self.logger.debug(f"[TASK_COMPLETION_SQL_DEBUG] Calling SQL completion for failed task: {error_msg[:100]}")
-                stage_completion = completion_detector.complete_task_and_check_stage(
+                stage_completion = stage_completion_repo.complete_task_and_check_stage(
                     task_id=task_message.task_id,
                     job_id=task_message.parent_job_id,
                     stage=task_message.stage,
@@ -1494,13 +1892,25 @@ class BaseController(ABC):
                     job_id=task_message.parent_job_id,
                     stage=task_message.stage,
                     job_repo=job_repo,
-                    completion_detector=completion_detector
+                    stage_completion_repo=stage_completion_repo
                 )
                 self.logger.debug(f"[STAGE_ADVANCEMENT_DEBUG] Stage advancement result: {stage_advancement_result}")
             except Exception as stage_error:
                 error_msg = f"Stage advancement failed: {type(stage_error).__name__}: {str(stage_error)}"
                 self.logger.error(f"[STAGE_ADVANCEMENT_ERROR] {error_msg}")
                 self.logger.error(f"[STAGE_ADVANCEMENT_ERROR] Traceback: {traceback.format_exc()}")
+
+                # CRITICAL: Mark job as FAILED when stage advancement fails
+                try:
+                    job_repo.update_job_status_with_validation(
+                        job_id=task_message.parent_job_id,
+                        new_status=JobStatus.FAILED,
+                        additional_updates={'error_details': error_msg}
+                    )
+                    self.logger.error(f"[JOB_FAILED] Job {task_message.parent_job_id[:16]}... marked as FAILED due to stage advancement error")
+                except Exception as update_error:
+                    self.logger.error(f"[JOB_FAILED_UPDATE_ERROR] Failed to mark job as FAILED: {update_error}")
+
                 raise RuntimeError(error_msg) from stage_error
         else:
             self.logger.debug(f"[STAGE_ADVANCEMENT_DEBUG] Stage not complete - remaining tasks: {stage_completion.remaining_tasks if stage_completion else 'N/A'}")
@@ -1521,27 +1931,36 @@ class BaseController(ABC):
         return result
     
     def _handle_stage_completion(
-        self, 
-        job_id: str, 
-        stage: int, 
-        job_repo: 'BaseRepository',
-        completion_detector: 'CompletionDetector'
+        self,
+        job_id: str,
+        stage: int,
+        job_repo: Any,  # Repository type
+        stage_completion_repo: 'StageCompletionRepository'
     ) -> Dict[str, Any]:
         """
         Handle stage completion by advancing to next stage or completing job.
-        
-        Private helper method that determines whether to:
-        - Advance to the next stage and create new tasks
-        - Complete the job if this was the final stage
-        
+
+        CRITICAL: This is the SINGLE ORCHESTRATION POINT for stage completion.
+        All orchestration logic lives here in the Controller layer.
+
+        The stage_completion_repo provides only atomic database operations:
+        - check_job_completion() returns completion status
+        - advance_job_stage() atomically increments stage
+        - No business logic in repository layer!
+
+        Decision tree:
+        - If final stage: Complete the job
+        - If tasks failed: Mark job as failed
+        - Otherwise: Advance to next stage and queue new job message
+
         Args:
-            job_id: The job ID
-            stage: The completed stage number
+            job_id: The job ID (SHA256 hash)
+            stage: The completed stage number (1-based)
             job_repo: Job repository instance
-            completion_detector: Completion detection service
-            
+            stage_completion_repo: Provides atomic SQL operations only
+
         Returns:
-            Dict with completion status and results
+            Dict with completion status and next actions
         """
         
         config = get_config()
@@ -1557,31 +1976,23 @@ class BaseController(ABC):
             self.logger.info(f"Final stage complete - completing job {job_id[:16]}...")
             
             # Get all task results
-            job_completion = completion_detector.check_job_completion(job_id)
+            job_completion = stage_completion_repo.check_job_completion(job_id)
             
             if not job_completion.job_complete:
                 raise RuntimeError(f"Job completion check failed: {job_id}")
             
-            # Convert task results to TaskResult objects and check for failures
+            # ENFORCE CONTRACT: Repository must return TaskResult objects
             task_results = []
             has_failed_tasks = False
-            for task_data in job_completion.task_results or []:
-                if isinstance(task_data, dict):
-                    task_status = task_data.get('status', TaskStatus.COMPLETED.value)
-                    if task_status == TaskStatus.FAILED.value or task_status == 'failed':
-                        has_failed_tasks = True
-                    
-                    task_result = TaskResult(
-                        task_id=task_data.get('task_id', ''),
-                        job_id=task_data.get('job_id', job_id),
-                        stage_number=task_data.get('stage', stage),
-                        task_type=task_data.get('task_type', ''),
-                        status=task_status,
-                        result_data=task_data.get('result_data', {}),
-                        error_details=task_data.get('error_details'),
-                        execution_time_seconds=task_data.get('execution_time_seconds', 0.0)
+            for task_result in job_completion.task_results or []:
+                if not isinstance(task_result, TaskResult):
+                    raise TypeError(
+                        f"Repository returned {type(task_result).__name__} instead of TaskResult. "
+                        f"Repository must convert database records to Pydantic models."
                     )
-                    task_results.append(task_result)
+                if task_result.status == TaskStatus.FAILED:
+                    has_failed_tasks = True
+                task_results.append(task_result)
             
             # Aggregate results
             aggregated_results = self.aggregate_stage_results(
@@ -1641,7 +2052,7 @@ class BaseController(ABC):
             next_stage = stage + 1
             
             # Get current stage results and check for failures
-            stage_completion = completion_detector.check_job_completion(job_id)
+            stage_completion = stage_completion_repo.check_job_completion(job_id)
             stage_results = {
                 'stage_number': stage,
                 'completed_tasks': len(stage_completion.task_results or []),
@@ -1682,12 +2093,30 @@ class BaseController(ABC):
             
             # No failures - advance to next stage
             self.logger.info(f"Advancing job {job_id[:16]}... to stage {next_stage}")
-            
-            # Advance stage
-            advancement = completion_detector.advance_job_stage(
+
+            # ENFORCE CONTRACT: Repository must return TaskResult objects
+            task_results = []
+            for task_result in stage_completion.task_results or []:
+                if not isinstance(task_result, TaskResult):
+                    raise TypeError(
+                        f"Repository returned {type(task_result).__name__} instead of TaskResult. "
+                        f"Repository must convert database records to Pydantic models."
+                    )
+                task_results.append(task_result)
+
+            # Call the controller's aggregate_stage_results to get properly formatted results
+            aggregated_stage_results = self.aggregate_stage_results(
+                stage_number=stage,
+                task_results=task_results
+            )
+
+            self.logger.debug(f"Aggregated stage {stage} results: {list(aggregated_stage_results.keys()) if isinstance(aggregated_stage_results, dict) else 'non-dict'}")
+
+            # Advance stage with the aggregated results
+            advancement = stage_completion_repo.advance_job_stage(
                 job_id=job_id,
                 current_stage=stage,
-                stage_results=stage_results
+                stage_results=aggregated_stage_results
             )
             
             if not advancement.job_updated:

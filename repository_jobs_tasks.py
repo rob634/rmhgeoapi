@@ -47,6 +47,7 @@ import logging
 from util_logger import LoggerFactory, ComponentType, LogLevel, LogContext
 from schema_base import (
     JobRecord, TaskRecord, JobStatus, TaskStatus,
+    TaskResult, TaskDefinition,  # Added for contract enforcement
     generate_job_id
 )
 # Task ID generation moved to Controller layer (hierarchically correct)
@@ -55,8 +56,9 @@ from repository_postgresql import (
     PostgreSQLRepository,
     PostgreSQLJobRepository,
     PostgreSQLTaskRepository,
-    PostgreSQLCompletionDetector
+    PostgreSQLStageCompletionRepository
 )
+from contract_validator import enforce_contract
 
 logger = LoggerFactory.create_logger(ComponentType.REPOSITORY, "JobsTasksRepository")
 
@@ -72,6 +74,14 @@ class JobRepository(PostgreSQLJobRepository):
     Inherits PostgreSQL operations and adds business-specific methods.
     """
     
+    @enforce_contract(
+        params={
+            'job_type': str,
+            'parameters': dict,
+            'total_stages': int
+        },
+        returns=JobRecord
+    )
     def create_job_from_params(
         self,
         job_type: str,
@@ -80,47 +90,79 @@ class JobRepository(PostgreSQLJobRepository):
     ) -> JobRecord:
         """
         Create new job with automatic ID generation and validation.
-        
+        CONTRACT: Returns JobRecord, never dict.
+
         Business logic wrapper around create_job.
-        
+
         Args:
             job_type: Type of job (snake_case format)
             parameters: Job parameters dictionary
             total_stages: Total number of stages in job
-            
+
         Returns:
             Created JobRecord
+
+        Raises:
+            TypeError: If parameters are not a dict
+            ValueError: If job_type is invalid
         """
+        # CONTRACT ENFORCEMENT: Validate inputs
+        if not isinstance(parameters, dict):
+            raise TypeError(
+                f"Parameters must be dict, got {type(parameters).__name__}. "
+                f"This is a contract violation - controller must pass dict."
+            )
+
+        if not job_type or not isinstance(job_type, str):
+            raise ValueError(
+                f"job_type must be non-empty string, got {job_type!r}. "
+                f"This is a contract violation - controller must pass valid job_type."
+            )
+
         with self._error_context("job creation from params"):
             # Generate deterministic job ID
             job_id = generate_job_id(job_type, parameters)
-            
+
             # Check if job already exists (idempotency)
             existing_job = self.get_job(job_id)
             if existing_job:
+                # CONTRACT: get_job returns JobRecord, not dict
+                if not isinstance(existing_job, JobRecord):
+                    raise TypeError(
+                        f"get_job returned {type(existing_job).__name__}, expected JobRecord. "
+                        f"Repository contract violation detected."
+                    )
                 logger.info(f"📋 Job already exists (idempotent): {job_id[:16]}...")
                 return existing_job
-            
-            # Create job record
+
+            # Create job record using Pydantic model
             now = datetime.now(timezone.utc)
             job = JobRecord(
                 job_id=job_id,
                 job_type=job_type,
-                status=JobStatus.QUEUED,
+                status=JobStatus.QUEUED,  # Enum, not string
                 stage=1,
                 total_stages=total_stages,
                 parameters=parameters.copy(),  # Defensive copy
-                stage_results={},
+                stage_results={},  # Will have string keys per contract
                 metadata={},  # Required by database NOT NULL constraint
                 created_at=now,
                 updated_at=now
             )
-            
+
             # Create in database
             created = self.create_job(job)
-            
+
             return job
     
+    @enforce_contract(
+        params={
+            'job_id': str,
+            'new_status': JobStatus,
+            'additional_updates': (dict, type(None))
+        },
+        returns=bool
+    )
     def update_job_status_with_validation(
         self,
         job_id: str,
@@ -202,9 +244,27 @@ class JobRepository(PostgreSQLJobRepository):
             updates = {'stage': new_stage}
             
             if stage_results:
-                # Add stage results to existing results
+                # === STAGE RESULTS STORAGE WITH STRING KEY ===
+                #
+                # CRITICAL BOUNDARY CONTRACT:
+                #
+                # current_job.stage is an INTEGER (e.g., 2)
+                # But we MUST use STRING key for storage because:
+                # 1. This will be serialized to JSON for PostgreSQL
+                # 2. JSON spec requires object keys to be strings
+                # 3. PostgreSQL JSONB will convert integer keys to strings anyway
+                #
+                # EXAMPLE:
+                # - current_job.stage = 2 (integer)
+                # - str(current_job.stage) = "2" (string key)
+                # - updated_stage_results["2"] = {...stage 2 results...}
+                #
+                # RETRIEVAL:
+                # Later, when retrieving: stage_results["2"] or stage_results[str(2)]
+                # Never: stage_results[2] (would fail with KeyError)
+                #
                 updated_stage_results = current_job.stage_results.copy()
-                updated_stage_results[current_job.stage] = stage_results
+                updated_stage_results[str(current_job.stage)] = stage_results  # STRING KEY!
                 updates['stage_results'] = updated_stage_results
             
             return self.update_job(job_id, updates)
@@ -255,65 +315,64 @@ class TaskRepository(PostgreSQLTaskRepository):
     Inherits PostgreSQL operations and adds business-specific methods.
     """
     
-    def create_task_from_params(
+    @enforce_contract(
+        params={'task_def': TaskDefinition},
+        returns=TaskRecord
+    )
+    def create_task_from_definition(
         self,
-        task_id: str,  # Controller provides pre-generated semantic task ID
-        parent_job_id: str,
-        task_type: str,
-        stage: int,
-        task_index: str,  # Semantic task index from Controller
-        parameters: Dict[str, Any]
+        task_def: TaskDefinition
     ) -> TaskRecord:
         """
-        Create task with Controller-provided task ID.
-        
-        HIERARCHICALLY CORRECT: Repository stores what Controller provides.
-        Controller generates semantic task IDs for cross-stage lineage.
-        
+        Create task from TaskDefinition using factory method.
+        CONTRACT: Uses factory method, returns TaskRecord.
+
+        This is the ONLY method for task creation as of 20 SEP 2025.
+        Enforces contract pattern - controllers MUST use TaskDefinition.
+
         Args:
-            task_id: Pre-generated semantic task ID from Controller
-            parent_job_id: Parent job ID (must exist)
-            task_type: Type of task (snake_case format)
-            stage: Stage number task belongs to
-            task_index: Semantic task index (e.g., 'greet_0', 'tile_x5_y10')
-            parameters: Task parameters
-            
+            task_def: TaskDefinition with all task parameters
+
         Returns:
             Created TaskRecord
+
+        Raises:
+            TypeError: If task_def is not a TaskDefinition
         """
-        with self._error_context("task creation from params"):
-            # Use Controller-provided task ID (no generation in Repository layer)
-            
-            # Validate parent-child relationship
-            self._validate_parent_child_relationship(task_id, parent_job_id)
-            
-            # Check if task already exists (idempotency)
-            existing_task = self.get_task(task_id)
-            if existing_task:
-                logger.info(f"📋 Task already exists (idempotent): {task_id}")
-                return existing_task
-            
-            # Create task record
-            now = datetime.now(timezone.utc)
-            task = TaskRecord(
-                task_id=task_id,
-                parent_job_id=parent_job_id,
-                task_type=task_type,
-                status=TaskStatus.QUEUED,
-                stage=stage,
-                task_index=task_index,
-                parameters=parameters.copy(),  # Defensive copy
-                metadata={},  # Required by database NOT NULL constraint
-                retry_count=0,
-                created_at=now,
-                updated_at=now
+        # CONTRACT ENFORCEMENT: Must be TaskDefinition
+        if not isinstance(task_def, TaskDefinition):
+            raise TypeError(
+                f"Expected TaskDefinition, got {type(task_def).__name__}. "
+                f"Controller must use TaskDefinition.to_task_record() factory method."
             )
-            
-            # Create in database
-            created = self.create_task(task)
-            
-            return task
+
+        # Use factory method to create TaskRecord
+        task_record = task_def.to_task_record()
+
+        # Check if task already exists (idempotency)
+        existing_task = self.get_task(task_record.task_id)
+        if existing_task:
+            # CONTRACT: get_task returns TaskRecord, not dict
+            if not isinstance(existing_task, TaskRecord):
+                raise TypeError(
+                    f"get_task returned {type(existing_task).__name__}, expected TaskRecord. "
+                    f"Repository contract violation detected."
+                )
+            logger.info(f"📋 Task already exists (idempotent): {task_record.task_id}")
+            return existing_task
+
+        # Create in database
+        created = self.create_task(task_record)
+        return task_record
     
+    @enforce_contract(
+        params={
+            'task_id': str,
+            'new_status': TaskStatus,
+            'additional_updates': (dict, type(None))
+        },
+        returns=bool
+    )
     def update_task_status_with_validation(
         self,
         task_id: str,
@@ -420,136 +479,37 @@ class TaskRepository(PostgreSQLTaskRepository):
 # EXTENDED COMPLETION DETECTOR - Business logic wrapper
 # ============================================================================
 
-class CompletionDetector(PostgreSQLCompletionDetector):
+class StageCompletionRepository(PostgreSQLStageCompletionRepository):
     """
-    Extended completion detector with business logic.
-    
-    Inherits atomic PostgreSQL operations and adds business-specific methods.
+    Stage completion repository providing atomic data operations.
+
+    This repository provides atomic database queries for stage completion detection
+    using PostgreSQL advisory locks to prevent race conditions. It inherits three
+    critical atomic operations from PostgreSQLStageCompletionRepository:
+
+    1. complete_task_and_check_stage() - Atomically completes task and checks if stage done
+    2. advance_job_stage() - Atomically advances job to next stage
+    3. check_job_completion() - Atomically checks if all job tasks complete
+
+    All orchestration logic (deciding what to do with these atomic results) belongs
+    in the Controller layer, not here in the Repository layer.
     """
     
-    def handle_task_completion(
-        self,
-        task_id: str,
-        parent_job_id: str,
-        stage: int,
-        result_data: Dict[str, Any],
-        job_repository: JobRepository,
-        task_repository: TaskRepository
-    ) -> Dict[str, Any]:
-        """
-        Handle complete task completion workflow.
-        
-        This is the main entry point for task completion that orchestrates:
-        1. Task completion and stage checking
-        2. Stage advancement if needed
-        3. Job completion if final stage
-        
-        Args:
-            task_id: Task to complete
-            parent_job_id: Parent job ID
-            stage: Current stage number
-            result_data: Task results
-            job_repository: Job repository for updates
-            task_repository: Task repository for updates
-            
-        Returns:
-            Dictionary with completion status and next steps
-        """
-        result = {
-            'task_completed': False,
-            'stage_completed': False,
-            'job_completed': False,
-            'next_stage': None,
-            'error': None
-        }
-        
-        try:
-            # Complete task and check stage
-            completion_result = self.complete_task_and_check_stage(
-                task_id=task_id,
-                job_id=parent_job_id,
-                stage=stage,
-                result_data=result_data
-            )
-            
-            if not completion_result.task_updated:
-                result['error'] = "Task was not in processing state or already completed"
-                return result
-            
-            result['task_completed'] = True
-            
-            # Check if stage is complete
-            if completion_result.stage_complete:
-                result['stage_completed'] = True
-                logger.info(f"🎯 Stage {stage} complete for job {parent_job_id[:16]}...")
-                
-                # Get job to check if more stages
-                job = job_repository.get_job(parent_job_id)
-                if not job:
-                    result['error'] = f"Job {parent_job_id} not found"
-                    return result
-                
-                # Advance to next stage if not final
-                if stage < job.total_stages:
-                    advancement_result = self.advance_job_stage(
-                        job_id=parent_job_id,
-                        current_stage=stage,
-                        stage_results=self._gather_stage_results(
-                            parent_job_id,
-                            stage,
-                            task_repository
-                        )
-                    )
-                    
-                    if advancement_result.job_updated:
-                        result['next_stage'] = advancement_result.new_stage
-                        
-                        if advancement_result.is_final_stage:
-                            # Check if job is complete
-                            completion_check = self.check_job_completion(parent_job_id)
-                            if completion_check.job_complete:
-                                result['job_completed'] = True
-                                logger.info(f"🏁 Job {parent_job_id[:16]}... completed successfully")
-                else:
-                    # Already at final stage, check completion
-                    completion_check = self.check_job_completion(parent_job_id)
-                    if completion_check.job_complete:
-                        result['job_completed'] = True
-                        logger.info(f"🏁 Job {parent_job_id[:16]}... completed successfully")
-            
-            return result
-            
-        except Exception as e:
-            logger.error(f"❌ Error in task completion workflow: {e}")
-            result['error'] = str(e)
-            return result
-    
-    def _gather_stage_results(
-        self,
-        job_id: str,
-        stage: int,
-        task_repository: TaskRepository
-    ) -> Dict[str, Any]:
-        """
-        Gather results from all tasks in a stage.
-        
-        Args:
-            job_id: Parent job ID
-            stage: Stage number
-            task_repository: Repository to query tasks
-            
-        Returns:
-            Dictionary of task results keyed by task_id
-        """
-        tasks = task_repository.list_tasks_for_job(job_id)
-        stage_tasks = [t for t in tasks if t.stage == stage]
-        
-        results = {}
-        for task in stage_tasks:
-            if task.result_data:
-                results[task.task_id] = task.result_data
-        
-        return results
+    # REMOVED: handle_task_completion() method - Orchestration belongs in Controller layer
+    # The CompletionDetector should only provide atomic database operations via inherited
+    # PostgreSQL functions. All business logic and orchestration has been moved to
+    # BaseController._handle_stage_completion() where it architecturally belongs.
+    #
+    # This class now only inherits atomic operations:
+    # - complete_task_and_check_stage() - Atomic task completion with stage check
+    # - advance_job_stage() - Atomic stage advancement
+    # - check_job_completion() - Atomic job completion check
+    #
+    # Date: 20 SEP 2025
+    # Reason: Separation of concerns - Repository provides data operations,
+    #         Controller handles orchestration
+
+    pass  # This class only inherits atomic operations, no additional methods
 
 
 # ============================================================================

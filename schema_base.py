@@ -52,7 +52,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from enum import Enum
 from typing import Dict, Any, List, Optional, Union
-from pydantic import BaseModel, Field, field_validator, ConfigDict, field_serializer
+from pydantic import BaseModel, Field, field_validator, ConfigDict, field_serializer, model_validator
 import hashlib
 import json
 import uuid
@@ -189,7 +189,10 @@ class JobRecord(BaseModel):
     
     # Data fields
     parameters: Dict[str, Any] = Field(default_factory=dict, description="Job parameters")
-    stage_results: Dict[str, Any] = Field(default_factory=dict, description="Results from completed stages")
+    stage_results: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Results from completed stages - keys MUST be STRING stage numbers ('1', '2', etc)"
+    )
     metadata: Dict[str, Any] = Field(default_factory=dict, description="Job metadata")
     result_data: Optional[Dict[str, Any]] = Field(None, description="Final job results")
     error_details: Optional[str] = Field(None, max_length=5000, description="Error details if failed")
@@ -379,7 +382,10 @@ class JobExecutionContext(BaseModel):
     current_stage: int = Field(..., ge=1, le=100)
     total_stages: int = Field(..., ge=1, le=100)
     parameters: Dict[str, Any] = Field(default_factory=dict)
-    stage_results: Dict[int, Dict[str, Any]] = Field(default_factory=dict)
+    stage_results: Dict[str, Dict[str, Any]] = Field(
+        default_factory=dict,
+        description="Stage results keyed by STRING stage number ('1', '2', etc) for consistency"
+    )
     created_at: Optional[datetime] = Field(default_factory=datetime.utcnow)
     updated_at: Optional[datetime] = Field(default_factory=datetime.utcnow)
     
@@ -389,12 +395,54 @@ class JobExecutionContext(BaseModel):
         return validate_job_id(v)
     
     def get_stage_result(self, stage_number: int) -> Optional[Dict[str, Any]]:
-        """Get results from a specific stage"""
-        return self.stage_results.get(stage_number)
-    
+        """
+        Get results from a specific stage.
+
+        === STAGE KEY BOUNDARY CONTRACT ===
+
+        This method ABSTRACTS the string/integer key issue!
+
+        INPUT: stage_number as INTEGER (because that's what stages are)
+        INTERNAL: Converts to string for dictionary lookup
+        OUTPUT: The stage results or None
+
+        WHY THIS EXISTS:
+        - Callers think in terms of integer stages (stage 1, 2, 3)
+        - But JSON/PostgreSQL forces string keys in storage
+        - This method handles the conversion transparently
+
+        EXAMPLE:
+        - job_record.get_stage_result(1)  # Pass integer
+        - Internally: stage_results.get("1")  # Uses string
+        - Returns: {"task_results": [...], ...}
+        """
+        return self.stage_results.get(str(stage_number))
+
     def set_stage_result(self, stage_number: int, result: Dict[str, Any]) -> None:
-        """Set results for a specific stage"""
-        self.stage_results[stage_number] = result
+        """
+        Set results for a specific stage.
+
+        === STAGE KEY BOUNDARY CONTRACT ===
+
+        This method ENFORCES the string key convention!
+
+        INPUT: stage_number as INTEGER (domain logic)
+        STORAGE: Converts to string key for consistency
+
+        WHY THIS EXISTS:
+        - Ensures ALL stage_results use string keys
+        - Prevents accidental integer key insertion
+        - Makes JSON serialization predictable
+
+        EXAMPLE:
+        - job_record.set_stage_result(2, {...})  # Pass integer
+        - Internally: stage_results["2"] = {...}  # Stores with string key
+        - PostgreSQL: JSONB will preserve "2" as string
+
+        CRITICAL: Never directly access stage_results[stage_number]
+        Always use these helper methods or explicitly convert: stage_results[str(stage_number)]
+        """
+        self.stage_results[str(stage_number)] = result
     
     model_config = ConfigDict(validate_assignment=True)
 
@@ -866,14 +914,353 @@ class JobCompletionResult(BaseModel):
     final_stage: int
     total_tasks: int
     completed_tasks: int
-    task_results: List[Dict[str, Any]] = Field(default_factory=list)
-    
+    task_results: List[Union[TaskResult, Dict[str, Any]]] = Field(default_factory=list)
+    # Note: Repository should convert dicts to TaskResult objects
+
     @property
     def completion_percentage(self) -> float:
         """Calculate completion percentage"""
         if self.total_tasks == 0:
             return 100.0
         return (self.completed_tasks / self.total_tasks) * 100.0
+
+
+# ============================================================================
+# STAGE RESULTS CONTRACTS - Blueprint for Multi-Stage Job Communication
+# ============================================================================
+
+class StageResultContract(BaseModel):
+    """
+    Enforced structure for stage results - eliminates silent failures.
+
+    === THE CRITICAL STAGE KEY BOUNDARY CONTRACT ===
+
+    THE FUNDAMENTAL ISSUE:
+    - Stages are INTEGERS in our domain (1, 2, 3...)
+    - JSON requires STRING keys for objects
+    - PostgreSQL JSONB follows JSON spec
+    - Result: stage_results MUST use string keys
+
+    HOW THIS CLASS HANDLES IT:
+    - stage_number field: Stored as INTEGER (domain logic)
+    - When stored in dict: Uses STRING key via str(stage_number)
+    - When retrieved: Parse from stage_results[str(stage_number)]
+
+    THE ARITHMETIC PROBLEM:
+    - Stage 2 needs results from Stage 1
+    - Math: previous = current - 1 (makes sense with integers)
+    - Lookup: stage_results[str(2-1)] = stage_results["1"]
+    - This is WHY we see str(stage - 1) throughout the code!
+
+    This contract ensures:
+    1. All stage results have consistent structure
+    2. Keys are ALWAYS strings for JSON compatibility
+    3. Task results are always TaskResult objects
+    4. All required fields are present
+    5. Downstream stages can rely on field existence
+
+    Every stage MUST produce results in this format, ensuring predictable
+    data flow between stages. This is the blueprint all job types follow.
+
+    Example:
+        # Stage 1 completes (stage_number=1 is INTEGER)
+        result = StageResultContract.from_task_results(1, task_results)
+        job_record.stage_results["1"] = result.model_dump()  # STRING KEY!
+
+        # Stage 2 retrieves Stage 1 results
+        # current_stage = 2 (integer)
+        # previous_stage = 2 - 1 = 1 (integer math)
+        # lookup_key = str(1) = "1" (string for JSON)
+        stage_1 = StageResultContract(**job_record.stage_results["1"])
+        for task in stage_1.task_results:  # Guaranteed to exist
+            if task.success:  # Guaranteed to have this field
+                process(task)
+    """
+    # Stage identification
+    stage_number: int = Field(..., ge=1, le=100, description="The actual stage number (1-based)")
+    stage_key: str = Field(..., description="String representation for dict key ('1', '2', etc)")
+
+    # Stage execution status
+    status: str = Field(..., description="Stage completion status")
+
+    # Task execution metrics - ALWAYS present
+    task_count: int = Field(..., ge=0, description="Total number of tasks in stage")
+    successful_tasks: int = Field(..., ge=0, description="Number of successful tasks")
+    failed_tasks: int = Field(..., ge=0, description="Number of failed tasks")
+    success_rate: float = Field(..., ge=0.0, le=100.0, description="Success percentage")
+
+    # Actual results from tasks
+    task_results: List[TaskResult] = Field(
+        default_factory=list,
+        description="List of TaskResult objects from all tasks in stage"
+    )
+
+    # Timing
+    completed_at: datetime = Field(..., description="When stage completed")
+
+    # Flexible additional data
+    metadata: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Additional stage-specific metadata"
+    )
+
+    # Orchestration data for next stage (optional)
+    orchestration: Optional['OrchestrationDataContract'] = Field(
+        None,
+        description="Instructions for next stage if dynamic orchestration is needed"
+    )
+
+    @field_validator('status')
+    @classmethod
+    def validate_status(cls, v):
+        """Validate stage status values"""
+        valid_statuses = ['completed', 'failed', 'completed_with_errors', 'partial_success']
+        if v not in valid_statuses:
+            raise ValueError(f"Invalid status: {v}. Must be one of {valid_statuses}")
+        return v
+
+    @field_validator('stage_key')
+    @classmethod
+    def validate_stage_key(cls, v):
+        """Ensure stage_key is a string representation of a number"""
+        try:
+            int(v)  # Should be convertible to int
+        except ValueError:
+            raise ValueError(f"stage_key must be a string number like '1', '2', got '{v}'")
+        return v
+
+    @classmethod
+    def from_task_results(cls, stage_number: int, task_results: List[TaskResult]) -> 'StageResultContract':
+        """
+        Factory method to create from task results.
+
+        Args:
+            stage_number: The stage that completed (1-based)
+            task_results: List of TaskResult objects from completed tasks
+
+        Returns:
+            StageResultContract with calculated metrics
+        """
+        if not isinstance(task_results, list):
+            task_results = []
+
+        successful = sum(1 for t in task_results if t.success)
+        failed = len(task_results) - successful
+
+        # Determine overall status
+        if len(task_results) == 0:
+            status = 'failed'
+        elif successful == len(task_results):
+            status = 'completed'
+        elif successful > 0:
+            status = 'completed_with_errors'
+        else:
+            status = 'failed'
+
+        return cls(
+            stage_number=stage_number,
+            stage_key=str(stage_number),
+            status=status,
+            task_count=len(task_results),
+            successful_tasks=successful,
+            failed_tasks=failed,
+            success_rate=(successful / len(task_results) * 100) if task_results else 0.0,
+            task_results=task_results,
+            completed_at=datetime.now(timezone.utc)
+        )
+
+    def to_dict_for_storage(self) -> Dict[str, Any]:
+        """
+        Convert to dict for storage in job_record.stage_results.
+        Excludes stage_key since that becomes the dict key.
+
+        Returns:
+            Dict suitable for storage, with TaskResult objects serialized
+        """
+        data = self.model_dump(exclude={'stage_key'})
+        # Ensure task_results are properly serialized
+        data['task_results'] = [
+            tr.model_dump() if isinstance(tr, TaskResult) else tr
+            for tr in self.task_results
+        ]
+        return data
+
+    @property
+    def needs_retry(self) -> bool:
+        """Check if stage should be retried based on failure rate"""
+        return self.status == 'failed' or self.success_rate < 50.0
+
+    @property
+    def all_tasks_succeeded(self) -> bool:
+        """Check if all tasks in stage succeeded"""
+        return self.successful_tasks == self.task_count and self.task_count > 0
+
+
+class OrchestrationDataContract(BaseModel):
+    """
+    Enforced structure for dynamic orchestration between stages.
+
+    When a stage needs to communicate work items or instructions to the next stage,
+    it uses this contract. This ensures consistent communication patterns across
+    all job types implementing multi-stage workflows.
+
+    Common use cases:
+    1. Stage 1 discovers files → Stage 2 processes each file
+    2. Stage 1 analyzes data → Stage 2 processes based on analysis
+    3. Stage 1 validates inputs → Stage 2 skips if validation failed
+
+    Example:
+        # Stage 1 discovers files to process
+        orchestration = OrchestrationDataContract(
+            action='CREATE_TASKS',
+            items=[
+                {"file_path": "data/image1.tif", "size_mb": 100},
+                {"file_path": "data/image2.tif", "size_mb": 200}
+            ],
+            item_count=2,
+            next_stage_parameters={"processing_mode": "parallel", "output_format": "cog"}
+        )
+
+        # Stage 2 reads orchestration
+        orch = OrchestrationDataContract(**prev_results.orchestration)
+        for item in orch.items:
+            create_task(item["file_path"], orch.next_stage_parameters)
+    """
+    # Action to take
+    action: str = Field(
+        ...,
+        description="Instruction for next stage: CREATE_TASKS, SKIP_STAGE, PARALLEL_STAGES, CONTINUE"
+    )
+
+    # Items to process in next stage
+    items: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        description="List of items for next stage to process"
+    )
+    item_count: int = Field(
+        ...,
+        ge=0,
+        description="Number of items (for quick checking without len())"
+    )
+
+    # Parameters for next stage
+    next_stage_parameters: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Parameters the next stage should use for processing"
+    )
+
+    # Grouping information (for batch processing)
+    batch_size: Optional[int] = Field(
+        None,
+        ge=1,
+        description="Suggested batch size for processing items"
+    )
+
+    # Priority or ordering
+    priority: Optional[str] = Field(
+        None,
+        description="Processing priority: 'high', 'normal', 'low'"
+    )
+
+    # Additional context
+    metadata: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Additional orchestration metadata"
+    )
+
+    # Validation reason (if action is SKIP_STAGE)
+    skip_reason: Optional[str] = Field(
+        None,
+        max_length=500,
+        description="Reason for skipping if action is SKIP_STAGE"
+    )
+
+    @field_validator('action')
+    @classmethod
+    def validate_action(cls, v):
+        """Validate orchestration action"""
+        valid_actions = ['CREATE_TASKS', 'SKIP_STAGE', 'PARALLEL_STAGES', 'CONTINUE', 'RETRY_STAGE', 'FAIL_JOB']
+        if v not in valid_actions:
+            raise ValueError(f"Invalid action: {v}. Must be one of {valid_actions}")
+        return v
+
+    @field_validator('priority')
+    @classmethod
+    def validate_priority(cls, v):
+        """Validate priority levels"""
+        if v is not None:
+            valid_priorities = ['high', 'normal', 'low']
+            if v not in valid_priorities:
+                raise ValueError(f"Invalid priority: {v}. Must be one of {valid_priorities}")
+        return v
+
+    @model_validator(mode='after')
+    def validate_skip_reason(self) -> 'OrchestrationDataContract':
+        """Ensure skip_reason is provided when action is SKIP_STAGE"""
+        if self.action == 'SKIP_STAGE' and not self.skip_reason:
+            raise ValueError("skip_reason is required when action is SKIP_STAGE")
+        return self
+
+    @model_validator(mode='after')
+    def validate_item_count(self) -> 'OrchestrationDataContract':
+        """Ensure item_count matches actual items length"""
+        if self.item_count != len(self.items):
+            raise ValueError(f"item_count ({self.item_count}) doesn't match items length ({len(self.items)})")
+        return self
+
+    @classmethod
+    def create_task_items(
+        cls,
+        items: List[Dict[str, Any]],
+        parameters: Dict[str, Any],
+        batch_size: Optional[int] = None
+    ) -> 'OrchestrationDataContract':
+        """
+        Factory method for CREATE_TASKS action.
+
+        Args:
+            items: List of items for next stage to process
+            parameters: Parameters for processing
+            batch_size: Optional batch size for processing
+
+        Returns:
+            OrchestrationDataContract configured for task creation
+        """
+        return cls(
+            action='CREATE_TASKS',
+            items=items,
+            item_count=len(items),
+            next_stage_parameters=parameters,
+            batch_size=batch_size
+        )
+
+    @classmethod
+    def skip_stage(cls, reason: str) -> 'OrchestrationDataContract':
+        """
+        Factory method for SKIP_STAGE action.
+
+        Args:
+            reason: Why the stage should be skipped
+
+        Returns:
+            OrchestrationDataContract configured to skip next stage
+        """
+        return cls(
+            action='SKIP_STAGE',
+            items=[],
+            item_count=0,
+            skip_reason=reason
+        )
+
+    @property
+    def should_create_tasks(self) -> bool:
+        """Check if tasks should be created"""
+        return self.action == 'CREATE_TASKS' and self.item_count > 0
+
+    @property
+    def should_skip(self) -> bool:
+        """Check if next stage should be skipped"""
+        return self.action == 'SKIP_STAGE'
     
     @property
     def remaining_tasks(self) -> int:

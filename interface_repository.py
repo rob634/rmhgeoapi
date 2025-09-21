@@ -143,11 +143,12 @@ class ITaskRepository(ABC):
         pass
 
 
-class ICompletionDetector(ABC):
+class IStageCompletionRepository(ABC):
     """
-    Completion detection interface with EXACT method signatures.
-    
+    Stage completion repository interface with EXACT method signatures.
+
     THIS IS THE CANONICAL DEFINITION - These signatures match the SQL functions.
+    Provides atomic data operations for stage transitions.
     """
     
     @abstractmethod

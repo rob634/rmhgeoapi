@@ -1,7 +1,7 @@
 # File Catalog
 
-**Date**: 11 SEP 2025  
-**Total Python Files**: 28  
+**Date**: 21 SEP 2025
+**Total Python Files**: 47
 **Purpose**: Quick file lookup with one-line descriptions
 
 ## 🎯 Core Entry Points (2 files)
@@ -11,13 +11,15 @@
 | `function_app.py` | Azure Functions entry point - HTTP, Queue, Timer triggers |
 | `config.py` | Strongly typed configuration with Pydantic v2 |
 
-## 🎛️ Controllers (3 files)
+## 🎛️ Controllers (5 files)
 
 | File | Purpose |
 |------|---------|
 | `controller_base.py` | Abstract base controller for Job→Stage→Task orchestration |
 | `controller_factories.py` | JobFactory and JobRegistry for controller instantiation |
+| `controller_container.py` | Container workflow for blob container file listing |
 | `controller_hello_world.py` | Example 2-stage workflow implementation |
+| `controller_stac_setup.py` | STAC setup controller for PostGIS/pgstac |
 
 ## 📜 Interfaces (1 file)
 
@@ -25,7 +27,7 @@
 |------|---------|
 | `interface_repository.py` | Pure abstract base classes for repository contracts |
 
-## 💾 Repositories (5 files)
+## 💾 Repositories (6 files)
 
 | File | Purpose |
 |------|---------|
@@ -33,17 +35,19 @@
 | `repository_factory.py` | Central factory for all repository instances |
 | `repository_jobs_tasks.py` | Business logic for job and task management |
 | `repository_postgresql.py` | PostgreSQL-specific implementation with psycopg |
+| `repository_blob.py` | Azure Blob Storage operations |
 | `repository_vault.py` | Azure Key Vault integration (currently disabled) |
 
-## ⚙️ Services (3 files)
+## ⚙️ Services (4 files)
 
 | File | Purpose |
 |------|---------|
 | `service_factories.py` | Task handler registry and factory implementation |
 | `service_hello_world.py` | Hello World task processing logic |
 | `schema_manager.py` | PostgreSQL schema deployment and validation |
+| `service_stac_setup.py` | STAC setup service implementation |
 
-## 📋 Schemas (5 files)
+## 📋 Schemas (6 files)
 
 | File | Purpose |
 |------|---------|
@@ -52,6 +56,7 @@
 | `schema_sql_generator.py` | Converts Pydantic models to PostgreSQL DDL |
 | `schema_workflow.py` | Workflow and stage definitions |
 | `schema_core.py` | Parameter validation schemas |
+| `schema_orchestration.py` | Orchestration contracts (StageResult, etc.) |
 
 ## 🔌 Triggers (7 files)
 
@@ -65,11 +70,12 @@
 | `trigger_poison_monitor.py` | Poison queue monitoring `/api/monitor/poison` |
 | `trigger_schema_pydantic_deploy.py` | Schema deployment `/api/db/schema/redeploy` |
 
-## 🛠️ Utilities (2 files)
+## 🛠️ Utilities (3 files)
 
 | File | Purpose |
 |------|---------|
 | `util_import_validator.py` | Auto-discovery import validation system |
+| `contract_validator.py` | Contract enforcement decorator (@enforce_contract) |
 | `util_logger.py` | Enhanced logging factory with correlation IDs |
 
 ## 📝 Configuration Files

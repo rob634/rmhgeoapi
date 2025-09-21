@@ -14,3 +14,10 @@ rio-cogeo>=5.0.0
 
 # STRONG TYPING DISCIPLINE - Schema validation and enforcement
 pydantic>=2.0.0
+
+# STAC Implementation - PgSTAC database and Python libraries
+pypgstac==0.8.5
+psycopg-pool>=3.1.0
+pystac>=1.13.0
+pystac-client>=0.7.0
+rio-stac>=0.9.0

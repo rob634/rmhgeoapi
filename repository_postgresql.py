@@ -3,7 +3,7 @@
 # ============================================================================
 # PURPOSE: PostgreSQL-specific repository implementation with direct database access and atomic operations
 # EXPORTS: PostgreSQLRepository, PostgreSQLJobRepository, PostgreSQLTaskRepository, PostgreSQLCompletionDetector
-# INTERFACES: BaseRepository, IJobRepository, ITaskRepository, ICompletionDetector (from repository_abc)
+# INTERFACES: BaseRepository, IJobRepository, ITaskRepository, IStageCompletionRepository (from interface_repository)
 # PYDANTIC_MODELS: JobRecord, TaskRecord, StageAdvancementResult, TaskCompletionResult, JobCompletionResult
 # DEPENDENCIES: psycopg, psycopg.sql, config, schema_core, repository_base, repository_abc
 # SOURCE: PostgreSQL database (connection from AppConfig), app schema tables (jobs, tasks)
@@ -54,11 +54,13 @@ from schema_base import (
 # generate_task_id moved to Controller layer - repository no longer needs it
 from repository_base import BaseRepository
 from interface_repository import (
-    IJobRepository, ITaskRepository, ICompletionDetector
+    IJobRepository, ITaskRepository, IStageCompletionRepository
 )
 from schema_base import (
-    StageAdvancementResult, TaskCompletionResult, JobCompletionResult
+    StageAdvancementResult, TaskCompletionResult, JobCompletionResult,
+    TaskResult, TaskStatus
 )
+from contract_validator import enforce_contract  # Added for contract enforcement
 
 # Logger setup
 logger = logging.getLogger(__name__)
@@ -617,6 +619,10 @@ class PostgreSQLJobRepository(PostgreSQLRepository, IJobRepository):
     Handles all job-related database operations with direct PostgreSQL access.
     """
     
+    @enforce_contract(
+        params={'job': JobRecord},
+        returns=bool
+    )
     def create_job(self, job: JobRecord) -> bool:
         """
         Create a new job in PostgreSQL.
@@ -666,6 +672,10 @@ class PostgreSQLJobRepository(PostgreSQLRepository, IJobRepository):
             
             return created
     
+    @enforce_contract(
+        params={'job_id': str},
+        returns=Optional[JobRecord]
+    )
     def get_job(self, job_id: str) -> Optional[JobRecord]:
         """
         Retrieve a job from PostgreSQL.
@@ -714,6 +724,10 @@ class PostgreSQLJobRepository(PostgreSQLRepository, IJobRepository):
             
             return job_record
     
+    @enforce_contract(
+        params={'job_id': str, 'updates': dict},
+        returns=bool
+    )
     def update_job(self, job_id: str, updates: Dict[str, Any]) -> bool:
         """
         Update a job in PostgreSQL.
@@ -767,6 +781,10 @@ class PostgreSQLJobRepository(PostgreSQLRepository, IJobRepository):
             
             return success
     
+    @enforce_contract(
+        params={'status_filter': Optional[JobStatus]},
+        returns=List[JobRecord]
+    )
     def list_jobs(self, status_filter: Optional[JobStatus] = None) -> List[JobRecord]:
         """
         List jobs with optional status filtering.
@@ -840,6 +858,10 @@ class PostgreSQLTaskRepository(PostgreSQLRepository, ITaskRepository):
     Handles all task-related database operations with direct PostgreSQL access.
     """
     
+    @enforce_contract(
+        params={'task': TaskRecord},
+        returns=bool
+    )
     def create_task(self, task: TaskRecord) -> bool:
         """
         Create a new task in PostgreSQL.
@@ -892,6 +914,10 @@ class PostgreSQLTaskRepository(PostgreSQLRepository, ITaskRepository):
             
             return created
     
+    @enforce_contract(
+        params={'task_id': str},
+        returns=Optional[TaskRecord]
+    )
     def get_task(self, task_id: str) -> Optional[TaskRecord]:
         """
         Retrieve a task from PostgreSQL.
@@ -943,6 +969,10 @@ class PostgreSQLTaskRepository(PostgreSQLRepository, ITaskRepository):
             
             return task_record
     
+    @enforce_contract(
+        params={'task_id': str, 'updates': dict},
+        returns=bool
+    )
     def update_task(self, task_id: str, updates: Dict[str, Any]) -> bool:
         """
         Update a task in PostgreSQL.
@@ -996,6 +1026,10 @@ class PostgreSQLTaskRepository(PostgreSQLRepository, ITaskRepository):
             
             return success
     
+    @enforce_contract(
+        params={'job_id': str},
+        returns=List[TaskRecord]
+    )
     def list_tasks_for_job(self, job_id: str) -> List[TaskRecord]:
         """
         List all tasks for a job.
@@ -1023,22 +1057,42 @@ class PostgreSQLTaskRepository(PostgreSQLRepository, ITaskRepository):
             
             tasks = []
             for row in rows:
-                task_data = {
-                    'task_id': row[0],
-                    'parent_job_id': row[1],
-                    'task_type': row[2],
-                    'status': row[3],
-                    'stage': row[4],
-                    'task_index': row[5],
-                    'parameters': row[6] if isinstance(row[6], dict) else json.loads(row[6]) if row[6] else {},
-                    'result_data': row[7] if isinstance(row[7], dict) else json.loads(row[7]) if row[7] else None,
-                    'error_details': row[8],
-                    'retry_count': row[9],
-                    'heartbeat': row[10],
-                    'created_at': row[11],
-                    'updated_at': row[12]
-                }
-                tasks.append(TaskRecord(**task_data))
+                # CONTRACT ENFORCEMENT: Convert status string to enum
+                if isinstance(row[4], str):
+                    try:
+                        status = TaskStatus(row[4])
+                    except ValueError as e:
+                        raise ValueError(
+                            f"Invalid TaskStatus from database: '{row[4]}'. "
+                            f"Valid values are: {[s.value for s in TaskStatus]}"
+                        ) from e
+                else:
+                    status = row[4]
+
+                # Now we have job_type from the fixed query
+                try:
+                    task_record = TaskRecord(
+                        task_id=row[0],
+                        parent_job_id=row[1],
+                        job_type=row[2],  # Now properly selected from database
+                        task_type=row[3],
+                        status=status,
+                        stage=row[5],
+                        task_index=row[6],
+                        parameters=row[7] if isinstance(row[7], dict) else json.loads(row[7]) if row[7] else {},
+                        result_data=row[8] if isinstance(row[8], dict) else json.loads(row[8]) if row[8] else None,
+                        error_details=row[9],
+                        retry_count=row[10],
+                        heartbeat=row[11],
+                        created_at=row[12],
+                        updated_at=row[13]
+                    )
+                    tasks.append(task_record)
+                except Exception as e:
+                    raise TypeError(
+                        f"Failed to create TaskRecord from database row for task_id={row[0]}. "
+                        f"Error: {e}"
+                    ) from e
             
             logger.info(f"📋 Listed {len(tasks)} tasks for job {job_id[:16]}...")
             
@@ -1049,14 +1103,25 @@ class PostgreSQLTaskRepository(PostgreSQLRepository, ITaskRepository):
 # COMPLETION DETECTOR - Atomic PostgreSQL operations
 # ============================================================================
 
-class PostgreSQLCompletionDetector(PostgreSQLRepository, ICompletionDetector):
+class PostgreSQLStageCompletionRepository(PostgreSQLRepository, IStageCompletionRepository):
     """
-    PostgreSQL implementation of completion detection.
-    
-    Provides atomic operations for task completion and stage advancement
-    to prevent race conditions in distributed processing.
+    PostgreSQL implementation of stage completion repository.
+
+    Provides atomic data operations for task completion and stage advancement
+    using PostgreSQL advisory locks to prevent race conditions. These are
+    fundamentally data queries that return state information.
     """
     
+    @enforce_contract(
+        params={
+            'task_id': str,
+            'job_id': str,
+            'stage': int,
+            'result_data': Optional[Dict[str, Any]],
+            'error_details': Optional[str]
+        },
+        returns=TaskCompletionResult
+    )
     def complete_task_and_check_stage(
         self,
         task_id: str,
@@ -1177,6 +1242,14 @@ class PostgreSQLCompletionDetector(PostgreSQLRepository, ICompletionDetector):
             
             return result
     
+    @enforce_contract(
+        params={
+            'job_id': str,
+            'current_stage': int,
+            'stage_results': dict
+        },
+        returns=StageAdvancementResult
+    )
     def advance_job_stage(
         self,
         job_id: str,
@@ -1231,6 +1304,10 @@ class PostgreSQLCompletionDetector(PostgreSQLRepository, ICompletionDetector):
             
             return result
     
+    @enforce_contract(
+        params={'job_id': str},
+        returns=JobCompletionResult
+    )
     def check_job_completion(
         self,
         job_id: str
@@ -1264,8 +1341,28 @@ class PostgreSQLCompletionDetector(PostgreSQLRepository, ICompletionDetector):
             # Parse task_results from JSONB - fail fast on incorrect type
             if not isinstance(row[4], list):
                 raise ValueError(f"Invalid task_results from database: expected list, got {type(row[4])}")
-            task_results = row[4] if row[4] is not None else []
-            
+
+            # Convert raw dicts to TaskResult objects for contract enforcement
+            raw_task_results = row[4] if row[4] is not None else []
+            task_results = []
+            for task_data in raw_task_results:
+                if isinstance(task_data, dict):
+                    # Convert dict to TaskResult with all required fields
+                    task_result = TaskResult(
+                        task_id=task_data.get('task_id', 'unknown'),
+                        job_id=task_data.get('parent_job_id', job_id),  # Use parent_job_id or fallback to job_id
+                        stage_number=task_data.get('stage', 1),
+                        task_type=task_data.get('task_type', 'unknown'),
+                        success=task_data.get('status') == 'completed',
+                        result_data=task_data.get('result_data', {}),
+                        error_details=task_data.get('error_details'),
+                        status=TaskStatus(task_data.get('status', 'failed'))
+                    )
+                    task_results.append(task_result)
+                else:
+                    # Already a TaskResult or unexpected type
+                    task_results.append(task_data)
+
             result = JobCompletionResult(
                 job_complete=row[0],
                 final_stage=row[1],

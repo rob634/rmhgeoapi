@@ -38,7 +38,7 @@ Date: 10 September 2025
 from typing import Dict, Any, Optional
 import logging
 
-from repository_jobs_tasks import JobRepository, TaskRepository, CompletionDetector
+from repository_jobs_tasks import JobRepository, TaskRepository, StageCompletionRepository
 from util_logger import LoggerFactory, ComponentType
 
 logger = LoggerFactory.create_logger(ComponentType.REPOSITORY, "RepositoryFactory")
@@ -97,15 +97,15 @@ class RepositoryFactory:
         job_repo = JobRepository(connection_string, schema_name)
         logger.debug("📦 Creating TaskRepository...")
         task_repo = TaskRepository(connection_string, schema_name)
-        logger.debug("📦 Creating CompletionDetector...")
-        completion_detector = CompletionDetector(connection_string, schema_name)
+        logger.debug("📦 Creating StageCompletionRepository...")
+        stage_completion_repo = StageCompletionRepository(connection_string, schema_name)
         
         logger.info("✅ All repositories created successfully")
         
         return {
             'job_repo': job_repo,
             'task_repo': task_repo,
-            'completion_detector': completion_detector
+            'stage_completion_repo': stage_completion_repo
         }
     
     @staticmethod
@@ -150,7 +150,7 @@ class RepositoryFactory:
     def create_completion_detector(
         connection_string: Optional[str] = None,
         schema_name: str = "app"
-    ) -> CompletionDetector:
+    ) -> StageCompletionRepository:
         """
         Create only a completion detector instance.
         
@@ -161,9 +161,9 @@ class RepositoryFactory:
             schema_name: Database schema name
             
         Returns:
-            CompletionDetector instance
+            StageCompletionRepository instance
         """
-        return CompletionDetector(connection_string, schema_name)
+        return StageCompletionRepository(connection_string, schema_name)
     
     # ========================================================================
     # FUTURE REPOSITORY TYPES

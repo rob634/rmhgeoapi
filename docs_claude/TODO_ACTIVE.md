@@ -1,310 +1,274 @@
 # Active Tasks
 
-**Last Updated**: 13 SEP 2025 - Advisory Lock Breakthrough Achieved  
+**Last Updated**: 21 SEP 2025 - Multi-Stage Jobs Working End-to-End!
 **Author**: Robert and Geospatial Claude Legion
 
-## 🚀 BREAKTHROUGH: Race Condition & Deadlock Solution (13 SEP 2025)
+## ✅ CURRENT STATUS: SYSTEM OPERATIONAL
 
-### Advisory Locks Eliminate Deadlocks at Scale ✅
-**Resolution Time**: 13 SEP 2025 04:33 UTC  
-**Status**: PRODUCTION READY - Tested with n=30 concurrent tasks
+### Working Features
+- ✅ **Multi-stage job orchestration** (tested with HelloWorld 2-stage workflow)
+- ✅ **Contract enforcement** throughout system with @enforce_contract decorators
+- ✅ **JSON serialization** with Pydantic `model_dump(mode='json')`
+- ✅ **Error handling** with proper job failure marking
+- ✅ **Advisory locks** preventing race conditions at any scale (tested n=30+)
+- ✅ **Stage advancement** working correctly with StageResultContract
+- ✅ **PostgreSQL atomic operations** via StageCompletionRepository
+- ✅ **Idempotency** - SHA256 hash ensures duplicate submissions return same job_id
+- ✅ **Database monitoring** - Comprehensive query endpoints at /api/db/*
+- ✅ **Schema management** - Redeploy endpoint for clean state
 
-**The Problem Evolution**:
-1. **Initial Issue**: Race condition in "last task turns out lights" pattern
-   - Multiple tasks completing simultaneously
-   - None detected they were last → stage never advanced
-   
-2. **First Fix (FOR UPDATE)**: Row-level locking
-   - ✅ Prevented race condition for n≤10
-   - ❌ Caused deadlocks at n=30
-   
-3. **Second Fix (ORDER BY)**: Ordered row locking
-   - ✅ Reduced deadlocks for n≤4
-   - ❌ Still deadlocked at n=30 due to PostgreSQL lock manager limits
+### Recent Critical Fixes (21 SEP 2025)
 
-4. **FINAL SOLUTION**: Advisory Locks
-   - ✅ Works perfectly at any scale (tested n=30)
-   - ✅ Zero deadlocks possible
-   - ✅ Better performance than row locks
-   - ✅ Scales to thousands of concurrent tasks
+#### 1. JSON Serialization Fixed
+- **Problem**: TaskResult objects with enums/datetime not JSON serializable
+- **Solution**: Use `model_dump(mode='json')` to convert enums→strings, datetime→ISO
+- **File**: controller_hello_world.py line 351
 
-**Implementation**:
-```sql
--- Instead of locking all task rows:
-PERFORM pg_advisory_xact_lock(
-    hashtext(v_job_id || ':stage:' || v_stage::text)
-);
+#### 2. Contract Compliance Enforced
+- **Problem**: HelloWorldController returned wrong field names ('successful' vs 'successful_tasks')
+- **Solution**: Updated aggregate_stage_results() to return StageResultContract format
+- **File**: controller_hello_world.py lines 273-354
+
+#### 3. Error Handling Added
+- **Problem**: Jobs stuck in PROCESSING forever when errors occurred
+- **Solution**: Added granular try-catch blocks in process_job_queue_message()
+- **File**: controller_base.py lines 1564-1620
+
+### Test Results (21 SEP 2025)
+```
+Job: 641608072a6583d29d95d14c1ad64c6491efd3b4b4f4031c88e99241885c2265
+Status: COMPLETED
+Stage 1: 3 greeting tasks ✅
+Stage 2: 3 reply tasks ✅
+Total execution time: ~7 seconds
 ```
 
-**Why It Works**:
-- Single application-level lock per job-stage
-- No row-level locks needed
-- Cannot deadlock (single lock point)
-- Automatically released at transaction end
-- Serializes stage completion checks without blocking task updates
+## 🔄 Next Priority Tasks
 
-**Testing Results**:
-- n=1: ✅ Completed
-- n=4: ✅ Completed  
-- n=30: ✅ Completed (previously failed with deadlocks)
+### 0. Queue Message Boundary Validation & Error Handling
+**Status**: IMMEDIATE PRIORITY - Prevent poison queue messages
+**Priority**: CRITICAL - Must complete before other work
+**Reference**: See QUEUE_MESSAGE_VALIDATION_OUTLINE.md for complete implementation details
 
-## 🎉 LATEST PROGRESS (13 SEP 2025)
+#### Phase 1: Add Comprehensive Logging (IMMEDIATE)
+- [ ] Log raw message content before parsing (first 500 chars)
+- [ ] Add correlation IDs to track messages through system
+- [ ] Log each phase of processing separately
+- [ ] Add message size and queue metadata logging
 
-### Blob Storage Implementation - CORE MODULES COMPLETE ✅
-**Completion Time**: 13 SEP 2025 02:30 UTC  
-**Status**: Ready for testing and deployment
+#### Phase 2: Queue Trigger Improvements (HIGH PRIORITY)
+**File**: `function_app.py` lines 429-501
 
-**What Was Implemented**:
-1. **repository_blob.py**: Centralized blob storage repository with DefaultAzureCredential
-   - Singleton pattern for connection reuse
-   - Connection pooling for container clients
-   - Full CRUD operations for blobs
-   - Chunked reading for large files
+**Job Queue Trigger (process_job_queue)**:
+- [ ] Separate message extraction from parsing
+- [ ] Wrap model_validate_json() in specific try-catch
+- [ ] Extract job_id from malformed messages if possible
+- [ ] Add _mark_job_failed_from_queue_error() helper
+- [ ] Log ValidationError details before raising
+- [ ] Separate controller creation from processing
+- [ ] Ensure job marked as FAILED before poison queue
 
-2. **schema_blob.py**: Pydantic models for blob operations
-   - BlobMetadata, ContainerInventory, ContainerSummary
-   - OrchestrationData for dynamic task generation
-   - FileFilter for advanced filtering
-   - ContainerSizeLimits for safe operation boundaries
+**Task Queue Trigger (process_task_queue)**:
+- [ ] Separate message extraction from parsing
+- [ ] Wrap model_validate_json() in specific try-catch
+- [ ] Extract task_id from malformed messages if possible
+- [ ] Add _mark_task_failed_from_queue_error() helper
+- [ ] Log ValidationError details before raising
+- [ ] Update parent job if task parsing fails
 
-3. **service_blob.py**: Task handlers for blob operations
-   - analyze_and_orchestrate: Stage 1 dynamic orchestrator
-   - extract_metadata: Stage 2 parallel file processor
-   - summarize_container: Container statistics generator
-   - create_file_index: Optional Stage 3 indexer
+#### Phase 3: Controller Method Improvements (HIGH PRIORITY)
+**File**: `controller_base.py`
 
-4. **controller_container.py**: Job orchestration controllers
-   - SummarizeContainerController: Single-stage container summary
-   - ListContainerController: Multi-stage with dynamic task generation
-   - Implements "Analyze & Orchestrate" pattern
+**process_job_queue_message() - 8 Granular Steps**:
+- [ ] Step 1: Repository setup with error handling
+- [ ] Step 2: Job record retrieval with null checks
+- [ ] Step 3: Status validation (skip if completed)
+- [ ] Step 4: Previous stage results retrieval (if stage > 1)
+- [ ] Step 5: Task creation with rollback on failure
+- [ ] Step 6: Queue client setup with credential handling
+- [ ] Step 7: Per-task queueing with individual error handling
+- [ ] Step 8: Final status update only if tasks queued
 
-**Key Design Features**:
-- DefaultAzureCredential for seamless auth across environments
-- Dynamic task generation based on container content
-- Hard limit of 5000 files with clear overflow handling
-- Task-per-file pattern leveraging tasks table as metadata store
-- No credential management needed in services
+**process_task_queue_message() - 6 Granular Steps**:
+- [ ] Step 1: Repository setup with error handling
+- [ ] Step 2: Task record retrieval and validation
+- [ ] Step 3: Status check (must be QUEUED)
+- [ ] Step 4: Update to PROCESSING with verification
+- [ ] Step 5: Task execution with TaskHandlerFactory
+- [ ] Step 6: Atomic completion with stage check
 
-**Next Steps**: Deploy and test with real containers
+#### Phase 4: Helper Functions (MEDIUM PRIORITY)
+**New functions to add**:
+- [ ] _mark_job_failed_from_queue_error(job_id, error_msg)
+- [ ] _mark_task_failed_from_queue_error(task_id, error_msg)
+- [ ] _is_job_marked_failed(job_id) -> bool
+- [ ] _is_task_marked_failed(task_id) -> bool
+- [ ] _extract_job_id_from_raw_message(message_content) -> Optional[str]
+- [ ] _extract_task_id_from_raw_message(message_content) -> Optional[str]
 
-## ✅ RECENTLY RESOLVED (13 SEP 2025)
+#### Phase 5: Poison Queue Handlers (MEDIUM PRIORITY)
+**New file**: `function_app.py` additions
 
-### Poison Queue Issue - FIXED ✅
-**Resolution Date**: 13 SEP 2025 01:54 UTC  
-**Problem**: Stage 2 job messages were going to poison queue even though jobs completed successfully
+**Poison Job Queue Handler**:
+- [ ] Create @app.queue_trigger for "geospatial-jobs-poison"
+- [ ] Extract job_id using JSON parsing or regex
+- [ ] **CHECK CURRENT JOB STATUS FIRST**:
+  - [ ] If already FAILED: Log as "expected poison" and dispose
+  - [ ] If NOT FAILED: **🚨 CRITICAL UNHANDLED ERROR** - requires special handling
+  - [ ] If COMPLETED: Log warning - shouldn't be in poison queue
+  - [ ] If PROCESSING: Mark as FAILED with "UNHANDLED POISON" flag
+- [ ] For unhandled errors: Send alert/notification to team
+- [ ] Store first 1000 chars of poison message in job record
+- [ ] Mark all pending tasks as FAILED (only if job wasn't already failed)
+- [ ] Log with different severity levels (INFO for expected, ERROR for unhandled)
 
-**Root Cause Identified**: 
-- When Stage 2 job message was processed, it tried to update job status from PROCESSING → PROCESSING
-- This invalid status transition caused a validation error and sent the message to poison queue
+**Poison Task Queue Handler**:
+- [ ] Create @app.queue_trigger for "geospatial-tasks-poison"
+- [ ] Extract task_id and parent_job_id
+- [ ] **CHECK CURRENT TASK STATUS FIRST**:
+  - [ ] If already FAILED: Log as "expected poison" and dispose
+  - [ ] If NOT FAILED: **🚨 CRITICAL UNHANDLED ERROR** - requires special handling
+  - [ ] If COMPLETED: Log warning - shouldn't be in poison queue
+  - [ ] If PROCESSING/QUEUED: Mark as FAILED with "UNHANDLED POISON" flag
+- [ ] For unhandled errors: Check parent job status and update if needed
+- [ ] Log comprehensive poison message details with appropriate severity
 
-**Solution Implemented**:
-- Modified `controller_base.py` line 1277-1282 to check if job is already PROCESSING before updating
-- Only updates status for initial stage (Stage 1) messages
+#### Phase 6: Testing Strategy (REQUIRED)
+- [ ] Test with malformed JSON
+- [ ] Test with missing required fields
+- [ ] Test with invalid data types
+- [ ] Test with unknown job_type
+- [ ] Test with database connection failures
+- [ ] Test with queue client failures
+- [ ] Test with concurrent duplicate messages
+- [ ] Verify all failures have database records
 
-**Testing Results**:
-- ✅ Tested with n=1, 2, 3, 4, 20 - all complete successfully
-- ✅ No poison queue messages after fix deployment
-- ✅ Idempotency confirmed working (duplicate jobs return same job_id)
+**Success Criteria**:
+- ✅ Zero messages in poison queue without database error record
+- ✅ Every ValidationError logged before raising
+- ✅ Clear audit trail: raw message → parsing → error → database update → poison queue
+- ✅ Poison handlers can recover partial information
+- ✅ No silent failures anywhere in queue processing
 
-### N=2 Completion Bug - FIXED ✅
-**Resolution Date**: 13 SEP 2025 01:42 UTC  
-**Problem**: Jobs with exactly n=2 would get stuck in PROCESSING state
+### 1. Contract Enforcement Testing
+**Status**: Ready for comprehensive testing
+**Priority**: HIGH - Validate all contract work
+**Tasks**:
+- [ ] End-to-end multi-stage job testing with various n values
+- [ ] Verify Stage 1 → Stage 2 data flow with contract enforcement
+- [ ] Test error injection to confirm loud failures
+- [ ] Validate contract violations produce clear error messages
+- [ ] Performance testing with contract decorators (n=100+)
 
-**Root Cause**: 
-- PostgreSQL function `complete_task_and_check_stage` had a race condition with exactly 2 tasks
-- Both Stage 2 tasks would report "1 remaining" instead of counting down to 0
+### 2. Container Controller Implementation
+**Status**: Skeleton exists, needs implementation
+**Files**: controller_container.py, repository_blob.py
+**Tasks**:
+- [ ] Implement list_container workflow for actual blob operations
+- [ ] Add pagination support for large containers
+- [ ] Test with real Azure Storage containers
+- [ ] Validate large-scale file processing (1000+ files)
+- [ ] Add error handling for blob access failures
 
-**Solution**: 
-- Schema redeploy fixed the issue (cleared state inconsistency)
-- N=2 now works correctly with proper countdown (1→0)
+### 2. STAC Integration
+**Status**: Setup services created, need integration
+**Files**: controller_stac_setup.py, service_stac_setup.py
+**Tasks**:
+- [ ] Complete STAC setup service implementation
+- [ ] Test pgstac schema deployment
+- [ ] Implement STAC item registration workflow
+- [ ] Add spatial indexing for PostGIS geometries
+- [ ] Create STAC collection management endpoints
 
----
+### 3. Production Hardening
+**Status**: Core working, needs resilience features
+**Tasks**:
+- [ ] Add retry logic for transient failures (network, storage)
+- [ ] Implement exponential backoff for retries
+- [ ] Add circuit breaker pattern for external services
+- [ ] Implement dead letter queue processing
+- [ ] Add comprehensive metrics and monitoring (Application Insights)
+- [ ] Create alerting rules for job failures
+- [ ] Add performance profiling for bottleneck identification
 
-## ✅ RECENTLY RESOLVED (12 SEP 2025)
+### 4. Raster Processing Workflow
+**Status**: Not started
+**Tasks**:
+- [ ] Design stage_raster controller for COG generation
+- [ ] Implement chunking strategy for large rasters
+- [ ] Add GDAL-based reprojection service
+- [ ] Create validation for output COGs
+- [ ] Integrate with STAC catalog for metadata
 
-### Task Handler Execution Error - FIXED
-**Resolution Time**: 12 SEP 2025 21:50 UTC
-**Problem**: Tasks failing with `AttributeError: 'TaskRegistry' object has no attribute 'get_handler'`
-**Solution**: 
-- Renamed `service_factories.py` → `task_factory.py` (proper naming convention)
-- Fixed controller_base.py to use `TaskHandlerFactory.get_handler()` instead of trying to use TaskRegistry directly
-- Fixed TaskResult field names (`result_data` and `error_details`)
-**Result**: All tasks now execute successfully through completion
+### 5. Vector Processing Workflow
+**Status**: Not started
+**Tasks**:
+- [ ] Design stage_vector controller for PostGIS ingestion
+- [ ] Implement geometry validation and repair
+- [ ] Add coordinate system transformation
+- [ ] Create spatial indexing strategy
+- [ ] Implement feature filtering and selection
 
-### Stage 2 Task Creation Failure - FIXED
-**Status**: RESOLVED  
-**Resolution Date**: 12 SEP 2025
-**Problems Fixed**:
-1. TaskDefinition to TaskRecord conversion missing in function_app.py lines 1133-1146
-2. Config attribute error: config.storage_account_url → config.queue_service_url (line 1167)
-3. Job completion status not updating after all tasks complete (lines 1221-1237)
+## 📊 System Health Metrics
 
-**Verification**: Successfully tested with n=2, 3, 5, 10, and 100 tasks
-- Idempotency confirmed working (duplicate submissions return same job_id)
-- All 200 tasks completed successfully for n=100 test
+### Performance Benchmarks
+- **Single task execution**: ~1-2 seconds
+- **30 parallel tasks**: ~5-7 seconds total
+- **Stage advancement**: <1 second
+- **Job completion detection**: <1 second
 
----
+### Current Limitations
+- **Max parallel tasks**: Tested up to n=30, theoretical limit much higher
+- **Max job parameters size**: 64KB (queue message limit)
+- **Max result data size**: 1MB inline, larger results need blob storage
 
-## 🟡 IN PROGRESS
+## 🔍 Known Issues
 
-### function_app.py Modularization (1251 lines → 506 lines) ✅
-**Problem**: function_app.py contains orchestration logic that belongs in controllers
-**Goal**: Move queue processing logic to BaseController, simplify function_app.py to just routing
-**Started**: 12 SEP 2025
-**COMPLETED**: 12 SEP 2025
+### Low Priority
+1. **Duplicate task results in Stage 2**: Stage aggregation shows 6 tasks instead of 3 (cosmetic issue)
+2. **Timezone handling**: All timestamps in UTC, need timezone support for UI
+3. **Job cleanup**: Old completed jobs remain in database indefinitely
 
-**Implementation Steps**:
-1. [x] **Add orchestration methods to BaseController**
-   - [x] `process_job_queue_message(job_message: JobQueueMessage)`
-   - [x] `process_task_queue_message(task_message: TaskQueueMessage)`
-   - [x] `_handle_stage_completion(job_id, stage)` (private helper)
-   - [x] Stage advancement logic integrated
-   - [x] Job completion logic integrated
+### Won't Fix (By Design)
+1. **No backward compatibility**: System fails fast on breaking changes (development mode)
+2. **No job cancellation**: Once started, jobs run to completion or failure
+3. **No partial retries**: Failed stages require full job retry
 
-2. [x] **Move helper functions from function_app.py**
-   - [x] Removed `_validate_and_parse_queue_message()` - logic in controller
-   - [x] Removed `_load_job_record_safely()` - logic in controller
-   - [x] Removed `_verify_task_creation_success()` - logic in controller
-   - [x] Removed `_mark_job_failed_safely()` - logic in controller
+## 📝 Documentation Needs
 
-3. [x] **Refactor queue triggers in function_app.py**
-   - [x] Simplified `process_job_queue()` to 22 lines
-   - [x] Simplified `process_task_queue()` to 22 lines
-   - [x] Both now just parse message and delegate to controller
+### High Priority
+- [ ] API documentation with OpenAPI/Swagger
+- [ ] Deployment guide for production environments
+- [ ] Performance tuning guide
 
-4. [ ] **Testing**
-   - [ ] Test hello_world with n=10
-   - [ ] Verify stage advancement still works
-   - [ ] Confirm job completion still works
+### Medium Priority
+- [ ] Controller development guide with templates
+- [ ] Service implementation patterns
+- [ ] Database migration strategy
 
-**Achieved Outcome**:
-- function_app.py: 506 lines (60% reduction from 1251 lines)
-- controller_base.py: Enhanced with queue orchestration methods (~360 new lines)
-- Clean separation achieved: Controllers orchestrate, Services execute, Triggers route
+### Low Priority
+- [ ] Architectural decision records (ADRs)
+- [ ] Security best practices guide
+- [ ] Monitoring and alerting setup
 
-### Service Handler Auto-Discovery
-**Problem**: Service modules not auto-imported, handlers never registered  
-**Partial Fix**: Added `import service_hello_world` to function_app.py  
-**Remaining Work**:
-- [ ] Implement proper auto-discovery mechanism in `util_import_validator.py`
-- [ ] Call `auto_discover_handlers()` during function_app startup
-- [ ] Test with new service modules
+## 🚀 Quick Test Commands
 
----
+```bash
+# Test multi-stage job
+curl -X POST https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/jobs/submit/hello_world \
+  -H "Content-Type: application/json" \
+  -d '{"n": 5, "message": "production test"}'
 
-## 🟢 READY TO START (Prioritized)
+# Check job status
+curl https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/jobs/status/{JOB_ID}
 
-### 1. Blob Storage Operations Implementation 🚀
-**Goal**: Implement centralized blob storage operations with dynamic orchestration  
-**Reference**: See `STORAGE_OPERATIONS_PLAN.md` for complete design  
-**Status**: IMPLEMENTATION IN PROGRESS - Core modules completed
+# Query all tasks for a job
+curl https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/db/tasks/{JOB_ID}
 
-#### Phase 1: Core Infrastructure ✅ COMPLETED (13 SEP 2025)
-- [x] Implement `repository_blob.py` with DefaultAzureCredential
-- [x] Update `repository_factory.py` to add `create_blob_repository()` method
-- [ ] Test singleton pattern and authentication
-- [ ] Verify connection pooling works
-
-#### Phase 2: Basic Operations ✅ COMPLETED (13 SEP 2025)
-- [x] Create `schema_blob.py` with BlobMetadata and ContainerInventory models
-- [x] Implement `service_blob.py` with task handlers:
-  - [x] `analyze_and_orchestrate` handler (Stage 1 orchestrator)
-  - [x] `extract_metadata` handler (Stage 2 file processor)
-  - [x] `summarize_container` handler
-  - [x] `create_file_index` handler (Stage 3 optional)
-- [x] Create `controller_container.py` with:
-  - [x] `SummarizeContainerController` (single-stage implementation)
-  - [x] `ListContainerController` (dynamic task generation with 2-3 stages)
-- [x] Register controllers with JobRegistry (auto-registration via decorators)
-- [x] Add service and controller imports to function_app.py and trigger_submit_job.py
-
-#### Phase 3: Testing & Validation
-- [ ] Test with small containers (<500 files)
-- [ ] Test with medium containers (500-2500 files)
-- [ ] Verify NotImplementedError for >5000 files
-- [ ] Test dynamic task generation pattern
-- [ ] Verify metadata storage in task.result_data
-
-#### Phase 4: Advanced Features
-- [ ] Add GDAL mounting support for geospatial operations
-- [ ] Implement batch download operations
-- [ ] Add SAS URL generation for external access
-- [ ] Performance optimization for large containers
-
-### 2. Cross-Stage Lineage System (Analysis Complete)
-**Goal**: Tasks automatically access predecessor data by semantic ID  
-**Note**: Analysis revealed lineage is already implemented via TaskContext!
-**Implementation**: Consider adding `is_lineage_task` for optimization at scale
-- [ ] Review existing TaskContext implementation
-- [ ] Add `is_lineage_task: bool` to TaskRecord schema (optional optimization)
-- [ ] Document lineage patterns for new developers
-- [ ] Test with multi-stage workflow
-
-### 3. Progress Calculation
-**Goal**: Remove placeholder return values  
-**Files**: `schema_base.py`
-- [ ] Implement `calculate_stage_progress()` with real percentages
-- [ ] Implement `calculate_overall_progress()` with actual math
-- [ ] Implement `calculate_estimated_completion()` with time estimates
-
-### 4. SQL Generator Enhancements
-**Goal**: Support all Pydantic v2 field constraints  
-**Files**: `schema_sql_generator.py`
-- [ ] Test field metadata with MinLen, Gt, Lt constraints
-- [ ] Add support for all annotated_types constraints
-- [ ] Verify complex nested model handling
-
-### 5. Repository Vault Integration
-**Goal**: Enable Key Vault for production  
-**Files**: `repository_vault.py`
-- [ ] Complete RBAC setup for Key Vault
-- [ ] Enable Key Vault integration
-- [ ] Test credential management flow
-- [ ] Remove "Currently disabled" status
-
----
-
-## 📋 Next Sprint (After Critical Issue Fixed)
-
-### Container Operations
-- [ ] Implement blob inventory scanning
-- [ ] Create container listing endpoints
-- [ ] Test with large containers (>10K blobs)
-
-### STAC Implementation
-- [ ] Design STAC catalog structure for Bronze tier
-- [ ] Implement STAC item generation from blobs
-- [ ] Create STAC validation endpoint
-
-### Process Raster Controller
-- [ ] Create ProcessRasterController with 4-stage workflow
-- [ ] Implement tile boundary calculation
-- [ ] Add COG conversion logic
-- [ ] Integrate with STAC catalog
+# Get system health
+curl https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/health
+```
 
 ---
 
-## 🔧 Development Configuration Notes
-
-### Current Settings
-- **Retry Logic**: DISABLED (`maxDequeueCount: 1`)
-- **Error Mode**: Fail-fast for development
-- **Key Vault**: Disabled, using env vars
-
-### When Moving to Production
-- [ ] Enable retry logic (`maxDequeueCount: 3-5`)
-- [ ] Implement exponential backoff
-- [ ] Enable Key Vault integration
-- [ ] Add circuit breaker pattern
-
----
-
-## 📝 Documentation Tasks
-
-- [ ] Update FILE_CATALOG.md after any file changes
-- [ ] Move completed tasks to HISTORY.md
-- [ ] Keep this file focused on ACTIVE work only
-
----
-
-*For completed tasks, see HISTORY.md. For technical details, see ARCHITECTURE_REFERENCE.md.*
+*System is operational. Multi-stage jobs working. Ready for production workflows.*

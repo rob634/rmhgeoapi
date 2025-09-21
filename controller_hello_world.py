@@ -40,6 +40,7 @@ from schema_base import (
     TaskResult,
     TaskStatus
 )
+from contract_validator import enforce_contract
 # TaskFactory import removed - using BaseController.generate_task_id() instead
 from util_logger import LoggerFactory
 from util_logger import ComponentType, LogLevel, LogContext
@@ -123,6 +124,10 @@ class HelloWorldController(BaseController):
         """
         return "hello_world"
     
+    @enforce_contract(
+        params={'parameters': dict},
+        returns=dict
+    )
     def validate_job_parameters(self, parameters: Dict[str, Any]) -> Dict[str, Any]:
         """
         Validate HelloWorld job parameters.
@@ -157,6 +162,15 @@ class HelloWorldController(BaseController):
         self.logger.info(f"✅ Validated HelloWorld job: n={n}, name={validated_params['name']}")
         return validated_params
     
+    @enforce_contract(
+        params={
+            'stage_number': int,
+            'job_id': str,
+            'job_parameters': dict,
+            'previous_stage_results': (dict, type(None))
+        },
+        returns=list
+    )
     def create_stage_tasks(
         self,
         stage_number: int,
@@ -212,11 +226,22 @@ class HelloWorldController(BaseController):
             for i in range(n):
                 task_id = self.generate_task_id(job_id, stage_number, f"reply-{i}")
                 
-                # Get greeting from previous stage if available
-                greeting = "Hello"
+                # === ACCESSING PREVIOUS STAGE RESULTS ===
+                #
+                # STAGE KEY BOUNDARY CONTRACT:
+                # - previous_stage_results is a dict from Stage 1's aggregate_stage_results()
+                # - Stage 1 returns: {'greetings': [...], 'successful': N, ...}
+                # - We access: previous_stage_results['greetings'] to get the list
+                #
+                # NOTE: This comes from BaseController which does:
+                # - stage_results[str(stage-1)] to get Stage 1 results (string key!)
+                # - Passes it here as previous_stage_results
+                #
+                greeting = "Hello"  # Default fallback
                 if previous_stage_results and 'greetings' in previous_stage_results:
                     greetings = previous_stage_results['greetings']
-                    if i < len(greetings):
+                    # Match task i with greeting i from Stage 1
+                    if isinstance(greetings, list) and i < len(greetings):
                         greeting = greetings[i]
                 
                 tasks.append(TaskDefinition(
@@ -238,6 +263,13 @@ class HelloWorldController(BaseController):
         
         return tasks
     
+    @enforce_contract(
+        params={
+            'stage_number': int,
+            'task_results': list
+        },
+        returns=dict
+    )
     def aggregate_stage_results(
         self,
         stage_number: int,
@@ -245,64 +277,89 @@ class HelloWorldController(BaseController):
     ) -> Dict[str, Any]:
         """
         Aggregate results from all tasks in a stage.
-        
+
+        MUST return StageResultContract-compliant format for proper stage advancement.
+
         Args:
             stage_number: The stage that completed
             task_results: Results from all tasks
-            
+
         Returns:
-            Aggregated results to store and pass to next stage
+            Dict matching StageResultContract schema
         """
         self.logger.info(
             f"Aggregating {len(task_results)} task results for stage {stage_number}"
         )
-        
-        # Count successes and failures (handle string status due to use_enum_values)
+
+        # === CONTRACT VALIDATION ===
+        # Ensure task_results contains TaskResult objects, not dicts
+        for task in task_results:
+            if not hasattr(task, 'success'):
+                raise TypeError(
+                    f"Expected TaskResult objects in task_results, got {type(task).__name__}. "
+                    f"Repository must return Pydantic models, not dicts."
+                )
+
+        # Count successes and failures
         successful = [t for t in task_results if t.success]
         failed = [t for t in task_results if not t.success]
-        
-        # Aggregate based on stage
+
+        # Calculate success rate
+        success_rate = (len(successful) / len(task_results) * 100) if task_results else 0.0
+
+        # Determine overall status
+        if len(failed) == 0:
+            status = 'completed'
+        elif len(successful) == 0:
+            status = 'failed'
+        else:
+            status = 'completed_with_errors'
+
+        # Build metadata with stage-specific data
+        metadata = {}
+
         if stage_number == 1:
             # Greeting stage - collect all greetings
             greetings = []
             for task in successful:
                 if task.result_data and 'message' in task.result_data:
                     greetings.append(task.result_data['message'])
-            
-            return {
-                'stage': 'greeting',
-                'task_count': len(task_results),
-                'successful': len(successful),
-                'failed': len(failed),
-                'greetings': greetings,
-                'execution_time': sum(t.execution_time_seconds for t in task_results),
-                'timestamp': datetime.now(timezone.utc).isoformat()
-            }
-            
+            metadata['greetings'] = greetings
+            metadata['stage_name'] = 'greeting'
+
         elif stage_number == 2:
             # Reply stage - collect all replies
             replies = []
             for task in successful:
                 if task.result_data and 'reply' in task.result_data:
                     replies.append(task.result_data['reply'])
-            
-            return {
-                'stage': 'reply',
-                'task_count': len(task_results),
-                'successful': len(successful),
-                'failed': len(failed),
-                'replies': replies,
-                'execution_time': sum(t.execution_time_seconds for t in task_results),
-                'timestamp': datetime.now(timezone.utc).isoformat()
-            }
-        
+            metadata['replies'] = replies
+            metadata['stage_name'] = 'reply'
+
+        # Add execution time to metadata
+        metadata['execution_time'] = sum(t.execution_time_seconds for t in task_results if hasattr(t, 'execution_time_seconds'))
+
+        # Return StageResultContract-compliant format
         return {
-            'stage': stage_number,
+            'stage_number': stage_number,  # Integer stage number
+            'stage_key': str(stage_number),  # String key for JSON storage
+            'status': status,  # 'completed', 'failed', or 'completed_with_errors'
             'task_count': len(task_results),
-            'successful': len(successful),
-            'failed': len(failed)
+            'successful_tasks': len(successful),  # Use correct field name
+            'failed_tasks': len(failed),  # Use correct field name
+            'success_rate': success_rate,
+            'task_results': [t.model_dump(mode='json') if hasattr(t, 'model_dump') else t for t in task_results],  # Convert to JSON-serializable dicts
+            'completed_at': datetime.now(timezone.utc).isoformat(),  # ISO format string for JSON
+            'metadata': metadata  # Custom data goes here
         }
     
+    @enforce_contract(
+        params={
+            'stage_number': int,
+            'stage_results': dict
+        },
+        returns=bool
+    )
     def should_advance_stage(
         self,
         stage_number: int,
@@ -310,32 +367,32 @@ class HelloWorldController(BaseController):
     ) -> bool:
         """
         Determine if job should advance to next stage.
-        
+
         For HelloWorld, we advance if at least one task succeeded.
         In production, this might require higher success rates.
-        
+
         Args:
             stage_number: Current stage
-            stage_results: Aggregated results
-            
+            stage_results: Aggregated results (StageResultContract format)
+
         Returns:
             bool: True to advance, False to fail job
         """
-        # Require at least one successful task to advance
-        successful_count = stage_results.get('successful', 0)
-        
+        # Use correct field name per StageResultContract
+        successful_count = stage_results.get('successful_tasks', 0)
+
         if successful_count == 0:
             self.logger.error(
                 f"Stage {stage_number} failed - no successful tasks"
             )
             return False
-        
+
         # Could add more sophisticated logic here
         # For example, require 80% success rate:
-        # success_rate = successful_count / stage_results.get('task_count', 1)
-        # if success_rate < 0.8:
+        # success_rate = stage_results.get('success_rate', 0)
+        # if success_rate < 80.0:
         #     return False
-        
+
         self.logger.info(
             f"Stage {stage_number} completed with {successful_count} successful tasks"
         )

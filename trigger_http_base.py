@@ -37,6 +37,7 @@ Version: 1.0.0 - Foundation HTTP trigger abstraction
 
 from abc import ABC, abstractmethod
 from typing import Dict, Any, Optional, Union, List
+import uuid
 import json
 from datetime import datetime, timezone
 
@@ -312,7 +313,7 @@ class BaseHttpTrigger(ABC):
     
     def _generate_request_id(self) -> str:
         """Generate unique request ID for tracing."""
-        import uuid
+        
         return str(uuid.uuid4())[:8]
     
     def _create_success_response(self, data: Dict[str, Any], request_id: str) -> func.HttpResponse:
@@ -371,6 +372,7 @@ class JobManagementTrigger(BaseHttpTrigger):
     @property
     def job_repository(self):
         """Lazy-loaded job repository."""
+        # This needs to be fixeds so we don't rely on lazy loads
         if self._job_repository is None:
             from repository_factory import RepositoryFactory
             repos = RepositoryFactory.create_repositories()

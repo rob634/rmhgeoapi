@@ -67,6 +67,12 @@ from schema_blob import (
     ContainerSizeLimits
 )
 
+# Application imports - Orchestration schemas
+from schema_orchestration import (
+    FileOrchestrationItem,
+    create_file_orchestration_items
+)
+
 logger = LoggerFactory.create_logger(ComponentType.SERVICE, __name__)
 
 
@@ -126,7 +132,8 @@ def create_orchestration_handler():
             filter_term = params.get('filter', None)
             prefix = params.get('prefix', '')
             max_files = params.get('max_files', 2500)
-            metadata_level = params.get('metadata_level', MetadataLevel.STANDARD)
+            # Keep metadata_level as string for consistency
+            metadata_level = params.get('metadata_level', 'standard')
             
             # Get limits
             limits = ContainerSizeLimits()
@@ -160,36 +167,50 @@ def create_orchestration_handler():
                 raise NotImplementedError(error_msg)
             
             # Apply additional filtering if specified
-            files_to_process = []
-            
+            filtered_blobs = []
+
             for blob in blobs[:max_files]:  # Respect max_files limit
                 # Apply filter term if specified
                 if filter_term and filter_term.lower() not in blob['name'].lower():
                     continue
-                
-                # Add to processing list
-                files_to_process.append({
-                    'path': blob['name'],
-                    'size': blob['size'],
-                    'last_modified': blob['last_modified']
+
+                # Add to filtered list for processing
+                # The repository returns 'name' field which is the full path
+                # FileOrchestrationItem expects 'path' field for the full path
+                # and 'name' field for just the filename
+                filtered_blobs.append({
+                    'path': blob['name'],  # Full path from repository
+                    'name': blob['name'].split('/')[-1],  # Just filename for display
+                    'size': blob.get('size', 0),
+                    'last_modified': blob.get('last_modified'),
+                    'content_type': blob.get('content_type'),
+                    'etag': blob.get('etag'),
+                    'metadata': blob.get('metadata', {})
                 })
+
+            # Convert to FileOrchestrationItem objects with deterministic IDs
+            files_to_process = create_file_orchestration_items(
+                files=filtered_blobs,
+                container=container
+            )
             
             logger.info(f"Selected {len(files_to_process)} files for processing after filtering")
             
             # Calculate estimated duration
             estimated_duration = len(files_to_process) * 0.5  # ~0.5 seconds per file
             
-            # Create orchestration data
+            # Create orchestration data with FileOrchestrationItem objects
             orchestration = OrchestrationData(
                 total_files=blob_count,
                 files_to_process=len(files_to_process),
-                files=files_to_process,
+                files=files_to_process,  # Now these are FileOrchestrationItem objects
                 batch_size=100,  # Could be dynamic based on file sizes
                 estimated_duration_seconds=estimated_duration,
                 filter_applied=filter_term,
                 prefix_applied=prefix if prefix else None,
                 overflow_detected=blob_count > max_files,
-                overflow_message=f"Showing first {max_files} of {blob_count} files" if blob_count > max_files else None
+                overflow_message=f"Showing first {max_files} of {blob_count} files" if blob_count > max_files else None,
+                metadata_level=metadata_level  # Pass through for Stage 2 parameters
             )
             
             # Return orchestration data for controller
@@ -242,7 +263,8 @@ def create_metadata_handler():
             container = params['container']
             file_path = params['file_path']
             file_size = params.get('file_size', 0)
-            metadata_level = params.get('metadata_level', MetadataLevel.STANDARD)
+            # Keep metadata_level as string and convert to enum for comparison
+            metadata_level = params.get('metadata_level', 'standard')
             
             logger.debug(f"Extracting metadata for {container}/{file_path}")
             
@@ -250,7 +272,7 @@ def create_metadata_handler():
             blob_repo = RepositoryFactory.create_blob_repository()
             
             # Get detailed properties based on metadata level
-            if metadata_level == MetadataLevel.BASIC:
+            if metadata_level == 'basic' or metadata_level == MetadataLevel.BASIC.value:
                 # Just use what we already have from orchestration
                 metadata = BlobMetadata(
                     name=file_path,
@@ -275,7 +297,7 @@ def create_metadata_handler():
                 )
                 
                 # For FULL level, could add more analysis here
-                if metadata_level == MetadataLevel.FULL:
+                if metadata_level == 'full' or metadata_level == MetadataLevel.FULL.value:
                     # Could read file headers, extract EXIF, etc.
                     pass
             
@@ -284,7 +306,7 @@ def create_metadata_handler():
             # Return metadata for storage in task.result_data
             result = metadata.to_task_result()
             result['success'] = True
-            result['extraction_level'] = metadata_level
+            result['extraction_level'] = str(metadata_level)  # Ensure it's a string
             
             return result
             

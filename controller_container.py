@@ -43,9 +43,11 @@ Date: 9 December 2025
 # ============================================================================
 
 # Standard library imports
-import hashlib
 from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional
+
+# Contract enforcement imports
+from contract_validator import enforce_contract
 
 # Application imports - Core controllers and registry
 from controller_base import BaseController
@@ -145,6 +147,10 @@ class SummarizeContainerController(BaseController):
         super().__init__()
         logger.info("Initialized SummarizeContainerController")
     
+    @enforce_contract(
+        params={'parameters': dict},
+        returns=dict
+    )
     def validate_job_parameters(self, parameters: Dict[str, Any]) -> Dict[str, Any]:
         """
         Validate container summarization parameters.
@@ -186,6 +192,15 @@ class SummarizeContainerController(BaseController):
         
         return validated
     
+    @enforce_contract(
+        params={
+            'stage_number': int,
+            'job_id': str,
+            'job_parameters': dict,
+            'previous_stage_results': (dict, type(None))
+        },
+        returns=list
+    )
     def create_stage_tasks(self, stage_number: int, job_id: str,
                           job_parameters: Dict[str, Any],
                           previous_stage_results: Optional[Dict[str, Any]] = None) -> List[TaskDefinition]:
@@ -236,55 +251,58 @@ class SummarizeContainerController(BaseController):
                                 task_results: List[TaskResult]) -> Dict[str, Any]:
         """
         Aggregate results from summary task.
-        
-        For single-stage workflow, just returns the summary.
-        
+
+        MUST return StageResultContract-compliant format for proper stage advancement.
+
         Args:
             stage_number: Current stage number
             task_results: Results from completed tasks (TaskResult objects)
-            
+
         Returns:
-            Aggregated summary data (JSON-serializable dict)
+            Dict matching StageResultContract schema
         """
         if not task_results or len(task_results) == 0:
             logger.error("❌ No task results to aggregate for summary")
             raise ValueError("Cannot aggregate summary without task results")
 
-        # For single task, extract and return its result_data
+        # Count successes and failures
+        successful = [t for t in task_results if t.success]
+        failed = [t for t in task_results if not t.success]
+
+        # Calculate success rate
+        success_rate = (len(successful) / len(task_results) * 100) if task_results else 0.0
+
+        # Determine overall status
+        if len(failed) == 0:
+            status = 'completed'
+        elif len(successful) == 0:
+            status = 'failed'
+        else:
+            status = 'completed_with_errors'
+
+        # Extract container summary data for metadata
+        metadata = {}
         if len(task_results) == 1:
             task = task_results[0]
-            # Return the result_data if successful, or fail explicitly if failed
-            if task.success:
-                if not task.result_data:
-                    logger.warning("Task succeeded but has no result_data")
-                return task.result_data if task.result_data else {}
-            else:
-                error_msg = task.error_details or "Task failed without error details"
-                logger.error(f"❌ Summary task {task.task_id} failed: {error_msg}")
-                raise RuntimeError(f"Summary task failed: {error_msg}")
+            if task.success and task.result_data:
+                # Put the actual summary data in metadata
+                metadata['container_summary'] = task.result_data
+                metadata['stage_name'] = 'summarize'
+            elif not task.success:
+                metadata['error'] = task.error_details or "Task failed without error details"
         
-        # Future: aggregate multiple analysis chunks
-        # Convert TaskResult objects to dicts for JSON serialization
-        try:
-            serialized_results = []
-            logger.debug(f"Aggregating {len(task_results)} task results")
-            for task in task_results:
-                serialized_results.append({
-                    "task_id": task.task_id,
-                    "status": task.status.value if hasattr(task.status, 'value') else str(task.status),
-                    "result_data": task.result_data,
-                    "error_details": task.error_details
-                })
-        except Exception as e:
-            logger.error(f"Error serializing task results: {e}")
-            return {
-                "error": f"Error serializing task results: {e}",
-                "status": "failed"
-            }
-        logger.info(f"Aggregated {len(serialized_results)} task results")
+        # Return StageResultContract-compliant format
         return {
-            "aggregated_results": serialized_results,
-            "task_count": len(task_results)
+            'stage_number': stage_number,
+            'stage_key': str(stage_number),
+            'status': status,
+            'task_count': len(task_results),
+            'successful_tasks': len(successful),
+            'failed_tasks': len(failed),
+            'success_rate': success_rate,
+            'task_results': [t.model_dump(mode='json') if hasattr(t, 'model_dump') else t for t in task_results],
+            'completed_at': datetime.now(timezone.utc).isoformat(),
+            'metadata': metadata
         }
     
     def should_advance_stage(self, current_stage: int,
@@ -411,7 +429,11 @@ class ListContainerController(BaseController):
     def supports_dynamic_orchestration(self) -> bool:
         """Enable dynamic orchestration for this controller."""
         return True
-    
+
+    @enforce_contract(
+        params={'parameters': dict},
+        returns=dict
+    )
     def validate_job_parameters(self, parameters: Dict[str, Any]) -> Dict[str, Any]:
         """
         Validate container listing parameters.
@@ -464,9 +486,18 @@ class ListContainerController(BaseController):
             raise
         
         logger.info(f"Validated list_container parameters: container={validated['container']}, "f"filter={validated['filter']}, max_files={validated['max_files']}")
-        
+
         return validated
-    
+
+    @enforce_contract(
+        params={
+            'stage_number': int,
+            'job_id': str,
+            'job_parameters': dict,
+            'previous_stage_results': (dict, type(None))
+        },
+        returns=list
+    )
     def create_stage_tasks(self, stage_number: int, job_id: str,
                           job_parameters: Dict[str, Any],
                           previous_stage_results: Optional[Dict[str, Any]] = None) -> List[TaskDefinition]:
@@ -546,29 +577,19 @@ class ListContainerController(BaseController):
             # Use the formal orchestration items
             tasks = []
             for idx, item in enumerate(orchestration.items):
-                logger.debug(f"  📄 Processing item {idx}: type={item.item_type}, id={item.item_id[:50] if len(item.item_id) > 50 else item.item_id}")
+                # FileOrchestrationItem guarantees both item_id (hash) and path fields
+                # item_id is the deterministic hash, path is the actual file location
+                logger.debug(f"  📄 Processing item {idx}: type={item.item_type}, id={item.item_id}")
+                logger.debug(f"    Path: {item.path[:50]}..." if len(item.path) > 50 else f"    Path: {item.path}")
 
-                # FileOrchestrationItem has all the file details
-                # This is still a dodgy workflow TBD
-                if hasattr(item, 'path'):
-                    file_path = item.path
-                    logger.debug(f"    File task with path: {file_path[:50]}")
-                elif hasattr(item, 'item_id'):
-                    # This might not be a file at all
-                    logger.debug(f"    Non-file task with ID: {item.item_id}")
-                    # Handle non-file tasks differently
-                    continue  # or create a different task type
-                else:
-                    logger.error(f"    Item has neither path nor item_id: {item}")
-                    raise ValueError(f"Cannot determine task target from item: {item}")
-
-                # Create unique task ID based on file path hash
+                # Create unique task ID using the item_id (deterministic hash)
                 try:
-                    file_hash = hashlib.md5(file_path.encode()).hexdigest()[:8]
-                    task_id = self.generate_task_id(job_id, 2, f"file-{file_hash}")
+                    # Use first 8 chars of the hash for task ID suffix
+                    task_suffix = f"item-{item.item_id[:8]}"
+                    task_id = self.generate_task_id(job_id, 2, task_suffix)
                     logger.debug(f"    Generated task_id: {task_id}")
                 except Exception as e:
-                    logger.error(f"❌ Error generating task ID for file {file_path}: {e}")
+                    logger.error(f"❌ Error generating task ID for file {item.path}: {e}")
                     raise
                 
                 try:
@@ -580,19 +601,19 @@ class ListContainerController(BaseController):
                         stage_number=2,
                         job_id=job_id,
                         parameters={
-                            'container': job_parameters['container'],
-                            'file_path': file_path,
+                            'container': item.container,  # Use container from FileOrchestrationItem
+                            'file_path': item.path,       # Use path from FileOrchestrationItem
                             'file_size': item.size if item.size else 0,
-                            'last_modified': item.metadata.get('last_modified') if item.metadata else None,
+                            'last_modified': item.last_modified.isoformat() if item.last_modified else None,
                             'metadata_level': job_parameters.get('metadata_level', 'standard'),
-                            'task_index': f"file-{idx:04d}-{file_hash}",
+                            'task_index': f"item-{idx:04d}-{item.item_id[:8]}",
                             # Include any additional stage 2 parameters from orchestration
                             **orchestration.stage_2_parameters
                         }
                     )
                     logger.debug(f"    Created task definition for {task_id}")
                 except Exception as e:
-                    logger.error(f"❌ Error creating task definition for file {file_path}: {e}")
+                    logger.error(f"❌ Error creating task definition for file {item.path}: {e}")
                     raise
 
                 tasks.append(task)
@@ -650,7 +671,14 @@ class ListContainerController(BaseController):
             error_message = f"Invalid stage number {stage_number} for list_container"
             logger.error(error_message)
             raise RuntimeError(error_message)
-    
+
+    @enforce_contract(
+        params={
+            'stage_number': int,
+            'task_results': list
+        },
+        returns=dict
+    )
     def aggregate_stage_results(self, stage_number: int,
                                 task_results: List[TaskResult]) -> Dict[str, Any]:
         """
@@ -682,9 +710,28 @@ class ListContainerController(BaseController):
 
                     # Check if service already returns formal orchestration
                     if 'orchestration' in raw_data and 'action' in raw_data.get('orchestration', {}):
-                        # Already in formal format
-                        logger.debug("  ✅ Data already in formal orchestration format")
-                        return raw_data
+                        # Already in formal format but needs contract compliance
+                        logger.debug("  ✅ Data already in formal orchestration format, wrapping in contract")
+                        # Count successes and failures
+                        successful = [t for t in task_results if t.success]
+                        failed = [t for t in task_results if not t.success]
+
+                        # Return StageResultContract-compliant format
+                        return {
+                            'stage_number': stage_number,
+                            'stage_key': str(stage_number),
+                            'status': 'completed' if len(failed) == 0 else 'completed_with_errors',
+                            'task_count': len(task_results),
+                            'successful_tasks': len(successful),
+                            'failed_tasks': len(failed),
+                            'success_rate': (len(successful) / len(task_results) * 100) if task_results else 0.0,
+                            'task_results': [t.model_dump(mode='json') if hasattr(t, 'model_dump') else t for t in task_results],
+                            'completed_at': datetime.now(timezone.utc).isoformat(),
+                            'metadata': {
+                                'stage_name': 'analyze_orchestrate',
+                                **raw_data  # Include all orchestration data in metadata
+                            }
+                        }
 
                     logger.debug("  📦 Converting to formal orchestration format")
 
@@ -708,7 +755,17 @@ class ListContainerController(BaseController):
                     logger.debug(f"  Created {len(orchestration_items)} orchestration items")
 
                     # Determine action based on files found
-                    action = OrchestrationAction.CREATE_TASKS if files else OrchestrationAction.SKIP_STAGE
+                    # Even with 0 files, we still complete normally but with a warning
+                    if files:
+                        action = OrchestrationAction.CREATE_TASKS
+                        reason = None
+                        warnings = orchestration_data.get('warnings', [])
+                    else:
+                        # Don't create tasks, but complete normally with warning
+                        action = OrchestrationAction.COMPLETE_JOB
+                        reason = f"No files found matching filter criteria (filter={orchestration_data.get('filter', 'none')})"
+                        warnings = orchestration_data.get('warnings', [])
+                        warnings.append(f"No files matched the filter '{orchestration_data.get('filter', 'none')}' - job completing with 0 files processed")
                     logger.debug(f"  Orchestration action: {action}")
 
                     # Create formal orchestration instruction
@@ -718,6 +775,7 @@ class ListContainerController(BaseController):
                         total_items=orchestration_data.get('total_files', len(files)),
                         items_filtered=orchestration_data.get('files_filtered', 0),
                         items_included=len(files),
+                        reason=reason,  # Add reason for COMPLETE_JOB action
                         stage_2_parameters={
                             'metadata_level': orchestration_data.get('metadata_level', 'standard')
                         },
@@ -735,7 +793,7 @@ class ListContainerController(BaseController):
                             'files_filtered': orchestration_data.get('files_filtered', 0)
                         },
                         discovered_metadata=orchestration_data.get('metadata', {}),
-                        warnings=orchestration_data.get('warnings', [])
+                        warnings=warnings  # Use the warnings list we updated above
                     )
                     logger.debug(f"  Created DynamicOrchestrationResult")
 
@@ -743,7 +801,39 @@ class ListContainerController(BaseController):
                     logger.debug(f"  Stage result keys: {list(stage_result.keys())}")
                     logger.info(f"✅ Stage 1 returning orchestration for {len(files)} files")
 
-                    return stage_result
+                    # Count successes and failures
+                    successful = [t for t in task_results if t.success]
+                    failed = [t for t in task_results if not t.success]
+                    warnings_list = stage_result.get('warnings', [])
+
+                    # Determine status based on failures and warnings
+                    if len(failed) > 0:
+                        status = 'completed_with_errors'
+                    elif warnings_list:
+                        status = 'completed_with_warnings'
+                    else:
+                        status = 'completed'
+
+                    # Return StageResultContract-compliant format
+                    return {
+                        'stage_number': stage_number,
+                        'stage_key': str(stage_number),
+                        'status': status,
+                        'task_count': len(task_results),
+                        'successful_tasks': len(successful),
+                        'failed_tasks': len(failed),
+                        'success_rate': (len(successful) / len(task_results) * 100) if task_results else 0.0,
+                        'task_results': [t.model_dump(mode='json') if hasattr(t, 'model_dump') else t for t in task_results],
+                        'completed_at': datetime.now(timezone.utc).isoformat(),
+                        'metadata': {
+                            'stage_name': 'analyze_orchestrate',
+                            'orchestration': stage_result.get('orchestration', {}),
+                            'statistics': stage_result.get('statistics', {}),
+                            'analysis_summary': stage_result.get('analysis_summary', {}),
+                            'discovered_metadata': stage_result.get('discovered_metadata', {}),
+                            'warnings': warnings_list
+                        }
+                    }
                 else:
                     error_msg = task.error_details or "Orchestration failed"
                     logger.error(f"❌ Stage 1 orchestration failed: {error_msg}")
@@ -779,14 +869,31 @@ class ListContainerController(BaseController):
                             'content_type': result.get('content_type'),
                             'last_modified': result.get('last_modified')
                         }
-            
+
+            # Determine overall status
+            if file_count - success_count == 0:
+                status = 'completed'
+            elif success_count == 0:
+                status = 'failed'
+            else:
+                status = 'completed_with_errors'
+
+            # Return StageResultContract-compliant format
             return {
-                'stage': 'metadata_extraction',
-                'total_files': file_count,
-                'successful': success_count,
-                'failed': file_count - success_count,
-                'file_index': file_index
-                # Removed task_results to avoid TaskResult serialization issues
+                'stage_number': stage_number,
+                'stage_key': str(stage_number),
+                'status': status,
+                'task_count': file_count,
+                'successful_tasks': success_count,
+                'failed_tasks': file_count - success_count,
+                'success_rate': (success_count / file_count * 100) if file_count > 0 else 0.0,
+                'task_results': [t.model_dump(mode='json') if hasattr(t, 'model_dump') else t for t in task_results],
+                'completed_at': datetime.now(timezone.utc).isoformat(),
+                'metadata': {
+                    'stage_name': 'metadata_extraction',
+                    'file_index': file_index,
+                    'total_files_processed': file_count
+                }
             }
         
         elif stage_number == 3:
@@ -797,12 +904,31 @@ class ListContainerController(BaseController):
 
             if task_results:
                 task = task_results[0]
+
+                # Count successes and failures
+                successful = [t for t in task_results if t.success]
+                failed = [t for t in task_results if not t.success]
+
+                # Prepare metadata
+                metadata = {'stage_name': 'create_index'}
                 if task.success and task.result_data:
-                    return task.result_data
+                    metadata['index_data'] = task.result_data
                 else:
-                    error_msg = task.error_details or "Index creation failed"
-                    logger.error(f"❌ Stage 3 index creation failed: {error_msg}")
-                    raise RuntimeError(f"Stage 3 index creation failed: {error_msg}")
+                    metadata['error'] = task.error_details or "Index creation failed"
+
+                # Return StageResultContract-compliant format
+                return {
+                    'stage_number': stage_number,
+                    'stage_key': str(stage_number),
+                    'status': 'completed' if len(failed) == 0 else 'failed',
+                    'task_count': len(task_results),
+                    'successful_tasks': len(successful),
+                    'failed_tasks': len(failed),
+                    'success_rate': (len(successful) / len(task_results) * 100) if task_results else 0.0,
+                    'task_results': [t.model_dump(mode='json') if hasattr(t, 'model_dump') else t for t in task_results],
+                    'completed_at': datetime.now(timezone.utc).isoformat(),
+                    'metadata': metadata
+                }
 
             logger.error("❌ No index data available from Stage 3")
             raise ValueError("Stage 3 failed to produce index data")
@@ -810,7 +936,14 @@ class ListContainerController(BaseController):
         else:
             logger.error(f"❌ Unknown stage number {stage_number} for aggregation")
             raise ValueError(f"Invalid stage number {stage_number} for list_container aggregation")
-    
+
+    @enforce_contract(
+        params={
+            'current_stage': int,
+            'stage_results': dict
+        },
+        returns=bool
+    )
     def should_advance_stage(self, current_stage: int,
                             stage_results: Dict[str, Any]) -> bool:
         """
@@ -832,23 +965,36 @@ class ListContainerController(BaseController):
                 logger.error("❌ No stage results available for advancement decision")
                 raise ValueError("Cannot determine stage advancement without stage results")
 
-            # Check ready_for_stage_2 flag first (preferred)
-            if stage_results.get('ready_for_stage_2', False):
-                orchestration = stage_results.get('orchestration', {})
-                files_to_process = orchestration.get('files_to_process', 0)
-                logger.info(f"Advancing to Stage 2 with {files_to_process} files")
+            # Check metadata for orchestration details
+            metadata = stage_results.get('metadata', {})
+            orchestration_data = metadata.get('orchestration', {})
+
+            # Check the orchestration action
+            action = orchestration_data.get('action')
+            if action == 'complete_job':
+                completion_reason = orchestration_data.get('reason', 'No items to process')
+                warnings = metadata.get('warnings', [])
+                if warnings:
+                    logger.info(f"Job completing with warnings: {warnings[0]}")
+                else:
+                    logger.info(f"Job completing: {completion_reason}")
+                return False
+
+            # Check if there are items to process
+            items = orchestration_data.get('items', [])
+            if items:
+                logger.info(f"Advancing to Stage 2 with {len(items)} items to process")
                 return True
 
-            # Fallback: Check orchestration data
-            orchestration = stage_results.get('orchestration', {})
-            files_to_process = orchestration.get('files_to_process', 0)
+            # Legacy check for backward compatibility
+            files_to_process = orchestration_data.get('files_to_process', 0)
             should_advance = files_to_process > 0
-            
+
             if should_advance:
                 logger.info(f"Advancing to Stage 2 with {files_to_process} files")
             else:
                 logger.info("No files to process, completing job")
-            
+
             return should_advance
         
         elif current_stage == 2:

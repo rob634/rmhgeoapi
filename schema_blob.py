@@ -48,6 +48,13 @@ from typing import Dict, Any, Optional, List
 # Third-party imports - Will fail fast if Pydantic not installed
 from pydantic import BaseModel, Field, field_validator, ConfigDict
 
+# Application imports - Orchestration schemas
+from schema_orchestration import (
+    OrchestrationInstruction,
+    OrchestrationAction,
+    FileOrchestrationItem
+)
+
 
 # ============================================================================
 # ENUMS
@@ -235,18 +242,18 @@ class ContainerSummary(BaseModel):
 class OrchestrationData(BaseModel):
     """
     Data from Stage 1 orchestration analysis.
-    
+
     Used to pass information from the analyze_and_orchestrate task
     to the controller for creating Stage 2 tasks.
     """
     # Analysis results
     total_files: int = Field(..., ge=0, description="Total files found")
     files_to_process: int = Field(..., ge=0, description="Files selected for processing")
-    
-    # File list for task creation
-    files: List[Dict[str, Any]] = Field(
+
+    # File list for task creation - Now accepts FileOrchestrationItem objects
+    files: List[Any] = Field(
         default_factory=list,
-        description="List of files with basic info for task creation"
+        description="List of FileOrchestrationItem objects for task creation"
     )
     
     # Orchestration decisions
@@ -260,12 +267,71 @@ class OrchestrationData(BaseModel):
     # Overflow handling
     overflow_detected: bool = Field(False, description="Whether container exceeded limits")
     overflow_message: Optional[str] = Field(None, description="Message about overflow handling")
+
+    # Processing parameters
+    metadata_level: Optional[str] = Field(None, description="Metadata extraction level for Stage 2")
     
     def to_stage_result(self) -> Dict[str, Any]:
         """Convert to format for stage results"""
+
+        # Ensure all files are FileOrchestrationItem objects
+        orchestration_items = []
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"Processing {len(self.files)} files for orchestration")
+
+        for idx, file_item in enumerate(self.files):
+            try:
+                if isinstance(file_item, FileOrchestrationItem):
+                    # Already a FileOrchestrationItem
+                    orchestration_items.append(file_item)
+                    logger.debug(f"Item {idx} is FileOrchestrationItem")
+                elif hasattr(file_item, 'model_dump'):
+                    # It's a Pydantic model, keep as-is
+                    orchestration_items.append(file_item)
+                    logger.debug(f"Item {idx} is Pydantic model")
+                elif isinstance(file_item, dict):
+                    # Try to convert dict to FileOrchestrationItem
+                    if 'container' in file_item and 'path' in file_item:
+                        orchestration_items.append(FileOrchestrationItem(**file_item))
+                        logger.debug(f"Item {idx} converted from dict to FileOrchestrationItem")
+                    else:
+                        logger.warning(f"Item {idx} missing required fields for FileOrchestrationItem: {list(file_item.keys())}")
+                        continue
+                else:
+                    # Try to keep as-is
+                    orchestration_items.append(file_item)
+                    logger.debug(f"Item {idx} kept as-is (type: {type(file_item)})")
+            except Exception as e:
+                logger.error(f"Failed to process item {idx}: {e}")
+                logger.error(f"Item type: {type(file_item)}, Item: {file_item}")
+                continue
+
+        logger.info(f"Successfully processed {len(orchestration_items)} out of {len(self.files)} files")
+
+        # Create proper OrchestrationInstruction with validated items
+        if len(orchestration_items) > 0:
+            action = OrchestrationAction.CREATE_TASKS
+            reason = None
+        else:
+            action = OrchestrationAction.COMPLETE_JOB
+            reason = "No items to process. Completing job early."
+
+        orchestration_instruction = OrchestrationInstruction(
+            action=action,
+            items=orchestration_items,  # Now guaranteed to be proper OrchestrationItem objects
+            total_items=self.total_files,
+            items_filtered=0,
+            items_included=self.files_to_process,
+            batch_size=self.batch_size,
+            reason=reason,
+            stage_2_parameters={"metadata_level": str(self.metadata_level) if self.metadata_level else "standard"}
+        )
+
+        # Return the orchestration instruction in the expected format
         return {
-            "orchestration": self.model_dump(mode='json', exclude_none=True),
-            "ready_for_stage_2": len(self.files) > 0
+            "orchestration": orchestration_instruction.model_dump(mode='json'),
+            "ready_for_stage_2": len(orchestration_items) > 0
         }
     
     model_config = ConfigDict(validate_assignment=True)

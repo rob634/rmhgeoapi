@@ -46,11 +46,10 @@ from pydantic import BaseModel, Field, field_validator, ConfigDict
 
 class OrchestrationAction(str, Enum):
     """
-    Actions that Stage 1 can instruct for Stage 2.
+    Actions that Stage 1 can instruct for subsequent processing.
     """
     CREATE_TASKS = "create_tasks"      # Normal: create Stage 2 tasks
-    SKIP_STAGE = "skip_stage"          # Skip Stage 2, advance to Stage 3
-    COMPLETE_JOB = "complete_job"      # Complete job without further stages
+    COMPLETE_JOB = "complete_job"      # Complete job early (no more stages needed)
     FAIL_JOB = "fail_job"              # Fail the job with reason
     RETRY_STAGE = "retry_stage"        # Retry Stage 1 (rare)
 
@@ -64,7 +63,7 @@ class ItemType(str, Enum):
     TILE = "tile"                      # Spatial tile
     CHUNK = "chunk"                    # Data chunk
     GENERIC = "generic"                # Generic work item
-
+    # STAC ITEM = "stac_item"              # STAC item (future)
 
 # ============================================================================
 # ORCHESTRATION ITEM MODEL
@@ -171,7 +170,8 @@ class OrchestrationInstruction(BaseModel):
     )
 
     # Items to process (only required for CREATE_TASKS)
-    items: List[OrchestrationItem] = Field(
+    # Using Union to preserve subclass fields during serialization
+    items: List[Union['FileOrchestrationItem', OrchestrationItem]] = Field(
         default_factory=list,
         description="Items to create tasks for in Stage 2"
     )
@@ -241,7 +241,7 @@ class OrchestrationInstruction(BaseModel):
     def validate_reason_for_action(cls, v: Optional[str], info) -> Optional[str]:
         """Require reason for certain actions."""
         action = info.data.get('action')
-        if action in [OrchestrationAction.SKIP_STAGE, OrchestrationAction.FAIL_JOB] and not v:
+        if action in [OrchestrationAction.COMPLETE_JOB, OrchestrationAction.FAIL_JOB] and not v:
             raise ValueError(f"reason is required when action is {action}")
         return v
 
@@ -443,6 +443,25 @@ class ChunkOrchestrationItem(OrchestrationItem):
 # VALIDATION HELPERS
 # ============================================================================
 
+def create_item_id(container: str, path: str) -> str:
+    """
+    Create deterministic item ID from container and path.
+
+    Uses SHA256 hash to create a unique, deterministic identifier
+    that clearly separates identity from location.
+
+    Args:
+        container: Blob container name
+        path: File path within container
+
+    Returns:
+        16-character hex hash identifier
+    """
+    import hashlib
+    content = f"{container}:{path}".encode('utf-8')
+    return hashlib.sha256(content).hexdigest()[:16]
+
+
 def create_file_orchestration_items(
     files: List[Dict[str, Any]],
     container: str
@@ -460,9 +479,9 @@ def create_file_orchestration_items(
     items = []
     for file_info in files:
         item = FileOrchestrationItem(
-            item_id=file_info['path'],
+            item_id=create_item_id(container, file_info['path']),  # Deterministic hash
             container=container,
-            path=file_info['path'],
+            path=file_info['path'],  # Actual file path
             name=file_info.get('name', file_info['path'].split('/')[-1]),
             size=file_info.get('size'),
             content_type=file_info.get('content_type'),

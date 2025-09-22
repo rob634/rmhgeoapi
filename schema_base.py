@@ -1129,7 +1129,7 @@ class OrchestrationDataContract(BaseModel):
     # Action to take
     action: str = Field(
         ...,
-        description="Instruction for next stage: CREATE_TASKS, SKIP_STAGE, PARALLEL_STAGES, CONTINUE"
+        description="Instruction for next stage: CREATE_TASKS, COMPLETE_JOB, PARALLEL_STAGES, CONTINUE"
     )
 
     # Items to process in next stage
@@ -1168,18 +1168,18 @@ class OrchestrationDataContract(BaseModel):
         description="Additional orchestration metadata"
     )
 
-    # Validation reason (if action is SKIP_STAGE)
-    skip_reason: Optional[str] = Field(
+    # Validation reason (if action is COMPLETE_JOB or FAIL_JOB)
+    completion_reason: Optional[str] = Field(
         None,
         max_length=500,
-        description="Reason for skipping if action is SKIP_STAGE"
+        description="Reason for completing job early or failing"
     )
 
     @field_validator('action')
     @classmethod
     def validate_action(cls, v):
         """Validate orchestration action"""
-        valid_actions = ['CREATE_TASKS', 'SKIP_STAGE', 'PARALLEL_STAGES', 'CONTINUE', 'RETRY_STAGE', 'FAIL_JOB']
+        valid_actions = ['CREATE_TASKS', 'COMPLETE_JOB', 'PARALLEL_STAGES', 'CONTINUE', 'RETRY_STAGE', 'FAIL_JOB']
         if v not in valid_actions:
             raise ValueError(f"Invalid action: {v}. Must be one of {valid_actions}")
         return v
@@ -1195,10 +1195,10 @@ class OrchestrationDataContract(BaseModel):
         return v
 
     @model_validator(mode='after')
-    def validate_skip_reason(self) -> 'OrchestrationDataContract':
-        """Ensure skip_reason is provided when action is SKIP_STAGE"""
-        if self.action == 'SKIP_STAGE' and not self.skip_reason:
-            raise ValueError("skip_reason is required when action is SKIP_STAGE")
+    def validate_completion_reason(self) -> 'OrchestrationDataContract':
+        """Ensure completion_reason is provided when action is COMPLETE_JOB or FAIL_JOB"""
+        if self.action in ['COMPLETE_JOB', 'FAIL_JOB'] and not self.completion_reason:
+            raise ValueError(f"completion_reason is required when action is {self.action}")
         return self
 
     @model_validator(mode='after')
@@ -1235,21 +1235,21 @@ class OrchestrationDataContract(BaseModel):
         )
 
     @classmethod
-    def skip_stage(cls, reason: str) -> 'OrchestrationDataContract':
+    def complete_job(cls, reason: str) -> 'OrchestrationDataContract':
         """
-        Factory method for SKIP_STAGE action.
+        Factory method for COMPLETE_JOB action.
 
         Args:
-            reason: Why the stage should be skipped
+            reason: Why the job is completing early
 
         Returns:
-            OrchestrationDataContract configured to skip next stage
+            OrchestrationDataContract configured to complete job
         """
         return cls(
-            action='SKIP_STAGE',
+            action='COMPLETE_JOB',
             items=[],
             item_count=0,
-            skip_reason=reason
+            completion_reason=reason
         )
 
     @property
@@ -1258,9 +1258,9 @@ class OrchestrationDataContract(BaseModel):
         return self.action == 'CREATE_TASKS' and self.item_count > 0
 
     @property
-    def should_skip(self) -> bool:
-        """Check if next stage should be skipped"""
-        return self.action == 'SKIP_STAGE'
+    def should_complete_job(self) -> bool:
+        """Check if job should complete early"""
+        return self.action == 'COMPLETE_JOB'
     
     @property
     def remaining_tasks(self) -> int:

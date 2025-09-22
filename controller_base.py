@@ -88,10 +88,16 @@ from task_factory import TaskHandlerFactory
 from util_logger import LoggerFactory
 from util_logger import ComponentType, LogLevel, LogContext
 from schema_base import (
-    JobStatus, TaskStatus, JobRecord
+    JobStatus, TaskStatus, JobRecord,
+    JobExecutionContext, StageExecutionContext,
+    TaskDefinition, TaskResult, TaskRecord,
+    StageResultContract  # Added for stage result validation
 )
-from schema_base import JobExecutionContext, StageExecutionContext
-from schema_base import TaskDefinition, TaskResult, TaskRecord
+from schema_orchestration import (
+    OrchestrationInstruction,
+    OrchestrationAction,
+    FileOrchestrationItem
+)
 from schema_queue import JobQueueMessage, TaskQueueMessage
 from schema_workflow import WorkflowDefinition, get_workflow_definition
 from contract_validator import enforce_contract  # Added for queue boundary contracts
@@ -514,22 +520,57 @@ class BaseController(ABC):
             return None
 
         self.logger.debug("✅ Controller supports dynamic orchestration")
-        orchestration_data = stage_results.get('orchestration')
+
+        # Check for orchestration data in metadata field (StageResultContract compliance)
+        # Stage results now follow StageResultContract with custom data in 'metadata' field
+        metadata = stage_results.get('metadata', {})
+        orchestration_data = metadata.get('orchestration') or stage_results.get('orchestration')
 
         if not orchestration_data:
-            self.logger.warning("⚠️ Dynamic orchestration enabled but no 'orchestration' key in Stage 1 results")
+            self.logger.warning("⚠️ Dynamic orchestration enabled but no 'orchestration' key in Stage 1 metadata or top-level results")
             self.logger.debug(f"Stage result keys: {list(stage_results.keys())}")
+            if metadata:
+                self.logger.debug(f"Metadata keys: {list(metadata.keys())}")
             return None
 
         self.logger.debug(f"📦 Found orchestration data of type: {type(orchestration_data)}")
 
         try:
             # Import here to avoid circular dependency
-            from schema_orchestration import OrchestrationInstruction
+            from schema_orchestration import OrchestrationInstruction, FileOrchestrationItem
 
             # Handle both dict and OrchestrationInstruction objects
             if isinstance(orchestration_data, dict):
                 self.logger.debug(f"📋 Orchestration data is dict with keys: {list(orchestration_data.keys())}")
+
+                # Convert items to FileOrchestrationItem objects if they're dicts
+                if 'items' in orchestration_data:
+                    items = orchestration_data['items']
+                    converted_items = []
+                    for item in items:
+                        if isinstance(item, dict):
+                            # Log what fields we have
+                            self.logger.debug(f"Item fields: {list(item.keys())}")
+                            # Try to create FileOrchestrationItem from dict
+                            # Check if it has required fields for FileOrchestrationItem
+                            if 'container' in item and 'path' in item:
+                                self.logger.debug(f"Converting dict to FileOrchestrationItem: {item.get('item_id', 'no_id')}")
+                                converted_items.append(FileOrchestrationItem(**item))
+                            elif 'container' in item and 'name' in item:
+                                # Handle case where 'name' is present instead of 'path'
+                                self.logger.debug(f"Found 'name' field, converting to 'path': {item.get('item_id', 'no_id')}")
+                                item['path'] = item.pop('name')  # Rename 'name' to 'path'
+                                converted_items.append(FileOrchestrationItem(**item))
+                            else:
+                                # Fall back to generic OrchestrationItem
+                                self.logger.warning(f"Item missing required fields, using generic: {item.get('item_id', 'no_id')}")
+                                self.logger.warning(f"Item fields: {list(item.keys())}")
+                                converted_items.append(item)
+                        else:
+                            # Already an object, keep as-is
+                            converted_items.append(item)
+                    orchestration_data['items'] = converted_items
+
                 instruction = OrchestrationInstruction(**orchestration_data)
                 self.logger.info(f"✅ Created OrchestrationInstruction with action={instruction.action}, items={len(instruction.items)}")
                 return instruction
@@ -568,7 +609,7 @@ class BaseController(ABC):
         """
         self.logger.debug(f"🏗️ Creating tasks from orchestration instruction for stage {stage_number}")
 
-        from schema_orchestration import OrchestrationAction
+        # OrchestrationAction already imported at top
 
         if orchestration.action != OrchestrationAction.CREATE_TASKS:
             self.logger.info(f"⏭️ Orchestration action is {orchestration.action}, not creating tasks")
@@ -1108,7 +1149,7 @@ class BaseController(ABC):
             ValueError: If stage_results missing or invalid
             KeyError: If requested stage not found
         """
-        from schema_base import StageResultContract
+        # StageResultContract already imported at top
 
         # === THE CRITICAL STRING CONVERSION ===
         #

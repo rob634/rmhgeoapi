@@ -204,36 +204,37 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
             )
     
     def _check_storage_queues(self) -> Dict[str, Any]:
-        """Check Azure Storage Queue health."""
+        """Check Azure Storage Queue health using QueueRepository."""
         def check_queues():
-            from azure.storage.queue import QueueServiceClient
-            from azure.identity import DefaultAzureCredential
+            from repositories import RepositoryFactory
             from config import QueueNames
-            
-            config = get_config()
-            credential = DefaultAzureCredential()
-            queue_service = QueueServiceClient(
-                account_url=f"https://{config.storage_account_name}.queue.core.windows.net",
-                credential=credential
-            )
-            
+
+            # Use QueueRepository singleton - credential reused!
+            queue_repo = RepositoryFactory.create_queue_repository()
+
             queue_status = {}
             for queue_name in [QueueNames.JOBS, QueueNames.TASKS]:
                 try:
-                    queue_client = queue_service.get_queue_client(queue_name)
-                    properties = queue_client.get_queue_properties()
+                    # Use repository method to get queue length
+                    message_count = queue_repo.get_queue_length(queue_name)
                     queue_status[queue_name] = {
                         "status": "accessible",
-                        "message_count": properties.approximate_message_count
+                        "message_count": message_count
                     }
                 except Exception as e:
                     queue_status[queue_name] = {
                         "status": "error",
                         "error": str(e)
                     }
-            
+
+            # Add singleton status to verify performance improvement
+            queue_status["_repository_info"] = {
+                "singleton_id": id(queue_repo),
+                "type": "QueueRepository"
+            }
+
             return queue_status
-        
+
         return self.check_component_health("storage_queues", check_queues)
     
     def _check_storage_tables(self) -> Dict[str, Any]:

@@ -52,8 +52,8 @@ from schema_base import (
     generate_job_id
 )
 # generate_task_id moved to Controller layer - repository no longer needs it
-from repository_base import BaseRepository
-from interface_repository import (
+from .base import BaseRepository
+from .interface_repository import (
     IJobRepository, ITaskRepository, IStageCompletionRepository
 )
 from schema_base import (

@@ -52,7 +52,7 @@ from typing import Dict, Any, List, Optional
 
 # Application imports - Core dependencies
 from task_factory import TaskRegistry, TaskContext
-from repository_factory import RepositoryFactory
+from repositories import RepositoryFactory
 from util_logger import LoggerFactory, ComponentType
 
 # Application imports - Blob schemas

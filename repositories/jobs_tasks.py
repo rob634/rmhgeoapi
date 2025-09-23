@@ -52,7 +52,7 @@ from schema_base import (
 )
 # Task ID generation moved to Controller layer (hierarchically correct)
 # Repository no longer generates IDs - Controller provides them
-from repository_postgresql import (
+from .postgresql import (
     PostgreSQLRepository,
     PostgreSQLJobRepository,
     PostgreSQLTaskRepository,

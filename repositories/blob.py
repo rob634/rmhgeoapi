@@ -35,8 +35,8 @@ Authentication Hierarchy:
 5. Azure PowerShell
 
 Usage:
-    from repository_factory import RepositoryFactory
-    
+    from .factory import RepositoryFactory
+
     # Get authenticated repository
     blob_repo = RepositoryFactory.create_blob_repository()
     

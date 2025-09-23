@@ -82,8 +82,8 @@ from azure.identity import DefaultAzureCredential
 
 # Local application imports
 from config import get_config
-from repository_factory import RepositoryFactory
-from repository_jobs_tasks import StageCompletionRepository
+from repositories import RepositoryFactory
+from repositories import StageCompletionRepository
 from task_factory import TaskHandlerFactory
 from util_logger import LoggerFactory
 from util_logger import ComponentType, LogLevel, LogContext

@@ -133,8 +133,8 @@ from schema_queue import JobQueueMessage, TaskQueueMessage
 from schema_base import JobStatus, TaskStatus
 from util_logger import LoggerFactory
 from util_logger import ComponentType
-from repository_factory import RepositoryFactory
-from repository_postgresql import PostgreSQLRepository
+from repositories import RepositoryFactory
+from repositories import PostgreSQLRepository
 from controller_factories import JobFactory
 from pydantic import ValidationError
 import re

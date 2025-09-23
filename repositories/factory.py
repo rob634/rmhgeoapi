@@ -38,7 +38,7 @@ Date: 10 September 2025
 from typing import Dict, Any, Optional
 import logging
 
-from repository_jobs_tasks import JobRepository, TaskRepository, StageCompletionRepository
+from .jobs_tasks import JobRepository, TaskRepository, StageCompletionRepository
 from util_logger import LoggerFactory, ComponentType
 
 logger = LoggerFactory.create_logger(ComponentType.REPOSITORY, "RepositoryFactory")
@@ -198,7 +198,7 @@ class RepositoryFactory:
                 storage_account="myaccount"
             )
         """
-        from repository_blob import BlobRepository
+        from .blob import BlobRepository
         
         logger.info("🏭 Creating Blob Storage repository")
         logger.debug(f"  Storage account: {storage_account or 'from environment'}")

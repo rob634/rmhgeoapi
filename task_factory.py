@@ -47,7 +47,7 @@ from datetime import datetime, timezone
 
 from schema_base import TaskRecord, TaskResult, TaskStatus
 from schema_queue import TaskQueueMessage
-from repository_base import BaseRepository  # Use base class for type hints
+from repositories import BaseRepository  # Use base class for type hints
 from util_logger import LoggerFactory, ComponentType
 
 logger = LoggerFactory.create_logger(ComponentType.FACTORY, __name__)

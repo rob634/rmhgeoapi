@@ -27,7 +27,7 @@ import json
 from controller_base import BaseController
 from schema_base import WorkflowDefinition, StageDefinition, TaskDefinition, TaskResult
 from util_logger import LoggerFactory, ComponentType
-from repository_factory import RepositoryFactory
+from repositories import RepositoryFactory
 
 logger = LoggerFactory.create_logger(ComponentType.CONTROLLER, __name__)
 

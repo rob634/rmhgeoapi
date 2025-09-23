@@ -151,20 +151,21 @@ import service_blob  # Registers blob storage task handlers (analyze_and_orchest
 from task_factory import auto_discover_handlers
 auto_discover_handlers()
 
-# Application modules (our code) - HTTP Trigger Classes  
-from trigger_health import health_check_trigger
-from trigger_submit_job import submit_job_trigger
-from trigger_get_job_status import get_job_status_trigger
-from trigger_poison_monitor import poison_monitor_trigger
-from trigger_db_query import (
-    jobs_query_trigger, 
-    tasks_query_trigger, 
-    db_stats_trigger, 
+# Application modules (our code) - HTTP Trigger Classes
+# Import directly from modules to control when instances are created
+from triggers.health import health_check_trigger
+from triggers.submit_job import submit_job_trigger
+from triggers.get_job_status import get_job_status_trigger
+from triggers.poison_monitor import poison_monitor_trigger
+from triggers.schema_pydantic_deploy import pydantic_deploy_trigger
+from triggers.db_query import (
+    jobs_query_trigger,
+    tasks_query_trigger,
+    db_stats_trigger,
     enum_diagnostic_trigger,
     schema_nuke_trigger,
     function_test_trigger
 )
-from trigger_schema_pydantic_deploy import pydantic_deploy_trigger
 
 # Initialize function app with HTTP auth level
 app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)

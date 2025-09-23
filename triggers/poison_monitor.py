@@ -118,7 +118,7 @@ Author: Azure Geospatial ETL Team
 from typing import Dict, Any, List
 
 import azure.functions as func
-from trigger_http_base import SystemMonitoringTrigger
+from .http_base import SystemMonitoringTrigger
 
 
 class PoisonQueueMonitorTrigger(SystemMonitoringTrigger):

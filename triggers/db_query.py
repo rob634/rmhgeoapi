@@ -47,7 +47,7 @@ from datetime import datetime, timezone
 import azure.functions as func
 import psycopg
 from psycopg import sql
-from trigger_http_base import BaseHttpTrigger
+from .http_base import BaseHttpTrigger
 from config import get_config
 from util_logger import LoggerFactory
 from util_logger import ComponentType, LogLevel, LogContext

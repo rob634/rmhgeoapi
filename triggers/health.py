@@ -44,7 +44,7 @@ import sys
 from datetime import datetime, timezone
 
 import azure.functions as func
-from trigger_http_base import SystemMonitoringTrigger
+from .http_base import SystemMonitoringTrigger
 from config import get_config
 from schema_manager import SchemaManagerFactory
 from utils import validator

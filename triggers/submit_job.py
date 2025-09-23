@@ -89,7 +89,7 @@ Author: Azure Geospatial ETL Team
 from typing import Dict, Any, List
 
 import azure.functions as func
-from trigger_http_base import JobManagementTrigger
+from .http_base import JobManagementTrigger
 
 
 class JobSubmissionTrigger(JobManagementTrigger):

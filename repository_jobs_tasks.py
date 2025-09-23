@@ -58,7 +58,7 @@ from repository_postgresql import (
     PostgreSQLTaskRepository,
     PostgreSQLStageCompletionRepository
 )
-from contract_validator import enforce_contract
+from utils import enforce_contract
 
 logger = LoggerFactory.create_logger(ComponentType.REPOSITORY, "JobsTasksRepository")
 

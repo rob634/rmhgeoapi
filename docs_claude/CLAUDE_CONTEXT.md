@@ -1,19 +1,22 @@
 # Claude Context - Azure Geospatial ETL Pipeline
 
 **Author**: Robert and Geospatial Claude Legion
-**Date**: 21 SEP 2025
+**Date**: 22 SEP 2025
 **Primary Documentation**: Start here for all Claude instances
 
-## ✅ CURRENT STATUS: SYSTEM OPERATIONAL
+## ✅ CURRENT STATUS: MULTI-STAGE ORCHESTRATION FULLY OPERATIONAL
 
 ### Working Features
 - ✅ **Multi-stage job orchestration** working end-to-end (tested with n=100)
+- ✅ **Container controller** with dynamic orchestration (Stage 1 analyzes, Stage 2 processes)
 - ✅ **Contract enforcement** throughout system with @enforce_contract decorators
+- ✅ **Contract compliance** fixed in all controllers with StageResultContract
 - ✅ **JSON serialization** fixed with Pydantic `model_dump(mode='json')`
 - ✅ **Error handling** with granular try-catch blocks and proper job failure marking
 - ✅ **Advisory locks** preventing race conditions at any scale
 - ✅ **PostgreSQL atomic operations** via StageCompletionRepository
 - ✅ **Idempotency** - SHA256 hash ensures duplicate submissions return same job_id
+- ✅ **Folder structure** - utils/ folder tested and working in Azure Functions
 
 ## 🚀 Quick Start
 
@@ -25,7 +28,7 @@
 
 ### Deployment Command
 ```bash
-func azure functionapp publish rmhgeoapibeta --build remote
+func azure functionapp publish rmhgeoapibeta --python --build remote
 ```
 
 ### Testing Commands (Ready to Copy)
@@ -102,17 +105,16 @@ trigger_*.py     → HTTP/Queue/Timer entry points
 util_*.py        → Utilities and helpers
 ```
 
-### File Count Summary
+### File Count Summary (Updated with folder structure)
 - **Controllers**: 5 files (base, container, hello_world, stac_setup, factories)
 - **Interfaces**: 1 file
 - **Repositories**: 6 files (base, blob, factory, jobs_tasks, postgresql, vault)
 - **Services**: 4 files (factories, hello_world, stac_setup, schema_manager)
 - **Schemas**: 6 files (base, core, orchestration, queue, sql_generator, workflow)
 - **Triggers**: 7 files
-- **Utilities**: 3 files (contract_validator, import_validator, logger)
-- **Utilities**: 2 files
+- **Utilities**: 3 files (1 in utils/ folder: contract_validator; 2 in root: import_validator, logger)
 - **Core**: 2 files (function_app, config)
-- **Total Python Files**: 28
+- **Total Python Files**: 34+
 
 ### Import Rules
 ```python
@@ -127,7 +129,7 @@ from repository_factory import RepositoryFactory
 repo = RepositoryFactory.create_repository("postgresql")
 ```
 
-## 🎯 Current State (13 SEP 2025)
+## 🎯 Current State (22 SEP 2025)
 
 ### ✅ What's Working - FULL END-TO-END WORKFLOW
 - ✅ HTTP job submission → Queue → Database flow
@@ -135,17 +137,25 @@ repo = RepositoryFactory.create_repository("postgresql")
 - ✅ Stage advancement from stage 1 to stage 2
 - ✅ Stage 2 task execution and completion
 - ✅ Job completion with result aggregation
+- ✅ **Container workflows** - summarize_container and list_container operational
+- ✅ **Dynamic orchestration** - Stage 1 analyzes content, creates Stage 2 tasks
 - ✅ PostgreSQL advisory locks (scales to n=30+ concurrent tasks without deadlocks)
 - ✅ Database monitoring endpoints (/api/db/*)
 - ✅ Schema deployment and validation
 - ✅ **NO POISON QUEUE MESSAGES** - All issues resolved
 - ✅ **Idempotency working** - Duplicate submissions return same job_id
+- ✅ **Folder migration** - utils/ folder structure working in Azure Functions
 
-### 🎉 Major Issues Resolved (13 SEP 2025)
+### 🎉 Major Issues Resolved (22 SEP 2025)
 1. **Deadlock Elimination**: Advisory locks enable n=30+ concurrent tasks (previously deadlocked at n>4)
 2. **Poison Queue Issue**: Fixed invalid status transition PROCESSING→PROCESSING
 3. **N=2 Race Condition**: Fixed task completion counting issue
 4. **Complete End-to-End**: All job sizes (n=1 to n=30+) work perfectly
+5. **Contract Compliance**: Fixed StageResultContract compliance in all controllers
+6. **Dynamic Orchestration**: Container controller Stage 1→Stage 2 task creation working
+
+### ⚠️ Known Issues
+1. **complete_job action**: When Stage 1 returns action="complete_job", system still tries to advance to Stage 2
 
 ### 🔒 Critical Pattern: Advisory Locks for "Last Task Turns Out Lights"
 **The Challenge**: When multiple tasks complete simultaneously, exactly one must detect it's the last and advance the stage.

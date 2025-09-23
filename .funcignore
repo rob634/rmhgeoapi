@@ -38,9 +38,9 @@ __pycache__/
 htmlcov/
 
 # ============================================================================
-# EXCLUDE ALL SUBDIRECTORIES (only root files should deploy)
+# EXCLUDE SPECIFIC SUBDIRECTORIES (but NOT utils/)
 # ============================================================================
-*/
+# */ - REMOVED! This was excluding utils/ folder
 reference/
 ancient_code/
 scripts/
@@ -50,6 +50,7 @@ backup/
 old/
 temp/
 tmp/
+docs_claude/
 
 # ============================================================================
 # LOCAL-ONLY FILES (development, testing, utilities)
@@ -110,3 +111,5 @@ surprise*
 
 # SQL files (not needed at runtime)
 *.sql
+
+local_*

@@ -60,7 +60,7 @@ from schema_base import (
     StageAdvancementResult, TaskCompletionResult, JobCompletionResult,
     TaskResult, TaskStatus
 )
-from contract_validator import enforce_contract  # Added for contract enforcement
+from utils import enforce_contract  # Added for contract enforcement
 
 # Logger setup
 logger = logging.getLogger(__name__)

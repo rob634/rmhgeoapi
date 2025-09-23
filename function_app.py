@@ -119,7 +119,7 @@ logging.getLogger("msal").setLevel(logging.WARNING)  # Microsoft Authentication 
 # FIXED: util_logger now uses dataclasses instead of Pydantic (stdlib only)
 
 # Application modules (our code) - Utilities
-from util_import_validator import validator
+from utils import validator
 
 # Perform fail-fast startup validation (only in Azure Functions or when explicitly enabled)
 validator.ensure_startup_ready()

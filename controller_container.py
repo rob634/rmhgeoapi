@@ -47,7 +47,7 @@ from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional
 
 # Contract enforcement imports
-from contract_validator import enforce_contract
+from utils import enforce_contract
 
 # Application imports - Core controllers and registry
 from controller_base import BaseController

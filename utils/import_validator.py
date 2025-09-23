@@ -36,7 +36,7 @@ Architecture:
 
 Usage:
     # Automatic startup validation
-    from util_import_validator import validator
+    from utils import validator
     validator.ensure_startup_ready()  # Raises ImportError if critical deps missing
     
     # Health check integration  

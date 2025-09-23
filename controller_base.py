@@ -100,7 +100,7 @@ from schema_orchestration import (
 )
 from schema_queue import JobQueueMessage, TaskQueueMessage
 from schema_workflow import WorkflowDefinition, get_workflow_definition
-from contract_validator import enforce_contract  # Added for queue boundary contracts
+from utils import enforce_contract  # Added for queue boundary contracts
 
 
 class BaseController(ABC):

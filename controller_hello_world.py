@@ -40,7 +40,7 @@ from schema_base import (
     TaskResult,
     TaskStatus
 )
-from contract_validator import enforce_contract
+from utils import enforce_contract
 # TaskFactory import removed - using BaseController.generate_task_id() instead
 from util_logger import LoggerFactory
 from util_logger import ComponentType, LogLevel, LogContext

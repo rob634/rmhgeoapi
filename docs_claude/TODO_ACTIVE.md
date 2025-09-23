@@ -18,6 +18,11 @@
 - ✅ **Schema management** - Redeploy endpoint for clean state
 
 ### NEW Features (22 SEP 2025)
+- ✅ **FOLDER STRUCTURE MIGRATION** - Azure Functions now support subdirectories!
+  - Fixed `.funcignore` removing `*/` wildcard that was excluding all folders
+  - Added `utils/__init__.py` to make folder a Python package
+  - Successfully moved `contract_validator.py` to `utils/`
+  - Both import styles working perfectly
 - ✅ **Container Controller Fixed** - StageResultContract compliance fully implemented
 - ✅ **Dynamic Orchestration** - Stage 1 analyzes container, creates Stage 2 tasks dynamically
 - ✅ **Zero-File Handling** - Correctly handles empty result sets with complete_job action

@@ -47,7 +47,7 @@ import azure.functions as func
 from trigger_http_base import SystemMonitoringTrigger
 from config import get_config
 from schema_manager import SchemaManagerFactory
-from util_import_validator import validator
+from utils import validator
 
 
 class HealthCheckTrigger(SystemMonitoringTrigger):

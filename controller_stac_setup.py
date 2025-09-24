@@ -78,6 +78,43 @@ class STACSetupController(BaseController):
         total_stages=3
     )
 
+    # Static registration metadata for explicit registration
+    REGISTRATION_INFO = {
+        'job_type': 'stac_setup',
+        'workflow': workflow,
+        'description': 'Install and configure PgSTAC database for STAC catalog operations',
+        'max_parallel_tasks': 1,
+        'timeout_minutes': 10,
+        'stages': {
+            'install_pgstac': {
+                'stage_number': 1,
+                'task_type': 'install_pgstac',
+                'max_parallel': 1,
+                'description': 'Install PgSTAC schema, tables, and functions'
+            },
+            'configure_roles': {
+                'stage_number': 2,
+                'task_type': 'configure_pgstac_roles',
+                'max_parallel': 1,
+                'description': 'Set up database roles and permissions'
+            },
+            'verify_installation': {
+                'stage_number': 3,
+                'task_type': 'verify_pgstac_installation',
+                'max_parallel': 1,
+                'description': 'Verify installation and create Bronze collection'
+            }
+        },
+        'required_env_vars': [
+            'PGHOST',
+            'PGDATABASE',
+            'PGUSER',
+            'PGPASSWORD'
+        ],
+        'dependencies': ['pypgstac', 'psycopg', 'postgis'],
+        'features': ['one_time_setup', 'database_migration', 'stac_catalog']
+    }
+
     def validate_job_parameters(self, parameters: Dict[str, Any]) -> Dict[str, Any]:
         """
         Validate STAC setup parameters.

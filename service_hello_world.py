@@ -78,6 +78,31 @@ from task_factory import TaskRegistry, TaskContext
 
 
 # ============================================================================
+# HANDLER METADATA FOR EXPLICIT REGISTRATION
+# ============================================================================
+# Static metadata for TaskCatalog registration during migration from decorators
+
+HELLO_GREETING_INFO = {
+    'task_type': 'hello_world_greeting',
+    'description': 'Generate greeting message for hello world workflow',
+    'timeout_seconds': 30,
+    'max_retries': 3,
+    'required_services': [],
+    'stage': 1,
+    'features': ['parallel_execution', 'no_predecessor']
+}
+
+HELLO_REPLY_INFO = {
+    'task_type': 'hello_world_reply',
+    'description': 'Generate reply message using predecessor data from greeting',
+    'timeout_seconds': 30,
+    'max_retries': 3,
+    'required_services': [],
+    'stage': 2,
+    'features': ['parallel_execution', 'predecessor_access', 'lineage_pattern']
+}
+
+# ============================================================================
 # STAGE 1: GREETING HANDLER
 # ============================================================================
 # Demonstrates basic task handler for first stage (no predecessor data)

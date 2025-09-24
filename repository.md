@@ -1,7 +1,7 @@
 # Singleton & Repository Patterns in Azure Functions
 ## With Complete Queue Repository Design
 
-**Date**: November 2024  
+**Date**: 23 SEP 2025 
 **Purpose**: Establish clear patterns for singleton usage and repository design  
 **Focus**: When to use singletons, why credentials belong in repositories, complete QueueRepository implementation
 

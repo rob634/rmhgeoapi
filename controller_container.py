@@ -128,6 +128,32 @@ list_container_workflow = WorkflowDefinition(
 )
 class SummarizeContainerController(BaseController):
     """
+    Static registration metadata for explicit registration.
+
+    This metadata will be used by JobCatalog for explicit registration,
+    allowing us to move away from decorator-based import-time registration.
+    """
+    REGISTRATION_INFO = {
+        'job_type': 'summarize_container',
+        'workflow': summarize_container_workflow,
+        'description': 'Generate container statistics and summary',
+        'max_parallel_tasks': 1,
+        'timeout_minutes': 10,
+        'stages': {
+            'summarize': {
+                'stage_number': 1,
+                'task_type': 'summarize_container',
+                'max_parallel': 1
+            }
+        },
+        'required_env_vars': [
+            'AZURE_STORAGE_ACCOUNT_URL',
+            'BRONZE_CONTAINER',
+            'SILVER_CONTAINER'
+        ],
+        'dependencies': ['azure-storage-blob', 'azure-identity']
+    }
+    """
     Controller for summarizing container contents.
     
     Generates statistics about file counts, sizes, and distributions.
@@ -400,8 +426,44 @@ class SummarizeContainerController(BaseController):
 
 class ListContainerController(BaseController):
     """
+    Static registration metadata for explicit registration.
+
+    This metadata will be used by JobCatalog for explicit registration.
+    Demonstrates dynamic orchestration with analyze & orchestrate pattern.
+    """
+    REGISTRATION_INFO = {
+        'job_type': 'list_container',
+        'workflow': list_container_workflow,
+        'description': 'List container with dynamic task generation for metadata extraction',
+        'max_parallel_tasks': 100,
+        'timeout_minutes': 20,
+        'stages': {
+            'analyze_orchestrate': {
+                'stage_number': 1,
+                'task_type': 'analyze_and_orchestrate',
+                'max_parallel': 1,
+                'description': 'Analyze container and create dynamic tasks'
+            },
+            'extract_metadata': {
+                'stage_number': 2,
+                'task_type': 'extract_metadata',
+                'max_parallel': 100,
+                'depends_on': 'analyze_orchestrate',
+                'description': 'Extract metadata from files (dynamically generated)'
+            }
+        },
+        'required_env_vars': [
+            'AZURE_STORAGE_ACCOUNT_URL',
+            'BRONZE_CONTAINER',
+            'SILVER_CONTAINER'
+        ],
+        'dependencies': ['azure-storage-blob', 'azure-identity'],
+        'features': ['dynamic_orchestration', 'metadata_extraction']
+    }
+
+    """
     Controller for listing container contents with metadata extraction.
-    
+
     Implements the "Analyze & Orchestrate" pattern where Stage 1 analyzes
     the container and dynamically creates Stage 2 tasks based on content.
     

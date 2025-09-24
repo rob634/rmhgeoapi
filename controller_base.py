@@ -76,10 +76,6 @@ import re
 import traceback
 from typing import List, Dict, Any, Optional
 
-# Azure imports
-from azure.storage.queue import QueueServiceClient
-from azure.identity import DefaultAzureCredential
-
 # Local application imports
 from config import get_config
 from repositories import RepositoryFactory
@@ -753,7 +749,7 @@ class BaseController(ABC):
         Creates a JobQueueMessage and sends it to the geospatial-jobs queue
         for asynchronous processing. This initiates the job execution flow.
 
-        Uses managed identity (DefaultAzureCredential) for queue access.
+        Uses QueueRepository singleton for managed queue access.
 
         Args:
             job_id: The unique job identifier (SHA256 hash)
@@ -773,34 +769,23 @@ class BaseController(ABC):
         
         # Send to queue
         try:
-            # Initialize Azure queue client with managed identity
-            account_url = config.queue_service_url
+            # Use QueueRepository singleton - credential reused across all invocations!
+            self.logger.debug(f"📦 Getting QueueRepository singleton instance")
+            try:
+                queue_repo = RepositoryFactory.create_queue_repository()
+                self.logger.debug(f"✅ QueueRepository obtained (singleton reused)")
+            except Exception as repo_error:
+                self.logger.error(f"❌ CRITICAL: Failed to get QueueRepository: {repo_error}")
+                raise RuntimeError(f"CRITICAL CONFIGURATION ERROR - Queue repository initialization failed: {repo_error}")
 
-            # Create credential for Azure Storage access
-            self.logger.debug(f"🔐 Creating DefaultAzureCredential for queue operations")
+            # Send message to queue using repository (handles encoding automatically)
+            self.logger.debug(f"📤 Sending job message to queue: {config.job_processing_queue}")
             try:
-                credential = DefaultAzureCredential()
-                self.logger.debug(f"✅ DefaultAzureCredential created successfully")
-            except Exception as cred_error:
-                # CONTRACT: Managed identity must be configured properly
-                self.logger.error(f"❌ CRITICAL: Failed to create DefaultAzureCredential for storage queues: {cred_error}")
-                raise RuntimeError(f"CRITICAL CONFIGURATION ERROR - Managed identity authentication failed for Azure Storage: {cred_error}")
-            
-            self.logger.debug(f"🔗 Creating QueueServiceClient with URL: {account_url}")
-            try:
-                queue_service = QueueServiceClient(account_url, credential=credential)
-                queue_client = queue_service.get_queue_client(config.job_processing_queue)
-                self.logger.debug(f"📤 Queue client created for: {config.job_processing_queue}")
-            except Exception as queue_error:
-                self.logger.error(f"❌ CRITICAL: Failed to create QueueServiceClient or queue client: {queue_error}")
-                raise RuntimeError(f"CRITICAL CONFIGURATION ERROR - Azure Storage Queue access failed: {queue_error}")
-            
-            # Convert message to JSON
-            message_json = queue_message.model_dump_json()
-            self.logger.debug(f"Queueing job message: {message_json}")
-            
-            # Send message to queue
-            queue_client.send_message(message_json)
+                message_id = queue_repo.send_message(config.job_processing_queue, queue_message)
+                self.logger.debug(f"✅ Message sent successfully. ID: {message_id}")
+            except Exception as send_error:
+                self.logger.error(f"❌ Failed to send message to queue: {send_error}")
+                raise RuntimeError(f"Failed to queue job message: {send_error}")
             
             self.logger.info(f"Job {job_id[:16]}... queued successfully to {config.job_processing_queue}")
             
@@ -1414,15 +1399,10 @@ class BaseController(ABC):
                     self.logger.debug(f"📤 Target task queue: {config.task_processing_queue}")
                     
                     # Create credential (reuse from RBAC configuration)
-                    self.logger.debug(f"🔐 Creating DefaultAzureCredential for task queue operations")
-                    credential = DefaultAzureCredential()
-                    self.logger.debug(f"✅ DefaultAzureCredential created successfully for tasks")
-                    
-                    # Create queue service and client
-                    self.logger.debug(f"🔗 Creating QueueServiceClient for tasks")
-                    queue_service = QueueServiceClient(account_url, credential=credential)
-                    queue_client = queue_service.get_queue_client(config.task_processing_queue)
-                    self.logger.debug(f"✅ Task queue client created successfully for: {config.task_processing_queue}")
+                    # Use QueueRepository singleton for task queue operations
+                    self.logger.debug(f"📦 Getting QueueRepository singleton for task operations")
+                    queue_repo = RepositoryFactory.create_queue_repository()
+                    self.logger.debug(f"✅ QueueRepository obtained for tasks (singleton reused)")
                     
                 except Exception as queue_setup_error:
                     self.logger.error(f"❌ CRITICAL: Failed to setup Azure Queue client for task: {task_record.task_id}")
@@ -1438,21 +1418,15 @@ class BaseController(ABC):
                 # === STEP 4: SEND MESSAGE TO QUEUE ===
                 self.logger.debug(f"📨 Sending task message to queue: {task_record.task_id}")
                 try:
-                    message_json = task_message.model_dump_json()
-                    self.logger.debug(f"📋 Task message JSON length: {len(message_json)} characters")
-                    self.logger.debug(f"📋 Task message preview: {message_json[:200]}...")
-                    
-                    # DEBUG: Log queue send attempt
-                    self.logger.debug(f"🔍 CALLING queue_client.send_message for: {task_record.task_id}")
+                    # Send using QueueRepository (handles encoding automatically)
+                    self.logger.debug(f"🔍 Sending task to queue via QueueRepository: {task_record.task_id}")
                     self.logger.debug(f"    Queue: {config.task_processing_queue}")
-                    self.logger.debug(f"    Message size: {len(message_json)} bytes")
-                    
-                    send_result = queue_client.send_message(message_json)
-                    
+
+                    message_id = queue_repo.send_message(config.task_processing_queue, task_message)
+
                     # DEBUG: Log queue send result
                     self.logger.debug(f"✅ Task message sent successfully to queue: {task_record.task_id}")
-                    self.logger.debug(f"🔍 Queue send result: {send_result}")
-                    self.logger.debug(f"📨 Message ID: {getattr(send_result, 'message_id', 'N/A')}")
+                    self.logger.debug(f"📨 Message ID: {message_id}")
                     
                     queued_tasks += 1
                     self.logger.info(f"✅ Task {i+1}/{len(task_definitions)} completed successfully: {task_record.task_id}")
@@ -1710,13 +1684,9 @@ class BaseController(ABC):
         tasks_queued = 0
         tasks_failed = 0
         
-        # Setup queue client
-        credential = DefaultAzureCredential()
-        queue_service = QueueServiceClient(
-            account_url=config.queue_service_url,
-            credential=credential
-        )
-        queue_client = queue_service.get_queue_client(config.task_processing_queue)
+        # Get QueueRepository singleton for task queue operations
+        queue_repo = RepositoryFactory.create_queue_repository()
+        self.logger.debug(f"📦 Using QueueRepository for task submission (singleton reused)")
         
         for task_def in tasks:
             try:
@@ -1738,8 +1708,9 @@ class BaseController(ABC):
                     raise RuntimeError(f"Failed to create task record for {task_def.task_id}")
 
                 task_message = task_def.to_queue_message()
-                message_json = task_message.model_dump_json()
-                queue_client.send_message(message_json)
+                # Send using QueueRepository (handles encoding automatically)
+                message_id = queue_repo.send_message(config.task_processing_queue, task_message)
+                self.logger.debug(f"📨 Task queued with message ID: {message_id}")
                 tasks_queued += 1
                 
             except Exception as e:
@@ -2207,14 +2178,10 @@ class BaseController(ABC):
             if not advancement.job_updated:
                 raise RuntimeError(f"Failed to advance job {job_id} to stage {next_stage}")
             
-            # Queue job for next stage processing
-            credential = DefaultAzureCredential()
-            queue_service = QueueServiceClient(
-                account_url=config.queue_service_url,
-                credential=credential
-            )
-            queue_client = queue_service.get_queue_client(config.job_processing_queue)
-            
+            # Queue job for next stage processing using QueueRepository
+            queue_repo = RepositoryFactory.create_queue_repository()
+            self.logger.debug(f"📦 Using QueueRepository for stage advancement (singleton reused)")
+
             # Create job message for next stage
             job_message = JobQueueMessage(
                 job_id=job_id,
@@ -2222,9 +2189,10 @@ class BaseController(ABC):
                 stage=next_stage,
                 parameters=job_record.parameters
             )
-            
-            message_json = job_message.model_dump_json()
-            queue_client.send_message(message_json)
+
+            # Send using QueueRepository (handles encoding automatically)
+            message_id = queue_repo.send_message(config.job_processing_queue, job_message)
+            self.logger.debug(f"📨 Next stage job queued with message ID: {message_id}")
             
             self.logger.info(f"Job {job_id[:16]}... queued for stage {next_stage}")
             

@@ -351,3 +351,96 @@ registry.register_module(VECTOR_MODULE)
 ---
 
 *This refactoring establishes the foundation for enterprise-scale microservice architecture while maintaining development velocity.*
+
+⏺ 📋 Detailed Phase 1 Plan for Registration Refactoring
+
+  Overview
+
+  Phase 1 creates the infrastructure for explicit registration without breaking existing decorator-based registration. This allows parallel testing and gradual
+  migration.
+
+  Detailed Implementation Plan:
+
+  Step 1: Create registration.py (Tasks 1.1-1.2)
+
+  # registration.py - New file
+  class JobCatalog:
+      """Non-singleton registry for job controllers."""
+      def __init__(self):
+          self._controllers = {}
+
+      def register_controller(self, job_type: str, controller_class: type, metadata: dict):
+          """Register a controller with metadata."""
+          if job_type in self._controllers:
+              raise ValueError(f"Controller for {job_type} already registered")
+          self._controllers[job_type] = {
+              'class': controller_class,
+              'metadata': metadata
+          }
+
+      def get_controller(self, job_type: str):
+          """Get controller class for job type."""
+          if job_type not in self._controllers:
+              raise ValueError(f"No controller registered for {job_type}")
+          return self._controllers[job_type]['class']
+
+      def list_job_types(self) -> list:
+          """List all registered job types."""
+          return list(self._controllers.keys())
+
+  class TaskCatalog:
+      """Non-singleton registry for task handlers."""
+      # Similar structure for task handlers
+
+  Step 2: Add REGISTRATION_INFO to Controllers (Tasks 1.3-1.5)
+
+  Each controller gets a static metadata dictionary:
+  # In HelloWorldController
+  class HelloWorldController(BaseController):
+      REGISTRATION_INFO = {
+          'job_type': 'hello_world',
+          'workflow': workflow,  # The existing WorkflowDefinition
+          'description': 'Two-stage hello world demonstration',
+          'max_parallel_tasks': 10,
+          'timeout_minutes': 5
+      }
+
+  Step 3: Add HANDLER_INFO to Services (Tasks 1.6-1.8)
+
+  Each handler function gets metadata:
+  # In service_hello_world.py
+  HELLO_GREETING_INFO = {
+      'task_type': 'hello_world_greeting',
+      'description': 'Generate greeting message',
+      'timeout_seconds': 30
+  }
+
+  @TaskRegistry.instance().register("hello_world_greeting")  # Keep for now
+  def create_greeting_handler():
+      # Handler implementation
+
+  Step 4: Create Unit Tests (Tasks 1.9-1.10)
+
+  - Test registration and retrieval
+  - Test duplicate detection
+  - Test error handling for missing types
+  - Verify non-singleton behavior
+
+  Key Principles:
+
+  1. No Breaking Changes: Keep decorators working during Phase 1
+  2. Explicit Metadata: All registration info in static dictionaries
+  3. Non-Singleton: Each Function App creates its own catalog instances
+  4. Testable: Can test registration without import side effects
+
+  Benefits for Future Claudes:
+
+  - Clear Structure: All 10 Phase 1 tasks clearly defined
+  - Incremental Progress: Can complete tasks individually
+  - Parallel Testing: Old and new patterns coexist
+  - No Risk: Existing system continues working
+
+  Success Criteria:
+
+  ✅ registration.py created with both catalog classes✅ All controllers have REGISTRATION_INFO✅ All handlers have HANDLER_INFO✅ Unit tests pass for both
+  catalogs✅ No impact on existing decorator registration

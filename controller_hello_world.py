@@ -89,6 +89,35 @@ hello_world_workflow = WorkflowDefinition(
 )
 class HelloWorldController(BaseController):
     """
+    Static registration metadata for explicit registration.
+
+    This metadata will be used by JobCatalog for explicit registration,
+    allowing us to move away from decorator-based import-time registration.
+    Phase 1 keeps both patterns working in parallel.
+    """
+    REGISTRATION_INFO = {
+        'job_type': 'hello_world',
+        'workflow': hello_world_workflow,
+        'description': 'HelloWorld demonstration with greeting and reply stages',
+        'max_parallel_tasks': 20,
+        'timeout_minutes': 10,
+        'stages': {
+            'greeting': {
+                'stage_number': 1,
+                'task_type': 'hello_world_greeting',
+                'max_parallel': 10
+            },
+            'reply': {
+                'stage_number': 2,
+                'task_type': 'hello_world_reply',
+                'max_parallel': 10,
+                'depends_on': 'greeting'
+            }
+        },
+        'required_env_vars': [],  # No special env vars needed
+        'dependencies': []  # No external dependencies
+    }
+    """
     HelloWorld controller with new registry pattern.
     
     Implements a two-stage workflow:

@@ -167,6 +167,168 @@ from triggers.db_query import (
     function_test_trigger
 )
 
+# ========================================================================
+# PHASE 2: EXPLICIT REGISTRATION PATTERN (Parallel with decorators)
+# ========================================================================
+# During migration, both decorator-based and explicit registration work
+# simultaneously. This allows gradual migration without breaking changes.
+
+from registration import JobCatalog, TaskCatalog
+
+# Create catalog instances for explicit registration
+job_catalog = JobCatalog()
+task_catalog = TaskCatalog()
+
+# Create logger for registration
+logger = LoggerFactory.create_logger(ComponentType.CONTROLLER, "registration")
+
+def initialize_catalogs():
+    """
+    Explicitly register all controllers and handlers using REGISTRATION_INFO.
+
+    This runs alongside the existing decorator-based registration during
+    Phase 2 migration. Both patterns work in parallel for safe testing.
+    """
+    logger.info("🚀 Starting explicit catalog registration (Phase 2)")
+
+    # ====================================================================
+    # REGISTER CONTROLLERS
+    # ====================================================================
+
+    # Import controllers for registration
+    from controller_hello_world import HelloWorldController
+    from controller_container import SummarizeContainerController, ListContainerController
+    from controller_stac_setup import STACSetupController
+
+    # Register HelloWorldController
+    try:
+        job_catalog.register_controller(
+            HelloWorldController.REGISTRATION_INFO['job_type'],
+            HelloWorldController,
+            HelloWorldController.REGISTRATION_INFO
+        )
+        logger.info("✅ Registered HelloWorldController explicitly")
+    except Exception as e:
+        logger.error(f"❌ Failed to register HelloWorldController: {e}")
+
+    # Register SummarizeContainerController
+    try:
+        job_catalog.register_controller(
+            SummarizeContainerController.REGISTRATION_INFO['job_type'],
+            SummarizeContainerController,
+            SummarizeContainerController.REGISTRATION_INFO
+        )
+        logger.info("✅ Registered SummarizeContainerController explicitly")
+    except Exception as e:
+        logger.error(f"❌ Failed to register SummarizeContainerController: {e}")
+
+    # Register ListContainerController
+    try:
+        job_catalog.register_controller(
+            ListContainerController.REGISTRATION_INFO['job_type'],
+            ListContainerController,
+            ListContainerController.REGISTRATION_INFO
+        )
+        logger.info("✅ Registered ListContainerController explicitly")
+    except Exception as e:
+        logger.error(f"❌ Failed to register ListContainerController: {e}")
+
+    # Register STACSetupController (even though it doesn't have decorator yet)
+    try:
+        job_catalog.register_controller(
+            STACSetupController.REGISTRATION_INFO['job_type'],
+            STACSetupController,
+            STACSetupController.REGISTRATION_INFO
+        )
+        logger.info("✅ Registered STACSetupController explicitly")
+    except Exception as e:
+        logger.error(f"❌ Failed to register STACSetupController: {e}")
+
+    # ====================================================================
+    # REGISTER TASK HANDLERS
+    # ====================================================================
+
+    # Import service handler info and factories
+    from service_hello_world import (
+        HELLO_GREETING_INFO, HELLO_REPLY_INFO,
+        create_greeting_handler, create_reply_handler
+    )
+    from service_blob import (
+        ANALYZE_ORCHESTRATE_INFO, EXTRACT_METADATA_INFO,
+        SUMMARIZE_CONTAINER_INFO, CREATE_FILE_INDEX_INFO,
+        create_orchestration_handler, create_metadata_handler,
+        create_summary_handler, create_index_handler
+    )
+    from service_stac_setup import (
+        INSTALL_PGSTAC_INFO, CONFIGURE_PGSTAC_ROLES_INFO,
+        VERIFY_PGSTAC_INSTALLATION_INFO,
+        create_install_pgstac_handler
+    )
+
+    # Register hello_world handlers
+    task_catalog.register_handler(
+        HELLO_GREETING_INFO['task_type'],
+        create_greeting_handler,
+        HELLO_GREETING_INFO
+    )
+    logger.info("✅ Registered hello_world_greeting handler explicitly")
+
+    task_catalog.register_handler(
+        HELLO_REPLY_INFO['task_type'],
+        create_reply_handler,
+        HELLO_REPLY_INFO
+    )
+    logger.info("✅ Registered hello_world_reply handler explicitly")
+
+    # Register blob service handlers
+    task_catalog.register_handler(
+        ANALYZE_ORCHESTRATE_INFO['task_type'],
+        create_orchestration_handler,
+        ANALYZE_ORCHESTRATE_INFO
+    )
+    logger.info("✅ Registered analyze_and_orchestrate handler explicitly")
+
+    task_catalog.register_handler(
+        EXTRACT_METADATA_INFO['task_type'],
+        create_metadata_handler,
+        EXTRACT_METADATA_INFO
+    )
+    logger.info("✅ Registered extract_metadata handler explicitly")
+
+    task_catalog.register_handler(
+        SUMMARIZE_CONTAINER_INFO['task_type'],
+        create_summary_handler,
+        SUMMARIZE_CONTAINER_INFO
+    )
+    logger.info("✅ Registered summarize_container handler explicitly")
+
+    task_catalog.register_handler(
+        CREATE_FILE_INDEX_INFO['task_type'],
+        create_index_handler,
+        CREATE_FILE_INDEX_INFO
+    )
+    logger.info("✅ Registered create_file_index handler explicitly")
+
+    # Register STAC setup handlers
+    # NOTE: Only install_pgstac has a factory function, the others are direct async handlers
+    # For now, only register the one with a factory function
+    task_catalog.register_handler(
+        INSTALL_PGSTAC_INFO['task_type'],
+        create_install_pgstac_handler,
+        INSTALL_PGSTAC_INFO
+    )
+    logger.info("✅ Registered install_pgstac handler explicitly")
+
+    # TODO: Fix service_stac_setup.py to use factory pattern for these handlers:
+    # - configure_pgstac_roles (currently direct async function)
+    # - verify_pgstac_installation (currently direct async function)
+    logger.warning("⚠️ Skipping configure_pgstac_roles and verify_pgstac_installation - need factory pattern")
+
+    logger.info(f"📊 Explicit registration complete: {len(job_catalog.list_job_types())} controllers, {len(task_catalog.list_task_types())} handlers")
+
+# Initialize catalogs at module level (happens when function_app.py loads)
+initialize_catalogs()
+
 # Initialize function app with HTTP auth level
 app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
 
@@ -483,6 +645,17 @@ def process_job_queue(msg: func.QueueMessage) -> None:
         logger.info(f"[{correlation_id}] 📋 Raw content (first 500 chars): {message_content[:500]}")
         logger.info(f"[{correlation_id}] 📊 Metadata: size={message_size} bytes, dequeue_count={message_metadata['dequeue_count']}")
 
+        # IMPORTANT: Decode base64 message from QueueRepository
+        # QueueRepository encodes messages in base64 for Azure Queue compatibility
+        import base64
+        try:
+            decoded_content = base64.b64decode(message_content).decode('utf-8')
+            logger.info(f"[{correlation_id}] 🔓 Decoded base64 message successfully")
+            message_content = decoded_content
+        except Exception as decode_error:
+            logger.warning(f"[{correlation_id}] ⚠️ Base64 decode failed, assuming plain JSON: {decode_error}")
+            # If decode fails, assume it's already plain JSON (backward compatibility)
+
     except Exception as e:
         logger.error(f"[{correlation_id}] ❌ Failed to extract message body: {e}")
         raise
@@ -681,6 +854,17 @@ def process_task_queue(msg: func.QueueMessage) -> None:
         # Log raw message content (first 500 chars)
         logger.info(f"[{correlation_id}] 📋 Raw content (first 500 chars): {message_content[:500]}")
         logger.info(f"[{correlation_id}] 📊 Metadata: size={message_size} bytes, dequeue_count={message_metadata['dequeue_count']}")
+
+        # IMPORTANT: Decode base64 message from QueueRepository
+        # QueueRepository encodes messages in base64 for Azure Queue compatibility
+        import base64
+        try:
+            decoded_content = base64.b64decode(message_content).decode('utf-8')
+            logger.info(f"[{correlation_id}] 🔓 Decoded base64 message successfully")
+            message_content = decoded_content
+        except Exception as decode_error:
+            logger.warning(f"[{correlation_id}] ⚠️ Base64 decode failed, assuming plain JSON: {decode_error}")
+            # If decode fails, assume it's already plain JSON (backward compatibility)
 
     except Exception as e:
         logger.error(f"[{correlation_id}] ❌ Failed to extract message body: {e}")

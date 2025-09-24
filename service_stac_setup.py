@@ -52,6 +52,47 @@ def get_connection_string(as_admin: bool = False) -> str:
     )
 
 
+# ============================================================================
+# HANDLER METADATA FOR EXPLICIT REGISTRATION
+# ============================================================================
+# Static metadata for TaskCatalog registration during migration from decorators
+
+INSTALL_PGSTAC_INFO = {
+    'task_type': 'install_pgstac',
+    'description': 'Install PgSTAC schema, tables, and functions in PostgreSQL',
+    'timeout_seconds': 300,
+    'max_retries': 1,
+    'required_services': ['PostgreSQL', 'pypgstac'],
+    'stage': 1,
+    'features': ['database_migration', 'schema_creation', 'postgis_integration'],
+    'critical': True,
+    'one_time_operation': True
+}
+
+CONFIGURE_PGSTAC_ROLES_INFO = {
+    'task_type': 'configure_pgstac_roles',
+    'description': 'Configure database roles and permissions for PgSTAC',
+    'timeout_seconds': 60,
+    'max_retries': 2,
+    'required_services': ['PostgreSQL'],
+    'stage': 2,
+    'features': ['role_management', 'permission_configuration', 'security_setup'],
+    'depends_on': 'install_pgstac'
+}
+
+VERIFY_PGSTAC_INSTALLATION_INFO = {
+    'task_type': 'verify_pgstac_installation',
+    'description': 'Verify PgSTAC installation and create Bronze collection',
+    'timeout_seconds': 60,
+    'max_retries': 2,
+    'required_services': ['PostgreSQL', 'PgSTAC'],
+    'stage': 3,
+    'features': ['installation_verification', 'collection_creation', 'health_check'],
+    'depends_on': 'configure_pgstac_roles',
+    'creates_collection': True
+}
+
+
 @TaskRegistry.instance().register("install_pgstac")
 def create_install_pgstac_handler():
     """Factory function for install_pgstac handler."""

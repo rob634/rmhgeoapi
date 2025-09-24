@@ -95,6 +95,51 @@ def parse_folder_path(blob_name: str) -> str:
 
 
 # ============================================================================
+# HANDLER METADATA FOR EXPLICIT REGISTRATION
+# ============================================================================
+# Static metadata for TaskCatalog registration during migration from decorators
+
+ANALYZE_ORCHESTRATE_INFO = {
+    'task_type': 'analyze_and_orchestrate',
+    'description': 'Analyze container contents and generate dynamic orchestration tasks',
+    'timeout_seconds': 120,
+    'max_retries': 2,
+    'required_services': ['BlobRepository'],
+    'stage': 1,
+    'features': ['dynamic_orchestration', 'container_analysis', 'task_generation']
+}
+
+EXTRACT_METADATA_INFO = {
+    'task_type': 'extract_metadata',
+    'description': 'Extract metadata from individual blob files',
+    'timeout_seconds': 60,
+    'max_retries': 3,
+    'required_services': ['BlobRepository'],
+    'stage': 2,
+    'features': ['parallel_execution', 'metadata_extraction', 'file_processing']
+}
+
+SUMMARIZE_CONTAINER_INFO = {
+    'task_type': 'summarize_container',
+    'description': 'Generate comprehensive statistics and summary for storage container',
+    'timeout_seconds': 300,
+    'max_retries': 2,
+    'required_services': ['BlobRepository'],
+    'stage': 1,
+    'features': ['container_statistics', 'file_distribution', 'size_analysis']
+}
+
+CREATE_FILE_INDEX_INFO = {
+    'task_type': 'create_file_index',
+    'description': 'Create searchable index of files in container',
+    'timeout_seconds': 180,
+    'max_retries': 2,
+    'required_services': ['BlobRepository'],
+    'stage': 1,
+    'features': ['file_indexing', 'search_preparation', 'metadata_collection']
+}
+
+# ============================================================================
 # STAGE 1: ANALYZE AND ORCHESTRATE HANDLER
 # ============================================================================
 

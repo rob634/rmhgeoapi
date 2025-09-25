@@ -26,7 +26,7 @@ import psycopg
 from psycopg import sql
 
 from schema_base import TaskResult, TaskStatus
-from task_factory import TaskRegistry, TaskContext
+from task_factory import TaskContext
 from util_logger import LoggerFactory, ComponentType
 from config import get_config
 
@@ -93,7 +93,6 @@ VERIFY_PGSTAC_INSTALLATION_INFO = {
 }
 
 
-@TaskRegistry.instance().register("install_pgstac")
 def create_install_pgstac_handler():
     """Factory function for install_pgstac handler."""
 
@@ -233,7 +232,6 @@ def create_install_pgstac_handler():
     return install_pgstac
 
 
-@TaskRegistry.instance().register("configure_pgstac_roles")
 async def configure_pgstac_roles(task_context: TaskContext) -> TaskResult:
     """
     Configure database roles and permissions for PgSTAC.
@@ -336,7 +334,6 @@ async def configure_pgstac_roles(task_context: TaskContext) -> TaskResult:
         )
 
 
-@TaskRegistry.instance().register("verify_pgstac_installation")
 async def verify_pgstac_installation(task_context: TaskContext) -> TaskResult:
     """
     Verify PgSTAC installation and optionally create Bronze collection.

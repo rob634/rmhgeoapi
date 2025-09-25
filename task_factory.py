@@ -49,108 +49,35 @@ from schema_base import TaskRecord, TaskResult, TaskStatus
 from schema_queue import TaskQueueMessage
 from repositories import BaseRepository  # Use base class for type hints
 from util_logger import LoggerFactory, ComponentType
+from registration import TaskCatalog  # Import the new catalog
 
 logger = LoggerFactory.create_logger(ComponentType.FACTORY, __name__)
 
 
-# ============================================================================
-# TASK REGISTRY - Singleton for handler registration
-# ============================================================================
+# Note: TaskRegistry has been removed in Phase 4 of the registration refactoring.
+# It is replaced by the non-singleton TaskCatalog in registration.py.
+# This ensures clean module separation and enables future microservice splitting.
 
+# For backward compatibility during migration, we keep a reference but it won't be used
+# when TaskHandlerFactory._catalog is set.
 class TaskRegistry:
-    """
-    Singleton registry for task handlers.
-    
-    Service modules register their task handlers using the decorator pattern,
-    similar to JobRegistry for controllers. Ensures all task types have
-    registered handlers before execution.
-    
-    Usage:
-        @TaskRegistry.instance().register("process_tile")
-        def create_tile_processor():
-            return process_tile_handler
-    """
-    
-    _instance: Optional['TaskRegistry'] = None
-    _handlers: Dict[str, Callable] = {}
-    
-    def __new__(cls):
-        """Ensure singleton instance"""
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-            cls._instance._handlers = {}
-        return cls._instance
-    
+    """Legacy registry kept for backward compatibility during migration."""
+    _instance = None
+    _handlers = {}
+
     @classmethod
-    def instance(cls) -> 'TaskRegistry':
-        """Get or create singleton instance"""
+    def instance(cls):
         if cls._instance is None:
             cls._instance = cls()
         return cls._instance
-    
-    def register(self, task_type: str) -> Callable:
-        """
-        Decorator for registering task handler factories.
-        
-        Args:
-            task_type: Unique identifier for the task type
-            
-        Returns:
-            Decorator function that registers the handler factory
-            
-        Example:
-            @TaskRegistry.instance().register("hello_world_greeting")
-            def create_greeting_handler():
-                return lambda params: {"greeting": f"Hello {params['name']}"}
-        """
-        def decorator(handler_factory: Callable) -> Callable:
-            if task_type in self._handlers:
-                logger.warning(
-                    f"Task handler for '{task_type}' already registered, overwriting",
-                    extra={"task_type": task_type}
-                )
-            
-            self._handlers[task_type] = handler_factory
-            logger.info(
-                f"Registered task handler for '{task_type}'",
-                extra={"task_type": task_type}
-            )
-            return handler_factory
-        
-        return decorator
-    
+
     def get_handler_factory(self, task_type: str) -> Callable:
-        """
-        Get handler factory for a task type.
-        
-        Args:
-            task_type: Task type to get handler for
-            
-        Returns:
-            Handler factory function
-            
-        Raises:
-            ValueError: If task_type not registered
-        """
         if task_type not in self._handlers:
-            available = list(self._handlers.keys())
-            raise ValueError(
-                f"No handler registered for task_type '{task_type}'. "
-                f"Available types: {available}"
-            )
+            raise ValueError(f"No handler registered for task_type '{task_type}'")
         return self._handlers[task_type]
-    
+
     def is_registered(self, task_type: str) -> bool:
-        """Check if task type has registered handler"""
         return task_type in self._handlers
-    
-    def list_task_types(self) -> List[str]:
-        """Get list of all registered task types"""
-        return list(self._handlers.keys())
-    
-    def clear(self) -> None:
-        """Clear all registrations (mainly for testing)"""
-        self._handlers.clear()
 
 
 # ============================================================================
@@ -160,12 +87,19 @@ class TaskRegistry:
 class TaskHandlerFactory:
     """
     Factory for creating task handlers with lineage context.
-    
+
     Implements Robert's implicit lineage pattern by injecting predecessor
     data access into task handlers. Handles both stateless functions and
     stateful handler classes.
     """
+
+    _catalog: Optional[TaskCatalog] = None
     
+    @classmethod
+    def set_catalog(cls, catalog: TaskCatalog) -> None:
+        """Set the task catalog instance to use."""
+        cls._catalog = catalog
+
     @staticmethod
     def get_handler(
         task_message: TaskQueueMessage,
@@ -173,27 +107,31 @@ class TaskHandlerFactory:
     ) -> Callable:
         """
         Get task handler with lineage context injected.
-        
+
         For tasks in stage > 1, automatically provides access to predecessor
         task results using the implicit ID pattern.
-        
+
         Args:
             task_message: Queue message with task details
             repository: Database repository for lineage queries
-            
+
         Returns:
             Handler function ready for execution
-            
+
         Raises:
+            RuntimeError: If catalog not initialized
             ValueError: If task_type not registered
         """
-        registry = TaskRegistry.instance()
-        
-        # Get the handler factory
-        handler_factory = registry.get_handler_factory(task_message.task_type)
-        
-        # Create base handler
-        base_handler = handler_factory()
+        if TaskHandlerFactory._catalog is None:
+            # Fallback to old registry for backward compatibility
+            registry = TaskRegistry.instance()
+            handler_factory = registry.get_handler_factory(task_message.task_type)
+            base_handler = handler_factory()  # Registry returns factory, so we call it
+        else:
+            # Get handler factory from catalog
+            handler_factory = TaskHandlerFactory._catalog.get_handler(task_message.task_type)
+            # Call the factory to get the actual handler
+            base_handler = handler_factory()
         
         # Create context with lineage support
         context = TaskContext(
@@ -277,18 +215,30 @@ class TaskHandlerFactory:
     def validate_handler_availability(task_types: List[str]) -> Dict[str, bool]:
         """
         Validate that handlers exist for given task types.
-        
+
         Args:
             task_types: List of task types to validate
-            
+
         Returns:
             Dict mapping task_type to availability (True/False)
         """
-        registry = TaskRegistry.instance()
-        return {
-            task_type: registry.is_registered(task_type)
-            for task_type in task_types
-        }
+        if TaskHandlerFactory._catalog is None:
+            # Fallback to old registry
+            registry = TaskRegistry.instance()
+            return {
+                task_type: registry.is_registered(task_type)
+                for task_type in task_types
+            }
+        else:
+            # Use catalog - check if handler exists by trying to get it
+            result = {}
+            for task_type in task_types:
+                try:
+                    TaskHandlerFactory._catalog.get_handler(task_type)
+                    result[task_type] = True
+                except (ValueError, KeyError):
+                    result[task_type] = False
+            return result
 
 
 # ============================================================================

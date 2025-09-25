@@ -36,14 +36,13 @@ from datetime import datetime, timezone
 
 from controller_base import BaseController
 from schema_base import (
-    JobRegistry,
-    JobRegistration,
     WorkflowDefinition,
     TaskDefinition,
     TaskRecord,
     TaskStatus
 )
 from schema_queue import JobQueueMessage, TaskQueueMessage
+from registration import JobCatalog  # Import the new catalog
 
 
 # ============================================================================
@@ -53,118 +52,85 @@ from schema_queue import JobQueueMessage, TaskQueueMessage
 class JobFactory:
     """
     Factory for creating job controllers.
-    
-    Uses the JobRegistry to instantiate the correct controller for a given
+
+    Uses the JobCatalog to instantiate the correct controller for a given
     job type. Ensures type safety and proper initialization of controllers
     with their workflow definitions.
     """
+
+    _catalog: Optional[JobCatalog] = None
     
+    @classmethod
+    def set_catalog(cls, catalog: JobCatalog) -> None:
+        """Set the job catalog instance to use."""
+        cls._catalog = catalog
+
     @staticmethod
     def create_controller(job_type: str) -> BaseController:
         """
         Create a controller instance for the specified job type.
-        
+
         Args:
             job_type: The type of job to create a controller for
-            
+
         Returns:
             Instantiated controller with workflow attached
-            
+
         Raises:
             ValueError: If job_type is not registered
-            ImportError: If controller class cannot be imported
+            RuntimeError: If catalog not initialized
         """
-        registry = JobRegistry.instance()
-        
-        # Check if job type is registered
-        if not registry.is_registered(job_type):
-            available = registry.list_job_types()
-            raise ValueError(
-                f"Unknown job_type: '{job_type}'. "
-                f"Available types: {available}"
-            )
-        
-        # Get registration
-        registration = registry.get_registration(job_type)
-        
-        # Import the controller class dynamically
-        controller_class = JobFactory._import_controller_class(
-            registration.controller_class
-        )
-        
+        if JobFactory._catalog is None:
+            raise RuntimeError("JobCatalog not initialized. Call JobFactory.set_catalog() first.")
+
+        # Get controller class from catalog
+        controller_class = JobFactory._catalog.get_controller(job_type)
+
+        # Get metadata for injection
+        metadata = JobFactory._catalog.get_metadata(job_type)
+
         # Create instance
         controller = controller_class()
-        
-        # Inject metadata from registration
-        controller._job_type = registration.job_type
-        controller._workflow = registration.workflow
-        controller._registration = registration
-        
+
+        # Inject metadata
+        controller._job_type = job_type
+        if 'workflow' in metadata:
+            controller._workflow = metadata['workflow']
+
         return controller
     
-    @staticmethod
-    def _import_controller_class(class_path: str) -> Type[BaseController]:
-        """
-        Import a controller class from its fully qualified name.
-        
-        Args:
-            class_path: Full path like 'controller_hello_world.HelloWorldController'
-            
-        Returns:
-            The controller class
-            
-        Raises:
-            ImportError: If class cannot be imported
-        """
-        try:
-            # Split module and class name
-            parts = class_path.rsplit('.', 1)
-            if len(parts) != 2:
-                raise ValueError(f"Invalid class path: {class_path}")
-            
-            module_name, class_name = parts
-            
-            # Import module
-            module = importlib.import_module(module_name)
-            
-            # Get class
-            controller_class = getattr(module, class_name)
-            
-            # Verify it's a BaseController
-            if not issubclass(controller_class, BaseController):
-                raise TypeError(
-                    f"{class_path} is not a BaseController subclass"
-                )
-            
-            return controller_class
-            
-        except Exception as e:
-            raise ImportError(
-                f"Failed to import controller {class_path}: {e}"
-            )
     
+    @staticmethod
+    def list_available_jobs() -> List[str]:
+        """List available job types from catalog."""
+        if JobFactory._catalog is None:
+            return []  # Return empty list if catalog not initialized
+        return JobFactory._catalog.list_job_types()
+
     @staticmethod
     def get_workflow(job_type: str) -> WorkflowDefinition:
         """
         Get workflow definition without instantiating controller.
-        
+
         Useful for validation and planning without creating objects.
-        
+
         Args:
             job_type: The job type to get workflow for
-            
+
         Returns:
             WorkflowDefinition for the job type
-            
+
         Raises:
             ValueError: If job_type is not registered
         """
-        registry = JobRegistry.instance()
-        
-        if not registry.is_registered(job_type):
-            raise ValueError(f"Unknown job_type: '{job_type}'")
-        
-        return registry.get_registration(job_type).workflow
+        if JobFactory._catalog is None:
+            raise RuntimeError("JobCatalog not initialized. Call JobFactory.set_catalog() first.")
+
+        # Get from catalog
+        metadata = JobFactory._catalog.get_metadata(job_type)
+        if 'workflow' in metadata:
+            return metadata['workflow']
+        raise ValueError(f"No workflow found for job_type: '{job_type}'")
 
 
 # ============================================================================

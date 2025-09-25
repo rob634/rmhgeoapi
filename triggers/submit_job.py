@@ -221,11 +221,11 @@ class JobSubmissionTrigger(JobManagementTrigger):
         except ValueError as e:
             # JobFactory raises ValueError for unknown job types
             self.logger.error(f"❌ Unknown job type {job_type}: {e}")
-            
-            # Get list of supported job types
-            from schema_base import JobRegistry
-            supported_jobs = JobRegistry.instance().list_job_types()
-            
+
+            # Get list of supported job types from factory
+            from controller_factories import JobFactory
+            supported_jobs = JobFactory.list_available_jobs()
+
             raise ValueError(
                 f"Invalid job type: '{job_type}'. "
                 f"Supported job types: {', '.join(supported_jobs) if supported_jobs else 'none configured'}. "

@@ -329,6 +329,16 @@ def initialize_catalogs():
 # Initialize catalogs at module level (happens when function_app.py loads)
 initialize_catalogs()
 
+# Initialize factories with catalogs
+from controller_factories import JobFactory
+from task_factory import TaskHandlerFactory
+
+# Set catalogs on factories
+JobFactory.set_catalog(job_catalog)
+TaskHandlerFactory.set_catalog(task_catalog)
+
+logger.info("✅ Factories initialized with catalogs")
+
 # Initialize function app with HTTP auth level
 app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
 

@@ -33,7 +33,6 @@ from datetime import datetime, timezone
 
 from controller_base import BaseController
 from schema_base import (
-    JobRegistry,
     WorkflowDefinition,
     StageDefinition,
     TaskDefinition,
@@ -80,13 +79,6 @@ hello_world_workflow = WorkflowDefinition(
 # CONTROLLER IMPLEMENTATION
 # ============================================================================
 
-@JobRegistry.instance().register(
-    job_type="hello_world",
-    workflow=hello_world_workflow,
-    description="HelloWorld demonstration with greeting and reply stages",
-    max_parallel_tasks=20,
-    timeout_minutes=10
-)
 class HelloWorldController(BaseController):
     """
     Static registration metadata for explicit registration.

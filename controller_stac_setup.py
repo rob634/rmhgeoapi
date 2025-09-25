@@ -361,16 +361,5 @@ class STACSetupController(BaseController):
         }
 
 
-# Register with JobRegistry using decorator
-from schema_base import JobRegistry
-
-@JobRegistry.instance().register(
-    job_type="stac_setup",
-    workflow=STACSetupController.workflow,
-    description="One-time PgSTAC database installation and configuration",
-    max_parallel_tasks=1,
-    timeout_minutes=10
-)
-class _RegisteredSTACSetupController(STACSetupController):
-    """Registration wrapper for STACSetupController"""
-    pass
+# Registration handled by explicit registration in function_app.py
+# Controller uses REGISTRATION_INFO metadata instead of decorator

@@ -51,7 +51,7 @@ from utils import enforce_contract
 
 # Application imports - Core controllers and registry
 from controller_base import BaseController
-from schema_base import JobRegistry, TaskResult
+from schema_base import TaskResult
 
 # Application imports - Schemas
 from schema_base import TaskDefinition, StageDefinition, WorkflowDefinition
@@ -119,13 +119,6 @@ list_container_workflow = WorkflowDefinition(
 # SUMMARIZE CONTAINER CONTROLLER
 # ============================================================================
 
-@JobRegistry.instance().register(
-    job_type="summarize_container",
-    workflow=summarize_container_workflow,
-    description="Generate container statistics and summary",
-    max_parallel_tasks=1,
-    timeout_minutes=10
-)
 class SummarizeContainerController(BaseController):
     """
     Static registration metadata for explicit registration.
@@ -415,14 +408,6 @@ class SummarizeContainerController(BaseController):
 # ============================================================================
 # LIST CONTAINER CONTROLLER
 # ============================================================================
-
-@JobRegistry.instance().register(
-    job_type="list_container",
-    workflow=list_container_workflow,
-    description="List container with dynamic task generation for metadata extraction",
-    max_parallel_tasks=100,
-    timeout_minutes=20
-)
 
 class ListContainerController(BaseController):
     """
@@ -1121,29 +1106,5 @@ class ListContainerController(BaseController):
 # REGISTRATION VERIFICATION
 # ============================================================================
 
-def verify_registration():
-    """
-    Verify that controllers are properly registered.
-    
-    This function is called during module import to ensure
-    controllers are available to the JobFactory.
-    """
-    registry = JobRegistry.instance()
-    
-    registered_types = [
-        "summarize_container",
-        "list_container"
-    ]
-    
-    for job_type in registered_types:
-        if registry.is_registered(job_type):
-            logger.info(f"✅ {job_type} controller registered successfully")
-        else:
-            logger.error(f"❌ {job_type} controller registration failed")
-    
-    return all(registry.is_registered(jt) for jt in registered_types)
-
-
-# Verify registration on import
-if __name__ != "__main__":
-    verify_registration()
+# Registration verification removed - now handled by explicit registration
+# Controllers are registered via REGISTRATION_INFO metadata in function_app.py

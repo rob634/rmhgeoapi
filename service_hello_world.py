@@ -72,9 +72,9 @@ Date: 9 December 2025
 
 from datetime import datetime, timezone
 
-# Import the TaskRegistry for handler registration
-# This provides the decorator pattern and lineage support
-from task_factory import TaskRegistry, TaskContext
+# Import TaskContext for lineage support
+# TaskRegistry decorators removed - using explicit registration
+from task_factory import TaskContext
 
 
 # ============================================================================
@@ -107,7 +107,6 @@ HELLO_REPLY_INFO = {
 # ============================================================================
 # Demonstrates basic task handler for first stage (no predecessor data)
 
-@TaskRegistry.instance().register("hello_world_greeting")
 def create_greeting_handler():
     """
     Factory for hello_world_greeting task handler.
@@ -175,7 +174,6 @@ def create_greeting_handler():
 # ============================================================================
 # Demonstrates Robert's implicit lineage pattern for accessing predecessor data
 
-@TaskRegistry.instance().register("hello_world_reply")  
 def create_reply_handler():
     """
     Factory for hello_world_reply task handler.

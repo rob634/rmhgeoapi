@@ -51,7 +51,7 @@ from datetime import datetime
 from typing import Dict, Any, List, Optional
 
 # Application imports - Core dependencies
-from task_factory import TaskRegistry, TaskContext
+from task_factory import TaskContext
 from repositories import RepositoryFactory
 from util_logger import LoggerFactory, ComponentType
 
@@ -143,7 +143,6 @@ CREATE_FILE_INDEX_INFO = {
 # STAGE 1: ANALYZE AND ORCHESTRATE HANDLER
 # ============================================================================
 
-@TaskRegistry.instance().register("analyze_and_orchestrate")
 def create_orchestration_handler():
     """
     Factory for analyze_and_orchestrate task handler.
@@ -276,7 +275,6 @@ def create_orchestration_handler():
 # STAGE 2: EXTRACT METADATA HANDLER
 # ============================================================================
 
-@TaskRegistry.instance().register("extract_metadata")
 def create_metadata_handler():
     """
     Factory for extract_metadata task handler.
@@ -371,7 +369,6 @@ def create_metadata_handler():
 # SINGLE STAGE: SUMMARIZE CONTAINER HANDLER
 # ============================================================================
 
-@TaskRegistry.instance().register("summarize_container")
 def create_summary_handler():
     """
     Factory for summarize_container task handler.
@@ -493,7 +490,6 @@ def create_summary_handler():
 # STAGE 3: CREATE INDEX HANDLER (Optional)
 # ============================================================================
 
-@TaskRegistry.instance().register("create_file_index")
 def create_index_handler():
     """
     Factory for create_file_index task handler.

@@ -235,13 +235,13 @@ class TaskCatalog:
 
     def get_handler(self, task_type: str) -> Callable:
         """
-        Get handler function for task type.
+        Get handler factory function for task type.
 
         Args:
             task_type: The task type to look up
 
         Returns:
-            The handler function (result of calling the factory)
+            The handler factory function (not called yet)
 
         Raises:
             ValueError: If no handler registered for task_type
@@ -253,9 +253,10 @@ class TaskCatalog:
                 f"Available types: {available or 'none'}"
             )
 
-        # Call the factory to get the actual handler
+        # Return the factory function (don't call it)
+        # The TaskHandlerFactory will call it when needed
         factory = self._handlers[task_type]['factory']
-        return factory()
+        return factory
 
     def get_metadata(self, task_type: str) -> Dict[str, Any]:
         """

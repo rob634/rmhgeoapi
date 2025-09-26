@@ -1,17 +1,17 @@
 # ============================================================================
 # CLAUDE CONTEXT - SERVICE
 # ============================================================================
-# PURPOSE: HelloWorld service implementing task handlers for two-stage workflow using TaskRegistry pattern
-# EXPORTS: create_greeting_handler, create_reply_handler (registered with @TaskRegistry decorators)
-# INTERFACES: TaskRegistry pattern with handler functions returning dicts
+# PURPOSE: HelloWorld service implementing task handlers for two-stage workflow
+# EXPORTS: create_greeting_handler, create_reply_handler (task handler factory functions)
+# INTERFACES: Task handlers receive params dict and TaskContext, return result dict
 # PYDANTIC_MODELS: None - uses dict-based parameter passing and results
-# DEPENDENCIES: service_factories (TaskRegistry, TaskContext), datetime, typing
+# DEPENDENCIES: task_factory (TaskContext), datetime, typing, util_logger
 # SOURCE: Task parameters from queue messages via TaskHandlerFactory
 # SCOPE: Task-level business logic execution for HelloWorld greeting and reply stages
 # VALIDATION: Parameter validation within handler functions
-# PATTERNS: Registry pattern (TaskRegistry), Factory pattern, Robert's implicit lineage pattern
-# ENTRY_POINTS: Handlers auto-registered via @TaskRegistry decorators for hello_world_greeting/reply
-# INDEX: create_greeting_handler:95, create_reply_handler:140, Implementation Notes:50
+# PATTERNS: Handler factory pattern, Explicit Registration (via function_app.py)
+# ENTRY_POINTS: Registered in function_app.py via task_catalog.register_handler()
+# INDEX: create_greeting_handler:95, create_reply_handler:140, Handler logic:100-180
 # ============================================================================
 
 """
@@ -30,7 +30,7 @@ Architecture Position:
     - Repository Layer: Data persistence handled by framework
 
 Key Features:
-    - Decorator-based handler registration with @TaskRegistry
+    - Explicit handler registration in function_app.py (no decorators)
     - Robert's implicit lineage pattern for multi-stage data access
     - Simple dict-based parameter and result passing
     - Automatic predecessor data access for stage N from stage N-1
@@ -60,11 +60,12 @@ Lineage Pattern Example:
     Stage 2, Task 3: job123-s2-task_3 → automatically gets s1-task_3 data
 
 Usage Pattern for New Services:
-    1. Import TaskRegistry and TaskContext from task_factory
-    2. Define handler factory function with @TaskRegistry.instance().register("task_type")
+    1. Import TaskContext from task_factory
+    2. Define handler factory function (e.g., create_my_handler)
     3. Factory returns actual handler function that processes params
-    4. Use context.has_predecessor() and context.get_predecessor_result() for lineage
-    5. Return dict with results - framework handles the rest
+    4. Register in function_app.py via task_catalog.register_handler("task_type", create_my_handler)
+    5. Use context.has_predecessor() and context.get_predecessor_result() for lineage
+    6. Return dict with results - framework handles the rest
 
 Author: Robert and Geospatial Claude Legion
 Date: 9 December 2025
@@ -250,13 +251,14 @@ def create_reply_handler():
 Template for Creating New Service Handlers:
 
 1. Import Requirements:
-   from task_factory import TaskRegistry, TaskContext
+   from task_factory import TaskContext
    from datetime import datetime, timezone
    from typing import Dict, Any
 
 2. Basic Handler Structure:
 
-@TaskRegistry.instance().register("your_task_type")
+# Handler functions are now registered in function_app.py using TaskCatalog
+# No decorator needed here
 def create_your_handler():
     '''Factory for your task handler.'''
     

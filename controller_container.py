@@ -2,15 +2,15 @@
 # CLAUDE CONTEXT - CONTROLLER
 # ============================================================================
 # PURPOSE: Container operation controllers implementing Job→Stage→Task orchestration for blob storage
-# EXPORTS: SummarizeContainerController, ListContainerController (auto-registered with JobRegistry)
-# INTERFACES: BaseController abstract methods for job orchestration
-# PYDANTIC_MODELS: TaskDefinition, WorkflowDefinition from schema_base
-# DEPENDENCIES: controller_base, job_registry, repository_factory, schema_blob, hashlib
-# SOURCE: Job parameters from HTTP requests, stage results from task completions
-# SCOPE: Job-level orchestration for container analysis and metadata extraction
-# VALIDATION: Parameter validation, container size limits, task creation validation
-# PATTERNS: Template Method (BaseController), Factory (JobRegistry), Dynamic Orchestration
-# ENTRY_POINTS: Auto-registered via @JobRegistry decorators for 'summarize_container' and 'list_container'
+# EXPORTS: SummarizeContainerController, ListContainerController (concrete controller implementations)
+# INTERFACES: BaseController - implements all abstract methods for workflow orchestration
+# PYDANTIC_MODELS: TaskDefinition, WorkflowDefinition, StageResultContract, ContainerOrchestration
+# DEPENDENCIES: controller_base, schema_workflow, schema_blob, schema_orchestration, hashlib, typing
+# SOURCE: Job parameters from HTTP requests, stage results from task completions via queue messages
+# SCOPE: Job-level orchestration for container analysis (summarize) and metadata extraction (list)
+# VALIDATION: Parameter validation, container size limits, contract enforcement via @enforce_contract
+# PATTERNS: Template Method (BaseController), Dynamic Orchestration (Stage 1 determines Stage 2 tasks)
+# ENTRY_POINTS: Registered in function_app.py via job_catalog.register_controller()
 # INDEX: SummarizeContainerController:100, ListContainerController:300, Dynamic Task Creation:450
 # ============================================================================
 

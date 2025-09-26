@@ -1,0 +1,208 @@
+{
+  "project": "H3 Hexagon Processing with Azure Service Bus",
+  "overview": {
+    "problem": "Current ETL pipeline times out when queuing dozens of H3 hexagon tasks for zonal statistics",
+    "solution": "Replace queue storage with Service Bus batch sending for massive parallelization",
+    "scale": "Level 6/7 H3 hexagons = millions of potential tasks",
+    "architecture": "Keep existing Postgres orchestration, upgrade queuing mechanism only"
+  },
+  "service_bus_setup": {
+    "recommended_tier": "Standard",
+    "pricing": {
+      "base_cost": "$10/month",
+      "included_operations": "13 million/month",
+      "operations_per_message": "~3 (send + receive + complete)",
+      "effective_message_capacity": "~4.3 million messages/month"
+    },
+    "configuration": {
+      "queue_creation": "Must be done via Azure Portal/CLI, not in code",
+      "connection_string_location": "Azure Portal → Service Bus → Shared Access Policies → RootManageSharedAccessKey"
+    }
+  },
+  "message_structure": {
+    "hexagon_batch": {
+      "BatchId": "level7_batch_001",
+      "HexagonIndexes": ["872830828ffffff", "872830829ffffff", "..."],
+      "SpatialBounds": {
+        "description": "For efficient raster data fetching",
+        "north": 45.123,
+        "south": 44.567,
+        "east": -122.123,
+        "west": -123.456
+      },
+      "StatisticalOperations": ["mean", "sum", "count", "stddev"],
+      "JobId": "uuid-for-postgres-tracking",
+      "OrchestrationId": "optional-for-durable-functions"
+    },
+    "batch_sizing_strategy": {
+      "recommendation": "100-1000 hexagons per batch",
+      "considerations": [
+        "Function timeout limits (5-10 minutes)",
+        "Memory constraints",
+        "Raster tile alignment",
+        "Statistical complexity per hexagon"
+      ],
+      "spatial_batching": "Leverage H3 index spatial ordering for data locality"
+    }
+  },
+  "code_patterns": {
+    "nuget_packages": [
+      "Azure.Messaging.ServiceBus",
+      "Microsoft.Azure.Functions.Extensions"
+    ],
+    "connection_setup": {
+      "csharp": [
+        "var client = new ServiceBusClient(connectionString);",
+        "var sender = client.CreateSender(\"hexagon-tasks\");",
+        "var receiver = client.CreateReceiver(\"hexagon-tasks\");"
+      ]
+    },
+    "batch_sending": {
+      "description": "Replace timeout-prone individual sends with fast batch operations",
+      "csharp": [
+        "// Generate all batches first (fast, in-memory)",
+        "var hexagonBatches = await GenerateH3Batches(jobConfig);",
+        "",
+        "// Convert to Service Bus messages",
+        "var messages = hexagonBatches.Select(batch => ",
+        "    new ServiceBusMessage(JsonSerializer.Serialize(batch))",
+        "    {",
+        "        MessageId = batch.BatchId,",
+        "        TimeToLive = TimeSpan.FromHours(2)",
+        "    });",
+        "",
+        "// Batch send (up to 100 messages at once)",
+        "foreach (var messageBatch in messages.Chunk(100))",
+        "{",
+        "    await sender.SendMessagesAsync(messageBatch);",
+        "}",
+        "",
+        "// Update Postgres: mark tasks as queued",
+        "await MarkTasksAsQueued(jobId);"
+      ]
+    },
+    "worker_function": {
+      "description": "Service Bus triggered function to process hexagon batches",
+      "csharp": [
+        "[FunctionName(\"ProcessHexagonBatch\")]",
+        "public static async Task ProcessBatch(",
+        "    [ServiceBusTrigger(\"hexagon-tasks\", Connection = \"ServiceBusConnection\")] string message,",
+        "    ILogger log)",
+        "{",
+        "    var batch = JsonSerializer.Deserialize<HexagonBatch>(message);",
+        "    ",
+        "    try",
+        "    {",
+        "        // Your existing zonal statistics processing",
+        "        await ProcessZonalStatistics(batch);",
+        "        ",
+        "        // Update Postgres state",
+        "        await MarkBatchComplete(batch.JobId, batch.BatchId);",
+        "        ",
+        "        log.LogInformation($\"Completed batch {batch.BatchId} with {batch.HexagonIndexes.Length} hexagons\");",
+        "    }",
+        "    catch (Exception ex)",
+        "    {",
+        "        log.LogError(ex, $\"Failed processing batch {batch.BatchId}\");",
+        "        // Message will go to dead letter queue automatically",
+        "        throw;",
+        "    }",
+        "}"
+      ]
+    },
+    "configuration": {
+      "local_settings_json": {
+        "IsEncrypted": false,
+        "Values": {
+          "AzureWebJobsStorage": "UseDevelopmentStorage=true",
+          "FUNCTIONS_WORKER_RUNTIME": "dotnet",
+          "ServiceBusConnection": "Endpoint=sb://your-namespace.servicebus.windows.net/;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=your-key"
+        }
+      }
+    }
+  },
+  "migration_strategy": {
+    "current_architecture": {
+      "job_controller": "Azure Function creates tasks in Postgres",
+      "task_queuing": "Times out after dozens of queue storage sends",
+      "workers": "Functions process individual tasks"
+    },
+    "updated_architecture": {
+      "job_controller": "Same - creates tasks in Postgres (no change)",
+      "task_queuing": "Fast batch sends to Service Bus (major upgrade)",
+      "workers": "Same processing logic, different trigger (minimal change)"
+    },
+    "implementation_steps": [
+      "1. Create Service Bus namespace and queue in Azure Portal",
+      "2. Add Azure.Messaging.ServiceBus NuGet package",
+      "3. Replace queue storage client with Service Bus sender in job controller",
+      "4. Update worker function trigger from QueueTrigger to ServiceBusTrigger",
+      "5. Test with small batch first",
+      "6. Scale up to full H3 processing"
+    ]
+  },
+  "performance_benefits": {
+    "queue_population": {
+      "before": "50ms per message × 1000 tasks = 50 seconds (often times out)",
+      "after": "100 messages in ~200ms × 10 batches = 2 seconds total"
+    },
+    "worker_scaling": {
+      "description": "Service Bus handles backpressure and auto-scaling better than queue storage",
+      "parallel_processing": "Dozens of function instances can process batches simultaneously"
+    },
+    "error_handling": {
+      "dead_letter_queues": "Built-in handling for failed messages",
+      "retry_policies": "Configurable automatic retries",
+      "poison_message_detection": "Automatic after max retry attempts"
+    }
+  },
+  "spatial_optimization": {
+    "h3_spatial_ordering": {
+      "benefit": "Consecutive H3 indexes are spatially nearby",
+      "implementation": "Sort hexagons by index before batching for data locality",
+      "cache_efficiency": "Load raster tiles once, use for multiple nearby hexagons"
+    },
+    "batch_generation": {
+      "csharp": [
+        "// Leverage H3 spatial ordering for efficient batching",
+        "var spatialBatches = hexagons",
+        "    .OrderBy(h => h.Index)",
+        "    .Chunk(batchSize)",
+        "    .Select(batch => new HexagonBatch",
+        "    {",
+        "        BatchId = Guid.NewGuid().ToString(),",
+        "        HexagonIndexes = batch.Select(h => h.Index).ToArray(),",
+        "        SpatialBounds = CalculateBounds(batch),",
+        "        JobId = jobId",
+        "    });"
+      ]
+    }
+  },
+  "monitoring_and_ops": {
+    "azure_portal_metrics": [
+      "Active messages in queue",
+      "Completed messages",
+      "Dead-lettered messages",
+      "Incoming requests",
+      "Throttled requests"
+    ],
+    "logging_strategy": {
+      "job_level": "Track overall job progress in Postgres",
+      "batch_level": "Log batch completion/failure in Function logs",
+      "message_level": "Service Bus handles individual message lifecycle"
+    }
+  },
+  "cost_estimation": {
+    "scenario_1": {
+      "description": "Regional analysis - 100K hexagons, 200 batches",
+      "operations": "200 batches × 3 operations = 600 operations",
+      "cost": "Included in $10 base (13M operations available)"
+    },
+    "scenario_2": {
+      "description": "Continental analysis - 10M hexagons, 20K batches",
+      "operations": "20K batches × 3 operations = 60K operations", 
+      "cost": "Still included in $10 base"
+    },
+    "break_even": "Need ~4.3M messages/month to exceed included operations"
+  }
+}

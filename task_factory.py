@@ -1,17 +1,17 @@
 # ============================================================================
-# CLAUDE CONTEXT - FACTORY
+# CLAUDE CONTEXT - TASK FACTORY
 # ============================================================================
-# PURPOSE: Registry and factory pattern for task handler discovery and execution
-# EXPORTS: TaskRegistry, TaskHandlerFactory, TaskContext
-# INTERFACES: Singleton registry pattern, factory methods for task handlers
-# PYDANTIC_MODELS: Uses TaskQueueMessage, TaskRecord from schema_base
-# DEPENDENCIES: typing, importlib, repository_postgresql
-# SOURCE: Task handlers registered via decorators in service modules
+# PURPOSE: Factory for task creation and handler management with context injection
+# EXPORTS: TaskFactory, TaskHandlerFactory, TaskContext (data class for handler context)
+# INTERFACES: Uses TaskCatalog injected via set_catalog() for handler lookup
+# PYDANTIC_MODELS: TaskQueueMessage, TaskRecord from schema_queue and schema_base
+# DEPENDENCIES: registration (TaskCatalog), schema_queue, typing, hashlib, logging
+# SOURCE: Task handlers registered in function_app.py, task definitions from controllers
 # SCOPE: Task execution layer for parallel processing
-# VALIDATION: Registry validates task types, ensures handler availability
-# PATTERNS: Singleton Registry, Factory, Dependency Injection
-# ENTRY_POINTS: TaskRegistry.instance(), TaskHandlerFactory.get_handler()
-# INDEX: TaskRegistry:50, TaskHandlerFactory:200, TaskContext:350
+# VALIDATION: Validates task types against catalog, ensures handler availability
+# PATTERNS: Factory pattern with dependency injection, Context pattern for handler params
+# ENTRY_POINTS: TaskHandlerFactory.set_catalog(), TaskHandlerFactory.get_handler(), TaskFactory.create_tasks()
+# INDEX: TaskContext:40, TaskFactory:100, TaskHandlerFactory:200, get_handler:250
 # ============================================================================
 
 """
@@ -58,28 +58,6 @@ logger = LoggerFactory.create_logger(ComponentType.FACTORY, __name__)
 # It is replaced by the non-singleton TaskCatalog in registration.py.
 # This ensures clean module separation and enables future microservice splitting.
 
-# For backward compatibility during migration, we keep a reference but it won't be used
-# when TaskHandlerFactory._catalog is set.
-class TaskRegistry:
-    """Legacy registry kept for backward compatibility during migration."""
-    _instance = None
-    _handlers = {}
-
-    @classmethod
-    def instance(cls):
-        if cls._instance is None:
-            cls._instance = cls()
-        return cls._instance
-
-    def get_handler_factory(self, task_type: str) -> Callable:
-        if task_type not in self._handlers:
-            raise ValueError(f"No handler registered for task_type '{task_type}'")
-        return self._handlers[task_type]
-
-    def is_registered(self, task_type: str) -> bool:
-        return task_type in self._handlers
-
-
 # ============================================================================
 # TASK HANDLER FACTORY - Creates handlers with context
 # ============================================================================
@@ -123,15 +101,12 @@ class TaskHandlerFactory:
             ValueError: If task_type not registered
         """
         if TaskHandlerFactory._catalog is None:
-            # Fallback to old registry for backward compatibility
-            registry = TaskRegistry.instance()
-            handler_factory = registry.get_handler_factory(task_message.task_type)
-            base_handler = handler_factory()  # Registry returns factory, so we call it
-        else:
-            # Get handler factory from catalog
-            handler_factory = TaskHandlerFactory._catalog.get_handler(task_message.task_type)
-            # Call the factory to get the actual handler
-            base_handler = handler_factory()
+            raise RuntimeError("TaskCatalog not initialized. Call TaskHandlerFactory.set_catalog() first.")
+
+        # Get handler factory from catalog
+        handler_factory = TaskHandlerFactory._catalog.get_handler(task_message.task_type)
+        # Call the factory to get the actual handler
+        base_handler = handler_factory()
         
         # Create context with lineage support
         context = TaskContext(
@@ -223,22 +198,18 @@ class TaskHandlerFactory:
             Dict mapping task_type to availability (True/False)
         """
         if TaskHandlerFactory._catalog is None:
-            # Fallback to old registry
-            registry = TaskRegistry.instance()
-            return {
-                task_type: registry.is_registered(task_type)
-                for task_type in task_types
-            }
-        else:
-            # Use catalog - check if handler exists by trying to get it
-            result = {}
-            for task_type in task_types:
-                try:
-                    TaskHandlerFactory._catalog.get_handler(task_type)
-                    result[task_type] = True
-                except (ValueError, KeyError):
-                    result[task_type] = False
-            return result
+            # Return all False if catalog not initialized
+            return {task_type: False for task_type in task_types}
+
+        # Use catalog - check if handler exists by trying to get it
+        result = {}
+        for task_type in task_types:
+            try:
+                TaskHandlerFactory._catalog.get_handler(task_type)
+                result[task_type] = True
+            except (ValueError, KeyError):
+                result[task_type] = False
+        return result
 
 
 # ============================================================================
@@ -445,13 +416,12 @@ def auto_discover_handlers():
 # ============================================================================
 
 """
-Example Registration in service_hello_world.py:
+Example Handler Definition in services/service_hello_world.py:
 
-@TaskRegistry.instance().register("hello_world_greeting")
 def create_greeting_handler():
     def handle_greeting(params: dict, context: TaskContext) -> dict:
         name = params.get('name', 'World')
-        
+
         # Check for predecessor data (if stage > 1)
         if context.has_predecessor():
             prev_data = context.get_predecessor_result()
@@ -460,15 +430,29 @@ def create_greeting_handler():
                 "greeting": f"Hello {name}!",
                 "previous": previous_message
             }
-        
+
         return {"greeting": f"Hello {name}!"}
-    
+
     return handle_greeting
 
 
-Example Usage in function_app.py:
+Example Registration in function_app.py:
 
-# Replace hardcoded logic with:
+from services.service_hello_world import create_greeting_handler
+
+# During initialization:
+task_catalog.register_handler(
+    "hello_world_greeting",
+    create_greeting_handler
+)
+
+# Inject catalog into factory:
+TaskHandlerFactory.set_catalog(task_catalog)
+
+
+Example Usage in Queue Processing:
+
+# Get handler from factory:
 handler = TaskHandlerFactory.get_handler(task_message, repository)
 result = handler(task_message.parameters)
 

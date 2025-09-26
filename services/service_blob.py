@@ -2,15 +2,15 @@
 # CLAUDE CONTEXT - SERVICE
 # ============================================================================
 # PURPOSE: Blob storage service implementing task handlers for container operations
-# EXPORTS: Task handlers registered with @TaskRegistry decorators for blob operations
-# INTERFACES: TaskRegistry pattern with handler functions returning dicts
+# EXPORTS: Handler factory functions - create_analyze_handler, create_extract_handler, create_summary_handler
+# INTERFACES: Task handlers receive params dict and TaskContext, return result dict
 # PYDANTIC_MODELS: BlobMetadata, ContainerSummary, OrchestrationData from schema_blob
-# DEPENDENCIES: repository_factory (BlobRepository), task_factory (TaskRegistry, TaskContext), schema_blob
+# DEPENDENCIES: repository_factory (BlobRepository), task_factory (TaskContext), schema_blob
 # SOURCE: Task parameters from queue messages via TaskHandlerFactory
 # SCOPE: Task-level business logic for container analysis and metadata extraction
 # VALIDATION: Parameter validation within handler functions, size limit checks
-# PATTERNS: Registry pattern (TaskRegistry), Factory pattern, Dynamic orchestration pattern
-# ENTRY_POINTS: Handlers auto-registered via @TaskRegistry decorators
+# PATTERNS: Handler factory pattern, Explicit Registration (via function_app.py), Dynamic orchestration
+# ENTRY_POINTS: Registered in function_app.py via task_catalog.register_handler()
 # INDEX: analyze_and_orchestrate:100, extract_metadata:250, summarize_container:400
 # ============================================================================
 

@@ -1,17 +1,17 @@
 # ============================================================================
 # CLAUDE CONTEXT - CONTROLLER
 # ============================================================================
-# PURPOSE: HelloWorld workflow controller using new registry pattern - demonstrates two-stage orchestration
-# EXPORTS: HelloWorldController (concrete controller with decorator-based registration)
-# INTERFACES: BaseController from schema_base - implements abstract methods for workflow orchestration
-# PYDANTIC_MODELS: WorkflowDefinition, StageDefinition, TaskDefinition, TaskResult
-# DEPENDENCIES: schema_base, job_factory, util_logger, typing, datetime
-# SOURCE: Job parameters from HTTP requests, workflow from decorator registration
-# SCOPE: HelloWorld-specific workflow with greeting and reply stages
-# VALIDATION: Parameter validation (n must be integer), workflow validation via Pydantic
-# PATTERNS: Decorator registration, Template Method, Factory pattern for task creation
-# ENTRY_POINTS: Automatically registered via @JobRegistry decorator at import
-# INDEX: HelloWorldWorkflow:50, HelloWorldController:100, create_stage_tasks:150
+# PURPOSE: HelloWorld workflow controller - demonstrates two-stage orchestration pattern
+# EXPORTS: HelloWorldController (concrete controller implementing BaseController)
+# INTERFACES: BaseController - implements all abstract methods for workflow orchestration
+# PYDANTIC_MODELS: WorkflowDefinition, StageDefinition, TaskDefinition, TaskResult, StageResultContract
+# DEPENDENCIES: controller_base, schema_workflow, schema_orchestration, util_logger, typing, datetime
+# SOURCE: Job parameters from HTTP requests via queue messages, workflow defined in REGISTRATION_INFO
+# SCOPE: HelloWorld-specific workflow with greeting (stage 1) and reply (stage 2) stages
+# VALIDATION: Parameter validation (n must be integer 1-100), contract enforcement via @enforce_contract
+# PATTERNS: Template Method (inherits from BaseController), Explicit Registration (via function_app.py)
+# ENTRY_POINTS: Registered in function_app.py via job_catalog.register_controller('hello_world', ...)
+# INDEX: REGISTRATION_INFO:50, HelloWorldController:100, validate_job_parameters:150, create_stage_tasks:200
 # ============================================================================
 
 """

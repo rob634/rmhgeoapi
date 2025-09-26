@@ -127,34 +127,39 @@ class JobSubmissionTrigger(JobManagementTrigger):
         resource_id = req_body.get("resource_id")
         version_id = req_body.get("version_id")
         system = req_body.get("system", False)
+
+        # Extract Service Bus toggle parameter
+        use_service_bus = req_body.get("use_service_bus", False)
         
         # Extract additional parameters
         additional_params = {}
-        standard_params = {"dataset_id", "resource_id", "version_id", "system"}
+        standard_params = {"dataset_id", "resource_id", "version_id", "system", "use_service_bus"}
         for key, value in req_body.items():
             if key not in standard_params:
                 additional_params[key] = value
         
         self.logger.debug(
             f"📦 Job parameters: dataset_id={dataset_id}, resource_id={resource_id}, "
-            f"version_id={version_id}, system={system}, additional={list(additional_params.keys())}"
+            f"version_id={version_id}, system={system}, use_service_bus={use_service_bus}, "
+            f"additional={list(additional_params.keys())}"
         )
         
         # Get controller for job type
         self.logger.debug(f"🎯 Getting controller for job_type: {job_type}")
         try:
-            controller = self._get_controller_for_job_type(job_type)
+            controller = self._get_controller_for_job_type(job_type, use_service_bus)
             self.logger.debug(f"✅ Controller loaded successfully: {type(controller).__name__}")
         except Exception as controller_error:
             self.logger.error(f"❌ Failed to load controller for {job_type}: {controller_error}")
             raise
         
-        # Create job parameters
+        # Create job parameters (including Service Bus toggle)
         job_params = {
             'dataset_id': dataset_id,
-            'resource_id': resource_id, 
+            'resource_id': resource_id,
             'version_id': version_id,
             'system': system,
+            'use_service_bus': use_service_bus,  # Pass toggle to controller
             **additional_params
         }
         
@@ -192,21 +197,22 @@ class JobSubmissionTrigger(JobManagementTrigger):
             "queue_info": queue_result
         }
     
-    def _get_controller_for_job_type(self, job_type: str):
+    def _get_controller_for_job_type(self, job_type: str, use_service_bus: bool = False):
         """
         Get controller instance for the specified job type.
-        
+
         Args:
             job_type: Type of job to create controller for
-            
+            use_service_bus: Whether to use Service Bus controller variant
+
         Returns:
             Controller instance
-            
+
         Raises:
             ValueError: If job type is not supported
         """
-        self.logger.debug(f"🎯 Loading controller for job_type: {job_type}")
-        
+        self.logger.debug(f"🎯 Loading controller for job_type: {job_type}, use_service_bus: {use_service_bus}")
+
         # Use JobFactory to create controllers
         self.logger.debug(f"🏗️ Using JobFactory to create controller for {job_type}")
         try:
@@ -214,8 +220,9 @@ class JobSubmissionTrigger(JobManagementTrigger):
             import controller_hello_world  # Import to trigger registration
             import controller_container  # Import to trigger registration of container controllers
             import controller_stac_setup  # Import to trigger registration of STAC setup controller
-            
-            controller = JobFactory.create_controller(job_type)
+
+            # Pass Service Bus flag to factory
+            controller = JobFactory.create_controller(job_type, use_service_bus)
             self.logger.debug(f"✅ Controller for {job_type} created successfully via JobFactory")
             return controller
         except ValueError as e:

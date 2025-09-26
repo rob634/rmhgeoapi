@@ -181,3 +181,9 @@ static_web*
 *.zip
 
 reference/
+
+# Docker volumes and local test data
+postgres_data/
+pgadmin_data/
+sql/init/*.sql.bak
+local_test_results/

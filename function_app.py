@@ -1,17 +1,17 @@
 # ============================================================================
-# CLAUDE CONTEXT - CONTROLLER
+# CLAUDE CONTEXT - AZURE FUNCTIONS ENTRY POINT
 # ============================================================================
 # PURPOSE: Azure Functions entry point orchestrating the geospatial ETL pipeline with HTTP and queue triggers
-# EXPORTS: app (Function App), HTTP routes (health, jobs/*, db/*, schema/*), queue processors
-# INTERFACES: Azure Functions triggers (HttpTrigger, QueueTrigger), controller classes
-# PYDANTIC_MODELS: JobQueueMessage, TaskQueueMessage, JobSubmissionRequest (via triggers)
-# DEPENDENCIES: azure.functions, trigger_* modules, controller_*, repository_factory, util_logger
-# SOURCE: HTTP requests, Azure Storage Queues (job-processing, task-processing), timer triggers
-# SCOPE: Global application entry point managing all Azure Function triggers and orchestration
-# VALIDATION: Request validation via trigger classes, queue message validation via Pydantic
-# PATTERNS: Front Controller pattern, Message Queue pattern, Dependency Injection (via triggers)
-# ENTRY_POINTS: Azure Functions runtime calls app routes; HTTP POST /api/jobs/{job_type}
-# INDEX: Routes:144-238, Queue processors:629-825, Health monitoring:144, Job submission:150
+# EXPORTS: app (Function App), job_catalog, task_catalog, initialize_catalogs()
+# INTERFACES: Azure Functions triggers via @app decorators (http_trigger, queue_trigger, timer_trigger)
+# PYDANTIC_MODELS: JobQueueMessage, TaskQueueMessage, various trigger request/response models
+# DEPENDENCIES: azure.functions, triggers/*, registration, controller_*, repositories/factory, util_logger
+# SOURCE: HTTP requests, Azure Storage Queues (geospatial-jobs, geospatial-tasks), timer schedules
+# SCOPE: Global application entry point managing all Azure Function triggers and explicit registration
+# VALIDATION: Request validation via trigger classes, queue message validation via Pydantic models
+# PATTERNS: Explicit Registration pattern (no decorators), Catalog pattern, Dependency Injection
+# ENTRY_POINTS: Azure Functions runtime calls app routes; main entry: /api/jobs/submit/{job_type}
+# INDEX: Registration:170-338, HTTP routes:340-435, Queue processors:629-825, Helper functions:620-750
 # ============================================================================
 
 """
@@ -140,16 +140,13 @@ from pydantic import ValidationError
 import re
 from typing import Optional
 
-# Import service modules to trigger handler registration via decorators
-# NOTE: This import is required! It registers handlers via decorators on import
-import service_hello_world  # Registers hello_world_greeting and hello_world_reply handlers
-import service_blob  # Registers blob storage task handlers (analyze_and_orchestrate, extract_metadata, etc.)
-# TODO: Fix service_stac_setup to use correct TaskRegistry pattern
-# import service_stac_setup  # Registers STAC setup task handlers (install_pgstac, configure_roles, verify)
+# Import service modules - no longer needed for registration (Phase 4 complete)
+# Services are now explicitly registered in initialize_catalogs()
+# Auto-discovery no longer needed since we use explicit registration
 
-# Auto-discover and import all service modules to trigger handler registration
-from task_factory import auto_discover_handlers
-auto_discover_handlers()
+# Auto-discover is deprecated after Phase 4 migration
+# from task_factory import auto_discover_handlers
+# auto_discover_handlers()
 
 # Application modules (our code) - HTTP Trigger Classes
 # Import directly from modules to control when instances are created
@@ -199,6 +196,7 @@ def initialize_catalogs():
     from controller_hello_world import HelloWorldController
     from controller_container import SummarizeContainerController, ListContainerController
     from controller_stac_setup import STACSetupController
+    from controller_service_bus import ServiceBusHelloWorldController
 
     # Register HelloWorldController
     try:
@@ -244,22 +242,33 @@ def initialize_catalogs():
     except Exception as e:
         logger.error(f"❌ Failed to register STACSetupController: {e}")
 
+    # Register Service Bus HelloWorldController
+    try:
+        job_catalog.register_controller(
+            ServiceBusHelloWorldController.REGISTRATION_INFO['job_type'],
+            ServiceBusHelloWorldController,
+            ServiceBusHelloWorldController.REGISTRATION_INFO
+        )
+        logger.info("✅ Registered ServiceBusHelloWorldController explicitly")
+    except Exception as e:
+        logger.error(f"❌ Failed to register ServiceBusHelloWorldController: {e}")
+
     # ====================================================================
     # REGISTER TASK HANDLERS
     # ====================================================================
 
-    # Import service handler info and factories
-    from service_hello_world import (
+    # Import service handler info and factories from services folder
+    from services.service_hello_world import (
         HELLO_GREETING_INFO, HELLO_REPLY_INFO,
         create_greeting_handler, create_reply_handler
     )
-    from service_blob import (
+    from services.service_blob import (
         ANALYZE_ORCHESTRATE_INFO, EXTRACT_METADATA_INFO,
         SUMMARIZE_CONTAINER_INFO, CREATE_FILE_INDEX_INFO,
         create_orchestration_handler, create_metadata_handler,
         create_summary_handler, create_index_handler
     )
-    from service_stac_setup import (
+    from services.service_stac_setup import (
         INSTALL_PGSTAC_INFO, CONFIGURE_PGSTAC_ROLES_INFO,
         VERIFY_PGSTAC_INSTALLATION_INFO,
         create_install_pgstac_handler
@@ -1041,6 +1050,147 @@ def process_task_queue(msg: func.QueueMessage) -> None:
 def check_poison_queues(req: func.HttpRequest) -> func.HttpResponse:
     """Poison queue monitoring endpoint using HTTP trigger base class."""
     return poison_monitor_trigger.handle_request(req)
+
+
+# ============================================================================
+# SERVICE BUS TRIGGERS - Parallel Pipeline for High-Volume Processing
+# ============================================================================
+
+@app.service_bus_queue_trigger(
+    arg_name="msg",
+    queue_name="geospatial-jobs",  # Same as Storage Queue name
+    connection="ServiceBusConnection"
+)
+def process_service_bus_job(msg: func.ServiceBusMessage) -> None:
+    """
+    Process job messages from Service Bus.
+
+    This is the parallel pipeline to the Queue Storage trigger.
+    Used when jobs are submitted with use_service_bus=true.
+
+    Performance benefits:
+    - No base64 encoding needed (Service Bus handles binary)
+    - Better throughput for high-volume scenarios
+    - Built-in dead letter queue support
+    """
+    correlation_id = str(uuid.uuid4())[:8]
+    start_time = time.time()
+
+    logger.info(f"[{correlation_id}] 🚌 SERVICE BUS JOB TRIGGER activated")
+
+    try:
+        # Extract message body (no base64 decoding needed for Service Bus)
+        message_body = msg.get_body().decode('utf-8')
+        logger.info(f"[{correlation_id}] 📦 Message size: {len(message_body)} bytes")
+
+        # Parse message
+        job_message = JobQueueMessage.model_validate_json(message_body)
+        logger.info(f"[{correlation_id}] ✅ Parsed job: {job_message.job_id[:16]}..., type={job_message.job_type}")
+
+        # Add correlation ID for tracking
+        if job_message.parameters is None:
+            job_message.parameters = {}
+        job_message.parameters['_correlation_id'] = correlation_id
+        job_message.parameters['_processing_path'] = 'service_bus'
+
+        # Get controller (will use Service Bus-optimized version if available)
+        controller = JobFactory.create_controller(job_message.job_type, use_service_bus=True)
+        logger.info(f"[{correlation_id}] 🎮 Controller created: {type(controller).__name__}")
+
+        # Process job message
+        result = controller.process_job_queue_message(job_message)
+
+        elapsed = time.time() - start_time
+        logger.info(f"[{correlation_id}] ✅ Service Bus job processed in {elapsed:.3f}s")
+
+        if hasattr(controller, 'get_performance_summary'):
+            metrics = controller.get_performance_summary()
+            logger.info(f"[{correlation_id}] 📊 Performance: {metrics}")
+
+    except Exception as e:
+        elapsed = time.time() - start_time
+        logger.error(f"[{correlation_id}] ❌ Service Bus job failed after {elapsed:.3f}s: {e}")
+        # Service Bus will handle retry/dead letter based on configuration
+        raise
+
+
+@app.service_bus_queue_trigger(
+    arg_name="msg",
+    queue_name="geospatial-tasks",  # Same as Storage Queue name
+    connection="ServiceBusConnection"
+)
+def process_service_bus_task(msg: func.ServiceBusMessage) -> None:
+    """
+    Process task messages from Service Bus.
+
+    This is the parallel pipeline for task processing.
+    Handles tasks created by Service Bus-optimized controllers.
+
+    Performance benefits:
+    - Processes batches of tasks efficiently
+    - Better concurrency handling
+    - Lower latency for high-volume scenarios
+    """
+    correlation_id = str(uuid.uuid4())[:8]
+    start_time = time.time()
+
+    logger.info(f"[{correlation_id}] 🚌 SERVICE BUS TASK TRIGGER activated")
+
+    try:
+        # Extract message body
+        message_body = msg.get_body().decode('utf-8')
+
+        # Parse message
+        task_message = TaskQueueMessage.model_validate_json(message_body)
+        logger.info(f"[{correlation_id}] ✅ Parsed task: {task_message.task_id}, type={task_message.task_type}")
+
+        # Add metadata for tracking
+        if task_message.parameters is None:
+            task_message.parameters = {}
+        task_message.parameters['_correlation_id'] = correlation_id
+        task_message.parameters['_processing_path'] = 'service_bus'
+
+        # Get repositories
+        repos = RepositoryFactory.create_repositories()
+        task_repo = repos['task_repo']
+
+        # Mark task as processing
+        task_repo.update_task_status_with_validation(
+            task_message.task_id,
+            TaskStatus.PROCESSING
+        )
+
+        # Get task handler and execute
+        handler = TaskHandlerFactory.get_handler(task_message, task_repo)
+        result = handler(task_message.parameters)
+
+        # Check if this was the last task in a batch
+        if task_message.parameters.get('batch_id'):
+            batch_id = task_message.parameters['batch_id']
+            batch_tasks = task_repo.get_tasks_by_batch(batch_id)
+            completed_count = sum(1 for t in batch_tasks if t['status'] in ['completed', 'failed'])
+
+            if completed_count == len(batch_tasks):
+                logger.info(f"[{correlation_id}] 🎆 Batch {batch_id} complete: {completed_count}/{len(batch_tasks)} tasks")
+
+        elapsed = time.time() - start_time
+        logger.info(f"[{correlation_id}] ✅ Service Bus task processed in {elapsed:.3f}s")
+
+    except Exception as e:
+        elapsed = time.time() - start_time
+        logger.error(f"[{correlation_id}] ❌ Service Bus task failed after {elapsed:.3f}s: {e}")
+
+        # Mark task as failed if possible
+        if 'task_message' in locals() and task_message:
+            try:
+                repos = RepositoryFactory.create_repositories()
+                task_repo = repos['task_repo']
+                task_repo.fail_task(task_message.task_id, str(e))
+            except:
+                pass
+
+        # Let Service Bus handle retry
+        raise
 
 
 # ============================================================================

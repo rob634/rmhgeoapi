@@ -457,10 +457,10 @@ class TaskRepository(PostgreSQLTaskRepository):
     def increment_retry_count(self, task_id: str) -> bool:
         """
         Increment task retry count.
-        
+
         Args:
             task_id: Task ID to update
-            
+
         Returns:
             True if incremented successfully
         """
@@ -468,11 +468,209 @@ class TaskRepository(PostgreSQLTaskRepository):
             task = self.get_task(task_id)
             if not task:
                 return False
-            
+
             return self.update_task(
                 task_id,
                 {'retry_count': task.retry_count + 1}
             )
+
+    # ========================================================================
+    # BATCH OPERATIONS - For Service Bus aligned batching
+    # ========================================================================
+
+    BATCH_SIZE = 100  # Aligned with Service Bus limit
+
+    def batch_create_tasks(
+        self,
+        task_definitions: List[TaskDefinition],
+        batch_id: Optional[str] = None,
+        initial_status: str = 'pending_queue'
+    ) -> List[TaskRecord]:
+        """
+        Batch create tasks using PostgreSQL executemany.
+        Aligned to Service Bus batch size (100 tasks max).
+
+        Args:
+            task_definitions: List of TaskDefinition objects (max 100)
+            batch_id: Optional batch identifier for tracking
+            initial_status: Initial task status (default: pending_queue)
+
+        Returns:
+            List of created TaskRecord objects
+
+        Raises:
+            ValueError: If batch size exceeds limit
+            RuntimeError: If database operation fails
+        """
+        if len(task_definitions) > self.BATCH_SIZE:
+            raise ValueError(f"Batch too large: {len(task_definitions)} > {self.BATCH_SIZE}")
+
+        logger.info(f"📦 Batch creating {len(task_definitions)} tasks with batch_id: {batch_id}")
+
+        try:
+            # Convert TaskDefinitions to tuples for executemany
+            now = datetime.now(timezone.utc)
+            data = []
+
+            for td in task_definitions:
+                # Convert TaskDefinition to TaskRecord
+                task_record = td.to_task_record()
+
+                # Prepare data tuple for SQL insert
+                data.append((
+                    task_record.task_id,
+                    task_record.parent_job_id,
+                    task_record.task_type,
+                    initial_status,  # Use initial_status instead of task_record.status
+                    task_record.stage_number,
+                    json.dumps(task_record.parameters) if task_record.parameters else '{}',
+                    batch_id,  # Add batch_id
+                    0,  # retry_count
+                    json.dumps(task_record.metadata) if task_record.metadata else '{}',
+                    now,
+                    now
+                ))
+
+            # Execute batch insert
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+
+                # Use executemany for batch insert
+                cursor.executemany(
+                    f"""
+                    INSERT INTO {self.schema_name}.tasks (
+                        task_id, parent_job_id, task_type, status,
+                        stage_number, parameters, batch_id, retry_count,
+                        metadata, created_at, updated_at
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """,
+                    data
+                )
+
+                conn.commit()
+                affected = cursor.rowcount
+
+                logger.info(f"✅ Batch insert successful: {affected} tasks created")
+
+            # Return TaskRecord objects
+            return [td.to_task_record() for td in task_definitions]
+
+        except Exception as e:
+            logger.error(f"❌ Batch task creation failed: {e}")
+            raise RuntimeError(f"Failed to batch create tasks: {e}")
+
+    def batch_update_status(
+        self,
+        task_ids: List[str],
+        new_status: str,
+        additional_updates: Optional[Dict[str, Any]] = None
+    ) -> int:
+        """
+        Batch update task status for multiple tasks.
+
+        Args:
+            task_ids: List of task IDs to update
+            new_status: New status value
+            additional_updates: Optional additional fields to update
+
+        Returns:
+            Number of tasks updated
+
+        Example:
+            # Mark batch as queued after successful Service Bus send
+            task_repo.batch_update_status(
+                task_ids=['task1', 'task2', ...],
+                new_status='queued',
+                additional_updates={'queued_at': datetime.now(timezone.utc)}
+            )
+        """
+        if not task_ids:
+            return 0
+
+        logger.info(f"📝 Batch updating status for {len(task_ids)} tasks to: {new_status}")
+
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+
+                # Build update query
+                set_clauses = [f"status = %s", f"updated_at = %s"]
+                params = [new_status, datetime.now(timezone.utc)]
+
+                if additional_updates:
+                    for key, value in additional_updates.items():
+                        set_clauses.append(f"{key} = %s")
+                        params.append(value)
+
+                # Add task IDs to params
+                params.append(tuple(task_ids))
+
+                query = f"""
+                    UPDATE {self.schema_name}.tasks
+                    SET {', '.join(set_clauses)}
+                    WHERE task_id = ANY(%s)
+                """
+
+                cursor.execute(query, params)
+                conn.commit()
+
+                updated = cursor.rowcount
+                logger.info(f"✅ Batch status update successful: {updated} tasks updated")
+
+                return updated
+
+        except Exception as e:
+            logger.error(f"❌ Batch status update failed: {e}")
+            raise RuntimeError(f"Failed to batch update task status: {e}")
+
+    def get_tasks_by_batch(self, batch_id: str) -> List[Dict[str, Any]]:
+        """
+        Get all tasks for a specific batch.
+
+        Args:
+            batch_id: Batch identifier
+
+        Returns:
+            List of task dictionaries
+
+        Example:
+            tasks = task_repo.get_tasks_by_batch('job123-b0')
+        """
+        query = f"""
+            SELECT * FROM {self.schema_name}.tasks
+            WHERE batch_id = %s
+            ORDER BY created_at
+        """
+
+        return self._execute_query(query, (batch_id,))
+
+    def get_pending_retry_batches(
+        self,
+        max_age_minutes: int = 30,
+        limit: int = 10
+    ) -> List[str]:
+        """
+        Get batch IDs that have tasks pending retry.
+
+        Args:
+            max_age_minutes: Maximum age of tasks to retry
+            limit: Maximum number of batches to return
+
+        Returns:
+            List of batch IDs needing retry
+        """
+        query = f"""
+            SELECT DISTINCT batch_id
+            FROM {self.schema_name}.tasks
+            WHERE status = 'pending_retry'
+              AND batch_id IS NOT NULL
+              AND created_at > NOW() - INTERVAL '%s minutes'
+            LIMIT %s
+        """
+
+        results = self._execute_query(query, (max_age_minutes, limit))
+        return [r['batch_id'] for r in results]
 
 
 # ============================================================================

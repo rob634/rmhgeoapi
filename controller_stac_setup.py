@@ -1,22 +1,17 @@
 # ============================================================================
 # CLAUDE CONTEXT - CONTROLLER
 # ============================================================================
-# PURPOSE: One-time STAC database setup controller for PgSTAC installation
-# EXPORTS: STACSetupController - Manages PgSTAC schema installation workflow
-# INTERFACES: BaseController - Implements abstract controller methods
-# PYDANTIC_MODELS: WorkflowDefinition, StageDefinition, TaskDefinition
-# DEPENDENCIES: pypgstac for database migrations
-# SOURCE: Triggered via HTTP endpoint for one-time setup
-# SCOPE: Database schema creation - run once per environment
-# VALIDATION: Verifies PgSTAC installation success
-# PATTERNS: Controller pattern for job orchestration
-# ENTRY_POINTS: JobFactory.create_controller("stac_setup")
-# INDEX:
-#   - Line 20: Class definition
-#   - Line 35: Workflow definition
-#   - Line 55: Parameter validation
-#   - Line 70: Task creation logic
-#   - Line 120: Result aggregation
+# PURPOSE: One-time STAC database setup controller for PgSTAC installation and configuration
+# EXPORTS: STACSetupController (concrete controller implementing BaseController)
+# INTERFACES: BaseController - implements all abstract methods for workflow orchestration
+# PYDANTIC_MODELS: WorkflowDefinition, StageDefinition, TaskDefinition, StageResultContract
+# DEPENDENCIES: controller_base, schema_workflow, schema_orchestration, util_logger, typing
+# SOURCE: Job parameters from HTTP requests, triggered for one-time database setup
+# SCOPE: Database schema creation and configuration - run once per environment
+# VALIDATION: Parameter validation (database config), contract enforcement via @enforce_contract
+# PATTERNS: Template Method (BaseController), Explicit Registration (via function_app.py)
+# ENTRY_POINTS: Registered in function_app.py via job_catalog.register_controller('stac_setup', ...)
+# INDEX: REGISTRATION_INFO:30, STACSetupController:70, validate_job_parameters:100, create_stage_tasks:150
 # ============================================================================
 
 from typing import Dict, List, Any, Optional

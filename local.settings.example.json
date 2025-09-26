@@ -27,6 +27,14 @@
     "_comment_queues": "=== Queue Configuration ===",
     "JOB_PROCESSING_QUEUE": "geospatial-jobs",
     "TASK_PROCESSING_QUEUE": "geospatial-tasks",
+
+    "_comment_service_bus": "=== Service Bus Configuration (Parallel Pipeline) ===",
+    "SERVICE_BUS_NAMESPACE": "your-servicebus-namespace",
+    "SERVICE_BUS_CONNECTION_STRING": "Endpoint=sb://your-namespace.servicebus.windows.net/;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=...",
+    "SERVICE_BUS_JOB_QUEUE": "sb-jobs",
+    "SERVICE_BUS_TASK_QUEUE": "sb-tasks",
+    "SERVICE_BUS_MAX_BATCH_SIZE": "100",
+    "ENABLE_SERVICE_BUS": "false",
     
     "_comment_app": "=== Application Configuration ===",
     "FUNCTION_TIMEOUT_MINUTES": "5",

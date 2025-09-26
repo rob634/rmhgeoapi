@@ -1,17 +1,17 @@
 # ============================================================================
-# CLAUDE CONTEXT - CONTROLLER
+# CLAUDE CONTEXT - FACTORY
 # ============================================================================
 # PURPOSE: Factory classes for creating controllers and tasks in the job orchestration system
-# EXPORTS: JobFactory, TaskFactory
-# INTERFACES: Factory pattern for job/task instantiation
-# PYDANTIC_MODELS: Uses models from schema_base
-# DEPENDENCIES: schema_base, typing, hashlib, importlib
-# SOURCE: JobRegistry singleton for job type lookup
+# EXPORTS: JobFactory, TaskFactory (factory classes for controller and task instantiation)
+# INTERFACES: Uses JobCatalog and TaskCatalog instances injected via set_catalog() methods
+# PYDANTIC_MODELS: TaskDefinition, WorkflowDefinition from schema_workflow
+# DEPENDENCIES: registration (JobCatalog, TaskCatalog), typing, hashlib, logging
+# SOURCE: Catalogs injected from function_app.py during initialization
 # SCOPE: Job and task creation throughout the system
-# VALIDATION: Validates job types against registry, generates deterministic IDs
-# PATTERNS: Factory pattern, Singleton registry access
+# VALIDATION: Validates job types against catalog, generates deterministic task IDs
+# PATTERNS: Factory pattern with dependency injection (catalogs), NOT singleton
 # ENTRY_POINTS: JobFactory.create_controller(), TaskFactory.create_tasks()
-# INDEX: JobFactory:50, TaskFactory:150
+# INDEX: JobFactory:50, set_catalog:70, create_controller:90, TaskFactory:150, create_tasks:200
 # ============================================================================
 
 """
@@ -66,12 +66,13 @@ class JobFactory:
         cls._catalog = catalog
 
     @staticmethod
-    def create_controller(job_type: str) -> BaseController:
+    def create_controller(job_type: str, use_service_bus: bool = False) -> BaseController:
         """
         Create a controller instance for the specified job type.
 
         Args:
             job_type: The type of job to create a controller for
+            use_service_bus: If True, use Service Bus-optimized controller if available
 
         Returns:
             Instantiated controller with workflow attached
@@ -83,19 +84,37 @@ class JobFactory:
         if JobFactory._catalog is None:
             raise RuntimeError("JobCatalog not initialized. Call JobFactory.set_catalog() first.")
 
-        # Get controller class from catalog
-        controller_class = JobFactory._catalog.get_controller(job_type)
-
-        # Get metadata for injection
-        metadata = JobFactory._catalog.get_metadata(job_type)
+        # Check for Service Bus-optimized controller
+        if use_service_bus:
+            # Try to get Service Bus version first
+            sb_job_type = f"sb_{job_type}"
+            try:
+                # Check if Service Bus version exists
+                controller_class = JobFactory._catalog.get_controller(sb_job_type)
+                metadata = JobFactory._catalog.get_metadata(sb_job_type)
+                actual_job_type = sb_job_type
+            except (ValueError, KeyError):
+                # Fall back to regular controller but it will use Service Bus for queuing
+                controller_class = JobFactory._catalog.get_controller(job_type)
+                metadata = JobFactory._catalog.get_metadata(job_type)
+                actual_job_type = job_type
+        else:
+            # Use regular controller
+            controller_class = JobFactory._catalog.get_controller(job_type)
+            metadata = JobFactory._catalog.get_metadata(job_type)
+            actual_job_type = job_type
 
         # Create instance
         controller = controller_class()
 
         # Inject metadata
-        controller._job_type = job_type
+        controller._job_type = actual_job_type
         if 'workflow' in metadata:
             controller._workflow = metadata['workflow']
+
+        # Set Service Bus flag if needed (for controllers that check this)
+        if use_service_bus and hasattr(controller, 'use_service_bus'):
+            controller.use_service_bus = True
 
         return controller
     
@@ -351,13 +370,16 @@ class TaskFactory:
 """
 Example usage in controller:
 
-@JobRegistry.instance().register(
-    job_type="process_raster",
-    workflow=workflow,
-    description="Process raster into COGs"
-)
+# In controller file:
 class ProcessRasterController(BaseController):
-    
+
+    # Define static metadata for registration
+    REGISTRATION_INFO = {
+        'job_type': 'process_raster',
+        'description': 'Process raster into COGs',
+        'workflow': workflow  # WorkflowDefinition object
+    }
+
     def create_stage_tasks(self, stage_number, job_id, params, prev_results):
         if stage_number == 2:  # Tiling stage
             # Calculate tiles (could be 100-1000)
@@ -369,7 +391,7 @@ class ProcessRasterController(BaseController):
                         'bounds': [x*100, y*100, (x+1)*100, (y+1)*100],
                         'source_raster': params['input_path']
                     })
-            
+
             # Use factory for bulk creation
             definitions = []
             for p in tile_params:
@@ -383,8 +405,16 @@ class ProcessRasterController(BaseController):
                     job_id=job_id,
                     parameters=p
                 ))
-            
+
             return definitions
+
+# In function_app.py, register explicitly:
+from controller_process_raster import ProcessRasterController
+job_catalog.register_controller(
+    'process_raster',
+    ProcessRasterController,
+    ProcessRasterController.REGISTRATION_INFO
+)
 
 # In submit_job endpoint:
 controller = JobFactory.create_controller(job_type)

@@ -1,17 +1,17 @@
 # ============================================================================
-# CLAUDE CONTEXT - FACTORY
+# CLAUDE CONTEXT - REPOSITORY FACTORY
 # ============================================================================
 # PURPOSE: Central factory for creating all repository instances across different storage backends
-# EXPORTS: RepositoryFactory
-# INTERFACES: Factory pattern for repository instantiation
-# PYDANTIC_MODELS: None - returns repository instances
-# DEPENDENCIES: repository_jobs_tasks, repository_vault, typing
-# SOURCE: Configuration from AppConfig or environment variables
+# EXPORTS: RepositoryFactory (static class with factory methods for all repository types)
+# INTERFACES: Creates instances implementing IJobRepository, ITaskRepository, IQueueRepository
+# PYDANTIC_MODELS: None - returns repository instances that use Pydantic models internally
+# DEPENDENCIES: repositories/*, interfaces/repository, config, typing
+# SOURCE: Configuration from AppConfig for connection strings and settings
 # SCOPE: Global repository creation for entire application
 # VALIDATION: Connection validation handled by individual repositories
-# PATTERNS: Factory pattern, Abstract Factory (future: multiple backends)
-# ENTRY_POINTS: repos = RepositoryFactory.create_repositories(); job_repo = repos['job_repo']
-# INDEX: RepositoryFactory:45, create_repositories:65, create_job_repository:107
+# PATTERNS: Factory pattern, Dependency Injection, Interface segregation
+# ENTRY_POINTS: RepositoryFactory.create_repositories(), create_job_repository(), create_queue_repository()
+# INDEX: RepositoryFactory:45, create_repositories:65, create_queue_repository:150, create_blob_repository:200
 # ============================================================================
 
 """
@@ -193,6 +193,32 @@ class RepositoryFactory:
         logger.info("✅ Queue repository created successfully")
 
         return queue_repo
+
+    @staticmethod
+    def create_service_bus_repository() -> 'ServiceBusRepository':
+        """
+        Create Service Bus repository for high-volume message operations.
+
+        This is the parallel pipeline to Queue Storage for A/B testing.
+        Uses Service Bus for batch operations and better performance.
+
+        Returns:
+            ServiceBusRepository singleton instance
+
+        Example:
+            # Route based on parameter
+            if job_params.get('use_service_bus', False):
+                repo = RepositoryFactory.create_service_bus_repository()
+            else:
+                repo = RepositoryFactory.create_queue_repository()
+        """
+        from .service_bus import ServiceBusRepository
+
+        logger.info("🚌 Creating Service Bus repository")
+        service_bus_repo = ServiceBusRepository.instance()
+        logger.info("✅ Service Bus repository created successfully")
+
+        return service_bus_repo
 
     @staticmethod
     def create_blob_repository(

@@ -562,7 +562,8 @@ def create_sync_container_workflow() -> WorkflowDefinition:
 # Export workflow registry for easy access
 WORKFLOW_REGISTRY = {
     "hello_world": create_hello_world_workflow,
-    "sync_container": create_sync_container_workflow
+    "sync_container": create_sync_container_workflow,
+    "sb_hello_world": create_hello_world_workflow  # Service Bus version uses same workflow
 }
 
 

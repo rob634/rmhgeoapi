@@ -1,9 +1,393 @@
 # Project History
 
-**Last Updated**: 25 SEP 2025 - Service Bus Parallel Implementation Complete
+**Last Updated**: 2 OCT 2025 - END-TO-END JOB COMPLETION ACHIEVED! 🎉
 **Note**: For project history prior to September 11, 2025, see **OLDER_HISTORY.md**
 
 This document tracks completed architectural changes and improvements to the Azure Geospatial ETL Pipeline from September 11, 2025 onwards.
+
+---
+
+## 2 OCT 2025: End-to-End Job Completion Achieved! 🏆
+
+**Status**: ✅ COMPLETE - First successful end-to-end job completion with Service Bus architecture!
+**Impact**: Core orchestration working - Jobs → Stages → Tasks → Completion
+**Timeline**: Full debug session fixing psycopg dict_row compatibility issues
+**Author**: Robert and Geospatial Claude Legion
+
+### Major Achievement: HELLO_WORLD JOB COMPLETED END-TO-END
+
+**Final Result:**
+```json
+{
+  "status": "JobStatus.COMPLETED",
+  "totalTasks": 6,
+  "resultData": {
+    "message": "Job completed successfully",
+    "job_type": "hello_world",
+    "total_tasks": 6
+  }
+}
+```
+
+### Complete Workflow Verified:
+1. ✅ HTTP job submission → Job queue (Service Bus)
+2. ✅ Job processor creates tasks for Stage 1
+3. ✅ All Stage 1 tasks execute in parallel (3/3 completed)
+4. ✅ "Last task turns out lights" triggers stage completion
+5. ✅ System advances to Stage 2
+6. ✅ All Stage 2 tasks execute in parallel (3/3 completed)
+7. ✅ Final task triggers job completion
+8. ✅ Job marked as COMPLETED with aggregated results
+
+### Critical Fixes Applied:
+
+#### 1. PostgreSQL dict_row Migration
+**Problem**: psycopg `fetchall()` returned tuples, code expected dicts
+**Solution**:
+- Added `from psycopg.rows import dict_row` import
+- Set `row_factory=dict_row` on all connections
+- Migrated 7 methods from numeric index access (`row[0]`) to dict keys (`row['job_id']`)
+
+**Files Fixed:**
+- `infrastructure/postgresql.py` - Connection factory and all query methods
+- `infrastructure/jobs_tasks.py` - Task retrieval with `fetch='all'` parameter
+
+#### 2. TaskResult Pydantic Validation
+**Problem**: Creating TaskResult with wrong field names (job_id, stage_number instead of task_id, task_type)
+**Solution**: Fixed all TaskResult instantiations to use correct Pydantic fields
+
+#### 3. Task Status Lifecycle
+**Problem**: Tasks never transitioned from QUEUED → PROCESSING
+**Solution**: Added `update_task_status_direct()` call before handler execution
+
+#### 4. Workflow Registry Access
+**Problem**: Code called non-existent `get_workflow()` function
+**Solution**: Replaced with explicit `self.jobs_registry[job_type]` lookups
+
+#### 5. Workflow Stages Access
+**Problem**: Tried to call `workflow.define_stages()` method on data class
+**Solution**: Access `workflow.stages` class attribute directly
+
+#### 6. JobExecutionContext Schema
+**Problem**: Pydantic model had `extra="forbid"` but missing `task_results` field
+**Solution**: Added `task_results: List[Any]` field to allow job completion
+
+### Architecture Validation:
+
+**Service Bus Only** ✅
+- Storage Queue support removed from health checks
+- All jobs use Service Bus queues exclusively
+- Two queues: `geospatial-jobs`, `geospatial-tasks`
+
+**Pydantic Validation at All Boundaries** ✅
+- TaskDefinition (orchestration layer)
+- TaskRecord (database persistence)
+- TaskQueueMessage (Service Bus messages)
+- TaskResult (execution results)
+- JobExecutionContext (completion aggregation)
+
+**Atomic Completion Detection** ✅
+- PostgreSQL `complete_task_and_check_stage()` function
+- Advisory locks prevent race conditions
+- "Last task turns out lights" pattern verified
+
+### Technical Debt Cleaned:
+- ❌ Removed: Storage Queue infrastructure
+- ❌ Removed: Legacy `BaseController` references
+- ✅ Confirmed: Service Bus receiver caching removed
+- ✅ Confirmed: State transition validation working
+- ✅ Confirmed: CoreMachine composition pattern operational
+
+### Next Steps:
+- More complex job types (geospatial workflows)
+- Multi-stage fan-out/fan-in patterns
+- Production testing with real data
+
+---
+
+## 1 OCT 2025: Epoch 4 Schema Migration Complete 🎉
+
+**Status**: ✅ COMPLETE - Full migration to Epoch 4 `core/` architecture!
+**Impact**: Cleaned up 800+ lines of legacy schema code, established clean architecture foundation
+**Timeline**: Full migration session with strategic archival and import fixing
+**Author**: Robert and Geospatial Claude Legion
+
+### Major Achievements:
+
+#### 1. Complete Schema Migration (`schema_base.py` → `core/`)
+- **Migrated 20+ files** from `schema_base`, `schema_queue`, `schema_updates` imports to `core/` structure
+- **Infrastructure layer**: All 7 files in `infrastructure/` updated
+- **Repository layer**: All 5 files in `repositories/` updated
+- **Controllers**: hello_world, container, base, factories all migrated
+- **Triggers**: health.py fixed to use `infrastructure/` instead of `repositories/`
+- **Core**: machine.py, function_app.py fully migrated
+
+#### 2. Health Endpoint Fully Operational
+**Before**: "unhealthy" - Queue component had `schema_base` import error
+**After**: "healthy" - All components passing
+
+**Component Status:**
+- ✅ **Imports**: 11/11 modules (100% success rate)
+- ✅ **Queues**: Both geospatial-jobs and geospatial-tasks accessible (0 messages)
+- ✅ **Database**: PostgreSQL + PostGIS fully functional
+- ✅ **Database Config**: All environment variables present
+
+#### 3. Database Schema Redeploy Working
+**Successful Execution:**
+- ✅ **26 SQL statements executed** (0 failures!)
+- ✅ **4 PostgreSQL functions** deployed
+  - `complete_task_and_check_stage`
+  - `advance_job_stage`
+  - `check_job_completion`
+  - `update_updated_at_column`
+- ✅ **2 tables created** (jobs, tasks)
+- ✅ **2 enums created** (job_status, task_status)
+- ✅ **10 indexes created**
+- ✅ **2 triggers created**
+
+**Verification:** All objects present and functional after deployment.
+
+#### 4. Documentation Reorganization
+**Problem**: 29 markdown files cluttering root directory
+**Solution**: Organized into `docs/` structure
+
+**Created Structure:**
+- `docs/epoch/` - Epoch planning & implementation tracking (14 files)
+- `docs/architecture/` - CoreMachine & infrastructure design (6 files)
+- `docs/migrations/` - Migration & refactoring tracking (7 files)
+
+**Kept in root:**
+- `CLAUDE.md` - Primary entry point
+- `LOCAL_TESTING_README.md` - Developer quick reference
+
+**Updated `.funcignore`:**
+- Added `docs/` folder exclusion
+- Added `archive_epoch3_controllers/` exclusion
+
+#### 5. Epoch 3 Controller Archive
+**Archived Controllers:**
+- `controller_base.py` - God Class (2,290 lines)
+- `controller_hello_world.py` - Storage Queue version
+- `controller_container.py` - Storage Queue version
+- `controller_factories.py` - Old factory pattern
+- `controller_service_bus.py` - Empty tombstone file
+- `registration.py` - Old registry pattern
+
+**Preserved for Reference:**
+- `controller_service_bus_hello.py` - Working Service Bus example
+- `controller_service_bus_container.py` - Service Bus stub
+
+### Migration Strategy Used:
+
+**User's Strategy**: "Move files and let imports fail"
+- Archived deprecated schema files first
+- Deployed to capture import errors from Application Insights
+- Fixed each import error iteratively
+- Used comprehensive local import testing before final deployment
+
+**Files Archived:**
+- `archive_epoch3_schema/` - schema_base.py, schema_manager.py, schema_sql_generator.py, etc.
+- `archive_epoch3_controllers/` - All legacy controller files
+
+### Technical Details:
+
+#### Import Path Changes:
+```python
+# BEFORE (Epoch 3):
+from schema_base import JobRecord, TaskRecord, generate_job_id
+from schema_queue import JobQueueMessage, TaskQueueMessage
+from schema_updates import TaskUpdateModel, JobUpdateModel
+
+# AFTER (Epoch 4):
+from core.models import JobRecord, TaskRecord
+from core.utils import generate_job_id
+from core.schema.queue import JobQueueMessage, TaskQueueMessage
+from core.schema.updates import TaskUpdateModel, JobUpdateModel
+```
+
+#### New Core Structure:
+```
+core/
+├── utils.py                    # generate_job_id, SchemaValidationError
+├── models/
+│   ├── enums.py               # JobStatus, TaskStatus
+│   ├── job.py                 # JobRecord
+│   ├── task.py                # TaskRecord
+│   └── results.py             # TaskResult, TaskCompletionResult, JobCompletionResult
+└── schema/
+    ├── queue.py               # JobQueueMessage, TaskQueueMessage
+    ├── updates.py             # TaskUpdateModel, JobUpdateModel
+    └── deployer.py            # SchemaManagerFactory
+```
+
+### Files Modified:
+1. `core/utils.py` - Created with generate_job_id + SchemaValidationError
+2. `core/models/results.py` - Added TaskCompletionResult
+3. `infrastructure/*.py` - All 7 files migrated
+4. `repositories/*.py` - All 5 files migrated
+5. `services/service_stac_setup.py` - Migrated imports
+6. `controller_hello_world.py` - Migrated to core/
+7. `controller_base.py` - Migrated to core/
+8. `controller_container.py` - Migrated to core/
+9. `controller_factories.py` - Migrated to core/
+10. `triggers/health.py` - Changed `repositories` → `infrastructure`
+11. `function_app.py` - Migrated queue imports
+12. `core/machine.py` - Migrated queue imports
+13. `.funcignore` - Added docs/ and archive exclusions
+
+### Deployment Verification:
+- ✅ Remote build successful
+- ✅ All imports load correctly
+- ✅ Health endpoint returns "healthy"
+- ✅ Schema redeploy works flawlessly
+- ✅ No import errors in Application Insights
+
+### Next Steps:
+1. Test end-to-end job submission with new architecture
+2. Complete Epoch 4 job registry implementation
+3. Migrate remaining services to new patterns
+4. Archive remaining Epoch 3 files
+
+---
+
+## 28 SEP 2025: Service Bus Complete End-to-End Fix 🎉
+
+**Status**: ✅ COMPLETE - Service Bus jobs now complete successfully!
+**Impact**: Fixed 7 critical bugs preventing Service Bus operation
+**Timeline**: Full day debugging session (Morning + Evening)
+**Author**: Robert and Geospatial Claude Legion
+
+### Morning Session: Task Execution Fixes
+
+#### Issues Discovered Through Log Analysis:
+1. **TaskHandlerFactory Wrong Parameters** (line 691)
+   - Passed string instead of TaskQueueMessage object
+   - Fixed: Pass full message object
+
+2. **Missing Return in Error Handler** (function_app.py:1245)
+   - Continued after exception, logged false success
+   - Fixed: Added return statement
+
+3. **Wrong Attribute parent_job_id** (8 locations)
+   - Used job_id instead of parent_job_id
+   - Fixed: Updated all references
+
+4. **Missing update_task_with_model** (function_app.py:1243)
+   - Method didn't exist in TaskRepository
+   - Fixed: Used existing update_task() method
+
+5. **Incorrect Import Path** (controller_service_bus_hello.py:691)
+   - `from repositories.factories` doesn't exist
+   - Fixed: `from repositories import RepositoryFactory`
+
+### Evening Session: Job Completion Architecture Fix
+
+#### Deep Architecture Analysis:
+- **Compared BaseController vs CoreController** job completion flows
+- **Discovered**: Parameter type mismatch in complete_job pipeline
+- **Root Cause**: Missing Pydantic type safety in clean architecture
+
+#### Complete Fix Implementation:
+1. **Added TaskRepository.get_tasks_for_job()**
+   - Returns `List[TaskRecord]` Pydantic objects
+   - Proper type safety from database layer
+
+2. **Fixed JobExecutionContext Creation**
+   - Added missing current_stage and total_stages fields
+   - Fixed Pydantic validation errors
+
+3. **Refactored Job Completion Flow**
+   - Fetch TaskRecords → Convert to TaskResults
+   - Pass proper Pydantic objects through pipeline
+   - StateManager.complete_job() signature aligned with JobRepository
+
+4. **Type Safety Throughout**
+   - Reused existing schema_base.py models
+   - TaskRecord, TaskResult, JobExecutionContext
+   - Maintains consistency with BaseController patterns
+
+### Final Achievement:
+- ✅ Tasks complete (PROCESSING → COMPLETED)
+- ✅ Stage advancement works (Stage 1 → Stage 2)
+- ✅ Job completion executes successfully
+- ✅ Full Pydantic type safety
+- ✅ Clean architecture preserved
+
+---
+
+## 26 SEP 2025 Afternoon: Clean Architecture Refactoring
+
+**Status**: ✅ COMPLETE - Service Bus Clean Architecture WITHOUT God Class
+**Impact**: Eliminated 2,290-line God Class, replaced with focused components
+**Timeline**: Afternoon architecture session (3-4 hours)
+**Author**: Robert and Geospatial Claude Legion
+
+### What Was Accomplished
+
+#### Major Architecture Refactoring
+1. **CoreController** (`controller_core.py`)
+   - ✅ Extracted minimal abstract base from BaseController
+   - ✅ Only 5 abstract methods + ID generation + validation
+   - ✅ ~430 lines vs BaseController's 2,290 lines
+   - ✅ Clean inheritance without God Class baggage
+
+2. **StateManager** (`state_manager.py`)
+   - ✅ Extracted all database operations with advisory locks
+   - ✅ Critical "last task turns out lights" pattern preserved
+   - ✅ Shared component for both Queue Storage and Service Bus
+   - ✅ ~540 lines of focused state management
+
+3. **OrchestrationManager** (`orchestration_manager.py`)
+   - ✅ Simplified dynamic task creation
+   - ✅ Optimized for Service Bus batch processing
+   - ✅ No workflow definition dependencies
+   - ✅ ~400 lines of clean orchestration logic
+
+4. **ServiceBusListProcessor** (`service_bus_list_processor.py`)
+   - ✅ Reusable base for "list-then-process" workflows
+   - ✅ Template method pattern for common operations
+   - ✅ Built-in examples: Container, STAC, GeoJSON processors
+   - ✅ ~500 lines of reusable patterns
+
+### Architecture Strategy
+- **Composition Over Inheritance**: Service Bus uses focused components
+- **Parallel Build**: BaseController remains unchanged for backward compatibility
+- **Single Responsibility**: Each component has one clear purpose
+- **Zero Breaking Changes**: Existing Queue Storage code unaffected
+
+### Key Benefits
+- **No God Class**: Service Bus doesn't inherit 38 methods it doesn't need
+- **Testability**: Each component can be tested in isolation
+- **Maintainability**: Components are 200-600 lines each (vs 2,290)
+- **Reusability**: Components can be shared across different controller types
+
+### Documentation Created
+- `BASECONTROLLER_COMPLETE_ANALYSIS.md` - Full method categorization
+- `BASECONTROLLER_SPLIT_STRATEGY.md` - Refactoring strategy
+- `SERVICE_BUS_CLEAN_ARCHITECTURE.md` - Clean architecture plan
+- `BASECONTROLLER_ANNOTATED_REFACTOR.md` - Method-by-method analysis
+
+---
+
+## 26 SEP 2025 Morning: Service Bus Victory
+
+**Status**: ✅ COMPLETE - Service Bus Pipeline Operational
+**Impact**: Both Queue Storage and Service Bus running in parallel
+**Timeline**: Morning debugging session
+**Author**: Robert and Geospatial Claude Legion
+
+### What Was Fixed
+
+#### Service Bus HelloWorld Working
+1. **Parameter Mismatches Fixed**
+   - ✅ Fixed job_id vs parent_job_id inconsistencies
+   - ✅ Aligned method signatures across components
+   - ✅ Fixed aggregate_job_results context parameter
+
+2. **Successful Test Run**
+   - ✅ HelloWorld with n=20 (40 tasks total)
+   - ✅ Both stages completed successfully
+   - ✅ Batch processing metrics collected
 
 ---
 
@@ -30,426 +414,94 @@ This document tracks completed architectural changes and improvements to the Azu
    - ✅ Batch tracking with batch_id
 
 3. **Service Bus Controller** (`controller_service_bus.py`)
-   - ✅ Separate controller for clean separation
-   - ✅ Inherits from BaseController for compatibility
-   - ✅ Smart batching strategy (≥50 tasks = batch)
-   - ✅ Built-in performance metrics
+   - ✅ ServiceBusBaseController with batch optimization
+   - ✅ Smart batching (>50 tasks = batch, <50 = individual)
+   - ✅ Performance metrics tracking
+   - ✅ ServiceBusHelloWorldController test implementation
 
-4. **Complete Integration**
-   - ✅ HTTP trigger accepts `use_service_bus` parameter
-   - ✅ Factory routes based on flag
-   - ✅ Service Bus triggers added to function_app.py
-   - ✅ ServiceBusHelloWorldController registered
+4. **Function App Triggers** (`function_app.py`)
+   - ✅ `process_service_bus_job` - Job message processing
+   - ✅ `process_service_bus_task` - Task message processing
+   - ✅ Correlation ID tracking for debugging
+   - ✅ Batch completion detection
 
 ### Performance Characteristics
-- **Queue Storage Path**: 1,000 tasks = 100 seconds (times out)
-- **Service Bus Path**: 1,000 tasks = 2.5 seconds (250x faster!)
-- **Batch Processing**: 100-item aligned batches
-- **Scales to**: 100,000+ tasks without timeouts
-
-### Key Innovation
-**Aligned 100-item batches** - PostgreSQL and Service Bus use the same batch size, creating perfect 1-to-1 coordination and simplifying error handling.
+- **Queue Storage**: ~100 seconds for 1,000 tasks (often times out)
+- **Service Bus**: ~2.5 seconds for 1,000 tasks (250x faster!)
+- **Batch Size**: 100 items (aligned with Service Bus limits)
+- **Linear Scaling**: Predictable performance up to 100,000+ tasks
 
 ### Documentation Created
-- `SERVICE_BUS_COMPLETE_IMPLEMENTATION.md` - Full implementation guide
-- `SIMPLIFIED_BATCH_COORDINATION.md` - Batch alignment strategy
-- `BATCH_PROCESSING_ANALYSIS.md` - PostgreSQL batch capabilities
-- `SERVICE_BUS_PARALLEL_IMPLEMENTATION.md` - Design document
+- `SERVICE_BUS_PARALLEL_IMPLEMENTATION.md` - Complete implementation guide
+- `BATCH_COORDINATION_STRATEGY.md` - Coordination between PostgreSQL and Service Bus
+- `SERVICE_BUS_IMPLEMENTATION_STATUS.md` - Current status and testing
 
 ---
 
-## 25 SEP 2025 Morning: Phase 4 Registration Refactoring - Complete Registry Removal
+## 24 SEP 2025 Evening: Task Handler Bug Fixed
 
-**Status**: ✅ COMPLETED - OLD REGISTRY CLASSES ELIMINATED
-**Impact**: System now runs entirely on injected catalogs (no singletons)
-**Timeline**: Morning implementation session
-**Author**: Robert and Geospatial Claude Legion
-
-### What Was Accomplished
-
-#### Phase 4 Option A: Minimal Refactor
-1. **Removed Old Registry Classes**
-   - ✅ Deleted JobRegistry class from job_factory.py
-   - ✅ Deleted TaskRegistry class from task_factory.py
-   - ✅ Removed all fallback logic from factories
-   - ✅ Factories now require catalog initialization
-
-2. **Updated Factory Methods**
-   - TaskHandlerFactory.get_handler() - Now requires catalog, no fallback
-   - TaskHandlerFactory.validate_handler_availability() - Returns all False if no catalog
-   - JobFactory uses only injected catalog
-
-3. **Testing & Verification**
-   - Created test_phase4_complete.py to verify old classes cannot be imported
-   - Deployed to production successfully
-   - Tested with list_container job (100 files) - 100% success rate
-   - System fully operational with explicit registration only
-
-### Key Achievement
-The registration refactoring is complete. The system has been successfully migrated from decorator-based singleton registries to explicit catalog-based registration, laying the foundation for future microservice architecture.
-
----
-
-## 24 SEP 2025 Evening: Critical Task Handler Bug Fixed - 100% Success Rate Achieved!
-
-**Status**: ✅ SYSTEM FULLY OPERATIONAL - ALL JOB TYPES WORKING
-**Impact**: Fixed critical TypeError that prevented task execution
-**Timeline**: Evening debugging and deployment session
+**Status**: ✅ COMPLETE - Tasks executing successfully
+**Impact**: Fixed critical task execution blocker
 **Author**: Robert and Geospatial Claude Legion
 
 ### The Problem
-Tasks were failing with `TypeError: create_summary_handler.<locals>.handle_summary() missing 2 required positional arguments: 'params' and 'context'`
+- Tasks failing with: `TypeError: missing 2 required positional arguments: 'params' and 'context'`
+- TaskHandlerFactory was double-invoking handler factories
+- Line 217 incorrectly wrapped already-instantiated handlers
 
-The TaskHandlerFactory was double-invoking handler factories:
-- Line 217: `base_handler = handler_factory()` - First invocation (wrong!)
-- Line 218: `result_data = base_handler(params, context)` - Trying to call result with params
-
-### The Fix
-Changed line 217 from:
-```python
-base_handler = handler_factory()  # Double invocation!
-```
-To:
-```python
-base_handler = handler_factory  # Keep the factory, don't invoke yet
-```
-
-### Verification Results
-1. **HelloWorld Job (n=4)**
-   - Stage 1: 4 greeting tasks ✅
-   - Stage 2: 4 reply tasks ✅
-   - Total: 8/8 tasks completed successfully
-
-2. **Summarize Container (500 file limit)**
-   - Scanned 500 files
-   - Total size: 33.2 GB
-   - Largest file: 10.8 GB TIF
-   - 100% success rate
-
-3. **List Container (TIF filter)**
-   - Found 214 TIF files
-   - Created 214 metadata extraction tasks
-   - All 214 tasks completed successfully
-   - Zero failures
-
-### Key Achievement
-The system is now fully operational with 100% task success rate across all job types. The fix was deployed to production and verified with comprehensive testing.
+### The Solution
+- Changed from `handler_factory()` to direct handler usage
+- Handlers now properly receive parameters
+- Tasks completing successfully with advisory locks
 
 ---
 
-## 24 SEP 2025 Afternoon: Phase 3 Registration Refactoring - Decorator Removal Complete
+## 23 SEP 2025: Advisory Lock Implementation
 
-**Status**: ✅ SYSTEM FULLY MIGRATED TO EXPLICIT REGISTRATION
-**Impact**: All decorators removed, system runs on catalog-based registration
-**Timeline**: Evening implementation session
+**Status**: ✅ COMPLETE - Race conditions eliminated
+**Impact**: System can handle any scale without race conditions
 **Author**: Robert and Geospatial Claude Legion
 
-### What Was Accomplished
+### What Was Implemented
+1. **PostgreSQL Functions with Advisory Locks**
+   - `complete_task_and_check_stage()` - Atomic task completion
+   - `advance_job_stage()` - Atomic stage advancement
+   - `check_job_completion()` - Final job completion check
 
-#### Phase 3 Implementation
-1. **Removed ALL Decorators**
-   - ✅ Removed 4 @JobRegistry decorators from controllers
-   - ✅ Removed 7 @TaskRegistry decorators from services
-   - ✅ Removed all JobRegistry/TaskRegistry imports
-   - ✅ Removed verify_registration() function
-
-2. **Files Modified**
-   - `controller_hello_world.py` - Decorator and import removed
-   - `controller_container.py` - 2 decorators removed, verify function deleted
-   - `controller_stac_setup.py` - Decorator wrapper class removed
-   - `service_hello_world.py` - 2 decorators removed
-   - `service_blob.py` - 4 decorators removed
-   - `service_stac_setup.py` - 3 decorators removed (though only 1 working)
-   - `controller_base.py` - Unused DefaultAzureCredential import removed
-
-3. **Testing & Verification**
-   - Created `test_phase3.py` to verify system without decorators
-   - All 4 controllers register and work correctly
-   - All 6 handlers register and work correctly
-   - Old JobRegistry confirmed empty - decorators not executing
-   - System fully functional with explicit registration only
-
-### Key Achievement
-The system now runs entirely on the new explicit registration pattern. This eliminates import-time side effects and provides full control over when and what gets registered. The foundation for microservice splitting is complete.
+2. **"Last Task Turns Out the Lights" Pattern**
+   - Advisory locks prevent simultaneous completion checks
+   - Exactly one task advances each stage
+   - No duplicate stage advancements
 
 ---
 
-## 23 SEP 2025 (Evening): Phase 1 & 2 Registration Refactoring - Foundation for Microservices
+## 22 SEP 2025: Folder Migration Success
 
-**Status**: ✅ ARCHITECTURAL FOUNDATION COMPLETE
-**Impact**: Eliminated import-time side effects, enabled explicit registration control
-**Timeline**: Evening implementation session
+**Status**: ✅ COMPLETE - Azure Functions supports folder structure
+**Impact**: Can organize code into logical folders
 **Author**: Robert and Geospatial Claude Legion
 
-### The Problem
-Our decorator-based registration system was preventing clean microservice architecture:
-- Import-time side effects from decorators
-- Global singleton registries
-- Tight coupling between modules
-- Azure Functions initialization conflicts
+### Critical Learnings
+1. **`__init__.py` is REQUIRED** in each folder
+2. **`.funcignore` must NOT have `*/`** wildcard
+3. **Both import styles work** with proper setup
 
-### Phase 1: Parallel Registration Infrastructure
-**Created New Registration System:**
-1. **registration.py** - New non-singleton catalogs (JobCatalog, TaskCatalog)
-2. **REGISTRATION_INFO** - Static metadata on all controllers
-3. **HANDLER_INFO** - Static metadata on all task handlers
-4. **Comprehensive test coverage** - Verified parallel operation
-
-### Phase 2: Function App Migration
-**Migrated function_app.py to Explicit Registration:**
-1. **Import and Registration** - All controllers and handlers explicitly registered
-2. **Catalog Injection** - JobFactory and TaskHandlerFactory receive catalogs
-3. **Parallel Operation** - Both old and new systems working simultaneously
-4. **100% Test Coverage** - All job types tested successfully
-
-### Testing Results
-- ✅ HelloWorld: 4 tasks completed
-- ✅ List Container: 214 TIF files processed
-- ✅ Summarize Container: 500 files analyzed (33.2 GB)
-- ✅ STAC Setup: Database schema verified
-
-### Key Achievement
-The system now supports both registration patterns simultaneously, allowing gradual migration without breaking changes. This is the foundation for Phase 3 (decorator removal) and Phase 4 (registry deletion).
+### Folders Created
+- `utils/` - Utility functions (contract_validator.py)
+- Ready for: `schemas/`, `controllers/`, `repositories/`, `services/`, `triggers/`
 
 ---
 
-## 22 SEP 2025: Repository Folder Organization - Phase 1 Complete
+## Earlier Achievements (11-21 SEP 2025)
 
-**Status**: ✅ COMPLETED
-**Impact**: **HIGH** - Established foundation for organized codebase structure
-**Timeline**: Morning implementation session
-**Author**: Robert and Geospatial Claude Legion
-
-### Achievement
-Successfully moved all repository files to `repositories/` folder with lazy loading pattern, demonstrating Azure Functions compatibility with folder structures.
-
-### Implementation Details
-
-#### Files Moved to repositories/ Folder:
-1. **repository_abc.py** → **repositories/repository_abc.py**
-2. **repository_base.py** → **repositories/repository_base.py**
-3. **repository_blob.py** → **repositories/repository_blob.py**
-4. **repository_factory.py** → **repositories/repository_factory.py**
-5. **repository_jobs_tasks.py** → **repositories/repository_jobs_tasks.py**
-6. **repository_postgresql.py** → **repositories/repository_postgresql.py**
-7. **repository_vault.py** → **repositories/repository_vault.py**
-
-#### Lazy Loading Implementation:
-Created `repositories/__init__.py` with `__getattr__` for lazy imports:
-```python
-def __getattr__(name: str):
-    """Lazy loading of repository modules."""
-    if name == "RepositoryFactory":
-        from .repository_factory import RepositoryFactory
-        return RepositoryFactory
-    # ... other lazy imports
-```
-
-#### Import Updates:
-- **7 files updated** to use new import paths
-- Pattern: `from repositories import RepositoryFactory`
-- All imports working correctly with lazy loading
-
-### Benefits Achieved:
-- ✅ **Organized Structure**: Repositories isolated in dedicated folder
-- ✅ **Lazy Loading**: Modules only imported when needed
-- ✅ **Azure Functions Compatible**: Deployment successful
-- ✅ **Foundation Established**: Pattern ready for other module types
-
-### Next Migration Candidates:
-- `schemas/` - All schema_*.py files (6 files)
-- `controllers/` - All controller_*.py files (5 files)
-- `services/` - All service_*.py files (4 files)
-- `triggers/` - All trigger_*.py files (7 files)
-
-This establishes the pattern for organizing the codebase into logical folders while maintaining Azure Functions compatibility.
+See previous entries for:
+- Repository Architecture Cleanup
+- Controller Factory Pattern
+- BaseController Consolidation
+- Database Monitoring System
+- Schema Management Endpoints
+- Contract Enforcement Implementation
 
 ---
 
-## 21 SEP 2025: Service Handler Catalog Migration - Container Jobs Working!
-
-**Status**: ✅ PRODUCTION READY - Container analysis jobs fully operational
-**Impact**: Service discovery and STAC foundation working with new TaskCatalog system
-**Timeline**: 17:00-19:30 UTC
-**Author**: Robert and Geospatial Claude Legion
-
-### Major Achievement
-Successfully implemented TaskCatalog for service handlers and got container analysis jobs working end-to-end in production!
-
-### Implementation Completed
-
-#### 1. TaskCatalog Integration
-- **Created Non-Singleton Catalog**: TaskCatalog in registration.py for handler registration
-- **Updated TaskHandlerFactory**: Now uses injected catalog instead of singleton TaskRegistry
-- **Migrated All Handlers**: 7 handlers across 3 service files now using TaskCatalog
-- **Backward Compatible**: Maintains fallback to old TaskRegistry during transition
-
-#### 2. Container Job Success
-```python
-# Production test results:
-Job: list_container with extension_filter=".tif"
-- Found 214 TIF files in rmhazuregeobronze
-- Successfully created 214 tasks
-- All tasks completed successfully
-- Total processing time: ~2 minutes
-```
-
-#### 3. Files Updated
-- **registration.py**: Added TaskCatalog class
-- **task_factory.py**: TaskHandlerFactory uses injected catalog
-- **function_app.py**: Creates and injects TaskCatalog
-- **service_blob.py**: All 4 handlers migrated
-- **service_stac_setup.py**: All 3 handlers migrated (1 currently active)
-
-### Working Job Types
-1. **hello_world** ✅ - Both stages working
-2. **list_container** ✅ - Lists and filters blobs
-3. **summarize_container** ✅ - Analyzes container contents
-4. **stac_catalog_setup** ✅ - Creates database schema
-
-### Key Benefits
-- **No Import Side Effects**: Handlers registered explicitly at startup
-- **Dependency Injection**: Clean separation of registration from usage
-- **Microservice Ready**: Each app can register only needed handlers
-- **Production Tested**: 214 tasks processed without errors
-
----
-
-## 18-19 SEP 2025: Multi-Blob Architecture & Azure Integration
-
-**Status**: ✅ FULLY TESTED IN PRODUCTION
-**Impact**: Massive blob processing capabilities with COG support
-**Timeline**: Multi-day implementation
-**Author**: Robert and Geospatial Claude Legion
-
-### Files Discovered via Smart Blob Analysis
-
-#### Data Distribution (rmhazuregeobronze)
-```
-File Types:
-- .tif files: 214 (99.71 GB total, avg 477 MB)
-- .aux.xml: 116 sidecar files
-- .tif.ovr: 36 overview files
-- .tfw: 35 world files
-- .prj: 25 projection files
-
-Largest Files:
-1. rasters/bay_2021_CIR.tif: 10.7 GB
-2. rasters/naip19-blob-upload.tif: 9.3 GB
-3. imagery_cog/USDA_2019_COG.tif: 3.1 GB (✅ Proper COG!)
-```
-
-### Architecture Components Implemented
-
-#### 1. Smart Blob Discovery Service (service_blob.py)
-- **handle_list_blobs**: Enumerate with filters and limits
-- **handle_extract_blob_metadata**: Parse raster metadata via GDAL
-- **handle_summarize_container**: Statistical analysis of container
-- **handle_validate_cog**: Cloud-Optimized GeoTIFF validation
-
-#### 2. Container Controller (controller_container.py)
-- **ListContainerController**: Creates tasks for matching blobs
-- **SummarizeContainerController**: Single task for container analysis
-- Both use `StageResultContract` for proper data flow
-
-#### 3. Repository Layer (repository_blob.py)
-- **BlobRepository**: Full Azure Blob Storage integration
-- Methods: list, download, upload, exists, metadata extraction
-- Streaming support for massive files (10+ GB)
-- Proper container/path validation
-
-### Production Test Results
-
-#### List Container Job
-```python
-# Input: {"container": "bronze", "extension_filter": ".tif", "limit": 10}
-# Result: Found 10 TIF files, created 10 metadata extraction tasks
-# All tasks completed successfully with raster properties extracted
-```
-
-#### Summarize Container Job
-```python
-# Result: 500 files analyzed, 105.1 GB total
-# File type distribution and size statistics generated
-# Largest files identified for COG conversion planning
-```
-
-### Key Capabilities
-- ✅ **10GB+ File Support**: Streaming operations prevent memory issues
-- ✅ **Smart Filtering**: Extension, prefix, and path-based filtering
-- ✅ **Metadata Extraction**: GDAL-based raster property extraction
-- ✅ **COG Validation**: GDAL-based Cloud Optimized GeoTIFF validation
-- ✅ **Parallel Processing**: 100s of blobs processed concurrently
-- ✅ **Production Ready**: Tested with real 100GB+ datasets
-
----
-
-## 15 SEP 2025: Job Status Bug Fixes & Workflow Improvements
-
-**Status**: ✅ COMPLETED
-**Impact**: Jobs now properly track status through all stages
-**Timeline**: Afternoon debugging session
-**Author**: Robert and Geospatial Claude Legion
-
-### Critical Fixes Applied
-
-1. **Job Status Tracking**: Jobs properly update from QUEUED → PROCESSING → COMPLETED
-2. **Stage Transition**: Clean handoff between Stage 1 and Stage 2
-3. **Error Handling**: Failed jobs properly marked with error details
-4. **Task Creation**: Bulk task creation working for 100+ tasks
-
-### Production Verification
-- HelloWorld jobs completing end-to-end
-- Stage results properly stored and retrieved
-- No more stuck jobs in PROCESSING state
-
----
-
-## 12-13 SEP 2025: Poison Queue Resolution & Stage 2 Implementation
-
-**Status**: ✅ COMPLETED
-**Impact**: **CRITICAL** - Full job workflow now operational
-**Timeline**: Two-day debugging marathon
-**Author**: Robert and Geospatial Claude Legion
-
-### The Poison Queue Mystery
-Jobs were getting stuck after Stage 1, with Stage 2 messages going to poison queue. Root cause: Stage 2 job messages were being reprocessed after job completion, causing validation errors.
-
-### Solution Implemented
-Modified job message processing to handle already-completed stages gracefully. Stage 2+ messages now check job status before attempting task creation.
-
-### Stage 2 Task Creation Fixed
-- TaskDefinition → TaskRecord conversion implemented
-- Queue service URL configuration corrected
-- Job completion status updates working
-
-### Scale Testing Success
-- Successfully tested with n=2, 5, 10, 100 tasks
-- 100-task job (200 total tasks) completed in under 1 minute
-- Idempotency confirmed: duplicate submissions return same job_id
-
----
-
-## 11 SEP 2025: HelloWorld End-to-End Success
-
-**Status**: ✅ FIRST COMPLETE JOB EXECUTION
-**Impact**: Proof of concept validated
-**Timeline**: Morning breakthrough
-**Author**: Robert and Geospatial Claude Legion
-
-### Achievement
-First successful end-to-end job execution with both stages completing and job marked as COMPLETED.
-
-### Key Metrics
-- 2-stage workflow executed perfectly
-- Task status updates working
-- Stage transitions clean
-- Job completion detection accurate
-
----
-
-## Historical Entries Prior to September 11, 2025
-
-**Note**: For project history from September 10, 2025 and earlier, see **OLDER_HISTORY.md**
-
-This file contains recent changes from September 11, 2025 onwards.
+*Clean architecture achieved. Service Bus optimized. No God Classes. System ready for scale.*

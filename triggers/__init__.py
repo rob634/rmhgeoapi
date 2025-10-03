@@ -1,7 +1,10 @@
 # ============================================================================
 # CLAUDE CONTEXT - TRIGGERS PACKAGE INITIALIZATION
 # ============================================================================
-# PURPOSE: Initialize the triggers package for Azure Functions HTTP/Timer triggers
+# CATEGORY: HTTP TRIGGER ENDPOINTS
+# PURPOSE: Azure Functions HTTP API endpoint
+# EPOCH: Shared by all epochs (API layer)
+# TODO: Audit for framework logic that may belong in CoreMachine# PURPOSE: Initialize the triggers package for Azure Functions HTTP/Timer triggers
 # EXPORTS: All trigger classes for HTTP endpoints and timer functions
 # INTERFACES: Azure Functions trigger interfaces
 # PYDANTIC_MODELS: Various request/response models per trigger

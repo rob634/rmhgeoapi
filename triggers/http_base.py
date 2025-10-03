@@ -1,7 +1,10 @@
 # ============================================================================
 # CLAUDE CONTEXT - CONTROLLER
 # ============================================================================
-# PURPOSE: Abstract HTTP trigger base class providing consistent request/response handling for Azure Functions
+# CATEGORY: HTTP TRIGGER ENDPOINTS
+# PURPOSE: Azure Functions HTTP API endpoint
+# EPOCH: Shared by all epochs (API layer)
+# TODO: Audit for framework logic that may belong in CoreMachine# PURPOSE: Abstract HTTP trigger base class providing consistent request/response handling for Azure Functions
 # EXPORTS: BaseHttpTrigger, JobManagementTrigger, SystemMonitoringTrigger
 # INTERFACES: ABC (Abstract Base Class) - defines contract for HTTP trigger implementations
 # PYDANTIC_MODELS: None - uses dict validation for request/response data

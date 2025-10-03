@@ -1,7 +1,10 @@
 # ============================================================================
 # CLAUDE CONTEXT - CONTROLLER
 # ============================================================================
-# PURPOSE: Job status retrieval HTTP trigger handling GET /api/jobs/{job_id} requests
+# CATEGORY: HTTP TRIGGER ENDPOINTS
+# PURPOSE: Azure Functions HTTP API endpoint
+# EPOCH: Shared by all epochs (API layer)
+# TODO: Audit for framework logic that may belong in CoreMachine# PURPOSE: Job status retrieval HTTP trigger handling GET /api/jobs/{job_id} requests
 # EXPORTS: JobStatusTrigger (HTTP trigger class for job status retrieval)
 # INTERFACES: JobManagementTrigger (inherited from trigger_http_base)
 # PYDANTIC_MODELS: JobRecord (imported from schema_core for type safety)
@@ -93,7 +96,7 @@ from typing import Dict, Any, List, Optional
 
 import azure.functions as func
 from .http_base import JobManagementTrigger
-from schema_base import JobRecord
+from core.models import JobRecord
 
 
 class JobStatusTrigger(JobManagementTrigger):

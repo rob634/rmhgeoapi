@@ -40,10 +40,8 @@ from contextlib import contextmanager
 from typing import Union, Optional, Dict, Any
 import logging
 
-from schema_base import (
-    JobRecord, TaskRecord, JobStatus, TaskStatus,
-    SchemaValidationError
-)
+from core.models import JobRecord, TaskRecord, JobStatus, TaskStatus
+from core.utils import SchemaValidationError
 
 # Logger setup
 logger = logging.getLogger(__name__)

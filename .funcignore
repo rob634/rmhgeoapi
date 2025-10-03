@@ -38,9 +38,9 @@ __pycache__/
 htmlcov/
 
 # ============================================================================
-# EXCLUDE SPECIFIC SUBDIRECTORIES (but NOT utils/)
+# EXCLUDE SPECIFIC SUBDIRECTORIES (but NOT utils/ or core/)
 # ============================================================================
-# */ - REMOVED! This was excluding utils/ folder
+# */ - REMOVED! This was excluding utils/ and core/ folders
 reference/
 ancient_code/
 scripts/
@@ -51,17 +51,17 @@ old/
 temp/
 tmp/
 docs_claude/
+docs/
+local/
+archive_epoch3_schema/
+archive_docs/
+archive_epoch3_controllers/
 
 # ============================================================================
 # LOCAL-ONLY FILES (development, testing, utilities)
 # ============================================================================
 
-# Test files (be specific, not using wildcards)
-test_*.py
-*_test.py
-test_api.py
-test_api_local.py
-test_container_list.py
+# Test files - now all moved to local/ folder
 
 # Local utility scripts
 local_scripts/

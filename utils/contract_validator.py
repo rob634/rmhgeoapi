@@ -1,7 +1,9 @@
 # ============================================================================
 # CLAUDE CONTEXT - UTILITY
 # ============================================================================
-# PURPOSE: Runtime type contract enforcement decorator for boundary methods ensuring fail-fast behavior
+# CATEGORY: CROSS-CUTTING UTILITIES
+# PURPOSE: Validation and diagnostic utilities used throughout codebase
+# EPOCH: Shared by all epochs (utilities)# PURPOSE: Runtime type contract enforcement decorator for boundary methods ensuring fail-fast behavior
 # EXPORTS: enforce_contract decorator for automatic type validation
 # INTERFACES: Decorator pattern for method validation
 # PYDANTIC_MODELS: None (works with any types including Pydantic models)

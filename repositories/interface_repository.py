@@ -31,10 +31,12 @@ from abc import ABC, abstractmethod
 from typing import Dict, Any, List, Optional, Protocol, Final
 from enum import Enum
 
-from schema_base import (
+from core.models import (
     JobRecord, TaskRecord, JobStatus, TaskStatus,
-    JobCompletionResult, TaskCompletionResult, StageAdvancementResult
+    StageAdvancementResult
 )
+from core.models.results import JobCompletionResult, TaskCompletionResult
+from core.schema.updates import TaskUpdateModel, JobUpdateModel
 
 
 # ============================================================================
@@ -107,8 +109,8 @@ class IJobRepository(ABC):
         pass
     
     @abstractmethod
-    def update_job(self, job_id: str, updates: Dict[str, Any]) -> bool:
-        """Update job - parameters MUST be named 'job_id' and 'updates'"""
+    def update_job(self, job_id: str, updates: JobUpdateModel) -> bool:
+        """Update job - parameter MUST use JobUpdateModel for type safety"""
         pass
     
     @abstractmethod
@@ -133,8 +135,8 @@ class ITaskRepository(ABC):
         pass
     
     @abstractmethod
-    def update_task(self, task_id: str, updates: Dict[str, Any]) -> bool:
-        """Update task - parameters MUST be named 'task_id' and 'updates'"""
+    def update_task(self, task_id: str, updates: TaskUpdateModel) -> bool:
+        """Update task - parameter MUST use TaskUpdateModel for type safety"""
         pass
     
     @abstractmethod
@@ -220,13 +222,13 @@ class RepositoryProtocol(Protocol):
     # From IJobRepository
     def create_job(self, job: JobRecord) -> bool: ...
     def get_job(self, job_id: str) -> Optional[JobRecord]: ...
-    def update_job(self, job_id: str, updates: Dict[str, Any]) -> bool: ...
+    def update_job(self, job_id: str, updates: JobUpdateModel) -> bool: ...
     def list_jobs(self, status_filter: Optional[JobStatus] = None) -> List[JobRecord]: ...
-    
-    # From ITaskRepository  
+
+    # From ITaskRepository
     def create_task(self, task: TaskRecord) -> bool: ...
     def get_task(self, task_id: str) -> Optional[TaskRecord]: ...
-    def update_task(self, task_id: str, updates: Dict[str, Any]) -> bool: ...
+    def update_task(self, task_id: str, updates: TaskUpdateModel) -> bool: ...
     def list_tasks_for_job(self, job_id: str) -> List[TaskRecord]: ...
     
     # From ICompletionDetector
@@ -255,9 +257,8 @@ from interface_repository import (
     IJobRepository, ITaskRepository, ICompletionDetector,
     ParamNames
 )
-from schema_base import (
-    StageAdvancementResult, TaskCompletionResult, JobCompletionResult
-)
+from core.models import StageAdvancementResult
+from schema_base import (TaskCompletionResult, JobCompletionResult)
 
 class PostgreSQLJobRepository(IJobRepository):
     

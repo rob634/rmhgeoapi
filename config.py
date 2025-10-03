@@ -1,6 +1,9 @@
 # ============================================================================
 # CLAUDE CONTEXT - CONFIGURATION
 # ============================================================================
+# EPOCH: 4 - ACTIVE ✅
+# STATUS: Epoch 3 COMPLETELY DEPRECATED - Service Bus only application
+# NOTE: This is a SERVICE BUS ONLY application - Storage Queues are NOT supported
 # PURPOSE: Central configuration management with Pydantic v2 validation for Azure Geospatial ETL Pipeline
 # EXPORTS: AppConfig, get_config(), QueueNames, debug_config()
 # INTERFACES: Pydantic BaseModel for configuration management
@@ -160,6 +163,65 @@ class AppConfig(BaseModel):
         description="Azure Storage Queue for individual task processing"
     )
     
+    # ========================================================================
+    # Service Bus Configuration (for parallel processing pipeline)
+    # ========================================================================
+
+    service_bus_connection_string: Optional[str] = Field(
+        default=None,
+        description="Service Bus connection string for local development"
+    )
+
+    service_bus_namespace: Optional[str] = Field(
+        default=None,
+        description="Service Bus namespace for managed identity auth"
+    )
+
+    service_bus_jobs_queue: str = Field(
+        default="geospatial-jobs",
+        description="Service Bus queue name for job messages"
+    )
+
+    service_bus_tasks_queue: str = Field(
+        default="geospatial-tasks",
+        description="Service Bus queue name for task messages"
+    )
+
+    service_bus_max_batch_size: int = Field(
+        default=100,
+        description="Maximum batch size for Service Bus messages"
+    )
+
+    service_bus_retry_count: int = Field(
+        default=3,
+        description="Number of retry attempts for Service Bus operations"
+    )
+
+    # ========================================================================
+    # Task Retry Configuration - Exponential Backoff
+    # ========================================================================
+
+    task_max_retries: int = Field(
+        default=3,
+        ge=0,
+        le=10,
+        description="Maximum retry attempts for failed tasks (0 = no retries)"
+    )
+
+    task_retry_base_delay: int = Field(
+        default=5,
+        ge=1,
+        le=60,
+        description="Base delay in seconds for exponential backoff (first retry)"
+    )
+
+    task_retry_max_delay: int = Field(
+        default=300,
+        ge=60,
+        le=3600,
+        description="Maximum delay in seconds between retries (5 minutes default)"
+    )
+
     # ========================================================================
     # Security Configuration - Azure Key Vault
     # ========================================================================
@@ -323,6 +385,19 @@ class AppConfig(BaseModel):
             # Queues (usually defaults are fine)
             job_processing_queue=os.environ.get('JOB_PROCESSING_QUEUE', 'geospatial-jobs'),
             task_processing_queue=os.environ.get('TASK_PROCESSING_QUEUE', 'geospatial-tasks'),
+
+            # Service Bus (optional)
+            service_bus_connection_string=os.environ.get('SERVICE_BUS_CONNECTION_STRING'),
+            service_bus_namespace=os.environ.get('SERVICE_BUS_NAMESPACE') or os.environ.get('ServiceBusConnection__fullyQualifiedNamespace'),
+            service_bus_jobs_queue=os.environ.get('SERVICE_BUS_JOBS_QUEUE', 'geospatial-jobs'),
+            service_bus_tasks_queue=os.environ.get('SERVICE_BUS_TASKS_QUEUE', 'geospatial-tasks'),
+            service_bus_max_batch_size=int(os.environ.get('SERVICE_BUS_MAX_BATCH_SIZE', '100')),
+            service_bus_retry_count=int(os.environ.get('SERVICE_BUS_RETRY_COUNT', '3')),
+
+            # Task retry configuration
+            task_max_retries=int(os.environ.get('TASK_MAX_RETRIES', '3')),
+            task_retry_base_delay=int(os.environ.get('TASK_RETRY_BASE_DELAY', '5')),
+            task_retry_max_delay=int(os.environ.get('TASK_RETRY_MAX_DELAY', '300')),
         )
     
     def validate_runtime_dependencies(self) -> None:

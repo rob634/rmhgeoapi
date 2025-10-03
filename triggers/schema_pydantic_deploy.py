@@ -1,7 +1,10 @@
 # ============================================================================
 # CLAUDE CONTEXT - CONTROLLER
 # ============================================================================
-# PURPOSE: HTTP trigger for deploying Pydantic-generated schema directly to PostgreSQL database
+# CATEGORY: HTTP TRIGGER ENDPOINTS
+# PURPOSE: Azure Functions HTTP API endpoint
+# EPOCH: Shared by all epochs (API layer)
+# TODO: Audit for framework logic that may belong in CoreMachine# PURPOSE: HTTP trigger for deploying Pydantic-generated schema directly to PostgreSQL database
 # EXPORTS: PydanticSchemaDeployTrigger (HTTP trigger class for schema deployment)
 # INTERFACES: Azure Functions HttpTrigger interface (func.HttpRequest -> func.HttpResponse)
 # PYDANTIC_MODELS: JobRecord, TaskRecord (imported from schema_core for SQL generation)
@@ -31,8 +34,8 @@ from datetime import datetime, timezone
 from util_logger import LoggerFactory
 from util_logger import ComponentType, LogLevel, LogContext
 from config import get_config
-from schema_sql_generator import PydanticToSQL
-from schema_base import JobRecord, TaskRecord
+from core.schema.sql_generator import PydanticToSQL
+from core.models import JobRecord, TaskRecord
 
 class PydanticSchemaDeployTrigger:
     """

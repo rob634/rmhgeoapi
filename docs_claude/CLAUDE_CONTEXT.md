@@ -1,8 +1,94 @@
 # Claude Context - Azure Geospatial ETL Pipeline
 
 **Author**: Robert and Geospatial Claude Legion
-**Date**: 22 SEP 2025
+**Date**: 29 SEP 2025
 **Primary Documentation**: Start here for all Claude instances
+
+## 🚨 CRITICAL: NEW CORE ARCHITECTURE (29 SEP 2025)
+
+### Two Parallel Implementations
+The system now has **TWO separate controller architectures** running in parallel:
+
+#### 1. **Legacy: BaseController (God Class)**
+- **File**: `controller_base.py` (2,290 lines)
+- **Used by**: Storage Queue jobs (`hello_world`, `summarize_container`)
+- **Status**: ⚠️ Legacy - being replaced, still operational
+- **Pattern**: Inheritance-based with 2,290 lines of God Class
+- **Imports**: Uses `schema_base.py` for models (being migrated to `core.models`)
+
+#### 2. **NEW: Core Architecture (Clean)** ✨
+- **Location**: `core/` folder
+- **Used by**: Service Bus jobs (`sb_hello_world`)
+- **Status**: ✅ Active development - the future
+- **Pattern**: Composition over inheritance
+- **Imports**: Uses `core.models` exclusively
+
+### Core Architecture Structure
+```
+core/
+├── __init__.py              # Lazy loading to prevent circular imports
+├── core_controller.py       # Minimal base (400 lines vs 2,290)
+├── state_manager.py         # Database operations (composition)
+├── orchestration_manager.py # Dynamic task creation (composition)
+├── models/                  # Pure Pydantic data models
+│   ├── __init__.py
+│   ├── enums.py            # JobStatus, TaskStatus
+│   ├── job.py              # JobRecord
+│   ├── task.py             # TaskRecord, TaskDefinition
+│   ├── results.py          # TaskResult, StageResultContract
+│   └── context.py          # JobExecutionContext, StageExecutionContext
+├── logic/                   # Business logic utilities
+│   ├── __init__.py
+│   ├── calculations.py     # Stage advancement calculations
+│   └── transitions.py      # State transition validation
+└── schema/                  # Database schema management
+    ├── __init__.py
+    ├── deployer.py         # Schema deployment logic
+    └── sql_generator.py    # SQL generation utilities
+```
+
+### Core Architecture Dependencies (Root Modules Still Used)
+The `core/` architecture uses these root modules:
+- **config.py** - Configuration management
+- **repositories/** - Database access layer (shared by both architectures)
+- **task_factory.py** - Task handler factory
+- **utils/contract_validator.py** - Contract enforcement
+- **util_logger.py** - Logging infrastructure
+- **schema_workflow.py** - Workflow definitions
+- **schema_queue.py** - Queue message schemas
+- **schema_orchestration.py** - Orchestration schemas
+- **schema_updates.py** - Update models for partial updates
+- **exceptions.py** - Custom exception classes
+
+### Migration Path
+```
+OLD (BaseController):                  NEW (Core):
+controller_base.py (2,290 lines) →    core/core_controller.py (400 lines)
+                                      + core/state_manager.py (composition)
+                                      + core/orchestration_manager.py (composition)
+
+schema_base.py →                      core/models/ (pure Pydantic models)
+
+Inheritance hell →                    Composition over inheritance
+```
+
+### How to Identify Which Architecture
+```python
+# Legacy (BaseController)
+from controller_base import BaseController
+from schema_base import JobStatus, TaskStatus  # OLD imports
+
+class HelloWorldController(BaseController):  # 2,290 lines inherited!
+    pass
+
+# New (Core Architecture)
+from core import CoreController, StateManager, OrchestrationManager
+from core.models import JobStatus, TaskStatus  # NEW imports
+
+class ServiceBusHelloWorldController(CoreController):  # Only 400 lines inherited
+    def __init__(self):
+        self.state_manager = StateManager()  # Composition!
+```
 
 ## ✅ CURRENT STATUS: MULTI-STAGE ORCHESTRATION FULLY OPERATIONAL
 

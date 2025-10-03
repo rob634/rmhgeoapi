@@ -1,6 +1,9 @@
 # ============================================================================
 # CLAUDE CONTEXT - SERVICE
 # ============================================================================
+# EPOCH: SHARED - BOTH EPOCHS
+# STATUS: Used by Epoch 3 and Epoch 4
+# NOTE: Careful migration required
 # PURPOSE: Service handlers for STAC database setup tasks
 # EXPORTS: Task handlers for PgSTAC installation, configuration, and verification
 # INTERFACES: TaskRegistry - Registers handlers for task execution
@@ -25,7 +28,8 @@ from datetime import datetime
 import psycopg
 from psycopg import sql
 
-from schema_base import TaskResult, TaskStatus
+from core.models.results import TaskResult
+from core.models.enums import TaskStatus
 from task_factory import TaskContext
 from util_logger import LoggerFactory, ComponentType
 from config import get_config

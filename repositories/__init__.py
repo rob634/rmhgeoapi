@@ -27,8 +27,67 @@ All imports are deferred until actually needed to avoid:
 - Logger proliferation
 - Import order dependencies
 
+========================================================================
+🎯 CRITICAL AZURE FUNCTIONS RUNTIME EXPLANATION (Learning Project Note)
+========================================================================
+
+WHY LAZY LOADING IS ESSENTIAL IN AZURE FUNCTIONS:
+
+The Azure Functions runtime has a "mysterious" initialization sequence that
+can cause failures if you don't understand it. Here's what actually happens:
+
+1. COLD START SEQUENCE:
+   Cold Start → Import Modules → Runtime Init → Ready for Triggers
+        ↓             ↓                ↓              ↓
+     ~500ms      NO ENV VARS!    ENV VARS SET   NOW SAFE TO USE
+
+2. THE PROBLEM:
+   - Azure Functions loads function_app.py on EVERY cold start
+   - All top-level imports execute immediately during load
+   - This happens BEFORE environment variables are guaranteed available
+   - This happens BEFORE managed identity tokens are ready
+   - This happens BEFORE the Functions runtime is fully initialized
+
+3. WHAT HAPPENS WITHOUT LAZY LOADING:
+   ❌ config.py imports and reads env vars immediately → KeyError
+   ❌ Singletons initialize during import → Missing configuration
+   ❌ DefaultAzureCredential tries to authenticate → Auth failures
+   ❌ Database connections attempt during module load → Connection refused
+   Result: Mysterious failures that "work locally but fail in Azure"
+
+4. WHAT HAPPENS WITH OUR LAZY LOADING:
+   ✅ function_app.py imports repositories package
+   ✅ repositories/__init__.py loads but DOESN'T import modules
+   ✅ Azure Functions runtime fully initializes
+   ✅ Environment variables become available
+   ✅ Managed identity tokens become ready
+   ✅ THEN your first HTTP/Queue trigger fires
+   ✅ ONLY NOW does config.py read environment variables
+   ✅ ONLY NOW do singletons initialize with proper config
+
+5. COMMON SYMPTOMS WE'RE AVOIDING:
+   • "Works locally but fails in Azure"
+   • "Environment variable not found" (but it's definitely set)
+   • "DefaultAzureCredential failed" during cold starts
+   • "Connection refused" to services that should be available
+   • "Works after warm-up but fails on first request"
+
+6. HOW THIS LAZY LOADING WORKS:
+   - __getattr__ intercepts any access to repository classes
+   - The actual import happens ONLY when the class is first used
+   - This is typically when RepositoryFactory.create_repositories() is called
+   - By then, Azure Functions runtime is fully initialized
+
+THIS IS A LEARNING PROJECT NOTE:
+This explanation documents our understanding of Azure Functions' runtime
+behavior through trial and error. The "mysterious" part is that there's
+a gap between when Python starts importing modules and when the Functions
+host has fully initialized the environment. Our lazy loading pattern
+elegantly bridges this gap!
+
 Author: Robert and Geospatial Claude Legion
 Date: 23 SEP 2025
+Updated: 27 SEP 2025 - Added Azure Functions runtime explanation
 """
 
 from typing import TYPE_CHECKING

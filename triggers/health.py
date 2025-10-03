@@ -1,7 +1,10 @@
 # ============================================================================
 # CLAUDE CONTEXT - CONTROLLER
 # ============================================================================
-# PURPOSE: System health monitoring HTTP trigger handling GET /api/health requests
+# CATEGORY: HTTP TRIGGER ENDPOINTS
+# PURPOSE: Azure Functions HTTP API endpoint
+# EPOCH: Shared by all epochs (API layer)
+# TODO: Audit for framework logic that may belong in CoreMachine# PURPOSE: System health monitoring HTTP trigger handling GET /api/health requests
 # EXPORTS: HealthCheckTrigger (HTTP trigger class for comprehensive health checks)
 # INTERFACES: SystemMonitoringTrigger (inherited from trigger_http_base)
 # PYDANTIC_MODELS: None directly - uses dict responses for health status
@@ -46,7 +49,7 @@ from datetime import datetime, timezone
 import azure.functions as func
 from .http_base import SystemMonitoringTrigger
 from config import get_config
-from schema_manager import SchemaManagerFactory
+from core.schema.deployer import SchemaManagerFactory
 from utils import validator
 
 
@@ -87,20 +90,29 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
         if import_health["status"] == "unhealthy":
             health_data["status"] = "unhealthy"
             health_data["errors"].extend(import_health.get("errors", []))
-        
-        # Check storage queues
-        queue_health = self._check_storage_queues()
-        health_data["components"]["queues"] = queue_health
-        if queue_health["status"] == "unhealthy":
+
+        # Storage Queues - DEPRECATED (2 OCT 2025) - SERVICE BUS ONLY APPLICATION
+        # queue_health = self._check_storage_queues()
+        # health_data["components"]["queues"] = queue_health
+        # if queue_health["status"] == "unhealthy":
+        #     health_data["status"] = "unhealthy"
+        #     health_data["errors"].extend(queue_health.get("errors", []))
+
+        # Check Service Bus queues
+        service_bus_health = self._check_service_bus_queues()
+        health_data["components"]["service_bus"] = service_bus_health
+        if service_bus_health["status"] == "unhealthy":
             health_data["status"] = "unhealthy"
-            health_data["errors"].extend(queue_health.get("errors", []))
-        
-        # Check storage tables
-        table_health = self._check_storage_tables()
-        health_data["components"]["tables"] = table_health
-        if table_health["status"] == "unhealthy":
-            health_data["status"] = "unhealthy"
-            health_data["errors"].extend(table_health.get("errors", []))
+            health_data["errors"].extend(service_bus_health.get("errors", []))
+
+        # Storage tables REMOVED (1 OCT 2025) - deprecated in favor of PostgreSQL
+        # Azure Table Storage was replaced by PostgreSQL for ACID compliance
+        health_data["components"]["tables"] = {
+            "component": "tables",
+            "status": "deprecated",
+            "details": {"message": "Azure Table Storage deprecated - using PostgreSQL instead"},
+            "checked_at": datetime.now(timezone.utc).isoformat()
+        }
         
         # Key Vault disabled - using environment variables only
         # vault_health = self._check_vault_configuration()
@@ -204,9 +216,9 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
             )
     
     def _check_storage_queues(self) -> Dict[str, Any]:
-        """Check Azure Storage Queue health using QueueRepository."""
+        """Check Azure Storage Queue health using QueueRepository. DEPRECATED - SERVICE BUS ONLY."""
         def check_queues():
-            from repositories import RepositoryFactory
+            from infrastructure import RepositoryFactory
             from config import QueueNames
 
             # Use QueueRepository singleton - credential reused!
@@ -236,40 +248,48 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
             return queue_status
 
         return self.check_component_health("storage_queues", check_queues)
-    
-    def _check_storage_tables(self) -> Dict[str, Any]:
-        """Check Azure Table Storage health."""
-        def check_tables():
-            from azure.data.tables import TableServiceClient
-            from azure.identity import DefaultAzureCredential
-            
+
+    def _check_service_bus_queues(self) -> Dict[str, Any]:
+        """Check Azure Service Bus queue health using ServiceBusRepository."""
+        def check_service_bus():
+            from infrastructure.service_bus import ServiceBusRepository
+            from config import get_config
+
             config = get_config()
-            credential = DefaultAzureCredential()
-            table_service = TableServiceClient(
-                endpoint=f"https://{config.storage_account_name}.table.core.windows.net",
-                credential=credential
-            )
-            
-            table_status = {}
-            for table_name in ["jobs", "tasks"]:
+            service_bus_repo = ServiceBusRepository()
+
+            queue_status = {}
+            queues_to_check = [
+                config.service_bus_jobs_queue,
+                config.service_bus_tasks_queue
+            ]
+
+            for queue_name in queues_to_check:
                 try:
-                    table_client = table_service.get_table_client(table_name)
-                    # Simple query to test accessibility
-                    entities = list(table_client.list_entities(select="PartitionKey", results_per_page=1))
-                    table_status[table_name] = {
+                    # Peek at queue to verify connectivity and get approximate count
+                    message_count = service_bus_repo.get_queue_length(queue_name)
+                    queue_status[queue_name] = {
                         "status": "accessible",
-                        "sample_entities": len(entities)
+                        "approximate_message_count": message_count,
+                        "note": "Count is approximate (peek limit: 100)"
                     }
                 except Exception as e:
-                    table_status[table_name] = {
-                        "status": "error", 
+                    queue_status[queue_name] = {
+                        "status": "error",
                         "error": str(e)
                     }
-            
-            return table_status
-        
-        return self.check_component_health("storage_tables", check_tables)
-    
+
+            # Add repository info
+            queue_status["_repository_info"] = {
+                "singleton_id": id(service_bus_repo),
+                "type": "ServiceBusRepository",
+                "namespace": config.service_bus_namespace
+            }
+
+            return queue_status
+
+        return self.check_component_health("service_bus", check_service_bus)
+
     def _check_database(self) -> Dict[str, Any]:
         """Enhanced PostgreSQL database health check with query metrics."""
         def check_pg():

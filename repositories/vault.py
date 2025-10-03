@@ -68,9 +68,10 @@ class VaultRepository:
         Args:
             vault_name: Key Vault name (defaults to KEY_VAULT env var or rmhazurevault)
         """
-        import os
-        
-        self.vault_name = vault_name or os.environ.get('KEY_VAULT', 'rmhkeyvault')
+        from config import get_config
+        config = get_config()
+
+        self.vault_name = vault_name or config.key_vault_name
         self.vault_url = f"https://{self.vault_name}.vault.azure.net/"
         
         # Initialize Azure credentials
@@ -257,9 +258,10 @@ class VaultRepositoryFactory:
             # Check if config has a key_vault_name field
             vault_name = getattr(config, 'key_vault_name', None)
             if not vault_name:
-                # Fallback to environment variable or default
-                import os
-                vault_name = os.environ.get('KEY_VAULT', 'rmhkeyvault')
+                # Fallback to config
+                from config import get_config
+                config = get_config()
+                vault_name = config.key_vault_name
             
             return VaultRepository(vault_name=vault_name)
             

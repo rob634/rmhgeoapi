@@ -1,7 +1,10 @@
 # ============================================================================
 # CLAUDE CONTEXT - CONTROLLER
 # ============================================================================
-# PURPOSE: Poison queue monitoring HTTP trigger for detecting and processing failed queue messages
+# CATEGORY: HTTP TRIGGER ENDPOINTS
+# PURPOSE: Azure Functions HTTP API endpoint
+# EPOCH: Shared by all epochs (API layer)
+# TODO: Audit for framework logic that may belong in CoreMachine# PURPOSE: Poison queue monitoring HTTP trigger for detecting and processing failed queue messages
 # EXPORTS: PoisonQueueMonitorTrigger (HTTP trigger class for poison queue monitoring)
 # INTERFACES: SystemMonitoringTrigger (inherited from trigger_http_base)
 # PYDANTIC_MODELS: None directly - uses dict for monitoring results

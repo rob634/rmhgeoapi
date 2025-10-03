@@ -169,7 +169,9 @@ class BlobRepository(IBlobRepository):
                     self.storage_account = self.blob_service.account_name
                 else:
                     # Use DefaultAzureCredential (preferred for blob storage)
-                    storage_account = storage_account or os.environ.get('STORAGE_ACCOUNT_NAME', 'rmhazuregeo')
+                    from config import get_config
+                    config = get_config()
+                    storage_account = storage_account or config.storage_account_name
                     self.storage_account = storage_account
                     self.account_url = f"https://{storage_account}.blob.core.windows.net"
                     

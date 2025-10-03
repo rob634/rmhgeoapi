@@ -1,7 +1,9 @@
 # ============================================================================
 # CLAUDE CONTEXT - UTILITY
 # ============================================================================
-# PURPOSE: Zero-configuration import validation with auto-discovery of application modules
+# CATEGORY: CROSS-CUTTING UTILITIES
+# PURPOSE: Validation and diagnostic utilities used throughout codebase
+# EPOCH: Shared by all epochs (utilities)# PURPOSE: Zero-configuration import validation with auto-discovery of application modules
 # EXPORTS: ImportValidator, validator (singleton instance)
 # INTERFACES: None - utility class for import validation
 # PYDANTIC_MODELS: None - uses dict for validation results
@@ -79,13 +81,14 @@ class ImportValidator:
         
     **2. Application Modules (Auto-Discovered):**
         - Scans filesystem for Python files using naming patterns
-        - controller_*.py → "* workflow controller"  
         - service_*.py → "* service implementation"
         - model_*.py → "* Pydantic model definitions"
         - repository_*.py → "* repository layer"
-        - trigger_*.py → "* HTTP trigger class"  
+        - trigger_*.py → "* HTTP trigger class"
         - util_*.py → "* utility module"
         - validator_*.py → "* validation utilities"
+        - schema_*.py → "* schema definitions"
+        - adapter_*.py → "* adapter layer"
     
     ## Registry Structure (import_validation_registry.json):
     
@@ -100,10 +103,10 @@ class ImportValidator:
         }
       },
       "application_modules": {
-        "controller_hello_world": {
-          "description": "Hello World workflow controller", 
-          "discovered_date": "2025-09-05T...",
-          "last_successful_validation": "2025-09-05T...",
+        "service_hello_world": {
+          "description": "Hello World service implementation",
+          "discovered_date": "2025-10-01T...",
+          "last_successful_validation": "2025-10-01T...",
           "auto_discovered": true
         }
       },
@@ -123,7 +126,7 @@ class ImportValidator:
         - **Azure Functions Ready**: Skips file writes in read-only filesystem environments
         
     ## Usage in Development:
-        When adding new classes like `controller_geospatial.py` or `service_raster_processor.py`,
+        When adding new classes like `service_raster_processor.py` or `trigger_geospatial.py`,
         they are automatically discovered and included in import validation within 6 minutes
         (health check interval). No manual configuration required.
     
@@ -261,8 +264,9 @@ class ImportValidator:
         self.logger.debug(f"🔍 Auto-discovering modules in: {current_dir}")
         
         # Module discovery patterns with descriptions
+        # NOTE: controller_*.py REMOVED (1 OCT 2025) - Epoch 3 controllers deprecated
         discovery_patterns = [
-            ('controller_*.py', 'workflow controller'),
+            # ('controller_*.py', 'workflow controller'),  # REMOVED - Epoch 3 deprecated
             ('service_*.py', 'service implementation'),
             ('model_*.py', 'Pydantic model definitions'),
             ('validator_*.py', 'validation utilities'),
@@ -285,9 +289,7 @@ class ImportValidator:
                     continue
                     
                 # Create descriptive name based on module name and pattern
-                if module_name.startswith('controller_'):
-                    description = f"{module_name.replace('controller_', '').replace('_', ' ').title()} {description_suffix}"
-                elif module_name.startswith('service_'):
+                if module_name.startswith('service_'):
                     description = f"{module_name.replace('service_', '').replace('_', ' ').title()} {description_suffix}"
                 elif module_name.startswith('model_'):
                     description = f"{module_name.replace('model_', '').replace('_', ' ').title()} {description_suffix}"

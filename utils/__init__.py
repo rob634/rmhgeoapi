@@ -1,7 +1,9 @@
 # ============================================================================
 # CLAUDE CONTEXT - UTILS PACKAGE INITIALIZATION
 # ============================================================================
-# PURPOSE: Initialize the utils package for Azure Functions compatibility
+# CATEGORY: CROSS-CUTTING UTILITIES
+# PURPOSE: Validation and diagnostic utilities used throughout codebase
+# EPOCH: Shared by all epochs (utilities)# PURPOSE: Initialize the utils package for Azure Functions compatibility
 # EXPORTS: Import validator and logger utilities
 # INTERFACES: None
 # PYDANTIC_MODELS: None

@@ -45,11 +45,12 @@ from datetime import datetime, timezone
 import logging
 
 from util_logger import LoggerFactory, ComponentType, LogLevel, LogContext
-from schema_base import (
+from core.models import (
     JobRecord, TaskRecord, JobStatus, TaskStatus,
-    TaskResult, TaskDefinition,  # Added for contract enforcement
-    generate_job_id
+    TaskResult, TaskDefinition  # Added for contract enforcement
 )
+from core.utils import generate_job_id  # ID generation utility
+from core.schema.updates import TaskUpdateModel, JobUpdateModel
 # Task ID generation moved to Controller layer (hierarchically correct)
 # Repository no longer generates IDs - Controller provides them
 from .postgresql import (
@@ -203,13 +204,25 @@ class JobRepository(PostgreSQLJobRepository):
                 logger.error(f"🔍 Validation error args: {validation_error.args}")
                 raise
             
-            # Prepare updates
-            updates = {'status': new_status}
+            # Prepare updates using Pydantic model
+            update = JobUpdateModel(status=new_status)
+
+            # Add additional updates if provided
             if additional_updates:
-                updates.update(additional_updates)
-            
+                # Merge additional updates into the model
+                if 'error_details' in additional_updates:
+                    update.error_details = additional_updates['error_details']
+                if 'stage' in additional_updates:
+                    update.stage = additional_updates['stage']
+                if 'stage_results' in additional_updates:
+                    update.stage_results = additional_updates['stage_results']
+                if 'result_data' in additional_updates:
+                    update.result_data = additional_updates['result_data']
+                if 'metadata' in additional_updates:
+                    update.metadata = additional_updates['metadata']
+
             # Update in database
-            return self.update_job(job_id, updates)
+            return self.update_job(job_id, update)
     
     def update_job_stage_with_validation(
         self,
@@ -240,9 +253,9 @@ class JobRepository(PostgreSQLJobRepository):
                 current_job.total_stages
             )
             
-            # Prepare updates
-            updates = {'stage': new_stage}
-            
+            # Prepare updates using Pydantic model
+            update = JobUpdateModel(stage=new_stage)
+
             if stage_results:
                 # === STAGE RESULTS STORAGE WITH STRING KEY ===
                 #
@@ -265,9 +278,9 @@ class JobRepository(PostgreSQLJobRepository):
                 #
                 updated_stage_results = current_job.stage_results.copy()
                 updated_stage_results[str(current_job.stage)] = stage_results  # STRING KEY!
-                updates['stage_results'] = updated_stage_results
-            
-            return self.update_job(job_id, updates)
+                update.stage_results = updated_stage_results
+
+            return self.update_job(job_id, update)
     
     def complete_job(self, job_id: str, result_data: Dict[str, Any]) -> bool:
         """
@@ -400,13 +413,25 @@ class TaskRepository(PostgreSQLTaskRepository):
             # Validate status transition
             self._validate_status_transition(current_task, new_status)
             
-            # Prepare updates (ensure enum is converted to string value)
-            updates = {'status': new_status.value}
+            # Prepare updates using Pydantic model
+            update = TaskUpdateModel(status=new_status)
+
+            # Add additional updates if provided
             if additional_updates:
-                updates.update(additional_updates)
-            
+                # Merge additional updates into the model
+                if 'error_details' in additional_updates:
+                    update.error_details = additional_updates['error_details']
+                if 'result_data' in additional_updates:
+                    update.result_data = additional_updates['result_data']
+                if 'heartbeat' in additional_updates:
+                    update.heartbeat = additional_updates['heartbeat']
+                if 'retry_count' in additional_updates:
+                    update.retry_count = additional_updates['retry_count']
+                if 'metadata' in additional_updates:
+                    update.metadata = additional_updates['metadata']
+
             # Update in database
-            return self.update_task(task_id, updates)
+            return self.update_task(task_id, update)
     
     def complete_task(self, task_id: str, result_data: Dict[str, Any]) -> bool:
         """
@@ -442,17 +467,34 @@ class TaskRepository(PostgreSQLTaskRepository):
             {'error_details': error_details}
         )
     
-    def update_task_heartbeat(self, task_id: str) -> bool:
+    def update_task_with_model(self, task_id: str, update_model: TaskUpdateModel) -> bool:
         """
-        Update task heartbeat timestamp.
-        
+        Update task using Pydantic model.
+
+        This is a wrapper method for API consistency with StateManager.
+        Both this method and update_task accept TaskUpdateModel.
+
         Args:
             task_id: Task ID to update
-            
+            update_model: TaskUpdateModel with fields to update
+
         Returns:
             True if updated successfully
         """
-        return self.update_task(task_id, {'heartbeat': datetime.now(timezone.utc)})
+        return self.update_task(task_id, update_model)
+
+    def update_task_heartbeat(self, task_id: str) -> bool:
+        """
+        Update task heartbeat timestamp.
+
+        Args:
+            task_id: Task ID to update
+
+        Returns:
+            True if updated successfully
+        """
+        update = TaskUpdateModel(heartbeat=datetime.now(timezone.utc))
+        return self.update_task(task_id, update)
     
     def increment_retry_count(self, task_id: str) -> bool:
         """
@@ -469,10 +511,8 @@ class TaskRepository(PostgreSQLTaskRepository):
             if not task:
                 return False
 
-            return self.update_task(
-                task_id,
-                {'retry_count': task.retry_count + 1}
-            )
+            update = TaskUpdateModel(retry_count=task.retry_count + 1)
+            return self.update_task(task_id, update)
 
     # ========================================================================
     # BATCH OPERATIONS - For Service Bus aligned batching
@@ -637,13 +677,46 @@ class TaskRepository(PostgreSQLTaskRepository):
         Example:
             tasks = task_repo.get_tasks_by_batch('job123-b0')
         """
-        query = f"""
-            SELECT * FROM {self.schema_name}.tasks
+        from psycopg import sql
+
+        query = sql.SQL("""
+            SELECT * FROM {}.tasks
             WHERE batch_id = %s
             ORDER BY created_at
-        """
+        """).format(sql.Identifier(self.schema_name))
 
         return self._execute_query(query, (batch_id,))
+
+    def get_tasks_for_job(self, job_id: str) -> List['TaskRecord']:
+        """
+        Get all tasks for a specific job as TaskRecord objects.
+
+        Args:
+            job_id: Job identifier
+
+        Returns:
+            List of TaskRecord Pydantic objects
+
+        Example:
+            task_records = task_repo.get_tasks_for_job('job123')
+        """
+        from core.models import TaskRecord
+        from psycopg import sql
+
+        query = sql.SQL("""
+            SELECT * FROM {}.tasks
+            WHERE parent_job_id = %s
+            ORDER BY stage, task_index
+        """).format(sql.Identifier(self.schema_name))
+
+        rows = self._execute_query(query, (job_id,))
+
+        # Convert to TaskRecord objects
+        task_records = []
+        for row in rows:
+            task_records.append(TaskRecord(**row))
+
+        return task_records
 
     def get_pending_retry_batches(
         self,
@@ -660,16 +733,20 @@ class TaskRepository(PostgreSQLTaskRepository):
         Returns:
             List of batch IDs needing retry
         """
-        query = f"""
+        from psycopg import sql
+
+        query = sql.SQL("""
             SELECT DISTINCT batch_id
-            FROM {self.schema_name}.tasks
+            FROM {}.tasks
             WHERE status = 'pending_retry'
               AND batch_id IS NOT NULL
-              AND created_at > NOW() - INTERVAL '%s minutes'
+              AND created_at > NOW() - INTERVAL %s
             LIMIT %s
-        """
+        """).format(sql.Identifier(self.schema_name))
 
-        results = self._execute_query(query, (max_age_minutes, limit))
+        # Create proper interval string
+        interval_str = f'{max_age_minutes} minutes'
+        results = self._execute_query(query, (interval_str, limit))
         return [r['batch_id'] for r in results]
 
 

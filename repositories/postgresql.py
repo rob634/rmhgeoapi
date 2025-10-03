@@ -47,19 +47,18 @@ from contextlib import contextmanager
 import logging
 
 from config import AppConfig, get_config
-from schema_base import (
+from core.models import (
     JobRecord, TaskRecord, JobStatus, TaskStatus,
-    generate_job_id
+    StageAdvancementResult, TaskResult
 )
+from core.utils import generate_job_id
+from core.models.results import TaskCompletionResult, JobCompletionResult
 # generate_task_id moved to Controller layer - repository no longer needs it
 from .base import BaseRepository
 from .interface_repository import (
     IJobRepository, ITaskRepository, IStageCompletionRepository
 )
-from schema_base import (
-    StageAdvancementResult, TaskCompletionResult, JobCompletionResult,
-    TaskResult, TaskStatus
-)
+from core.schema.updates import TaskUpdateModel, JobUpdateModel
 from utils import enforce_contract  # Added for contract enforcement
 
 # Logger setup
@@ -212,22 +211,6 @@ class PostgreSQLRepository(BaseRepository):
         - Consider using managed identity to avoid password management
         """
         logger.debug("🔌 Getting PostgreSQL connection string...")
-        
-        # Check for complete connection string in environment
-        env_conn_string = os.getenv('POSTGRESQL_CONNECTION_STRING')
-        if env_conn_string:
-            logger.debug("📋 Using POSTGRESQL_CONNECTION_STRING from environment")
-            # Mask password in log
-            masked = env_conn_string
-            if '@' in masked and ':' in masked[:masked.index('@')]:
-                # Find password portion and mask it
-                user_pass_end = masked.index('@')
-                user_start = masked.index('://') + 3
-                if ':' in masked[user_start:user_pass_end]:
-                    pass_start = masked.index(':', user_start) + 1
-                    masked = masked[:pass_start] + '****' + masked[user_pass_end:]
-            logger.debug(f"  Connection string from env: {masked}")
-            return env_conn_string
         
         # Use connection string from config
         # This is built from config.postgis_* properties
@@ -650,7 +633,7 @@ class PostgreSQLJobRepository(PostgreSQLRepository, IJobRepository):
             params = (
                 job.job_id,
                 job.job_type,
-                job.status.value if isinstance(job.status, JobStatus) else job.status,
+                job.status.value,  # Require JobStatus enum
                 job.stage,
                 job.total_stages,
                 json.dumps(job.parameters),
@@ -725,37 +708,39 @@ class PostgreSQLJobRepository(PostgreSQLRepository, IJobRepository):
             return job_record
     
     @enforce_contract(
-        params={'job_id': str, 'updates': dict},
+        params={'job_id': str, 'updates': JobUpdateModel},
         returns=bool
     )
-    def update_job(self, job_id: str, updates: Dict[str, Any]) -> bool:
+    def update_job(self, job_id: str, updates: JobUpdateModel) -> bool:
         """
-        Update a job in PostgreSQL.
-        
+        Update a job in PostgreSQL using type-safe Pydantic model.
+
         Args:
             job_id: Job ID to update
-            updates: Dictionary of fields to update
-            
+            updates: JobUpdateModel with fields to update
+
         Returns:
             True if updated, False otherwise
         """
         with self._error_context("job update", job_id):
-            if not updates:
+            # Convert Pydantic model to dict, excluding unset fields
+            update_dict = updates.to_dict(exclude_unset=True)
+
+            if not update_dict:
                 return False
-            
+
             # Build UPDATE query dynamically
             set_clauses = []
             params = []
-            
-            for field, value in updates.items():
+
+            for field, value in update_dict.items():
                 set_clauses.append(sql.SQL("{} = %s").format(sql.Identifier(field)))
-                
+
                 # Handle special types
-                if field in ['parameters', 'stage_results', 'result_data'] and value is not None:
+                if field in ['parameters', 'stage_results', 'result_data', 'metadata'] and value is not None:
                     params.append(json.dumps(value) if not isinstance(value, str) else value)
-                elif isinstance(value, (JobStatus, TaskStatus)):
-                    params.append(value.value)
                 else:
+                    # Pydantic has already converted enums to strings
                     params.append(value)
             
             # Add job_id to params
@@ -775,7 +760,7 @@ class PostgreSQLJobRepository(PostgreSQLRepository, IJobRepository):
             success = rowcount > 0
             
             if success:
-                logger.info(f"✅ Job updated: {job_id[:16]}... fields={list(updates.keys())}")
+                logger.info(f"✅ Job updated: {job_id[:16]}... fields={list(update_dict.keys())}")
             else:
                 logger.warning(f"⚠️ Job not found for update: {job_id[:16]}...")
             
@@ -808,7 +793,7 @@ class PostgreSQLJobRepository(PostgreSQLRepository, IJobRepository):
                     sql.Identifier(self.schema_name),
                     sql.Identifier("jobs")
                 )
-                params = (status_filter.value if isinstance(status_filter, JobStatus) else status_filter,)
+                params = (status_filter.value,)  # Require JobStatus enum
             else:
                 query = sql.SQL("""
                     SELECT job_id, job_type, status, stage, total_stages,
@@ -891,7 +876,7 @@ class PostgreSQLTaskRepository(PostgreSQLRepository, ITaskRepository):
                 task.parent_job_id,
                 task.job_type,  # Added job_type field
                 task.task_type,
-                task.status.value if isinstance(task.status, TaskStatus) else task.status,
+                task.status.value,  # Require TaskStatus enum
                 task.stage,
                 task.task_index,
                 json.dumps(task.parameters),
@@ -970,37 +955,39 @@ class PostgreSQLTaskRepository(PostgreSQLRepository, ITaskRepository):
             return task_record
     
     @enforce_contract(
-        params={'task_id': str, 'updates': dict},
+        params={'task_id': str, 'updates': TaskUpdateModel},
         returns=bool
     )
-    def update_task(self, task_id: str, updates: Dict[str, Any]) -> bool:
+    def update_task(self, task_id: str, updates: TaskUpdateModel) -> bool:
         """
-        Update a task in PostgreSQL.
-        
+        Update a task in PostgreSQL using type-safe Pydantic model.
+
         Args:
             task_id: Task ID to update
-            updates: Dictionary of fields to update
-            
+            updates: TaskUpdateModel with fields to update
+
         Returns:
             True if updated, False otherwise
         """
         with self._error_context("task update", task_id):
-            if not updates:
+            # Convert Pydantic model to dict, excluding unset fields
+            update_dict = updates.to_dict(exclude_unset=True)
+
+            if not update_dict:
                 return False
-            
+
             # Build UPDATE query dynamically
             set_clauses = []
             params = []
-            
-            for field, value in updates.items():
+
+            for field, value in update_dict.items():
                 set_clauses.append(sql.SQL("{} = %s").format(sql.Identifier(field)))
-                
+
                 # Handle special types
-                if field in ['parameters', 'result_data'] and value is not None:
+                if field in ['parameters', 'result_data', 'metadata'] and value is not None:
                     params.append(json.dumps(value) if not isinstance(value, str) else value)
-                elif isinstance(value, (JobStatus, TaskStatus)):
-                    params.append(value.value)
                 else:
+                    # Pydantic has already converted enums to strings
                     params.append(value)
             
             # Add task_id to params
@@ -1020,7 +1007,7 @@ class PostgreSQLTaskRepository(PostgreSQLRepository, ITaskRepository):
             success = rowcount > 0
             
             if success:
-                logger.info(f"✅ Task updated: {task_id} fields={list(updates.keys())}")
+                logger.info(f"✅ Task updated: {task_id} fields={list(update_dict.keys())}")
             else:
                 logger.warning(f"⚠️ Task not found for update: {task_id}")
             

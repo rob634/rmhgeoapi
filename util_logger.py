@@ -1,6 +1,9 @@
 # ============================================================================
 # CLAUDE CONTEXT - LOGGING
 # ============================================================================
+# EPOCH: SHARED - BOTH EPOCHS
+# STATUS: Used by Epoch 3 and Epoch 4
+# NOTE: Careful migration required
 # PURPOSE: JSON-only structured logging for Azure Functions with Application Insights
 # EXPORTS: ComponentType, LogLevel, LogContext, LogEvent, LoggerFactory, log_exceptions
 # INTERFACES: Dataclass models, enums, factory, JSON formatter, exception decorator

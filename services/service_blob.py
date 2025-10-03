@@ -1,6 +1,9 @@
 # ============================================================================
 # CLAUDE CONTEXT - SERVICE
 # ============================================================================
+# EPOCH: SHARED - BOTH EPOCHS
+# STATUS: Used by Epoch 3 and Epoch 4
+# NOTE: Careful migration required
 # PURPOSE: Blob storage service implementing task handlers for container operations
 # EXPORTS: Handler factory functions - create_analyze_handler, create_extract_handler, create_summary_handler
 # INTERFACES: Task handlers receive params dict and TaskContext, return result dict
@@ -52,7 +55,7 @@ from typing import Dict, Any, List, Optional
 
 # Application imports - Core dependencies
 from task_factory import TaskContext
-from repositories import RepositoryFactory
+from infrastructure import RepositoryFactory
 from util_logger import LoggerFactory, ComponentType
 
 # Application imports - Blob schemas

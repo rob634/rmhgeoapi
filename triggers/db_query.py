@@ -1,7 +1,10 @@
 # ============================================================================
 # CLAUDE CONTEXT - CONTROLLER
 # ============================================================================
-# PURPOSE: Database query HTTP triggers providing direct PostgreSQL access for monitoring and debugging
+# CATEGORY: HTTP TRIGGER ENDPOINTS
+# PURPOSE: Azure Functions HTTP API endpoint
+# EPOCH: Shared by all epochs (API layer)
+# TODO: Audit for framework logic that may belong in CoreMachine# PURPOSE: Database query HTTP triggers providing direct PostgreSQL access for monitoring and debugging
 # EXPORTS: DatabaseQueryTrigger, JobsQueryTrigger, TasksQueryTrigger, DatabaseStatsQueryTrigger, EnumDiagnosticTrigger, SchemaNukeQueryTrigger
 # INTERFACES: BaseHttpTrigger (inherited from trigger_http_base)
 # PYDANTIC_MODELS: None directly - uses dict for query results

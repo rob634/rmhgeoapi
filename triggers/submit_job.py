@@ -1,7 +1,10 @@
 # ============================================================================
 # CLAUDE CONTEXT - CONTROLLER
 # ============================================================================
-# PURPOSE: Primary job submission HTTP trigger handling POST /api/jobs/{job_type} requests
+# CATEGORY: HTTP TRIGGER ENDPOINTS
+# PURPOSE: Azure Functions HTTP API endpoint
+# EPOCH: Shared by all epochs (API layer)
+# TODO: Audit for framework logic that may belong in CoreMachine# PURPOSE: Primary job submission HTTP trigger handling POST /api/jobs/{job_type} requests
 # EXPORTS: JobSubmissionTrigger (HTTP trigger class for job submission)
 # INTERFACES: JobManagementTrigger (inherited from trigger_http_base)
 # PYDANTIC_MODELS: None directly - uses controller validation for job parameters
@@ -147,7 +150,7 @@ class JobSubmissionTrigger(JobManagementTrigger):
         # Get controller for job type
         self.logger.debug(f"🎯 Getting controller for job_type: {job_type}")
         try:
-            controller = self._get_controller_for_job_type(job_type, use_service_bus)
+            controller = self._get_controller_for_job_type(job_type)
             self.logger.debug(f"✅ Controller loaded successfully: {type(controller).__name__}")
         except Exception as controller_error:
             self.logger.error(f"❌ Failed to load controller for {job_type}: {controller_error}")
@@ -170,13 +173,53 @@ class JobSubmissionTrigger(JobManagementTrigger):
         
         # Generate job ID from validated parameters
         job_id = controller.generate_job_id(validated_params)
-        self.logger.info(f"Creating {job_type} job with ID: {job_id}")
-        
+        self.logger.info(f"Checking for existing {job_type} job with ID: {job_id}")
+
+        # IDEMPOTENCY CHECK: See if job already exists
+        from infrastructure.factory import RepositoryFactory
+        repos = RepositoryFactory.create_repositories()
+        existing_job = repos['job_repo'].get_job(job_id)
+
+        if existing_job:
+            self.logger.info(f"🔄 Job {job_id[:16]}... already exists with status: {existing_job.status}")
+
+            # If job already completed, return existing results without re-running
+            if existing_job.status.value == 'completed':
+                self.logger.info(f"✅ Job already completed - returning existing results")
+                return {
+                    "job_id": job_id,
+                    "status": "already_completed",
+                    "job_type": job_type,
+                    "message": "Job already completed with identical parameters - returning existing results (idempotency)",
+                    "parameters": validated_params,
+                    "result_data": existing_job.result_data,
+                    "created_at": existing_job.created_at.isoformat() if existing_job.created_at else None,
+                    "completed_at": existing_job.updated_at.isoformat() if existing_job.updated_at else None,
+                    "idempotent": True
+                }
+            else:
+                # Job exists but not completed - return current status
+                self.logger.info(f"⏳ Job in progress with status: {existing_job.status}")
+                return {
+                    "job_id": job_id,
+                    "status": existing_job.status.value,
+                    "job_type": job_type,
+                    "message": f"Job already exists with status: {existing_job.status.value} (idempotency - not re-queued)",
+                    "parameters": validated_params,
+                    "created_at": existing_job.created_at.isoformat() if existing_job.created_at else None,
+                    "current_stage": existing_job.stage,
+                    "total_stages": existing_job.total_stages,
+                    "idempotent": True
+                }
+
+        # Job doesn't exist - proceed with creation
+        self.logger.info(f"Creating new {job_type} job with ID: {job_id}")
+
         # Create job record
         self.logger.debug(f"💾 Creating job record")
         job_record = controller.create_job_record(job_id, validated_params)
         self.logger.debug(f"✅ Job record created")
-        
+
         # Queue the job for processing
         self.logger.debug(f"📤 Queueing job for processing")
         try:
@@ -186,24 +229,27 @@ class JobSubmissionTrigger(JobManagementTrigger):
             self.logger.error(f"❌ Failed to queue job {job_id}: {queue_error}")
             # Re-raise with more context about where the error occurred
             raise RuntimeError(f"Job queuing failed in controller.queue_job(): {queue_error}")
-        
+
         # Return success response
         return {
             "job_id": job_id,
-            "status": "created", 
+            "status": "created",
             "job_type": job_type,
             "message": "Job created and queued for processing",
             "parameters": validated_params,
-            "queue_info": queue_result
+            "queue_info": queue_result,
+            "idempotent": False
         }
     
-    def _get_controller_for_job_type(self, job_type: str, use_service_bus: bool = False):
+    def _get_controller_for_job_type(self, job_type: str):
         """
         Get controller instance for the specified job type.
 
+        NO AUTO-PREFIXING: Job type must match exactly as registered.
+        Queue routing determined by controller's queue_type declaration.
+
         Args:
-            job_type: Type of job to create controller for
-            use_service_bus: Whether to use Service Bus controller variant
+            job_type: Exact job type as registered (e.g. 'hello_world' or 'sb_hello_world')
 
         Returns:
             Controller instance
@@ -211,36 +257,29 @@ class JobSubmissionTrigger(JobManagementTrigger):
         Raises:
             ValueError: If job type is not supported
         """
-        self.logger.debug(f"🎯 Loading controller for job_type: {job_type}, use_service_bus: {use_service_bus}")
+        self.logger.debug(f"🎯 Validating job_type: {job_type}")
 
-        # Use JobFactory to create controllers
-        self.logger.debug(f"🏗️ Using JobFactory to create controller for {job_type}")
-        try:
-            from controller_factories import JobFactory
-            import controller_hello_world  # Import to trigger registration
-            import controller_container  # Import to trigger registration of container controllers
-            import controller_stac_setup  # Import to trigger registration of STAC setup controller
+        # Use EXPLICIT REGISTRY for job validation (NO decorators, NO factory!)
+        # Direct dict lookup - crystal clear, no magic
+        from jobs import ALL_JOBS
 
-            # Pass Service Bus flag to factory
-            controller = JobFactory.create_controller(job_type, use_service_bus)
-            self.logger.debug(f"✅ Controller for {job_type} created successfully via JobFactory")
-            return controller
-        except ValueError as e:
-            # JobFactory raises ValueError for unknown job types
-            self.logger.error(f"❌ Unknown job type {job_type}: {e}")
-
-            # Get list of supported job types from factory
-            from controller_factories import JobFactory
-            supported_jobs = JobFactory.list_available_jobs()
-
-            raise ValueError(
+        if job_type not in ALL_JOBS:
+            # Unknown job type - provide helpful error message
+            available = list(ALL_JOBS.keys())
+            error_msg = (
                 f"Invalid job type: '{job_type}'. "
-                f"Supported job types: {', '.join(supported_jobs) if supported_jobs else 'none configured'}. "
+                f"Available job types: {', '.join(available) if available else 'none configured'}. "
                 f"Please use one of the supported job types."
             )
-        except Exception as error:
-            self.logger.error(f"❌ Failed to create controller for {job_type}: {error}")
-            raise RuntimeError(f"Controller creation failed for {job_type}: {error}")
+            self.logger.error(f"❌ {error_msg}")
+            raise ValueError(error_msg)
+
+        # Job type is valid - get job class from registry
+        job_class = ALL_JOBS[job_type]
+        self.logger.debug(f"✅ Job type validated: {job_type} ({job_class.__name__})")
+
+        # Return job class (CoreMachine will use it for orchestration)
+        return job_class
 
 
 # Create singleton instance for use in function_app.py  

@@ -105,24 +105,46 @@ class ServiceBusRepository(IQueueRepository):
             logger.info("🚌 Initializing ServiceBusRepository")
 
             try:
+                # Get configuration from centralized config
+                from config import get_config
+                config = get_config()
+
+                logger.debug("🔍 Checking Service Bus configuration...")
+                logger.debug(f"  Connection string: {'SET' if config.service_bus_connection_string else 'NOT SET'}")
+                logger.debug(f"  Namespace: {config.service_bus_namespace or 'NOT SET'}")
+                logger.debug(f"  Max batch size: {config.service_bus_max_batch_size}")
+                logger.debug(f"  Retry count: {config.service_bus_retry_count}")
+
                 # Check for connection string first (for local development)
-                connection_string = os.getenv('SERVICE_BUS_CONNECTION_STRING')
+                connection_string = config.service_bus_connection_string
 
                 if connection_string:
                     logger.info("🔑 Using connection string authentication")
-                    self.client = ServiceBusClient.from_connection_string(connection_string)
+                    logger.debug(f"Connection string length: {len(connection_string)} chars")
+
+                    try:
+                        self.client = ServiceBusClient.from_connection_string(connection_string)
+                        logger.info("✅ ServiceBusClient created from connection string")
+                    except Exception as cs_error:
+                        logger.error(f"❌ Failed to create client from connection string: {cs_error}")
+                        raise
+
                     self.async_client = None  # Will create on demand
                 else:
                     # Use DefaultAzureCredential for production
-                    logger.info("🔐 Using DefaultAzureCredential")
+                    logger.info("🔐 Using DefaultAzureCredential (no connection string found)")
 
                     # Azure Functions Service Bus configuration
-                    fully_qualified_namespace = os.getenv('ServiceBusConnection__fullyQualifiedNamespace')
+                    fully_qualified_namespace = config.service_bus_namespace
 
                     if not fully_qualified_namespace:
+                        logger.error("❌ Service Bus namespace not configured")
+                        logger.error("Please set SERVICE_BUS_NAMESPACE or ServiceBusConnection__fullyQualifiedNamespace")
+
                         raise ValueError(
                             "ServiceBusConnection__fullyQualifiedNamespace environment variable not set. "
-                            "This is required for Azure Functions Service Bus connection."
+                            "This is required for Azure Functions Service Bus connection. "
+                            "Please configure this in Azure Functions Application Settings."
                         )
 
                     logger.info(f"🚌 Using Service Bus namespace: {fully_qualified_namespace}")
@@ -130,24 +152,39 @@ class ServiceBusRepository(IQueueRepository):
                     # Use DefaultAzureCredential as recommended by Azure docs
                     # This tries managed identity first in Azure Functions
                     logger.info("🔐 Creating DefaultAzureCredential for Service Bus...")
-                    self.credential = DefaultAzureCredential()
-                    logger.info("✅ DefaultAzureCredential created successfully")
+                    try:
+                        self.credential = DefaultAzureCredential()
+                        logger.info("✅ DefaultAzureCredential created successfully")
+                    except Exception as cred_error:
+                        logger.error(f"❌ Failed to create DefaultAzureCredential: {cred_error}")
+                        raise RuntimeError(f"Credential creation failed: {cred_error}")
 
-                    self.client = ServiceBusClient(
-                        fully_qualified_namespace=fully_qualified_namespace,
-                        credential=self.credential
-                    )
-                    logger.info("✅ ServiceBusClient created successfully")
+                    try:
+                        logger.debug(f"📦 Creating ServiceBusClient with namespace: {fully_qualified_namespace}")
+                        self.client = ServiceBusClient(
+                            fully_qualified_namespace=fully_qualified_namespace,
+                            credential=self.credential
+                        )
+                        logger.info("✅ ServiceBusClient created successfully")
+                    except Exception as client_error:
+                        logger.error(f"❌ Failed to create ServiceBusClient: {client_error}")
+                        logger.error(f"Namespace used: {fully_qualified_namespace}")
+                        raise RuntimeError(f"ServiceBusClient creation failed: {client_error}")
 
                     # Async client for batch operations
-                    self.async_client = AsyncServiceBusClient(
-                        fully_qualified_namespace=fully_qualified_namespace,
-                        credential=self.credential
-                    )
+                    try:
+                        self.async_client = AsyncServiceBusClient(
+                            fully_qualified_namespace=fully_qualified_namespace,
+                            credential=self.credential
+                        )
+                        logger.debug("✅ AsyncServiceBusClient created")
+                    except Exception as async_error:
+                        logger.warning(f"⚠️ Failed to create AsyncServiceBusClient: {async_error}")
+                        self.async_client = None
 
                 # Configuration
-                self.max_batch_size = int(os.getenv('SERVICE_BUS_MAX_BATCH_SIZE', '100'))
-                self.max_retries = int(os.getenv('SERVICE_BUS_RETRY_COUNT', '3'))
+                self.max_batch_size = config.service_bus_max_batch_size
+                self.max_retries = config.service_bus_retry_count
                 self.retry_delay = 1  # seconds
 
                 # Cache for senders/receivers (created lazily)
@@ -159,6 +196,8 @@ class ServiceBusRepository(IQueueRepository):
 
             except Exception as e:
                 logger.error(f"❌ Failed to initialize ServiceBusRepository: {e}")
+                import traceback
+                logger.error(f"Full initialization error: {traceback.format_exc()}")
                 raise RuntimeError(f"ServiceBusRepository initialization failed: {e}")
 
     @classmethod
@@ -169,10 +208,30 @@ class ServiceBusRepository(IQueueRepository):
         return cls._instance
 
     def _get_sender(self, queue_or_topic: str) -> ServiceBusSender:
-        """Get or create a message sender."""
+        """Get or create a message sender with error handling."""
         if queue_or_topic not in self._senders:
-            logger.debug(f"🚌 Creating sender for: {queue_or_topic}")
-            self._senders[queue_or_topic] = self.client.get_queue_sender(queue_or_topic)
+            logger.debug(f"🚌 Creating new sender for queue: {queue_or_topic}")
+            try:
+                sender = self.client.get_queue_sender(queue_or_topic)
+                logger.debug(f"✅ Sender created for queue: {queue_or_topic}")
+                self._senders[queue_or_topic] = sender
+            except Exception as sender_error:
+                logger.error(f"❌ Failed to create sender for queue '{queue_or_topic}': {sender_error}")
+                logger.error(f"Error type: {type(sender_error).__name__}")
+
+                # Check for specific error types
+                error_msg = str(sender_error).lower()
+                if 'not found' in error_msg or '404' in error_msg:
+                    logger.error(f"Queue '{queue_or_topic}' does not exist in Service Bus namespace")
+                elif 'unauthorized' in error_msg or '401' in error_msg:
+                    logger.error(f"Authentication failed - check managed identity or connection string")
+                elif 'forbidden' in error_msg or '403' in error_msg:
+                    logger.error(f"Access denied to queue '{queue_or_topic}' - check permissions")
+
+                raise RuntimeError(f"Cannot create sender for queue '{queue_or_topic}': {sender_error}")
+        else:
+            logger.debug(f"♻️ Reusing existing sender for queue: {queue_or_topic}")
+
         return self._senders[queue_or_topic]
 
     def _get_receiver(self, queue_or_topic: str) -> ServiceBusReceiver:
@@ -258,11 +317,9 @@ class ServiceBusRepository(IQueueRepository):
                 logger.debug(f"📮 Send attempt {attempt + 1}/{self.max_retries}")
 
                 # Step 5: Send the message
-                logger.debug(f"🔓 Opening sender context")
-                with sender:
-                    logger.debug(f"📤 Calling sender.send_messages()")
-                    sender.send_messages(sb_message)
-                    logger.debug(f"✅ send_messages() completed successfully")
+                logger.debug(f"📤 Sending message without context manager (sender is cached)")
+                sender.send_messages(sb_message)
+                logger.debug(f"✅ send_messages() completed successfully")
 
                 # Step 6: Generate message ID for compatibility
                 try:
@@ -507,45 +564,45 @@ class ServiceBusRepository(IQueueRepository):
         errors = []
 
         try:
-            with sender:
-                # Process messages in batches
-                for i in range(0, len(messages), batch_size):
-                    batch = messages[i:i + batch_size]
-                    batch_count += 1
+            # Don't use context manager with cached sender
+            # Process messages in batches
+            for i in range(0, len(messages), batch_size):
+                batch = messages[i:i + batch_size]
+                batch_count += 1
 
-                    # Convert to Service Bus messages
-                    sb_messages = []
-                    for msg in batch:
-                        sb_message = ServiceBusMessage(
-                            body=msg.model_dump_json(),
-                            content_type="application/json"
-                        )
+                # Convert to Service Bus messages
+                sb_messages = []
+                for msg in batch:
+                    sb_message = ServiceBusMessage(
+                        body=msg.model_dump_json(),
+                        content_type="application/json"
+                    )
 
-                        # Add metadata for tracing
-                        if hasattr(msg, 'task_id'):
-                            sb_message.application_properties['task_id'] = msg.task_id
-                        if hasattr(msg, 'job_id'):
-                            sb_message.application_properties['job_id'] = msg.job_id
+                    # Add metadata for tracing
+                    if hasattr(msg, 'task_id'):
+                        sb_message.application_properties['task_id'] = msg.task_id
+                    if hasattr(msg, 'job_id'):
+                        sb_message.application_properties['job_id'] = msg.job_id
 
-                        sb_messages.append(sb_message)
+                    sb_messages.append(sb_message)
 
-                    # Send batch with retry
-                    for attempt in range(self.max_retries):
-                        try:
-                            sender.send_messages(sb_messages)
-                            messages_sent += len(sb_messages)
+                # Send batch with retry
+                for attempt in range(self.max_retries):
+                    try:
+                        sender.send_messages(sb_messages)
+                        messages_sent += len(sb_messages)
 
-                            if batch_count % 10 == 0:
-                                logger.debug(f"Progress: {messages_sent}/{len(messages)} messages sent")
-                            break
+                        if batch_count % 10 == 0:
+                            logger.debug(f"Progress: {messages_sent}/{len(messages)} messages sent")
+                        break
 
-                        except Exception as e:
-                            if attempt == self.max_retries - 1:
-                                error_msg = f"Batch {batch_count} failed: {e}"
-                                errors.append(error_msg)
-                                logger.error(error_msg)
-                            else:
-                                time.sleep(self.retry_delay * (2 ** attempt))
+                    except Exception as e:
+                        if attempt == self.max_retries - 1:
+                            error_msg = f"Batch {batch_count} failed: {e}"
+                            errors.append(error_msg)
+                            logger.error(error_msg)
+                        else:
+                            time.sleep(self.retry_delay * (2 ** attempt))
 
             elapsed_ms = (time.time() - start_time) * 1000
 

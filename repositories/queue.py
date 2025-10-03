@@ -108,10 +108,12 @@ class QueueRepository(IQueueRepository):
                 self.credential = DefaultAzureCredential()
                 logger.info("✅ DefaultAzureCredential created successfully")
 
-                # Get storage account name from environment
-                storage_account = os.getenv('STORAGE_ACCOUNT_NAME')
+                # Get storage account name from config
+                from config import get_config
+                config = get_config()
+                storage_account = config.storage_account_name
                 if not storage_account:
-                    raise ValueError("STORAGE_ACCOUNT_NAME environment variable not set")
+                    raise ValueError("storage_account_name not configured")
 
                 # Construct account URL
                 self.account_url = f"https://{storage_account}.queue.core.windows.net"

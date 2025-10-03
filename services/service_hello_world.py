@@ -1,302 +1,94 @@
-# ============================================================================
-# CLAUDE CONTEXT - SERVICE
-# ============================================================================
-# PURPOSE: HelloWorld service implementing task handlers for two-stage workflow
-# EXPORTS: create_greeting_handler, create_reply_handler (task handler factory functions)
-# INTERFACES: Task handlers receive params dict and TaskContext, return result dict
-# PYDANTIC_MODELS: None - uses dict-based parameter passing and results
-# DEPENDENCIES: task_factory (TaskContext), datetime, typing, util_logger
-# SOURCE: Task parameters from queue messages via TaskHandlerFactory
-# SCOPE: Task-level business logic execution for HelloWorld greeting and reply stages
-# VALIDATION: Parameter validation within handler functions
-# PATTERNS: Handler factory pattern, Explicit Registration (via function_app.py)
-# ENTRY_POINTS: Registered in function_app.py via task_catalog.register_handler()
-# INDEX: create_greeting_handler:95, create_reply_handler:140, Handler logic:100-180
-# ============================================================================
-
 """
-Hello World Service - Task Handler Implementation
+HelloWorld Service Handlers - Pure Business Logic (No Decorators!)
 
-Service layer implementation demonstrating the task handler pattern within the
-Job→Stage→Task architecture. Uses the TaskRegistry pattern for automatic
-handler discovery and registration.
+These are pure functions that execute task logic. No decorators, no registration magic.
+Registration happens explicitly in services/__init__.py.
 
-This file serves as a TEMPLATE for future service implementations.
-
-Architecture Position:
-    - Job Layer (Controller): HelloWorldController orchestrates stages
-    - Stage Layer (Controller): Creates parallel tasks for execution  
-    - Task Layer (Service): THIS MODULE - Business logic execution
-    - Repository Layer: Data persistence handled by framework
-
-Key Features:
-    - Explicit handler registration in function_app.py (no decorators)
-    - Robert's implicit lineage pattern for multi-stage data access
-    - Simple dict-based parameter and result passing
-    - Automatic predecessor data access for stage N from stage N-1
-
-Workflow Pattern:
-    STAGE 1 (Greeting Stage):
-    ├── hello_world_greeting handler (parallel)
-    ├── hello_world_greeting handler (parallel)
-    └── hello_world_greeting handler (parallel)
-                ↓ All tasks complete
-    STAGE 2 (Reply Stage):
-    ├── hello_world_reply handler (parallel)
-    ├── hello_world_reply handler (parallel) 
-    └── hello_world_reply handler (parallel)
-                ↓ All tasks complete
-    JOB COMPLETION (Controller aggregates results)
-
-Implementation Notes:
-    - Handlers are functions that return functions (factory pattern)
-    - Outer function is called once at registration time
-    - Inner function is called for each task execution
-    - TaskContext provides automatic lineage tracking and predecessor access
-    - Results are simple dicts - framework handles TaskResult wrapping
-
-Lineage Pattern Example:
-    Stage 1, Task 3: job123-s1-task_3 → stores result
-    Stage 2, Task 3: job123-s2-task_3 → automatically gets s1-task_3 data
-
-Usage Pattern for New Services:
-    1. Import TaskContext from task_factory
-    2. Define handler factory function (e.g., create_my_handler)
-    3. Factory returns actual handler function that processes params
-    4. Register in function_app.py via task_catalog.register_handler("task_type", create_my_handler)
-    5. Use context.has_predecessor() and context.get_predecessor_result() for lineage
-    6. Return dict with results - framework handles the rest
+Handler functions are simple:
+- Take params dict and optional context dict
+- Execute business logic
+- Return result dict
 
 Author: Robert and Geospatial Claude Legion
-Date: 9 December 2025
+Date: 1 OCT 2025
 """
 
+from typing import Dict, Any, Optional
 from datetime import datetime, timezone
-
-# Import TaskContext for lineage support
-# TaskRegistry decorators removed - using explicit registration
-from task_factory import TaskContext
+import random
 
 
-# ============================================================================
-# HANDLER METADATA FOR EXPLICIT REGISTRATION
-# ============================================================================
-# Static metadata for TaskCatalog registration during migration from decorators
-
-HELLO_GREETING_INFO = {
-    'task_type': 'hello_world_greeting',
-    'description': 'Generate greeting message for hello world workflow',
-    'timeout_seconds': 30,
-    'max_retries': 3,
-    'required_services': [],
-    'stage': 1,
-    'features': ['parallel_execution', 'no_predecessor']
-}
-
-HELLO_REPLY_INFO = {
-    'task_type': 'hello_world_reply',
-    'description': 'Generate reply message using predecessor data from greeting',
-    'timeout_seconds': 30,
-    'max_retries': 3,
-    'required_services': [],
-    'stage': 2,
-    'features': ['parallel_execution', 'predecessor_access', 'lineage_pattern']
-}
-
-# ============================================================================
-# STAGE 1: GREETING HANDLER
-# ============================================================================
-# Demonstrates basic task handler for first stage (no predecessor data)
-
-def create_greeting_handler():
+def handle_greeting(params: Dict[str, Any], context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """
-    Factory for hello_world_greeting task handler.
-    
-    Creates a handler function for Stage 1 greeting tasks.
-    Stage 1 has no predecessor, so this demonstrates the base pattern.
-    
+    Handle greeting task - pure business logic with optional stochastic failures.
+
+    This is a Stage 1 task - no predecessor data needed.
+
+    Args:
+        params: Task parameters dict
+            - index (int): Task index number
+            - message (str): Greeting message template
+            - failure_rate (float): Probability of random failure (0.0-1.0, default 0.0)
+        context: Optional context (not used in stage 1)
+
     Returns:
-        Handler function that processes greeting task parameters
-        
-    Pattern:
-        - Factory function (this) is called once at registration
-        - Handler function (inner) is called for each task execution
-        - Results are returned as simple dicts
+        Result dict with greeting data
+
+    Raises:
+        Exception: If stochastic failure is triggered (based on failure_rate)
     """
-    def handle_greeting(params: dict, context: TaskContext) -> dict:
-        """
-        Execute greeting task.
-        
-        Args:
-            params: Task parameters from queue message
-                - task_number: Task index for identification
-                - message: Base message content
-                - greeting: Greeting text to use
-                - total_tasks: Total tasks in this stage
-            context: Task context with lineage support
-            
-        Returns:
-            Dict with greeting results and metadata
-        """
-        # Extract parameters with defaults
-        task_number = params.get('task_number', 1)
-        message = params.get('message', 'Hello')
-        greeting = params.get('greeting', 'World')
-        total_tasks = params.get('total_tasks', 1)
-        
-        # Stage 1 typically has no predecessor, but we check for completeness
-        # This demonstrates the pattern even though not used in stage 1
-        if context.has_predecessor():
-            # This wouldn't normally happen for stage 1
-            # Could use predecessor data if it existed
-            _ = context.get_predecessor_result()
-        
-        # Create greeting result (business logic)
-        greeting_text = f"{message} from task_{task_number}!"
-        
-        # Return result as dict
-        # Framework handles wrapping in TaskResult
-        result = {
-            "task_number": task_number,
-            "greeting": greeting_text,
-            "message": f"Task {task_number}/{total_tasks}: {greeting}",
-            "stage": "greeting",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "success": True
-        }
-        
-        return result
-    
-    return handle_greeting
+    try:
+        index = params.get('index', 0)
+        message = params.get('message', 'Hello World')
+        failure_rate = params.get('failure_rate', 0.0)
 
+        # STOCHASTIC FAILURE INJECTION (for testing retry mechanisms)
+        if failure_rate > 0.0 and random.random() < failure_rate:
+            raise Exception(
+                f"💥 STOCHASTIC FAILURE - Task {index} randomly failed "
+                f"(failure_rate={failure_rate:.1%}) to test retry mechanisms"
+            )
 
-# ============================================================================
-# STAGE 2: REPLY HANDLER
-# ============================================================================
-# Demonstrates Robert's implicit lineage pattern for accessing predecessor data
-
-def create_reply_handler():
-    """
-    Factory for hello_world_reply task handler.
-    
-    Creates a handler function for Stage 2 reply tasks.
-    Demonstrates Robert's implicit lineage pattern where tasks
-    automatically access their predecessor's data.
-    
-    Returns:
-        Handler function that processes reply task parameters
-        
-    Lineage Pattern:
-        - Task ID format: {job_id}-s{stage}-{index}
-        - Stage 2 task automatically gets matching Stage 1 task data
-        - Example: job123-s2-task_3 gets data from job123-s1-task_3
-    """
-    def handle_reply(params: dict, context: TaskContext) -> dict:
-        """
-        Execute reply task with predecessor data access.
-        
-        Args:
-            params: Task parameters from queue message
-                - task_number: Task index for identification
-                - total_tasks: Total tasks in this stage
-                - replying_to: Optional explicit greeting to reply to
-            context: Task context with automatic lineage support
-            
-        Returns:
-            Dict with reply results including lineage information
-        """
-        # Extract parameters
-        task_number = params.get('task_number', 1)
-        total_tasks = params.get('total_tasks', 1)
-        replying_to = params.get('replying_to', None)
-        
-        # Demonstrate lineage pattern - automatically get stage 1 result
-        reply_message = "Hello from reply stage!"
-        original_greeting = None
-        
-        if context.has_predecessor():
-            # Automatically retrieves the matching task from previous stage
-            # e.g., s2-task_3 gets data from s1-task_3
-            predecessor_data = context.get_predecessor_result()
-            if predecessor_data:
-                original_greeting = predecessor_data.get('greeting', '')
-                reply_message = f"Reply to: {original_greeting}"
-        elif replying_to:
-            # Fallback to explicit parameter if provided
-            original_greeting = replying_to
-            reply_message = f"Reply to: {replying_to}"
-        
-        # Create reply result
-        result = {
-            "task_number": task_number,
-            "reply": reply_message,
-            "original_greeting": original_greeting,
-            "message": f"Reply task {task_number}/{total_tasks} completed",
-            "stage": "reply",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "lineage": context.get_lineage_chain(),  # Full lineage chain
-            "success": True
-        }
-        
-        return result
-    
-    return handle_reply
-
-
-# ============================================================================
-# TEMPLATE NOTES FOR FUTURE SERVICES
-# ============================================================================
-
-"""
-Template for Creating New Service Handlers:
-
-1. Import Requirements:
-   from task_factory import TaskContext
-   from datetime import datetime, timezone
-   from typing import Dict, Any
-
-2. Basic Handler Structure:
-
-# Handler functions are now registered in function_app.py using TaskCatalog
-# No decorator needed here
-def create_your_handler():
-    '''Factory for your task handler.'''
-    
-    def handle_task(params: dict, context: TaskContext) -> dict:
-        '''Execute your task logic.'''
-        
-        # Get parameters
-        param1 = params.get('param1', 'default')
-        
-        # Check for predecessor (if stage > 1)
-        if context.has_predecessor():
-            prev_data = context.get_predecessor_result()
-            # Use predecessor data
-        
-        # Your business logic here
-        result = process_something(param1)
-        
-        # Return results as dict
         return {
-            "result": result,
+            "success": True,
+            "greeting": f"{message} from task {index}!",
             "timestamp": datetime.now(timezone.utc).isoformat(),
-            "success": True
+            "task_index": index,
+            "failure_rate_tested": failure_rate
         }
-    
-    return handle_task
 
-3. Multi-Stage Pattern:
-   - Stage 1: No predecessor, initialize data
-   - Stage 2+: Access predecessor via context
-   - Lineage is automatic based on task ID pattern
+    except Exception as e:
+        # Re-raise so CoreMachine can catch and mark task as FAILED
+        raise
 
-4. Error Handling:
-   - Return {"success": False, "error": "message"} on failure
-   - Framework handles TaskResult wrapping and status updates
 
-5. Best Practices:
-   - Keep handlers focused on single responsibility
-   - Use context for lineage, not explicit parameters
-   - Return simple dicts, let framework handle complexity
-   - Include timestamp and success flag in results
-"""
+def handle_reply(params: Dict[str, Any], context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """
+    Handle reply task - uses lineage to access predecessor.
+
+    This is a Stage 2 task - can access Stage 1 results via context.
+
+    Args:
+        params: Task parameters dict
+            - index (int): Task index number
+        context: Context dict (optional)
+            - predecessor_result (dict): Stage 1 task result if available
+
+    Returns:
+        Result dict with reply data
+    """
+    index = params.get('index', 0)
+
+    # Access predecessor result if context provided
+    # In real implementation, CoreMachine will provide this
+    predecessor_greeting = "unknown"
+    if context and 'predecessor_result' in context:
+        predecessor_greeting = context['predecessor_result'].get('greeting', 'unknown')
+
+    return {
+        "success": True,
+        "reply": f"Replying to: {predecessor_greeting}",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "task_index": index,
+        "predecessor_accessed": context is not None and 'predecessor_result' in context
+    }

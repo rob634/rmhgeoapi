@@ -1,0 +1,162 @@
+[
+  {
+    "name": "APP_SCHEMA",
+    "slotSetting": false,
+    "value": "app"
+  },
+  {
+    "name": "APPLICATIONINSIGHTS_AUTHENTICATION_STRING",
+    "slotSetting": false,
+    "value": "Authorization=AAD"
+  },
+  {
+    "name": "APPLICATIONINSIGHTS_CONNECTION_STRING",
+    "slotSetting": false,
+    "value": "InstrumentationKey=32ef235f-4bfc-416b-98e9-19b23fb266e1;IngestionEndpoint=https://eastus-8.in.applicationinsights.azure.com/;LiveEndpoint=https://eastus.livediagnostics.monitor.azure.com/;ApplicationId=829adb94-5f5c-46ae-9f00-18e731529222"
+  },
+  {
+    "name": "AzureWebJobsStorage__blobServiceUri",
+    "slotSetting": false,
+    "value": "https://rmhazuregeo.blob.core.windows.net"
+  },
+  {
+    "name": "AzureWebJobsStorage__credential",
+    "slotSetting": false,
+    "value": "managedidentity"
+  },
+  {
+    "name": "AzureWebJobsStorage__queueServiceUri",
+    "slotSetting": false,
+    "value": "https://rmhazuregeo.queue.core.windows.net"
+  },
+  {
+    "name": "AzureWebJobsStorage__tableServiceUri",
+    "slotSetting": false,
+    "value": "https://rmhazuregeo.table.core.windows.net"
+  },
+  {
+    "name": "BRONZE_CONTAINER_NAME",
+    "slotSetting": false,
+    "value": "rmhazuregeobronze"
+  },
+  {
+    "name": "ENABLE_DATABASE_HEALTH_CHECK",
+    "slotSetting": false,
+    "value": "true"
+  },
+  {
+    "name": "ENABLE_ORYX_BUILD",
+    "slotSetting": false,
+    "value": "true"
+  },
+  {
+    "name": "FUNCTIONS_EXTENSION_VERSION",
+    "slotSetting": false,
+    "value": "~4"
+  },
+  {
+    "name": "FUNCTIONS_WORKER_RUNTIME",
+    "slotSetting": false,
+    "value": "python"
+  },
+  {
+    "name": "GOLD_CONTAINER_NAME",
+    "slotSetting": false,
+    "value": "rmhazuregeogold"
+  },
+  {
+    "name": "KEY_VAULT",
+    "slotSetting": false,
+    "value": "rmhazurevault"
+  },
+  {
+    "name": "KEY_VAULT_DATABASE_SECRET",
+    "slotSetting": false,
+    "value": "postgis-password"
+  },
+  {
+    "name": "KEY_VAULT_NAME",
+    "slotSetting": false,
+    "value": "rmhazurevault"
+  },
+  {
+    "name": "POSTGIS_DATABASE",
+    "slotSetting": false,
+    "value": "geopgflex"
+  },
+  {
+    "name": "POSTGIS_HOST",
+    "slotSetting": false,
+    "value": "rmhpgflex.postgres.database.azure.com"
+  },
+  {
+    "name": "POSTGIS_PASSWORD",
+    "slotSetting": false,
+    "value": "B@lamb634@"
+  },
+  {
+    "name": "POSTGIS_PORT",
+    "slotSetting": false,
+    "value": "5432"
+  },
+  {
+    "name": "POSTGIS_SCHEMA",
+    "slotSetting": false,
+    "value": "geo"
+  },
+  {
+    "name": "POSTGIS_USER",
+    "slotSetting": false,
+    "value": "rob634"
+  },
+  {
+    "name": "SCM_DO_BUILD_DURING_DEPLOYMENT",
+    "slotSetting": false,
+    "value": "true"
+  },
+  {
+    "name": "SILVER_CONTAINER_NAME",
+    "slotSetting": false,
+    "value": "rmhazuregeosilver"
+  },
+  {
+    "name": "Storage__blobServiceUri",
+    "slotSetting": false,
+    "value": "https://rmhazuregeo.blob.core.windows.net"
+  },
+  {
+    "name": "Storage__credential",
+    "slotSetting": false,
+    "value": "managedidentity"
+  },
+  {
+    "name": "STORAGE_ACCOUNT_NAME",
+    "slotSetting": false,
+    "value": "rmhazuregeo"
+  },
+  {
+    "name": "WEBSITE_CONTENTAZUREFILECONNECTIONSTRING",
+    "slotSetting": false,
+    "value": "DefaultEndpointsProtocol=https;AccountName=rmhazuregeo;AccountKey=drfLsaBC3OdvYjoq+NoESWn03KuQ8HyZkPzDaQ5b2xBvB8bp7Eu/HIpN7R51P0iOpp2WVDIyByR++AStDuHM0w==;EndpointSuffix=core.windows.net"
+  },
+  {
+    "name": "WEBSITE_CONTENTSHARE",
+    "slotSetting": false,
+    "value": "rmhgeoapibetab242"
+  },
+  {
+    "name": "WEBSITE_HEALTHCHECK_MAXPINGFAILURES",
+    "slotSetting": false,
+    "value": "10"
+  },
+  {
+    "name": "BUILD_FLAGS",
+    "slotSetting": false,
+    "value": "UseExpressBuild"
+  },
+  {
+    "name": "XDG_CACHE_HOME",
+    "slotSetting": false,
+    "value": "/tmp/.cache"
+  }
+]

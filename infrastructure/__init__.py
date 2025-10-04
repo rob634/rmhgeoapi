@@ -12,7 +12,7 @@
 # SCOPE: Application-wide repository access
 # VALIDATION: Import validation handled per module
 # PATTERNS: Lazy loading to prevent premature initialization
-# ENTRY_POINTS: from repositories import RepositoryFactory
+# ENTRY_POINTS: from infrastructure import RepositoryFactory
 # INDEX: Lazy imports prevent module-level code execution
 # ============================================================================
 

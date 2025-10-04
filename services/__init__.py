@@ -46,6 +46,8 @@ Date: 1 OCT 2025
 """
 
 from .service_hello_world import handle_greeting, handle_reply
+from .container_summary import analyze_container_summary
+from .container_list import list_container_blobs, analyze_single_blob
 
 # ============================================================================
 # EXPLICIT HANDLER REGISTRY
@@ -59,6 +61,9 @@ from .service_hello_world import handle_greeting, handle_reply
 ALL_HANDLERS = {
     "hello_world_greeting": handle_greeting,
     "hello_world_reply": handle_reply,
+    "container_summary_task": analyze_container_summary,
+    "list_container_blobs": list_container_blobs,
+    "analyze_single_blob": analyze_single_blob,
     # Add new handlers here explicitly
     # "process_tile": handle_tile_processing,
     # "validate_geotiff": handle_geotiff_validation,

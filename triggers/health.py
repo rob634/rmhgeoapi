@@ -630,7 +630,7 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
         
         # DISABLED - Key Vault not configured for managed identity
         def check_vault():
-            from repositories.vault import VaultRepositoryFactory, VaultAccessError
+            from infrastructure.vault import VaultRepositoryFactory, VaultAccessError
             
             config = get_config()
             

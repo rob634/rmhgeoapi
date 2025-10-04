@@ -228,13 +228,28 @@ class CoreMachine:
             self.logger.warning(f"⚠️ COREMACHINE STEP 4 WARNING: Failed to update job status: {e}")
             # Continue - not critical
 
-        # Step 4: Generate task definitions (in-memory only, not persisted yet)
+        # Step 4: Fetch previous stage results (for fan-out pattern)
+        previous_results = None
+        if job_message.stage > 1:
+            try:
+                self.logger.debug(f"📊 COREMACHINE STEP 4.5: Fetching Stage {job_message.stage - 1} results for fan-out...")
+                previous_results = self._get_completed_stage_results(
+                    job_message.job_id,
+                    job_message.stage - 1
+                )
+                self.logger.info(f"✅ COREMACHINE STEP 4.5: Retrieved {len(previous_results)} completed task results from Stage {job_message.stage - 1}")
+            except Exception as e:
+                self.logger.warning(f"⚠️ COREMACHINE STEP 4.5: Could not fetch previous results: {e}")
+                # Continue without previous results - job may not need them
+
+        # Step 5: Generate task definitions (in-memory only, not persisted yet)
         try:
             self.logger.debug(f"🏗️ COREMACHINE STEP 5: Generating task definitions for stage {job_message.stage}...")
             tasks = job_class.create_tasks_for_stage(
                 job_message.stage,
                 job_record.parameters,
-                job_message.job_id
+                job_message.job_id,
+                previous_results=previous_results  # NEW: Pass previous results for fan-out
             )
             self.logger.info(f"✅ COREMACHINE STEP 5: Generated {len(tasks)} task definitions (in-memory)")
             self.logger.debug(f"   Task IDs: {[t['task_id'] for t in tasks]}")
@@ -912,3 +927,43 @@ class CoreMachine:
         except Exception as e:
             self.logger.error(f"❌ Failed to mark job as FAILED: {e}")
             # Best effort - don't raise
+
+    def _get_completed_stage_results(self, job_id: str, stage: int) -> list[dict]:
+        """
+        Get completed task results from a specific stage.
+
+        Used for fan-out pattern where Stage N+1 needs Stage N results.
+
+        Args:
+            job_id: Parent job ID
+            stage: Stage number to fetch results from
+
+        Returns:
+            List of task result_data dicts from completed tasks
+
+        Raises:
+            RuntimeError: If no completed tasks found for stage
+        """
+        from infrastructure import RepositoryFactory
+
+        repos = RepositoryFactory.create_repositories()
+        task_repo = repos['task_repo']
+
+        # Get all tasks for this job and stage
+        all_tasks = task_repo.get_tasks_for_job(job_id)
+        stage_tasks = [t for t in all_tasks if t.stage == stage and t.status == TaskStatus.COMPLETED]
+
+        if not stage_tasks:
+            raise RuntimeError(
+                f"No completed tasks found for job {job_id} stage {stage}. "
+                f"Cannot generate tasks for next stage."
+            )
+
+        # Extract result_data from each task
+        results = []
+        for task in stage_tasks:
+            if task.result_data:
+                results.append(task.result_data)
+
+        self.logger.debug(f"Retrieved {len(results)} completed task results from stage {stage}")
+        return results

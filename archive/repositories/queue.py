@@ -58,7 +58,7 @@ import os
 from datetime import datetime, timezone
 from pydantic import BaseModel
 
-from interfaces.repository import IQueueRepository
+from infrastructure.interface_repository import IQueueRepository
 from util_logger import LoggerFactory, ComponentType
 
 logger = LoggerFactory.create_logger(ComponentType.REPOSITORY, "QueueRepository")

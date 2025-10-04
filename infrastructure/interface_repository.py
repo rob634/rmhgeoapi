@@ -4,7 +4,7 @@
 # CATEGORY: AZURE RESOURCE REPOSITORIES
 # PURPOSE: Azure SDK wrapper providing data access abstraction
 # EPOCH: Shared by all epochs (infrastructure layer)# PURPOSE: Abstract interfaces defining behavior contracts for repository implementations
-# EXPORTS: IJobRepository, ITaskRepository, ICompletionDetector, ParamNames
+# EXPORTS: IJobRepository, ITaskRepository, IQueueRepository, IStageCompletionRepository, ParamNames
 # INTERFACES: ABC interfaces defining canonical repository contracts for all implementations
 # PYDANTIC_MODELS: JobRecord, TaskRecord (imported from schema_base for type hints)
 # DEPENDENCIES: abc, typing, enum, schema_base
@@ -32,6 +32,7 @@ files would be IMPOSSIBLE with this pattern.
 from abc import ABC, abstractmethod
 from typing import Dict, Any, List, Optional, Protocol, Final
 from enum import Enum
+from pydantic import BaseModel
 
 from core.models import (
     JobRecord, TaskRecord, JobStatus, TaskStatus,
@@ -147,6 +148,114 @@ class ITaskRepository(ABC):
         pass
 
 
+class IQueueRepository(ABC):
+    """
+    Queue repository interface with EXACT method signatures.
+    All queue operations must go through implementations of this interface.
+
+    Implementations should handle:
+    - Authentication and credential management
+    - Connection pooling and reuse
+    - Retry logic and error handling
+    - Message encoding/decoding
+    - Logging and monitoring
+    """
+
+    @abstractmethod
+    def send_message(self, queue_name: str, message: BaseModel) -> str:
+        """
+        Send a message to specified queue.
+
+        Args:
+            queue_name: Target queue name
+            message: Pydantic model to send
+
+        Returns:
+            Message ID
+
+        Raises:
+            RuntimeError: If send fails after retries
+        """
+        pass
+
+    @abstractmethod
+    def receive_messages(
+        self,
+        queue_name: str,
+        max_messages: int = 1,
+        visibility_timeout: int = 30
+    ) -> List[Dict[str, Any]]:
+        """
+        Receive messages from queue.
+
+        Args:
+            queue_name: Queue to receive from
+            max_messages: Maximum messages to receive (1-32)
+            visibility_timeout: How long to hide messages (seconds)
+
+        Returns:
+            List of message dictionaries with content and metadata
+        """
+        pass
+
+    @abstractmethod
+    def delete_message(self, queue_name: str, message_id: str, pop_receipt: str) -> bool:
+        """
+        Delete a message from queue.
+
+        Args:
+            queue_name: Queue containing the message
+            message_id: Message ID
+            pop_receipt: Pop receipt from receive operation
+
+        Returns:
+            True if deleted successfully
+        """
+        pass
+
+    @abstractmethod
+    def peek_messages(self, queue_name: str, max_messages: int = 1) -> List[Dict[str, Any]]:
+        """
+        Peek at messages without removing them.
+
+        Args:
+            queue_name: Queue to peek at
+            max_messages: Maximum messages to peek (1-32)
+
+        Returns:
+            List of message dictionaries
+        """
+        pass
+
+    @abstractmethod
+    def get_queue_length(self, queue_name: str) -> int:
+        """
+        Get approximate number of messages in queue.
+
+        Args:
+            queue_name: Queue to check
+
+        Returns:
+            Approximate message count
+        """
+        pass
+
+    @abstractmethod
+    def clear_queue(self, queue_name: str) -> bool:
+        """
+        Clear all messages from queue.
+
+        WARNING: This deletes ALL messages. Use with extreme caution.
+
+        Args:
+            queue_name: Queue to clear
+
+        Returns:
+            True if cleared successfully
+        """
+        pass
+
+
 class IStageCompletionRepository(ABC):
     """
     Stage completion repository interface with EXACT method signatures.
@@ -154,7 +263,7 @@ class IStageCompletionRepository(ABC):
     THIS IS THE CANONICAL DEFINITION - These signatures match the SQL functions.
     Provides atomic data operations for stage transitions.
     """
-    
+
     @abstractmethod
     def complete_task_and_check_stage(
         self,
@@ -166,7 +275,7 @@ class IStageCompletionRepository(ABC):
     ) -> TaskCompletionResult:
         """
         Atomically complete task and check stage completion.
-        
+
         SQL Function Signature:
         complete_task_and_check_stage(
             p_task_id VARCHAR(100),
@@ -175,7 +284,7 @@ class IStageCompletionRepository(ABC):
         )
         """
         pass
-    
+
     @abstractmethod
     def advance_job_stage(
         self,
@@ -185,9 +294,9 @@ class IStageCompletionRepository(ABC):
     ) -> StageAdvancementResult:
         """
         Advance job to next stage.
-        
+
         CRITICAL: Only 3 parameters! No 'next_stage' parameter!
-        
+
         SQL Function Signature:
         advance_job_stage(
             p_job_id VARCHAR(64),
@@ -196,7 +305,7 @@ class IStageCompletionRepository(ABC):
         )
         """
         pass
-    
+
     @abstractmethod
     def check_job_completion(
         self,
@@ -204,7 +313,7 @@ class IStageCompletionRepository(ABC):
     ) -> JobCompletionResult:
         """
         Check if job is complete.
-        
+
         SQL Function Signature:
         check_job_completion(p_job_id VARCHAR(64))
         """

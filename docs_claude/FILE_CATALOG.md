@@ -1,10 +1,10 @@
 # File Catalog
 
-**Date**: 30 SEP 2025 (Updated after schema migration and doc cleanup)
-**Total Python Files**: 50+ (excluding test files)
+**Date**: 4 OCT 2025 (Updated with container operations & task lineage)
+**Total Python Files**: 55+ (excluding test files)
 **Purpose**: Quick file lookup with one-line descriptions
 **Author**: Robert and Geospatial Claude Legion
-**Status**: ✅ Updated - Core schemas migrated, root docs organized
+**Status**: ✅ Updated - Container operations, deterministic task lineage added
 
 ## 🎯 Core Entry Points (2 files)
 
@@ -13,12 +13,13 @@
 | `function_app.py` | Azure Functions entry point - HTTP, Queue, Service Bus, Timer triggers |
 | `config.py` | Strongly typed configuration with Pydantic v2 |
 
-## 🏗️ Core Architecture (NEW - core/ folder, 15 files)
+## 🏗️ Core Architecture (core/ folder, 17 files) ⭐ UPDATED 4 OCT
 
-### Core Controllers & Managers (3 files)
+### Core Controllers & Managers (4 files)
 | File | Purpose |
 |------|---------|
-| `core/core_controller.py` | Minimal abstract base with only inherited methods (400 lines vs BaseController's 2,290) |
+| `core/machine.py` | CoreMachine orchestration - job/task processing with fan-out support |
+| `core/task_id.py` | ⭐ NEW - Deterministic task ID generation for lineage tracking |
 | `core/state_manager.py` | Database operations with advisory locks - composition over inheritance (540 lines) |
 | `core/orchestration_manager.py` | Simplified dynamic task creation for Service Bus batch optimization (400 lines) |
 
@@ -91,13 +92,23 @@
 | `repositories/service_bus.py` | Service Bus implementation with batch support |
 | `repositories/vault.py` | Azure Key Vault integration (currently disabled) |
 
-## ⚙️ Services (3 files in services/ folder)
+## ⚙️ Services (5 files in services/ folder) ⭐ UPDATED 4 OCT
 
 | File | Purpose |
 |------|---------|
 | `services/service_hello_world.py` | Hello World task processing logic |
 | `services/service_blob.py` | Blob storage service handlers |
 | `services/service_stac_setup.py` | STAC setup service |
+| `services/container_summary.py` | ⭐ NEW - Container aggregate statistics handler |
+| `services/container_list.py` | ⭐ NEW - Container blob listing and analysis handlers |
+
+## 📋 Job Workflows (3 files in jobs/ folder) ⭐ NEW 4 OCT
+
+| File | Purpose |
+|------|---------|
+| `jobs/hello_world.py` | Hello World two-stage workflow definition |
+| `jobs/container_summary.py` | ⭐ NEW - Container summary single-stage job |
+| `jobs/container_list.py` | ⭐ NEW - Container list two-stage fan-out job |
 
 ## 📊 Schemas (10 files - Root Level) ⚠️ LEGACY
 

@@ -1,18 +1,40 @@
 # Active Tasks
 
-**Last Updated**: 2 OCT 2025 - END-TO-END JOB COMPLETION ACHIEVED! 🏆
+**Last Updated**: 4 OCT 2025 - CONTAINER OPERATIONS & DETERMINISTIC TASK LINEAGE! 🎯
 **Author**: Robert and Geospatial Claude Legion
 
-## 🏆 BREAKTHROUGH: END-TO-END JOB COMPLETION (2 OCT 2025)
+## 🎯 LATEST: DETERMINISTIC TASK LINEAGE SYSTEM (4 OCT 2025)
 
-### ✅ SYSTEM FULLY OPERATIONAL
+### ✅ CONTAINER OPERATIONS PRODUCTION-READY
 
-**HELLO_WORLD JOB COMPLETED SUCCESSFULLY!**
-- Status: `JobStatus.COMPLETED`
-- All 6 tasks executed (Stage 1: 3/3, Stage 2: 3/3)
+**TWO NEW JOB TYPES OPERATIONAL:**
+
+1. **Container Summary** (`summarize_container`)
+   - Single-stage aggregate statistics
+   - 1,978 files analyzed in 1.34 seconds
+   - File types, size distribution, date ranges
+
+2. **Container List** (`list_container_contents`)
+   - Two-stage fan-out pattern
+   - 213 .tif files found and analyzed
+   - Metadata stored in tasks.result_data
+
+**DETERMINISTIC TASK LINEAGE:**
+- Task IDs: `SHA256(job_id|stage|logical_unit)[:16]`
+- Tasks can calculate predecessor IDs without database queries
+- Foundation for complex multi-stage workflows
+- Enables raster tiling, batch processing, DAG patterns
+
+## 🏆 SYSTEM FULLY OPERATIONAL (Updated 4 OCT 2025)
+
+**CORE CAPABILITIES:**
+- Multi-stage job execution with fan-out patterns
+- Deterministic task lineage across stages
+- Automatic stage advancement
+- Previous stage results passed to next stage
 - "Last task turns out lights" pattern working
-- Stage advancement operational
-- Job completion aggregation working
+- Job completion with result aggregation
+- Pydantic validation at all boundaries
 
 ### Current System Capabilities:
 
@@ -29,12 +51,14 @@
 #### Active Endpoints:
 ```bash
 # Job Management
-POST /api/jobs/submit/hello_world - Submit hello world job
-GET  /api/jobs/status/{job_id}     - Get job status
-GET  /api/db/jobs                  - Query all jobs
+POST /api/jobs/submit/hello_world            - Submit hello world job
+POST /api/jobs/submit/summarize_container    - Container statistics (NEW)
+POST /api/jobs/submit/list_container_contents - Container inventory (NEW)
+GET  /api/jobs/status/{job_id}               - Get job status
+GET  /api/db/jobs                            - Query all jobs
 
 # Task Management
-GET /api/db/tasks/{job_id}         - Get tasks for job
+GET /api/db/tasks/{job_id}         - Get tasks for job (with JSONB results)
 
 # System Health
 GET /api/health                    - System health check
@@ -47,20 +71,23 @@ GET  /api/db/stats                       - Database statistics
 ### Next Development Priorities:
 
 #### Immediate (Ready to Implement):
-1. **Additional Job Types**
-   - Geospatial tile processing
-   - Container analysis
-   - STAC catalog updates
+1. **Complex Raster Workflows**
+   - Multi-stage tiling with deterministic lineage
+   - Parallel reproject/validate operations
+   - COG conversion pipelines
+   - STAC record updates
 
-2. **Enhanced Monitoring**
-   - Task execution time tracking
-   - Job duration metrics
-   - Failure rate monitoring
+2. **Advanced Workflow Patterns**
+   - Diamond patterns (fan-out then converge)
+   - Dynamic stage creation based on previous results
+   - Task-to-task direct communication
+   - Cross-stage data dependencies
 
-3. **Error Handling Improvements**
-   - Retry logic for transient failures
-   - Dead letter queue processing
-   - Better error reporting
+3. **Additional Container Operations** ✅ COMPLETED
+   - ✅ Summarize container (aggregate statistics)
+   - ✅ List container contents (per-blob metadata)
+   - File type analysis and filtering
+   - Size distribution analysis
 
 #### Future Enhancements:
 1. **Advanced Workflows**

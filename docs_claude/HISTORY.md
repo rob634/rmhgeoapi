@@ -1,9 +1,265 @@
 # Project History
 
-**Last Updated**: 3 OCT 2025 - RETRY LOGIC PRODUCTION-READY! 🚀
+**Last Updated**: 4 OCT 2025 - CONTAINER OPERATIONS & DETERMINISTIC TASK LINEAGE! 🎯
 **Note**: For project history prior to September 11, 2025, see **OLDER_HISTORY.md**
 
 This document tracks completed architectural changes and improvements to the Azure Geospatial ETL Pipeline from September 11, 2025 onwards.
+
+---
+
+## 4 OCT 2025: Container Operations & Deterministic Task Lineage 🎯
+
+**Status**: ✅ PRODUCTION-READY - Container analysis with deterministic task lineage operational
+**Impact**: Foundation for complex multi-stage workflows (raster tiling, batch processing)
+**Timeline**: Full implementation of container operations + task lineage system
+**Author**: Robert and Geospatial Claude Legion
+
+### Major Achievement: DETERMINISTIC TASK LINEAGE SYSTEM
+
+**Task ID Formula**: `SHA256(job_id|stage|logical_unit)[:16]`
+
+**Key Innovation**: Tasks can calculate predecessor IDs without database queries
+- Task at Stage 2, blob "foo.tif" knows its Stage 1 predecessor innately
+- Enables complex DAG workflows (raster tiling with multi-stage dependencies)
+- No database lookups needed for task lineage tracking
+
+**Logical Unit Examples**:
+- Blob processing: blob file name ("foo.tif")
+- Raster tiling: tile coordinates ("tile_x5_y10")
+- Batch processing: file path or identifier
+- Any constant identifier across stages
+
+### Container Operations Implemented:
+
+#### 1. Summarize Container (`summarize_container`)
+**Type**: Single-stage job producing aggregate statistics
+**Performance**: 1,978 files analyzed in 1.34 seconds
+**Output**: Total counts, file types, size distribution, date ranges
+
+**Example Result**:
+```json
+{
+  "total_files": 1978,
+  "total_size_mb": 87453.21,
+  "file_types": {
+    ".tif": 213,
+    ".json": 456,
+    ".xml": 1309
+  },
+  "size_distribution": {
+    "under_1mb": 1543,
+    "1mb_to_100mb": 398,
+    "over_100mb": 37
+  }
+}
+```
+
+#### 2. List Container Contents (`list_container_contents`)
+**Type**: Two-stage fan-out job with per-blob analysis
+**Pattern**: 1 Stage 1 task → N Stage 2 tasks (parallel)
+**Storage**: Blob metadata in `tasks.result_data` (no new tables)
+
+**Full Scan Results**:
+- Container: `rmhazuregeobronze`
+- Total files scanned: 1,978 blobs
+- .tif files found: 213 files
+- Stage 1 duration: 1.48 seconds
+- Stage 2 tasks: 213 parallel tasks (one per .tif)
+- All tasks completed successfully
+
+**Stage 2 Metadata Per Blob**:
+```json
+{
+  "blob_name": "foo.tif",
+  "blob_path": "container/foo.tif",
+  "size_mb": 83.37,
+  "file_extension": ".tif",
+  "content_type": "image/tiff",
+  "last_modified": "2024-11-15T12:34:56Z",
+  "etag": "0x8DC...",
+  "metadata": {}
+}
+```
+
+### Fan-Out Pattern Architecture:
+
+**Universal Pattern in CoreMachine**:
+1. Stage N completes → CoreMachine detects completion
+2. CoreMachine calls `_get_completed_stage_results(job_id, stage=N)`
+3. CoreMachine calls `job_class.create_tasks_for_stage(stage=N+1, previous_results=[...])`
+4. Job class transforms previous results into new tasks
+5. CoreMachine queues all tasks with deterministic IDs
+
+**Benefits**:
+- Reusable across ALL job types
+- Supports N:M stage relationships
+- No hardcoded fan-out logic
+- Works for any workflow pattern
+
+### Files Created:
+
+**Core Infrastructure**:
+1. `core/task_id.py` (NEW)
+   - `generate_deterministic_task_id()` - SHA256-based ID generation
+   - `get_predecessor_task_id()` - Calculate previous stage task ID
+   - Foundation for task lineage tracking
+
+**Job Workflows**:
+2. `jobs/container_summary.py` - Single-stage aggregate statistics
+3. `jobs/container_list.py` - Two-stage fan-out pattern
+
+**Service Handlers**:
+4. `services/container_summary.py` - Container statistics calculation
+5. `services/container_list.py` - Two handlers:
+   - `list_container_blobs()` - Stage 1: List all blobs
+   - `analyze_single_blob()` - Stage 2: Per-blob metadata
+
+**Core Machine Updates**:
+6. `core/machine.py` - Added:
+   - `_get_completed_stage_results()` method
+   - Previous results fetching before task creation
+   - `previous_results` parameter passed to all job workflows
+
+### Technical Implementation:
+
+#### Deterministic Task ID Generation:
+```python
+def generate_deterministic_task_id(job_id: str, stage: int, logical_unit: str) -> str:
+    """
+    Generate deterministic task ID from job context.
+
+    Args:
+        job_id: Parent job ID
+        stage: Current stage number (1, 2, 3, ...)
+        logical_unit: Identifier constant across stages
+                     (blob_name, tile_x_y, file_path, etc.)
+
+    Returns:
+        16-character hex task ID (SHA256 hash truncated)
+    """
+    composite = f"{job_id}|s{stage}|{logical_unit}"
+    full_hash = hashlib.sha256(composite.encode()).hexdigest()
+    return full_hash[:16]
+```
+
+#### Fan-Out Implementation Example:
+```python
+@staticmethod
+def create_tasks_for_stage(stage: int, job_params: dict, job_id: str,
+                          previous_results: list = None) -> list[dict]:
+    """Stage 1: Single task. Stage 2: Fan-out (one task per blob)."""
+
+    if stage == 1:
+        # Single task to list blobs
+        task_id = generate_deterministic_task_id(job_id, 1, "list")
+        return [{"task_id": task_id, "task_type": "list_container_blobs", ...}]
+
+    elif stage == 2:
+        # FAN-OUT: Extract blob names from Stage 1 results
+        blob_names = previous_results[0]['result']['blob_names']
+
+        # Create one task per blob with deterministic ID
+        tasks = []
+        for blob_name in blob_names:
+            task_id = generate_deterministic_task_id(job_id, 2, blob_name)
+            tasks.append({"task_id": task_id, "task_type": "analyze_single_blob", ...})
+
+        return tasks
+```
+
+#### CoreMachine Previous Results Integration:
+```python
+def process_job_message(self, job_message: JobQueueMessage):
+    # ... existing code ...
+
+    # NEW: Fetch previous stage results for fan-out
+    previous_results = None
+    if job_message.stage > 1:
+        previous_results = self._get_completed_stage_results(
+            job_message.job_id,
+            job_message.stage - 1
+        )
+
+    # Generate tasks with previous results
+    tasks = job_class.create_tasks_for_stage(
+        job_message.stage,
+        job_record.parameters,
+        job_message.job_id,
+        previous_results=previous_results  # NEW parameter
+    )
+```
+
+### Critical Bug Fixed:
+
+**Handler Return Format Standardization**:
+- All service handlers MUST return `{"success": True/False, ...}` format
+- CoreMachine uses `success` field to determine task status
+- Fixed `analyze_container_summary()` to wrap results properly
+
+**Before** (WRONG):
+```python
+def handler(params):
+    return {"statistics": {...}}  # Missing success field
+```
+
+**After** (CORRECT):
+```python
+def handler(params):
+    return {
+        "success": True,
+        "result": {"statistics": {...}}
+    }
+```
+
+### Use Cases Enabled:
+
+**Complex Raster Workflows** (Future):
+1. Stage 1: Extract metadata, determine if tiling needed
+2. Stage 2: Create tiling scheme (if needed)
+3. Stage 3: Fan-out - Parallel reproject/validate chunks (N tasks)
+4. Stage 4: Fan-out - Parallel convert to COGs (N tasks)
+5. Stage 5: Update STAC record with tiled COGs
+
+**Batch Processing** (Future):
+- Process lists of files/records
+- Each stage can fan-out to N parallel tasks
+- Task lineage preserved across stages
+- Aggregate results at completion
+
+### Database Queries:
+
+**Retrieve Container Inventory**:
+```bash
+# Get all blob metadata for a job
+curl "https://rmhgeoapibeta.../api/db/tasks/{JOB_ID}" | \
+  jq '.tasks[] | select(.stage==2) | .result_data.result'
+
+# Filter by file size
+curl "https://rmhgeoapibeta.../api/db/tasks/{JOB_ID}" | \
+  jq '.tasks[] | select(.stage==2 and .result_data.result.size_mb > 100)'
+
+# Get file type distribution
+curl "https://rmhgeoapibeta.../api/db/tasks/{JOB_ID}" | \
+  jq '[.tasks[] | select(.stage==2) | .result_data.result.file_extension] |
+      group_by(.) | map({ext: .[0], count: length})'
+```
+
+### Production Readiness Checklist:
+- ✅ Deterministic task IDs working (verified with test cases)
+- ✅ Fan-out pattern universal (works for all job types)
+- ✅ Previous results fetching operational
+- ✅ Container summary (1,978 files in 1.34s)
+- ✅ Container list with filters (213 .tif files found)
+- ✅ Full .tif scan completed (no file limit)
+- ✅ All metadata stored in tasks.result_data
+- ✅ PostgreSQL JSONB queries working
+- ✅ Handler return format standardized
+
+### Next Steps:
+- Implement complex raster workflows using task lineage
+- Diamond pattern workflows (converge after fan-out)
+- Dynamic stage creation based on previous results
+- Task-to-task direct communication patterns
 
 ---
 

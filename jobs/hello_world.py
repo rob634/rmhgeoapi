@@ -51,7 +51,7 @@ class HelloWorldJob:
     }
 
     @staticmethod
-    def create_tasks_for_stage(stage: int, job_params: dict, job_id: str) -> List[dict]:
+    def create_tasks_for_stage(stage: int, job_params: dict, job_id: str, previous_results: list = None) -> List[dict]:
         """
         Generate task parameters for a stage.
 

@@ -35,6 +35,8 @@ Date: 1 OCT 2025
 """
 
 from .hello_world import HelloWorldJob
+from .container_summary import ContainerSummaryWorkflow
+from .container_list import ListContainerContentsWorkflow
 
 # ============================================================================
 # EXPLICIT JOB REGISTRY
@@ -47,8 +49,9 @@ from .hello_world import HelloWorldJob
 
 ALL_JOBS = {
     "hello_world": HelloWorldJob,
+    "summarize_container": ContainerSummaryWorkflow,
+    "list_container_contents": ListContainerContentsWorkflow,
     # Add new jobs here explicitly
-    # "container_list": ContainerListJob,
     # "process_raster": ProcessRasterJob,
 }
 

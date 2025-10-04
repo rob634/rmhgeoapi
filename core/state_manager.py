@@ -93,12 +93,18 @@ class StateManager:
     """
 
     def __init__(self):
-        """Initialize state manager with logging."""
+        """Initialize state manager with logging and repository access."""
         self.logger = LoggerFactory.create_logger(
             ComponentType.CONTROLLER,
             "StateManager"
         )
-        self.logger.info("StateManager initialized")
+
+        # Initialize repository for retry count operations
+        from infrastructure import RepositoryFactory
+        repos = RepositoryFactory.create_repositories()
+        self.task_repo = repos['task_repo']
+
+        self.logger.info("StateManager initialized with task repository")
 
     # ========================================================================
     # JOB RECORD OPERATIONS

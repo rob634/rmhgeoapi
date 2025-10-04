@@ -454,7 +454,7 @@ class TaskRepository(PostgreSQLTaskRepository):
             # Call PostgreSQL function for atomic increment + status reset
             query = sql.SQL("""
                 SELECT * FROM {schema}.increment_task_retry_count(%s)
-            """).format(schema=sql.Identifier(self.schema))
+            """).format(schema=sql.Identifier(self.schema_name))
 
             result = self._execute_query(query, (task_id,), fetch='one')
 

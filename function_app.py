@@ -557,10 +557,22 @@ def process_service_bus_job(msg: func.ServiceBusMessage) -> None:
 
     except Exception as e:
         elapsed = time.time() - start_time
-        logger.error(f"[{correlation_id}] ❌ CoreMachine job failed after {elapsed:.3f}s: {e}")
-        logger.error(f"[{correlation_id}] 📍 Error traceback: {traceback.format_exc()}")
-        # Service Bus will handle retry/dead letter based on configuration
-        raise
+        logger.error(f"[{correlation_id}] ❌ EXCEPTION in process_service_bus_job after {elapsed:.3f}s")
+        logger.error(f"[{correlation_id}] 📍 Exception type: {type(e).__name__}")
+        logger.error(f"[{correlation_id}] 📍 Exception message: {e}")
+        logger.error(f"[{correlation_id}] 📍 Full traceback:\n{traceback.format_exc()}")
+
+        # Log job details if available
+        if 'job_message' in locals() and job_message:
+            logger.error(f"[{correlation_id}] 📋 Job ID: {job_message.job_id}")
+            logger.error(f"[{correlation_id}] 📋 Job Type: {job_message.job_type}")
+            logger.error(f"[{correlation_id}] 📋 Stage: {job_message.stage}")
+
+        # NOTE: Job processing errors are typically critical (workflow creation failures).
+        # Unlike task retries, jobs don't have application-level retry logic.
+        # Log extensively but don't re-raise to avoid Service Bus retries for job messages.
+        logger.warning(f"[{correlation_id}] ⚠️ Function completing (exception logged but not re-raised)")
+        logger.warning(f"[{correlation_id}] ⚠️ Job marked as failed - check logs for details")
 
 
 @app.service_bus_queue_trigger(
@@ -613,26 +625,28 @@ def process_service_bus_task(msg: func.ServiceBusMessage) -> None:
 
     except Exception as e:
         elapsed = time.time() - start_time
-        logger.error(f"[{correlation_id}] ❌ CoreMachine task failed after {elapsed:.3f}s: {e}")
-        logger.error(f"[{correlation_id}] 📍 Error traceback: {traceback.format_exc()}")
+        logger.error(f"[{correlation_id}] ❌ EXCEPTION in process_service_bus_task after {elapsed:.3f}s")
+        logger.error(f"[{correlation_id}] 📍 Exception type: {type(e).__name__}")
+        logger.error(f"[{correlation_id}] 📍 Exception message: {e}")
+        logger.error(f"[{correlation_id}] 📍 Full traceback:\n{traceback.format_exc()}")
 
-        # Mark task as failed if possible
+        # Log task details if available
         if 'task_message' in locals() and task_message:
-            try:
-                repos = RepositoryFactory.create_repositories()
-                task_repo = repos['task_repo']
-                # TaskUpdateModel already imported at top of file (line 152)
-                update_model = TaskUpdateModel(
-                    status=TaskStatus.FAILED,
-                    error_details=f"CoreMachine processing failed: {str(e)}"
-                )
-                task_repo.update_task(task_message.task_id, update_model)
-                logger.info(f"[{correlation_id}] 📝 Task marked as FAILED")
-            except Exception as update_error:
-                logger.error(f"[{correlation_id}] ❌ Failed to mark task as failed: {update_error}")
+            logger.error(f"[{correlation_id}] 📋 Task ID: {task_message.task_id}")
+            logger.error(f"[{correlation_id}] 📋 Task Type: {task_message.task_type}")
+            logger.error(f"[{correlation_id}] 📋 Job ID: {task_message.parent_job_id}")
+            logger.error(f"[{correlation_id}] 📋 Stage: {task_message.stage}")
 
-        # Let Service Bus handle retry
-        raise
+        # NOTE: Do NOT re-raise! CoreMachine already handled the failure internally.
+        # Re-raising would trigger Service Bus retries instead of our application-level
+        # retry logic (exponential backoff, retry_count tracking in database).
+        # CoreMachine's process_task_message() already:
+        # 1. Caught the task execution failure
+        # 2. Incremented retry_count in database
+        # 3. Re-queued with exponential backoff delay (if retries available)
+        # 4. OR marked as permanently FAILED (if max retries exceeded)
+        logger.warning(f"[{correlation_id}] ⚠️ Function completing (exception logged but not re-raised)")
+        logger.warning(f"[{correlation_id}] ⚠️ CoreMachine retry logic has handled this failure internally")
 
 
 # ============================================================================

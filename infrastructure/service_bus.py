@@ -405,6 +405,9 @@ class ServiceBusRepository(IQueueRepository):
             scheduled_enqueue_time_utc=scheduled_time  # KEY: Delay delivery
         )
 
+        # Initialize application_properties (it's None by default)
+        sb_message.application_properties = {}
+
         # Add metadata properties
         if hasattr(message, 'task_id'):
             sb_message.application_properties['task_id'] = message.task_id

@@ -463,15 +463,38 @@ class CoreMachine:
         else:
             # Task failed - check if retry needed
             self.logger.warning(f"⚠️ Task failed: {result.error_details}")
+            self.logger.warning(f"🔄 RETRY LOGIC STARTING for task {task_message.task_id[:16]}")
+
+            # DEBUGGING: Update error_details to confirm we reached retry logic
+            try:
+                self.state_manager.update_task_status_direct(
+                    task_message.task_id,
+                    TaskStatus.FAILED,
+                    error_details=f"[RETRY LOGIC REACHED] {result.error_details}"
+                )
+                self.logger.info(f"✅ Updated error_details to confirm retry logic execution")
+            except Exception as debug_e:
+                self.logger.error(f"❌ Failed to update error_details for debugging: {debug_e}")
 
             # Get config for retry settings
             from config import get_config
+            from infrastructure import RepositoryFactory
             config = get_config()
+            self.logger.debug(f"📋 Retry config: max_retries={config.task_max_retries}, base_delay={config.task_retry_base_delay}s")
 
             # Get current task to check retry count
-            task_record = self.state_manager.task_repo.get_task(task_message.task_id)
+            repos = RepositoryFactory.create_repositories()
+            task_repo = repos['task_repo']
+            task_record = task_repo.get_task(task_message.task_id)
+
+            if task_record is None:
+                self.logger.error(f"❌ CRITICAL: task_record is NONE for task_id={task_message.task_id}")
+                self.logger.error(f"❌ Cannot retry - task not found in database!")
+            else:
+                self.logger.info(f"📋 Task found: retry_count={task_record.retry_count}, max={config.task_max_retries}")
 
             if task_record and task_record.retry_count < config.task_max_retries:
+                self.logger.warning(f"🔄 RETRY CONDITION MET: retry_count ({task_record.retry_count}) < max_retries ({config.task_max_retries})")
                 # Retry needed - calculate exponential backoff delay
                 retry_attempt = task_record.retry_count + 1
                 delay_seconds = min(
@@ -480,13 +503,15 @@ class CoreMachine:
                 )
 
                 self.logger.warning(
-                    f"🔄 Task {task_message.task_id[:16]} failed (attempt {retry_attempt}/"
-                    f"{config.task_max_retries}) - retrying in {delay_seconds}s"
+                    f"🔄 RETRY SCHEDULED - Task {task_message.task_id[:16]} failed (attempt {retry_attempt}/"
+                    f"{config.task_max_retries}) - will retry in {delay_seconds}s"
                 )
 
                 try:
                     # Increment retry count and reset to QUEUED
+                    self.logger.debug(f"📝 Incrementing retry_count from {task_record.retry_count} to {retry_attempt}")
                     self.state_manager.increment_task_retry_count(task_message.task_id)
+                    self.logger.debug(f"✅ retry_count incremented successfully")
 
                     # Re-queue with delay using Service Bus scheduled delivery
                     from infrastructure.service_bus import ServiceBusRepository

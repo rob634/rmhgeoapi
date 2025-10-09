@@ -51,9 +51,8 @@ from .container_list import list_container_blobs, analyze_single_blob
 from .stac_catalog import list_raster_files, extract_stac_metadata
 from .stac_vector_catalog import extract_vector_stac_metadata
 from .test_minimal import test_minimal_handler
-# TEMPORARILY COMMENTED OUT - Excluding raster ETL to isolate deployment issue
-# from .raster_validation import validate_raster
-# from .raster_cog import create_cog
+from .raster_validation import validate_raster
+from .raster_cog import create_cog
 
 # ============================================================================
 # EXPLICIT HANDLER REGISTRY
@@ -74,9 +73,8 @@ ALL_HANDLERS = {
     "extract_stac_metadata": extract_stac_metadata,
     "extract_vector_stac_metadata": extract_vector_stac_metadata,
     "test_minimal": test_minimal_handler,
-    # TEMPORARILY COMMENTED OUT - Handlers require rasterio/rio-cogeo dependencies
-    # "validate_raster": validate_raster,
-    # "create_cog": create_cog,
+    "validate_raster": validate_raster,
+    "create_cog": create_cog,
     # Add new handlers here explicitly
     # "process_tile": handle_tile_processing,
 }

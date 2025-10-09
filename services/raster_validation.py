@@ -57,6 +57,8 @@ def validate_raster(params: dict) -> dict:
     Args:
         params: Task parameters dict with:
             - blob_url: Azure blob URL with SAS token
+            - blob_name: Blob path (for logging)
+            - container_name: Container name (for logging)
             - input_crs: (Optional) User-provided CRS override
             - raster_type: (Optional) Expected raster type (auto, rgb, rgba, dem, etc.)
             - strict_mode: (Optional) Fail on warnings
@@ -70,27 +72,63 @@ def validate_raster(params: dict) -> dict:
             "message": "Error description" (if failed)
         }
     """
+    import traceback
 
-    print(f"🔍 VALIDATION: Starting raster validation", file=sys.stderr, flush=True)
+    # CRITICAL: Log entry BEFORE any imports
+    print(f"🚀 HANDLER ENTRY: validate_raster called with params keys: {list(params.keys())}", file=sys.stderr, flush=True)
+    print(f"🚀 HANDLER ENTRY: blob_name={params.get('blob_name', 'MISSING')}", file=sys.stderr, flush=True)
 
-    # Extract parameters
-    blob_url = params.get('blob_url')
-    # Support both input_crs and source_crs parameter names
-    input_crs = params.get('input_crs') or params.get('source_crs')
-    raster_type_param = params.get('raster_type', 'auto')
-    strict_mode = params.get('strict_mode', False)
-    skip_validation = params.get('_skip_validation', False)
-
-    if not blob_url:
+    # STEP 0: Initialize logger
+    logger = None
+    try:
+        print(f"📦 STEP 0: Importing logger...", file=sys.stderr, flush=True)
+        from util_logger import LoggerFactory, ComponentType
+        logger = LoggerFactory.create_logger(ComponentType.SERVICE, "validate_raster")
+        logger.info("✅ STEP 0: Logger initialized successfully")
+        print(f"✅ STEP 0: Logger initialized", file=sys.stderr, flush=True)
+    except Exception as e:
+        print(f"❌ STEP 0 FAILED: Logger initialization error: {e}", file=sys.stderr, flush=True)
         return {
             "success": False,
-            "error": "MISSING_PARAMETER",
-            "message": "blob_url parameter is required"
+            "error": "LOGGER_INIT_FAILED",
+            "message": f"Failed to initialize logger: {e}",
+            "blob_name": params.get("blob_name")
+        }
+
+    # STEP 1: Extract and validate parameters
+    try:
+        logger.info("🔄 STEP 1: Extracting parameters...")
+        blob_url = params.get('blob_url')
+        blob_name = params.get('blob_name', 'unknown')
+        container_name = params.get('container_name', params.get('container', 'unknown'))
+        input_crs = params.get('input_crs') or params.get('source_crs')
+        raster_type_param = params.get('raster_type', 'auto')
+        strict_mode = params.get('strict_mode', False)
+        skip_validation = params.get('_skip_validation', False)
+
+        logger.info(f"✅ STEP 1: Parameters extracted - blob={blob_name}, container={container_name}")
+
+        if not blob_url:
+            logger.error("❌ STEP 1 FAILED: blob_url parameter is required")
+            return {
+                "success": False,
+                "error": "MISSING_PARAMETER",
+                "message": "blob_url parameter is required",
+                "blob_name": blob_name,
+                "container_name": container_name
+            }
+    except Exception as e:
+        logger.error(f"❌ STEP 1 FAILED: Parameter extraction error: {e}\n{traceback.format_exc()}")
+        return {
+            "success": False,
+            "error": "PARAMETER_ERROR",
+            "message": f"Failed to extract parameters: {e}",
+            "traceback": traceback.format_exc()
         }
 
     # TESTING ONLY: Skip validation if requested
     if skip_validation:
-        print(f"⚠️ VALIDATION: Skipping validation (_skip_validation=True)", file=sys.stderr, flush=True)
+        logger.warning(f"⏭️  VALIDATION SKIPPED: _skip_validation=True")
         return {
             "success": True,
             "result": {
@@ -100,124 +138,238 @@ def validate_raster(params: dict) -> dict:
             }
         }
 
-    # Lazy import rasterio and numpy
+    # STEP 2: Lazy import rasterio and numpy
     try:
+        logger.info("🔄 STEP 2: Lazy loading rasterio dependencies...")
         np, rasterio, ColorInterp, Window = _lazy_imports()
+        logger.info("✅ STEP 2: Dependencies loaded successfully")
     except ImportError as e:
+        logger.error(f"❌ STEP 2 FAILED: Import error: {e}\n{traceback.format_exc()}")
         return {
             "success": False,
             "error": "IMPORT_ERROR",
-            "message": f"Failed to import dependencies: {e}"
+            "message": f"Failed to import dependencies: {e}",
+            "blob_name": blob_name,
+            "container_name": container_name,
+            "traceback": traceback.format_exc()
+        }
+    except Exception as e:
+        logger.error(f"❌ STEP 2 FAILED: Unexpected error during import: {e}\n{traceback.format_exc()}")
+        return {
+            "success": False,
+            "error": "IMPORT_ERROR",
+            "error_type": type(e).__name__,
+            "message": f"Unexpected error loading dependencies: {e}",
+            "blob_name": blob_name,
+            "container_name": container_name,
+            "traceback": traceback.format_exc()
         }
 
-    # Open raster file
+    # STEP 3: Open raster file
     try:
-        print(f"📂 VALIDATION: Opening raster: {blob_url[:100]}...", file=sys.stderr, flush=True)
+        logger.info(f"🔄 STEP 3: Opening raster file via SAS URL...")
+        logger.debug(f"   Blob URL: {blob_url[:100]}...")
         src = rasterio.open(blob_url)
+        logger.info(f"✅ STEP 3: File opened successfully - {src.count} bands, {src.shape}")
     except Exception as e:
+        logger.error(f"❌ STEP 3 FAILED: Cannot open raster file: {e}\n{traceback.format_exc()}")
         return {
             "success": False,
             "error": "FILE_UNREADABLE",
-            "message": f"Cannot open raster file: {e}"
+            "message": f"Cannot open raster file: {e}",
+            "blob_name": blob_name,
+            "container_name": container_name,
+            "blob_url_prefix": blob_url[:100] if blob_url else None,
+            "error_type": type(e).__name__,
+            "traceback": traceback.format_exc()
         }
 
-    with src:
-        # Basic file info
-        band_count = src.count
-        dtype = src.dtypes[0]
-        shape = src.shape
-        bounds = src.bounds
-        nodata = src.nodata
+    # STEP 4: Extract basic file information
+    try:
+        logger.info("🔄 STEP 4: Extracting basic file information...")
+        with src:
+            band_count = src.count
+            dtype = src.dtypes[0]
+            shape = src.shape
+            bounds = src.bounds
+            nodata = src.nodata
+            logger.info(f"✅ STEP 4: File info extracted - {band_count} bands, {dtype}, shape {shape}")
+            logger.debug(f"   Bounds: {bounds}, nodata: {nodata}")
 
-        print(f"📊 VALIDATION: File info - {band_count} bands, {dtype}, shape {shape}", file=sys.stderr, flush=True)
+            # Warnings list
+            warnings = []
 
-        # Warnings list
-        warnings = []
+            # ================================================================
+            # STEP 5: CRS VALIDATION
+            # ================================================================
+            try:
+                logger.info("🔄 STEP 5: Validating CRS...")
+                crs_result = _validate_crs(src, input_crs, bounds, skip_validation)
+                if not crs_result["success"]:
+                    logger.error(f"❌ STEP 5 FAILED: CRS validation failed - {crs_result.get('message', 'unknown error')}")
+                    return crs_result
 
-        # ================================================================
-        # 1. CRS VALIDATION
-        # ================================================================
-        crs_result = _validate_crs(src, input_crs, bounds, skip_validation)
-        if not crs_result["success"]:
-            return crs_result
+                source_crs = crs_result["source_crs"]
+                crs_source = crs_result["crs_source"]
+                logger.info(f"✅ STEP 5: CRS validated - {source_crs} (source: {crs_source})")
 
-        source_crs = crs_result["source_crs"]
-        crs_source = crs_result["crs_source"]
-
-        # Add CRS warnings if any
-        if "warning" in crs_result:
-            warnings.append(crs_result["warning"])
-
-        # ================================================================
-        # 2. BIT-DEPTH EFFICIENCY CHECK
-        # ================================================================
-        bit_depth_result = _check_bit_depth_efficiency(src, dtype, strict_mode)
-
-        # Add bit-depth warnings
-        if "warning" in bit_depth_result:
-            warnings.append(bit_depth_result["warning"])
-
-            # CRITICAL warnings in strict mode = FAIL
-            if strict_mode and bit_depth_result["warning"].get("severity") == "CRITICAL":
+                # Add CRS warnings if any
+                if "warning" in crs_result:
+                    warnings.append(crs_result["warning"])
+                    logger.warning(f"   ⚠️  CRS warning: {crs_result['warning'].get('message', 'unknown')}")
+            except Exception as e:
+                logger.error(f"❌ STEP 5 FAILED: CRS validation error: {e}\n{traceback.format_exc()}")
                 return {
                     "success": False,
-                    "error": "BIT_DEPTH_POLICY_VIOLATION",
-                    "message": bit_depth_result["warning"]["message"],
-                    "bit_depth_check": bit_depth_result
+                    "error": "CRS_VALIDATION_ERROR",
+                    "message": f"CRS validation failed: {e}",
+                    "blob_name": blob_name,
+                    "container_name": container_name,
+                    "traceback": traceback.format_exc()
                 }
 
-        # ================================================================
-        # 3. RASTER TYPE DETECTION
-        # ================================================================
-        type_result = _detect_raster_type(src, raster_type_param)
-        if not type_result["success"]:
-            return type_result
+            # ================================================================
+            # STEP 6: BIT-DEPTH EFFICIENCY CHECK
+            # ================================================================
+            try:
+                logger.info("🔄 STEP 6: Checking bit-depth efficiency...")
+                bit_depth_result = _check_bit_depth_efficiency(src, dtype, strict_mode)
 
-        detected_type = type_result["detected_type"]
+                # Add bit-depth warnings
+                if "warning" in bit_depth_result:
+                    warnings.append(bit_depth_result["warning"])
+                    logger.warning(f"   ⚠️  Bit-depth warning: {bit_depth_result['warning'].get('message', 'unknown')}")
 
-        # ================================================================
-        # 4. GET OPTIMAL COG SETTINGS
-        # ================================================================
-        optimal_settings = _get_optimal_cog_settings(detected_type)
+                    # CRITICAL warnings in strict mode = FAIL
+                    if strict_mode and bit_depth_result["warning"].get("severity") == "CRITICAL":
+                        logger.error("❌ STEP 6 FAILED: CRITICAL bit-depth policy violation in strict mode")
+                        return {
+                            "success": False,
+                            "error": "BIT_DEPTH_POLICY_VIOLATION",
+                            "message": bit_depth_result["warning"]["message"],
+                            "bit_depth_check": bit_depth_result,
+                            "blob_name": blob_name,
+                            "container_name": container_name
+                        }
 
-        # Success result
-        result = {
-            "success": True,
-            "result": {
-                "valid": True,
-                "source_blob": params.get('blob_name', 'unknown'),
-                "source_crs": str(source_crs),
-                "crs_source": crs_source,
-                "bounds": list(bounds),
-                "shape": list(shape),
-                "band_count": band_count,
-                "dtype": str(dtype),
-                "size_mb": params.get('size_mb', 0),  # Passed from job
-                "nodata": nodata,
+                logger.info(f"✅ STEP 6: Bit-depth check complete - efficient: {bit_depth_result.get('efficient', True)}")
+            except Exception as e:
+                logger.error(f"❌ STEP 6 FAILED: Bit-depth check error: {e}\n{traceback.format_exc()}")
+                return {
+                    "success": False,
+                    "error": "BIT_DEPTH_CHECK_ERROR",
+                    "message": f"Bit-depth check failed: {e}",
+                    "blob_name": blob_name,
+                    "container_name": container_name,
+                    "traceback": traceback.format_exc()
+                }
 
-                # Raster type detection
-                "raster_type": {
-                    "detected_type": detected_type,
-                    "confidence": type_result.get("confidence", "UNKNOWN"),
-                    "evidence": type_result.get("evidence", []),
-                    "type_source": type_result.get("type_source", "auto_detected"),
-                    "optimal_cog_settings": optimal_settings
-                },
+            # ================================================================
+            # STEP 7: RASTER TYPE DETECTION
+            # ================================================================
+            try:
+                logger.info("🔄 STEP 7: Detecting raster type...")
+                type_result = _detect_raster_type(src, raster_type_param)
+                if not type_result["success"]:
+                    logger.error(f"❌ STEP 7 FAILED: Type detection failed - {type_result.get('message', 'unknown error')}")
+                    return type_result
 
-                # Bit-depth analysis
-                "bit_depth_check": {
-                    "efficient": bit_depth_result.get("efficient", True),
-                    "current_dtype": str(dtype),
-                    "reason": bit_depth_result.get("reason", "Unknown")
-                },
+                detected_type = type_result["detected_type"]
+                logger.info(f"✅ STEP 7: Raster type detected - {detected_type} (confidence: {type_result.get('confidence', 'UNKNOWN')})")
+            except Exception as e:
+                logger.error(f"❌ STEP 7 FAILED: Type detection error: {e}\n{traceback.format_exc()}")
+                return {
+                    "success": False,
+                    "error": "TYPE_DETECTION_ERROR",
+                    "message": f"Type detection failed: {e}",
+                    "blob_name": blob_name,
+                    "container_name": container_name,
+                    "traceback": traceback.format_exc()
+                }
 
-                # Warnings
-                "warnings": warnings
-            }
+            # ================================================================
+            # STEP 8: GET OPTIMAL COG SETTINGS
+            # ================================================================
+            try:
+                logger.info("🔄 STEP 8: Determining optimal COG settings...")
+                optimal_settings = _get_optimal_cog_settings(detected_type)
+                logger.info(f"✅ STEP 8: Optimal settings determined - compression: {optimal_settings.get('compression', 'unknown')}")
+            except Exception as e:
+                logger.error(f"❌ STEP 8 FAILED: COG settings error: {e}\n{traceback.format_exc()}")
+                return {
+                    "success": False,
+                    "error": "COG_SETTINGS_ERROR",
+                    "message": f"Failed to determine COG settings: {e}",
+                    "blob_name": blob_name,
+                    "container_name": container_name,
+                    "traceback": traceback.format_exc()
+                }
+
+            # STEP 9: Build success result
+            try:
+                logger.info("🔄 STEP 9: Building validation result...")
+                result = {
+                    "success": True,
+                    "result": {
+                        "valid": True,
+                        "source_blob": blob_name,
+                        "container_name": container_name,
+                        "source_crs": str(source_crs),
+                        "crs_source": crs_source,
+                        "bounds": list(bounds),
+                        "shape": list(shape),
+                        "band_count": band_count,
+                        "dtype": str(dtype),
+                        "size_mb": params.get('size_mb', 0),
+                        "nodata": nodata,
+
+                        # Raster type detection
+                        "raster_type": {
+                            "detected_type": detected_type,
+                            "confidence": type_result.get("confidence", "UNKNOWN"),
+                            "evidence": type_result.get("evidence", []),
+                            "type_source": type_result.get("type_source", "auto_detected"),
+                            "optimal_cog_settings": optimal_settings
+                        },
+
+                        # Bit-depth analysis
+                        "bit_depth_check": {
+                            "efficient": bit_depth_result.get("efficient", True),
+                            "current_dtype": str(dtype),
+                            "reason": bit_depth_result.get("reason", "Unknown")
+                        },
+
+                        # Warnings
+                        "warnings": warnings
+                    }
+                }
+
+                logger.info(f"✅ STEP 9: Result built successfully")
+                logger.info(f"✅ VALIDATION COMPLETE: Type={detected_type}, CRS={source_crs}, Warnings={len(warnings)}")
+                return result
+
+            except Exception as e:
+                logger.error(f"❌ STEP 9 FAILED: Error building result: {e}\n{traceback.format_exc()}")
+                return {
+                    "success": False,
+                    "error": "RESULT_BUILD_ERROR",
+                    "message": f"Failed to build validation result: {e}",
+                    "blob_name": blob_name,
+                    "container_name": container_name,
+                    "traceback": traceback.format_exc()
+                }
+
+    except Exception as e:
+        logger.error(f"❌ STEP 4+ FAILED: Unexpected error during validation: {e}\n{traceback.format_exc()}")
+        return {
+            "success": False,
+            "error": "VALIDATION_ERROR",
+            "error_type": type(e).__name__,
+            "message": f"Unexpected validation error: {e}",
+            "blob_name": blob_name,
+            "container_name": container_name,
+            "traceback": traceback.format_exc()
         }
-
-        print(f"✅ VALIDATION: Complete - Type: {detected_type}, CRS: {source_crs}", file=sys.stderr, flush=True)
-        return result
 
 
 def _validate_crs(src, input_crs: Optional[str], bounds, skip_validation: bool = False) -> dict:

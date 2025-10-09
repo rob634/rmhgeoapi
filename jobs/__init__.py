@@ -37,6 +37,11 @@ Date: 1 OCT 2025
 from .hello_world import HelloWorldJob
 from .container_summary import ContainerSummaryWorkflow
 from .container_list import ListContainerContentsWorkflow
+from .stac_catalog_container import StacCatalogContainerWorkflow
+from .stac_catalog_vectors import StacCatalogVectorsWorkflow
+from .ingest_vector import IngestVectorJob
+# TEMPORARILY COMMENTED OUT - Job requires rasterio/rio-cogeo dependencies
+# from .process_raster import ProcessRasterWorkflow
 
 # ============================================================================
 # EXPLICIT JOB REGISTRY
@@ -51,8 +56,12 @@ ALL_JOBS = {
     "hello_world": HelloWorldJob,
     "summarize_container": ContainerSummaryWorkflow,
     "list_container_contents": ListContainerContentsWorkflow,
+    "stac_catalog_container": StacCatalogContainerWorkflow,
+    "stac_catalog_vectors": StacCatalogVectorsWorkflow,
+    "ingest_vector": IngestVectorJob,
+    # TEMPORARILY COMMENTED OUT - Job requires rasterio/rio-cogeo dependencies
+    # "process_raster": ProcessRasterWorkflow,
     # Add new jobs here explicitly
-    # "process_raster": ProcessRasterJob,
 }
 
 # ============================================================================

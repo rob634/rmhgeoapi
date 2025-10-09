@@ -53,6 +53,8 @@ tmp/
 docs_claude/
 docs/
 local/
+archive*
+archive/
 archive_epoch3_schema/
 archive_docs/
 archive_epoch3_controllers/

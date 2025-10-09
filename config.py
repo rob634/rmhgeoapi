@@ -97,7 +97,78 @@ class AppConfig(BaseModel):
         description="Gold tier container name for GeoParquet exports and analytics",
         examples=["rmhazuregeogold"]
     )
-    
+
+    # ========================================================================
+    # Vector ETL Configuration
+    # ========================================================================
+
+    vector_pickle_container: str = Field(
+        default="rmhazuregeotemp",
+        description="Container for vector ETL intermediate pickle files",
+        examples=["rmhazuregeotemp", "silver"]
+    )
+
+    vector_pickle_prefix: str = Field(
+        default="temp/vector_etl",
+        description="Blob path prefix for vector ETL pickle files",
+        examples=["temp/vector_etl", "intermediate/vector"]
+    )
+
+    # ========================================================================
+    # Raster Pipeline Configuration
+    # ========================================================================
+
+    raster_intermediate_prefix: str = Field(
+        default="temp/raster_etl",
+        description="Blob path prefix for raster ETL intermediate files (large file tiles)",
+        examples=["temp/raster_etl", "intermediate/raster"]
+    )
+
+    raster_size_threshold_mb: int = Field(
+        default=1000,  # 1 GB
+        description="File size threshold (MB) for pipeline selection (small vs large file)",
+    )
+
+    raster_cog_compression: str = Field(
+        default="deflate",
+        description="Default compression algorithm for COG creation",
+        examples=["deflate", "lzw", "zstd", "jpeg", "webp", "lerc_deflate"]
+    )
+
+    raster_cog_jpeg_quality: int = Field(
+        default=85,
+        description="JPEG quality for lossy compression (1-100, only applies to jpeg/webp)",
+    )
+
+    raster_cog_tile_size: int = Field(
+        default=512,
+        description="Internal tile size for COG (pixels)",
+    )
+
+    raster_overview_resampling: str = Field(
+        default="cubic",
+        description="Resampling method for COG overview generation",
+        examples=["cubic", "bilinear", "average", "mode", "nearest"]
+    )
+
+    raster_reproject_resampling: str = Field(
+        default="cubic",
+        description="Resampling method for reprojection",
+        examples=["cubic", "bilinear", "lanczos", "nearest"]
+    )
+
+    raster_strict_validation: bool = Field(
+        default=False,
+        description="Fail on validation warnings (inefficient bit-depth, etc)",
+    )
+
+    raster_cog_in_memory: bool = Field(
+        default=True,
+        description="Process COG creation in-memory (True) vs disk-based (False). "
+                    "In-memory is faster for small files (<1GB) but uses more RAM. "
+                    "Disk-based uses local SSD temp storage, better for large files.",
+    )
+
     # ========================================================================
     # PostgreSQL/PostGIS Configuration
     # ========================================================================
@@ -371,6 +442,10 @@ class AppConfig(BaseModel):
             postgis_database=os.environ['POSTGIS_DATABASE'],
             postgis_schema=os.environ.get('POSTGIS_SCHEMA', 'geo'),
             app_schema=os.environ.get('APP_SCHEMA', 'app'),
+
+            # Vector ETL
+            vector_pickle_container=os.environ.get('VECTOR_PICKLE_CONTAINER', 'rmhazuregeotemp'),
+            vector_pickle_prefix=os.environ.get('VECTOR_PICKLE_PREFIX', 'temp/vector_etl'),
             
             # Security
             key_vault_name=os.environ.get('KEY_VAULT', 'rmhkeyvault'),
@@ -485,6 +560,8 @@ def debug_config() -> dict:
             'postgis_database': config.postgis_database,
             'postgis_schema': config.postgis_schema,
             'app_schema': config.app_schema,
+            'vector_pickle_container': config.vector_pickle_container,
+            'vector_pickle_prefix': config.vector_pickle_prefix,
             'key_vault_name': config.key_vault_name,
             'key_vault_database_secret': config.key_vault_database_secret,
             'job_queue': config.job_processing_queue,

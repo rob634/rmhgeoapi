@@ -1,9 +1,60 @@
 # Active Tasks
 
-**Last Updated**: 4 OCT 2025 - CONTAINER OPERATIONS & DETERMINISTIC TASK LINEAGE! 🎯
+**Last Updated**: 6 OCT 2025 - STAC METADATA EXTRACTION FULLY OPERATIONAL! 🎯
 **Author**: Robert and Geospatial Claude Legion
 
-## 🎯 LATEST: DETERMINISTIC TASK LINEAGE SYSTEM (4 OCT 2025)
+## 🎯 LATEST: STAC METADATA EXTRACTION WITH MANAGED IDENTITY (6 OCT 2025)
+
+### ✅ STAC WORKFLOW PRODUCTION-READY
+
+**COMPLETE STAC IMPLEMENTATION OPERATIONAL:**
+
+1. **STAC Collections Initialized** (`/api/stac/init`)
+   - 4 production collections: dev, cogs, vectors, geoparquet
+   - PgSTAC integration working
+   - Collection management endpoints functional
+
+2. **STAC Metadata Extraction** (`/api/stac/extract`)
+   - User Delegation SAS with managed identity (NO storage keys!)
+   - rio-stac integration for automatic metadata extraction
+   - stac-pydantic validation for STAC spec compliance
+   - Full raster metadata: bbox, geometry, projection, bands, statistics
+   - Azure-specific properties (container, blob_path, tier)
+   - Automatic insertion into PgSTAC database
+
+3. **Critical Architecture Fixes**
+   - ✅ `Asset` import from `stac_pydantic.shared` (not top-level)
+   - ✅ User Delegation SAS using managed identity (no account keys)
+   - ✅ rio-stac Item object conversion to dict before manipulation
+   - ✅ Single authentication source: BlobRepository with managed identity
+   - ✅ Missing `json` import in infrastructure/stac.py
+
+**MANAGED IDENTITY AUTHENTICATION:**
+- All blob access uses DefaultAzureCredential
+- SAS URLs generated with User Delegation Key (not account keys)
+- Authentication happens in ONE place: BlobRepository
+- Blob URI + SAS token pattern: `blob_client.url + "?" + sas_token`
+
+**SUCCESSFULLY TESTED:**
+```bash
+# Extract STAC metadata from COG
+POST /api/stac/extract
+{
+  "container": "rmhazuregeobronze",
+  "blob_name": "dctest3_R1C2_cog.tif",
+  "collection_id": "dev",
+  "insert": true
+}
+
+# Result: Complete STAC Item with:
+# - Bounding box: Washington DC (-77.028, 38.908 to -77.013, 38.932)
+# - 3 RGB bands with statistics and histograms
+# - EPSG:4326 projection
+# - Azure metadata (container, blob_path, tier)
+# - User Delegation SAS URL (1 hour validity)
+```
+
+## 🎯 PREVIOUS: DETERMINISTIC TASK LINEAGE SYSTEM (4 OCT 2025)
 
 ### ✅ CONTAINER OPERATIONS PRODUCTION-READY
 
@@ -52,13 +103,19 @@
 ```bash
 # Job Management
 POST /api/jobs/submit/hello_world            - Submit hello world job
-POST /api/jobs/submit/summarize_container    - Container statistics (NEW)
-POST /api/jobs/submit/list_container_contents - Container inventory (NEW)
+POST /api/jobs/submit/summarize_container    - Container statistics
+POST /api/jobs/submit/list_container_contents - Container inventory
 GET  /api/jobs/status/{job_id}               - Get job status
 GET  /api/db/jobs                            - Query all jobs
 
 # Task Management
 GET /api/db/tasks/{job_id}         - Get tasks for job (with JSONB results)
+
+# STAC Operations (NEW - 6 OCT 2025)
+POST /api/stac/init                - Initialize STAC collections
+POST /api/stac/extract             - Extract STAC metadata from raster
+GET  /api/stac/setup               - Check PgSTAC installation status
+POST /api/stac/collections/{tier}  - Create tier-specific collection
 
 # System Health
 GET /api/health                    - System health check
@@ -66,6 +123,7 @@ GET /api/health                    - System health check
 # Database Management
 POST /api/db/schema/redeploy?confirm=yes - Redeploy schema
 GET  /api/db/stats                       - Database statistics
+GET  /api/db/debug/all                   - Dump all jobs and tasks
 ```
 
 ### Next Development Priorities:

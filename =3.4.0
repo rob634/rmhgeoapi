@@ -1,0 +1,15 @@
+Collecting stac-pydantic
+  Downloading stac_pydantic-3.4.0-py3-none-any.whl.metadata (8.5 kB)
+Requirement already satisfied: click>=8.1.7 in /Users/robertharrison/anaconda3/envs/azgeo/lib/python3.12/site-packages (from stac-pydantic) (8.2.1)
+Requirement already satisfied: pydantic>=2.4.1 in /Users/robertharrison/anaconda3/envs/azgeo/lib/python3.12/site-packages (from stac-pydantic) (2.11.7)
+Collecting geojson-pydantic>=1.0.0 (from stac-pydantic)
+  Downloading geojson_pydantic-2.0.0-py3-none-any.whl.metadata (4.2 kB)
+Requirement already satisfied: annotated-types>=0.6.0 in /Users/robertharrison/anaconda3/envs/azgeo/lib/python3.12/site-packages (from pydantic>=2.4.1->stac-pydantic) (0.7.0)
+Requirement already satisfied: pydantic-core==2.33.2 in /Users/robertharrison/anaconda3/envs/azgeo/lib/python3.12/site-packages (from pydantic>=2.4.1->stac-pydantic) (2.33.2)
+Requirement already satisfied: typing-extensions>=4.12.2 in /Users/robertharrison/anaconda3/envs/azgeo/lib/python3.12/site-packages (from pydantic>=2.4.1->stac-pydantic) (4.14.1)
+Requirement already satisfied: typing-inspection>=0.4.0 in /Users/robertharrison/anaconda3/envs/azgeo/lib/python3.12/site-packages (from pydantic>=2.4.1->stac-pydantic) (0.4.1)
+Downloading stac_pydantic-3.4.0-py3-none-any.whl (24 kB)
+Downloading geojson_pydantic-2.0.0-py3-none-any.whl (8.7 kB)
+Installing collected packages: geojson-pydantic, stac-pydantic
+
+Successfully installed geojson-pydantic-2.0.0 stac-pydantic-3.4.0

@@ -166,7 +166,7 @@ class JobStatusTrigger(JobManagementTrigger):
         response = {
             "jobId": job_record.job_id,
             "jobType": job_record.job_type,
-            "status": job_record.status,
+            "status": job_record.status.value if hasattr(job_record.status, 'value') else str(job_record.status),  # FIX: Extract enum value
             "stage": job_record.stage,
             "totalStages": job_record.total_stages,
             "parameters": job_record.parameters,

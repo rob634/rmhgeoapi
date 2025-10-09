@@ -1,9 +1,162 @@
 # Project History
 
-**Last Updated**: 4 OCT 2025 - CONTAINER OPERATIONS & DETERMINISTIC TASK LINEAGE! 🎯
+**Last Updated**: 6 OCT 2025 - STAC METADATA EXTRACTION FULLY OPERATIONAL! 🎯
 **Note**: For project history prior to September 11, 2025, see **OLDER_HISTORY.md**
 
 This document tracks completed architectural changes and improvements to the Azure Geospatial ETL Pipeline from September 11, 2025 onwards.
+
+---
+
+## 6 OCT 2025: STAC Metadata Extraction with Managed Identity 🎯
+
+**Status**: ✅ PRODUCTION-READY - Complete STAC workflow operational
+**Impact**: Automatic STAC metadata extraction from rasters with managed identity authentication
+**Timeline**: Full debugging and implementation of STAC extraction pipeline
+**Author**: Robert and Geospatial Claude Legion
+
+### Major Achievement: STAC WORKFLOW WITH MANAGED IDENTITY
+
+**Critical Fixes Implemented**:
+
+1. **stac-pydantic Import Error** (services/service_stac_metadata.py:31-32)
+   - **Root Cause**: `Asset` not exported at top level of stac-pydantic 3.4.0
+   - **Error**: `ImportError: cannot import name 'Asset' from 'stac_pydantic'`
+   - **Fix**: Changed from `from stac_pydantic import Item, Asset` to:
+     ```python
+     from stac_pydantic import Item
+     from stac_pydantic.shared import Asset
+     ```
+   - **Testing**: Reproduced locally using azgeo conda environment (Python 3.12.11)
+   - **Impact**: Function app was completely dead (all endpoints 404)
+
+2. **User Delegation SAS with Managed Identity** (infrastructure/blob.py:613-668)
+   - **Old Approach**: Account Key SAS requiring `AZURE_STORAGE_KEY` environment variable
+   - **New Approach**: User Delegation SAS using `DefaultAzureCredential`
+   - **Implementation**:
+     ```python
+     # Get user delegation key (managed identity)
+     delegation_key = self.blob_service.get_user_delegation_key(
+         key_start_time=now,
+         key_expiry_time=expiry
+     )
+     # Generate SAS with delegation key (no account key!)
+     sas_token = generate_blob_sas(
+         account_name=self.storage_account,
+         user_delegation_key=delegation_key,
+         permission=BlobSasPermissions(read=True),
+         ...
+     )
+     sas_url = f"{blob_client.url}?{sas_token}"
+     ```
+   - **Benefits**: NO storage keys, single authentication source, Azure best practices
+
+3. **rio-stac Object Conversion** (services/service_stac_metadata.py:121-125)
+   - **Issue**: `rio_stac.create_stac_item()` returns `pystac.Item` object, not dict
+   - **Error**: `'Item' object is not subscriptable`
+   - **Fix**: Added conversion check:
+     ```python
+     if hasattr(rio_item, 'to_dict'):
+         item_dict = rio_item.to_dict()
+     else:
+         item_dict = rio_item
+     ```
+
+4. **Missing json Import** (infrastructure/stac.py:38)
+   - **Issue**: Using `json.dumps()` without import
+   - **Error**: `NameError: name 'json' is not defined`
+   - **Fix**: Added `import json`
+
+5. **Attribute Name Fix** (infrastructure/blob.py:638)
+   - **Issue**: `self.storage_account_name` → should be `self.storage_account`
+   - **Error**: `AttributeError: 'BlobRepository' object has no attribute 'storage_account_name'`
+   - **Fix**: Corrected attribute reference
+
+### Testing Results:
+
+**Successful STAC Extraction** from `dctest3_R1C2_cog.tif`:
+```json
+{
+  "item_id": "dev-dctest3_R1C2_cog-tif",
+  "bbox": [-77.028, 38.908, -77.013, 38.932],
+  "geometry": { "type": "Polygon", ... },
+  "properties": {
+    "proj:epsg": 4326,
+    "proj:shape": [7777, 5030],
+    "azure:container": "rmhazuregeobronze",
+    "azure:blob_path": "dctest3_R1C2_cog.tif",
+    "azure:tier": "dev"
+  },
+  "assets": {
+    "data": {
+      "href": "https://...?<user_delegation_sas>",
+      "raster:bands": [
+        { "data_type": "uint8", "statistics": {...}, ... },
+        { "data_type": "uint8", "statistics": {...}, ... },
+        { "data_type": "uint8", "statistics": {...}, ... }
+      ]
+    }
+  }
+}
+```
+
+**Metadata Extracted**:
+- ✅ Bounding box: Washington DC area
+- ✅ Geometry: Polygon in EPSG:4326
+- ✅ Projection: Full proj extension
+- ✅ 3 RGB bands with statistics and histograms
+- ✅ Azure-specific metadata
+- ✅ User Delegation SAS URL (1 hour validity)
+
+### Architecture Improvements:
+
+**Single Authentication Source**:
+- All blob operations use `BlobRepository.instance()` with `DefaultAzureCredential`
+- SAS URLs generated using User Delegation Key (no account keys)
+- Authentication happens in ONE place: `BlobRepository.__init__()`
+
+**Blob URI Pattern**:
+```python
+# Get blob client (has URI)
+blob_client = container_client.get_blob_client(blob_path)
+
+# Generate SAS with managed identity
+delegation_key = blob_service.get_user_delegation_key(...)
+sas_token = generate_blob_sas(user_delegation_key=delegation_key, ...)
+
+# Combine for rasterio/GDAL
+sas_url = f"{blob_client.url}?{sas_token}"
+```
+
+**STAC Validation**:
+- stac-pydantic 3.4.0 ensures STAC 1.1.0 spec compliance
+- Pydantic v2 validation at all boundaries
+- Type-safe Item and Asset objects
+
+### Files Modified:
+1. `services/service_stac_metadata.py` - Fixed imports, rio-stac handling
+2. `infrastructure/stac.py` - Added json import
+3. `infrastructure/blob.py` - User Delegation SAS implementation
+4. `triggers/stac_init.py` - Collection initialization endpoint
+5. `triggers/stac_extract.py` - Metadata extraction endpoint
+6. `function_app.py` - STAC route registration
+
+### Endpoints Now Operational:
+```bash
+# Initialize STAC collections
+POST /api/stac/init
+{"collections": ["dev", "cogs", "vectors", "geoparquet"]}
+
+# Extract STAC metadata
+POST /api/stac/extract
+{
+  "container": "rmhazuregeobronze",
+  "blob_name": "dctest3_R1C2_cog.tif",
+  "collection_id": "dev",
+  "insert": true
+}
+```
+
+**Production Status**: ✅ FULLY OPERATIONAL - Ready for production STAC cataloging
 
 ---
 

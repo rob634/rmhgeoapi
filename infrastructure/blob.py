@@ -63,7 +63,7 @@ from io import BytesIO
 from typing import List, Dict, Any, Optional, Iterator, BinaryIO, Union
 
 # Azure SDK imports - These will fail fast if not installed
-from azure.storage.blob import BlobServiceClient, ContainerClient, BlobClient
+from azure.storage.blob import BlobServiceClient, ContainerClient, BlobClient, generate_blob_sas, BlobSasPermissions
 from azure.identity import DefaultAzureCredential
 from azure.core.exceptions import ResourceNotFoundError
 
@@ -572,39 +572,101 @@ class BlobRepository(IBlobRepository):
             logger.error(f"Failed to get blob properties: {e}")
             raise
     
+    def get_blob_url_with_sas(self, container_name: str, blob_name: str, hours: int = 1) -> str:
+        """
+        Generate blob URL with user delegation SAS token.
+
+        Uses DefaultAzureCredential to generate user delegation SAS token.
+        This allows managed identity access without exposing account keys.
+
+        Args:
+            container_name: Container name
+            blob_name: Blob path
+            hours: SAS token validity in hours (default: 1)
+
+        Returns:
+            Full blob URL with SAS token appended
+
+        Example:
+            url = repo.get_blob_url_with_sas('bronze', 'path/file.tif')
+            # Returns: https://storage.blob.core.windows.net/bronze/path/file.tif?sv=...
+        """
+        try:
+            logger.debug(f"Generating SAS URL for {container_name}/{blob_name} (validity: {hours}h)")
+
+            # Get blob client
+            blob_client = self._get_container_client(container_name).get_blob_client(blob_name)
+
+            # Calculate expiry time
+            start_time = datetime.now(datetime.timezone.utc) if hasattr(datetime, 'timezone') else datetime.utcnow()
+            expiry_time = start_time + timedelta(hours=hours)
+
+            # Get user delegation key (works with managed identity)
+            try:
+                user_delegation_key = self.blob_service.get_user_delegation_key(
+                    key_start_time=start_time,
+                    key_expiry_time=expiry_time
+                )
+                logger.debug("✅ User delegation key obtained successfully")
+            except Exception as e:
+                logger.error(f"Failed to get user delegation key: {e}")
+                raise ValueError(f"Failed to generate user delegation key. Ensure managed identity has 'Storage Blob Delegator' role: {e}")
+
+            # Generate SAS token using user delegation key
+            sas_token = generate_blob_sas(
+                account_name=self.storage_account,
+                container_name=container_name,
+                blob_name=blob_name,
+                user_delegation_key=user_delegation_key,
+                permission=BlobSasPermissions(read=True),
+                expiry=expiry_time,
+                start=start_time
+            )
+
+            # Build full URL with SAS token
+            blob_url = f"{blob_client.url}?{sas_token}"
+
+            logger.debug(f"✅ SAS URL generated successfully (expires: {expiry_time.isoformat()})")
+            return blob_url
+
+        except Exception as e:
+            logger.error(f"Failed to generate SAS URL for {container_name}/{blob_name}: {e}")
+            raise
+
+
     # ========================================================================
     # ADVANCED OPERATIONS
     # ========================================================================
-    
+
     def batch_download(self, container: str, blob_paths: List[str], max_workers: int = 10) -> Dict[str, BytesIO]:
         """
         Download multiple blobs in parallel.
-        
+
         Args:
             container: Container name
             blob_paths: List of blob paths to download
             max_workers: Maximum concurrent downloads
-            
+
         Returns:
             Dict mapping blob paths to BytesIO streams
         """
         results = {}
-        
+
         def download_single(path):
             return path, self.read_blob_to_stream(container, path)
-        
+
         logger.info(f"Starting batch download of {len(blob_paths)} blobs")
-        
+
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = [executor.submit(download_single, path) for path in blob_paths]
-            
+
             for future in concurrent.futures.as_completed(futures):
                 try:
                     path, stream = future.result()
                     results[path] = stream
                 except Exception as e:
                     logger.error(f"Failed to download blob in batch: {e}")
-        
+
         logger.info(f"Batch download complete: {len(results)}/{len(blob_paths)} successful")
         return results
 

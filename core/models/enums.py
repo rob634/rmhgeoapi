@@ -74,3 +74,29 @@ class StageStatus(Enum):
     COMPLETED = "completed"  # All tasks in stage completed
     FAILED = "failed"  # Stage failed (unrecoverable)
     COMPLETED_WITH_ERRORS = "completed_with_errors"  # Some tasks failed but stage continues
+
+
+class RasterType(str, Enum):
+    """
+    Raster data types for automatic detection and optimization.
+
+    Used to automatically select optimal COG compression and resampling
+    settings based on the type of raster data being processed.
+
+    Type Detection Criteria:
+    - RGB: 3 bands, uint8/uint16 (drone imagery, aerial photos)
+    - RGBA: 4 bands, uint8/uint16 with alpha channel (drone imagery with transparency)
+    - DEM: Single-band float32/int16 with smooth gradients (elevation data)
+    - CATEGORICAL: Single-band with <256 discrete integer values (land cover classification)
+    - MULTISPECTRAL: 5+ bands (Landsat, Sentinel-2, Planet satellite imagery)
+    - NIR: 4 bands without alpha (RGB + Near-Infrared)
+    - UNKNOWN: Cannot determine type automatically
+    """
+
+    RGB = "rgb"
+    RGBA = "rgba"
+    DEM = "dem"
+    CATEGORICAL = "categorical"
+    MULTISPECTRAL = "multispectral"
+    NIR = "nir"
+    UNKNOWN = "unknown"

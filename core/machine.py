@@ -401,11 +401,15 @@ class CoreMachine:
 
             # Convert dict to TaskResult if needed
             if isinstance(raw_result, dict):
+                # Extract error message from dict if handler failed
+                error_msg = raw_result.get('error') if not raw_result.get('success', False) else None
+
                 result = TaskResult(
                     task_id=task_message.task_id,
                     task_type=task_message.task_type,
                     status=TaskStatus.COMPLETED if raw_result.get('success', False) else TaskStatus.FAILED,
                     result_data=raw_result,
+                    error_details=error_msg,  # FIX: Extract error from dict
                     execution_time_ms=int(elapsed * 1000),  # Convert seconds to milliseconds
                     timestamp=datetime.now(timezone.utc)
                 )

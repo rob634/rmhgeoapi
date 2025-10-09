@@ -184,6 +184,14 @@ from triggers.db_query import (
     schema_nuke_trigger,
     function_test_trigger
 )
+from triggers.analyze_container import analyze_container_trigger
+from triggers.stac_setup import stac_setup_trigger
+from triggers.stac_collections import stac_collections_trigger
+from triggers.stac_init import stac_init_trigger
+from triggers.stac_extract import stac_extract_trigger
+from triggers.stac_vector import stac_vector_trigger
+from triggers.ingest_vector import ingest_vector_trigger
+from triggers.test_raster_create import test_raster_create_trigger
 
 # ========================================================================
 # PHASE 2: EXPLICIT REGISTRATION PATTERN (Parallel with decorators)
@@ -390,6 +398,189 @@ def test_database_functions(req: func.HttpRequest) -> func.HttpResponse:
     return function_test_trigger.handle_request(req)
 
 
+# ============================================================================
+# CONTAINER ANALYSIS ENDPOINT - Post-processing for list_container_contents jobs
+# ============================================================================
+
+@app.route(route="analysis/container/{job_id}", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def analyze_container(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Analyze a list_container_contents job: GET /api/analysis/container/{job_id}?save=true
+
+    Provides comprehensive analysis of blob container contents including:
+    - File categorization (vector, raster, metadata)
+    - Pattern detection (Maxar orders, Vivid basemaps, etc.)
+    - Duplicate file detection
+    - Size distribution and statistics
+    - Execution timing analysis
+
+    Query Parameters:
+        save: If 'true', saves results to rmhazuregeoinventory container
+    """
+    return analyze_container_trigger.handle_request(req)
+
+
+# ============================================================================
+# STAC SETUP ENDPOINT - PgSTAC installation and management
+# ============================================================================
+
+@app.route(route="stac/setup", methods=["GET", "POST"], auth_level=func.AuthLevel.ANONYMOUS)
+def stac_setup(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    STAC infrastructure setup and status: /api/stac/setup
+
+    GET  /api/stac/setup              - Check installation status
+    GET  /api/stac/setup?verify=true  - Full verification with tests
+    POST /api/stac/setup?confirm=yes  - Install PgSTAC schema
+
+    POST with drop (DESTRUCTIVE):
+    POST /api/stac/setup?confirm=yes&drop=true - Reinstall (requires PGSTAC_CONFIRM_DROP=true)
+
+    Returns:
+        Installation status, verification results, or setup confirmation
+    """
+    return stac_setup_trigger.handle_request(req)
+
+
+@app.route(route="stac/collections/{tier}", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
+def stac_collections(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    STAC collection management for Bronze/Silver/Gold tiers.
+
+    POST /api/stac/collections/{tier} where tier is: bronze, silver, or gold
+
+    Body:
+        {
+            "container": "rmhazuregeobronze",  // Required
+            "collection_id": "custom-id",      // Optional
+            "title": "Custom Title",           // Optional
+            "description": "Custom description"// Optional
+        }
+
+    Returns:
+        Collection creation result with collection_id
+    """
+    return stac_collections_trigger.handle_request(req)
+
+
+@app.route(route="stac/init", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
+def stac_init(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Initialize STAC production collections.
+
+    POST /api/stac/init
+
+    Body (optional):
+        {
+            "collections": ["dev", "cogs", "vectors", "geoparquet"]  // Default: all
+        }
+
+    Returns:
+        Results for each collection creation
+    """
+    return stac_init_trigger.handle_request(req)
+
+
+@app.route(route="stac/extract", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
+def stac_extract(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Extract STAC metadata from raster blob and insert into PgSTAC.
+
+    POST /api/stac/extract
+
+    Body:
+        {
+            "container": "rmhazuregeobronze",      // Required
+            "blob_name": "test/file.tif",          // Required
+            "collection_id": "dev",                // Optional (default: "dev")
+            "insert": true                         // Optional (default: true)
+        }
+
+    Returns:
+        STAC Item metadata and insertion result
+    """
+    return stac_extract_trigger.handle_request(req)
+
+
+@app.route(route="stac/vector", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
+def stac_vector(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Catalog PostGIS vector table in STAC.
+
+    POST /api/stac/vector
+
+    Body:
+        {
+            "schema": "geo",                        // Required - PostgreSQL schema
+            "table_name": "parcels_2025",           // Required - Table name
+            "collection_id": "vectors",             // Optional (default: "vectors")
+            "source_file": "data/parcels.gpkg",     // Optional - Original source file
+            "insert": true,                         // Optional (default: true)
+            "properties": {                         // Optional - Custom properties
+                "jurisdiction": "county"
+            }
+        }
+
+    Returns:
+        STAC Item metadata and insertion result
+    """
+    return stac_vector_trigger.handle_request(req)
+
+
+@app.route(route="jobs/ingest_vector", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
+def ingest_vector(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Submit vector file for ETL to PostGIS.
+
+    POST /api/jobs/ingest_vector
+
+    Body:
+        {
+            "blob_name": "data/parcels.gpkg",       // Required
+            "file_extension": "gpkg",               // Required (csv, geojson, gpkg, kml, kmz, shp, zip)
+            "table_name": "parcels_2025",           // Required (PostgreSQL identifier)
+            "container_name": "bronze",             // Optional (default: bronze)
+            "schema": "geo",                        // Optional (default: geo)
+            "chunk_size": 1000,                     // Optional (None = auto-calculate)
+            "converter_params": {                   // Optional (format-specific)
+                "layer_name": "parcels"             // For GPKG
+                // OR
+                "lat_name": "latitude",             // For CSV
+                "lon_name": "longitude"             // For CSV
+            }
+        }
+
+    Returns:
+        Job creation response with job_id and status
+    """
+    return ingest_vector_trigger.handle_request(req)
+
+
+# ============================================================================
+# TEST UTILITIES - DEVELOPMENT ONLY
+# ============================================================================
+
+@app.route(route="test/create-rasters", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
+def test_create_rasters(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Create test raster files in Azure Blob Storage for pipeline testing.
+
+    TESTING/DEVELOPMENT ONLY - Should not be exposed in production.
+
+    POST /api/test/create-rasters
+    POST /api/test/create-rasters?raster_type=rgb
+
+    Query Parameters:
+        raster_type: Optional - Create single raster type
+                     (rgb, rgba, dem, categorical_64bit, no_crs, sentinel2, wgs84)
+                     If not specified, creates ALL test rasters
+
+    Returns:
+        Upload results with blob URLs
+    """
+    return test_raster_create_trigger.handle_request(req)
+
+
 @app.route(route="db/debug/all", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
 def debug_dump_all(req: func.HttpRequest) -> func.HttpResponse:
     """
@@ -410,65 +601,63 @@ def debug_dump_all(req: func.HttpRequest) -> func.HttpResponse:
         # Get connection from repository
         # Import moved to top of file
         if isinstance(job_repo, PostgreSQLRepository):
-            conn = job_repo._get_connection()
-            cursor = conn.cursor()
-            
-            # Get all jobs
-            cursor.execute(f"""
-                SELECT 
-                    job_id, job_type, status, stage, total_stages,
-                    parameters, stage_results, result_data, error_details,
-                    created_at, updated_at
-                FROM {job_repo.schema_name}.jobs
-                ORDER BY created_at DESC
-                LIMIT %s
-            """, (limit,))
-            
-            jobs = []
-            for row in cursor.fetchall():
-                jobs.append({
-                    "job_id": row[0],
-                    "job_type": row[1],
-                    "status": row[2],
-                    "stage": row[3],
-                    "total_stages": row[4],
-                    "parameters": row[5],
-                    "stage_results": row[6],
-                    "result_data": row[7],
-                    "error_details": row[8],
-                    "created_at": row[9].isoformat() if row[9] else None,
-                    "updated_at": row[10].isoformat() if row[10] else None
-                })
-            
-            # Get all tasks
-            cursor.execute(f"""
-                SELECT 
-                    task_id, job_id, task_type, status, stage,
-                    parameters, result_data, error_details, retry_count,
-                    created_at, updated_at
-                FROM {job_repo.schema_name}.tasks
-                ORDER BY created_at DESC
-                LIMIT %s
-            """, (limit,))
-            
-            tasks = []
-            for row in cursor.fetchall():
-                tasks.append({
-                    "task_id": row[0],
-                    "job_id": row[1],
-                    "task_type": row[2],
-                    "status": row[3],
-                    "stage": row[4],
-                    "parameters": row[5],
-                    "result_data": row[6],
-                    "error_details": row[7],
-                    "retry_count": row[8],
-                    "created_at": row[9].isoformat() if row[9] else None,
-                    "updated_at": row[10].isoformat() if row[10] else None
-                })
-            
-            cursor.close()
-            conn.close()
+            # FIX: _get_connection() is a context manager, use with statement
+            with job_repo._get_connection() as conn:
+                with conn.cursor() as cursor:
+                    # Get all jobs
+                    cursor.execute(f"""
+                        SELECT
+                            job_id, job_type, status, stage, total_stages,
+                            parameters, stage_results, result_data, error_details,
+                            created_at, updated_at
+                        FROM {job_repo.schema_name}.jobs
+                        ORDER BY created_at DESC
+                        LIMIT %s
+                    """, (limit,))
+
+                    jobs = []
+                    for row in cursor.fetchall():
+                        jobs.append({
+                            "job_id": row[0],
+                            "job_type": row[1],
+                            "status": row[2],
+                            "stage": row[3],
+                            "total_stages": row[4],
+                            "parameters": row[5],
+                            "stage_results": row[6],
+                            "result_data": row[7],
+                            "error_details": row[8],
+                            "created_at": row[9].isoformat() if row[9] else None,
+                            "updated_at": row[10].isoformat() if row[10] else None
+                        })
+
+                    # Get all tasks
+                    cursor.execute(f"""
+                        SELECT
+                            task_id, job_id, task_type, status, stage,
+                            parameters, result_data, error_details, retry_count,
+                            created_at, updated_at
+                        FROM {job_repo.schema_name}.tasks
+                        ORDER BY created_at DESC
+                        LIMIT %s
+                    """, (limit,))
+
+                    tasks = []
+                    for row in cursor.fetchall():
+                        tasks.append({
+                            "task_id": row[0],
+                            "job_id": row[1],
+                            "task_type": row[2],
+                            "status": row[3],
+                            "stage": row[4],
+                            "parameters": row[5],
+                            "result_data": row[6],
+                            "error_details": row[7],
+                            "retry_count": row[8],
+                            "created_at": row[9].isoformat() if row[9] else None,
+                            "updated_at": row[10].isoformat() if row[10] else None
+                        })
+            # Context managers automatically close cursor and connection
             
             return func.HttpResponse(
                 body=json.dumps({

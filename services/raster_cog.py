@@ -203,9 +203,9 @@ def create_cog(params: dict) -> dict:
         print(f"⏱️ COG CREATION: Processing time: {elapsed_time:.2f}s", file=sys.stderr, flush=True)
 
         # Upload to silver container OR save locally for testing
-        container = params.get('container', 'unknown')
+        container_name = params.get('container_name', 'unknown')
 
-        if container == 'local':
+        if container_name == 'local':
             # LOCAL TESTING MODE: Save to output path instead of uploading
             import shutil
             final_output = output_blob_name
@@ -250,7 +250,7 @@ def create_cog(params: dict) -> dict:
                 "cog_blob": output_blob_name,
                 "cog_container": silver_container,
                 "source_blob": params.get('blob_name', 'unknown'),
-                "source_container": params.get('container', 'unknown'),
+                "source_container": params.get('container_name', 'unknown'),
                 "reprojection_performed": needs_reprojection,
                 "source_crs": str(source_crs),
                 "target_crs": str(target_crs),

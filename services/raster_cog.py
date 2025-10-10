@@ -299,9 +299,9 @@ def create_cog(params: dict) -> dict:
 
             # Upload
             with open(local_output, 'rb') as f:
-                blob_infra.upload_blob(
-                    container_name=silver_container,
-                    blob_name=output_blob_name,
+                blob_infra.write_blob(
+                    container=silver_container,
+                    blob_path=output_blob_name,
                     data=f.read()
                 )
 

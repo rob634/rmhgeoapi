@@ -70,7 +70,7 @@ def create_cog(params: dict) -> dict:
             - overview_resampling: (Optional) User override
             - reproject_resampling: (Optional) User override
             - output_blob_name: Silver container blob path
-            - container: Bronze container name
+            - container_name: Bronze container name
             - blob_name: Bronze blob name
 
     Returns:
@@ -78,94 +78,133 @@ def create_cog(params: dict) -> dict:
             "success": True/False,
             "result": {...COG metadata...},
             "error": "ERROR_CODE" (if failed),
-            "message": "Error description" (if failed)
+            "message": "Error description" (if failed),
+            "traceback": "..." (if failed)
         }
     """
+    import traceback
 
-    print(f"🏗️ COG CREATION: Starting COG creation", file=sys.stderr, flush=True)
-
-    # Extract parameters
-    blob_url = params.get('blob_url')
-    source_crs = params.get('source_crs')
-    target_crs = params.get('target_crs', 'EPSG:4326')
-    raster_type = params.get('raster_type', {}).get('detected_type', 'unknown')
-    optimal_settings = params.get('raster_type', {}).get('optimal_cog_settings', {})
-
-    # User overrides or optimal settings
-    compression = params.get('compression') or optimal_settings.get('compression', 'deflate')
-    jpeg_quality = params.get('jpeg_quality', 85)
-    overview_resampling = params.get('overview_resampling') or optimal_settings.get('overview_resampling', 'cubic')
-    reproject_resampling = params.get('reproject_resampling') or optimal_settings.get('reproject_resampling', 'cubic')
-
-    output_blob_name = params.get('output_blob_name')
-
-    if not all([blob_url, source_crs, output_blob_name]):
+    # STEP 0: Initialize logger
+    logger = None
+    try:
+        from util_logger import LoggerFactory, ComponentType
+        logger = LoggerFactory.create_logger(ComponentType.SERVICE, "create_cog")
+        logger.info("✅ STEP 0: Logger initialized successfully")
+    except Exception as e:
         return {
             "success": False,
-            "error": "MISSING_PARAMETER",
-            "message": "blob_url, source_crs, and output_blob_name parameters are required"
+            "error": "LOGGER_INIT_FAILED",
+            "message": f"Failed to initialize logger: {e}",
+            "traceback": traceback.format_exc()
         }
 
-    print(f"📊 COG CREATION: Type: {raster_type}, Compression: {compression}", file=sys.stderr, flush=True)
-    print(f"📍 COG CREATION: CRS: {source_crs} → {target_crs}", file=sys.stderr, flush=True)
-
-    # Lazy import dependencies
+    # STEP 1: Extract and validate parameters
     try:
+        logger.info("🔄 STEP 1: Extracting and validating parameters...")
+
+        blob_url = params.get('blob_url')
+        source_crs = params.get('source_crs')
+        target_crs = params.get('target_crs', 'EPSG:4326')
+        raster_type = params.get('raster_type', {}).get('detected_type', 'unknown')
+        optimal_settings = params.get('raster_type', {}).get('optimal_cog_settings', {})
+
+        # User overrides or optimal settings
+        compression = params.get('compression') or optimal_settings.get('compression', 'deflate')
+        jpeg_quality = params.get('jpeg_quality', 85)
+        overview_resampling = params.get('overview_resampling') or optimal_settings.get('overview_resampling', 'cubic')
+        reproject_resampling = params.get('reproject_resampling') or optimal_settings.get('reproject_resampling', 'cubic')
+
+        output_blob_name = params.get('output_blob_name')
+        container_name = params.get('container_name', 'unknown')
+        blob_name = params.get('blob_name', 'unknown')
+
+        if not all([blob_url, source_crs, output_blob_name]):
+            missing = []
+            if not blob_url: missing.append('blob_url')
+            if not source_crs: missing.append('source_crs')
+            if not output_blob_name: missing.append('output_blob_name')
+
+            logger.error(f"❌ STEP 1 FAILED: Missing required parameters: {', '.join(missing)}")
+            return {
+                "success": False,
+                "error": "PARAMETER_ERROR",
+                "message": f"Missing required parameters: {', '.join(missing)}"
+            }
+
+        logger.info(f"✅ STEP 1: Parameters validated - blob={blob_name}, container={container_name}")
+        logger.info(f"   Type: {raster_type}, Compression: {compression}, CRS: {source_crs} → {target_crs}")
+
+    except Exception as e:
+        logger.error(f"❌ STEP 1 FAILED: {e}\n{traceback.format_exc()}")
+        return {
+            "success": False,
+            "error": "PARAMETER_ERROR",
+            "message": f"Failed to extract parameters: {e}",
+            "traceback": traceback.format_exc()
+        }
+
+    # STEP 2: Lazy import dependencies
+    try:
+        logger.info("🔄 STEP 2: Lazy importing rasterio and rio-cogeo dependencies...")
         rasterio, Resampling, cog_translate, cog_profiles = _lazy_imports()
+        logger.info("✅ STEP 2: Dependencies imported successfully (rasterio, rio-cogeo)")
     except ImportError as e:
+        logger.error(f"❌ STEP 2 FAILED: {e}\n{traceback.format_exc()}")
         return {
             "success": False,
-            "error": "IMPORT_ERROR",
-            "message": f"Failed to import rio-cogeo: {e}"
+            "error": "DEPENDENCY_LOAD_FAILED",
+            "message": f"Failed to import rio-cogeo dependencies: {e}",
+            "traceback": traceback.format_exc()
         }
 
-    # Import blob storage
+    # STEP 2b: Import blob storage
     try:
+        logger.info("🔄 STEP 2b: Importing BlobRepository...")
         from infrastructure.blob import BlobRepository
+        logger.info("✅ STEP 2b: BlobRepository imported successfully")
     except ImportError as e:
+        logger.error(f"❌ STEP 2b FAILED: {e}\n{traceback.format_exc()}")
         return {
             "success": False,
-            "error": "IMPORT_ERROR",
-            "message": f"Failed to import BlobRepository: {e}"
+            "error": "DEPENDENCY_LOAD_FAILED",
+            "message": f"Failed to import BlobRepository: {e}",
+            "traceback": traceback.format_exc()
         }
 
-    # Create temp directory for processing
-    temp_dir = tempfile.mkdtemp(prefix="cog_")
-    local_output = os.path.join(temp_dir, "output_cog.tif")
+    # STEP 3: Setup COG profile and configuration
+    temp_dir = None
+    local_output = None
 
+    # Wrap entire COG creation in try-finally for cleanup
     try:
+        # STEP 3: Setup COG profile and configuration
+        logger.info("🔄 STEP 3: Setting up COG profile and temp directory...")
+
+        # Create temp directory
+        temp_dir = tempfile.mkdtemp(prefix="cog_")
+        local_output = os.path.join(temp_dir, "output_cog.tif")
+        logger.info(f"   Created temp directory: {temp_dir}")
+
         start_time = datetime.now(timezone.utc)
 
         # Get COG profile for compression type
         try:
             cog_profile = cog_profiles.get(compression)
+            logger.info(f"   Using COG profile: {compression}")
         except KeyError:
-            print(f"⚠️ COG CREATION: Unknown compression '{compression}', using deflate", file=sys.stderr, flush=True)
+            logger.warning(f"⚠️ Unknown compression '{compression}', falling back to deflate")
             cog_profile = cog_profiles.get('deflate')
 
         # Add JPEG quality if using JPEG compression
         if compression == "jpeg":
             cog_profile["QUALITY"] = jpeg_quality
-
-        # Determine if reprojection needed
-        needs_reprojection = (str(source_crs) != str(target_crs))
-
-        # Configure reprojection if needed
-        if needs_reprojection:
-            print(f"🔄 COG CREATION: Reprojection needed: {source_crs} → {target_crs}", file=sys.stderr, flush=True)
-            config = {
-                "dst_crs": target_crs,
-                "resampling": getattr(Resampling, reproject_resampling),
-            }
-        else:
-            print(f"✓ COG CREATION: No reprojection needed (already {target_crs})", file=sys.stderr, flush=True)
-            config = {}
+            logger.info(f"   JPEG quality: {jpeg_quality}")
 
         # Get resampling enum for overviews
         try:
             overview_resampling_enum = getattr(Resampling, overview_resampling)
         except AttributeError:
-            print(f"⚠️ COG CREATION: Unknown resampling '{overview_resampling}', using cubic", file=sys.stderr, flush=True)
+            logger.warning(f"⚠️ Unknown resampling '{overview_resampling}', using cubic")
             overview_resampling_enum = Resampling.cubic
 
         # Get in_memory setting from config
@@ -173,17 +212,45 @@ def create_cog(params: dict) -> dict:
         config_obj = get_config()
         in_memory = config_obj.raster_cog_in_memory
 
-        print(f"🎯 COG CREATION: Creating COG with {compression} compression...", file=sys.stderr, flush=True)
-        print(f"💾 COG CREATION: Processing mode: {'in-memory (RAM)' if in_memory else 'disk-based (/tmp SSD)'}", file=sys.stderr, flush=True)
+        logger.info(f"✅ STEP 3: COG profile configured")
+        logger.info(f"   Processing mode: {'in-memory (RAM)' if in_memory else 'disk-based (/tmp SSD)'}")
 
-        # Create COG (with optional reprojection in single pass)
+        # STEP 4: Determine reprojection needs
+        logger.info("🔄 STEP 4: Checking CRS and reprojection requirements...")
+
+        needs_reprojection = (str(source_crs) != str(target_crs))
+
+        # Configure reprojection if needed
+        if needs_reprojection:
+            logger.info(f"   Reprojection needed: {source_crs} → {target_crs}")
+            config = {
+                "dst_crs": target_crs,
+                "resampling": getattr(Resampling, reproject_resampling),
+            }
+            logger.info(f"   Reprojection resampling: {reproject_resampling}")
+        else:
+            logger.info(f"   No reprojection needed (already {target_crs})")
+            config = {}
+
+        logger.info(f"✅ STEP 4: CRS check complete")
+
+        # STEP 5: Create COG (with optional reprojection in single pass)
+        logger.info("🔄 STEP 5: Creating COG with cog_translate()...")
+        logger.info(f"   Input: {blob_url}")
+        logger.info(f"   Output: {local_output}")
+        logger.info(f"   Compression: {compression}, Overview resampling: {overview_resampling}")
+
+        # rio-cogeo expects string name, not enum object
+        overview_resampling_name = overview_resampling_enum.name if hasattr(overview_resampling_enum, 'name') else overview_resampling
+        logger.info(f"   Overview resampling (for cog_translate): {overview_resampling_name}")
+
         cog_translate(
             blob_url,
             local_output,
             cog_profile,
             config=config,
             overview_level=None,  # Auto-calculate optimal levels
-            overview_resampling=overview_resampling_enum,
+            overview_resampling=overview_resampling_name,  # Use string name, not enum
             in_memory=in_memory,  # Configurable: True (default) for small files, False for large
             quiet=False,
         )
@@ -199,58 +266,56 @@ def create_cog(params: dict) -> dict:
 
         elapsed_time = (datetime.now(timezone.utc) - start_time).total_seconds()
 
-        print(f"✅ COG CREATION: COG created - {output_size_mb:.1f} MB, {len(overviews)} overview levels", file=sys.stderr, flush=True)
-        print(f"⏱️ COG CREATION: Processing time: {elapsed_time:.2f}s", file=sys.stderr, flush=True)
+        logger.info(f"✅ STEP 5: COG created successfully")
+        logger.info(f"   Size: {output_size_mb:.1f} MB, Overview levels: {len(overviews)}")
+        logger.info(f"   Processing time: {elapsed_time:.2f}s")
 
-        # Upload to silver container OR save locally for testing
-        container_name = params.get('container_name', 'unknown')
+        # STEP 6: Upload to silver container OR save locally for testing
+        logger.info("🔄 STEP 6: Uploading COG to silver container...")
 
         if container_name == 'local':
             # LOCAL TESTING MODE: Save to output path instead of uploading
+            logger.info("   LOCAL TESTING MODE: Saving to local filesystem...")
             import shutil
             final_output = output_blob_name
             shutil.copy(local_output, final_output)
-            print(f"💾 COG CREATION: Saved locally to: {final_output}", file=sys.stderr, flush=True)
+            logger.info(f"   Saved locally to: {final_output}")
             silver_container = "local"
 
         else:
             # PRODUCTION MODE: Upload to Azure Blob Storage
-            print(f"☁️ COG CREATION: Uploading to silver: {output_blob_name}", file=sys.stderr, flush=True)
+            logger.info(f"   PRODUCTION MODE: Uploading to Azure blob storage...")
 
-            try:
-                from infrastructure import BlobRepository
-                blob_infra = BlobRepository()
+            from infrastructure import BlobRepository
+            blob_infra = BlobRepository()
 
-                # Get silver container from config
-                from config import get_config
-                config_obj = get_config()
-                silver_container = config_obj.silver_container_name
+            # Get silver container from config
+            from config import get_config
+            config_obj = get_config()
+            silver_container = config_obj.silver_container_name
 
-                # Upload
-                with open(local_output, 'rb') as f:
-                    blob_infra.upload_blob(
-                        container_name=silver_container,
-                        blob_name=output_blob_name,
-                        data=f.read()
-                    )
+            logger.info(f"   Target container: {silver_container}")
+            logger.info(f"   Target blob: {output_blob_name}")
 
-                print(f"✅ COG CREATION: Uploaded to silver container", file=sys.stderr, flush=True)
+            # Upload
+            with open(local_output, 'rb') as f:
+                blob_infra.upload_blob(
+                    container_name=silver_container,
+                    blob_name=output_blob_name,
+                    data=f.read()
+                )
 
-            except Exception as e:
-                return {
-                    "success": False,
-                    "error": "UPLOAD_FAILED",
-                    "message": f"Failed to upload COG to silver container: {e}"
-                }
+            logger.info(f"✅ STEP 6: COG uploaded successfully to {silver_container}/{output_blob_name}")
 
         # Success result
+        logger.info("🎉 COG creation pipeline completed successfully")
         return {
             "success": True,
             "result": {
                 "cog_blob": output_blob_name,
                 "cog_container": silver_container,
-                "source_blob": params.get('blob_name', 'unknown'),
-                "source_container": params.get('container_name', 'unknown'),
+                "source_blob": blob_name,
+                "source_container": container_name,
                 "reprojection_performed": needs_reprojection,
                 "source_crs": str(source_crs),
                 "target_crs": str(target_crs),
@@ -269,25 +334,45 @@ def create_cog(params: dict) -> dict:
         }
 
     except Exception as e:
-        import traceback
-        print(f"❌ COG CREATION: Failed - {e}", file=sys.stderr, flush=True)
-        print(traceback.format_exc(), file=sys.stderr, flush=True)
+        # Catch all errors from STEPs 3-6
+        logger.error(f"❌ COG CREATION FAILED: {e}\n{traceback.format_exc()}")
+
+        # Determine which step failed based on what variables are defined
+        if 'cog_profile' not in locals():
+            error_code = "SETUP_FAILED"
+            step_info = "STEP 3 (setup)"
+        elif 'config' not in locals():
+            error_code = "CRS_CHECK_FAILED"
+            step_info = "STEP 4 (CRS check)"
+        elif 'output_size_mb' not in locals():
+            error_code = "COG_TRANSLATE_FAILED"
+            step_info = "STEP 5 (cog_translate)"
+        elif 'silver_container' not in locals():
+            error_code = "UPLOAD_FAILED"
+            step_info = "STEP 6 (upload)"
+        else:
+            error_code = "COG_CREATION_FAILED"
+            step_info = "Unknown step"
 
         return {
             "success": False,
-            "error": "COG_CREATION_FAILED",
-            "message": f"Failed to create COG: {e}",
-            "exception": str(e),
+            "error": error_code,
+            "message": f"{step_info} failed: {e}",
             "traceback": traceback.format_exc()
         }
 
     finally:
-        # Cleanup temp files
-        try:
-            if os.path.exists(local_output):
-                os.remove(local_output)
-            if os.path.exists(temp_dir):
-                os.rmdir(temp_dir)
-            print(f"🧹 COG CREATION: Cleaned up temp files", file=sys.stderr, flush=True)
-        except Exception as e:
-            print(f"⚠️ COG CREATION: Failed to cleanup temp files: {e}", file=sys.stderr, flush=True)
+        # STEP 7: Cleanup temp files (non-critical)
+        if logger and temp_dir and local_output:
+            try:
+                logger.info("🔄 STEP 7: Cleaning up temporary files...")
+                if os.path.exists(local_output):
+                    os.remove(local_output)
+                    logger.info(f"   Removed: {local_output}")
+                if os.path.exists(temp_dir):
+                    os.rmdir(temp_dir)
+                    logger.info(f"   Removed: {temp_dir}")
+                logger.info("✅ STEP 7: Cleanup complete")
+            except Exception as e:
+                logger.warning(f"⚠️ STEP 7: Cleanup warning (non-critical): {e}")
+                # Don't fail the entire operation due to cleanup issues

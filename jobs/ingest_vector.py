@@ -166,6 +166,102 @@ class IngestVectorJob:
         return job_hash
 
     @staticmethod
+    def create_job_record(job_id: str, params: dict) -> dict:
+        """
+        Create job record for database storage.
+
+        Args:
+            job_id: Generated job ID
+            params: Validated parameters
+
+        Returns:
+            Job record dict
+        """
+        from infrastructure import RepositoryFactory
+        from core.models import JobRecord, JobStatus
+
+        # Create job record object
+        job_record = JobRecord(
+            job_id=job_id,
+            job_type="ingest_vector",
+            parameters=params,
+            status=JobStatus.QUEUED,
+            stage=1,
+            total_stages=2,
+            stage_results={},
+            metadata={
+                "description": "Load vector file and ingest to PostGIS with parallel chunked uploads",
+                "created_by": "IngestVectorJob",
+                "blob_name": params.get("blob_name"),
+                "table_name": params.get("table_name"),
+                "file_extension": params.get("file_extension"),
+                "container_name": params.get("container_name")
+            }
+        )
+
+        # Persist to database
+        repos = RepositoryFactory.create_repositories()
+        job_repo = repos['job_repo']
+        job_repo.create_job(job_record)
+
+        # Return as dict
+        return job_record.model_dump()
+
+    @staticmethod
+    def queue_job(job_id: str, params: dict) -> dict:
+        """
+        Queue job for processing using Service Bus.
+
+        Args:
+            job_id: Job ID
+            params: Validated parameters
+
+        Returns:
+            Queue result information
+        """
+        from infrastructure.service_bus import ServiceBusRepository
+        from core.schema.queue import JobQueueMessage
+        from config import get_config
+        from util_logger import LoggerFactory, ComponentType
+        import uuid
+
+        logger = LoggerFactory.create_logger(ComponentType.CONTROLLER, "IngestVectorJob.queue_job")
+
+        logger.info(f"🚀 Starting queue_job for job_id={job_id}")
+
+        # Get config for queue name
+        config = get_config()
+        queue_name = config.service_bus_jobs_queue
+
+        # Create Service Bus repository
+        service_bus_repo = ServiceBusRepository()
+
+        # Create job queue message
+        correlation_id = str(uuid.uuid4())
+        job_message = JobQueueMessage(
+            job_id=job_id,
+            job_type="ingest_vector",
+            stage=1,
+            parameters=params,
+            correlation_id=correlation_id
+        )
+
+        # Send to Service Bus jobs queue
+        message_id = service_bus_repo.send_message(queue_name, job_message)
+        logger.info(f"✅ Message sent successfully - message_id={message_id}")
+
+        result = {
+            "queued": True,
+            "queue_type": "service_bus",
+            "queue_name": queue_name,
+            "message_id": message_id,
+            "job_id": job_id
+        }
+
+        logger.info(f"🎉 Job queued successfully - {result}")
+        return result
+
+    @staticmethod
     def create_tasks_for_stage(stage: int, job_params: dict, job_id: str, previous_results: list = None) -> list[dict]:
         """
         Generate task parameters for a stage.
@@ -242,41 +338,68 @@ class IngestVectorJob:
             return []
 
     @staticmethod
-    def aggregate_results(stage: int, task_results: list) -> dict:
+    def aggregate_job_results(context) -> Dict[str, Any]:
         """
-        Aggregate task results for a stage.
-
-        Stage 1: Return chunk metadata
-        Stage 2: Aggregate rows uploaded across all chunks
+        Aggregate results from all completed tasks into job summary.
 
         Args:
-            stage: Stage number
-            task_results: List of task result dicts
+            context: JobExecutionContext with task results
 
         Returns:
-            Aggregated results
+            Aggregated job results dict
         """
-        if stage == 1:
-            # Stage 1: Single task, just pass through
-            if task_results:
-                return task_results[0].get('result', {})
-            return {}
+        from core.models import TaskStatus
 
-        elif stage == 2:
-            # Stage 2: Aggregate rows uploaded
-            total_rows = sum(
-                result.get('result', {}).get('rows_uploaded', 0)
-                for result in task_results
-            )
-            successful_chunks = sum(
-                1 for result in task_results
-                if result.get('success', False)
-            )
+        task_results = context.task_results
+        params = context.parameters
 
-            return {
-                "total_rows_uploaded": total_rows,
-                "chunks_processed": successful_chunks,
-                "total_chunks": len(task_results)
+        # Separate tasks by stage
+        stage_1_tasks = [t for t in task_results if t.task_type == "prepare_vector_chunks"]
+        stage_2_tasks = [t for t in task_results if t.task_type == "upload_pickled_chunk"]
+
+        # Extract metadata from Stage 1
+        total_chunks = 0
+        chunk_metadata = {}
+        if stage_1_tasks and stage_1_tasks[0].result_data:
+            stage_1_result = stage_1_tasks[0].result_data.get("result", {})
+            total_chunks = stage_1_result.get("chunk_count", 0)
+            chunk_metadata = {
+                "chunk_count": total_chunks,
+                "total_features": stage_1_result.get("total_features", 0),
+                "chunk_paths": stage_1_result.get("chunk_paths", [])
             }
 
-        return {}
+        # Aggregate Stage 2 upload results
+        successful_chunks = sum(1 for t in stage_2_tasks if t.status == TaskStatus.COMPLETED)
+        failed_chunks = len(stage_2_tasks) - successful_chunks
+
+        total_rows_uploaded = sum(
+            t.result_data.get("result", {}).get("rows_uploaded", 0)
+            for t in stage_2_tasks
+            if t.result_data
+        )
+
+        # Build aggregated result
+        return {
+            "job_type": "ingest_vector",
+            "blob_name": params.get("blob_name"),
+            "file_extension": params.get("file_extension"),
+            "table_name": params.get("table_name"),
+            "schema": params.get("schema"),
+            "container_name": params.get("container_name"),
+            "summary": {
+                "total_chunks": total_chunks,
+                "chunks_uploaded": successful_chunks,
+                "chunks_failed": failed_chunks,
+                "total_rows_uploaded": total_rows_uploaded,
+                "success_rate": f"{(successful_chunks / len(stage_2_tasks) * 100):.1f}%" if stage_2_tasks else "0%",
+                "stage_1_metadata": chunk_metadata
+            },
+            "stages_completed": context.current_stage,
+            "total_tasks_executed": len(task_results),
+            "tasks_by_status": {
+                "completed": sum(1 for t in task_results if t.status == TaskStatus.COMPLETED),
+                "failed": sum(1 for t in task_results if t.status == TaskStatus.FAILED),
+                "pending": sum(1 for t in task_results if t.status == TaskStatus.PENDING)
+            }
+        }

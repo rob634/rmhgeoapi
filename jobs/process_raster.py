@@ -3,14 +3,15 @@
 # ============================================================================
 # PURPOSE: 2-stage workflow for processing rasters to COGs (<= 1GB)
 # EXPORTS: ProcessRasterWorkflow class
-# INTERFACES: Job workflow pattern with stages
+# INTERFACES: CoreMachine contract - create_tasks_for_stage() signature
 # PYDANTIC_MODELS: None (class attributes)
 # DEPENDENCIES: core.models.enums.TaskStatus
 # SOURCE: Bronze container rasters
 # SCOPE: Small file raster processing pipeline (<= 1GB)
 # VALIDATION: Stage 1 validates, Stage 2 creates COG
-# PATTERNS: Multi-stage workflow with result passing
+# PATTERNS: CoreMachine compliance - NO old patterns, NO fallbacks
 # ENTRY_POINTS: Registered in jobs/__init__.py ALL_JOBS
+# MIGRATION: 9 OCT 2025 - Removed create_stage_X_tasks, added create_tasks_for_stage
 # ============================================================================
 
 """
@@ -35,9 +36,14 @@ Key Innovation:
 - rio-cogeo combines reprojection + COG creation in one pass
 - Eliminates intermediate files
 - Type-specific optimization (JPEG for RGB, WebP for RGBA, LERC for DEM)
+
+Author: Robert and Geospatial Claude Legion
+Date: 9 OCT 2025
 """
 
 from typing import List, Dict, Any
+import hashlib
+import json
 
 
 class ProcessRasterWorkflow:
@@ -71,7 +77,7 @@ class ProcessRasterWorkflow:
 
     parameters_schema: Dict[str, Any] = {
         "blob_name": {"type": "str", "required": True},
-        "container": {"type": "str", "required": True, "default": None},  # Uses config.bronze_container_name if None
+        "container_name": {"type": "str", "required": True, "default": None},  # Uses config.bronze_container_name if None
         "input_crs": {"type": "str", "required": False, "default": None},
         "raster_type": {
             "type": "str",
@@ -88,111 +94,351 @@ class ProcessRasterWorkflow:
     }
 
     @staticmethod
-    def create_stage_1_tasks(context) -> List[Dict[str, Any]]:
+    def validate_job_parameters(params: dict) -> dict:
         """
-        Create Stage 1 task: Validate raster.
+        Validate job parameters.
 
-        Returns single task to validate the raster file.
+        Required:
+            blob_name: str - Blob path in container
+
+        Optional:
+            container_name: str - Container name (default: config.bronze_container_name)
+            input_crs: str - User-provided CRS override
+            raster_type: str - Expected type for validation
+            compression: str - Compression method override
+            jpeg_quality: int - JPEG quality (1-100)
+            overview_resampling: str - Resampling method for overviews
+            reproject_resampling: str - Resampling method for reprojection
+            strict_mode: bool - Fail on warnings
+            _skip_validation: bool - TESTING ONLY
+
+        Returns:
+            Validated parameters dict
+
+        Raises:
+            ValueError: If parameters are invalid
         """
-        from config import get_config
-        from infrastructure.blob import BlobRepository
+        validated = {}
 
-        params = context.parameters
-        config = get_config()
+        # Validate blob_name (required)
+        if "blob_name" not in params:
+            raise ValueError("blob_name is required")
 
-        # Use config default if container not specified
-        container = params.get('container') or config.bronze_container_name
+        blob_name = params["blob_name"]
+        if not isinstance(blob_name, str) or not blob_name.strip():
+            raise ValueError("blob_name must be a non-empty string")
 
-        # Build blob URL with SAS token
-        blob_infra = BlobRepository()
+        validated["blob_name"] = blob_name.strip()
 
-        blob_url = blob_infra.get_blob_url_with_sas(
-            container_name=container,
-            blob_name=params.get('blob_name')
-        )
+        # Validate container_name (optional)
+        container_name = params.get("container_name")
+        if container_name is not None:
+            if not isinstance(container_name, str) or not container_name.strip():
+                raise ValueError("container_name must be a non-empty string")
+            validated["container_name"] = container_name.strip()
+        else:
+            validated["container_name"] = None
 
-        return [{
-            "task_type": "validate_raster",
-            "parameters": {
-                "blob_url": blob_url,
-                "blob_name": params.get('blob_name'),
-                "container": container,
-                "input_crs": params.get('input_crs'),
-                "raster_type": params.get('raster_type', 'auto'),
-                "strict_mode": params.get('strict_mode', False),
-                "_skip_validation": params.get('_skip_validation', False)
-            }
-        }]
+        # Validate input_crs (optional)
+        input_crs = params.get("input_crs")
+        if input_crs is not None:
+            if not isinstance(input_crs, str) or not input_crs.strip():
+                raise ValueError("input_crs must be a non-empty string")
+            validated["input_crs"] = input_crs.strip()
+
+        # Validate raster_type (optional)
+        raster_type = params.get("raster_type", "auto")
+        allowed_types = ["auto", "rgb", "rgba", "dem", "categorical", "multispectral", "nir"]
+        if raster_type not in allowed_types:
+            raise ValueError(f"raster_type must be one of {allowed_types}, got {raster_type}")
+        validated["raster_type"] = raster_type
+
+        # Validate compression (optional)
+        compression = params.get("compression")
+        if compression is not None:
+            if not isinstance(compression, str):
+                raise ValueError("compression must be a string")
+            validated["compression"] = compression
+
+        # Validate jpeg_quality (optional)
+        jpeg_quality = params.get("jpeg_quality", 85)
+        if not isinstance(jpeg_quality, int):
+            try:
+                jpeg_quality = int(jpeg_quality)
+            except (ValueError, TypeError):
+                raise ValueError("jpeg_quality must be an integer")
+        if jpeg_quality < 1 or jpeg_quality > 100:
+            raise ValueError(f"jpeg_quality must be between 1 and 100, got {jpeg_quality}")
+        validated["jpeg_quality"] = jpeg_quality
+
+        # Validate overview_resampling (optional)
+        overview_resampling = params.get("overview_resampling")
+        if overview_resampling is not None:
+            if not isinstance(overview_resampling, str):
+                raise ValueError("overview_resampling must be a string")
+            validated["overview_resampling"] = overview_resampling
+
+        # Validate reproject_resampling (optional)
+        reproject_resampling = params.get("reproject_resampling")
+        if reproject_resampling is not None:
+            if not isinstance(reproject_resampling, str):
+                raise ValueError("reproject_resampling must be a string")
+            validated["reproject_resampling"] = reproject_resampling
+
+        # Validate strict_mode (optional)
+        strict_mode = params.get("strict_mode", False)
+        if not isinstance(strict_mode, bool):
+            raise ValueError("strict_mode must be boolean")
+        validated["strict_mode"] = strict_mode
+
+        # Validate _skip_validation (optional, testing only)
+        skip_validation = params.get("_skip_validation", False)
+        if not isinstance(skip_validation, bool):
+            raise ValueError("_skip_validation must be boolean")
+        validated["_skip_validation"] = skip_validation
+
+        return validated
 
     @staticmethod
-    def create_stage_2_tasks(context) -> List[Dict[str, Any]]:
+    def generate_job_id(params: dict) -> str:
         """
-        Create Stage 2 task: Create COG with optional reprojection.
+        Generate deterministic job ID from parameters.
 
-        Uses validation results from Stage 1 to determine:
-        - Source CRS
-        - Raster type (for optimal settings)
-        - Whether reprojection is needed
+        Same parameters = same job ID (idempotency).
         """
+        # Sort keys for consistent hashing
+        param_str = json.dumps(params, sort_keys=True)
+        job_hash = hashlib.sha256(param_str.encode()).hexdigest()
+        return job_hash
+
+    @staticmethod
+    def create_job_record(job_id: str, params: dict) -> dict:
+        """
+        Create job record for database storage.
+
+        Args:
+            job_id: Generated job ID
+            params: Validated parameters
+
+        Returns:
+            Job record dict
+        """
+        from infrastructure import RepositoryFactory
+        from core.models import JobRecord, JobStatus
+
+        # Create job record object
+        job_record = JobRecord(
+            job_id=job_id,
+            job_type="process_raster",
+            parameters=params,
+            status=JobStatus.QUEUED,
+            stage=1,
+            total_stages=2,
+            stage_results={},
+            metadata={
+                "description": "Process raster to COG pipeline",
+                "created_by": "ProcessRasterWorkflow",
+                "blob_name": params.get("blob_name"),
+                "container_name": params.get("container_name"),
+                "raster_type": params.get("raster_type", "auto")
+            }
+        )
+
+        # Persist to database
+        repos = RepositoryFactory.create_repositories()
+        job_repo = repos['job_repo']
+        job_repo.create_job(job_record)
+
+        # Return as dict
+        return job_record.model_dump()
+
+    @staticmethod
+    def queue_job(job_id: str, params: dict) -> dict:
+        """
+        Queue job for processing using Service Bus.
+
+        Args:
+            job_id: Job ID
+            params: Validated parameters
+
+        Returns:
+            Queue result information
+        """
+        from infrastructure.service_bus import ServiceBusRepository
+        from core.schema.queue import JobQueueMessage
+        from config import get_config
+        from util_logger import LoggerFactory, ComponentType
+        import uuid
+
+        logger = LoggerFactory.create_logger(ComponentType.CONTROLLER, "ProcessRasterWorkflow.queue_job")
+
+        logger.info(f"🚀 Starting queue_job for job_id={job_id}")
+
+        # Get config for queue name
+        config = get_config()
+        queue_name = config.service_bus_jobs_queue
+
+        # Create Service Bus repository
+        service_bus_repo = ServiceBusRepository()
+
+        # Create job queue message
+        correlation_id = str(uuid.uuid4())
+        job_message = JobQueueMessage(
+            job_id=job_id,
+            job_type="process_raster",
+            stage=1,
+            parameters=params,
+            correlation_id=correlation_id
+        )
+
+        # Send to Service Bus jobs queue
+        message_id = service_bus_repo.send_message(queue_name, job_message)
+        logger.info(f"✅ Message sent successfully - message_id={message_id}")
+
+        result = {
+            "queued": True,
+            "queue_type": "service_bus",
+            "queue_name": queue_name,
+            "message_id": message_id,
+            "job_id": job_id
+        }
+
+        logger.info(f"🎉 Job queued successfully - {result}")
+        return result
+
+    @staticmethod
+    def create_tasks_for_stage(stage: int, job_params: dict, job_id: str, previous_results: list = None) -> list[dict]:
+        """
+        Generate task parameters for a stage.
+
+        CRITICAL: This is the ONLY method CoreMachine calls. Old create_stage_X_tasks methods REMOVED.
+
+        Stage 1: Single task to validate raster
+        Stage 2: Single task to create COG (requires Stage 1 results)
+
+        Args:
+            stage: Stage number (1 or 2)
+            job_params: Job parameters from database
+            job_id: Job ID for task ID generation
+            previous_results: Results from previous stage (required for Stage 2)
+
+        Returns:
+            List of task parameter dicts
+
+        Raises:
+            ValueError: If Stage 2 called without previous_results or invalid stage number
+        """
+        from core.task_id import generate_deterministic_task_id
         from config import get_config
         from infrastructure.blob import BlobRepository
 
-        params = context.parameters
         config = get_config()
-        stage_1_results = context.stage_results.get(1, [])
 
-        if not stage_1_results:
-            raise ValueError("Stage 1 validation results not found")
+        if stage == 1:
+            # Stage 1: Validate raster
+            # Use config default if container_name not specified
+            container_name = job_params.get('container_name') or config.bronze_container_name
 
-        validation_result = stage_1_results[0].result_data.get('result', {})
+            # Build blob URL with SAS token
+            blob_repo = BlobRepository.instance()
+            blob_url = blob_repo.get_blob_url_with_sas(
+                container_name=container_name,
+                blob_name=job_params['blob_name'],
+                hours=1
+            )
 
-        # Get source CRS from validation
-        source_crs = validation_result.get('source_crs')
-        if not source_crs:
-            raise ValueError("No source_crs found in validation results")
+            task_id = generate_deterministic_task_id(job_id, 1, "validate")
 
-        # Use config default if container not specified
-        container = params.get('container') or config.bronze_container_name
+            return [
+                {
+                    "task_id": task_id,
+                    "task_type": "validate_raster",
+                    "parameters": {
+                        "blob_url": blob_url,
+                        "blob_name": job_params['blob_name'],
+                        "container_name": container_name,
+                        "input_crs": job_params.get('input_crs'),
+                        "raster_type": job_params.get('raster_type', 'auto'),
+                        "strict_mode": job_params.get('strict_mode', False),
+                        "_skip_validation": job_params.get('_skip_validation', False)
+                    }
+                }
+            ]
 
-        # Build blob URL with SAS token
-        blob_infra = BlobRepository()
+        elif stage == 2:
+            # Stage 2: Create COG
+            # REQUIRES previous_results from Stage 1
+            if not previous_results:
+                raise ValueError("Stage 2 requires Stage 1 results - previous_results cannot be None")
 
-        blob_url = blob_infra.get_blob_url_with_sas(
-            container_name=container,
-            blob_name=params.get('blob_name')
-        )
+            # Extract validation result from Stage 1 task
+            stage_1_result = previous_results[0]
+            if not stage_1_result.get('success'):
+                raise ValueError(f"Stage 1 validation failed: {stage_1_result.get('error')}")
 
-        # Output blob name in silver container
-        # Pattern: same path as bronze but in silver, with _cog suffix
-        blob_name = params.get('blob_name')
-        if blob_name.lower().endswith('.tif'):
-            output_blob_name = blob_name[:-4] + '_cog.tif'
+            validation_result = stage_1_result.get('result', {})
+
+            # Get source CRS from validation (REQUIRED)
+            source_crs = validation_result.get('source_crs')
+            if not source_crs:
+                raise ValueError("No source_crs found in Stage 1 validation results")
+
+            # Use config default if container_name not specified
+            container_name = job_params.get('container_name') or config.bronze_container_name
+
+            # Build blob URL with SAS token
+            blob_repo = BlobRepository.instance()
+            blob_url = blob_repo.get_blob_url_with_sas(
+                container_name=container_name,
+                blob_name=job_params['blob_name'],
+                hours=1
+            )
+
+            # Output blob name in silver container
+            # Pattern: same path as bronze but in silver, with _cog suffix
+            blob_name = job_params['blob_name']
+            if blob_name.lower().endswith('.tif'):
+                output_blob_name = blob_name[:-4] + '_cog.tif'
+            else:
+                output_blob_name = blob_name + '_cog.tif'
+
+            task_id = generate_deterministic_task_id(job_id, 2, "create_cog")
+
+            return [
+                {
+                    "task_id": task_id,
+                    "task_type": "create_cog",
+                    "parameters": {
+                        "blob_url": blob_url,
+                        "blob_name": job_params['blob_name'],
+                        "container_name": container_name,
+                        "source_crs": source_crs,
+                        "target_crs": "EPSG:4326",
+                        "raster_type": validation_result.get('raster_type', {}),
+                        "output_blob_name": output_blob_name,
+                        "compression": job_params.get('compression'),  # User override or None
+                        "jpeg_quality": job_params.get('jpeg_quality', 85),
+                        "overview_resampling": job_params.get('overview_resampling'),  # User override or None
+                        "reproject_resampling": job_params.get('reproject_resampling'),  # User override or None
+                    }
+                }
+            ]
+
         else:
-            output_blob_name = blob_name + '_cog.tif'
-
-        return [{
-            "task_type": "create_cog",
-            "parameters": {
-                "blob_url": blob_url,
-                "blob_name": params.get('blob_name'),
-                "container": container,
-                "source_crs": source_crs,
-                "target_crs": "EPSG:4326",
-                "raster_type": validation_result.get('raster_type', {}),
-                "output_blob_name": output_blob_name,
-                "compression": params.get('compression'),  # User override or None
-                "jpeg_quality": params.get('jpeg_quality', 85),
-                "overview_resampling": params.get('overview_resampling'),  # User override or None
-                "reproject_resampling": params.get('reproject_resampling'),  # User override or None
-            }
-        }]
+            raise ValueError(f"ProcessRasterWorkflow only has 2 stages, got stage {stage}")
 
     @staticmethod
     def aggregate_job_results(context) -> Dict[str, Any]:
         """
         Aggregate results from all completed tasks into job summary.
+
+        Args:
+            context: JobExecutionContext with task results
+
+        Returns:
+            Aggregated job results dict
         """
-        from core.models.enums import TaskStatus
+        from core.models import TaskStatus
 
         task_results = context.task_results
         params = context.parameters
@@ -229,7 +475,7 @@ class ProcessRasterWorkflow:
         return {
             "job_type": "process_raster",
             "source_blob": params.get("blob_name"),
-            "source_container": params.get("container"),
+            "source_container": params.get("container_name"),
             "validation": validation_summary,
             "cog": cog_summary,
             "stages_completed": context.current_stage,

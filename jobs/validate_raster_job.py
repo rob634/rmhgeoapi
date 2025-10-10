@@ -36,6 +36,8 @@ Date: 9 OCT 2025
 """
 
 from typing import List, Dict, Any
+import hashlib
+import json
 
 
 class ValidateRasterJob:
@@ -61,7 +63,7 @@ class ValidateRasterJob:
 
     parameters_schema: Dict[str, Any] = {
         "blob_name": {"type": "str", "required": True},
-        "container": {"type": "str", "required": True, "default": None},  # Uses config.bronze_container_name if None
+        "container_name": {"type": "str", "required": True, "default": None},  # Uses config.bronze_container_name if None
         "input_crs": {"type": "str", "required": False, "default": None},
         "raster_type": {
             "type": "str",
@@ -82,7 +84,7 @@ class ValidateRasterJob:
             blob_name: str - Blob path in container
 
         Optional:
-            container: str - Container name (default: config.bronze_container_name)
+            container_name: str - Container name (default: config.bronze_container_name)
             input_crs: str - User-provided CRS override
             raster_type: str - Expected type for validation
             strict_mode: bool - Fail on warnings
@@ -106,14 +108,14 @@ class ValidateRasterJob:
 
         validated["blob_name"] = blob_name.strip()
 
-        # Validate container (optional)
-        container = params.get("container")
-        if container is not None:
-            if not isinstance(container, str) or not container.strip():
-                raise ValueError("container must be a non-empty string")
-            validated["container"] = container.strip()
+        # Validate container_name (optional)
+        container_name = params.get("container_name")
+        if container_name is not None:
+            if not isinstance(container_name, str) or not container_name.strip():
+                raise ValueError("container_name must be a non-empty string")
+            validated["container_name"] = container_name.strip()
         else:
-            validated["container"] = None
+            validated["container_name"] = None
 
         # Validate input_crs (optional)
         input_crs = params.get("input_crs")
@@ -171,13 +173,13 @@ class ValidateRasterJob:
 
         config = get_config()
 
-        # Use config default if container not specified
-        container = job_params.get('container') or config.bronze_container_name
+        # Use config default if container_name not specified
+        container_name = job_params.get('container_name') or config.bronze_container_name
 
         # Build blob URL with SAS token
         blob_repo = BlobRepository.instance()
         blob_url = blob_repo.get_blob_url_with_sas(
-            container_name=container,
+            container_name=container_name,
             blob_name=job_params['blob_name'],
             hours=1
         )
@@ -191,7 +193,7 @@ class ValidateRasterJob:
                 "parameters": {
                     "blob_url": blob_url,
                     "blob_name": job_params['blob_name'],
-                    "container_name": container,
+                    "container_name": container_name,
                     "input_crs": job_params.get('input_crs'),
                     "raster_type": job_params.get('raster_type', 'auto'),
                     "strict_mode": job_params.get('strict_mode', False),
@@ -199,3 +201,150 @@ class ValidateRasterJob:
                 }
             }
         ]
+
+    @staticmethod
+    def generate_job_id(params: dict) -> str:
+        """
+        Generate deterministic job ID from parameters.
+
+        Same parameters = same job ID (idempotency).
+        """
+        # Sort keys for consistent hashing
+        param_str = json.dumps(params, sort_keys=True)
+        job_hash = hashlib.sha256(param_str.encode()).hexdigest()
+        return job_hash
+
+    @staticmethod
+    def create_job_record(job_id: str, params: dict) -> dict:
+        """
+        Create job record for database storage.
+
+        Args:
+            job_id: Generated job ID
+            params: Validated parameters
+
+        Returns:
+            Job record dict
+        """
+        from infrastructure import RepositoryFactory
+        from core.models import JobRecord, JobStatus
+
+        # Create job record object
+        job_record = JobRecord(
+            job_id=job_id,
+            job_type="validate_raster_job",
+            parameters=params,
+            status=JobStatus.QUEUED,
+            stage=1,
+            total_stages=1,
+            stage_results={},
+            metadata={
+                "description": "Standalone raster validation",
+                "created_by": "ValidateRasterJob",
+                "blob_name": params.get("blob_name"),
+                "container_name": params.get("container_name"),
+                "raster_type": params.get("raster_type", "auto")
+            }
+        )
+
+        # Persist to database
+        repos = RepositoryFactory.create_repositories()
+        job_repo = repos['job_repo']
+        job_repo.create_job(job_record)
+
+        # Return as dict
+        return job_record.model_dump()
+
+    @staticmethod
+    def queue_job(job_id: str, params: dict) -> dict:
+        """
+        Queue job for processing using Service Bus.
+
+        Args:
+            job_id: Job ID
+            params: Validated parameters
+
+        Returns:
+            Queue result information
+        """
+        from infrastructure.service_bus import ServiceBusRepository
+        from core.schema.queue import JobQueueMessage
+        from config import get_config
+        from util_logger import LoggerFactory, ComponentType
+        import uuid
+
+        logger = LoggerFactory.create_logger(ComponentType.CONTROLLER, "ValidateRasterJob.queue_job")
+
+        logger.info(f"🚀 Starting queue_job for job_id={job_id}")
+
+        # Get config for queue name
+        config = get_config()
+        queue_name = config.service_bus_jobs_queue
+
+        # Create Service Bus repository
+        service_bus_repo = ServiceBusRepository()
+
+        # Create job queue message
+        correlation_id = str(uuid.uuid4())
+        job_message = JobQueueMessage(
+            job_id=job_id,
+            job_type="validate_raster_job",
+            stage=1,
+            parameters=params,
+            correlation_id=correlation_id
+        )
+
+        # Send to Service Bus jobs queue
+        message_id = service_bus_repo.send_message(queue_name, job_message)
+        logger.info(f"✅ Message sent successfully - message_id={message_id}")
+
+        result = {
+            "queued": True,
+            "queue_type": "service_bus",
+            "queue_name": queue_name,
+            "message_id": message_id,
+            "job_id": job_id
+        }
+
+        logger.info(f"🎉 Job queued successfully - {result}")
+        return result
+
+    @staticmethod
+    def aggregate_job_results(context) -> Dict[str, Any]:
+        """
+        Aggregate results from completed task into job summary.
+
+        Args:
+            context: JobExecutionContext with task results
+
+        Returns:
+            Aggregated job results dict
+        """
+        from core.models import TaskStatus
+
+        task_results = context.task_results
+        params = context.parameters
+
+        # Single task - Stage 1
+        if task_results and task_results[0].result_data:
+            result = task_results[0].result_data.get("result", {})
+            # Handler returns "valid" field
+            validation_status = "passed" if result.get("valid") else "failed"
+
+            return {
+                "job_type": "validate_raster_job",
+                "blob_name": params.get("blob_name"),
+                "container_name": params.get("container_name"),
+                "validation_status": validation_status,
+                "validation_result": result,
+                "tasks_executed": len(task_results),
+                "task_status": task_results[0].status.value if hasattr(task_results[0].status, 'value') else str(task_results[0].status)
+            }
+        else:
+            return {
+                "job_type": "validate_raster_job",
+                "blob_name": params.get("blob_name"),
+                "container_name": params.get("container_name"),
+                "validation_status": "failed",
+                "error": "No task results available"
+            }

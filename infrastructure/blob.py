@@ -63,7 +63,7 @@ from io import BytesIO
 from typing import List, Dict, Any, Optional, Iterator, BinaryIO, Union
 
 # Azure SDK imports - These will fail fast if not installed
-from azure.storage.blob import BlobServiceClient, ContainerClient, BlobClient, generate_blob_sas, BlobSasPermissions
+from azure.storage.blob import BlobServiceClient, ContainerClient, BlobClient, generate_blob_sas, BlobSasPermissions, ContentSettings
 from azure.identity import DefaultAzureCredential
 from azure.core.exceptions import ResourceNotFoundError
 
@@ -348,9 +348,9 @@ class BlobRepository(IBlobRepository):
             logger.debug(f"Writing blob: {container}/{blob_path} (overwrite={overwrite})")
             
             blob_client.upload_blob(
-                data, 
-                overwrite=overwrite, 
-                content_settings={'content_type': content_type},
+                data,
+                overwrite=overwrite,
+                content_settings=ContentSettings(content_type=content_type),
                 metadata=metadata or {}
             )
             

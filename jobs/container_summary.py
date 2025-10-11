@@ -214,3 +214,131 @@ class ContainerSummaryWorkflow:
 
         logger.info(f"🎉 Job queued successfully - {result}")
         return result
+
+    @staticmethod
+    def aggregate_job_results(context) -> Dict[str, Any]:
+        """
+        Aggregate results from single container summary task.
+
+        Since this is a single-stage, single-task job, aggregation is simple:
+        just extract and pass through the comprehensive statistics from the task.
+
+        Args:
+            context: JobExecutionContext with task results
+
+        Returns:
+            Job results with statistics from the summary task
+        """
+        from core.models import TaskStatus
+        from util_logger import LoggerFactory, ComponentType
+
+        logger = LoggerFactory.create_logger(
+            ComponentType.CONTROLLER,
+            "ContainerSummaryWorkflow.aggregate_job_results"
+        )
+
+        try:
+            logger.info("🔄 STEP 1: Starting result aggregation...")
+
+            task_results = context.task_results
+            params = context.parameters
+
+            logger.info(f"   Total tasks: {len(task_results)}")
+            logger.info(f"   Container: {params.get('container_name')}")
+
+            # STEP 2: Extract single task result
+            try:
+                logger.info("🔄 STEP 2: Extracting task result...")
+
+                if not task_results:
+                    logger.error("   No task results found!")
+                    return {
+                        "job_type": "summarize_container",
+                        "container_name": params.get("container_name"),
+                        "error": "No task results found",
+                        "success": False
+                    }
+
+                summary_task = task_results[0]  # Only one task
+                logger.info(f"   Task status: {summary_task.status}")
+
+                # Check task status
+                if summary_task.status != TaskStatus.COMPLETED:
+                    logger.warning(f"   Task did not complete successfully: {summary_task.status}")
+                    error_msg = summary_task.result_data.get("error") if summary_task.result_data else "Unknown error"
+                    return {
+                        "job_type": "summarize_container",
+                        "container_name": params.get("container_name"),
+                        "error": error_msg,
+                        "task_status": summary_task.status.value if hasattr(summary_task.status, 'value') else str(summary_task.status),
+                        "success": False
+                    }
+
+                # Extract task result
+                if not summary_task.result_data:
+                    logger.error("   Task completed but has no result_data!")
+                    return {
+                        "job_type": "summarize_container",
+                        "container_name": params.get("container_name"),
+                        "error": "Task completed but no result data",
+                        "success": False
+                    }
+
+                task_result = summary_task.result_data.get("result", {})
+                logger.info(f"   Task result extracted: {len(task_result)} keys")
+
+            except Exception as e:
+                logger.error(f"❌ STEP 2 FAILED: Error extracting task result: {e}")
+                return {
+                    "job_type": "summarize_container",
+                    "container_name": params.get("container_name"),
+                    "error": f"Failed to extract task result: {e}",
+                    "success": False
+                }
+
+            # STEP 3: Build aggregated result (pass-through with job metadata)
+            try:
+                logger.info("🔄 STEP 3: Building final result...")
+
+                # Extract statistics from task result
+                statistics = task_result.get("statistics", {})
+                execution_info = task_result.get("execution_info", {})
+
+                result = {
+                    "job_type": "summarize_container",
+                    "container_name": params.get("container_name"),
+                    "file_limit": params.get("file_limit"),
+                    "filter": params.get("filter"),
+                    "analysis_timestamp": task_result.get("analysis_timestamp"),
+                    "summary": statistics,  # Complete statistics from task
+                    "execution_info": execution_info,
+                    "stages_completed": context.current_stage,
+                    "total_tasks_executed": len(task_results),
+                    "task_status": summary_task.status.value if hasattr(summary_task.status, 'value') else str(summary_task.status),
+                    "success": True
+                }
+
+                logger.info("✅ STEP 3: Result built successfully")
+                logger.info(f"🎉 Aggregation complete: {statistics.get('total_files', 0)} files, {statistics.get('total_size_gb', 0)} GB")
+
+                return result
+
+            except Exception as e:
+                logger.error(f"❌ STEP 3 FAILED: Error building result: {e}")
+                # Return partial result
+                return {
+                    "job_type": "summarize_container",
+                    "container_name": params.get("container_name"),
+                    "error": f"Failed to build final result: {e}",
+                    "raw_task_result": task_result,  # Include raw result for debugging
+                    "success": False
+                }
+
+        except Exception as e:
+            logger.error(f"❌ CRITICAL: Aggregation failed completely: {e}")
+            return {
+                "job_type": "summarize_container",
+                "error": f"Critical aggregation failure: {e}",
+                "fallback": True,
+                "success": False
+            }

@@ -298,3 +298,206 @@ class ListContainerContentsWorkflow:
 
         logger.info(f"🎉 Job queued successfully - {result}")
         return result
+
+    @staticmethod
+    def aggregate_job_results(context) -> Dict[str, Any]:
+        """
+        Aggregate results from list + analyze tasks.
+
+        This is critical for fan-out jobs - Stage 2 can create 1000+ parallel tasks.
+        Without proper aggregation, you lose visibility into what was analyzed.
+
+        Args:
+            context: JobExecutionContext with task results
+
+        Returns:
+            Aggregated job results dict with comprehensive statistics
+        """
+        from core.models import TaskStatus
+        from util_logger import LoggerFactory, ComponentType
+
+        logger = LoggerFactory.create_logger(ComponentType.CONTROLLER, "ListContainerContentsWorkflow.aggregate_job_results")
+
+        try:
+            logger.info("🔄 STEP 1: Starting result aggregation...")
+
+            task_results = context.task_results
+            params = context.parameters
+
+            logger.info(f"   Total tasks: {len(task_results)}")
+            logger.info(f"   Container: {params.get('container_name')}")
+
+            # STEP 2: Separate tasks by stage
+            try:
+                logger.info("🔄 STEP 2: Separating tasks by stage...")
+                list_tasks = [t for t in task_results if t.task_type == "list_container_blobs"]
+                analyze_tasks = [t for t in task_results if t.task_type == "analyze_single_blob"]
+
+                logger.info(f"   List tasks (Stage 1): {len(list_tasks)}")
+                logger.info(f"   Analyze tasks (Stage 2): {len(analyze_tasks)}")
+
+            except Exception as e:
+                logger.error(f"❌ STEP 2 FAILED: Error separating tasks: {e}")
+                raise
+
+            # STEP 3: Extract Stage 1 results (total blobs found)
+            total_blobs_found = 0
+            try:
+                logger.info("🔄 STEP 3: Extracting Stage 1 results...")
+
+                if list_tasks and list_tasks[0].result_data:
+                    stage_1_result = list_tasks[0].result_data.get("result", {})
+                    blob_names = stage_1_result.get("blob_names", [])
+                    total_blobs_found = len(blob_names)
+                    logger.info(f"   Total blobs found in Stage 1: {total_blobs_found}")
+                else:
+                    logger.warning("   No Stage 1 results found (list task may have failed)")
+
+            except Exception as e:
+                logger.error(f"❌ STEP 3 FAILED: Error extracting Stage 1 results: {e}")
+                # Don't raise - continue with Stage 2 aggregation
+                total_blobs_found = 0
+
+            # STEP 4: Count successful/failed analyses
+            try:
+                logger.info("🔄 STEP 4: Counting task statuses...")
+
+                successful_analyses = sum(1 for t in analyze_tasks if t.status == TaskStatus.COMPLETED)
+                failed_analyses = sum(1 for t in analyze_tasks if t.status == TaskStatus.FAILED)
+                pending_analyses = sum(1 for t in analyze_tasks if t.status == TaskStatus.PENDING)
+
+                logger.info(f"   Successful: {successful_analyses}")
+                logger.info(f"   Failed: {failed_analyses}")
+                logger.info(f"   Pending: {pending_analyses}")
+
+            except Exception as e:
+                logger.error(f"❌ STEP 4 FAILED: Error counting statuses: {e}")
+                successful_analyses = 0
+                failed_analyses = 0
+                pending_analyses = 0
+
+            # STEP 5: Aggregate blob statistics
+            total_size_bytes = 0
+            file_types = {}
+            largest_file = {"name": None, "size_mb": 0}
+            errors_encountered = []
+
+            try:
+                logger.info("🔄 STEP 5: Aggregating blob statistics...")
+
+                for i, task in enumerate(analyze_tasks):
+                    try:
+                        # Only aggregate completed tasks with result data
+                        if task.status == TaskStatus.COMPLETED and task.result_data:
+                            result = task.result_data.get("result", {})
+
+                            # Aggregate size
+                            try:
+                                size_bytes = result.get("size_bytes", 0)
+                                if isinstance(size_bytes, (int, float)) and size_bytes > 0:
+                                    total_size_bytes += size_bytes
+                            except Exception as e:
+                                logger.debug(f"   Warning: Could not aggregate size for task {i}: {e}")
+
+                            # Track largest file
+                            try:
+                                blob_name = result.get("blob_name", result.get("name"))
+                                size_mb = size_bytes / (1024 * 1024) if size_bytes > 0 else 0
+
+                                if size_mb > largest_file["size_mb"]:
+                                    largest_file = {
+                                        "name": blob_name,
+                                        "size_mb": round(size_mb, 2)
+                                    }
+                            except Exception as e:
+                                logger.debug(f"   Warning: Could not track largest file for task {i}: {e}")
+
+                            # Count file types by extension
+                            try:
+                                blob_name = result.get("blob_name", result.get("name", ""))
+                                if blob_name and isinstance(blob_name, str):
+                                    extension = blob_name.split('.')[-1].lower() if '.' in blob_name else "no_extension"
+                                    file_types[extension] = file_types.get(extension, 0) + 1
+                            except Exception as e:
+                                logger.debug(f"   Warning: Could not count file type for task {i}: {e}")
+
+                        # Track failed tasks
+                        elif task.status == TaskStatus.FAILED:
+                            error_msg = task.result_data.get("error", "Unknown error") if task.result_data else "No error info"
+                            errors_encountered.append({
+                                "task_id": task.task_id[:16] + "..." if hasattr(task, 'task_id') else "unknown",
+                                "error": error_msg
+                            })
+
+                    except Exception as e:
+                        logger.debug(f"   Warning: Error processing task {i}: {e}")
+                        continue
+
+                logger.info(f"   Total size: {total_size_bytes / (1024**3):.2f} GB")
+                logger.info(f"   File types: {len(file_types)} unique extensions")
+                logger.info(f"   Largest file: {largest_file['name']} ({largest_file['size_mb']} MB)")
+
+            except Exception as e:
+                logger.error(f"❌ STEP 5 FAILED: Error aggregating statistics: {e}")
+                # Continue with whatever we have
+
+            # STEP 6: Build aggregated result
+            try:
+                logger.info("🔄 STEP 6: Building final result...")
+
+                success_rate = f"{(successful_analyses / len(analyze_tasks) * 100):.1f}%" if analyze_tasks else "0%"
+
+                result = {
+                    "job_type": "list_container_contents",
+                    "container_name": params.get("container_name"),
+                    "file_limit": params.get("file_limit"),
+                    "filter": params.get("filter", {}),
+                    "summary": {
+                        "total_blobs_found": total_blobs_found,
+                        "blobs_analyzed": len(analyze_tasks),
+                        "successful_analyses": successful_analyses,
+                        "failed_analyses": failed_analyses,
+                        "pending_analyses": pending_analyses,
+                        "success_rate": success_rate,
+                        "total_size_bytes": total_size_bytes,
+                        "total_size_gb": round(total_size_bytes / (1024**3), 3),
+                        "total_size_mb": round(total_size_bytes / (1024**2), 1),
+                        "file_types": file_types,
+                        "unique_extensions": len(file_types),
+                        "largest_file": largest_file if largest_file["name"] else None,
+                        "errors_sample": errors_encountered[:5] if errors_encountered else []  # First 5 errors
+                    },
+                    "stages_completed": context.current_stage,
+                    "total_tasks_executed": len(task_results),
+                    "tasks_by_status": {
+                        "completed": sum(1 for t in task_results if t.status == TaskStatus.COMPLETED),
+                        "failed": sum(1 for t in task_results if t.status == TaskStatus.FAILED),
+                        "pending": sum(1 for t in task_results if t.status == TaskStatus.PENDING)
+                    }
+                }
+
+                logger.info("✅ STEP 6: Result built successfully")
+                logger.info(f"🎉 Aggregation complete: {total_blobs_found} blobs found, {successful_analyses}/{len(analyze_tasks)} analyzed successfully")
+
+                return result
+
+            except Exception as e:
+                logger.error(f"❌ STEP 6 FAILED: Error building result: {e}")
+                # Return minimal result rather than failing
+                return {
+                    "job_type": "list_container_contents",
+                    "container_name": params.get("container_name"),
+                    "error": "Aggregation failed",
+                    "error_details": str(e),
+                    "total_tasks": len(task_results)
+                }
+
+        except Exception as e:
+            logger.error(f"❌ CRITICAL: Aggregation failed completely: {e}")
+            # Return minimal fallback result
+            return {
+                "job_type": "list_container_contents",
+                "error": "Critical aggregation failure",
+                "error_details": str(e),
+                "fallback": True
+            }

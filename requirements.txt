@@ -24,3 +24,7 @@ psycopg-pool>=3.1.0
 pystac>=1.13.0
 pystac-client>=0.7.0
 stac-pydantic>=3.4.0
+
+# DuckDB - Analytical query engine with spatial and Azure extensions
+duckdb>=1.1.0
+pyarrow>=10.0.0

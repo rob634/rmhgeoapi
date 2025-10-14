@@ -269,6 +269,45 @@ class AppConfig(BaseModel):
     )
 
     # ========================================================================
+    # DuckDB Configuration - Analytical Query Engine
+    # ========================================================================
+
+    duckdb_connection_type: str = Field(
+        default="memory",
+        description="DuckDB connection type: 'memory' (in-memory, ephemeral) or 'persistent' (file-based)"
+    )
+
+    duckdb_database_path: Optional[str] = Field(
+        default=None,
+        description="Path to DuckDB database file for persistent mode (e.g., '/data/analytics.duckdb')"
+    )
+
+    duckdb_enable_spatial: bool = Field(
+        default=True,
+        description="Enable DuckDB spatial extension for PostGIS-like ST_* functions"
+    )
+
+    duckdb_enable_azure: bool = Field(
+        default=True,
+        description="Enable DuckDB azure extension for serverless blob storage queries"
+    )
+
+    duckdb_enable_httpfs: bool = Field(
+        default=False,
+        description="Enable DuckDB httpfs extension for HTTP/HTTPS file access (optional)"
+    )
+
+    duckdb_memory_limit: Optional[str] = Field(
+        default=None,
+        description="DuckDB memory limit (e.g., '1GB', '512MB'). None = unlimited."
+    )
+
+    duckdb_threads: Optional[int] = Field(
+        default=None,
+        description="Number of threads for DuckDB queries. None = auto-detect CPU count."
+    )
+
+    # ========================================================================
     # Task Retry Configuration - Exponential Backoff
     # ========================================================================
 

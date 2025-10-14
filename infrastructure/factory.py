@@ -267,13 +267,66 @@ class RepositoryFactory:
         return blob_repo
     
     @staticmethod
+    def create_duckdb_repository(
+        connection_type: str = "memory",
+        database_path: Optional[str] = None,
+        storage_account: Optional[str] = None
+    ) -> 'DuckDBRepository':
+        """
+        Create DuckDB repository for analytical workloads.
+
+        This is THE centralized creation point for DuckDB operations.
+        DuckDB provides serverless queries over Azure Blob Storage,
+        spatial analytics, and GeoParquet exports.
+
+        Args:
+            connection_type: "memory" (default) or "persistent"
+            database_path: Path to database file (for persistent mode)
+            storage_account: Azure storage account name (uses env if not provided)
+
+        Returns:
+            DuckDBRepository singleton instance
+
+        Example:
+            # In-memory analytics (default)
+            duckdb_repo = RepositoryFactory.create_duckdb_repository()
+
+            # Persistent database
+            duckdb_repo = RepositoryFactory.create_duckdb_repository(
+                connection_type="persistent",
+                database_path="/data/analytics.duckdb"
+            )
+
+            # Query Parquet in blob storage (NO DOWNLOAD!)
+            result = duckdb_repo.read_parquet_from_blob(
+                'rmhazuregeosilver',
+                'exports/2025/*.parquet'
+            )
+        """
+        from .duckdb import DuckDBRepository
+
+        logger.info("🦆 Creating DuckDB repository")
+        logger.debug(f"  Connection type: {connection_type}")
+        logger.debug(f"  Database path: {database_path or 'N/A'}")
+        logger.debug(f"  Storage account: {storage_account or 'from environment'}")
+
+        duckdb_repo = DuckDBRepository.instance(
+            connection_type=connection_type,
+            database_path=database_path,
+            storage_account_name=storage_account
+        )
+
+        logger.info("✅ DuckDB repository created successfully")
+        return duckdb_repo
+
+    @staticmethod
     def create_cosmos_repository(
         account_url: Optional[str] = None,
         database_name: Optional[str] = None
     ) -> Any:
         """
         Future: Create Cosmos DB repository.
-        
+
         This will create repositories for Cosmos DB operations
         when implemented.
         """

@@ -4,7 +4,7 @@
 # CATEGORY: AZURE RESOURCE REPOSITORIES
 # PURPOSE: Azure SDK wrapper providing data access abstraction
 # EPOCH: Shared by all epochs (infrastructure layer)# PURPOSE: Abstract interfaces defining behavior contracts for repository implementations
-# EXPORTS: IJobRepository, ITaskRepository, IQueueRepository, IStageCompletionRepository, ParamNames
+# EXPORTS: IJobRepository, ITaskRepository, IQueueRepository, IStageCompletionRepository, IDuckDBRepository, ParamNames
 # INTERFACES: ABC interfaces defining canonical repository contracts for all implementations
 # PYDANTIC_MODELS: JobRecord, TaskRecord (imported from schema_base for type hints)
 # DEPENDENCIES: abc, typing, enum, schema_base
@@ -316,6 +316,123 @@ class IStageCompletionRepository(ABC):
 
         SQL Function Signature:
         check_job_completion(p_job_id VARCHAR(64))
+        """
+        pass
+
+
+class IDuckDBRepository(ABC):
+    """
+    DuckDB repository interface for analytical operations.
+
+    Enables dependency injection and testing/mocking of DuckDB operations.
+    All DuckDB repositories must implement this interface.
+
+    Key Features:
+    - Serverless queries over Azure Blob Storage (NO DOWNLOAD!)
+    - Spatial analytics with PostGIS-like ST_* functions
+    - GeoParquet export for Gold tier data products
+    - In-memory or persistent database connections
+    """
+
+    @abstractmethod
+    def get_connection(self):
+        """
+        Get or create DuckDB connection with extensions loaded.
+
+        Returns:
+            DuckDB connection ready for queries
+        """
+        pass
+
+    @abstractmethod
+    def query(self, sql: str, parameters: Optional[List[Any]] = None):
+        """
+        Execute SQL query with optional parameters.
+
+        Args:
+            sql: SQL query string
+            parameters: Optional list of parameter values for ? placeholders
+
+        Returns:
+            DuckDB relation (lazy evaluation)
+        """
+        pass
+
+    @abstractmethod
+    def query_to_df(self, sql: str, parameters: Optional[List[Any]] = None):
+        """
+        Execute SQL query and return pandas DataFrame.
+
+        Args:
+            sql: SQL query string
+            parameters: Optional list of parameter values
+
+        Returns:
+            pandas DataFrame with query results
+        """
+        pass
+
+    @abstractmethod
+    def execute(self, sql: str, parameters: Optional[List[Any]] = None) -> None:
+        """
+        Execute SQL statement without returning results.
+
+        Used for CREATE TABLE, INSERT, UPDATE, DELETE, etc.
+
+        Args:
+            sql: SQL statement
+            parameters: Optional list of parameter values
+        """
+        pass
+
+    @abstractmethod
+    def read_parquet_from_blob(self, container: str, blob_pattern: str):
+        """
+        Read Parquet files from Azure Blob Storage (serverless query).
+
+        NO DATA DOWNLOAD! DuckDB queries blob storage directly using
+        the Azure extension. This is 10-100x faster than downloading.
+
+        Args:
+            container: Azure blob container name
+            blob_pattern: Blob path with wildcards (e.g., "path/*.parquet")
+
+        Returns:
+            DuckDB relation (lazy evaluation)
+        """
+        pass
+
+    @abstractmethod
+    def export_geoparquet(self, data: Any, output_path: str) -> Dict[str, Any]:
+        """
+        Export data to GeoParquet format.
+
+        Args:
+            data: pandas DataFrame, GeoPandas GeoDataFrame, or DuckDB relation
+            output_path: Output file path (.parquet)
+
+        Returns:
+            Dict with export metadata (path, size, row_count)
+        """
+        pass
+
+    @abstractmethod
+    def close(self) -> None:
+        """
+        Close DuckDB connection and cleanup resources.
+
+        Note: Singleton instance will remain, but connection will be closed.
+        Next get_connection() call will create a new connection.
+        """
+        pass
+
+    @abstractmethod
+    def health_check(self) -> Dict[str, Any]:
+        """
+        Check DuckDB health and extension availability.
+
+        Returns:
+            Dict with health status, extensions, and connection info
         """
         pass
 

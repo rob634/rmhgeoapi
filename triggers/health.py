@@ -138,7 +138,14 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
             if db_health["status"] == "unhealthy":
                 health_data["status"] = "unhealthy"
                 health_data["errors"].extend(db_health.get("errors", []))
-        
+
+        # Check DuckDB analytical engine (optional component)
+        duckdb_health = self._check_duckdb()
+        health_data["components"]["duckdb"] = duckdb_health
+        # Note: DuckDB is optional - don't fail overall health if unavailable
+        if duckdb_health["status"] == "error":
+            health_data["errors"].append("DuckDB unavailable (optional analytical component)")
+
         return health_data
     
     def handle_request(self, req: func.HttpRequest) -> func.HttpResponse:
@@ -846,6 +853,62 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
             }
         
         return self.check_component_health("import_validation", check_imports)
+
+    def _check_duckdb(self) -> Dict[str, Any]:
+        """
+        Check DuckDB analytical engine health (optional component).
+
+        DuckDB is an optional analytical query engine used for:
+        - Serverless queries over Azure Blob Storage Parquet files
+        - Spatial analytics with PostGIS-like ST_* functions
+        - GeoParquet exports for Gold tier data products
+
+        This component is NOT critical for core operations - health check
+        will not fail if DuckDB is unavailable or not installed.
+
+        Returns:
+            Dict with DuckDB health status, extensions, and connection info
+        """
+        def check_duckdb():
+            try:
+                # Try to import DuckDB repository
+                from infrastructure.factory import RepositoryFactory
+
+                # Create DuckDB repository singleton
+                duckdb_repo = RepositoryFactory.create_duckdb_repository()
+
+                # Get comprehensive health check from repository
+                health_result = duckdb_repo.health_check()
+
+                # Add component metadata
+                health_result["component_type"] = "analytical_engine"
+                health_result["optional"] = True
+                health_result["purpose"] = "Serverless Parquet queries and GeoParquet exports"
+
+                return health_result
+
+            except ImportError as e:
+                # DuckDB not installed - this is OK, it's optional
+                return {
+                    "status": "not_installed",
+                    "optional": True,
+                    "message": "DuckDB not installed (optional dependency)",
+                    "install_command": "pip install duckdb>=1.1.0 pyarrow>=10.0.0",
+                    "impact": "GeoParquet exports and serverless blob queries unavailable"
+                }
+            except Exception as e:
+                # Other errors during initialization
+                import traceback
+                return {
+                    "status": "error",
+                    "optional": True,
+                    "error": str(e)[:200],
+                    "error_type": type(e).__name__,
+                    "traceback": traceback.format_exc()[:500],
+                    "impact": "Analytical queries and GeoParquet exports unavailable"
+                }
+
+        return self.check_component_health("duckdb", check_duckdb)
 
 
 # Create singleton instance for use in function_app.py

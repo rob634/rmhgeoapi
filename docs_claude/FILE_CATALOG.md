@@ -1,10 +1,10 @@
 # File Catalog
 
-**Date**: 4 OCT 2025 (Updated with container operations & task lineage)
-**Total Python Files**: 55+ (excluding test files)
+**Date**: 10 OCT 2025 (Updated with DuckDB analytical infrastructure)
+**Total Python Files**: 56+ (excluding test files)
 **Purpose**: Quick file lookup with one-line descriptions
 **Author**: Robert and Geospatial Claude Legion
-**Status**: ✅ Updated - Container operations, deterministic task lineage added
+**Status**: ✅ Updated - DuckDB repository, STAC + Raster ETL production-ready
 
 ## 🎯 Core Entry Points (2 files)
 
@@ -79,18 +79,22 @@
 |------|---------|
 | `interfaces/repository.py` | IQueueRepository and other repository interfaces |
 
-## 💾 Repositories (8 files in repositories/ folder)
+## 💾 Infrastructure Layer (12 files in infrastructure/ folder) ⭐ UPDATED 10 OCT
 
-| File | Purpose |
-|------|---------|
-| `repositories/base.py` | Common repository patterns and validation |
-| `repositories/factory.py` | Central factory for all repository instances |
-| `repositories/jobs_tasks.py` | Business logic for job and task management + batch operations |
-| `repositories/postgresql.py` | PostgreSQL-specific implementation with psycopg |
-| `repositories/blob.py` | Azure Blob Storage operations |
-| `repositories/queue.py` | Queue Storage operations with singleton pattern |
-| `repositories/service_bus.py` | Service Bus implementation with batch support |
-| `repositories/vault.py` | Azure Key Vault integration (currently disabled) |
+| File | Purpose | Status |
+|------|---------|--------|
+| `infrastructure/base.py` | Common repository patterns and validation | ✅ Working |
+| `infrastructure/factory.py` | Central factory for all repository instances (includes DuckDB) | ✅ Updated 10 OCT |
+| `infrastructure/jobs_tasks.py` | Business logic for job and task management + batch operations | ✅ Working |
+| `infrastructure/postgresql.py` | PostgreSQL-specific implementation with psycopg | ✅ Working |
+| `infrastructure/blob.py` | Azure Blob Storage operations with managed identity | ✅ Working |
+| `infrastructure/queue.py` | Queue Storage operations with singleton pattern | ✅ Working |
+| `infrastructure/service_bus.py` | Service Bus implementation with batch support | ✅ Working |
+| `infrastructure/vault.py` | Azure Key Vault integration (currently disabled) | ⚠️ Disabled |
+| `infrastructure/stac.py` | pgSTAC operations for STAC catalog | ✅ Working |
+| `infrastructure/duckdb.py` | ⭐ NEW - DuckDB analytical query engine with spatial+azure extensions | ✅ NEW 10 OCT |
+| `infrastructure/interface_repository.py` | Repository interfaces (IJobRepository, ITaskRepository, IDuckDBRepository) | ✅ Updated 10 OCT |
+| `infrastructure/__init__.py` | Infrastructure module exports | ✅ Working |
 
 ## ⚙️ Services (5 files in services/ folder) ⭐ UPDATED 4 OCT
 
@@ -238,4 +242,53 @@ from controller_base import BaseController
 
 ---
 
-**Last Updated**: 30 SEP 2025 - Schema migration complete, docs organized, legacy files marked
+## 🦆 DuckDB Analytical Infrastructure (NEW 10 OCT 2025)
+
+### Overview
+DuckDB provides serverless analytical queries over Azure Blob Storage with spatial analytics capabilities.
+
+### Key Capabilities
+- **Serverless Parquet Queries**: Query Parquet files in blob storage WITHOUT downloading (10-100x faster)
+- **Spatial Extension**: PostGIS-like ST_* functions for geometry operations
+- **Azure Extension**: Direct az:// protocol access to Azure Blob Storage
+- **GeoParquet Export**: Write spatial data to GeoParquet format for Gold tier
+- **In-Memory Analytics**: Fast columnar queries with vectorized execution
+
+### Architecture Integration
+```python
+from infrastructure.factory import RepositoryFactory
+
+# Get DuckDB repository
+duckdb_repo = RepositoryFactory.create_duckdb_repository()
+
+# Query Parquet in blob storage (NO DOWNLOAD!)
+result = duckdb_repo.read_parquet_from_blob('rmhazuregeosilver', 'exports/*.parquet')
+df = result.df()
+
+# Export to GeoParquet
+metadata = duckdb_repo.export_geoparquet(df, '/tmp/output.parquet')
+```
+
+### Configuration (config.py)
+- `duckdb_connection_type`: "memory" (default) or "persistent"
+- `duckdb_enable_spatial`: PostGIS-like functions (default: True)
+- `duckdb_enable_azure`: Blob storage queries (default: True)
+- `duckdb_memory_limit`: Optional memory limit (e.g., "1GB")
+- `duckdb_threads`: Optional thread count (default: auto-detect)
+
+### Health Monitoring
+DuckDB is an **optional component** in `/api/health`:
+- Status: "healthy", "not_installed", or "error"
+- Extensions: spatial, azure, httpfs availability
+- Connection: memory/persistent mode status
+- Impact: GeoParquet exports and serverless queries
+
+### Use Cases
+1. **Gold Tier Exports**: Generate GeoParquet files for data products
+2. **Analytical Queries**: Fast aggregations over historical data
+3. **Serverless Processing**: Query blob Parquet without data movement
+4. **Spatial Analytics**: Complex geometry operations without PostGIS
+
+---
+
+**Last Updated**: 10 OCT 2025 - DuckDB infrastructure complete, STAC + Raster ETL production-ready

@@ -250,6 +250,8 @@ class DuckDBRepository(IDuckDBRepository):
         Extensions:
         - spatial: PostGIS-like ST_* functions
         - azure: Direct blob storage queries
+        - h3: H3 hierarchical hexagonal grid functions
+        - httpfs: HTTP/HTTPS file access for Overture Maps
         """
         if self._extensions_loaded:
             return
@@ -275,6 +277,24 @@ class DuckDBRepository(IDuckDBRepository):
                 logger.info("   ✅ Azure extension loaded (blob storage queries available)")
             except Exception as e:
                 logger.warning(f"   ⚠️ Azure extension failed (non-critical): {e}")
+
+            # STEP 2c: H3 extension (for hexagonal grid operations)
+            try:
+                logger.info("   Installing h3 extension...")
+                conn.execute("INSTALL h3")
+                conn.execute("LOAD h3")
+                logger.info("   ✅ H3 extension loaded (h3_* functions available)")
+            except Exception as e:
+                logger.warning(f"   ⚠️ H3 extension failed (non-critical): {e}")
+
+            # STEP 2d: httpfs extension (for Overture Maps HTTPS access)
+            try:
+                logger.info("   Installing httpfs extension...")
+                conn.execute("INSTALL httpfs")
+                conn.execute("LOAD httpfs")
+                logger.info("   ✅ httpfs extension loaded (HTTPS file access available)")
+            except Exception as e:
+                logger.warning(f"   ⚠️ httpfs extension failed (non-critical): {e}")
 
             # STEP 3: Configure Azure authentication
             logger.info("🔄 STEP 3: Configuring Azure authentication...")

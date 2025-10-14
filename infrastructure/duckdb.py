@@ -278,10 +278,10 @@ class DuckDBRepository(IDuckDBRepository):
             except Exception as e:
                 logger.warning(f"   ⚠️ Azure extension failed (non-critical): {e}")
 
-            # STEP 2c: H3 extension (for hexagonal grid operations)
+            # STEP 2c: H3 extension (for hexagonal grid operations - COMMUNITY EXTENSION)
             try:
-                logger.info("   Installing h3 extension...")
-                conn.execute("INSTALL h3")
+                logger.info("   Installing h3 extension from community repository...")
+                conn.execute("INSTALL h3 FROM community")
                 conn.execute("LOAD h3")
                 logger.info("   ✅ H3 extension loaded (h3_* functions available)")
             except Exception as e:

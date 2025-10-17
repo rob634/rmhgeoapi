@@ -67,21 +67,35 @@ POST /api/jobs/submit/process_raster
 
 ---
 
-### 3. Advanced Workflow Patterns ✅ PARTIALLY COMPLETE
+### 3. Advanced Workflow Patterns ✅ MOSTLY COMPLETE
 
 **Implemented (16 OCT 2025)**:
 - ✅ **Diamond Pattern**: Fan-out → Process → Fan-in → Aggregate
   - CoreMachine auto-creates aggregation tasks for `"parallelism": "fan_in"` stages
   - Complete documentation in ARCHITECTURE_REFERENCE.md
+  - Production tested: 4 files, 100 files - both successful
   - Ready for production use
 
 - ✅ **Dynamic Stage Creation**: Stage 1 results determine Stage 2 tasks
   - Fully supported via `"parallelism": "fan_out"` pattern
   - Previous stage results passed to `create_tasks_for_stage()`
 
-**Still To Implement**:
-- **Task-to-Task Communication**: Direct lineage between predecessor/successor
-- **Cross-Stage Data Dependencies**: Pass large data between stages via blob storage
+- ✅ **Cross-Stage Data Dependencies**: Pickle intermediate storage (7 OCT 2025)
+  - Implemented in `ingest_vector` job (vector ETL)
+  - Stage 1 pickles GeoDataFrame chunks to blob storage
+  - Stage 2 loads pickles in parallel for PostGIS upload
+  - Config: `vector_pickle_container`, `vector_pickle_prefix`
+  - Handles multi-GB datasets that exceed Service Bus 256KB limit
+  - Production ready, registered in `jobs/__init__.py`
+
+**Partially Implemented**:
+- ⚠️ **Task-to-Task Communication**: Field exists but unused
+  - Database field `next_stage_params` exists in TaskRecord
+  - Documentation written in ARCHITECTURE_REFERENCE.md
+  - No production jobs using it yet
+  - **Recommended**: Create raster tiling job to demonstrate pattern
+    - Stage 1 determines tile boundaries → `next_stage_params`
+    - Stage 2 tasks with matching semantic IDs retrieve tile specs
 
 **Example Diamond Workflow (Now Supported)**:
 ```python

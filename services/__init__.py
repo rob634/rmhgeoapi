@@ -55,6 +55,7 @@ from .raster_validation import validate_raster
 from .raster_cog import create_cog
 from .handler_h3_level4 import h3_level4_generate
 from .handler_h3_base import h3_base_generate
+from .vector.tasks import prepare_vector_chunks, upload_pickled_chunk
 
 # ============================================================================
 # EXPLICIT HANDLER REGISTRY
@@ -80,8 +81,9 @@ ALL_HANDLERS = {
     "create_cog": create_cog,
     "h3_level4_generate": h3_level4_generate,
     "h3_base_generate": h3_base_generate,
-    # Add new handlers here explicitly
-    # "process_tile": handle_tile_processing,
+    # Vector ETL handlers (17 OCT 2025)
+    "prepare_vector_chunks": prepare_vector_chunks,  # Stage 1: Load, validate, chunk, pickle
+    "upload_pickled_chunk": upload_pickled_chunk,    # Stage 2: Load pickle and upload to PostGIS
 }
 
 # ============================================================================

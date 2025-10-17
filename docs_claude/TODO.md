@@ -10,6 +10,8 @@
 **System Status**: ✅ FULLY OPERATIONAL
 
 **Recent Completions** (See HISTORY.md for details):
+- ✅ Vector ETL GeoPackage Support (17 OCT 2025) - Optional layer_name, error validation
+- ✅ Job Failure Detection (17 OCT 2025) - Auto-fail jobs when tasks exceed max retries
 - ✅ Phase 2 ABC Migration (16 OCT 2025) - All 10 jobs migrated to JobBase
 - ✅ Python Header Standardization (16 OCT 2025) - 27 core/infrastructure files reviewed
 - ✅ Documentation Archive Organization (16 OCT 2025) - 22 files archived with searchable headers
@@ -17,7 +19,7 @@
 - ✅ STAC Metadata Extraction (6 OCT 2025) - Managed identity, rio-stac integration
 - ✅ Multi-stage orchestration with advisory locks - Zero deadlocks at any scale
 
-**Current Focus**: Ready for next feature development
+**Current Focus**: Vector ETL format support (testing Shapefile, CSV, KML next)
 
 ---
 
@@ -146,9 +148,23 @@ stages = [
 - [ ] Job templates (reusable workflows)
 - [ ] Webhook notifications on job completion
 
-### Vector ETL Pipeline
-- [ ] GeoJSON → PostGIS ingestion
-- [ ] Shapefile processing
+### Vector ETL Pipeline ✅ IN PROGRESS (17 OCT 2025)
+- ✅ **GeoJSON → PostGIS ingestion** (7 OCT 2025) - Production ready
+  - Two-stage pipeline: pickle chunks → parallel upload
+  - Handles multi-GB datasets beyond Service Bus limits
+  - Registered in `jobs/__init__.py` as `ingest_vector`
+- ✅ **GeoPackage support** (17 OCT 2025) - Production ready
+  - Optional layer_name parameter (reads first layer by default)
+  - Explicit error validation for invalid layer names
+  - Error propagation: converter → TaskResult → job failure
+- ✅ **Job failure detection** (17 OCT 2025) - Production ready
+  - Jobs marked as FAILED when tasks exceed max retries (3 attempts)
+  - Application-level retry with exponential backoff (5s → 10s → 20s)
+  - Detailed error messages include task_id and retry count
+- [ ] **Additional format support** - Next up
+  - [ ] Shapefile processing
+  - [ ] CSV with geometry columns
+  - [ ] KML/KMZ support
 - [ ] Vector tiling (MVT generation)
 - [ ] Vector validation and repair
 

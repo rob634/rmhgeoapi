@@ -29,17 +29,44 @@ Example:
         "process_tile": handle_tile_processing,  # <- Added here!
     }
 
-Handler Function Signature:
+Handler Function Contract (ENFORCED BY CoreMachine):
     def handler(params: Dict[str, Any], context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         '''
+        Task handler function signature and return contract.
+
         Args:
-            params: Task parameters from job definition
-            context: Optional context with predecessor results, job metadata, etc.
-        
+            params: Task parameters from job definition (dict)
+            context: Optional context with predecessor results, job metadata, etc. (dict or None)
+
         Returns:
-            Result dict with task output data
+            Dict with REQUIRED 'success' field (bool) and additional data:
+
+            SUCCESS FORMAT:
+                {
+                    "success": True,        # REQUIRED - Must be boolean True
+                    "result": {...}         # Optional - Your task results
+                }
+
+            FAILURE FORMAT:
+                {
+                    "success": False,       # REQUIRED - Must be boolean False
+                    "error": "error message",  # REQUIRED - Describe what went wrong
+                    "error_type": "ValueError" # Optional - Exception type name
+                }
+
+        CONTRACT ENFORCEMENT:
+            - Missing 'success' field → ContractViolationError (crashes function)
+            - Non-boolean 'success' → ContractViolationError (crashes function)
+            - Task marked COMPLETED if success=True, FAILED if success=False
+
+        EXCEPTION HANDLING:
+            - Handlers can raise exceptions instead of returning {"success": False, ...}
+            - CoreMachine catches exceptions and auto-creates failure result
+            - Prefer raising exceptions for unexpected errors (simpler code)
+            - Use {"success": False, ...} for expected business logic failures
         '''
-        return {"success": True, "result": "..."}
+        # Your handler logic here
+        return {"success": True, "result": {"foo": "bar"}}
 
 Author: Robert and Geospatial Claude Legion
 Date: 1 OCT 2025

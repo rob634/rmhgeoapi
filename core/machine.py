@@ -456,15 +456,29 @@ class CoreMachine:
 
             # Convert dict to TaskResult if needed
             if isinstance(raw_result, dict):
+                # ENFORCE CONTRACT: Task handlers MUST return {'success': True/False, ...}
+                if 'success' not in raw_result:
+                    raise ContractViolationError(
+                        f"Task handler '{task_message.task_type}' returned dict without 'success' field. "
+                        f"Required format: {{'success': True/False, 'result': {{...}}}} or {{'success': False, 'error': '...'}}"
+                    )
+
+                # Validate success field is boolean
+                if not isinstance(raw_result['success'], bool):
+                    raise ContractViolationError(
+                        f"Task handler '{task_message.task_type}' returned non-boolean 'success' field: "
+                        f"{type(raw_result['success']).__name__}. Must be True or False."
+                    )
+
                 # Extract error message from dict if handler failed
-                error_msg = raw_result.get('error') if not raw_result.get('success', False) else None
+                error_msg = raw_result.get('error') if not raw_result['success'] else None
 
                 result = TaskResult(
                     task_id=task_message.task_id,
                     task_type=task_message.task_type,
-                    status=TaskStatus.COMPLETED if raw_result.get('success', False) else TaskStatus.FAILED,
+                    status=TaskStatus.COMPLETED if raw_result['success'] else TaskStatus.FAILED,
                     result_data=raw_result,
-                    error_details=error_msg,  # FIX: Extract error from dict
+                    error_details=error_msg,
                     execution_time_ms=int(elapsed * 1000),  # Convert seconds to milliseconds
                     timestamp=datetime.now(timezone.utc)
                 )

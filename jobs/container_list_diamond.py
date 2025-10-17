@@ -291,9 +291,9 @@ class ListContainerContentsDiamondWorkflow(JobBase):
         """
         from infrastructure import RepositoryFactory
         from core.schema.queue import JobQueueMessage
-        from config import Config
+        from config import get_config
 
-        config = Config()
+        config = get_config()
         repos = RepositoryFactory.create_repositories()
         service_bus = repos['service_bus']
 

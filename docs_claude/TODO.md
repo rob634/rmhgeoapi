@@ -162,11 +162,16 @@ stages = [
   - Application-level retry with exponential backoff (5s → 10s → 20s)
   - Detailed error messages include task_id and retry count
 - [ ] **Additional format support** - Next up
-  - [ ] Shapefile processing
+  - [ ] Shapefile processing (ZIP format)
   - [ ] CSV with geometry columns
   - [ ] KML/KMZ support
 - [ ] Vector tiling (MVT generation)
 - [ ] Vector validation and repair
+- [ ] **Advanced Shapefile Support** ⚠️ FUTURE (Avoid for now!)
+  - [ ] Read shapefile as group of files (.shp, .shx, .dbf, .prj, etc.)
+  - [ ] Auto-detect related files in same blob prefix
+  - [ ] Handle multi-file upload workflows
+  - **Note**: This is a hot mess - stick with ZIP format for production use
 
 ### Data Quality
 - [ ] Automated raster validation checks

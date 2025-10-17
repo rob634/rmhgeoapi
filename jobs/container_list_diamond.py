@@ -289,26 +289,28 @@ class ListContainerContentsDiamondWorkflow(JobBase):
         Returns:
             Queue confirmation dict
         """
-        from infrastructure import RepositoryFactory
+        from infrastructure.service_bus import ServiceBusRepository
         from core.schema.queue import JobQueueMessage
         from config import get_config
+        import uuid
 
         config = get_config()
-        repos = RepositoryFactory.create_repositories()
-        service_bus = repos['service_bus']
+        service_bus_repo = ServiceBusRepository()
 
         # Create job queue message
+        correlation_id = str(uuid.uuid4())
         message = JobQueueMessage(
             job_id=job_id,
             job_type="list_container_contents_diamond",
             stage=1,
             attempt=1,
             parameters=params,
-            queue_name=config.jobs_queue_name
+            correlation_id=correlation_id
         )
 
         # Send to Service Bus
-        message_id = service_bus.send_message(message.model_dump_json())
+        queue_name = config.service_bus_jobs_queue
+        message_id = service_bus_repo.send_message(queue_name, message.model_dump_json())
 
         return {
             "queued": True,

@@ -290,7 +290,7 @@ class ListContainerContentsDiamondWorkflow(JobBase):
             Queue confirmation dict
         """
         from infrastructure import RepositoryFactory
-        from core.models import JobQueueMessage
+        from core.schema.queue import JobQueueMessage
         from config import Config
 
         config = Config()

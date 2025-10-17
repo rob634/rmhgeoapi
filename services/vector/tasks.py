@@ -261,14 +261,17 @@ def prepare_vector_chunks(parameters: Dict[str, Any]) -> Dict[str, Any]:
         chunk_paths.append(chunk_path)
 
     return {
-        'chunk_paths': chunk_paths,
-        'table_name': table_name,
-        'schema': schema,
-        'total_rows': len(validated_gdf),
-        'chunk_count': len(chunks),
-        'chunk_size_used': actual_chunk_size,
-        'source_file': blob_name,
-        'geometry_types': validated_gdf.geometry.type.unique().tolist()
+        "success": True,
+        "result": {
+            'chunk_paths': chunk_paths,
+            'table_name': table_name,
+            'schema': schema,
+            'total_rows': len(validated_gdf),
+            'chunk_count': len(chunks),
+            'chunk_size_used': actual_chunk_size,
+            'source_file': blob_name,
+            'geometry_types': validated_gdf.geometry.type.unique().tolist()
+        }
     }
 
 
@@ -320,9 +323,12 @@ def upload_pickled_chunk(parameters: Dict[str, Any]) -> Dict[str, Any]:
     # Timer job will clean up old pickles (>24 hours)
 
     return {
-        'rows_uploaded': len(chunk),
-        'chunk_path': chunk_path,
-        'chunk_index': chunk_index,
-        'table': f"{schema}.{table_name}",
-        'pickle_retained': True  # For timer cleanup tracking
+        "success": True,
+        "result": {
+            'rows_uploaded': len(chunk),
+            'chunk_path': chunk_path,
+            'chunk_index': chunk_index,
+            'table': f"{schema}.{table_name}",
+            'pickle_retained': True  # For timer cleanup tracking
+        }
     }

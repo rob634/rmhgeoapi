@@ -740,7 +740,7 @@ class StateManager:
             repos = RepositoryFactory.create_repositories()
             job_repo = repos['job_repo']
 
-            job_repo.mark_job_failed(job_id, error_msg)
+            job_repo.fail_job(job_id, error_msg)
             self.logger.info(f"Job {job_id[:16]}... marked as FAILED")
             return True
 

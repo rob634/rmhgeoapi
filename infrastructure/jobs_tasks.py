@@ -1,19 +1,20 @@
 # ============================================================================
-# CLAUDE CONTEXT - REPOSITORY
+# CLAUDE CONTEXT - JOB/TASK REPOSITORIES
 # ============================================================================
-# CATEGORY: AZURE RESOURCE REPOSITORIES
-# PURPOSE: Azure SDK wrapper providing data access abstraction
-# EPOCH: Shared by all epochs (infrastructure layer)# PURPOSE: Business logic repository layer for job and task management with validation and orchestration
-# EXPORTS: JobRepository, TaskRepository, CompletionDetector
-# INTERFACES: Extends PostgreSQLJobRepository, PostgreSQLTaskRepository, PostgreSQLCompletionDetector
-# PYDANTIC_MODELS: JobRecord, TaskRecord, JobStatus, TaskStatus (from schema_base)
-# DEPENDENCIES: repository_postgresql, schema_base, util_logger, typing, datetime
-# SOURCE: PostgreSQL database via inherited base classes, business logic layer
+# EPOCH: 4 - ACTIVE ✅
+# STATUS: Infrastructure - Business logic repositories for job and task operations
+# PURPOSE: Business logic repository layer for job and task management with validation and orchestration
+# LAST_REVIEWED: 16 OCT 2025
+# EXPORTS: JobRepository, TaskRepository, StageCompletionRepository
+# INTERFACES: Extends PostgreSQLJobRepository, PostgreSQLTaskRepository, PostgreSQLStageCompletionRepository
+# PYDANTIC_MODELS: JobRecord, TaskRecord, TaskDefinition, JobStatus, TaskStatus (from core.models)
+# DEPENDENCIES: infrastructure.postgresql, core.models, util_logger, typing, datetime
+# SOURCE: PostgreSQL database via inherited base classes, adds business logic
 # SCOPE: Business-level job and task operations with validation and workflow orchestration
 # VALIDATION: Business rule validation, idempotency checks, status transition validation
-# PATTERNS: Repository pattern, Template Method, Facade (for complex workflows)
-# ENTRY_POINTS: from repository_jobs_tasks import JobRepository; job_repo = JobRepository()
-# INDEX: JobRepository:64, TaskRepository:235, CompletionDetector:404
+# PATTERNS: Repository pattern, Template Method, Facade (for complex workflows), Batch operations
+# ENTRY_POINTS: from infrastructure.jobs_tasks import JobRepository; job_repo = JobRepository()
+# INDEX: JobRepository:73, TaskRepository:326, StageCompletionRepository:791
 # ============================================================================
 
 """

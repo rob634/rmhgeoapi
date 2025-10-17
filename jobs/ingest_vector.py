@@ -10,14 +10,17 @@ Each Stage 2 task receives blob reference, loads pickle, uploads to PostGIS.
 
 Author: Robert and Geospatial Claude Legion
 Date: 7 OCT 2025
+Updated: 15 OCT 2025 - Phase 2: Migrated to JobBase ABC
 """
 
 from typing import List, Dict, Any
 import hashlib
 import json
 
+from jobs.base import JobBase
 
-class IngestVectorJob:
+
+class IngestVectorJob(JobBase):
     """
     Two-stage vector ETL workflow with pickle-based intermediate storage.
 

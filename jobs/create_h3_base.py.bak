@@ -1,0 +1,158 @@
+"""
+Create H3 Base Grid Job Declaration
+
+Generates complete H3 hexagonal grids at resolutions 0-4 without any filtering.
+Pure hierarchical generation using H3's deterministic structure.
+
+Author: Robert and Geospatial Claude Legion
+Date: 15 OCT 2025
+"""
+
+from typing import List, Dict, Any
+
+
+class CreateH3BaseJob:
+    """
+    H3 Base Grid Generation - Single-stage job that creates complete global grids.
+
+    Resolutions:
+        0: 122 cells (~1,108 km edge)
+        1: 842 cells (~418 km edge)
+        2: 5,882 cells (~158 km edge)
+        3: 41,162 cells (~59.8 km edge)
+        4: 288,122 cells (~22.6 km edge)
+
+    This is PURE DATA - no execution logic, just job declaration.
+    """
+
+    # Job metadata
+    job_type: str = "create_h3_base"
+    description: str = "Generate complete H3 hexagonal grid at specified resolution"
+
+    # Single-stage job: just generate the grid
+    stages: List[Dict[str, Any]] = [
+        {
+            "number": 1,
+            "name": "generate",
+            "task_type": "h3_base_generate",
+            "parallelism": "fixed",
+            "count": 1,  # Single task generates entire grid
+            "description": "Generate complete H3 grid using hierarchical expansion"
+        }
+    ]
+
+    # Parameter schema with validation
+    parameters_schema: Dict[str, Any] = {
+        "resolution": {
+            "type": "int",
+            "min": 0,
+            "max": 4,
+            "required": True,
+            "description": "H3 resolution level (0=coarsest, 4=finest supported)"
+        },
+        "exclude_antimeridian": {
+            "type": "bool",
+            "default": True,
+            "description": "Exclude cells crossing 180° longitude (prevents rendering issues)"
+        },
+        "output_folder": {
+            "type": "str",
+            "default": "h3/base",
+            "description": "Output folder in gold container"
+        },
+        "output_filename": {
+            "type": "str",
+            "default": None,
+            "description": "Output filename (auto-generated if not provided: h3_res{N}_global.parquet)"
+        }
+    }
+
+    @staticmethod
+    def create_tasks_for_stage(
+        stage: int,
+        job_params: dict,
+        job_id: str,
+        previous_results: list = None
+    ) -> List[dict]:
+        """
+        Generate task parameters for H3 base grid generation.
+
+        Single-stage job: always returns one task with the grid generation parameters.
+
+        Args:
+            stage: Stage number (always 1 for this job)
+            job_params: Job parameters (resolution, exclude_antimeridian, etc.)
+            job_id: Job ID for task ID generation
+            previous_results: Not used (no previous stages)
+
+        Returns:
+            List with single task dict
+        """
+        if stage != 1:
+            raise ValueError(f"Invalid stage {stage} for create_h3_base job (only has 1 stage)")
+
+        # Extract and validate resolution
+        resolution = job_params.get('resolution')
+        if resolution is None:
+            raise ValueError("resolution parameter is required")
+
+        if not isinstance(resolution, int) or resolution < 0 or resolution > 4:
+            raise ValueError(f"resolution must be 0-4, got {resolution}")
+
+        # Build task parameters
+        task_params = {
+            "resolution": resolution,
+            "exclude_antimeridian": job_params.get('exclude_antimeridian', True),
+            "output_folder": job_params.get('output_folder', 'h3/base'),
+            "output_filename": job_params.get('output_filename')
+        }
+
+        # Create single task
+        return [
+            {
+                "task_id": f"{job_id[:8]}-h3base-res{resolution}",
+                "task_type": "h3_base_generate",
+                "parameters": task_params
+            }
+        ]
+
+    @staticmethod
+    def validate_parameters(params: dict) -> dict:
+        """
+        Validate job parameters before submission.
+
+        Args:
+            params: Raw job parameters
+
+        Returns:
+            Validated and normalized parameters
+
+        Raises:
+            ValueError: If parameters are invalid
+        """
+        # Resolution is required
+        if 'resolution' not in params:
+            raise ValueError("'resolution' parameter is required")
+
+        resolution = params['resolution']
+        if not isinstance(resolution, int):
+            raise ValueError(f"resolution must be an integer, got {type(resolution).__name__}")
+
+        if resolution < 0 or resolution > 4:
+            raise ValueError(f"resolution must be 0-4, got {resolution}")
+
+        # Validate filename if provided
+        filename = params.get('output_filename')
+        if filename:
+            if not isinstance(filename, str):
+                raise ValueError(f"output_filename must be string, got {type(filename).__name__}")
+            if not filename.endswith('.parquet'):
+                raise ValueError("output_filename must end with .parquet")
+
+        # Return normalized params
+        return {
+            "resolution": resolution,
+            "exclude_antimeridian": params.get('exclude_antimeridian', True),
+            "output_folder": params.get('output_folder', 'h3/base'),
+            "output_filename": filename
+        }

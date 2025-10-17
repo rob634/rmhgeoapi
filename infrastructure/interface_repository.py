@@ -1,19 +1,20 @@
 # ============================================================================
-# CLAUDE CONTEXT - INTERFACE
+# CLAUDE CONTEXT - REPOSITORY INTERFACES
 # ============================================================================
-# CATEGORY: AZURE RESOURCE REPOSITORIES
-# PURPOSE: Azure SDK wrapper providing data access abstraction
-# EPOCH: Shared by all epochs (infrastructure layer)# PURPOSE: Abstract interfaces defining behavior contracts for repository implementations
+# EPOCH: 4 - ACTIVE ✅
+# STATUS: Infrastructure - Abstract interfaces for repository pattern enforcement
+# PURPOSE: Abstract interfaces defining behavior contracts for repository implementations
+# LAST_REVIEWED: 16 OCT 2025
 # EXPORTS: IJobRepository, ITaskRepository, IQueueRepository, IStageCompletionRepository, IDuckDBRepository, ParamNames
 # INTERFACES: ABC interfaces defining canonical repository contracts for all implementations
-# PYDANTIC_MODELS: JobRecord, TaskRecord (imported from schema_base for type hints)
-# DEPENDENCIES: abc, typing, enum, schema_base
+# PYDANTIC_MODELS: JobRecord, TaskRecord, TaskUpdateModel, JobUpdateModel (imported from core.models)
+# DEPENDENCIES: abc, typing, enum, core.models, core.schema.updates
 # SOURCE: No data source - defines abstract interfaces and contracts
 # SCOPE: Global repository pattern enforcement - all repository implementations must follow these interfaces
 # VALIDATION: ABC enforcement ensures method signature compliance, type hints provide compile-time checking
 # PATTERNS: Interface Segregation, Repository pattern, Protocol pattern, Parameter Object pattern
 # ENTRY_POINTS: class PostgreSQLRepository(IJobRepository); must implement all abstract methods
-# INDEX: ParamNames:43, IJobRepository:93, ITaskRepository:120, ICompletionDetector:146
+# INDEX: ParamNames:49, IJobRepository:98, ITaskRepository:125, IStageCompletionRepository:259, IDuckDBRepository:323
 # ============================================================================
 
 """

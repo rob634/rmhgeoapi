@@ -1,16 +1,17 @@
 # ============================================================================
 # CLAUDE CONTEXT - CORE MODELS - TASK
 # ============================================================================
-# CATEGORY: DATA MODELS - DATABASE ENTITIES
-# PURPOSE: Pydantic model mapping to PostgreSQL table/database structure
-# EPOCH: Shared by all epochs (database schema)
+# EPOCH: 4 - ACTIVE ✅
+# STATUS: Core data models - Task database representation
+# PURPOSE: Pydantic models for task records and definitions in PostgreSQL
+# LAST_REVIEWED: 16 OCT 2025
 # EXPORTS: TaskRecord, TaskDefinition - Pydantic models for task data
-# INTERFACES: Inherits from TaskData (core.contracts)
-# PYDANTIC_MODELS: TaskRecord (adds persistence fields), TaskDefinition
+# INTERFACES: TaskRecord inherits from TaskData (core.contracts)
+# PYDANTIC_MODELS: TaskRecord (adds persistence fields), TaskDefinition (lightweight orchestration model)
 # DEPENDENCIES: pydantic, datetime, typing, core.contracts.TaskData
 # SOURCE: Extracted from schema_base.py, refactored to inherit from TaskData
 # SCOPE: Task record and definition data models for DATABASE boundary
-# VALIDATION: Field validation via Pydantic (inherits from TaskData)
+# VALIDATION: Field validation via Pydantic, status transition validation
 # PATTERNS: Data model pattern, Inheritance (TaskData), no business logic
 # ENTRY_POINTS: from core.models.task import TaskRecord, TaskDefinition
 # ARCHITECTURE: TaskRecord = TaskData + Database persistence fields

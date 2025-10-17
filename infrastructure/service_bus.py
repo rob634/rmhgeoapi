@@ -1,19 +1,20 @@
 # ============================================================================
-# CLAUDE CONTEXT - REPOSITORY
+# CLAUDE CONTEXT - SERVICE BUS REPOSITORY
 # ============================================================================
-# CATEGORY: AZURE RESOURCE REPOSITORIES
-# PURPOSE: Azure SDK wrapper providing data access abstraction
-# EPOCH: Shared by all epochs (infrastructure layer)# PURPOSE: Azure Service Bus repository for high-volume message operations with batch support
+# EPOCH: 4 - ACTIVE ✅
+# STATUS: Infrastructure - Azure Service Bus repository for high-volume operations
+# PURPOSE: Azure Service Bus repository for high-volume message operations with batch support
+# LAST_REVIEWED: 16 OCT 2025
 # EXPORTS: ServiceBusRepository - Singleton implementation for Service Bus operations
 # INTERFACES: IQueueRepository - Implements queue operation interface for compatibility
 # PYDANTIC_MODELS: Accepts BaseModel instances for message sending, supports batch operations
-# DEPENDENCIES: azure-servicebus, azure-identity, threading, json, asyncio
+# DEPENDENCIES: azure-servicebus, azure-identity, threading, json, asyncio, config
 # SOURCE: Azure Service Bus via DefaultAzureCredential
 # SCOPE: High-volume task messaging operations (thousands to millions of messages)
-# VALIDATION: Batch size limits, message size validation, retry logic
-# PATTERNS: Singleton, Repository, Batch Processing, Connection pooling
-# ENTRY_POINTS: ServiceBusRepository.instance(), batch_send_messages(), async operations
-# INDEX: ServiceBusRepository:50, batch_send_messages:300, async_batch_send:450
+# VALIDATION: Batch size limits (100 messages), message size validation, retry logic
+# PATTERNS: Singleton, Repository, Batch Processing, Connection pooling, Scheduled delivery
+# ENTRY_POINTS: ServiceBusRepository.instance(), batch_send_messages(), send_message_with_delay()
+# INDEX: ServiceBusRepository:50, batch_send_messages:300, async_batch_send:450, send_message_with_delay:600
 # ============================================================================
 
 """

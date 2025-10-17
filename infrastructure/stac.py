@@ -1,16 +1,19 @@
 # ============================================================================
-# CLAUDE CONTEXT - INFRASTRUCTURE
+# CLAUDE CONTEXT - STAC INFRASTRUCTURE
 # ============================================================================
+# EPOCH: 4 - ACTIVE ✅
+# STATUS: Infrastructure - PgSTAC setup and management
 # PURPOSE: STAC (SpatioTemporal Asset Catalog) infrastructure for PgSTAC setup and management
+# LAST_REVIEWED: 16 OCT 2025
 # EXPORTS: StacInfrastructure class with schema detection, installation, and verification
 # INTERFACES: None - concrete infrastructure class
 # PYDANTIC_MODELS: None - uses dict responses for status
-# DEPENDENCIES: pypgstac (0.8.5), psycopg, typing, subprocess
+# DEPENDENCIES: pypgstac (0.8.5), psycopg, typing, subprocess, config
 # SOURCE: PostgreSQL database connection from config, environment variables for pypgstac
 # SCOPE: One-time PgSTAC installation, idempotent schema checks, version management
 # VALIDATION: Schema existence checks, version verification, role validation
-# PATTERNS: Infrastructure pattern, idempotent operations
-# ENTRY_POINTS: StacInfrastructure().check_installation(), install_pgstac()
+# PATTERNS: Infrastructure pattern, Idempotent operations
+# ENTRY_POINTS: StacInfrastructure().check_installation(), install_pgstac(), verify_installation()
 # INDEX: StacInfrastructure:50, check_installation:90, install_pgstac:150, verify_installation:250
 # ============================================================================
 

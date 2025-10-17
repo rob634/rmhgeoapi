@@ -39,8 +39,10 @@ from typing import List, Dict, Any
 import hashlib
 import json
 
+from jobs.base import JobBase
 
-class ValidateRasterJob:
+
+class ValidateRasterJob(JobBase):
     """
     Standalone raster validation job.
 

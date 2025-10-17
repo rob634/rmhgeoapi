@@ -1,18 +1,19 @@
 # ============================================================================
 # CLAUDE CONTEXT - CORE MODELS - RESULTS
 # ============================================================================
-# CATEGORY: DATA MODELS - DATABASE ENTITIES
-# PURPOSE: Pydantic model mapping to PostgreSQL table/database structure
-# EPOCH: Shared by all epochs (database schema)# PURPOSE: Pure data models for execution results
-# EXPORTS: TaskResult, StageResult, JobResult, StageAdvancementResult
+# EPOCH: 4 - ACTIVE ✅
+# STATUS: Core models - Execution result data structures
+# PURPOSE: Pure data models for execution results
+# LAST_REVIEWED: 16 OCT 2025
+# EXPORTS: TaskResult, StageResult, JobResult, StageAdvancementResult, TaskCompletionResult, JobCompletionResult
 # INTERFACES: Pydantic BaseModel
-# PYDANTIC_MODELS: Various result models
+# PYDANTIC_MODELS: Various result models for atomic operations
 # DEPENDENCIES: pydantic, datetime, typing
 # SOURCE: Extracted from schema_base.py (data structure only)
-# SCOPE: Result data models
+# SCOPE: Result data models for task/stage/job completion
 # VALIDATION: Field validation via Pydantic
 # PATTERNS: Data model pattern, no business logic
-# ENTRY_POINTS: from core.models.results import TaskResult
+# ENTRY_POINTS: from core.models.results import TaskResult, StageAdvancementResult
 # ============================================================================
 
 """

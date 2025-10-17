@@ -1,18 +1,20 @@
 # ============================================================================
-# CLAUDE CONTEXT - REPOSITORY
+# CLAUDE CONTEXT - BLOB REPOSITORY
 # ============================================================================
-# CATEGORY: AZURE RESOURCE REPOSITORIES
-# PURPOSE: Azure SDK wrapper providing data access abstraction
-# EPOCH: Shared by all epochs (infrastructure layer)# PURPOSE: Centralized Azure Blob Storage repository with managed authentication
+# EPOCH: 4 - ACTIVE ✅
+# STATUS: Infrastructure - Azure Blob Storage repository
+# PURPOSE: Centralized Azure Blob Storage repository with managed authentication
+# LAST_REVIEWED: 16 OCT 2025
 # EXPORTS: BlobRepository singleton with DefaultAzureCredential authentication
 # INTERFACES: IBlobRepository for dependency injection
-# DEPENDENCIES: azure-storage-blob, azure-identity, io.BytesIO, typing
+# PYDANTIC_MODELS: None - operates on raw bytes and streams
+# DEPENDENCIES: azure-storage-blob, azure-identity, io.BytesIO, typing, config
 # SOURCE: Azure Blob Storage containers (Bronze/Silver/Gold tiers)
 # SCOPE: ALL blob operations for entire ETL pipeline
 # VALIDATION: Blob existence, size limits, content type validation
-# PATTERNS: Singleton, Repository, DefaultAzureCredential, connection pooling
-# ENTRY_POINTS: BlobRepository.instance() for singleton access
-# INDEX: IBlobRepository:60, BlobRepository:100, get_blob_repository:470
+# PATTERNS: Singleton, Repository, DefaultAzureCredential, Connection pooling
+# ENTRY_POINTS: BlobRepository.instance(), RepositoryFactory.create_blob_repository()
+# INDEX: IBlobRepository:60, BlobRepository:100, upload_blob:200, download_blob:300
 # ============================================================================
 
 """

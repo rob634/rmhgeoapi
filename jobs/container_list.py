@@ -15,8 +15,10 @@ from typing import List, Dict, Any
 import hashlib
 import json
 
+from jobs.base import JobBase
 
-class ListContainerContentsWorkflow:
+
+class ListContainerContentsWorkflow(JobBase):
     """
     Two-stage fan-out job for detailed container inventory.
 

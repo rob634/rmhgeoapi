@@ -12,8 +12,10 @@ from typing import List, Dict, Any
 import hashlib
 import json
 
+from jobs.base import JobBase
 
-class ContainerSummaryWorkflow:
+
+class ContainerSummaryWorkflow(JobBase):
     """Single-stage container summary job - pure data declaration."""
 
     # Job metadata

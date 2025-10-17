@@ -1,7 +1,7 @@
 # Claude Context - Azure Geospatial ETL Pipeline
 
 **Author**: Robert and Geospatial Claude Legion
-**Date**: 29 SEP 2025
+**Date**: 16 OCT 2025
 **Primary Documentation**: Start here for all Claude instances
 
 ## 🚨 CRITICAL: NEW CORE ARCHITECTURE (29 SEP 2025)
@@ -139,9 +139,72 @@ curl https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/db/t
 
 ## 🏗️ Architecture Overview
 
+### Job Declaration Pattern (Pattern B)
+
+**Updated**: 15 OCT 2025
+
+Jobs are **declarative blueprints** processed by CoreMachine:
+
+```
+Job Class (Blueprint)
+  ↓
+CoreMachine (Orchestrator)
+  ↓
+Handlers (Business Logic)
+```
+
+**Job Responsibilities:**
+- Define stages (plain dicts)
+- Create task parameters (`create_tasks_for_stage()`)
+- Validate parameters (optional)
+
+**CoreMachine Responsibilities:**
+- Read job blueprints
+- Convert dicts → Pydantic objects
+- Queue tasks (batch or individual)
+- Execute handlers
+- Manage state transitions
+- Handle stage completion
+
+**Pattern B: Simple Job Classes (Official Standard)**
+
+```python
+class HelloWorldJob:
+    job_type: str = "hello_world"
+    stages: List[Dict[str, Any]] = [...]  # Plain dicts
+
+    @staticmethod
+    def create_tasks_for_stage(...) -> List[dict]:
+        return [{"task_id": ..., "task_type": ...}]
+```
+
+**Registration (Explicit):**
+```python
+# jobs/__init__.py
+ALL_JOBS = {"hello_world": HelloWorldJob}
+
+# function_app.py
+core_machine = CoreMachine(all_jobs=ALL_JOBS, all_handlers=ALL_HANDLERS)
+```
+
+**Why Pattern B:**
+- Jobs are simple blueprints
+- CoreMachine handles complexity
+- Pydantic at boundaries (type safety)
+- All 10 production jobs use this
+
+**Removed Files (Phase 2 - 15 OCT 2025):**
+- `jobs/workflow.py` - Removed (unused Workflow ABC with wrong contract)
+- `jobs/registry.py` - Removed (unused decorator pattern)
+
+**Unused Reference Files:**
+- `core/models/stage.py` - Stage model (not used by jobs - jobs use plain dicts)
+
+**For complete details:** See `docs_claude/ARCHITECTURE_REFERENCE.md` section "Job Declaration Pattern"
+
 ### Job→Stage→Task Pattern
 ```
-JOB (Controller Layer - Orchestration)
+JOB (Blueprint - Declares stages)
  ├── STAGE 1 (Sequential)
  │   ├── Task A (Parallel) ┐
  │   ├── Task B (Parallel) ├─ All tasks run concurrently
@@ -215,7 +278,7 @@ from repository_factory import RepositoryFactory
 repo = RepositoryFactory.create_repository("postgresql")
 ```
 
-## 🎯 Current State (22 SEP 2025)
+## 🎯 Current State (16 OCT 2025)
 
 ### ✅ What's Working - FULL END-TO-END WORKFLOW
 - ✅ HTTP job submission → Queue → Database flow
@@ -232,7 +295,7 @@ repo = RepositoryFactory.create_repository("postgresql")
 - ✅ **Idempotency working** - Duplicate submissions return same job_id
 - ✅ **Folder migration** - utils/ folder structure working in Azure Functions
 
-### 🎉 Major Issues Resolved (22 SEP 2025)
+### 🎉 Major Issues Resolved (See HISTORY.md for details)
 1. **Deadlock Elimination**: Advisory locks enable n=30+ concurrent tasks (previously deadlocked at n>4)
 2. **Poison Queue Issue**: Fixed invalid status transition PROCESSING→PROCESSING
 3. **N=2 Race Condition**: Fixed task completion counting issue
@@ -276,9 +339,12 @@ PERFORM pg_advisory_xact_lock(
 ### Claude Context Headers (Required for all Python files)
 ```python
 # ============================================================================
-# CLAUDE CONTEXT - [FILE_TYPE]
+# CLAUDE CONTEXT - [DESCRIPTIVE_TITLE]
 # ============================================================================
+# EPOCH: 4 - ACTIVE ✅
+# STATUS: [Component type] - [Brief description]
 # PURPOSE: [One sentence description]
+# LAST_REVIEWED: [DD MMM YYYY]
 # EXPORTS: [Classes/functions exposed]
 # INTERFACES: [ABCs implemented]
 # PYDANTIC_MODELS: [Models used]
@@ -301,7 +367,7 @@ PERFORM pg_advisory_xact_lock(
 
 | Document | Purpose |
 |----------|---------|
-| `TODO_ACTIVE.md` | Current tasks and blocking issues only |
+| `TODO.md` | ⚡ PRIMARY AND ONLY active task list |
 | `ARCHITECTURE_REFERENCE.md` | Deep technical specifications |
 | `FILE_CATALOG.md` | Quick file lookup with descriptions |
 | `DEPLOYMENT_GUIDE.md` | Deployment procedures and monitoring |

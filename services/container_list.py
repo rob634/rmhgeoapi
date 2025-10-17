@@ -1,15 +1,17 @@
 """
-Container List Services - Two-Stage Pattern
+Container List Services - Three-Stage Diamond Pattern Support
 
 Stage 1: list_container_blobs - Returns list of blob names
-Stage 2: analyze_single_blob - Analyzes and stores individual blob metadata
+Stage 2: analyze_single_blob - Analyzes and stores individual blob metadata (fan-out)
+Stage 3: aggregate_blob_analysis - Aggregates all blob metadata into summary (fan-in)
 
 Author: Robert and Geospatial Claude Legion
-Date: 4 OCT 2025
+Date: 4 OCT 2025 (Updated 16 OCT 2025 - Added fan-in aggregation)
 """
 
 from typing import Any
 from datetime import datetime
+from collections import defaultdict
 from infrastructure.blob import BlobRepository
 
 
@@ -190,6 +192,163 @@ def _matches_filter(blob: dict, filter_criteria: dict) -> bool:
                 return False
 
     return True
+
+
+def aggregate_blob_analysis(params: dict) -> dict[str, Any]:
+    """
+    Stage 3: Aggregate all blob analysis results into summary (FAN-IN).
+
+    This is a fan-in aggregation handler - CoreMachine automatically creates
+    one task of this type when stage has parallelism="fan_in".
+
+    Receives ALL Stage 2 results and produces consolidated summary.
+
+    Args:
+        params: {
+            "previous_results": [
+                {"task_id": "...", "result": {"blob_name": "...", "size_mb": ..., ...}},
+                {"task_id": "...", "result": {"blob_name": "...", "size_mb": ..., ...}},
+                # ... N results
+            ],
+            "job_parameters": {"container_name": str, ...},
+            "aggregation_metadata": {
+                "stage": 3,
+                "previous_stage": 2,
+                "result_count": N,
+                "pattern": "fan_in"
+            }
+        }
+
+    Returns:
+        Dict with aggregated summary:
+        {
+            "success": True,
+            "result": {
+                "summary": {
+                    "total_files": int,
+                    "total_size_bytes": int,
+                    "total_size_mb": float,
+                    "by_extension": {".tif": 5, ".shp": 3, ...},
+                    "largest_file": {"name": "...", "size_mb": ...},
+                    "smallest_file": {"name": "...", "size_mb": ...},
+                    "average_size_mb": float,
+                    "files_analyzed": int,
+                    "files_failed": int
+                }
+            }
+        }
+    """
+    try:
+        start_time = datetime.utcnow()
+
+        # Extract previous results from params
+        previous_results = params.get("previous_results", [])
+        job_params = params.get("job_parameters", {})
+        agg_metadata = params.get("aggregation_metadata", {})
+
+        # Validate inputs
+        if not previous_results:
+            return {
+                "success": False,
+                "error": "No previous results to aggregate",
+                "error_type": "ValidationError"
+            }
+
+        # Initialize aggregation accumulators
+        total_files = 0
+        total_size_bytes = 0
+        extension_counts = defaultdict(int)
+        extension_sizes = defaultdict(int)  # Total bytes per extension
+        successful_results = []
+        failed_results = []
+
+        # Aggregate results from all Stage 2 tasks
+        for task_result in previous_results:
+            if not task_result.get('success'):
+                failed_results.append(task_result)
+                continue
+
+            result_data = task_result.get('result', {})
+
+            # Count files
+            total_files += 1
+            successful_results.append(result_data)
+
+            # Sum sizes
+            size_bytes = result_data.get('size_bytes', 0)
+            total_size_bytes += size_bytes
+
+            # Count by extension
+            file_ext = result_data.get('file_extension', 'unknown')
+            extension_counts[file_ext] += 1
+            extension_sizes[file_ext] += size_bytes
+
+        # Calculate derived metrics
+        total_size_mb = round(total_size_bytes / (1024 * 1024), 2) if total_size_bytes else 0.0
+        average_size_mb = round(total_size_mb / total_files, 4) if total_files > 0 else 0.0
+
+        # Find largest and smallest files
+        largest_file = None
+        smallest_file = None
+        if successful_results:
+            largest = max(successful_results, key=lambda x: x.get('size_bytes', 0))
+            smallest = min(successful_results, key=lambda x: x.get('size_bytes', 0))
+
+            largest_file = {
+                "name": largest.get('blob_name'),
+                "size_mb": largest.get('size_mb'),
+                "extension": largest.get('file_extension')
+            }
+            smallest_file = {
+                "name": smallest.get('blob_name'),
+                "size_mb": smallest.get('size_mb'),
+                "extension": smallest.get('file_extension')
+            }
+
+        # Calculate extension statistics
+        by_extension = {}
+        for ext, count in extension_counts.items():
+            total_bytes = extension_sizes[ext]
+            by_extension[ext] = {
+                "count": count,
+                "total_size_mb": round(total_bytes / (1024 * 1024), 2),
+                "percentage": round((count / total_files) * 100, 1) if total_files > 0 else 0.0
+            }
+
+        duration = (datetime.utcnow() - start_time).total_seconds()
+
+        # SUCCESS - return aggregated summary
+        return {
+            "success": True,
+            "result": {
+                "summary": {
+                    "total_files": total_files,
+                    "total_size_bytes": total_size_bytes,
+                    "total_size_mb": total_size_mb,
+                    "average_size_mb": average_size_mb,
+                    "by_extension": dict(sorted(by_extension.items())),  # Sort for readability
+                    "largest_file": largest_file,
+                    "smallest_file": smallest_file,
+                    "files_analyzed": len(successful_results),
+                    "files_failed": len(failed_results),
+                    "container_name": job_params.get("container_name"),
+                    "aggregation_metadata": {
+                        "stage": agg_metadata.get("stage"),
+                        "results_aggregated": agg_metadata.get("result_count"),
+                        "pattern": agg_metadata.get("pattern"),
+                        "execution_time_seconds": round(duration, 3)
+                    }
+                }
+            }
+        }
+
+    except Exception as e:
+        # FAILURE - return error
+        return {
+            "success": False,
+            "error": str(e) or type(e).__name__,
+            "error_type": type(e).__name__
+        }
 
 
 def _get_extension(filename: str) -> str:

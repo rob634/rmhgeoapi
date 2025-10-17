@@ -45,8 +45,10 @@ from typing import List, Dict, Any
 import hashlib
 import json
 
+from jobs.base import JobBase
 
-class ProcessRasterWorkflow:
+
+class ProcessRasterWorkflow(JobBase):
     """
     Small file raster processing workflow (<= 1GB).
 

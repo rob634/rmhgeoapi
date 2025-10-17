@@ -1,19 +1,20 @@
 # ============================================================================
-# CLAUDE CONTEXT - REPOSITORY
+# CLAUDE CONTEXT - POSTGRESQL REPOSITORIES
 # ============================================================================
-# CATEGORY: AZURE RESOURCE REPOSITORIES
-# PURPOSE: Azure SDK wrapper providing data access abstraction
-# EPOCH: Shared by all epochs (infrastructure layer)# PURPOSE: PostgreSQL-specific repository implementation with direct database access and atomic operations
-# EXPORTS: PostgreSQLRepository, PostgreSQLJobRepository, PostgreSQLTaskRepository, PostgreSQLCompletionDetector
-# INTERFACES: BaseRepository, IJobRepository, ITaskRepository, IStageCompletionRepository (from interface_repository)
+# EPOCH: 4 - ACTIVE ✅
+# STATUS: Infrastructure - PostgreSQL database repositories
+# PURPOSE: PostgreSQL-specific repository implementation with direct database access and atomic operations
+# LAST_REVIEWED: 16 OCT 2025
+# EXPORTS: PostgreSQLRepository, PostgreSQLJobRepository, PostgreSQLTaskRepository, PostgreSQLStageCompletionRepository
+# INTERFACES: BaseRepository, IJobRepository, ITaskRepository, IStageCompletionRepository
 # PYDANTIC_MODELS: JobRecord, TaskRecord, StageAdvancementResult, TaskCompletionResult, JobCompletionResult
-# DEPENDENCIES: psycopg, psycopg.sql, config, schema_core, repository_base, repository_abc
-# SOURCE: PostgreSQL database (connection from AppConfig), app schema tables (jobs, tasks)
+# DEPENDENCIES: psycopg, psycopg.sql, config, core.models, infrastructure.base
+# SOURCE: PostgreSQL database (app schema: jobs, tasks tables)
 # SCOPE: Database operations for job/task persistence and atomic completion detection
-# VALIDATION: SQL injection prevention via psycopg.sql composition, transaction atomicity for race prevention
+# VALIDATION: SQL injection prevention via psycopg.sql composition, transaction atomicity
 # PATTERNS: Repository pattern, Unit of Work (transactions), Template Method, Connection pooling
-# ENTRY_POINTS: repo = JobRepository(); job = repo.get_job(job_id); detector.complete_task_and_check_stage()
-# INDEX: PostgreSQLRepository:61, JobRepository:514, TaskRepository:736, CompletionDetector:949
+# ENTRY_POINTS: repo = PostgreSQLJobRepository(); job = repo.get_job(job_id)
+# INDEX: PostgreSQLRepository:61, PostgreSQLJobRepository:514, PostgreSQLTaskRepository:736, PostgreSQLStageCompletionRepository:949
 # ============================================================================
 
 """

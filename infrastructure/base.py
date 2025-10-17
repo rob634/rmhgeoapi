@@ -1,19 +1,20 @@
 # ============================================================================
-# CLAUDE CONTEXT - REPOSITORY
+# CLAUDE CONTEXT - BASE REPOSITORY
 # ============================================================================
-# CATEGORY: AZURE RESOURCE REPOSITORIES
-# PURPOSE: Azure SDK wrapper providing data access abstraction
-# EPOCH: Shared by all epochs (infrastructure layer)# PURPOSE: Pure abstract base repository class providing common validation and error handling patterns
+# EPOCH: 4 - ACTIVE ✅
+# STATUS: Infrastructure - Abstract base for all repositories
+# PURPOSE: Pure abstract base repository class providing common validation and error handling patterns
+# LAST_REVIEWED: 16 OCT 2025
 # EXPORTS: BaseRepository (abstract base class for all repository implementations)
 # INTERFACES: ABC (Abstract Base Class) - defines repository contract for storage implementations
-# PYDANTIC_MODELS: JobRecord, TaskRecord, JobStatus, TaskStatus (imported from schema_core)
-# DEPENDENCIES: abc, contextlib, typing, logging, schema_core, validator_schema
+# PYDANTIC_MODELS: JobRecord, TaskRecord, JobStatus, TaskStatus (from core.models)
+# DEPENDENCIES: abc, contextlib, typing, logging, core.models, util_logger
 # SOURCE: No data source - pure abstract class providing patterns only
 # SCOPE: Base-level repository operations applicable to all storage backends
-# VALIDATION: Schema validation via SchemaValidator, state transition validation for jobs/tasks
+# VALIDATION: State transition validation for jobs/tasks, error handling patterns
 # PATTERNS: Repository pattern, Template Method pattern, Error Context Manager pattern
-# ENTRY_POINTS: class JobRepository(BaseRepository); self._validate_status_transition(job, status)
-# INDEX: BaseRepository:50, error_context:80, validate_status_transition:120, validate_stage_progression:180
+# ENTRY_POINTS: class PostgreSQLJobRepository(BaseRepository)
+# INDEX: BaseRepository:50, _error_context:80, _validate_status_transition:120, _validate_stage_progression:180
 # ============================================================================
 
 """

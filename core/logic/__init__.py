@@ -1,11 +1,17 @@
 # ============================================================================
 # CLAUDE CONTEXT - CORE LOGIC PACKAGE
 # ============================================================================
-# CATEGORY: BUSINESS LOGIC HELPERS
-# PURPOSE: Shared utility functions for calculations and state transitions
-# EPOCH: Shared by all epochs (business logic)# PURPOSE: Export business logic functions from the core.logic package
+# EPOCH: 4 - ACTIVE ✅
+# STATUS: Core logic - Business logic helpers
+# PURPOSE: Export business logic functions from the core.logic package
+# LAST_REVIEWED: 16 OCT 2025
 # EXPORTS: Transition and calculation functions
-# AZURE FUNCTIONS: Required for package imports
+# INTERFACES: Package initialization only
+# PYDANTIC_MODELS: None - operates on data models
+# DEPENDENCIES: Core logic submodules
+# AZURE_FUNCTIONS: Required for package imports
+# PATTERNS: Package initialization, Separation of concerns
+# ENTRY_POINTS: from core.logic import can_job_transition, can_task_transition
 # ============================================================================
 
 """

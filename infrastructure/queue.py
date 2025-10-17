@@ -1,17 +1,18 @@
 # ============================================================================
-# CLAUDE CONTEXT - REPOSITORY
+# CLAUDE CONTEXT - QUEUE REPOSITORY
 # ============================================================================
-# CATEGORY: AZURE RESOURCE REPOSITORIES
-# PURPOSE: Azure SDK wrapper providing data access abstraction
-# EPOCH: Shared by all epochs (infrastructure layer)# PURPOSE: Centralized queue repository with managed authentication and singleton credential reuse
+# EPOCH: 4 - ACTIVE ✅
+# STATUS: Infrastructure - Azure Storage Queue repository
+# PURPOSE: Centralized queue repository with managed authentication and singleton credential reuse
+# LAST_REVIEWED: 16 OCT 2025
 # EXPORTS: QueueRepository - Singleton implementation for all queue operations
 # INTERFACES: IQueueRepository - Implements queue operation interface
 # PYDANTIC_MODELS: Accepts BaseModel instances for message sending
-# DEPENDENCIES: azure.storage.queue, azure.identity, threading, base64, json
+# DEPENDENCIES: azure.storage.queue, azure.identity, threading, base64, json, config
 # SOURCE: Azure Storage Queues via DefaultAzureCredential
 # SCOPE: All queue operations in the application
 # VALIDATION: Retry logic, error handling, message size validation
-# PATTERNS: Singleton, Repository, Connection pooling
+# PATTERNS: Singleton, Repository, Connection pooling, DefaultAzureCredential
 # ENTRY_POINTS: QueueRepository.instance(), RepositoryFactory.create_queue_repository()
 # INDEX: QueueRepository:50, send_message:270, receive_messages:320
 # ============================================================================

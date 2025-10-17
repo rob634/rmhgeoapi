@@ -34,14 +34,18 @@ Author: Robert and Geospatial Claude Legion
 Date: 1 OCT 2025
 """
 
+from .base import JobBase
 from .hello_world import HelloWorldJob
 from .container_summary import ContainerSummaryWorkflow
 from .container_list import ListContainerContentsWorkflow
+from .container_list_diamond import ListContainerContentsDiamondWorkflow
 from .stac_catalog_container import StacCatalogContainerWorkflow
 from .stac_catalog_vectors import StacCatalogVectorsWorkflow
 from .ingest_vector import IngestVectorJob
 from .validate_raster_job import ValidateRasterJob
 from .process_raster import ProcessRasterWorkflow
+from .generate_h3_level4 import GenerateH3Level4Job
+from .create_h3_base import CreateH3BaseJob
 
 # ============================================================================
 # EXPLICIT JOB REGISTRY
@@ -56,11 +60,14 @@ ALL_JOBS = {
     "hello_world": HelloWorldJob,
     "summarize_container": ContainerSummaryWorkflow,
     "list_container_contents": ListContainerContentsWorkflow,
+    "list_container_contents_diamond": ListContainerContentsDiamondWorkflow,  # Fan-in demo (16 OCT 2025)
     "stac_catalog_container": StacCatalogContainerWorkflow,
     "stac_catalog_vectors": StacCatalogVectorsWorkflow,
     "ingest_vector": IngestVectorJob,
     "validate_raster_job": ValidateRasterJob,
     "process_raster": ProcessRasterWorkflow,
+    "generate_h3_level4": GenerateH3Level4Job,
+    "create_h3_base": CreateH3BaseJob,
     # Add new jobs here explicitly
 }
 
@@ -74,7 +81,33 @@ def validate_job_registry():
 
     This catches configuration errors immediately at import time,
     not when a user tries to submit a job.
+
+    Validates:
+    1. Required attributes (stages, job_type, description)
+    2. Required methods (interface contract - 5 methods)
+    3. Stage structure (list, not empty)
+    4. ABC inheritance (JobBase enforces method signatures at class definition)
+
+    Note: As of Phase 2 (15 OCT 2025), jobs should inherit from JobBase ABC.
+    ABC enforcement happens automatically at class definition time, providing:
+    - Fail-fast at import (not at HTTP request)
+    - IDE autocomplete and type hints
+    - Clear method signature documentation
+
+    Raises:
+        AttributeError: If job missing required methods
+        ValueError: If job has invalid attributes
+        TypeError: If ABC instantiation attempted without implementing abstract methods
     """
+    # Interface contract: Methods that triggers/CoreMachine expect
+    REQUIRED_METHODS = [
+        'validate_job_parameters',  # Called by: triggers/submit_job.py line 171
+        'generate_job_id',          # Called by: triggers/submit_job.py line 175
+        'create_job_record',        # Called by: triggers/submit_job.py line 220
+        'queue_job',                # Called by: triggers/submit_job.py line 226
+        'create_tasks_for_stage',   # Called by: core/machine.py line 248
+    ]
+
     for job_type, job_class in ALL_JOBS.items():
         # Verify required attributes exist
         if not hasattr(job_class, 'stages'):
@@ -93,6 +126,34 @@ def validate_job_registry():
         if not job_class.stages:
             raise ValueError(
                 f"Job {job_type} has empty 'stages' list. Jobs must have at least one stage."
+            )
+
+        # NEW: Verify required methods exist (interface contract enforcement)
+        missing_methods = []
+        for method_name in REQUIRED_METHODS:
+            if not hasattr(job_class, method_name):
+                missing_methods.append(method_name)
+
+        if missing_methods:
+            raise AttributeError(
+                f"\n{'='*80}\n"
+                f"❌ JOB INTERFACE CONTRACT VIOLATION: {job_type}\n"
+                f"{'='*80}\n"
+                f"Job class: {job_class.__name__}\n"
+                f"Missing required methods: {', '.join(missing_methods)}\n"
+                f"\n"
+                f"All jobs must implement these 5 methods:\n"
+                f"  1. validate_job_parameters(params: dict) -> dict\n"
+                f"  2. generate_job_id(params: dict) -> str\n"
+                f"  3. create_job_record(job_id: str, params: dict) -> dict\n"
+                f"  4. queue_job(job_id: str, params: dict) -> dict\n"
+                f"  5. create_tasks_for_stage(stage: int, job_params: dict, job_id: str, previous_results: list) -> List[dict]\n"
+                f"\n"
+                f"Reference implementations:\n"
+                f"  - Simple single-stage: jobs/create_h3_base.py\n"
+                f"  - Multi-stage: jobs/hello_world.py\n"
+                f"  - Complex pipeline: jobs/process_raster.py\n"
+                f"{'='*80}\n"
             )
 
     return True
@@ -128,4 +189,5 @@ __all__ = [
     'ALL_JOBS',
     'get_job_class',
     'validate_job_registry',
+    'JobBase',  # Export ABC for job implementations
 ]

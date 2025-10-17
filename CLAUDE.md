@@ -1,6 +1,6 @@
 # 📁 Documentation Has Been Restructured
 
-**Date**: 22 SEP 2025
+**Date**: 16 OCT 2025
 **Author**: Robert and Geospatial Claude Legion
 
 ## 🎯 Claude - Start Here!
@@ -18,8 +18,8 @@ This is your main starting point - it contains everything you need to understand
 ```
 docs_claude/
 ├── CLAUDE_CONTEXT.md         # 🎯 START HERE - Primary context
-├── TODO_ACTIVE.md            # Current tasks and blocking issues
-├── ARCHITECTURE_REFERENCE.md # Deep technical specifications  
+├── TODO.md                   # ⚡ PRIMARY TASK LIST - Only active TODO file
+├── ARCHITECTURE_REFERENCE.md # Deep technical specifications
 ├── FILE_CATALOG.md           # Quick file lookup
 ├── DEPLOYMENT_GUIDE.md       # Deployment procedures
 └── HISTORY.md                # Completed work log
@@ -30,8 +30,8 @@ docs_claude/
 # View primary context
 cat docs_claude/CLAUDE_CONTEXT.md
 
-# Check active tasks
-cat docs_claude/TODO_ACTIVE.md
+# Check active tasks (ONLY TODO file)
+cat docs_claude/TODO.md
 
 # See technical details
 cat docs_claude/ARCHITECTURE_REFERENCE.md
@@ -232,9 +232,12 @@ All .py files use Google style documentation but at the top before that, please 
 
 ```python
 # ============================================================================
-# CLAUDE CONTEXT - [FILE_TYPE]
+# CLAUDE CONTEXT - [DESCRIPTIVE_TITLE]
 # ============================================================================
+# EPOCH: 4 - ACTIVE ✅
+# STATUS: [Component type] - [Brief description]
 # PURPOSE: [One sentence description of what this file does]
+# LAST_REVIEWED: [DD MMM YYYY]
 # EXPORTS: [Main classes, functions, or constants exposed to other modules]
 # INTERFACES: [Abstract base classes or protocols this file implements]
 # PYDANTIC_MODELS: [Data models defined or consumed by this file]
@@ -256,7 +259,7 @@ Please refer to claude_log_access.md for instructions on accessing function app 
 
 
 **Important md files**
-- docs_claude/TODO_ACTIVE.md - Current active tasks
+- docs_claude/TODO.md - ⚡ PRIMARY AND ONLY active task list
 - docs_claude/HISTORY.md - Completed work log
 - docs_claude/CLAUDE_CONTEXT.md - Primary context
 - docs_claude/FILE_CATALOG.md - Quick file lookup

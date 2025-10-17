@@ -12,8 +12,10 @@ from typing import List, Dict, Any
 import hashlib
 import json
 
+from jobs.base import JobBase
 
-class StacCatalogVectorsWorkflow:
+
+class StacCatalogVectorsWorkflow(JobBase):
     """
     Single-stage job for STAC cataloging of PostGIS vector tables.
 

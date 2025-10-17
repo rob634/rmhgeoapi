@@ -1,9 +1,10 @@
 # ============================================================================
-# CLAUDE CONTEXT - REPOSITORY PACKAGE
+# CLAUDE CONTEXT - INFRASTRUCTURE PACKAGE
 # ============================================================================
-# CATEGORY: AZURE RESOURCE REPOSITORIES
-# PURPOSE: Azure SDK wrapper providing data access abstraction
-# EPOCH: Shared by all epochs (infrastructure layer)# PURPOSE: Package initialization for repository modules with lazy imports
+# EPOCH: 4 - ACTIVE ✅
+# STATUS: Infrastructure - Repository and service layer
+# PURPOSE: Package initialization for repository modules with lazy imports
+# LAST_REVIEWED: 16 OCT 2025
 # EXPORTS: Factory and repository classes via lazy loading
 # INTERFACES: All repository interfaces and implementations
 # PYDANTIC_MODELS: None at package level - models in individual modules

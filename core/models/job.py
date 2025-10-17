@@ -1,16 +1,17 @@
 # ============================================================================
 # CLAUDE CONTEXT - CORE MODELS - JOB
 # ============================================================================
-# CATEGORY: DATA MODELS - DATABASE ENTITIES
-# PURPOSE: Pydantic model mapping to PostgreSQL table/database structure
-# EPOCH: Shared by all epochs (database schema)
+# EPOCH: 4 - ACTIVE ✅
+# STATUS: Core data models - Job database representation
+# PURPOSE: Pydantic model for job records in PostgreSQL database
+# LAST_REVIEWED: 16 OCT 2025
 # EXPORTS: JobRecord - Pydantic model for job data
 # INTERFACES: Inherits from JobData (core.contracts)
-# PYDANTIC_MODELS: JobRecord (adds persistence fields)
+# PYDANTIC_MODELS: JobRecord (adds persistence fields to JobData)
 # DEPENDENCIES: pydantic, datetime, typing, core.contracts.JobData
 # SOURCE: Extracted from schema_base.py, refactored to inherit from JobData
 # SCOPE: Job record data model for DATABASE boundary
-# VALIDATION: Field validation via Pydantic (inherits from JobData)
+# VALIDATION: Field validation via Pydantic, status transition validation
 # PATTERNS: Data model pattern, Inheritance (JobData), no business logic
 # ENTRY_POINTS: from core.models.job import JobRecord
 # ARCHITECTURE: JobRecord = JobData + Database persistence fields

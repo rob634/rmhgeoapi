@@ -1,18 +1,20 @@
 # ============================================================================
-# CLAUDE CONTEXT - REPOSITORY
+# CLAUDE CONTEXT - DUCKDB REPOSITORY
 # ============================================================================
-# CATEGORY: ANALYTICAL DATABASE REPOSITORIES
+# EPOCH: 4 - ACTIVE ✅
+# STATUS: Infrastructure - DuckDB analytical database repository
 # PURPOSE: DuckDB repository for analytical queries and GeoParquet operations
-# EPOCH: Shared by all epochs (infrastructure layer)
+# LAST_REVIEWED: 16 OCT 2025
 # EXPORTS: DuckDBRepository singleton with connection pooling
 # INTERFACES: IDuckDBRepository for dependency injection
-# DEPENDENCIES: duckdb, geopandas, pyarrow, azure-identity
+# PYDANTIC_MODELS: None - returns pandas DataFrames and DuckDB relations
+# DEPENDENCIES: duckdb, geopandas, pyarrow, azure-identity, config
 # SOURCE: In-memory or file-based DuckDB connections with Azure Blob integration
-# SCOPE: Analytical queries, GeoParquet exports, spatial analytics
-# VALIDATION: Extension availability, connection health, query results
+# SCOPE: Analytical queries, GeoParquet exports, spatial analytics, serverless blob queries
+# VALIDATION: Extension availability (spatial, azure, h3, httpfs), connection health
 # PATTERNS: Singleton, Repository, Connection pooling, Lazy initialization
-# ENTRY_POINTS: DuckDBRepository.instance() for singleton access
-# INDEX: IDuckDBRepository:80, DuckDBRepository:130, get_duckdb_repository:550
+# ENTRY_POINTS: DuckDBRepository.instance(), RepositoryFactory.create_duckdb_repository()
+# INDEX: IDuckDBRepository:80, DuckDBRepository:130, query:250, read_parquet_from_blob:400
 # ============================================================================
 
 """
@@ -32,8 +34,8 @@ Key Features:
 
 Extensions Enabled:
 1. spatial - ST_* functions for geometry operations
-2. azure - Direct queries on Azure Blob Storage
-3. httpfs - HTTP/HTTPS file access (optional)
+2. azure - Direct queries on Azure Blob Storage (public and authenticated)
+3. h3 - H3 hexagonal geospatial indexing
 4. parquet - Native Parquet file support (built-in)
 
 Performance Benefits:
@@ -188,6 +190,7 @@ class DuckDBRepository(IDuckDBRepository):
         self.storage_account_name = storage_account_name or os.getenv('AZURE_STORAGE_ACCOUNT_NAME', 'rmhazuregeo')
         self._conn: Optional[duckdb.DuckDBPyConnection] = None
         self._extensions_loaded: bool = False
+        self._managed_identity_enabled: bool = False  # Track if credential_chain succeeded
 
         logger.info(f"DuckDBRepository initialized - type: {connection_type}, storage: {self.storage_account_name}")
 
@@ -249,9 +252,8 @@ class DuckDBRepository(IDuckDBRepository):
 
         Extensions:
         - spatial: PostGIS-like ST_* functions
-        - azure: Direct blob storage queries
+        - azure: Direct blob storage queries (public and authenticated)
         - h3: H3 hierarchical hexagonal grid functions
-        - httpfs: HTTP/HTTPS file access for Overture Maps
         """
         if self._extensions_loaded:
             return
@@ -287,26 +289,47 @@ class DuckDBRepository(IDuckDBRepository):
             except Exception as e:
                 logger.warning(f"   ⚠️ H3 extension failed (non-critical): {e}")
 
-            # STEP 2d: httpfs extension (for Overture Maps HTTPS access)
+            # STEP 3: Configure Azure extension with Managed Identity
+            logger.info("🔄 STEP 3: Configuring Azure extension...")
             try:
-                logger.info("   Installing httpfs extension...")
-                conn.execute("INSTALL httpfs")
-                conn.execute("LOAD httpfs")
-                logger.info("   ✅ httpfs extension loaded (HTTPS file access available)")
-            except Exception as e:
-                logger.warning(f"   ⚠️ httpfs extension failed (non-critical): {e}")
+                # Set Azure transport option to use curl for SSL/TLS
+                # This fixes "SSL CA cert" errors in Azure Functions Linux environment
+                conn.execute("SET azure_transport_option_type = 'curl'")
+                logger.info("   ✅ Azure transport set to 'curl' (fixes SSL cert issues)")
 
-            # STEP 3: Configure Azure authentication
-            logger.info("🔄 STEP 3: Configuring Azure authentication...")
-            try:
-                # DuckDB uses Azure CLI or managed identity automatically
-                # Set storage account for az:// protocol
-                conn.execute(f"""
-                    SET azure_storage_connection_string = 'DefaultEndpointsProtocol=https;AccountName={self.storage_account_name};AccountKey=MANAGED_IDENTITY';
-                """)
-                logger.info(f"   ✅ Azure storage configured - {self.storage_account_name}")
+                # Try to configure Managed Identity using credential_chain
+                # This is equivalent to DefaultAzureCredential in Python
+                import os
+                storage_account = os.getenv("AZURE_STORAGE_ACCOUNT_NAME", "rmhazuregeo")
+
+                try:
+                    # Use CREATE SECRET with credential_chain provider
+                    # This automatically uses Function App Managed Identity
+                    conn.execute(f"""
+                        CREATE SECRET azure_storage (
+                            TYPE azure,
+                            PROVIDER credential_chain,
+                            ACCOUNT_NAME '{storage_account}'
+                        )
+                    """)
+                    logger.info(f"   ✅ Managed Identity configured via credential_chain")
+                    logger.info(f"   ✅ Storage account: {storage_account}")
+                    logger.info(f"   ✅ Can access private blobs directly (no SAS needed)")
+                    logger.info(f"   ℹ️  credential_chain = DefaultAzureCredential (C++ version)")
+                    self._managed_identity_enabled = True
+
+                except Exception as credential_error:
+                    # Fallback to anonymous + SAS URLs
+                    logger.warning(f"   ⚠️ credential_chain failed: {credential_error}")
+                    logger.warning(f"   Falling back to anonymous access + SAS URLs")
+                    conn.execute("SET azure_storage_connection_string = ''")
+                    logger.info("   ✅ Fallback: Anonymous public blob access enabled")
+                    logger.info("   ℹ️  Private blobs will use SAS URLs as fallback")
+                    self._managed_identity_enabled = False
+
             except Exception as e:
-                logger.warning(f"   ⚠️ Azure auth config failed (will use CLI): {e}")
+                logger.warning(f"   ⚠️ Azure config failed: {e}")
+                self._managed_identity_enabled = False
 
             self._extensions_loaded = True
             logger.info("✅ STEP 2-3: All extensions initialized successfully")
@@ -376,6 +399,125 @@ class DuckDBRepository(IDuckDBRepository):
         except Exception as e:
             logger.error(f"Execute failed: {e}\nSQL: {sql}\n{traceback.format_exc()}")
             raise
+
+    def has_managed_identity(self) -> bool:
+        """
+        Check if DuckDB is configured with Managed Identity.
+
+        Returns:
+            True if credential_chain is configured, False if using SAS URLs
+        """
+        return self._managed_identity_enabled
+
+    def execute_safe(self, query_builder: 'QueryBuilder') -> None:
+        """
+        Execute SQL statement using safe query builder (RECOMMENDED).
+
+        This method enforces use of the QueryBuilder pattern for SQL composition,
+        similar to PostgreSQL's psycopg.sql.SQL() enforcement.
+
+        Args:
+            query_builder: QueryBuilder instance with composed query
+
+        Raises:
+            TypeError: If query_builder is not a QueryBuilder instance
+
+        Example:
+            from infrastructure.duckdb_query import QueryBuilder, Identifier
+
+            qb = QueryBuilder()
+            qb.append("CREATE TABLE", Identifier('my_table'), "(id INTEGER)")
+            repo.execute_safe(qb)
+
+        Note:
+            This is the RECOMMENDED method for executing DuckDB queries.
+            It prevents SQL injection by enforcing parameterization.
+        """
+        from .duckdb_query import QueryBuilder
+
+        if not isinstance(query_builder, QueryBuilder):
+            raise TypeError(
+                f"execute_safe() requires QueryBuilder instance, "
+                f"got {type(query_builder).__name__}. "
+                f"Use QueryBuilder for safe SQL composition."
+            )
+
+        query, params = query_builder.build()
+        self.execute(query, params)
+
+    def query_safe(self, query_builder: 'QueryBuilder') -> duckdb.DuckDBPyRelation:
+        """
+        Execute query using safe query builder (RECOMMENDED).
+
+        This method enforces use of the QueryBuilder pattern for SQL composition,
+        similar to PostgreSQL's psycopg.sql.SQL() enforcement.
+
+        Args:
+            query_builder: QueryBuilder instance with composed query
+
+        Returns:
+            DuckDB relation (lazy evaluation)
+
+        Raises:
+            TypeError: If query_builder is not a QueryBuilder instance
+
+        Example:
+            from infrastructure.duckdb_query import QueryBuilder, Identifier, QueryParam
+
+            qb = QueryBuilder()
+            qb.append(
+                "SELECT * FROM",
+                Identifier('users'),
+                "WHERE age >", QueryParam(18)
+            )
+            result = repo.query_safe(qb)
+            df = result.df()
+
+        Note:
+            This is the RECOMMENDED method for querying DuckDB.
+            It prevents SQL injection by enforcing parameterization.
+        """
+        from .duckdb_query import QueryBuilder
+
+        if not isinstance(query_builder, QueryBuilder):
+            raise TypeError(
+                f"query_safe() requires QueryBuilder instance, "
+                f"got {type(query_builder).__name__}. "
+                f"Use QueryBuilder for safe SQL composition."
+            )
+
+        query, params = query_builder.build()
+        return self.query(query, params)
+
+    def query_to_df_safe(self, query_builder: 'QueryBuilder'):
+        """
+        Execute query and return DataFrame using safe query builder (RECOMMENDED).
+
+        This method enforces use of the QueryBuilder pattern for SQL composition,
+        similar to PostgreSQL's psycopg.sql.SQL() enforcement.
+
+        Args:
+            query_builder: QueryBuilder instance with composed query
+
+        Returns:
+            pandas DataFrame with query results
+
+        Raises:
+            TypeError: If query_builder is not a QueryBuilder instance
+
+        Example:
+            from infrastructure.duckdb_query import QueryBuilder, QueryParam
+
+            qb = QueryBuilder()
+            qb.append("SELECT * FROM users WHERE age >", QueryParam(18))
+            df = repo.query_to_df_safe(qb)
+
+        Note:
+            This is the RECOMMENDED method for querying DuckDB to DataFrame.
+            It prevents SQL injection by enforcing parameterization.
+        """
+        relation = self.query_safe(query_builder)
+        return relation.df()
 
     def read_parquet_from_blob(
         self,
@@ -519,11 +661,28 @@ class DuckDBRepository(IDuckDBRepository):
             except:
                 extensions = {"error": "Could not query extensions"}
 
+            # Test H3 functions (Community Extension - not in duckdb_extensions())
+            h3_test = {}
+            try:
+                # Test basic H3 function - convert lat/lon to H3 index at resolution 5
+                result = conn.execute("SELECT h3_latlng_to_cell(37.7749, -122.4194, 5) as h3_index").fetchone()
+                h3_test = {
+                    "status": "functional",
+                    "test_query": "h3_latlng_to_cell(37.7749, -122.4194, 5)",
+                    "result": result[0] if result else None
+                }
+            except Exception as e:
+                h3_test = {
+                    "status": "unavailable",
+                    "error": str(e)
+                }
+
             return {
                 "status": "healthy",
                 "connection_type": self.connection_type,
                 "version": version,
                 "extensions": extensions,
+                "h3_extension": h3_test,
                 "storage_account": self.storage_account_name,
                 "connection_active": self._conn is not None,
                 "extensions_initialized": self._extensions_loaded

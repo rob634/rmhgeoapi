@@ -1,9 +1,10 @@
 # ============================================================================
-# CLAUDE CONTEXT - CORE SCHEMA
+# CLAUDE CONTEXT - UPDATE MODEL SCHEMAS
 # ============================================================================
-# CATEGORY: SCHEMAS - DATA VALIDATION & TRANSFORMATION
-# PURPOSE: Pydantic models for validation, serialization, and data flow
-# EPOCH: Shared by all epochs (not persisted to database)# PURPOSE: Strongly-typed Pydantic models for repository update operations
+# EPOCH: 4 - ACTIVE ✅
+# STATUS: Core schema - Repository update contracts
+# PURPOSE: Strongly-typed Pydantic models for repository update operations
+# LAST_REVIEWED: 16 OCT 2025
 # EXPORTS: TaskUpdateModel, JobUpdateModel, StageCompletionUpdateModel
 # INTERFACES: None - pure data models for contract enforcement
 # PYDANTIC_MODELS: TaskUpdateModel, JobUpdateModel, StageCompletionUpdateModel
@@ -13,7 +14,6 @@
 # VALIDATION: Pydantic automatic validation with enum handling
 # PATTERNS: Data Transfer Object, Contract Enforcement, Type Safety
 # ENTRY_POINTS: from core.schema.updates import TaskUpdateModel, JobUpdateModel
-# LOCATION: core/schema/ - Core architecture schema (copied from root schema_updates.py)
 # ============================================================================
 
 """

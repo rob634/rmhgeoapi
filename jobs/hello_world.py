@@ -6,13 +6,17 @@ Execution logic lives in services/service_hello_world.py.
 
 Author: Robert and Geospatial Claude Legion
 Date: 1 OCT 2025
+Updated: 15 OCT 2025 - Phase 2: Migrated to JobBase ABC
 """
 
 from typing import List, Dict, Any
 import hashlib
 import json
 
-class HelloWorldJob:
+from jobs.base import JobBase
+
+
+class HelloWorldJob(JobBase):
     """
     HelloWorld job declaration - two stages of greetings and replies.
 

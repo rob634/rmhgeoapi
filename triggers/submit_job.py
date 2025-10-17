@@ -166,12 +166,26 @@ class JobSubmissionTrigger(JobManagementTrigger):
             **additional_params
         }
         
-        # Validate parameters
+        # ====================================================================================
+        # JOB INTERFACE CONTRACT: Method 1 of 5
+        # ====================================================================================
+        # validate_job_parameters(params: dict) -> dict
+        # - Validates and normalizes parameters before job creation
+        # - Must return validated dict with defaults applied
+        # - Enforced at import time by: jobs/__init__.py validate_job_registry()
+        # ====================================================================================
         self.logger.debug(f"🔍 Starting parameter validation")
         validated_params = controller.validate_job_parameters(job_params)
         self.logger.debug(f"✅ Parameter validation complete")
-        
-        # Generate job ID from validated parameters
+
+        # ====================================================================================
+        # JOB INTERFACE CONTRACT: Method 2 of 5
+        # ====================================================================================
+        # generate_job_id(params: dict) -> str
+        # - Returns deterministic SHA256 hash for idempotency (same params = same job_id)
+        # - Enables deduplication: identical job submissions return same job_id
+        # - Enforced at import time by: jobs/__init__.py validate_job_registry()
+        # ====================================================================================
         job_id = controller.generate_job_id(validated_params)
         self.logger.info(f"Checking for existing {job_type} job with ID: {job_id}")
 
@@ -215,12 +229,26 @@ class JobSubmissionTrigger(JobManagementTrigger):
         # Job doesn't exist - proceed with creation
         self.logger.info(f"Creating new {job_type} job with ID: {job_id}")
 
-        # Create job record
+        # ====================================================================================
+        # JOB INTERFACE CONTRACT: Method 3 of 5
+        # ====================================================================================
+        # create_job_record(job_id: str, params: dict) -> dict
+        # - Creates JobRecord Pydantic model and persists to app.jobs table
+        # - Must use RepositoryFactory.create_repositories() for database access
+        # - Enforced at import time by: jobs/__init__.py validate_job_registry()
+        # ====================================================================================
         self.logger.debug(f"💾 Creating job record")
         job_record = controller.create_job_record(job_id, validated_params)
         self.logger.debug(f"✅ Job record created")
 
-        # Queue the job for processing
+        # ====================================================================================
+        # JOB INTERFACE CONTRACT: Method 4 of 5
+        # ====================================================================================
+        # queue_job(job_id: str, params: dict) -> dict
+        # - Creates JobQueueMessage and sends to Service Bus 'jobs' queue
+        # - Message triggers CoreMachine to process job (core/machine.py)
+        # - Enforced at import time by: jobs/__init__.py validate_job_registry()
+        # ====================================================================================
         self.logger.debug(f"📤 Queueing job for processing")
         try:
             queue_result = controller.queue_job(job_id, validated_params)

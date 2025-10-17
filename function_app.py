@@ -192,6 +192,7 @@ from triggers.stac_extract import stac_extract_trigger
 from triggers.stac_vector import stac_vector_trigger
 from triggers.ingest_vector import ingest_vector_trigger
 from triggers.test_raster_create import test_raster_create_trigger
+from triggers.test_duckdb_overture import test_duckdb_overture_trigger
 
 # ========================================================================
 # PHASE 2: EXPLICIT REGISTRATION PATTERN (Parallel with decorators)
@@ -579,6 +580,26 @@ def test_create_rasters(req: func.HttpRequest) -> func.HttpResponse:
         Upload results with blob URLs
     """
     return test_raster_create_trigger.handle_request(req)
+
+
+@app.route(route="test/duckdb/overture", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def test_duckdb_overture(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Test DuckDB access to Overture Maps Divisions on Azure Blob Storage.
+
+    TESTING/DEVELOPMENT ONLY - Verify DuckDB extensions work with Overture data.
+
+    GET /api/test/duckdb/overture
+    GET /api/test/duckdb/overture?country=Panama&limit=5
+
+    Query Parameters:
+        country: Optional - Filter by country name (e.g., "Panama")
+        limit: Optional - Result limit (default: 10)
+
+    Returns:
+        Query results with timing and sample Overture Divisions data
+    """
+    return test_duckdb_overture_trigger.handle_request(req)
 
 
 @app.route(route="db/debug/all", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)

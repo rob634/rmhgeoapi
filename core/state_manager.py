@@ -1,9 +1,10 @@
 # ============================================================================
 # CLAUDE CONTEXT - STATE MANAGEMENT
 # ============================================================================
-# CATEGORY: STATE MANAGEMENT & ORCHESTRATION
-# PURPOSE: Core architectural component for job/task lifecycle management
-# EPOCH: Shared by all epochs (may evolve with architecture changes)# PURPOSE: Manages all database state operations with advisory locks for atomic operations
+# EPOCH: 4 - ACTIVE ✅
+# STATUS: Core component - Database state management with advisory locks
+# PURPOSE: Manages all database state operations with advisory locks for atomic operations
+# LAST_REVIEWED: 16 OCT 2025
 # EXPORTS: StateManager - handles job/task state transitions and completion logic
 # INTERFACES: Uses repositories for database access, provides atomic state management
 # PYDANTIC_MODELS: JobRecord, TaskRecord, JobExecutionContext, StageAdvancementResult (from core.models)
@@ -14,7 +15,6 @@
 # PATTERNS: Repository pattern, Unit of Work, Advisory Locks for race prevention
 # ENTRY_POINTS: Used by controllers via composition for state management
 # INDEX: StateManager:100, Job Operations:300, Stage Completion:600, Task Completion:900
-# UPDATED: 29 SEP 2025 - Now imports from core.models instead of schema_base
 # ============================================================================
 
 """

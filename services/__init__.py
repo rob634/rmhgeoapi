@@ -47,12 +47,14 @@ Date: 1 OCT 2025
 
 from .service_hello_world import handle_greeting, handle_reply
 from .container_summary import analyze_container_summary
-from .container_list import list_container_blobs, analyze_single_blob
+from .container_list import list_container_blobs, analyze_single_blob, aggregate_blob_analysis
 from .stac_catalog import list_raster_files, extract_stac_metadata
 from .stac_vector_catalog import extract_vector_stac_metadata
 from .test_minimal import test_minimal_handler
 from .raster_validation import validate_raster
 from .raster_cog import create_cog
+from .handler_h3_level4 import h3_level4_generate
+from .handler_h3_base import h3_base_generate
 
 # ============================================================================
 # EXPLICIT HANDLER REGISTRY
@@ -69,12 +71,15 @@ ALL_HANDLERS = {
     "container_summary_task": analyze_container_summary,
     "list_container_blobs": list_container_blobs,
     "analyze_single_blob": analyze_single_blob,
+    "aggregate_blob_analysis": aggregate_blob_analysis,  # Fan-in aggregation handler (16 OCT 2025)
     "list_raster_files": list_raster_files,
     "extract_stac_metadata": extract_stac_metadata,
     "extract_vector_stac_metadata": extract_vector_stac_metadata,
     "test_minimal": test_minimal_handler,
     "validate_raster": validate_raster,
     "create_cog": create_cog,
+    "h3_level4_generate": h3_level4_generate,
+    "h3_base_generate": h3_base_generate,
     # Add new handlers here explicitly
     # "process_tile": handle_tile_processing,
 }

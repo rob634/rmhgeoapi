@@ -1,11 +1,17 @@
 # ============================================================================
 # CLAUDE CONTEXT - CORE SCHEMA PACKAGE
 # ============================================================================
-# CATEGORY: SCHEMAS - DATA VALIDATION & TRANSFORMATION
-# PURPOSE: Pydantic models for validation, serialization, and data flow
-# EPOCH: Shared by all epochs (not persisted to database)# PURPOSE: Database schema management for core framework
-# EXPORTS: SQL generation and schema deployment classes
-# AZURE FUNCTIONS: Required for package imports
+# EPOCH: 4 - ACTIVE ✅
+# STATUS: Core schema - Database schema management and validation
+# PURPOSE: Database schema management and message validation for core framework
+# LAST_REVIEWED: 16 OCT 2025
+# EXPORTS: SQL generation, schema deployment, queue messages, update models
+# INTERFACES: Package initialization only
+# PYDANTIC_MODELS: Exported from submodules (queue, updates, workflow)
+# DEPENDENCIES: Core schema submodules
+# AZURE_FUNCTIONS: Required for package imports
+# PATTERNS: Package initialization, Schema management
+# ENTRY_POINTS: from core.schema import JobQueueMessage, TaskUpdateModel
 # ============================================================================
 
 """

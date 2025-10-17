@@ -1,11 +1,17 @@
 # ============================================================================
 # CLAUDE CONTEXT - CORE PACKAGE INITIALIZATION
 # ============================================================================
-# CATEGORY: STATE MANAGEMENT & ORCHESTRATION
-# PURPOSE: Core architectural component for job/task lifecycle management
-# EPOCH: Shared by all epochs (may evolve with architecture changes)# PURPOSE: Initialize core orchestration components package
+# EPOCH: 4 - ACTIVE ✅
+# STATUS: Core package - Entry point for orchestration components
+# PURPOSE: Initialize core orchestration components package
+# LAST_REVIEWED: 16 OCT 2025
 # EXPORTS: CoreController, StateManager, OrchestrationManager, models, logic, schema
-# AZURE FUNCTIONS: CRITICAL - This __init__.py is REQUIRED for folder imports
+# INTERFACES: Package initialization only
+# PYDANTIC_MODELS: Exported from subpackages
+# DEPENDENCIES: core subpackages (models, logic, schema)
+# AZURE_FUNCTIONS: CRITICAL - This __init__.py is REQUIRED for folder imports
+# PATTERNS: Package initialization pattern
+# ENTRY_POINTS: from core import StateManager, CoreMachine
 # ============================================================================
 
 """

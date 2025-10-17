@@ -1,9 +1,10 @@
 # ============================================================================
-# CLAUDE CONTEXT - CORE SCHEMA
+# CLAUDE CONTEXT - QUEUE MESSAGE SCHEMAS
 # ============================================================================
-# CATEGORY: BOUNDARY CONTRACTS - QUEUE MESSAGES
+# EPOCH: 4 - ACTIVE ✅
+# STATUS: Core schema - Queue message validation
 # PURPOSE: Pydantic models for Queue boundary validation and serialization
-# EPOCH: Shared by all epochs (not persisted to database)
+# LAST_REVIEWED: 16 OCT 2025
 # EXPORTS: JobQueueMessage, TaskQueueMessage
 # INTERFACES: Inherits from JobData, TaskData (core.contracts)
 # PYDANTIC_MODELS: JobQueueMessage, TaskQueueMessage (adds transport fields)

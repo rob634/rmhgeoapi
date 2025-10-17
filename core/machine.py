@@ -4,6 +4,7 @@
 # EPOCH: 4 - ACTIVE ✅
 # STATUS: Core component - Universal orchestrator for all workflows
 # PURPOSE: Universal job orchestrator using composition to avoid God Class
+# LAST_REVIEWED: 16 OCT 2025
 # EXPORTS: CoreMachine - coordinates all workflows without job-specific logic
 # INTERFACES: Uses Workflow ABC, Task ABC, StateManager, repositories
 # PYDANTIC_MODELS: TaskQueueMessage, JobQueueMessage, TaskResult
@@ -243,16 +244,70 @@ class CoreMachine:
                 # Continue without previous results - job may not need them
 
         # Step 5: Generate task definitions (in-memory only, not persisted yet)
+        # ====================================================================================
+        # JOB INTERFACE CONTRACT: Method 5 of 5
+        # ====================================================================================
+        # create_tasks_for_stage(stage: int, job_params: dict, job_id: str, previous_results: list) -> List[dict]
+        # - Returns list of plain dicts with keys: task_id, task_type, parameters
+        # - CoreMachine converts dicts → TaskDefinition Pydantic objects (next step)
+        # - Enforced at import time by: jobs/__init__.py validate_job_registry()
+        # ====================================================================================
+
+        # ====================================================================================
+        # PARALLELISM PATTERN DETECTION (16 OCT 2025)
+        # ====================================================================================
+        # Three parallelism patterns (defined in stage_definition["parallelism"]):
+        #
+        # 1. "single": Orchestration-time parallelism
+        #    - Job creates tasks BEFORE any execution
+        #    - N from params (n=10) OR hardcoded (always 1 task)
+        #    - Example: Create N tiles from params, OR create 1 analysis task
+        #
+        # 2. "fan_out": Result-driven parallelism
+        #    - Job creates tasks FROM previous stage execution results
+        #    - N discovered at runtime (previous_results contains list)
+        #    - Example: Stage 1 lists files → Stage 2 creates task per file
+        #
+        # 3. "fan_in": Auto-aggregation (CoreMachine handles)
+        #    - CoreMachine auto-creates 1 task (job does nothing)
+        #    - Task receives ALL previous results
+        #    - Example: Stage 2 has N tasks → Stage 3 aggregates all N
+        # ====================================================================================
+
+        # Extract stage definition from job class metadata
+        stage_definition = None
+        if hasattr(job_class, 'stages') and job_class.stages:
+            stage_definition = job_class.stages[job_message.stage - 1] if job_message.stage <= len(job_class.stages) else None
+
+        # Check if this is a fan-in stage (auto-aggregation pattern)
+        is_fan_in = stage_definition and stage_definition.get("parallelism") == "fan_in"
+
         try:
             self.logger.debug(f"🏗️ COREMACHINE STEP 5: Generating task definitions for stage {job_message.stage}...")
-            tasks = job_class.create_tasks_for_stage(
-                job_message.stage,
-                job_record.parameters,
-                job_message.job_id,
-                previous_results=previous_results  # NEW: Pass previous results for fan-out
-            )
-            self.logger.info(f"✅ COREMACHINE STEP 5: Generated {len(tasks)} task definitions (in-memory)")
-            self.logger.debug(f"   Task IDs: {[t['task_id'] for t in tasks]}")
+
+            if is_fan_in:
+                # Pattern 3: Fan-In (CoreMachine auto-creates aggregation task)
+                self.logger.info(f"🔷 FAN-IN PATTERN: Auto-creating aggregation task for stage {job_message.stage}")
+                tasks = self._create_fan_in_task(
+                    job_message.job_id,
+                    job_message.stage,
+                    previous_results,
+                    stage_definition,
+                    job_record.parameters
+                )
+                self.logger.info(f"✅ COREMACHINE STEP 5: Auto-generated 1 fan-in aggregation task")
+            else:
+                # Pattern 1 or 2: Job creates tasks (single or fan_out)
+                # Job decides: "single" = N from params/hardcoded, "fan_out" = N from previous_results
+                tasks = job_class.create_tasks_for_stage(
+                    job_message.stage,
+                    job_record.parameters,
+                    job_message.job_id,
+                    previous_results=previous_results  # For fan-out: previous stage results
+                )
+                self.logger.info(f"✅ COREMACHINE STEP 5: Generated {len(tasks)} task definitions (in-memory)")
+                self.logger.debug(f"   Task IDs: {[t['task_id'] for t in tasks]}")
+
         except Exception as e:
             self.logger.error(f"❌ COREMACHINE STEP 5 FAILED: Task generation error: {e}")
             self.logger.error(f"   Traceback: {traceback.format_exc()}")
@@ -971,3 +1026,88 @@ class CoreMachine:
 
         self.logger.debug(f"Retrieved {len(results)} completed task results from stage {stage}")
         return results
+
+    def _create_fan_in_task(
+        self,
+        job_id: str,
+        stage: int,
+        previous_results: list[dict],
+        stage_definition: dict,
+        job_parameters: dict
+    ) -> list[dict]:
+        """
+        Auto-create single aggregation task for fan-in stage.
+
+        This method is called when a stage has parallelism="fan_in".
+        CoreMachine automatically creates a single task that receives ALL
+        results from the previous stage for aggregation.
+
+        Example:
+            Stage 1: 1 task  → Lists files
+            Stage 2: N tasks → Processes each file (fan-out)
+            Stage 3: 1 task  → Aggregates N results (fan-in) ← THIS METHOD
+
+        Args:
+            job_id: Job ID
+            stage: Current stage number (the fan-in stage)
+            previous_results: All results from previous stage (N results from fan-out)
+            stage_definition: Stage definition dict from job.stages
+            job_parameters: Original job parameters
+
+        Returns:
+            List with single task dict containing:
+            - task_id: Deterministic ID for aggregation task
+            - task_type: From stage_definition["task_type"]
+            - parameters: Includes previous_results + job_parameters
+
+        Raises:
+            ValueError: If previous_results is empty (nothing to aggregate)
+            KeyError: If stage_definition missing required "task_type"
+        """
+        from core.task_id import generate_deterministic_task_id
+
+        # Validation
+        if not previous_results:
+            raise ValueError(
+                f"Fan-in stage {stage} requires previous stage results, "
+                f"but previous_results is empty. Cannot aggregate nothing."
+            )
+
+        if "task_type" not in stage_definition:
+            raise KeyError(
+                f"Fan-in stage {stage} definition missing required 'task_type' field. "
+                f"Stage definition: {stage_definition}"
+            )
+
+        task_type = stage_definition["task_type"]
+
+        self.logger.info(
+            f"🔷 Fan-In Stage {stage}: Creating aggregation task of type '{task_type}' "
+            f"to aggregate {len(previous_results)} results from Stage {stage - 1}"
+        )
+
+        # Generate deterministic task ID
+        task_id = generate_deterministic_task_id(job_id, stage, "fan_in_aggregate")
+
+        # Create single aggregation task
+        # Task handler receives ALL previous results + job parameters
+        task = {
+            "task_id": task_id,
+            "task_type": task_type,
+            "parameters": {
+                "previous_results": previous_results,  # All N results from Stage N-1
+                "job_parameters": job_parameters,      # Original job parameters
+                "aggregation_metadata": {
+                    "stage": stage,
+                    "previous_stage": stage - 1,
+                    "result_count": len(previous_results),
+                    "pattern": "fan_in"
+                }
+            }
+        }
+
+        self.logger.debug(f"   Task ID: {task_id}")
+        self.logger.debug(f"   Task Type: {task_type}")
+        self.logger.debug(f"   Aggregating: {len(previous_results)} results")
+
+        return [task]

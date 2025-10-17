@@ -1,9 +1,10 @@
 # ============================================================================
 # CLAUDE CONTEXT - CORE MODELS - CONTEXT
 # ============================================================================
-# CATEGORY: DATA MODELS - DATABASE ENTITIES
-# PURPOSE: Pydantic model mapping to PostgreSQL table/database structure
-# EPOCH: Shared by all epochs (database schema)# PURPOSE: Pure data models for execution contexts
+# EPOCH: 4 - ACTIVE ✅
+# STATUS: Core models - Execution context data structures
+# PURPOSE: Pure data models for execution contexts
+# LAST_REVIEWED: 16 OCT 2025
 # EXPORTS: JobExecutionContext, StageExecutionContext, TaskExecutionContext
 # INTERFACES: Pydantic BaseModel
 # PYDANTIC_MODELS: Various execution context models

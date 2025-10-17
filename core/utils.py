@@ -2,9 +2,9 @@
 # CLAUDE CONTEXT - CORE UTILITIES
 # ============================================================================
 # EPOCH: 4 - ACTIVE ✅
-# STATUS: Core utilities extracted from schema_base.py
-# CATEGORY: UTILITIES
+# STATUS: Core utilities - Helper functions
 # PURPOSE: Core utility functions and exceptions
+# LAST_REVIEWED: 16 OCT 2025
 # EXPORTS: generate_job_id, SchemaValidationError
 # INTERFACES: None
 # PYDANTIC_MODELS: None

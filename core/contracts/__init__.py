@@ -1,11 +1,10 @@
 # ============================================================================
 # CLAUDE CONTEXT - CORE CONTRACTS
 # ============================================================================
-# CATEGORY: DATA CONTRACTS - BASE DEFINITIONS
-# PURPOSE: Base Pydantic models that define the essential data structure of entities
 # EPOCH: 4 - ACTIVE ✅
-# STATUS: Core architectural foundation
-#
+# STATUS: Core contracts - Base data definitions
+# PURPOSE: Base Pydantic models that define the essential data structure of entities
+# LAST_REVIEWED: 16 OCT 2025
 # EXPORTS: TaskData, JobData - Base contracts for data hierarchy
 # INTERFACES: Pydantic BaseModel
 # PYDANTIC_MODELS: TaskData (task identity), JobData (job identity)

@@ -1,19 +1,20 @@
 # ============================================================================
 # CLAUDE CONTEXT - REPOSITORY FACTORY
 # ============================================================================
-# CATEGORY: AZURE RESOURCE REPOSITORIES
-# PURPOSE: Azure SDK wrapper providing data access abstraction
-# EPOCH: Shared by all epochs (infrastructure layer)# PURPOSE: Central factory for creating all repository instances across different storage backends
+# EPOCH: 4 - ACTIVE ✅
+# STATUS: Infrastructure - Central factory for all repository instances
+# PURPOSE: Central factory for creating all repository instances across different storage backends
+# LAST_REVIEWED: 16 OCT 2025
 # EXPORTS: RepositoryFactory (static class with factory methods for all repository types)
-# INTERFACES: Creates instances implementing IJobRepository, ITaskRepository, IQueueRepository
+# INTERFACES: Creates instances implementing IJobRepository, ITaskRepository, IQueueRepository, IDuckDBRepository
 # PYDANTIC_MODELS: None - returns repository instances that use Pydantic models internally
 # DEPENDENCIES: repositories/*, interfaces/repository, config, typing
 # SOURCE: Configuration from AppConfig for connection strings and settings
 # SCOPE: Global repository creation for entire application
 # VALIDATION: Connection validation handled by individual repositories
-# PATTERNS: Factory pattern, Dependency Injection, Interface segregation
-# ENTRY_POINTS: RepositoryFactory.create_repositories(), create_job_repository(), create_queue_repository()
-# INDEX: RepositoryFactory:45, create_repositories:65, create_queue_repository:150, create_blob_repository:200
+# PATTERNS: Factory pattern, Dependency Injection, Interface segregation, Singleton
+# ENTRY_POINTS: RepositoryFactory.create_repositories(), create_service_bus_repository(), create_duckdb_repository()
+# INDEX: RepositoryFactory:53, create_repositories:69, create_service_bus:200, create_duckdb:270
 # ============================================================================
 
 """

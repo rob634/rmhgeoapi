@@ -1,10 +1,11 @@
 # ============================================================================
 # CLAUDE CONTEXT - CORE MODELS - ENUMS
 # ============================================================================
-# CATEGORY: DATA MODELS - DATABASE ENTITIES
-# PURPOSE: Pydantic model mapping to PostgreSQL table/database structure
-# EPOCH: Shared by all epochs (database schema)# PURPOSE: Pure enum definitions for job and task states
-# EXPORTS: JobStatus, TaskStatus, StageStatus enums
+# EPOCH: 4 - ACTIVE ✅
+# STATUS: Core data models - Enum definitions for state management
+# PURPOSE: Pure enum definitions for job and task states
+# LAST_REVIEWED: 16 OCT 2025
+# EXPORTS: JobStatus, TaskStatus, StageStatus, RasterType enums
 # INTERFACES: Standard Python Enum
 # PYDANTIC_MODELS: None - pure enums only
 # DEPENDENCIES: enum

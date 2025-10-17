@@ -1,21 +1,539 @@
 # Architecture Reference
 
-**Date**: 11 SEP 2025  
-**Author**: Robert and Geospatial Claude Legion  
+**Date**: 15 OCT 2025 (Updated with Job Declaration Pattern)
+**Author**: Robert and Geospatial Claude Legion
 **Purpose**: Deep technical specifications for the Azure Geospatial ETL Pipeline
 
 ## Table of Contents
-1. [Database Schema Architecture](#database-schema-architecture)
-2. [Data Models](#data-models)
-3. [Queue Message Schemas](#queue-message-schemas)
-4. [PostgreSQL Functions](#postgresql-functions)
-5. [Workflow Definitions](#workflow-definitions)
-6. [Factory Patterns](#factory-patterns)
-7. [State Transitions](#state-transitions)
-8. [Inter-Stage Communication](#inter-stage-communication)
-9. [Storage Architecture](#storage-architecture)
-10. [Error Handling Strategy](#error-handling-strategy)
-11. [Scalability Targets](#scalability-targets)
+1. [Job Declaration Pattern (Pattern B)](#job-declaration-pattern-pattern-b)
+2. [Database Schema Architecture](#database-schema-architecture)
+3. [Data Models](#data-models)
+4. [Queue Message Schemas](#queue-message-schemas)
+5. [PostgreSQL Functions](#postgresql-functions)
+6. [Workflow Definitions](#workflow-definitions)
+7. [Factory Patterns](#factory-patterns)
+8. [State Transitions](#state-transitions)
+9. [Inter-Stage Communication](#inter-stage-communication)
+10. [Storage Architecture](#storage-architecture)
+11. [Error Handling Strategy](#error-handling-strategy)
+12. [Scalability Targets](#scalability-targets)
+
+---
+
+## Job Declaration Pattern (Pattern B)
+
+**Updated**: 15 OCT 2025
+**Status**: Official standard - used by all 10 production jobs
+
+### Overview
+
+All jobs in this system use **Pattern B** - simple job classes with declarative blueprints. CoreMachine handles all orchestration machinery.
+
+**Key Principle:** Jobs define WHAT to do (stages, tasks). CoreMachine handles HOW (queuing, execution, completion).
+
+### Job Structure
+
+**Updated 15 OCT 2025**: All jobs now inherit from `JobBase` ABC for interface enforcement.
+
+```python
+from jobs.base import JobBase
+
+class YourJobClass(JobBase):  # ← Inherits from JobBase ABC
+    """
+    Job declaration - pure data + task creation logic.
+
+    This is a blueprint, not a controller. CoreMachine orchestrates everything.
+
+    Inherits from JobBase ABC which enforces the 5 required methods at class
+    definition time (Python's ABC mechanism).
+    """
+
+    # Job metadata
+    job_type: str = "your_job"
+    description: str = "What this job does"
+
+    # Stage definitions (plain dicts - NOT Pydantic Stage objects)
+    stages: List[Dict[str, Any]] = [
+        {
+            "number": 1,
+            "name": "stage_name",
+            "task_type": "handler_name",
+            "parallelism": "fixed",  # or "dynamic", "match_previous"
+            "count": 1  # if fixed parallelism
+        }
+    ]
+
+    # Parameter schema (optional but recommended)
+    parameters_schema: Dict[str, Any]] = {
+        "param1": {"type": "str", "required": True},
+        "param2": {"type": "int", "default": 10}
+    }
+
+    @staticmethod
+    def create_tasks_for_stage(
+        stage: int,
+        job_params: dict,
+        job_id: str,
+        previous_results: list = None
+    ) -> List[dict]:
+        """
+        Generate task parameters for a stage.
+
+        This is the ONLY job-specific logic needed.
+        Returns plain dicts - CoreMachine converts to TaskDefinition.
+
+        Args:
+            stage: Stage number (1-based)
+            job_params: Job parameters from submission
+            job_id: Unique job identifier
+            previous_results: Results from previous stage (for fan-out patterns)
+
+        Returns:
+            List of plain dicts with task_id, task_type, parameters
+        """
+        return [
+            {
+                "task_id": f"{job_id[:8]}-task-{i}",
+                "task_type": "handler_name",
+                "parameters": {"param": value}
+            }
+            for i in range(count)
+        ]
+
+    @staticmethod
+    def validate_job_parameters(params: dict) -> dict:
+        """
+        Validate and normalize parameters.
+
+        REQUIRED by JobBase ABC - must be implemented.
+
+        Args:
+            params: Raw parameters from job submission
+
+        Returns:
+            Validated parameters with defaults applied
+
+        Raises:
+            ValueError: If parameters are invalid
+        """
+        validated = {}
+        # Add validation logic
+        return validated
+
+    @staticmethod
+    def generate_job_id(params: dict) -> str:
+        """
+        Generate deterministic job ID for idempotency.
+
+        REQUIRED by JobBase ABC - must be implemented.
+
+        Args:
+            params: Job parameters
+
+        Returns:
+            Deterministic job ID string (typically SHA256 hash)
+        """
+        import hashlib
+        import json
+        return hashlib.sha256(
+            json.dumps(params, sort_keys=True).encode()
+        ).hexdigest()
+
+    @staticmethod
+    def create_job_record(job_id: str, params: dict) -> dict:
+        """
+        Create job record for database storage.
+
+        REQUIRED by JobBase ABC - must be implemented.
+
+        Args:
+            job_id: Generated job ID
+            params: Validated parameters
+
+        Returns:
+            Job record dict (typically {"job_id": ..., "status": ...})
+        """
+        from infrastructure import RepositoryFactory
+        from core.models import JobRecord, JobStatus
+
+        job_record = JobRecord(
+            job_id=job_id,
+            job_type="your_job",
+            parameters=params,
+            status=JobStatus.QUEUED,
+            stage=1,
+            total_stages=len(YourJobClass.stages),
+            stage_results={},
+            metadata={"description": YourJobClass.description}
+        )
+
+        repos = RepositoryFactory.create_repositories()
+        repos['job_repo'].create_job(job_record)
+
+        return {"job_id": job_id, "status": "queued"}
+
+    @staticmethod
+    def queue_job(job_id: str, params: dict) -> dict:
+        """
+        Queue job for processing using Service Bus.
+
+        REQUIRED by JobBase ABC - must be implemented.
+
+        Args:
+            job_id: Job ID
+            params: Validated parameters
+
+        Returns:
+            Queue result information
+        """
+        from infrastructure.service_bus import ServiceBusRepository
+        from core.schema.queue import JobQueueMessage
+        from config import get_config
+        import uuid
+
+        config = get_config()
+        service_bus = ServiceBusRepository(
+            connection_string=config.get_service_bus_connection(),
+            queue_name=config.jobs_queue_name
+        )
+
+        message = JobQueueMessage(
+            job_id=job_id,
+            job_type="your_job",
+            stage=1,
+            parameters=params,
+            message_id=str(uuid.uuid4()),
+            correlation_id=str(uuid.uuid4())
+        )
+
+        result = service_bus.send_message(message.model_dump_json())
+
+        return {
+            "queued": True,
+            "queue_type": "service_bus",
+            "message_id": message.message_id
+        }
+```
+
+### JobBase ABC Interface
+
+**File**: `jobs/base.py`
+**Purpose**: Enforces the 5 required methods that all jobs must implement
+
+The `JobBase` abstract base class uses Python's ABC mechanism to enforce interface compliance at class definition time (not runtime). This provides:
+
+1. **Earlier error detection**: Missing methods cause `TypeError` when class is defined, not when method is called
+2. **IDE support**: Autocomplete, type hints, jump to definition
+3. **Official contract**: Python's standard way to define interfaces
+4. **Better error messages**: Clear indication of missing abstract methods
+
+**Required Methods (All @staticmethod + @abstractmethod):**
+
+```python
+from abc import ABC, abstractmethod
+
+class JobBase(ABC):
+    """Abstract base class defining the interface contract for all jobs."""
+
+    @staticmethod
+    @abstractmethod
+    def validate_job_parameters(params: dict) -> dict:
+        """Validate and normalize job parameters."""
+        pass
+
+    @staticmethod
+    @abstractmethod
+    def generate_job_id(params: dict) -> str:
+        """Generate deterministic job ID for idempotency."""
+        pass
+
+    @staticmethod
+    @abstractmethod
+    def create_job_record(job_id: str, params: dict) -> dict:
+        """Create job record for database storage."""
+        pass
+
+    @staticmethod
+    @abstractmethod
+    def queue_job(job_id: str, params: dict) -> dict:
+        """Queue job for processing."""
+        pass
+
+    @staticmethod
+    @abstractmethod
+    def create_tasks_for_stage(
+        stage: int,
+        job_params: dict,
+        job_id: str,
+        previous_results: list = None
+    ) -> List[dict]:
+        """Generate task parameters for a stage."""
+        pass
+```
+
+**Why ABC + @staticmethod?**
+- **ABC enforcement**: Python checks methods exist at class definition time
+- **@staticmethod**: No `self` needed - jobs are stateless blueprints
+- **Decorator order matters**: `@staticmethod` MUST come before `@abstractmethod`
+
+**Error Example (Missing Method):**
+```python
+class BadJob(JobBase):  # Missing validate_job_parameters
+    pass
+
+# TypeError: Can't instantiate abstract class BadJob with abstract methods validate_job_parameters
+```
+
+**Migration Notes:**
+- Phase 0: Runtime validation via `hasattr()` checks in `jobs/__init__.py`
+- Phase 2: Compile-time validation via ABC (completed 15 OCT 2025)
+- All 10 production jobs migrated successfully (2-line change per job)
+
+### Registration (Explicit, No Decorators)
+
+```python
+# jobs/__init__.py
+from .your_job import YourJobClass
+
+ALL_JOBS = {
+    "your_job": YourJobClass,
+    # ... other jobs ...
+}
+
+# function_app.py - Initialization
+from jobs import ALL_JOBS
+from services import ALL_HANDLERS
+from core.machine import CoreMachine
+
+core_machine = CoreMachine(
+    all_jobs=ALL_JOBS,  # Explicit registry
+    all_handlers=ALL_HANDLERS
+)
+```
+
+### How CoreMachine Uses Jobs
+
+```python
+# Process job message
+job_class = ALL_JOBS[job_type]  # Get class from dict
+tasks = job_class.create_tasks_for_stage(...)  # Returns plain dicts
+task_defs = [TaskDefinition(**t) for t in tasks]  # CoreMachine converts to Pydantic
+```
+
+### Task Dictionary Contract (Required by CoreMachine)
+
+When `create_tasks_for_stage()` returns task definitions, **each dict must contain these keys**:
+
+**Required Keys:**
+```python
+{
+    "task_id": str,        # Unique identifier (format: "{job_id[:8]}-s{stage}-{index}")
+    "task_type": str,      # Handler function name registered in services/__init__.py
+    "parameters": dict     # Task-specific parameters passed to handler
+}
+```
+
+**Optional Keys:**
+```python
+{
+    "metadata": dict       # Additional task metadata (default: empty dict)
+}
+```
+
+**Example:**
+```python
+@staticmethod
+def create_tasks_for_stage(stage, job_params, job_id, previous_results=None):
+    n = job_params.get('n', 3)
+    return [
+        {
+            "task_id": f"{job_id[:8]}-s{stage}-{i}",  # Required
+            "task_type": "hello_world_greeting",       # Required
+            "parameters": {                            # Required
+                "index": i,
+                "message": job_params.get('message')
+            },
+            "metadata": {"batch": "morning"}           # Optional
+        }
+        for i in range(n)
+    ]
+```
+
+**What CoreMachine Does:**
+1. Receives plain dicts from `job_class.create_tasks_for_stage()`
+2. Validates required keys (raises `KeyError` if missing)
+3. Converts to `TaskDefinition` Pydantic objects (type validation)
+4. Adds context fields: `parent_job_id`, `job_type`, `stage`, `task_index`
+5. Persists to database (`app.tasks` table)
+6. Queues to Service Bus (`tasks` queue)
+
+**Contract Enforcement:**
+- Missing `task_id`, `task_type`, or `parameters` → `KeyError` at line 268-280 in `core/machine.py`
+- Invalid types → Pydantic `ValidationError`
+- Caught at job processing time, before tasks are queued
+
+### Pydantic Type Safety (At Boundaries)
+
+Jobs work with **plain dicts**. CoreMachine handles **Pydantic conversion at boundaries**:
+
+1. **Job → CoreMachine:** Plain dict → `TaskDefinition` (Pydantic)
+2. **Handler execution:** Plain dict → `TaskResult` (Pydantic)
+3. **Database:** `JobRecord`, `TaskRecord` (Pydantic models)
+4. **Service Bus:** Pydantic models serialize/deserialize automatically
+
+**Boundary Conversion Pattern:**
+- **Jobs**: Simple (plain dicts)
+- **CoreMachine**: Type-safe (Pydantic at boundaries)
+- **Database/Queue**: Validated (Pydantic models)
+
+### Creating a New Job Type - Complete Checklist
+
+**Prerequisites:**
+- [ ] Understand Job→Stage→Task pattern (see above)
+- [ ] Have handler implementations ready (in `services/`)
+- [ ] Know which Service Bus queue to use (`jobs` queue for all jobs)
+
+**Step-by-Step Process:**
+
+**1. Create Job Class**
+- [ ] Create `jobs/your_job.py` with class `YourJobClass`
+- [ ] Define class attributes:
+  - [ ] `job_type: str` - Unique identifier for this job
+  - [ ] `description: str` - Human-readable description
+  - [ ] `stages: List[Dict[str, Any]]` - Stage definitions (plain dicts)
+  - [ ] `parameters_schema: Dict[str, Any]` - (Optional) Parameter schema
+
+**2. Implement Required Methods** (ALL 5 REQUIRED - validated at import!)
+- [ ] `validate_job_parameters(params: dict) -> dict`
+  - Validate and normalize parameters
+  - Called by: `triggers/submit_job.py` line 171
+  - Must return validated dict
+
+- [ ] `generate_job_id(params: dict) -> str`
+  - Generate deterministic job ID (SHA256 recommended)
+  - Called by: `triggers/submit_job.py` line 175
+  - Must return hex string
+
+- [ ] `create_job_record(job_id: str, params: dict) -> dict`
+  - Create JobRecord and persist to database
+  - Called by: `triggers/submit_job.py` line 220
+  - Must use `RepositoryFactory.create_repositories()`
+
+- [ ] `queue_job(job_id: str, params: dict) -> dict`
+  - Queue JobQueueMessage to Service Bus
+  - Called by: `triggers/submit_job.py` line 226
+  - Must create message and send to `jobs` queue
+
+- [ ] `create_tasks_for_stage(stage: int, job_params: dict, job_id: str, previous_results: list = None) -> List[dict]`
+  - Generate task parameter dicts for each stage
+  - Called by: `core/machine.py` line 248
+  - Must return list of dicts with `task_id`, `task_type`, `parameters`
+
+**3. Register Job**
+- [ ] Import class in `jobs/__init__.py`: `from .your_job import YourJobClass`
+- [ ] Add to `ALL_JOBS` dict: `"your_job": YourJobClass`
+- [ ] Verify import-time validation passes (catches missing methods!)
+
+**4. Register Handlers**
+- [ ] Create handler functions in `services/service_your_domain.py`
+- [ ] Import in `services/__init__.py`
+- [ ] Add to `ALL_HANDLERS` dict: `"task_type": handler_function`
+
+**5. Local Testing**
+```bash
+# Validate job structure (runs at import)
+python3 -c "from jobs import validate_job_registry; validate_job_registry()"
+
+# Test compilation
+python3 -m py_compile jobs/your_job.py
+
+# Check handler registry
+python3 -c "from services import ALL_HANDLERS; print(list(ALL_HANDLERS.keys()))"
+```
+
+**6. Deploy and Test**
+```bash
+# Deploy to Azure
+func azure functionapp publish rmhgeoapibeta --python --build remote
+
+# Health check
+curl https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/health
+
+# Submit test job
+curl -X POST https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/jobs/submit/your_job \
+  -H "Content-Type: application/json" \
+  -d '{"param1": "value1"}'
+
+# Check job status (use job_id from response)
+curl https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/jobs/status/{JOB_ID}
+```
+
+**Reference Implementations:**
+- **Simple single-stage:** [jobs/create_h3_base.py](../jobs/create_h3_base.py) - Minimal working example
+- **Multi-stage workflow:** [jobs/hello_world.py](../jobs/hello_world.py) - Two stages with task lineage
+- **Complex pipeline:** [jobs/process_raster.py](../jobs/process_raster.py) - Dynamic fan-out pattern
+
+**Common Pitfalls:**
+- ❌ Forgetting `@staticmethod` decorator on methods
+- ❌ Missing required keys in task dicts (`task_id`, `task_type`, `parameters`)
+- ❌ Not registering handler in `services/__init__.py`
+- ❌ Using `job_type` string that doesn't match registry key
+- ❌ Forgetting to add job to `ALL_JOBS` dict
+
+**Validation Catches:**
+- ✅ Missing required methods (caught at import)
+- ✅ Missing `stages` attribute (caught at import)
+- ✅ Empty `stages` list (caught at import)
+- ✅ Missing task dict keys (caught when job processes)
+- ✅ Invalid handler names (caught when task executes)
+
+### Why NOT Workflow ABC?
+
+The system has **unused reference files** that define an ABC-based pattern:
+- `jobs/workflow.py` - Workflow ABC (unused)
+- `jobs/registry.py` - Decorator registration (unused)
+- `core/models/stage.py` - Stage Pydantic model (unused by jobs)
+
+These were **planned but never implemented**. Pattern B was chosen because:
+
+1. **Simpler** - No abstract methods or inheritance
+2. **Jobs are blueprints** - They define WHAT, CoreMachine handles HOW
+3. **Pydantic at boundaries** - Type safety where it matters (SQL ↔ Python ↔ Service Bus)
+4. **Proven** - All 10 production jobs use Pattern B successfully
+
+**NOTE:** ABC-based enforcement is planned for future implementation (see ARCHITECTURE_REVIEW.md Phase 2)
+5. **Less over-engineering** - Most jobs don't need heavy Pydantic throughout
+
+### Production Job Examples
+
+**Simple single-stage:** `jobs/create_h3_base.py`
+```python
+class CreateH3BaseJob:
+    job_type = "create_h3_base"
+    stages = [{"number": 1, "name": "generate", "task_type": "h3_base_generate"}]
+```
+
+**Multi-stage greeting:** `jobs/hello_world.py`
+```python
+class HelloWorldJob:
+    job_type = "hello_world"
+    stages = [
+        {"number": 1, "name": "greeting", "task_type": "hello_world_greeting"},
+        {"number": 2, "name": "reply", "task_type": "hello_world_reply"}
+    ]
+```
+
+**Complex raster pipeline:** `jobs/process_raster.py`
+```python
+class ProcessRasterWorkflow:
+    job_type = "process_raster"
+    stages = [
+        {"number": 1, "name": "validate", "task_type": "validate_raster"},
+        {"number": 2, "name": "create_cog", "task_type": "create_cog"}
+    ]
+```
+
+All follow Pattern B with plain dicts and static methods.
 
 ---
 
@@ -402,6 +920,257 @@ QUEUED → PROCESSING → COMPLETED
 2. **Result Aggregation**: Controller aggregates all task results for the stage
 3. **Job Record Update**: Stage results stored, stage number incremented
 4. **Next Stage Queuing**: New Jobs Queue message created with next stage number
+
+---
+
+## Parallelism Patterns
+
+**Updated**: 16 OCT 2025 - Clarified naming and added fan-in pattern
+
+### Overview
+
+Three parallelism patterns control how tasks are created and orchestrated:
+
+| Pattern | When N is Known | Who Creates Tasks | Example |
+|---------|----------------|-------------------|---------|
+| **"single"** | Orchestration-time | Job | N from params OR hardcoded |
+| **"fan_out"** | Runtime (after previous stage) | Job | N from previous_results |
+| **"fan_in"** | Always 1 | CoreMachine (auto) | Aggregate all previous |
+
+**Key Insight**: The distinction is NOT about what N equals, but WHEN N is determined.
+
+---
+
+### Pattern 1: "single" - Orchestration-Time Parallelism
+
+**When to Use**: N is known before any tasks execute (from params or hardcoded)
+
+**Job Behavior**: Job's `create_tasks_for_stage()` creates N tasks at orchestration time
+
+**Examples**:
+
+```python
+# Example A: N from job parameters
+stages = [
+    {"number": 1, "task_type": "process_item", "parallelism": "single"}
+]
+
+@staticmethod
+def create_tasks_for_stage(stage, job_params, job_id, previous_results=None):
+    if stage == 1:
+        n = job_params.get('n', 10)  # ← N from request parameters
+        return [
+            {"task_id": f"{job_id[:8]}-s1-{i}", ...}
+            for i in range(n)  # Create N tasks (N = 10)
+        ]
+
+# Example B: Hardcoded (always 1 task)
+@staticmethod
+def create_tasks_for_stage(stage, job_params, job_id, previous_results=None):
+    if stage == 1:
+        return [{  # ← Always create exactly 1 task
+            "task_id": f"{job_id[:8]}-s1-analyze",
+            "task_type": "analyze_raster",
+            "parameters": {"raster": job_params["raster"]}
+        }]
+```
+
+**Tiling Example**:
+```python
+# Stage 1: Calculate tile grid from bounding box
+stages = [
+    {"number": 1, "task_type": "generate_tiles", "parallelism": "single"}
+]
+
+@staticmethod
+def create_tasks_for_stage(stage, job_params, job_id, previous_results=None):
+    if stage == 1:
+        # Calculate tile grid at orchestration time (BEFORE execution)
+        bbox = job_params["bounding_box"]
+        tile_size = job_params.get("tile_size_km", 10)
+
+        # Determine N tiles from bbox geometry
+        tiles = calculate_tile_grid(bbox, tile_size)  # Returns 100 tiles
+
+        # Create 100 tasks immediately (orchestration-time)
+        return [
+            {
+                "task_id": f"{job_id[:8]}-s1-tile-{tile.x}-{tile.y}",
+                "task_type": "process_tile",
+                "parameters": {"tile": tile.coords}
+            }
+            for tile in tiles
+        ]
+```
+
+---
+
+### Pattern 2: "fan_out" - Result-Driven Parallelism
+
+**When to Use**: N is discovered by executing previous stage (file lists, dynamic analysis)
+
+**Job Behavior**: Job's `create_tasks_for_stage()` creates N tasks FROM `previous_results` data
+
+**Example**:
+
+```python
+stages = [
+    {"number": 1, "task_type": "list_files", "parallelism": "single"},
+    {"number": 2, "task_type": "process_file", "parallelism": "fan_out"}  # ← Fan-out
+]
+
+@staticmethod
+def create_tasks_for_stage(stage, job_params, job_id, previous_results=None):
+    if stage == 1:
+        # Stage 1: Create 1 task to LIST files (don't know N yet)
+        return [{
+            "task_id": f"{job_id[:8]}-s1-list",
+            "task_type": "list_container_files",
+            "parameters": {"container": job_params["container"]}
+        }]
+
+    elif stage == 2:
+        # Stage 2: Fan-out - Create tasks FROM Stage 1 execution results
+        if not previous_results:
+            raise ValueError("Stage 2 requires Stage 1 results")
+
+        # Extract file list from Stage 1 task result (runtime discovery!)
+        file_list = previous_results[0]['result']['files']  # ← N discovered HERE
+
+        # Create one task per file (N = len(file_list))
+        return [
+            {
+                "task_id": f"{job_id[:8]}-s2-{file_name}",
+                "task_type": "process_file",
+                "parameters": {"file_name": file_name}
+            }
+            for file_name in file_list
+        ]
+```
+
+**Raster Tiling Example (Dynamic N)**:
+```python
+# Stage 1: Analyze raster → determine if tiling needed
+# Stage 2: Process tiles (N determined by Stage 1 analysis)
+
+stages = [
+    {"number": 1, "task_type": "analyze_raster", "parallelism": "single"},
+    {"number": 2, "task_type": "process_tile", "parallelism": "fan_out"}
+]
+
+@staticmethod
+def create_tasks_for_stage(stage, job_params, job_id, previous_results=None):
+    if stage == 1:
+        # Stage 1: One task analyzes raster and determines tiling strategy
+        return [{
+            "task_id": f"{job_id[:8]}-s1-analyze",
+            "task_type": "analyze_raster_size",
+            "parameters": {"raster_path": job_params["raster"]}
+        }]
+        # Task execution outputs: {"tiles": [{"x": 0, "y": 0}, ...]}  ← 100 tiles
+
+    elif stage == 2:
+        # Stage 2: Fan-out based on Stage 1 analysis results
+        tile_plan = previous_results[0]['result']['tiles']  # ← N = 100 discovered
+
+        return [
+            {
+                "task_id": f"{job_id[:8]}-s2-tile-{tile['x']}-{tile['y']}",
+                "task_type": "process_tile",
+                "parameters": {"tile": tile, "raster": job_params["raster"]}
+            }
+            for tile in tile_plan
+        ]
+```
+
+---
+
+### Pattern 3: "fan_in" - Auto-Aggregation
+
+**When to Use**: Need to aggregate results in the MIDDLE of a workflow (not just at end)
+
+**Job Behavior**: Job does NOTHING - CoreMachine auto-creates 1 aggregation task
+
+**CoreMachine Logic**:
+```python
+# In core/machine.py:process_job_message()
+if stage_definition.get("parallelism") == "fan_in":
+    # CoreMachine creates aggregation task automatically
+    tasks = self._create_fan_in_task(...)  # Always returns [1 task]
+else:
+    # Delegate to job
+    tasks = job_class.create_tasks_for_stage(...)
+```
+
+**Example - Complete Diamond Pattern**:
+
+```python
+stages = [
+    {"number": 1, "task_type": "list_files", "parallelism": "single"},
+    {"number": 2, "task_type": "process_file", "parallelism": "fan_out"},
+    {"number": 3, "task_type": "aggregate_results", "parallelism": "fan_in"},  # ← AUTO
+    {"number": 4, "task_type": "update_catalog", "parallelism": "single"}
+]
+
+@staticmethod
+def create_tasks_for_stage(stage, job_params, job_id, previous_results=None):
+    if stage == 1:
+        return [{"task_id": ..., "task_type": "list_files", ...}]
+
+    elif stage == 2:
+        files = previous_results[0]['result']['files']
+        return [{"task_id": ..., "task_type": "process_file", ...} for f in files]
+
+    elif stage == 3:
+        # FAN-IN: Job does NOTHING - CoreMachine handles it
+        # DO NOT implement this case - return [] or raise NotImplementedError
+        return []  # CoreMachine creates aggregation task automatically
+
+    elif stage == 4:
+        # Stage 4 receives aggregated result from Stage 3
+        summary = previous_results[0]['result']['summary']
+        return [{"task_id": ..., "parameters": {"summary": summary}}]
+```
+
+**Task Handler for Fan-In Stage**:
+```python
+# services/aggregate_results.py
+class AggregateResultsHandler:
+    def execute(self, params: dict) -> dict:
+        # Receive ALL Stage 2 results (automatically provided by CoreMachine)
+        previous_results = params["previous_results"]  # List of N results
+
+        # Aggregate
+        total_files = len(previous_results)
+        total_size = sum(r['result']['file_size'] for r in previous_results)
+
+        return {
+            "success": True,
+            "result": {
+                "summary": {
+                    "total_files": total_files,
+                    "total_size_mb": total_size / 1024 / 1024
+                }
+            }
+        }
+```
+
+**Flow Diagram**:
+```
+Stage 1 (single):     [List Files]
+                           ↓
+                    (returns 100 files)
+                           ↓
+Stage 2 (fan_out):   [Process 1] [Process 2] ... [Process 100]
+                           ↓         ↓              ↓
+                    (all 100 results collected)
+                           ↓
+Stage 3 (fan_in):    [Aggregate] ← CoreMachine auto-creates this
+                           ↓
+                    (summary: 100 files processed)
+                           ↓
+Stage 4 (single):    [Update Catalog]
+```
 
 ---
 

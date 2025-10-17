@@ -1,18 +1,19 @@
 # ============================================================================
-# CLAUDE CONTEXT - REPOSITORY
+# CLAUDE CONTEXT - VAULT REPOSITORY
 # ============================================================================
-# CATEGORY: AZURE RESOURCE REPOSITORIES
-# PURPOSE: Azure SDK wrapper providing data access abstraction
-# EPOCH: Shared by all epochs (infrastructure layer)# PURPOSE: Azure Key Vault repository for secure credential management (currently disabled pending RBAC setup)
+# EPOCH: 4 - ACTIVE ✅
+# STATUS: Infrastructure - Azure Key Vault repository (disabled pending RBAC)
+# PURPOSE: Azure Key Vault repository for secure credential management (currently disabled pending RBAC setup)
+# LAST_REVIEWED: 16 OCT 2025
 # EXPORTS: VaultRepository, VaultRepositoryFactory, VaultAccessError
 # INTERFACES: None - standalone repository for Key Vault operations
 # PYDANTIC_MODELS: None - uses dict for vault information
-# DEPENDENCIES: azure.keyvault.secrets, azure.identity, azure.core, util_logger, typing, datetime
+# DEPENDENCIES: azure.keyvault.secrets, azure.identity, azure.core, util_logger, typing, datetime, config
 # SOURCE: Azure Key Vault via DefaultAzureCredential, environment variables for vault name
 # SCOPE: Global credential management for database passwords and application secrets
 # VALIDATION: Secret name validation, credential authentication, vault access permissions
 # PATTERNS: Repository pattern, Factory pattern, Caching pattern (with TTL), Singleton (via factory)
-# ENTRY_POINTS: repo = VaultRepository(vault_name); password = repo.get_database_password()
+# ENTRY_POINTS: VaultRepositoryFactory.create_with_config() - Currently disabled
 # INDEX: VaultRepository:46, get_secret:83, get_database_password:128, VaultRepositoryFactory:223
 # ============================================================================
 

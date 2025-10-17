@@ -639,7 +639,21 @@ class CoreMachine:
                 if task_record and task_record.retry_count >= config.task_max_retries:
                     self.logger.error(
                         f"❌ Task {task_message.task_id[:16]} exceeded max retries "
-                        f"({config.task_max_retries}) - marking as FAILED"
+                        f"({config.task_max_retries}) - marking task and job as FAILED"
+                    )
+
+                    # Mark the parent job as FAILED since task cannot be recovered
+                    job_error_msg = (
+                        f"Job failed due to task {task_message.task_id} exceeding max retries "
+                        f"({config.task_max_retries}). Task error: {result.error_details}"
+                    )
+                    self.state_manager.mark_job_failed(
+                        task_message.parent_job_id,
+                        job_error_msg
+                    )
+                    self.logger.error(
+                        f"❌ Job {task_message.parent_job_id[:16]} marked as FAILED "
+                        f"due to task failure"
                     )
                 else:
                     self.logger.info(f"✅ Task {task_message.task_id[:16]} marked as FAILED in database")

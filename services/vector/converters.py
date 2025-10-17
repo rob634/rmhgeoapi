@@ -98,15 +98,31 @@ def _convert_geopackage(data: BytesIO, layer_name: Optional[str] = None, **kwarg
     Returns:
         GeoDataFrame
 
+    Raises:
+        ValueError: If specified layer_name does not exist in GeoPackage
+
     Notes:
         If layer_name not provided, reads the first available layer.
         GeoPackage files can contain multiple layers.
+        Invalid layer names will raise ValueError with explicit error message.
     """
-    if layer_name:
-        return gpd.read_file(data, layer=layer_name)
-    else:
-        # Read first layer (or only layer if single-layer GPKG)
-        return gpd.read_file(data)
+    try:
+        if layer_name:
+            # Explicit layer requested - will fail if layer doesn't exist
+            return gpd.read_file(data, layer=layer_name)
+        else:
+            # Read first layer (or only layer if single-layer GPKG)
+            return gpd.read_file(data)
+    except Exception as e:
+        # Re-raise with explicit context about layer validation
+        if layer_name and ('layer' in str(e).lower() or 'not found' in str(e).lower()):
+            raise ValueError(
+                f"Layer '{layer_name}' not found in GeoPackage. "
+                f"Original error: {type(e).__name__}: {e}"
+            ) from e
+        else:
+            # Other errors (file corruption, etc.) - re-raise as-is
+            raise
 
 
 def _convert_kml(data: BytesIO, **kwargs) -> gpd.GeoDataFrame:

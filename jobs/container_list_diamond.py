@@ -310,7 +310,7 @@ class ListContainerContentsDiamondWorkflow(JobBase):
 
         # Send to Service Bus
         queue_name = config.service_bus_jobs_queue
-        message_id = service_bus_repo.send_message(queue_name, message.model_dump_json())
+        message_id = service_bus_repo.send_message(queue_name, message)
 
         return {
             "queued": True,

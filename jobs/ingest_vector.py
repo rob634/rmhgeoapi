@@ -403,6 +403,6 @@ class IngestVectorJob(JobBase):
             "tasks_by_status": {
                 "completed": sum(1 for t in task_results if t.status == TaskStatus.COMPLETED),
                 "failed": sum(1 for t in task_results if t.status == TaskStatus.FAILED),
-                "pending": sum(1 for t in task_results if t.status == TaskStatus.PENDING)
+                "queued": sum(1 for t in task_results if t.status == TaskStatus.QUEUED)
             }
         }

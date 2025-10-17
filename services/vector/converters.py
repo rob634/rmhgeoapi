@@ -86,25 +86,27 @@ def _convert_geojson(data: BytesIO, **kwargs) -> gpd.GeoDataFrame:
     return gpd.read_file(data)
 
 
-def _convert_geopackage(data: BytesIO, layer_name: str, **kwargs) -> gpd.GeoDataFrame:
+def _convert_geopackage(data: BytesIO, layer_name: Optional[str] = None, **kwargs) -> gpd.GeoDataFrame:
     """
     Convert GeoPackage to GeoDataFrame.
 
     Args:
         data: BytesIO containing GeoPackage data
-        layer_name: Layer name to extract (required)
+        layer_name: Layer name to extract (optional, defaults to first layer)
         **kwargs: Additional arguments (ignored)
 
     Returns:
         GeoDataFrame
 
-    Raises:
-        ValueError: If layer_name not provided
+    Notes:
+        If layer_name not provided, reads the first available layer.
+        GeoPackage files can contain multiple layers.
     """
-    if not layer_name:
-        raise ValueError("GeoPackage conversion requires 'layer_name' parameter")
-
-    return gpd.read_file(data, layer=layer_name)
+    if layer_name:
+        return gpd.read_file(data, layer=layer_name)
+    else:
+        # Read first layer (or only layer if single-layer GPKG)
+        return gpd.read_file(data)
 
 
 def _convert_kml(data: BytesIO, **kwargs) -> gpd.GeoDataFrame:

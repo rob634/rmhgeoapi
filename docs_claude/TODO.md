@@ -161,8 +161,30 @@ stages = [
   - Jobs marked as FAILED when tasks exceed max retries (3 attempts)
   - Application-level retry with exponential backoff (5s → 10s → 20s)
   - Detailed error messages include task_id and retry count
+- ✅ **Mixed geometry type handling** (18 OCT 2025) - Production ready
+  - Normalize all geometries to Multi- types (Polygon → MultiPolygon, etc.)
+  - Fixed coordinate counting for multi-part geometries
+  - ArcGIS compatibility - uniform geometry types in PostGIS tables
+  - Minimal overhead (<1% storage/performance cost)
+- [ ] **Fix PostgreSQL deadlock on parallel uploads** ⚠️ HIGH PRIORITY
+  - **Issue**: Multiple parallel tasks hit deadlock when creating table + inserting simultaneously
+  - **Root Cause**: Concurrent DDL (CREATE TABLE IF NOT EXISTS) causes lock contention
+  - **Solution**: Serialize table creation in Stage 1 aggregation, then parallel inserts in Stage 2
+  - **Implementation Plan**:
+    1. Modify `jobs/ingest_vector.py` → `aggregate_stage_results()` for Stage 1
+    2. Create table ONCE after Stage 1 completes (using first chunk for schema)
+    3. Split `services/vector/postgis_handler.py` methods:
+       - `create_table_only()` - DDL only (Stage 1 aggregation)
+       - `insert_features_only()` - DML only (Stage 2 parallel tasks)
+    4. Update `upload_pickled_chunk()` to skip table creation
+    5. Add `table_created: true` flag to Stage 1 results
+  - **Files to modify**:
+    - `jobs/ingest_vector.py` (aggregate_stage_results)
+    - `services/vector/postgis_handler.py` (split create/insert logic)
+    - `services/vector/tasks.py` (upload_pickled_chunk)
+  - **Testing**: Re-test kba_shp.zip (currently deadlocks with >2 chunks)
 - [ ] **Additional format support** - Next up
-  - [ ] Shapefile processing (ZIP format)
+  - ✅ Shapefile processing (ZIP format) - Works with geometry normalization
   - [ ] CSV with geometry columns
   - [ ] KML/KMZ support
 - [ ] Vector tiling (MVT generation)

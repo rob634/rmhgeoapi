@@ -85,6 +85,42 @@ class VectorToPostGISHandler:
             print(f"Fixing {invalid_count} invalid geometries using buffer(0)")
             gdf.loc[invalid_mask, 'geometry'] = gdf.loc[invalid_mask, 'geometry'].buffer(0)
 
+        # Normalize to Multi- geometry types for ArcGIS compatibility
+        # This ensures uniform geometry types in PostGIS tables
+        from shapely.geometry import MultiPolygon, MultiLineString, MultiPoint
+
+        def to_multi(geom):
+            """
+            Convert single-part geometries to Multi- variants.
+
+            Polygon → MultiPolygon([polygon])
+            LineString → MultiLineString([linestring])
+            Point → MultiPoint([point])
+            Multi-* → unchanged
+            """
+            geom_type = geom.geom_type
+
+            if geom_type == 'Polygon':
+                return MultiPolygon([geom])
+            elif geom_type == 'LineString':
+                return MultiLineString([geom])
+            elif geom_type == 'Point':
+                return MultiPoint([geom])
+            else:
+                # Already Multi- or GeometryCollection - unchanged
+                return geom
+
+        # Log geometry type distribution before normalization
+        type_counts = gdf.geometry.geom_type.value_counts().to_dict()
+        print(f"Geometry types before normalization: {type_counts}")
+
+        # Normalize all geometries
+        gdf['geometry'] = gdf.geometry.apply(to_multi)
+
+        # Log after normalization
+        type_counts_after = gdf.geometry.geom_type.value_counts().to_dict()
+        print(f"Geometry types after normalization: {type_counts_after}")
+
         # Reproject to EPSG:4326 if needed
         if gdf.crs and gdf.crs != "EPSG:4326":
             print(f"Reprojecting from {gdf.crs} to EPSG:4326")
@@ -156,12 +192,26 @@ class VectorToPostGISHandler:
         sample_geoms = gdf.geometry.iloc[:sample_size]
 
         # Average number of coordinates per geometry
-        avg_coords = sample_geoms.apply(
-            lambda g: len(g.coords) if hasattr(g, 'coords')
-            else (len(g.exterior.coords) if hasattr(g, 'exterior')
-            else sum(len(p.exterior.coords) for p in g.geoms) if hasattr(g, 'geoms')
-            else 10)  # Default for complex geometries
-        ).mean()
+        def _count_coords(geom):
+            """
+            Count coordinates in any geometry type safely.
+
+            Handles single-part (Point, LineString, Polygon) and
+            multi-part (MultiPoint, MultiLineString, MultiPolygon) geometries.
+            """
+            geom_type = geom.geom_type
+
+            if geom_type in ['Point', 'LineString']:
+                return len(geom.coords)
+            elif geom_type == 'Polygon':
+                return len(geom.exterior.coords)
+            elif geom_type in ['MultiPoint', 'MultiLineString', 'MultiPolygon', 'GeometryCollection']:
+                # Multi-part geometries - recursively count coords from all parts
+                return sum(_count_coords(part) for part in geom.geoms)
+            else:
+                return 10  # Default for unknown geometry types
+
+        avg_coords = sample_geoms.apply(_count_coords).mean()
 
         if avg_coords > 1000:
             geom_factor = 0.3  # Complex polygons
@@ -279,7 +329,16 @@ class VectorToPostGISHandler:
             schema: Schema name
         """
         # Get geometry type from first feature
+        # After normalization, all geometries should be uniform Multi- types
         geom_type = chunk.geometry.iloc[0].geom_type.upper()
+
+        # Verify uniform geometry type (should always be true after normalization)
+        unique_types = chunk.geometry.geom_type.unique()
+        if len(unique_types) > 1:
+            print(f"WARNING: Mixed geometry types detected in chunk: {unique_types.tolist()}")
+            print(f"Using {geom_type} for table definition")
+        else:
+            print(f"Creating table with geometry type: {geom_type}")
 
         # Build column definitions
         columns = []

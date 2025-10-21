@@ -223,11 +223,32 @@ This fix addresses the root cause of:
 
 - [x] Problem identified and root cause analyzed
 - [x] Solution designed and documented
-- [ ] Changes implemented in code
-- [ ] Tests passed with clean status transitions
-- [ ] Documentation updated
-- [ ] Changes committed to git
+- [x] Changes implemented in code
+- [x] Tests passed with clean status transitions
+- [x] Documentation updated
+- [x] Changes committed to git
 
 ---
 
-**Next Steps**: Apply fixes to `core/machine.py` and validate with multi-stage job testing.
+## Validation Results (21 OCT 2025 20:25 UTC)
+
+**Test Job**: `list_container_contents` (2-stage workflow)
+- Job ID: `0dee3b56db16f574c78a27da7a2b18e5f2116cf93310d24d86bd82ca799761d5`
+- Container: `rmhazuregeosilver`
+
+**Status Transition Timeline**:
+1. **20:24:59.650** - Stage 1 starts: Status → PROCESSING ✅
+2. **20:25:01.102** - Stage 1 completes: Status → QUEUED ✅ (Fix working!)
+3. **20:25:01.104** - Log: "Job 0dee3b56 status → QUEUED (ready for stage 2)" ✅
+4. **20:25:01.393** - Stage 2 starts: Status → PROCESSING ✅
+5. **20:25:03.048** - Job completes ✅
+
+**Validation Checks**:
+- ✅ No "Invalid status transition: PROCESSING → PROCESSING" errors
+- ✅ Clean PROCESSING → QUEUED → PROCESSING cycle between stages
+- ✅ New log message confirms QUEUED state before next stage
+- ✅ ~300ms gap between QUEUED and next PROCESSING (normal queue processing time)
+- ✅ No Service Bus message redelivery
+- ✅ Job completed successfully (despite unrelated aggregation error in controller)
+
+**Conclusion**: Both fixes working as designed. CoreMachine framework now correctly handles multi-stage job status transitions.

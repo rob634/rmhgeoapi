@@ -448,15 +448,18 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                             } for func in functions
                         ]
                         
-                        # Test the problematic function call directly
+                        # Test the problematic function call directly (isolated transaction)
                         try:
-                            cur.execute(f"SELECT job_complete, final_stage, total_tasks, completed_tasks, task_results FROM {config.app_schema}.check_job_completion('test_job_id')")
-                            detailed_schema_info['function_test'] = "SUCCESS - Function signature matches query"
+                            with conn.transaction():
+                                cur.execute(f"SELECT job_complete, final_stage, total_tasks, completed_tasks, task_results FROM {config.app_schema}.check_job_completion('test_job_id')")
+                                detailed_schema_info['function_test'] = "SUCCESS - Function signature matches query"
                         except Exception as func_error:
+                            # Transaction auto-rolled back, cursor remains valid
                             detailed_schema_info['function_test'] = f"ERROR: {str(func_error)}"
                             detailed_schema_info['function_error_type'] = type(func_error).__name__
-                            
+
                     except Exception as inspect_error:
+                        # Transaction auto-rolled back if it fails
                         detailed_schema_info['inspection_error'] = f"Failed to inspect schema: {str(inspect_error)}"
                     
                     # NEW: Enhanced database query metrics for monitoring
@@ -538,20 +541,23 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                             function_tests = []
                             
                             for func_name in ['complete_task_and_check_stage', 'advance_job_stage', 'check_job_completion']:
+                                func_start = time.time()
                                 try:
-                                    func_start = time.time()
-                                    # Set search_path and execute function in separate transactions
-                                    if func_name == 'complete_task_and_check_stage':
-                                        cur.execute(f"SET search_path TO {config.app_schema}, public")
-                                        cur.execute(f"SELECT task_updated, is_last_task_in_stage, job_id, stage_number, remaining_tasks FROM {config.app_schema}.complete_task_and_check_stage('test_nonexistent_task', 'test_job_id', 1)")
-                                    elif func_name == 'advance_job_stage':
-                                        cur.execute(f"SET search_path TO {config.app_schema}, public") 
-                                        cur.execute(f"SELECT job_updated, new_stage, is_final_stage FROM {config.app_schema}.advance_job_stage('test_nonexistent_job', 1)")
-                                    elif func_name == 'check_job_completion':
-                                        cur.execute(f"SET search_path TO {config.app_schema}, public")
-                                        cur.execute(f"SELECT job_complete, final_stage, total_tasks, completed_tasks, task_results FROM {config.app_schema}.check_job_completion('test_nonexistent_job')")
-                                    
-                                    result = cur.fetchone()
+                                    # Execute function test in isolated transaction
+                                    with conn.transaction():
+                                        if func_name == 'complete_task_and_check_stage':
+                                            cur.execute(f"SET search_path TO {config.app_schema}, public")
+                                            cur.execute(f"SELECT task_updated, is_last_task_in_stage, job_id, stage_number, remaining_tasks FROM {config.app_schema}.complete_task_and_check_stage('test_nonexistent_task', 'test_job_id', 1)")
+                                        elif func_name == 'advance_job_stage':
+                                            cur.execute(f"SET search_path TO {config.app_schema}, public")
+                                            cur.execute(f"SELECT job_updated, new_stage, is_final_stage FROM {config.app_schema}.advance_job_stage('test_nonexistent_job', 1)")
+                                        elif func_name == 'check_job_completion':
+                                            cur.execute(f"SET search_path TO {config.app_schema}, public")
+                                            cur.execute(f"SELECT job_complete, final_stage, total_tasks, completed_tasks, task_results FROM {config.app_schema}.check_job_completion('test_nonexistent_job')")
+
+                                        result = cur.fetchone()
+
+                                    # Transaction committed successfully
                                     func_time = round((time.time() - func_start) * 1000, 2)
                                     function_tests.append({
                                         "function_name": func_name,
@@ -560,6 +566,7 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                                         "test_result": "function_callable"
                                     })
                                 except Exception as func_error:
+                                    # Transaction auto-rolled back, cursor remains valid
                                     function_tests.append({
                                         "function_name": func_name,
                                         "status": "error",

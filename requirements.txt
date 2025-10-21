@@ -14,6 +14,7 @@ psycopg[binary]
 rasterio>=1.3.1
 rio-cogeo
 rio-stac>=0.10.0
+cogeo-mosaic>=7.0.0
 
 # STRONG TYPING DISCIPLINE - Schema validation and enforcement
 pydantic>=2.0.0

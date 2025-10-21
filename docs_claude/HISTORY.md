@@ -1,9 +1,287 @@
 # Project History
 
-**Last Updated**: 16 OCT 2025 - Diamond Pattern Test Job Created 🔷
+**Last Updated**: 19 OCT 2025 - Multi-Tier COG Architecture Phase 1 Complete ✅
 **Note**: For project history prior to September 11, 2025, see **OLDER_HISTORY.md**
 
 This document tracks completed architectural changes and improvements to the Azure Geospatial ETL Pipeline from September 11, 2025 onwards.
+
+---
+
+## 19 OCT 2025: Multi-Tier COG Architecture - Phase 1 Complete ✅
+
+**Status**: ✅ Phase 1 Complete (Steps 1-4b) - Single-tier COG with automatic tier detection
+**Impact**: Foundation for tiered storage strategy with intelligent compatibility detection
+**Timeline**: 1 day implementation (19 OCT 2025)
+**Author**: Robert and Geospatial Claude Legion
+**Documentation**: ✅ Comprehensive docstrings added to Python files
+
+### What Was Accomplished
+
+**Phase 1: Core Infrastructure** (Steps 1-4b):
+- ✅ **Step 1**: COG tier profile configurations in `config.py`
+  - Created `CogTier` enum (VISUALIZATION, ANALYSIS, ARCHIVE)
+  - Created `StorageAccessTier` enum (HOT, COOL, ARCHIVE)
+  - Created `CogTierProfile` Pydantic model with compression, quality, storage tier
+  - Defined 3 tier profiles with compatibility rules
+  - Implemented `is_compatible()` method for band count + data type checking
+
+- ✅ **Step 2**: Raster type detection
+  - Created `determine_applicable_tiers()` function in `config.py`
+  - Automatic compatibility detection based on band count and data type
+  - Tested with RGB (3 tiers), DEM (2 tiers), Landsat (2 tiers)
+
+- ✅ **Step 3**: Updated `process_raster` job parameters
+  - Added `output_tier` parameter (enum: "visualization", "analysis", "archive", "all")
+  - Added validation in `validate_job_parameters()`
+  - Pass `output_tier` through job metadata and to Stage 2 tasks
+  - Default to "analysis" for backward compatibility
+  - Marked `compression` parameter as deprecated
+
+- ✅ **Step 4**: Extended COG conversion service
+  - Import `CogTier`, `COG_TIER_PROFILES` from config
+  - Parse `output_tier` parameter with fallback to "analysis"
+  - Automatic compatibility check (e.g., DEM can't use JPEG visualization tier)
+  - Fallback to "analysis" tier if requested tier incompatible
+  - Apply tier-specific compression, quality, storage tier settings
+  - Generate output filename with tier suffix: `sample_analysis.tif`
+  - Add tier metadata to result: `cog_tier`, `storage_tier`, `tier_profile`
+
+- ✅ **Step 4b**: Added tier detection to validation service
+  - Import `determine_applicable_tiers()` in `services/raster_validation.py`
+  - Call tier detection during Stage 1 using band_count and dtype
+  - Add `cog_tiers` to validation result with applicable_tiers list
+  - Include band_count and data_type in raster_type metadata for Stage 2
+  - Log tier compatibility details (e.g., "2 tiers: analysis, archive")
+  - Handle tier detection errors with fallback to all tiers
+
+- ✅ **Documentation**: Comprehensive inline docstrings
+  - Updated `config.py` with detailed CogTier enum docstring (60+ lines)
+  - Updated `CogTierProfile` class docstring with compatibility matrix
+  - Updated `determine_applicable_tiers()` function docstring (100+ lines)
+  - Updated `is_compatible()` method docstring with examples
+  - Updated `services/raster_validation.py` module docstring with tier detection
+  - Added inline comments in validation service Step 8b (20+ lines)
+  - All docstrings include examples, use cases, and cross-references
+
+### Technical Specifications
+
+**Tier Profiles**:
+
+```python
+# Visualization (Web-optimized, RGB only)
+CogTier.VISUALIZATION: {
+    compression: "JPEG",
+    quality: 85,
+    storage_tier: HOT,
+    requires_rgb: True,  # Only 3 bands, uint8
+    use_case: "Fast web maps, visualization"
+}
+
+# Analysis (Lossless, universal)
+CogTier.ANALYSIS: {
+    compression: "DEFLATE",
+    predictor: 2,
+    zlevel: 6,
+    storage_tier: HOT,
+    requires_rgb: False,  # Works with all raster types
+    use_case: "Scientific analysis, GIS operations"
+}
+
+# Archive (Compliance, universal)
+CogTier.ARCHIVE: {
+    compression: "LZW",
+    predictor: 2,
+    storage_tier: COOL,
+    requires_rgb: False,  # Works with all raster types
+    use_case: "Long-term storage, regulatory compliance"
+}
+```
+
+**Automatic Tier Compatibility**:
+- **RGB (3 bands, uint8)**: All 3 tiers (visualization, analysis, archive)
+- **DEM (1 band, float32)**: 2 tiers (analysis, archive) - JPEG incompatible
+- **Landsat (8 bands, uint16)**: 2 tiers (analysis, archive) - JPEG incompatible
+
+### Files Modified
+
+**Core Configuration**:
+- `config.py` - Added `CogTier`, `StorageAccessTier`, `CogTierProfile` models (lines 60-208)
+- `config.py` - Added `COG_TIER_PROFILES` dict with 3 tier definitions
+- `config.py` - Added `determine_applicable_tiers()` function
+
+**Job Workflow**:
+- `jobs/process_raster.py` - Added `output_tier` parameter to schema and validation
+- `jobs/process_raster.py` - Pass `output_tier` to job metadata and Stage 2 tasks
+
+**Service Layer**:
+- `services/raster_cog.py` - Import tier configuration from config
+- `services/raster_cog.py` - Parse `output_tier`, get tier profile, check compatibility
+- `services/raster_cog.py` - Apply tier-specific settings (compression, quality, storage tier)
+- `services/raster_cog.py` - Add tier suffix to output filename
+- `services/raster_cog.py` - Include tier metadata in result
+
+**Documentation**:
+- `docs_claude/TODO.md` - Marked Steps 1-4 complete with detailed completion notes
+
+### Next Steps (Phase 2)
+
+**Step 5**: Multi-tier fan-out pattern
+- If `output_tier: "all"`, create tasks for applicable tiers only
+- Use `determine_applicable_tiers()` from Stage 1 metadata
+- Generate 2-3 COG files per source raster (depending on compatibility)
+
+**Step 6**: STAC metadata updates
+- Add tier information to STAC items: `cog:tier`, `cog:compression`, `cog:size_mb`
+- Link related tiers with `rel: "alternate"` in STAC links
+
+### Usage Example
+
+```bash
+# Submit process_raster job with analysis tier (default)
+curl -X POST https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/jobs/submit/process_raster \
+  -H "Content-Type: application/json" \
+  -d '{
+    "blob_name": "sample.tif",
+    "output_tier": "analysis"
+  }'
+
+# Job result will include:
+{
+  "cog_blob": "sample_analysis.tif",
+  "cog_tier": "analysis",
+  "storage_tier": "hot",
+  "compression": "deflate",
+  "tier_profile": {
+    "tier": "analysis",
+    "compression": "DEFLATE",
+    "storage_tier": "hot",
+    "use_case": "Scientific analysis, GIS operations"
+  }
+}
+```
+
+---
+
+## 18 OCT 2025: Vector ETL Pipeline - Production Ready ✅
+
+**Status**: ✅ COMPLETE - All 6 vector formats tested and working
+**Impact**: Full production vector ingestion pipeline with deadlock fix, 2D enforcement, multi-geometry normalization
+**Timeline**: 2 days of intensive testing and bug fixes (17-18 OCT 2025)
+**Author**: Robert and Geospatial Claude Legion
+
+### What Was Accomplished
+
+**All Vector Formats Tested**:
+- ✅ **GeoPackage (.gpkg)** - roads.gpkg (2 chunks, optional layer_name)
+- ✅ **Shapefile (.zip)** - kba_shp.zip (17 chunks, NO DEADLOCKS)
+- ✅ **KMZ (.kmz)** - grid.kml.kmz (21 chunks, 12,228 features, Z-dimension removal)
+- ✅ **KML (.kml)** - doc.kml (21 chunks, 12,228 features, Z-dimension removal)
+- ✅ **GeoJSON (.geojson)** - 8.geojson (10 chunks, 3,879 features)
+- ✅ **CSV (.csv)** - acled_test.csv (17 chunks, 5,000 features, lat/lon columns)
+
+### Critical Bug Fixes
+
+**1. PostgreSQL Deadlock Fix**
+- **Problem**: Parallel tasks hitting deadlock when creating table + inserting simultaneously
+- **Root Cause**: Concurrent DDL (CREATE TABLE IF NOT EXISTS) + DML (INSERT) causing lock contention
+- **Solution**: Serialize table creation in Stage 1 aggregation, then parallel inserts in Stage 2
+- **Implementation**:
+  - Split `services/vector/postgis_handler.py` methods:
+    - `create_table_only()` - DDL only (Stage 1 aggregation)
+    - `insert_features_only()` - DML only (Stage 2 parallel tasks)
+  - Modified `jobs/ingest_vector.py` → `create_tasks_for_stage()` for Stage 2
+  - Table created ONCE before Stage 2 tasks (using first chunk for schema)
+  - Updated `upload_pickled_chunk()` to use insert-only method
+- **Testing**: kba_shp.zip (17 chunks) - **100% success, ZERO deadlocks**
+
+**2. 2D Geometry Enforcement**
+- **Purpose**: System only supports 2D geometries (x, y coordinates)
+- **Problem**: KML/KMZ files contain 3D geometries with Z (elevation) dimensions
+- **Solution**: Strip Z/M dimensions using `shapely.force_2d()`
+- **Implementation**: `services/vector/postgis_handler.py` → `prepare_gdf()` (lines 88-125)
+- **Testing**: KML/KMZ files with 3D data (12,228 features each)
+- **Verification**: Local test confirmed coordinates reduced from 3 values (x,y,z) to 2 values (x,y)
+- **Bug Fixed**: Series boolean ambiguity - added `.any()` to `has_m` check
+
+**3. Mixed Geometry Normalization**
+- **Purpose**: ArcGIS requires uniform geometry types in tables
+- **Problem**: Datasets with mixed Polygon + MultiPolygon, LineString + MultiLineString
+- **Solution**: Normalize all geometries to Multi- types
+- **Implementation**: `services/vector/postgis_handler.py` → `prepare_gdf()` (lines 127-168)
+- **Cost**: <1% storage/performance overhead
+
+### Files Modified
+
+**Core Files**:
+- `services/vector/postgis_handler.py` - DDL/DML split, 2D enforcement, Multi- normalization
+- `jobs/ingest_vector.py` - Serialized table creation in Stage 2 setup
+- `services/vector/tasks.py` - Updated upload task to use insert-only method
+
+**Documentation Created**:
+- `docs_claude/VECTOR_ETL_COMPLETE.md` - Comprehensive production guide
+  - All format examples with curl commands
+  - Required parameters for each format
+  - Error handling patterns
+  - Architecture overview
+  - Testing results
+
+### Testing Results
+
+| Format | Chunks | Features | Success Rate | Deadlocks | Notes |
+|--------|--------|----------|--------------|-----------|-------|
+| GeoPackage | 2 | N/A | 100% | 0 | Layer selection working |
+| Shapefile | 17 | N/A | 100% | 0 | CRITICAL FIX - was deadlocking |
+| KMZ | 21 | 12,228 | 100% | 0 | 3D → 2D conversion |
+| KML | 21 | 12,228 | 100% | 0 | 3D → 2D conversion |
+| GeoJSON | 10 | 3,879 | 100% | 0 | Standard format |
+| CSV | 17 | 5,000 | 100% | 0 | Lat/lon columns |
+
+**Overall**: 88 parallel chunks uploaded, **100% success rate, ZERO deadlocks**
+
+### Usage Examples
+
+**CSV with lat/lon**:
+```bash
+curl -X POST https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/jobs/submit/ingest_vector \
+  -H "Content-Type: application/json" \
+  -d '{
+    "blob_name": "acled_test.csv",
+    "file_extension": ".csv",
+    "table_name": "acled_csv",
+    "container_name": "rmhazuregeobronze",
+    "schema": "geo",
+    "converter_params": {
+      "lat_name": "latitude",
+      "lon_name": "longitude"
+    }
+  }'
+```
+
+**KMZ with automatic 2D conversion**:
+```bash
+curl -X POST https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/jobs/submit/ingest_vector \
+  -H "Content-Type: application/json" \
+  -d '{
+    "blob_name": "grid.kml.kmz",
+    "file_extension": ".kmz",
+    "table_name": "grid_kmz",
+    "container_name": "rmhazuregeobronze",
+    "schema": "geo"
+  }'
+```
+
+### Production Readiness Checklist
+
+- [x] PostgreSQL deadlock fix tested and verified
+- [x] 2D geometry enforcement working (local + production)
+- [x] All 6 major formats tested
+- [x] Error handling and job failure detection
+- [x] Parallel upload performance validated
+- [x] ArcGIS compatibility (Multi- geometry types)
+- [x] Comprehensive documentation with examples
+- [x] Parameter validation and error messages
+
+**Status**: ✅ **PRODUCTION READY** - Vector ETL pipeline fully operational
 
 ---
 

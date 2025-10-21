@@ -46,6 +46,7 @@ from .validate_raster_job import ValidateRasterJob
 from .process_raster import ProcessRasterWorkflow
 from .generate_h3_level4 import GenerateH3Level4Job
 from .create_h3_base import CreateH3BaseJob
+from .process_raster_collection import ProcessRasterCollectionWorkflow
 
 # ============================================================================
 # EXPLICIT JOB REGISTRY
@@ -66,6 +67,7 @@ ALL_JOBS = {
     "ingest_vector": IngestVectorJob,
     "validate_raster_job": ValidateRasterJob,
     "process_raster": ProcessRasterWorkflow,
+    "process_raster_collection": ProcessRasterCollectionWorkflow,  # Multi-tile COG + MosaicJSON (20 OCT 2025)
     "generate_h3_level4": GenerateH3Level4Job,
     "create_h3_base": CreateH3BaseJob,
     # Add new jobs here explicitly

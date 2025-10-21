@@ -37,8 +37,13 @@ from shapely.geometry import box
 
 from config import get_config
 from infrastructure.stac import StacInfrastructure
+from util_logger import LoggerFactory, ComponentType
 
-logger = logging.getLogger(__name__)
+# Component-specific logger for structured logging (Application Insights)
+logger = LoggerFactory.create_logger(
+    ComponentType.SERVICE,
+    "stac_vector_service"
+)
 
 
 class StacVectorService:

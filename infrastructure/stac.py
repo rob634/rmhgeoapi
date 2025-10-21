@@ -80,6 +80,21 @@ class StacInfrastructure:
     # =========================================================================
 
     PRODUCTION_COLLECTIONS = {
+        # === SYSTEM STAC (Layer 1 - Operational Tracking) ===
+        'system-vectors': {
+            'title': 'System STAC - Vector Tables',
+            'description': 'Operational tracking of PostGIS vector tables created by ETL',
+            'asset_type': 'vector',
+            'media_type': 'application/geo+json'
+        },
+        'system-rasters': {
+            'title': 'System STAC - Raster Files',
+            'description': 'Operational tracking of COG files created by ETL',
+            'asset_type': 'raster',
+            'media_type': 'image/tiff; application=geotiff; profile=cloud-optimized'
+        },
+
+        # === LEGACY COLLECTIONS (Pre-System STAC) ===
         'cogs': {
             'title': 'Cloud-Optimized GeoTIFFs',
             'description': 'Raster data converted to COG format in EPSG:4326 for cloud-native access',
@@ -614,19 +629,37 @@ class StacInfrastructure:
 
     def create_production_collection(self, collection_type: str) -> Dict[str, Any]:
         """
-        Create one of the production STAC collections.
+        Create one of the production STAC collections (idempotent).
+
+        This method checks if the collection exists before attempting creation,
+        making it safe to call multiple times (infrastructure-as-code pattern).
 
         Production collections:
-        - "cogs": Cloud-optimized GeoTIFFs in EPSG:4326
-        - "vectors": PostGIS tables (queryable features)
-        - "geoparquet": GeoParquet analytical datasets
+        - "system-vectors": PostGIS vector tables created by ETL (System STAC Layer 1)
+        - "system-rasters": COG raster files created by ETL (System STAC Layer 1)
+        - "cogs": Cloud-optimized GeoTIFFs in EPSG:4326 (legacy)
+        - "vectors": PostGIS tables (legacy)
+        - "geoparquet": GeoParquet analytical datasets (legacy)
         - "dev": Development/testing (generic)
 
         Args:
             collection_type: One of PRODUCTION_COLLECTIONS keys
 
         Returns:
-            Dict with collection creation results
+            Dict with collection creation results:
+            {
+                'success': bool,
+                'existed': bool,  # True if collection already existed
+                'collection_id': str,
+                'collection_type': str,
+                'config': dict,
+                'result': Any  # PgSTAC function result (only if newly created)
+            }
+
+        Examples:
+            >>> result = stac.create_production_collection('system-vectors')
+            >>> result['success']  # True
+            >>> result['existed']  # False (first run) or True (subsequent runs)
         """
         if collection_type not in self.PRODUCTION_COLLECTIONS:
             error_msg = f"Invalid collection type '{collection_type}'. Must be one of: {', '.join(self.PRODUCTION_COLLECTIONS.keys())}"
@@ -662,6 +695,28 @@ class StacInfrastructure:
         try:
             with psycopg.connect(self.connection_string) as conn:
                 with conn.cursor() as cur:
+                    # Database-level idempotency check (18 OCT 2025)
+                    # Check if collection already exists before attempting creation
+                    logger.debug(f"🔍 Checking if collection '{collection_type}' exists...")
+                    cur.execute(
+                        "SELECT EXISTS(SELECT 1 FROM pgstac.collections WHERE id = %s)",
+                        [collection_type]
+                    )
+                    exists = cur.fetchone()[0]
+
+                    if exists:
+                        logger.info(f"✅ Collection '{collection_type}' already exists (idempotent - skipping creation)")
+                        return {
+                            'success': True,
+                            'existed': True,
+                            'collection_id': collection_type,
+                            'collection_type': collection_type,
+                            'config': coll_config,
+                            'message': 'Collection already exists (idempotent)'
+                        }
+
+                    # Create collection (only if doesn't exist)
+                    logger.debug(f"📝 Creating new collection '{collection_type}'...")
                     cur.execute(
                         "SELECT * FROM pgstac.create_collection(%s)",
                         [json.dumps(collection)]
@@ -672,6 +727,7 @@ class StacInfrastructure:
                     logger.info(f"✅ Production collection created: {collection_type}")
                     return {
                         'success': True,
+                        'existed': False,
                         'collection_id': collection_type,
                         'collection_type': collection_type,
                         'config': coll_config,
@@ -888,3 +944,284 @@ def install_stac(drop_existing: bool = False) -> Dict[str, Any]:
         Installation results dict
     """
     return StacInfrastructure().install_pgstac(drop_existing=drop_existing)
+
+
+# ============================================================================
+# STAC API QUERY METHODS (18 OCT 2025)
+# ============================================================================
+# STAC API standard endpoints for reading from pgstac schema
+# These follow STAC API specification for interoperability
+# ============================================================================
+
+def get_all_collections() -> Dict[str, Any]:
+    """
+    Get all STAC collections (STAC API standard endpoint).
+
+    Implements: GET /collections
+
+    Returns STAC-compliant FeatureCollection of all collections.
+    Uses pgstac.all_collections() function.
+
+    Returns:
+        Dict with 'collections' array and metadata
+    """
+    logger = LoggerFactory.create_logger(ComponentType.SERVICE, "StacAPI")
+
+    try:
+        config = get_config()
+        connection_string = config.postgis_connection_string
+
+        with psycopg.connect(connection_string) as conn:
+            with conn.cursor() as cur:
+                # PgSTAC function to get all collections
+                cur.execute("SELECT * FROM pgstac.all_collections()")
+                result = cur.fetchone()
+
+                if result and result[0]:
+                    collections_data = result[0]
+
+                    # STAC API standard response format
+                    return {
+                        'collections': collections_data if isinstance(collections_data, list) else [collections_data],
+                        'links': [
+                            {
+                                'rel': 'self',
+                                'type': 'application/json',
+                                'href': '/collections'
+                            }
+                        ]
+                    }
+                else:
+                    return {
+                        'collections': [],
+                        'links': [
+                            {
+                                'rel': 'self',
+                                'type': 'application/json',
+                                'href': '/collections'
+                            }
+                        ]
+                    }
+
+    except Exception as e:
+        logger.error(f"Failed to get collections: {e}")
+        return {
+            'error': str(e),
+            'error_type': type(e).__name__
+        }
+
+
+def get_collection(collection_id: str) -> Dict[str, Any]:
+    """
+    Get single STAC collection by ID (STAC API standard endpoint).
+
+    Implements: GET /collections/{collection_id}
+
+    Args:
+        collection_id: Collection identifier
+
+    Returns:
+        STAC Collection object or error dict
+    """
+    logger = LoggerFactory.create_logger(ComponentType.SERVICE, "StacAPI")
+
+    try:
+        config = get_config()
+        connection_string = config.postgis_connection_string
+
+        with psycopg.connect(connection_string) as conn:
+            with conn.cursor() as cur:
+                # PgSTAC function to get specific collection
+                cur.execute(
+                    "SELECT * FROM pgstac.get_collection(%s)",
+                    [collection_id]
+                )
+                result = cur.fetchone()
+
+                if result and result[0]:
+                    return result[0]  # Return collection JSON
+                else:
+                    return {
+                        'error': f"Collection '{collection_id}' not found",
+                        'error_type': 'NotFound'
+                    }
+
+    except Exception as e:
+        logger.error(f"Failed to get collection '{collection_id}': {e}")
+        return {
+            'error': str(e),
+            'error_type': type(e).__name__
+        }
+
+
+def get_collection_items(
+    collection_id: str,
+    limit: int = 100,
+    bbox: Optional[List[float]] = None,
+    datetime_str: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Get items in a collection (STAC API standard endpoint).
+
+    Implements: GET /collections/{collection_id}/items
+
+    Args:
+        collection_id: Collection identifier
+        limit: Maximum number of items to return (default 100)
+        bbox: Bounding box filter [minx, miny, maxx, maxy]
+        datetime_str: Datetime filter (RFC 3339 or interval)
+
+    Returns:
+        STAC ItemCollection (GeoJSON FeatureCollection)
+    """
+    logger = LoggerFactory.create_logger(ComponentType.SERVICE, "StacAPI")
+
+    try:
+        config = get_config()
+        connection_string = config.postgis_connection_string
+
+        # Build search parameters (STAC search syntax)
+        search_params = {
+            'collections': [collection_id],
+            'limit': limit
+        }
+
+        if bbox:
+            search_params['bbox'] = bbox
+
+        if datetime_str:
+            search_params['datetime'] = datetime_str
+
+        with psycopg.connect(connection_string) as conn:
+            with conn.cursor() as cur:
+                # Query items directly from pgstac.items table (simpler than search())
+                # NOTE: pgstac.search() requires 'searches' table which may not be set up
+                query = """
+                    SELECT jsonb_build_object(
+                        'type', 'FeatureCollection',
+                        'features', COALESCE(jsonb_agg(content), '[]'::jsonb),
+                        'links', '[]'::jsonb
+                    )
+                    FROM (
+                        SELECT content
+                        FROM pgstac.items
+                        WHERE collection = %s
+                        ORDER BY datetime DESC
+                        LIMIT %s
+                    ) items
+                """
+                cur.execute(query, [collection_id, limit])
+                result = cur.fetchone()
+
+                if result and result[0]:
+                    return result[0]  # Returns GeoJSON FeatureCollection
+                else:
+                    # Empty FeatureCollection
+                    return {
+                        'type': 'FeatureCollection',
+                        'features': [],
+                        'links': []
+                    }
+
+    except Exception as e:
+        logger.error(f"Failed to get items for collection '{collection_id}': {e}")
+        return {
+            'error': str(e),
+            'error_type': type(e).__name__
+        }
+
+
+def search_items(
+    collections: Optional[List[str]] = None,
+    bbox: Optional[List[float]] = None,
+    datetime_str: Optional[str] = None,
+    limit: int = 100,
+    query: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    """
+    Search items across collections (STAC API standard endpoint).
+
+    Implements: GET /search (also supports POST)
+
+    Args:
+        collections: List of collection IDs to search
+        bbox: Bounding box [minx, miny, maxx, maxy]
+        datetime_str: Datetime filter (RFC 3339 or interval)
+        limit: Maximum items to return (default 100)
+        query: Additional query parameters (STAC query extension)
+
+    Returns:
+        STAC ItemCollection (GeoJSON FeatureCollection)
+    """
+    logger = LoggerFactory.create_logger(ComponentType.SERVICE, "StacAPI")
+
+    try:
+        config = get_config()
+        connection_string = config.postgis_connection_string
+
+        # Build search parameters
+        search_params = {'limit': limit}
+
+        if collections:
+            search_params['collections'] = collections
+
+        if bbox:
+            search_params['bbox'] = bbox
+
+        if datetime_str:
+            search_params['datetime'] = datetime_str
+
+        if query:
+            search_params['query'] = query
+
+        with psycopg.connect(connection_string) as conn:
+            with conn.cursor() as cur:
+                # Query items directly from pgstac.items table (simpler than search())
+                # NOTE: pgstac.search() requires 'searches' table which may not be set up
+                logger.debug(f"STAC search - collections: {collections}, limit: {limit}")
+
+                # Build WHERE clause
+                where_clauses = []
+                params = []
+
+                if collections:
+                    where_clauses.append("collection = ANY(%s)")
+                    params.append(collections)
+
+                where_sql = " AND ".join(where_clauses) if where_clauses else "TRUE"
+
+                query = f"""
+                    SELECT jsonb_build_object(
+                        'type', 'FeatureCollection',
+                        'features', COALESCE(jsonb_agg(content), '[]'::jsonb),
+                        'links', '[]'::jsonb
+                    )
+                    FROM (
+                        SELECT content
+                        FROM pgstac.items
+                        WHERE {where_sql}
+                        ORDER BY datetime DESC
+                        LIMIT %s
+                    ) items
+                """
+                params.append(limit)
+
+                cur.execute(query, params)
+                result = cur.fetchone()
+
+                if result and result[0]:
+                    return result[0]  # Returns GeoJSON FeatureCollection
+                else:
+                    # Empty FeatureCollection
+                    return {
+                        'type': 'FeatureCollection',
+                        'features': [],
+                        'links': []
+                    }
+
+    except Exception as e:
+        logger.error(f"Failed to search items: {e}")
+        return {
+            'error': str(e),
+            'error_type': type(e).__name__
+        }

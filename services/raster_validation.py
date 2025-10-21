@@ -16,18 +16,90 @@
 """
 Raster Validation Service - Stage 1 of Raster Pipeline
 
-Validates raster files before expensive COG processing:
-- CRS validation (file metadata, user override, sanity checks)
-- Bit-depth efficiency analysis (flag 64-bit data as CRITICAL)
-- Raster type detection (RGB, RGBA, DEM, categorical, multispectral)
-- Type mismatch validation (user-specified vs detected)
-- Bounds sanity checks (catch obviously wrong coordinates)
+Validates raster files before expensive COG processing and determines applicable
+COG output tiers based on raster characteristics.
+
+Validation Steps:
+    1. File readability check
+    2. CRS validation (file metadata, user override, sanity checks)
+    3. Bit-depth efficiency analysis (flag 64-bit data as CRITICAL)
+    4. Raster type detection (RGB, RGBA, DEM, categorical, multispectral)
+    5. Type mismatch validation (user-specified vs detected)
+    6. Bounds sanity checks (catch obviously wrong coordinates)
+    7. Optimal COG settings recommendation
+    8. COG tier compatibility detection (NEW 19 OCT 2025)
+
+COG Tier Detection (Step 8b):
+    Automatically determines which output tiers are compatible with raster:
+    - VISUALIZATION (JPEG): RGB only (3 bands, uint8)
+    - ANALYSIS (DEFLATE): Universal (all raster types)
+    - ARCHIVE (LZW): Universal (all raster types)
+
+    Examples:
+        RGB aerial photo (3 bands, uint8) → all 3 tiers
+        DEM elevation (1 band, float32) → analysis + archive only
+        Landsat (8 bands, uint16) → analysis + archive only
+
+    Result includes 'cog_tiers' field:
+        {
+            "applicable_tiers": ["analysis", "archive"],
+            "total_compatible": 2,
+            "incompatible_reason": "JPEG requires RGB (3 bands, uint8)"
+        }
 
 Validation Philosophy: Garbage In = Error Out
-- Data owners are responsible for clean data
-- 64-bit data types flagged as organizational policy violation
-- Detailed error messages force data owners to fix problems
-- _skip_validation override for controlled testing only
+    - Data owners are responsible for clean data
+    - 64-bit data types flagged as organizational policy violation
+    - Detailed error messages force data owners to fix problems
+    - _skip_validation override for controlled testing only
+
+Validation Result Structure:
+    {
+        "success": True/False,
+        "result": {
+            "valid": True,
+            "source_blob": "sample.tif",
+            "band_count": 3,
+            "dtype": "uint8",
+            "data_type": "uint8",  # Alias for tier detection
+
+            "source_crs": "EPSG:4326",
+            "crs_source": "file_metadata",
+            "bounds": [-180, -90, 180, 90],
+            "shape": [1000, 1000],
+
+            "raster_type": {
+                "detected_type": "rgb",
+                "confidence": "HIGH",
+                "evidence": ["3 bands, uint8 (standard RGB)"],
+                "band_count": 3,
+                "data_type": "uint8",
+                "optimal_cog_settings": {
+                    "compression": "jpeg",
+                    "jpeg_quality": 85,
+                    "overview_resampling": "cubic"
+                }
+            },
+
+            "cog_tiers": {
+                "applicable_tiers": ["visualization", "analysis", "archive"],
+                "total_compatible": 3,
+                "incompatible_reason": null
+            },
+
+            "bit_depth_check": {
+                "efficient": true,
+                "current_dtype": "uint8"
+            },
+
+            "warnings": []
+        }
+    }
+
+See Also:
+    - config.py → determine_applicable_tiers(): Tier detection logic
+    - services/raster_cog.py: Uses tier metadata in Stage 2
+    - docs_claude/TIER_DETECTION_GUIDE.md: Complete tier detection guide
 """
 
 import sys
@@ -305,6 +377,53 @@ def validate_raster(params: dict) -> dict:
                     "traceback": traceback.format_exc()
                 }
 
+            # ================================================================
+            # STEP 8b: DETERMINE APPLICABLE COG TIERS
+            # ================================================================
+            # Automatically detect which COG output tiers (VISUALIZATION, ANALYSIS,
+            # ARCHIVE) are compatible with this raster based on band count and data type.
+            #
+            # Why This Matters:
+            #   - JPEG (visualization tier) only works with RGB (3 bands, uint8)
+            #   - DEM, Landsat, RGBA rasters are incompatible with JPEG
+            #   - DEFLATE/LZW (analysis/archive) are universally compatible
+            #
+            # This metadata is used in Stage 2 COG creation to:
+            #   1. Validate user-requested tier is compatible
+            #   2. Auto-fallback to "analysis" if incompatible tier requested
+            #   3. Future: Multi-tier fan-out (create all compatible tiers)
+            #
+            # Examples:
+            #   RGB aerial photo (3 bands, uint8) → all 3 tiers available
+            #   DEM elevation (1 band, float32) → 2 tiers only (JPEG incompatible)
+            #   Landsat (8 bands, uint16) → 2 tiers only (JPEG incompatible)
+            #
+            # See: config.py → determine_applicable_tiers() for detection logic
+            # See: docs_claude/TIER_DETECTION_GUIDE.md for complete guide
+            # ================================================================
+            try:
+                logger.info("🔄 STEP 8b: Determining applicable COG tiers...")
+                from config import determine_applicable_tiers
+
+                # Determine which tiers are compatible with this raster
+                # Returns list of CogTier enums (e.g., [ANALYSIS, ARCHIVE] for DEM)
+                applicable_tiers = determine_applicable_tiers(band_count, str(dtype))
+
+                logger.info(f"✅ STEP 8b: Applicable tiers determined - {len(applicable_tiers)} tiers: {applicable_tiers}")
+
+                # Log tier compatibility details if not all 3 tiers available
+                if len(applicable_tiers) < 3:
+                    logger.info(f"   ℹ️  Tier compatibility: {band_count} bands, {dtype} → {', '.join(applicable_tiers)}")
+                    if 'visualization' not in applicable_tiers:
+                        logger.info(f"   ℹ️  JPEG visualization tier not compatible (requires RGB: 3 bands, uint8)")
+
+            except Exception as e:
+                logger.error(f"❌ STEP 8b FAILED: Tier detection error: {e}\n{traceback.format_exc()}")
+                # Non-critical failure - default to all tiers if detection fails
+                # User may get error in Stage 2 if they request incompatible tier
+                applicable_tiers = ['visualization', 'analysis', 'archive']
+                logger.warning(f"   ⚠️  Using default tiers (detection failed): {applicable_tiers}")
+
             # STEP 9: Build success result
             try:
                 logger.info("🔄 STEP 9: Building validation result...")
@@ -320,6 +439,7 @@ def validate_raster(params: dict) -> dict:
                         "shape": list(shape),
                         "band_count": band_count,
                         "dtype": str(dtype),
+                        "data_type": str(dtype),  # Alias for tier compatibility
                         "size_mb": params.get('size_mb', 0),
                         "nodata": nodata,
 
@@ -329,7 +449,16 @@ def validate_raster(params: dict) -> dict:
                             "confidence": type_result.get("confidence", "UNKNOWN"),
                             "evidence": type_result.get("evidence", []),
                             "type_source": type_result.get("type_source", "auto_detected"),
-                            "optimal_cog_settings": optimal_settings
+                            "optimal_cog_settings": optimal_settings,
+                            "band_count": band_count,  # For tier detection
+                            "data_type": str(dtype)     # For tier detection
+                        },
+
+                        # COG tier compatibility
+                        "cog_tiers": {
+                            "applicable_tiers": applicable_tiers,
+                            "total_compatible": len(applicable_tiers),
+                            "incompatible_reason": "JPEG requires RGB (3 bands, uint8)" if 'visualization' not in applicable_tiers else None
                         },
 
                         # Bit-depth analysis
@@ -345,7 +474,7 @@ def validate_raster(params: dict) -> dict:
                 }
 
                 logger.info(f"✅ STEP 9: Result built successfully")
-                logger.info(f"✅ VALIDATION COMPLETE: Type={detected_type}, CRS={source_crs}, Warnings={len(warnings)}")
+                logger.info(f"✅ VALIDATION COMPLETE: Type={detected_type}, CRS={source_crs}, Tiers={len(applicable_tiers)}, Warnings={len(warnings)}")
                 return result
 
             except Exception as e:

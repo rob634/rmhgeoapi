@@ -371,12 +371,88 @@ def redeploy_schema(req: func.HttpRequest) -> func.HttpResponse:
             "objects_created": deploy_data.get("statistics", {}),
             "verification": deploy_data.get("verification", {})
         })
-        
+
+        # Step 3: Create System STAC collections (18 OCT 2025 - System STAC Layer 1)
+        import logging
+        logging.info("=" * 80)
+        logging.info("🚀 REACHED STEP 3 CODE BLOCK")
+        logging.info(f"🔍 Step 3 check: deploy_response.status_code = {deploy_response.status_code}")
+        logging.info(f"📋 Current results steps count: {len(results.get('steps', []))}")
+        logging.info("=" * 80)
+
+        if deploy_response.status_code == 200:
+            logging.info("📦 Step 3: Creating System STAC collections")
+            stac_collections_result = {"collections_created": [], "collections_failed": []}
+            try:
+                from infrastructure.stac import StacInfrastructure
+                logging.info("✅ StacInfrastructure imported")
+                stac = StacInfrastructure()
+                logging.info("✅ StacInfrastructure initialized")
+
+                # Create system-vectors collection (database-level idempotency)
+                logging.info("🔄 Creating system-vectors collection...")
+                result = stac.create_production_collection('system-vectors')
+                logging.info(f"✅ system-vectors result: {result}")
+
+                if result.get('success'):
+                    # Success - collection created or already existed
+                    if result.get('existed'):
+                        stac_collections_result["collections_created"].append('system-vectors (already exists)')
+                        logging.info("ℹ️ system-vectors already exists (idempotent)")
+                    else:
+                        stac_collections_result["collections_created"].append('system-vectors')
+                        logging.info("✅ system-vectors created")
+                else:
+                    # Real failure
+                    stac_collections_result["collections_failed"].append({
+                        "collection": "system-vectors",
+                        "error": result.get('error', 'Unknown error')
+                    })
+
+                # Create system-rasters collection (database-level idempotency)
+                logging.info("🔄 Creating system-rasters collection...")
+                result = stac.create_production_collection('system-rasters')
+                logging.info(f"✅ system-rasters result: {result}")
+
+                if result.get('success'):
+                    # Success - collection created or already existed
+                    if result.get('existed'):
+                        stac_collections_result["collections_created"].append('system-rasters (already exists)')
+                        logging.info("ℹ️ system-rasters already exists (idempotent)")
+                    else:
+                        stac_collections_result["collections_created"].append('system-rasters')
+                        logging.info("✅ system-rasters created")
+                else:
+                    # Real failure
+                    stac_collections_result["collections_failed"].append({
+                        "collection": "system-rasters",
+                        "error": result.get('error', 'Unknown error')
+                    })
+
+                stac_collections_result["status"] = "success" if len(stac_collections_result["collections_created"]) == 2 else "partial"
+                logging.info(f"📊 STAC collections result: {stac_collections_result}")
+
+            except Exception as e:
+                logging.error(f"❌ Step 3 exception: {e}")
+                import traceback
+                logging.error(f"Traceback: {traceback.format_exc()}")
+                stac_collections_result["status"] = "failed"
+                stac_collections_result["error"] = str(e)
+
+            logging.info(f"📝 Appending Step 3 to results: {stac_collections_result}")
+            results["steps"].append({
+                "step": "create_system_stac_collections",
+                "status": stac_collections_result.get("status", "failed"),
+                "collections_created": stac_collections_result.get("collections_created", []),
+                "collections_failed": stac_collections_result.get("collections_failed", [])
+            })
+            logging.info(f"✅ Step 3 appended. Total steps: {len(results['steps'])}")
+
         # Overall status
         overall_success = deploy_response.status_code == 200
         results["overall_status"] = "success" if overall_success else "partial_failure"
         results["message"] = "Schema redeployed successfully" if overall_success else "Nuke succeeded but deploy failed"
-        
+
         return func.HttpResponse(
             body=json.dumps(results),
             status_code=200 if overall_success else 500,
@@ -419,6 +495,69 @@ def analyze_container(req: func.HttpRequest) -> func.HttpResponse:
         save: If 'true', saves results to rmhazuregeoinventory container
     """
     return analyze_container_trigger.handle_request(req)
+
+
+@app.route(route="analysis/delivery", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
+def discover_delivery_structure(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Discover vendor delivery structure: POST /api/analysis/delivery
+
+    Analyzes a folder to detect:
+    - Manifest files (.MAN, .json, .xml, .til)
+    - Tile patterns (R{row}C{col}, X{x}_Y{y})
+    - Delivery type (Maxar, Vivid, simple folder)
+    - Recommended processing workflow
+
+    Request Body:
+        {
+            "blob_list": ["path/file1.tif", "path/file2.tif", ...],
+            "folder_path": "optional/folder/path/"
+        }
+
+    Returns:
+        {
+            "delivery_type": "maxar_tiles" | "vivid_basemap" | "simple_folder",
+            "manifest": {...},
+            "tile_pattern": {...},
+            "recommended_workflow": {...}
+        }
+    """
+    from services.delivery_discovery import analyze_delivery_structure
+    import json
+
+    try:
+        # Parse request body
+        req_body = req.get_json()
+
+        if not req_body or 'blob_list' not in req_body:
+            return func.HttpResponse(
+                json.dumps({"error": "blob_list required in request body"}),
+                mimetype="application/json",
+                status_code=400
+            )
+
+        blob_list = req_body['blob_list']
+        folder_path = req_body.get('folder_path')
+
+        # Analyze delivery structure
+        result = analyze_delivery_structure(blob_list, folder_path)
+
+        return func.HttpResponse(
+            json.dumps(result, indent=2),
+            mimetype="application/json",
+            status_code=200
+        )
+
+    except Exception as e:
+        import traceback
+        return func.HttpResponse(
+            json.dumps({
+                "error": str(e),
+                "traceback": traceback.format_exc()
+            }),
+            mimetype="application/json",
+            status_code=500
+        )
 
 
 # ============================================================================
@@ -526,6 +665,270 @@ def stac_vector(req: func.HttpRequest) -> func.HttpResponse:
         STAC Item metadata and insertion result
     """
     return stac_vector_trigger.handle_request(req)
+
+
+# ============================================================================
+# STAC API STANDARD ENDPOINTS (18 OCT 2025)
+# ============================================================================
+# Read-only endpoints following STAC API specification
+# Interoperable with STAC clients (QGIS, pystac-client, etc.)
+# ============================================================================
+
+@app.route(route="collections", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def collections_list(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    List all STAC collections (STAC API standard).
+
+    GET /collections
+
+    STAC API Specification: https://github.com/radiantearth/stac-api-spec
+
+    Returns:
+        JSON with 'collections' array containing all STAC collections
+    """
+    from infrastructure.stac import get_all_collections
+
+    try:
+        result = get_all_collections()
+
+        if 'error' in result:
+            return func.HttpResponse(
+                json.dumps(result, indent=2),
+                status_code=500,
+                mimetype="application/json"
+            )
+
+        return func.HttpResponse(
+            json.dumps(result, indent=2),
+            status_code=200,
+            mimetype="application/json"
+        )
+
+    except Exception as e:
+        logging.error(f"Error in /collections endpoint: {e}")
+        return func.HttpResponse(
+            json.dumps({'error': str(e)}),
+            status_code=500,
+            mimetype="application/json"
+        )
+
+
+@app.route(route="collections/{collection_id}", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def collection_detail(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Get single STAC collection (STAC API standard).
+
+    GET /collections/{collection_id}
+
+    Path Parameters:
+        collection_id: Collection identifier (e.g., "system-vectors")
+
+    Returns:
+        STAC Collection object
+    """
+    from infrastructure.stac import get_collection
+
+    try:
+        collection_id = req.route_params.get('collection_id')
+
+        if not collection_id:
+            return func.HttpResponse(
+                json.dumps({'error': 'collection_id required'}),
+                status_code=400,
+                mimetype="application/json"
+            )
+
+        result = get_collection(collection_id)
+
+        if 'error' in result:
+            status_code = 404 if result.get('error_type') == 'NotFound' else 500
+            return func.HttpResponse(
+                json.dumps(result, indent=2),
+                status_code=status_code,
+                mimetype="application/json"
+            )
+
+        return func.HttpResponse(
+            json.dumps(result, indent=2),
+            status_code=200,
+            mimetype="application/json"
+        )
+
+    except Exception as e:
+        logging.error(f"Error in /collections/{{collection_id}} endpoint: {e}")
+        return func.HttpResponse(
+            json.dumps({'error': str(e)}),
+            status_code=500,
+            mimetype="application/json"
+        )
+
+
+@app.route(route="collections/{collection_id}/items", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def collection_items(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Get items in a collection (STAC API standard).
+
+    GET /collections/{collection_id}/items
+
+    Path Parameters:
+        collection_id: Collection identifier
+
+    Query Parameters:
+        limit: Max items to return (default 100)
+        bbox: Bounding box as minx,miny,maxx,maxy
+        datetime: Datetime filter (RFC 3339 or interval)
+
+    Returns:
+        STAC ItemCollection (GeoJSON FeatureCollection)
+    """
+    from infrastructure.stac import get_collection_items
+
+    try:
+        collection_id = req.route_params.get('collection_id')
+
+        if not collection_id:
+            return func.HttpResponse(
+                json.dumps({'error': 'collection_id required'}),
+                status_code=400,
+                mimetype="application/json"
+            )
+
+        # Parse query parameters
+        limit = int(req.params.get('limit', 100))
+        bbox_str = req.params.get('bbox')
+        datetime_str = req.params.get('datetime')
+
+        bbox = None
+        if bbox_str:
+            try:
+                bbox = [float(x) for x in bbox_str.split(',')]
+                if len(bbox) != 4:
+                    raise ValueError("bbox must have 4 values")
+            except ValueError as e:
+                return func.HttpResponse(
+                    json.dumps({'error': f'Invalid bbox: {e}'}),
+                    status_code=400,
+                    mimetype="application/json"
+                )
+
+        result = get_collection_items(
+            collection_id=collection_id,
+            limit=limit,
+            bbox=bbox,
+            datetime_str=datetime_str
+        )
+
+        if 'error' in result:
+            return func.HttpResponse(
+                json.dumps(result, indent=2),
+                status_code=500,
+                mimetype="application/json"
+            )
+
+        return func.HttpResponse(
+            json.dumps(result, indent=2),
+            status_code=200,
+            mimetype="application/geo+json"  # GeoJSON mimetype
+        )
+
+    except Exception as e:
+        logging.error(f"Error in /collections/{{collection_id}}/items endpoint: {e}")
+        return func.HttpResponse(
+            json.dumps({'error': str(e)}),
+            status_code=500,
+            mimetype="application/json"
+        )
+
+
+@app.route(route="search", methods=["GET", "POST"], auth_level=func.AuthLevel.ANONYMOUS)
+def stac_search(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Search STAC items across collections (STAC API standard).
+
+    GET/POST /search
+
+    Query Parameters (GET) or Body (POST):
+        collections: Comma-separated collection IDs (GET) or array (POST)
+        bbox: Bounding box as minx,miny,maxx,maxy (GET) or array (POST)
+        datetime: Datetime filter (RFC 3339 or interval)
+        limit: Max items to return (default 100)
+        query: Additional query parameters (POST only)
+
+    Returns:
+        STAC ItemCollection (GeoJSON FeatureCollection)
+    """
+    from infrastructure.stac import search_items
+
+    try:
+        # Handle GET and POST differently
+        if req.method == "POST":
+            # POST body with JSON
+            try:
+                body = req.get_json()
+            except ValueError:
+                return func.HttpResponse(
+                    json.dumps({'error': 'Invalid JSON body'}),
+                    status_code=400,
+                    mimetype="application/json"
+                )
+
+            collections = body.get('collections')
+            bbox = body.get('bbox')
+            datetime_str = body.get('datetime')
+            limit = body.get('limit', 100)
+            query = body.get('query')
+
+        else:
+            # GET with query parameters
+            collections_str = req.params.get('collections')
+            collections = collections_str.split(',') if collections_str else None
+
+            bbox_str = req.params.get('bbox')
+            bbox = None
+            if bbox_str:
+                try:
+                    bbox = [float(x) for x in bbox_str.split(',')]
+                    if len(bbox) != 4:
+                        raise ValueError("bbox must have 4 values")
+                except ValueError as e:
+                    return func.HttpResponse(
+                        json.dumps({'error': f'Invalid bbox: {e}'}),
+                        status_code=400,
+                        mimetype="application/json"
+                    )
+
+            datetime_str = req.params.get('datetime')
+            limit = int(req.params.get('limit', 100))
+            query = None  # Query extension only supported in POST
+
+        result = search_items(
+            collections=collections,
+            bbox=bbox,
+            datetime_str=datetime_str,
+            limit=limit,
+            query=query
+        )
+
+        if 'error' in result:
+            return func.HttpResponse(
+                json.dumps(result, indent=2),
+                status_code=500,
+                mimetype="application/json"
+            )
+
+        return func.HttpResponse(
+            json.dumps(result, indent=2),
+            status_code=200,
+            mimetype="application/geo+json"  # GeoJSON mimetype
+        )
+
+    except Exception as e:
+        logging.error(f"Error in /search endpoint: {e}")
+        return func.HttpResponse(
+            json.dumps({'error': str(e)}),
+            status_code=500,
+            mimetype="application/json"
+        )
 
 
 @app.route(route="jobs/ingest_vector", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)

@@ -87,12 +87,25 @@ class ProcessRasterWorkflow(JobBase):
             "default": "auto",
             "allowed": ["auto", "rgb", "rgba", "dem", "categorical", "multispectral", "nir"]
         },
-        "compression": {"type": "str", "required": False, "default": None},  # Auto-selected if None
+        "output_tier": {
+            "type": "str",
+            "required": False,
+            "default": "analysis",
+            "allowed": ["visualization", "analysis", "archive", "all"],
+            "description": "COG output tier: visualization (JPEG/hot), analysis (DEFLATE/hot), archive (LZW/cool), or all (create all applicable tiers)"
+        },
+        "compression": {"type": "str", "required": False, "default": None},  # Auto-selected if None (deprecated - use output_tier)
         "jpeg_quality": {"type": "int", "required": False, "default": 85},
         "overview_resampling": {"type": "str", "required": False, "default": None},  # Auto-selected
         "reproject_resampling": {"type": "str", "required": False, "default": None},  # Auto-selected
         "strict_mode": {"type": "bool", "required": False, "default": False},
         "_skip_validation": {"type": "bool", "required": False, "default": False},  # TESTING ONLY
+        "output_folder": {
+            "type": "str",
+            "required": False,
+            "default": None,
+            "description": "Override output folder path (e.g., 'cogs/satellite/'). If None, mirrors input folder structure."
+        },
     }
 
     @staticmethod
@@ -107,7 +120,8 @@ class ProcessRasterWorkflow(JobBase):
             container_name: str - Container name (default: config.bronze_container_name)
             input_crs: str - User-provided CRS override
             raster_type: str - Expected type for validation
-            compression: str - Compression method override
+            output_tier: str - COG output tier (visualization, analysis, archive, all)
+            compression: str - Compression method override (deprecated - use output_tier)
             jpeg_quality: int - JPEG quality (1-100)
             overview_resampling: str - Resampling method for overviews
             reproject_resampling: str - Resampling method for reprojection
@@ -155,6 +169,13 @@ class ProcessRasterWorkflow(JobBase):
             raise ValueError(f"raster_type must be one of {allowed_types}, got {raster_type}")
         validated["raster_type"] = raster_type
 
+        # Validate output_tier (optional)
+        output_tier = params.get("output_tier", "analysis")
+        allowed_tiers = ["visualization", "analysis", "archive", "all"]
+        if output_tier not in allowed_tiers:
+            raise ValueError(f"output_tier must be one of {allowed_tiers}, got {output_tier}")
+        validated["output_tier"] = output_tier
+
         # Validate compression (optional)
         compression = params.get("compression")
         if compression is not None:
@@ -199,6 +220,20 @@ class ProcessRasterWorkflow(JobBase):
             raise ValueError("_skip_validation must be boolean")
         validated["_skip_validation"] = skip_validation
 
+        # Validate output_folder (optional)
+        output_folder = params.get("output_folder")
+        if output_folder is not None:
+            if not isinstance(output_folder, str):
+                raise ValueError("output_folder must be a string")
+            # Remove leading/trailing slashes for consistency
+            output_folder = output_folder.strip().strip('/')
+            if output_folder:  # Only set if non-empty after stripping
+                validated["output_folder"] = output_folder
+            else:
+                validated["output_folder"] = None
+        else:
+            validated["output_folder"] = None
+
         return validated
 
     @staticmethod
@@ -242,7 +277,9 @@ class ProcessRasterWorkflow(JobBase):
                 "created_by": "ProcessRasterWorkflow",
                 "blob_name": params.get("blob_name"),
                 "container_name": params.get("container_name"),
-                "raster_type": params.get("raster_type", "auto")
+                "raster_type": params.get("raster_type", "auto"),
+                "output_tier": params.get("output_tier", "analysis"),
+                "output_folder": params.get("output_folder")
             }
         )
 
@@ -396,13 +433,23 @@ class ProcessRasterWorkflow(JobBase):
                 hours=1
             )
 
-            # Output blob name in silver container
-            # Pattern: same path as bronze but in silver, with _cog suffix
+            # Output blob name - configurable folder or mirror input structure
             blob_name = job_params['blob_name']
-            if blob_name.lower().endswith('.tif'):
-                output_blob_name = blob_name[:-4] + '_cog.tif'
+            output_folder = job_params.get('output_folder')
+
+            if output_folder:
+                # User specified output folder - use just filename in that folder
+                filename = blob_name.split('/')[-1]
+                if filename.lower().endswith('.tif'):
+                    output_blob_name = f"{output_folder}/{filename[:-4]}_cog.tif"
+                else:
+                    output_blob_name = f"{output_folder}/{filename}_cog.tif"
             else:
-                output_blob_name = blob_name + '_cog.tif'
+                # Default: mirror input folder structure
+                if blob_name.lower().endswith('.tif'):
+                    output_blob_name = blob_name[:-4] + '_cog.tif'
+                else:
+                    output_blob_name = blob_name + '_cog.tif'
 
             task_id = generate_deterministic_task_id(job_id, 2, "create_cog")
 
@@ -418,7 +465,8 @@ class ProcessRasterWorkflow(JobBase):
                         "target_crs": "EPSG:4326",
                         "raster_type": validation_result.get('raster_type', {}),
                         "output_blob_name": output_blob_name,
-                        "compression": job_params.get('compression'),  # User override or None
+                        "output_tier": job_params.get('output_tier', 'analysis'),  # COG tier selection
+                        "compression": job_params.get('compression'),  # User override or None (deprecated)
                         "jpeg_quality": job_params.get('jpeg_quality', 85),
                         "overview_resampling": job_params.get('overview_resampling'),  # User override or None
                         "reproject_resampling": job_params.get('reproject_resampling'),  # User override or None

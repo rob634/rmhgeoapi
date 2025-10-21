@@ -29,9 +29,17 @@ Each converter handles a specific file format and returns a GeoDataFrame.
 
 from io import BytesIO
 from typing import Optional
+import logging
 import pandas as pd
 import geopandas as gpd
 from .helpers import xy_df_to_gdf, wkt_df_to_gdf, extract_zip_file, DEFAULT_CRS
+from util_logger import LoggerFactory, ComponentType
+
+# Component-specific logger for structured logging (Application Insights)
+logger = LoggerFactory.create_logger(
+    ComponentType.SERVICE,
+    "vector_converters"
+)
 
 
 def _convert_csv(
@@ -166,6 +174,41 @@ def _convert_shapefile(data: BytesIO, shp_name: Optional[str] = None, **kwargs) 
 
     Returns:
         GeoDataFrame
+
+    Raises:
+        Exception: If shapefile cannot be read or has no geometries
     """
     shp_path = extract_zip_file(data, '.shp', shp_name)
-    return gpd.read_file(shp_path)
+    logger.info(f"📂 Reading shapefile from: {shp_path}")
+
+    gdf = gpd.read_file(shp_path)
+
+    # Log initial load stats with detailed diagnostics
+    logger.info(f"📊 Shapefile loaded - diagnostics:")
+    logger.info(f"   - Total rows read: {len(gdf)}")
+    logger.info(f"   - Columns: {list(gdf.columns)}")
+    logger.info(f"   - CRS: {gdf.crs}")
+
+    if 'geometry' in gdf.columns:
+        logger.info(f"   - Geometry column type: {gdf['geometry'].dtype}")
+        null_count = gdf.geometry.isna().sum()
+        logger.info(f"   - Null geometries on load: {null_count}")
+
+        if len(gdf) > 0 and not gdf.geometry.isna().all():
+            # Show geometry types if any valid geometries exist
+            valid_geoms = gdf[~gdf.geometry.isna()]
+            if len(valid_geoms) > 0:
+                geom_types = valid_geoms.geometry.geom_type.value_counts().to_dict()
+                logger.info(f"   - Geometry types found: {geom_types}")
+
+                # Sample first few geometries for debugging
+                if len(valid_geoms) > 0:
+                    sample_geom = valid_geoms.iloc[0].geometry
+                    logger.info(f"   - Sample geometry: type={sample_geom.geom_type}, bounds={sample_geom.bounds}")
+        else:
+            logger.warning(f"   - ⚠️  All {len(gdf)} rows have NULL geometries!")
+    else:
+        logger.error(f"   - ❌ CRITICAL: No 'geometry' column found in shapefile!")
+        logger.error(f"   - Available columns: {list(gdf.columns)}")
+
+    return gdf

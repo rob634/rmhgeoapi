@@ -313,10 +313,12 @@ def upload_pickled_chunk(parameters: Dict[str, Any]) -> Dict[str, Any]:
     pickled_data = blob_repo.read_blob(config.vector_pickle_container, chunk_path)
     chunk = pickle.loads(pickled_data)
 
-    # 2. Upload to PostGIS
+    # 2. Insert data into PostGIS (table already created in Stage 1)
+    # DEADLOCK FIX (17 OCT 2025): Use insert_features_only() to skip table creation
+    # Table was created once in jobs/ingest_vector.py before Stage 2 task creation
     from .postgis_handler import VectorToPostGISHandler
     handler = VectorToPostGISHandler()
-    handler.upload_chunk(chunk, table_name, schema)
+    handler.insert_features_only(chunk, table_name, schema)
 
     # 3. Note: Pickle cleanup handled by timer function
     # Pickles persist in {container}/{prefix}/{job_id}/ for audit/retry

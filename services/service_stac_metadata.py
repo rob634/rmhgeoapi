@@ -32,48 +32,55 @@ import logging
 from stac_pydantic import Item
 from stac_pydantic.shared import Asset
 
-# LAZY LOADING CANDIDATES: Heavy GDAL dependencies
-# These are imported at module level but could be moved to extract_item_from_blob()
-# if cold start issues occur. Keeping at module level for now since:
-# 1. This module is only imported via lazy loading in triggers
-# 2. Easier to maintain with imports at top
-import logging as _lazy_log
+# LAZY LOADING: Heavy GDAL dependencies
+# These imports are logged explicitly to track cold start timing
 import traceback as _traceback
+from util_logger import LoggerFactory, ComponentType
+
+# Temporary logger for import diagnostics (before main logger is created)
+_import_logger = LoggerFactory.create_logger(
+    ComponentType.SERVICE,
+    "stac_metadata_import"
+)
 
 try:
-    _lazy_log.getLogger(__name__).info("🔄 SERVICE MODULE: Loading rio-stac (depends on rasterio/GDAL)...")
+    _import_logger.info("🔄 SERVICE MODULE: Loading rio-stac (depends on rasterio/GDAL)...")
     from rio_stac import stac as rio_stac
-    _lazy_log.getLogger(__name__).info("✅ SERVICE MODULE: rio-stac loaded successfully")
+    _import_logger.info("✅ SERVICE MODULE: rio-stac loaded successfully")
 except ImportError as e:
-    _lazy_log.getLogger(__name__).error(f"❌ SERVICE MODULE IMPORT FAILED: rio-stac ImportError")
-    _lazy_log.getLogger(__name__).error(f"   Error: {e}")
-    _lazy_log.getLogger(__name__).error(f"   Traceback:\n{_traceback.format_exc()}")
+    _import_logger.error(f"❌ SERVICE MODULE IMPORT FAILED: rio-stac ImportError")
+    _import_logger.error(f"   Error: {e}")
+    _import_logger.error(f"   Traceback:\n{_traceback.format_exc()}")
     raise
 except Exception as e:
-    _lazy_log.getLogger(__name__).error(f"❌ SERVICE MODULE IMPORT FAILED: rio-stac unexpected error")
-    _lazy_log.getLogger(__name__).error(f"   Error: {e}")
-    _lazy_log.getLogger(__name__).error(f"   Traceback:\n{_traceback.format_exc()}")
+    _import_logger.error(f"❌ SERVICE MODULE IMPORT FAILED: rio-stac unexpected error")
+    _import_logger.error(f"   Error: {e}")
+    _import_logger.error(f"   Traceback:\n{_traceback.format_exc()}")
     raise
 
 try:
-    _lazy_log.getLogger(__name__).info("🔄 SERVICE MODULE: Loading rasterio (GDAL C++ library)...")
+    _import_logger.info("🔄 SERVICE MODULE: Loading rasterio (GDAL C++ library)...")
     import rasterio
-    _lazy_log.getLogger(__name__).info("✅ SERVICE MODULE: rasterio loaded successfully")
+    _import_logger.info("✅ SERVICE MODULE: rasterio loaded successfully")
 except ImportError as e:
-    _lazy_log.getLogger(__name__).error(f"❌ SERVICE MODULE IMPORT FAILED: rasterio ImportError")
-    _lazy_log.getLogger(__name__).error(f"   Error: {e}")
-    _lazy_log.getLogger(__name__).error(f"   Traceback:\n{_traceback.format_exc()}")
+    _import_logger.error(f"❌ SERVICE MODULE IMPORT FAILED: rasterio ImportError")
+    _import_logger.error(f"   Error: {e}")
+    _import_logger.error(f"   Traceback:\n{_traceback.format_exc()}")
     raise
 except Exception as e:
-    _lazy_log.getLogger(__name__).error(f"❌ SERVICE MODULE IMPORT FAILED: rasterio unexpected error")
-    _lazy_log.getLogger(__name__).error(f"   Error: {e}")
-    _lazy_log.getLogger(__name__).error(f"   Traceback:\n{_traceback.format_exc()}")
+    _import_logger.error(f"❌ SERVICE MODULE IMPORT FAILED: rasterio unexpected error")
+    _import_logger.error(f"   Error: {e}")
+    _import_logger.error(f"   Traceback:\n{_traceback.format_exc()}")
     raise
 
 from infrastructure.blob import BlobRepository
 from infrastructure.stac import StacInfrastructure
 
-logger = logging.getLogger(__name__)
+# Component-specific logger for structured logging (Application Insights)
+logger = LoggerFactory.create_logger(
+    ComponentType.SERVICE,
+    "stac_metadata_service"
+)
 
 
 class StacMetadataService:

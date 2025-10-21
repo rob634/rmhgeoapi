@@ -60,27 +60,52 @@ def create_cog(params: dict) -> dict:
 
     Args:
         params: Task parameters dict with:
-            - blob_url: Azure blob URL for bronze raster (with SAS token)
-            - source_crs: CRS from validation stage
-            - target_crs: Target CRS (default: EPSG:4326)
-            - raster_type: Detected raster type from validation
-            - optimal_cog_settings: Recommended settings from validation
-            - compression: (Optional) User override for compression
-            - jpeg_quality: (Optional) JPEG quality (1-100)
-            - overview_resampling: (Optional) User override
-            - reproject_resampling: (Optional) User override
-            - output_blob_name: Silver container blob path
-            - container_name: Bronze container name
-            - blob_name: Bronze blob name
+            - blob_url (str, REQUIRED): Azure blob URL for bronze raster (with SAS token)
+            - source_crs (str, REQUIRED): CRS from validation stage
+            - target_crs (str, optional): Target CRS (default: EPSG:4326)
+            - raster_type (dict, REQUIRED): Full raster_type dict from validation stage
+                Structure: {"detected_type": str, "optimal_cog_settings": {...}}
+            - output_blob_name (str, REQUIRED): Silver container blob path
+            - container_name (str): Bronze container name
+            - blob_name (str): Bronze blob name
+            - output_tier (str, optional): COG tier (visualization, analysis, archive) - default: analysis
+            - compression (str, optional): User override for compression (DEPRECATED - use output_tier)
+            - jpeg_quality (int, optional): JPEG quality (1-100)
+            - overview_resampling (str, optional): User override
+            - reproject_resampling (str, optional): User override
 
     Returns:
         dict: {
-            "success": True/False,
-            "result": {...COG metadata...},
-            "error": "ERROR_CODE" (if failed),
-            "message": "Error description" (if failed),
-            "traceback": "..." (if failed)
+            "success": bool,
+            "result": {
+                "cog_blob": str,           # ← Output COG path in silver container
+                "cog_container": str,      # ← Silver container name
+                "cog_tier": str,           # ← COG tier (visualization/analysis/archive)
+                "storage_tier": str,       # ← Azure storage tier (hot/cool/archive)
+                "source_blob": str,
+                "source_container": str,
+                "reprojection_performed": bool,
+                "source_crs": str,
+                "target_crs": str,
+                "bounds_4326": list,       # ← [minx, miny, maxx, maxy]
+                "shape": list,             # ← [height, width]
+                "size_mb": float,
+                "compression": str,
+                "jpeg_quality": int,
+                "tile_size": list,
+                "overview_levels": list,
+                "overview_resampling": str,
+                "reproject_resampling": str,
+                "raster_type": str,
+                "processing_time_seconds": float,
+                "tier_profile": {...}
+            },
+            "error": str (if success=False),
+            "message": str (if success=False),
+            "traceback": str (if success=False)
         }
+
+    NOTE: Downstream consumers (Stage 3+) rely on result["cog_blob"] field.
     """
     import traceback
 
@@ -108,15 +133,51 @@ def create_cog(params: dict) -> dict:
         raster_type = params.get('raster_type', {}).get('detected_type', 'unknown')
         optimal_settings = params.get('raster_type', {}).get('optimal_cog_settings', {})
 
-        # User overrides or optimal settings
-        compression = params.get('compression') or optimal_settings.get('compression', 'deflate')
-        jpeg_quality = params.get('jpeg_quality', 85)
+        # Get COG tier configuration from config
+        from config import get_config, CogTier, COG_TIER_PROFILES
+        config_obj = get_config()
+
+        # Get output_tier parameter (default to analysis)
+        output_tier_str = params.get('output_tier', 'analysis')
+        try:
+            output_tier = CogTier(output_tier_str)
+        except ValueError:
+            logger.warning(f"⚠️ Invalid output_tier '{output_tier_str}', defaulting to 'analysis'")
+            output_tier = CogTier.ANALYSIS
+
+        # Get tier profile
+        tier_profile = COG_TIER_PROFILES[output_tier]
+        logger.info(f"   Using tier profile: {output_tier.value}")
+        logger.info(f"   Profile: compression={tier_profile.compression}, storage_tier={tier_profile.storage_tier.value}")
+
+        # Check tier compatibility with raster type
+        raster_metadata = params.get('raster_type', {})
+        band_count = raster_metadata.get('band_count', 3)
+        data_type = raster_metadata.get('data_type', 'uint8')
+
+        if not tier_profile.is_compatible(band_count, data_type):
+            logger.warning(f"⚠️ Tier '{output_tier.value}' not compatible with {band_count} bands, {data_type}")
+            logger.warning(f"   Falling back to 'analysis' tier (DEFLATE - universal)")
+            output_tier = CogTier.ANALYSIS
+            tier_profile = COG_TIER_PROFILES[output_tier]
+
+        # Use tier profile settings (allow user overrides)
+        compression = params.get('compression') or tier_profile.compression.lower()
+        jpeg_quality = params.get('jpeg_quality') or tier_profile.quality or 85
         overview_resampling = params.get('overview_resampling') or optimal_settings.get('overview_resampling', 'cubic')
         reproject_resampling = params.get('reproject_resampling') or optimal_settings.get('reproject_resampling', 'cubic')
 
         output_blob_name = params.get('output_blob_name')
         container_name = params.get('container_name', 'unknown')
         blob_name = params.get('blob_name', 'unknown')
+
+        # Add tier suffix to output blob name
+        # Example: sample.tif → sample_analysis.tif
+        if output_blob_name and not any(tier.value in output_blob_name for tier in CogTier):
+            base_name = output_blob_name.rsplit('.', 1)[0] if '.' in output_blob_name else output_blob_name
+            extension = output_blob_name.rsplit('.', 1)[1] if '.' in output_blob_name else 'tif'
+            output_blob_name = f"{base_name}_{output_tier.value}.{extension}"
+            logger.info(f"   Added tier suffix to output: {output_blob_name}")
 
         if not all([blob_url, source_crs, output_blob_name]):
             missing = []
@@ -132,7 +193,7 @@ def create_cog(params: dict) -> dict:
             }
 
         logger.info(f"✅ STEP 1: Parameters validated - blob={blob_name}, container={container_name}")
-        logger.info(f"   Type: {raster_type}, Compression: {compression}, CRS: {source_crs} → {target_crs}")
+        logger.info(f"   Type: {raster_type}, Tier: {output_tier.value}, Compression: {compression}, CRS: {source_crs} → {target_crs}")
 
     except Exception as e:
         logger.error(f"❌ STEP 1 FAILED: {e}\n{traceback.format_exc()}")
@@ -314,6 +375,8 @@ def create_cog(params: dict) -> dict:
             "result": {
                 "cog_blob": output_blob_name,
                 "cog_container": silver_container,
+                "cog_tier": output_tier.value,
+                "storage_tier": tier_profile.storage_tier.value,
                 "source_blob": blob_name,
                 "source_container": container_name,
                 "reprojection_performed": needs_reprojection,
@@ -329,7 +392,14 @@ def create_cog(params: dict) -> dict:
                 "overview_resampling": overview_resampling,
                 "reproject_resampling": reproject_resampling if needs_reprojection else None,
                 "raster_type": raster_type,
-                "processing_time_seconds": round(elapsed_time, 2)
+                "processing_time_seconds": round(elapsed_time, 2),
+                "tier_profile": {
+                    "tier": output_tier.value,
+                    "compression": tier_profile.compression,
+                    "storage_tier": tier_profile.storage_tier.value,
+                    "use_case": tier_profile.use_case,
+                    "description": tier_profile.description
+                }
             }
         }
 

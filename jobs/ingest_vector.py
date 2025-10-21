@@ -16,8 +16,16 @@ Updated: 15 OCT 2025 - Phase 2: Migrated to JobBase ABC
 from typing import List, Dict, Any
 import hashlib
 import json
+import logging
 
 from jobs.base import JobBase
+from util_logger import LoggerFactory, ComponentType
+
+# Component-specific logger for structured logging (Application Insights)
+logger = LoggerFactory.create_logger(
+    ComponentType.CONTROLLER,
+    "ingest_vector_job"
+)
 
 
 class IngestVectorJob(JobBase):
@@ -49,6 +57,13 @@ class IngestVectorJob(JobBase):
             "task_type": "upload_pickled_chunk",
             "description": "Upload pickled chunks to PostGIS in parallel",
             "parallelism": "fan_out"
+        },
+        {
+            "number": 3,
+            "name": "create_stac_record",
+            "task_type": "create_vector_stac",
+            "description": "Create internal STAC record for PostGIS table",
+            "parallelism": "single"
         }
     ]
 
@@ -77,6 +92,7 @@ class IngestVectorJob(JobBase):
             container_name: str - Source container (default: 'bronze')
             schema: str - Target PostgreSQL schema (default: 'geo')
             chunk_size: int - Rows per chunk (default: None = auto-calculate)
+            create_stac: bool - Create System STAC record (default: True)
             converter_params: dict - Format-specific parameters
                 CSV: lat_name, lon_name OR wkt_column
                 GPKG: layer_name
@@ -154,6 +170,12 @@ class IngestVectorJob(JobBase):
             raise ValueError("converter_params must be a dictionary")
         validated["converter_params"] = converter_params
 
+        # Optional: create_stac (for testing - bypass Stage 3 STAC cataloging)
+        create_stac = params.get("create_stac", True)  # Default: True (create STAC)
+        if not isinstance(create_stac, bool):
+            raise ValueError(f"create_stac must be a boolean, got {type(create_stac).__name__}")
+        validated["create_stac"] = create_stac
+
         return validated
 
     @staticmethod
@@ -190,10 +212,10 @@ class IngestVectorJob(JobBase):
             parameters=params,
             status=JobStatus.QUEUED,
             stage=1,
-            total_stages=2,
+            total_stages=3,  # Stage 1: prepare, Stage 2: upload, Stage 3: STAC
             stage_results={},
             metadata={
-                "description": "Load vector file and ingest to PostGIS with parallel chunked uploads",
+                "description": "Load vector file and ingest to PostGIS with parallel chunked uploads + STAC cataloging",
                 "created_by": "IngestVectorJob",
                 "blob_name": params.get("blob_name"),
                 "table_name": params.get("table_name"),
@@ -320,6 +342,40 @@ class IngestVectorJob(JobBase):
             table_name = stage_1_result['result']['table_name']
             schema = stage_1_result['result']['schema']
 
+            # ========================================================================
+            # DEADLOCK FIX (17 OCT 2025): Create table ONCE before parallel inserts
+            # ========================================================================
+            # CRITICAL: Serialize table creation here to avoid PostgreSQL deadlocks
+            # during parallel INSERT operations in Stage 2 tasks.
+            #
+            # Problem: Multiple Stage 2 tasks calling CREATE TABLE IF NOT EXISTS
+            # simultaneously caused lock contention and deadlocks.
+            #
+            # Solution: Create table once HERE (before task creation), then Stage 2
+            # tasks only INSERT data (no DDL operations).
+            # ========================================================================
+            logger.info(f"🔧 DEADLOCK FIX: Creating table {schema}.{table_name} before parallel uploads...")
+
+            # Load first chunk to get schema using BlobRepository singleton
+            from infrastructure.blob import BlobRepository
+            from config import get_config
+            import pickle
+
+            config = get_config()
+            first_chunk_path = chunk_paths[0]
+
+            # BlobRepository.read_blob(container, blob_path) returns bytes
+            blob_repo = BlobRepository.instance()
+            blob_data = blob_repo.read_blob(config.vector_pickle_container, first_chunk_path)
+            first_chunk = pickle.loads(blob_data)
+
+            # Create table using PostGIS handler
+            from services.vector.postgis_handler import VectorToPostGISHandler
+            postgis_handler = VectorToPostGISHandler()
+            postgis_handler.create_table_only(first_chunk, table_name, schema)
+
+            logger.info(f"✅ Table {schema}.{table_name} created successfully (ready for parallel inserts)")
+
             # Create one task per chunk with deterministic ID
             tasks = []
             for i, chunk_path in enumerate(chunk_paths):
@@ -336,6 +392,43 @@ class IngestVectorJob(JobBase):
                 })
 
             return tasks
+
+        elif stage == 3:
+            # Stage 3: Create STAC Record - Single task to catalog PostGIS table
+            # BYPASS: Skip Stage 3 if create_stac=false (for testing)
+            if not job_params.get("create_stac", True):
+                logger.info(f"⏭️ Stage 3: Skipping STAC cataloging (create_stac=false)")
+                return []  # No tasks = stage completes immediately
+
+            if not previous_results:
+                raise ValueError("Stage 3 requires Stage 2 results")
+
+            # Extract table details from Stage 2 results (any task will have the info)
+            stage_2_result = previous_results[0]  # All Stage 2 tasks reference same table
+            if not stage_2_result.get('success'):
+                raise ValueError(f"Stage 2 failed: {stage_2_result.get('error')}")
+
+            result_data = stage_2_result['result']
+            table_name = result_data['table'].split('.')[-1]  # Extract table name from "schema.table"
+            schema = result_data['table'].split('.')[0]  # Extract schema from "schema.table"
+
+            logger.info(f"📊 Stage 3: Creating STAC record for {schema}.{table_name}")
+
+            task_id = generate_deterministic_task_id(job_id, 3, "create_stac")
+            return [
+                {
+                    "task_id": task_id,
+                    "task_type": "create_vector_stac",
+                    "parameters": {
+                        "schema": schema,
+                        "table_name": table_name,
+                        "collection_id": "system-vectors",
+                        "source_file": job_params.get("blob_name"),
+                        "source_format": job_params.get("file_extension"),
+                        "job_id": job_id
+                    }
+                }
+            ]
 
         else:
             return []

@@ -76,13 +76,15 @@ from .service_hello_world import handle_greeting, handle_reply
 from .container_summary import analyze_container_summary
 from .container_list import list_container_blobs, analyze_single_blob, aggregate_blob_analysis
 from .stac_catalog import list_raster_files, extract_stac_metadata
-from .stac_vector_catalog import extract_vector_stac_metadata
+from .stac_vector_catalog import extract_vector_stac_metadata, create_vector_stac
 from .test_minimal import test_minimal_handler
 from .raster_validation import validate_raster
 from .raster_cog import create_cog
 from .handler_h3_level4 import h3_level4_generate
 from .handler_h3_base import h3_base_generate
 from .vector.tasks import prepare_vector_chunks, upload_pickled_chunk
+from .raster_mosaicjson import create_mosaicjson
+from .stac_collection import create_stac_collection
 
 # ============================================================================
 # EXPLICIT HANDLER REGISTRY
@@ -111,6 +113,10 @@ ALL_HANDLERS = {
     # Vector ETL handlers (17 OCT 2025)
     "prepare_vector_chunks": prepare_vector_chunks,  # Stage 1: Load, validate, chunk, pickle
     "upload_pickled_chunk": upload_pickled_chunk,    # Stage 2: Load pickle and upload to PostGIS
+    "create_vector_stac": create_vector_stac,        # Stage 3: Create STAC record (18 OCT 2025 - Priority 0A)
+    # Raster collection handlers (20 OCT 2025)
+    "create_mosaicjson": create_mosaicjson,          # Stage 3: Create MosaicJSON from COG collection
+    "create_stac_collection": create_stac_collection,  # Stage 4: Create STAC collection item
 }
 
 # ============================================================================

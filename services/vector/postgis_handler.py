@@ -32,11 +32,19 @@ Handles the complete workflow of preparing and uploading vector data to PostGIS:
 """
 
 from typing import List, Dict, Any
+import logging
 import geopandas as gpd
 import pandas as pd
 import psycopg
 from psycopg import sql
 from config import get_config
+from util_logger import LoggerFactory, ComponentType
+
+# Component-specific logger for structured logging (Application Insights)
+logger = LoggerFactory.create_logger(
+    ComponentType.SERVICE,
+    "postgis_handler"
+)
 
 
 class VectorToPostGISHandler:
@@ -67,23 +75,92 @@ class VectorToPostGISHandler:
         Raises:
             ValueError: If GeoDataFrame has no valid geometries
         """
-        # Remove null geometries
+        # Remove null geometries with detailed diagnostics
         original_count = len(gdf)
-        gdf = gdf[~gdf.geometry.isna()].copy()
+        null_mask = gdf.geometry.isna()
+        null_count = null_mask.sum()
+
+        logger.info(f"📊 Geometry validation starting:")
+        logger.info(f"   - Total features loaded: {original_count}")
+        logger.info(f"   - Null geometries found: {null_count}")
+
+        if null_count > 0:
+            # Sample some null geometry rows to see what data exists
+            null_samples = gdf[null_mask].head(5)
+            logger.warning(f"   - Sample rows with null geometries (first 5):")
+            for idx, row in null_samples.iterrows():
+                # Show non-geometry columns to help diagnose data issues
+                non_geom_cols = [col for col in gdf.columns if col != 'geometry']
+                sample_data = {col: row[col] for col in non_geom_cols[:3]}  # First 3 columns
+                logger.warning(f"      Row {idx}: {sample_data}")
+
+        gdf = gdf[~null_mask].copy()
 
         if len(gdf) == 0:
-            raise ValueError("GeoDataFrame has no valid geometries after removing nulls")
+            error_msg = (
+                f"❌ GeoDataFrame has no valid geometries after removing nulls\n"
+                f"   - Original feature count: {original_count}\n"
+                f"   - Null geometries: {null_count} (100%)\n"
+                f"   - Valid geometries remaining: 0\n"
+                f"   - This typically indicates:\n"
+                f"     1. Corrupted shapefile (geometry column empty)\n"
+                f"     2. Incompatible format (not a spatial file)\n"
+                f"     3. Invalid layer selected in GeoPackage\n"
+                f"     4. File extraction failed (ZIP issues)"
+            )
+            logger.error(error_msg)
+            raise ValueError(error_msg)
 
         if len(gdf) < original_count:
             removed = original_count - len(gdf)
-            print(f"Removed {removed} null geometries ({removed/original_count*100:.1f}%)")
+            logger.warning(f"   - ⚠️  Removed {removed} null geometries ({removed/original_count*100:.1f}%)")
+            logger.info(f"   - ✅ Valid geometries remaining: {len(gdf)}")
 
         # Fix invalid geometries
         invalid_mask = ~gdf.geometry.is_valid
         invalid_count = invalid_mask.sum()
         if invalid_count > 0:
-            print(f"Fixing {invalid_count} invalid geometries using buffer(0)")
+            logger.warning(f"Fixing {invalid_count} invalid geometries using buffer(0)")
             gdf.loc[invalid_mask, 'geometry'] = gdf.loc[invalid_mask, 'geometry'].buffer(0)
+
+        # ========================================================================
+        # FORCE 2D GEOMETRIES - Remove Z and M dimensions
+        # ========================================================================
+        # This system only supports 2D geometries. KML/KMZ files often contain
+        # 3D (Z) or measured (M) coordinates which must be stripped.
+        #
+        # Shapely's force_2d() removes both Z and M dimensions:
+        # - Point(x, y, z) → Point(x, y)
+        # - LineString with Z → LineString without Z
+        # - Polygon with Z → Polygon without Z
+        # ========================================================================
+        from shapely import force_2d
+
+        # Check if any geometries have Z or M dimensions
+        has_z = gdf.geometry.has_z.any()
+        has_m = gdf.geometry.has_m.any() if hasattr(gdf.geometry, 'has_m') else False
+
+        if has_z or has_m:
+            dims = []
+            if has_z:
+                dims.append('Z')
+            if has_m:
+                dims.append('M')
+            logger.info(f"⚠️  Detected {'/'.join(dims)} dimension(s) in geometries - forcing to 2D")
+
+            # Force 2D and rebuild GeoDataFrame to ensure geometry column has no Z/M
+            crs_before = gdf.crs
+            geoms_2d = gdf.geometry.apply(force_2d)
+
+            # Recreate GeoDataFrame with 2D geometries only
+            # This ensures the geometry column metadata is correct
+            gdf = gpd.GeoDataFrame(
+                gdf.drop(columns=['geometry']),
+                geometry=geoms_2d,
+                crs=crs_before
+            )
+
+            logger.info(f"✅ Successfully converted all geometries to 2D and rebuilt GeoDataFrame")
 
         # Normalize to Multi- geometry types for ArcGIS compatibility
         # This ensures uniform geometry types in PostGIS tables
@@ -112,21 +189,21 @@ class VectorToPostGISHandler:
 
         # Log geometry type distribution before normalization
         type_counts = gdf.geometry.geom_type.value_counts().to_dict()
-        print(f"Geometry types before normalization: {type_counts}")
+        logger.info(f"Geometry types before normalization: {type_counts}")
 
         # Normalize all geometries
         gdf['geometry'] = gdf.geometry.apply(to_multi)
 
         # Log after normalization
         type_counts_after = gdf.geometry.geom_type.value_counts().to_dict()
-        print(f"Geometry types after normalization: {type_counts_after}")
+        logger.info(f"Geometry types after normalization: {type_counts_after}")
 
         # Reproject to EPSG:4326 if needed
         if gdf.crs and gdf.crs != "EPSG:4326":
-            print(f"Reprojecting from {gdf.crs} to EPSG:4326")
+            logger.info(f"Reprojecting from {gdf.crs} to EPSG:4326")
             gdf = gdf.to_crs("EPSG:4326")
         elif not gdf.crs:
-            print("No CRS defined, assuming EPSG:4326")
+            logger.warning("No CRS defined, assuming EPSG:4326")
             gdf = gdf.set_crs("EPSG:4326")
 
         # Clean column names (lowercase, replace spaces/special chars)
@@ -228,8 +305,8 @@ class VectorToPostGISHandler:
         # Enforce bounds (minimum 100, maximum 5000)
         optimal_size = max(100, min(5000, optimal_size))
 
-        print(f"Calculated optimal chunk size: {optimal_size} rows")
-        print(f"  Factors: columns={col_factor:.1f}, types={type_factor:.1f}, geometry={geom_factor:.1f}")
+        logger.info(f"Calculated optimal chunk size: {optimal_size} rows")
+        logger.info(f"  Factors: columns={col_factor:.1f}, types={type_factor:.1f}, geometry={geom_factor:.1f}")
 
         return optimal_size
 
@@ -258,7 +335,7 @@ class VectorToPostGISHandler:
             chunk = gdf.iloc[i:i + chunk_size].copy()
             chunks.append(chunk)
 
-        print(f"Split GeoDataFrame into {len(chunks)} chunks of up to {chunk_size} rows")
+        logger.info(f"Split GeoDataFrame into {len(chunks)} chunks of up to {chunk_size} rows")
         return chunks
 
     def upload_chunk(self, chunk: gpd.GeoDataFrame, table_name: str, schema: str = "geo"):
@@ -285,7 +362,49 @@ class VectorToPostGISHandler:
                 self._insert_features(cur, chunk, table_name, schema)
 
                 conn.commit()
-                print(f"Uploaded {len(chunk)} rows to {schema}.{table_name}")
+                logger.info(f"Uploaded {len(chunk)} rows to {schema}.{table_name}")
+
+    def create_table_only(self, chunk: gpd.GeoDataFrame, table_name: str, schema: str = "geo"):
+        """
+        Create PostGIS table without inserting data (DDL only).
+
+        Used for serialized table creation in Stage 1 aggregation to avoid
+        PostgreSQL deadlocks during parallel inserts in Stage 2.
+
+        Args:
+            chunk: Sample GeoDataFrame for schema detection (first chunk recommended)
+            table_name: Target table name
+            schema: Target schema (default: 'geo')
+
+        Raises:
+            psycopg.Error: If table creation fails
+        """
+        with psycopg.connect(self.conn_string) as conn:
+            with conn.cursor() as cur:
+                self._create_table_if_not_exists(cur, chunk, table_name, schema)
+                conn.commit()
+                logger.info(f"Created table {schema}.{table_name} (DDL only, no data inserted)")
+
+    def insert_features_only(self, chunk: gpd.GeoDataFrame, table_name: str, schema: str = "geo"):
+        """
+        Insert features into existing PostGIS table (DML only).
+
+        Used for parallel inserts in Stage 2 after table has been created in Stage 1.
+        Assumes table already exists - will fail if table doesn't exist.
+
+        Args:
+            chunk: GeoDataFrame chunk to insert
+            table_name: Target table name (must already exist)
+            schema: Target schema (default: 'geo')
+
+        Raises:
+            psycopg.Error: If insert fails or table doesn't exist
+        """
+        with psycopg.connect(self.conn_string) as conn:
+            with conn.cursor() as cur:
+                self._insert_features(cur, chunk, table_name, schema)
+                conn.commit()
+                logger.info(f"Inserted {len(chunk)} rows into {schema}.{table_name} (DML only, table already exists)")
 
     def _get_postgres_type(self, dtype) -> str:
         """
@@ -335,10 +454,10 @@ class VectorToPostGISHandler:
         # Verify uniform geometry type (should always be true after normalization)
         unique_types = chunk.geometry.geom_type.unique()
         if len(unique_types) > 1:
-            print(f"WARNING: Mixed geometry types detected in chunk: {unique_types.tolist()}")
-            print(f"Using {geom_type} for table definition")
+            logger.warning(f" Mixed geometry types detected in chunk: {unique_types.tolist()}")
+            logger.info(f"Using {geom_type} for table definition")
         else:
-            print(f"Creating table with geometry type: {geom_type}")
+            logger.info(f"Creating table with geometry type: {geom_type}")
 
         # Build column definitions
         columns = []

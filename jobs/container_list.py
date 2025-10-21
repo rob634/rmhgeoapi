@@ -366,11 +366,11 @@ class ListContainerContentsWorkflow(JobBase):
 
                 successful_analyses = sum(1 for t in analyze_tasks if t.status == TaskStatus.COMPLETED)
                 failed_analyses = sum(1 for t in analyze_tasks if t.status == TaskStatus.FAILED)
-                queued_analyses = sum(1 for t in analyze_tasks if t.status == TaskStatus.QUEUED)
+                pending_analyses = sum(1 for t in analyze_tasks if t.status == TaskStatus.QUEUED)
 
                 logger.info(f"   Successful: {successful_analyses}")
                 logger.info(f"   Failed: {failed_analyses}")
-                logger.info(f"   Queued: {queued_analyses}")
+                logger.info(f"   Pending: {pending_analyses}")
 
             except Exception as e:
                 logger.error(f"❌ STEP 4 FAILED: Error counting statuses: {e}")

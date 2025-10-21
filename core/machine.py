@@ -218,16 +218,14 @@ class CoreMachine:
             raise BusinessLogicError(f"Job record not found: {e}")
 
         # Step 3: Update job status to PROCESSING
-        try:
-            self.logger.debug(f"📝 COREMACHINE STEP 4: Updating job status to PROCESSING...")
-            self.state_manager.update_job_status(
-                job_message.job_id,
-                JobStatus.PROCESSING
-            )
-            self.logger.info(f"✅ COREMACHINE STEP 4: Job status updated to PROCESSING")
-        except Exception as e:
-            self.logger.warning(f"⚠️ COREMACHINE STEP 4 WARNING: Failed to update job status: {e}")
-            # Continue - not critical
+        # NOTE: This will raise exception if status transition is invalid (e.g., PROCESSING → PROCESSING)
+        # which is CORRECT behavior - invalid transitions indicate bugs in stage advancement logic
+        self.logger.debug(f"📝 COREMACHINE STEP 4: Updating job status to PROCESSING...")
+        self.state_manager.update_job_status(
+            job_message.job_id,
+            JobStatus.PROCESSING
+        )
+        self.logger.info(f"✅ COREMACHINE STEP 4: Job status updated to PROCESSING")
 
         # Step 4: Fetch previous stage results (for fan-out pattern)
         previous_results = None
@@ -911,6 +909,11 @@ class CoreMachine:
             # Get job record for parameters
             repos = RepositoryFactory.create_repositories()
             job_record = repos['job_repo'].get_job(job_id)
+
+            # Update job status to QUEUED before queuing next stage message
+            # This allows clean QUEUED → PROCESSING transition when process_job_message() is triggered
+            self.state_manager.update_job_status(job_id, JobStatus.QUEUED)
+            self.logger.info(f"✅ Job {job_id[:16]} status → QUEUED (ready for stage {next_stage})")
 
             # Create job message for next stage
             next_message = JobQueueMessage(

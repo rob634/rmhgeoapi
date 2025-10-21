@@ -1,9 +1,90 @@
 # Project History
 
-**Last Updated**: 19 OCT 2025 - Multi-Tier COG Architecture Phase 1 Complete ✅
+**Last Updated**: 21 OCT 2025 - CoreMachine Status Transition Bug Fixed ✅
 **Note**: For project history prior to September 11, 2025, see **OLDER_HISTORY.md**
 
 This document tracks completed architectural changes and improvements to the Azure Geospatial ETL Pipeline from September 11, 2025 onwards.
+
+---
+
+## 21 OCT 2025: CoreMachine Status Transition Bug - Critical Fix ✅
+
+**Status**: ✅ Fixed and Validated
+**Impact**: All multi-stage jobs now work correctly without Service Bus redelivery loops
+**Timeline**: 1 day analysis and fix (21 OCT 2025)
+**Author**: Robert and Geospatial Claude Legion
+**Documentation**: ✅ `COREMACHINE_STATUS_TRANSITION_FIX.md`
+
+### Problem Discovered
+
+**Symptom**: Multi-stage jobs experiencing Service Bus message redelivery causing duplicate task processing
+- Tasks processed multiple times with 3-minute gaps (visibility timeout)
+- "Invalid status transition: PROCESSING → PROCESSING" errors in logs
+- Errors were silently swallowed, allowing execution to continue but preventing clean function completion
+
+**Root Cause Analysis**:
+1. **Bug #1**: `_advance_stage()` didn't update job status to QUEUED before sending next stage message
+   - Job remained in PROCESSING state when queuing next stage
+   - When `process_job_message()` triggered, it tried PROCESSING → PROCESSING transition (invalid)
+
+2. **Bug #2**: Silent exception swallowing in `process_job_message()` line 228-230
+   - Status transition validation errors were caught and logged with comment "# Continue - not critical"
+   - Prevented proper error handling and Azure Function clean completion
+   - Caused Service Bus to redeliver messages (no acknowledgement)
+
+### Fixes Applied
+
+**Fix #1**: Added status update in `_advance_stage()` ([core/machine.py:917](core/machine.py#L917))
+```python
+# Update job status to QUEUED before queuing next stage message
+self.state_manager.update_job_status(job_id, JobStatus.QUEUED)
+self.logger.info(f"✅ Job {job_id[:16]} status → QUEUED (ready for stage {next_stage})")
+```
+
+**Fix #2**: Removed silent exception swallowing in `process_job_message()` ([core/machine.py:220-228](core/machine.py#L220-L228))
+- Removed try/except wrapper around status update
+- Invalid status transitions now properly raise exceptions
+- Added comment explaining that validation errors ARE critical
+
+### Validation Results
+
+**Test Job**: `list_container_contents` (2-stage workflow)
+- Job ID: `0dee3b56db16f574c78a27da7a2b18e5f2116cf93310d24d86bd82ca799761d5`
+- Container: `rmhazuregeosilver`
+
+**Status Transition Timeline**:
+1. 20:24:59.650 - Stage 1 starts: Status → PROCESSING ✅
+2. 20:25:01.102 - Stage 1 completes: Status → QUEUED ✅ (Fix working!)
+3. 20:25:01.104 - Log: "Job status → QUEUED (ready for stage 2)" ✅
+4. 20:25:01.393 - Stage 2 starts: Status → PROCESSING ✅
+5. 20:25:03.048 - Job completes ✅
+
+**Validation Checks**:
+- ✅ No "Invalid status transition" errors
+- ✅ Clean PROCESSING → QUEUED → PROCESSING cycle between stages
+- ✅ No Service Bus message redelivery
+- ✅ Job completed successfully
+
+### Impact on Existing Workflows
+
+**Fixed Workflows**:
+- ✅ `process_raster_collection` - Multi-stage raster collection processing
+- ✅ `list_container_contents` - 2-stage container analysis
+- ✅ All other multi-stage jobs now work correctly
+
+**Key Insight**: This bug affected ALL multi-stage jobs, not just raster workflows. The fix ensures proper status transitions for any job with 2+ stages.
+
+### Related Files Changed
+
+- `core/machine.py` - Two fixes applied (lines 220-228, 915-918)
+- `COREMACHINE_STATUS_TRANSITION_FIX.md` - Comprehensive bug analysis and validation results
+
+### Lessons Learned
+
+1. **Never swallow exceptions silently** - Schema validation errors ARE critical
+2. **Status transitions must follow state machine** - PROCESSING → QUEUED → PROCESSING for stage advancement
+3. **Azure Functions require clean completion** - Unacknowledged Service Bus messages cause redelivery loops
+4. **Test multi-stage workflows early** - Single-stage jobs don't reveal status transition bugs
 
 ---
 

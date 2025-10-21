@@ -1,7 +1,39 @@
 # Active Tasks
 
-**Last Updated**: 20 OCT 2025
+**Last Updated**: 21 OCT 2025
 **Author**: Robert and Geospatial Claude Legion
+
+---
+
+## ✅ COMPLETED: CoreMachine Status Transition Bug Fix (21 OCT 2025)
+
+**Status**: ✅ **COMPLETE** - Multi-stage jobs now work correctly
+**Completion Date**: 21 OCT 2025
+**Impact**: Critical framework fix affecting ALL multi-stage jobs
+
+### What Was Fixed
+
+**Problem**: Multi-stage jobs experiencing Service Bus message redelivery and duplicate task processing
+- Status transition errors: "Invalid status transition: PROCESSING → PROCESSING"
+- Errors silently swallowed, preventing clean Azure Function completion
+- Service Bus redelivery loops causing duplicate work
+
+**Two Critical Bugs Fixed**:
+1. ✅ **`_advance_stage()` missing status update** - Job remained PROCESSING when queuing next stage
+2. ✅ **Silent exception swallowing** - Status validation errors caught and ignored
+
+**Validation Results**:
+- ✅ Clean PROCESSING → QUEUED → PROCESSING cycle between stages
+- ✅ No "Invalid status transition" errors
+- ✅ No Service Bus message redelivery
+- ✅ Test job `list_container_contents` completed successfully
+
+**Files Changed**:
+- `core/machine.py` - Two fixes (lines 220-228, 915-918)
+- `COREMACHINE_STATUS_TRANSITION_FIX.md` - Comprehensive documentation
+- `docs_claude/HISTORY.md` - Added to project history
+
+**See**: [HISTORY.md](HISTORY.md) for full details
 
 ---
 

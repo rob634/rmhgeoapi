@@ -480,7 +480,7 @@ class ProcessRasterCollectionWorkflow(JobBase):
                 "metadata": {
                     "tile_index": i,
                     "tile_count": len(blob_list),
-                    "tile_name": tile_name,
+                    "blob_name": blob_name,  # Use blob_name instead of tile_name
                     "collection_id": job_params["collection_id"]
                 }
             }

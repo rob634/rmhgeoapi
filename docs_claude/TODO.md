@@ -5,6 +5,141 @@
 
 ---
 
+## ✅ COMPLETED: process_raster_collection Pattern Compliance Analysis (22 OCT 2025)
+
+**Status**: ✅ **ANALYSIS COMPLETE** - Implementation plan created, ready for deployment
+**Completion Date**: 22 OCT 2025
+**Impact**: Identified 5 critical fixes for CoreMachine pattern compliance + comprehensive implementation plan
+
+### What Was Analyzed
+
+**Comprehensive Pattern Review**:
+- Reviewed `process_raster_collection` 4-stage workflow (validate → COG → MosaicJSON → STAC)
+- Compared against CoreMachine patterns validated 21-22 OCT 2025
+- Identified reusable components vs. new implementation needed
+- Created detailed implementation plan with before/after code snippets
+
+**Key Findings**:
+1. ✅ **Stages 1-2 Handlers Ready**: `validate_raster`, `create_cog` (100% reusable, zero changes needed)
+2. ✅ **Parallelism Values Already Fixed**: Stage 1 = "single", Stage 2 = "fan_out" (lines 85, 92)
+3. ❌ **Method Signature Mismatch**: `create_tasks_for_stage()` has `= None` default (should match JobBase)
+4. ❌ **Dead Code Discovered**: 127 lines in unused `_create_stage_3_tasks()` and `_create_stage_4_tasks()`
+5. ⚠️ **Handler Contract Minor Fix**: `create_stac_collection` extracts params incorrectly (needs `job_parameters` dict)
+6. ✅ **Success Fields Compliant**: All handlers already return `{"success": bool, ...}`
+
+**Critical Insight**: Only 2 files need changes (process_raster_collection.py, stac_collection.py) with 4 small edits total
+
+### Implementation Plan Created
+
+**Documentation**: `docs_claude/RASTER_COLLECTION_IMPLEMENTATION_PLAN.md` (107KB)
+
+**Plan Contents**:
+- Executive summary with current workflow status
+- 4-stage diamond pattern architecture diagram
+- 5 critical fixes with detailed before/after code snippets:
+  1. ✅ Fix #1: Parallelism values (ALREADY FIXED)
+  2. 🔧 Fix #2: Remove `= None` from `previous_results` parameter
+  3. 🗑️ Fix #3: Delete 127 lines of dead code (Stages 3-4 methods)
+  4. 🔧 Fix #4: Extract params from `job_parameters` dict in stac_collection handler
+  5. ✅ Fix #5: Success field compliance (ALREADY COMPLIANT)
+- Complete implementation checklist organized by phase:
+  - **Phase 1**: Code fixes (2 files, ~10 min)
+  - **Phase 2**: Testing with 2-tile workflow (30-45 min)
+  - **Phase 3**: Documentation updates (10 min)
+- Success criteria with specific validation points
+- Timeline estimate: **4-5 hours total**
+
+### Related Documentation Identified
+
+**Large Raster Automatic Tiling** (answers "GeoTIFF over 1GB get split into tiles"):
+
+1. **`RASTER_PIPELINE.md`** (93KB) ⭐ PRIMARY REFERENCE
+   - **Pipeline Selection**: ≤1GB (2-stage) vs >1GB (4-stage with automatic tiling)
+   - **Stage 2: Create Tiling Strategy** (lines 1056-1107)
+     - Automatic tile grid calculation
+     - Default: 5000x5000 pixels per tile
+     - 100-pixel overlap for seamless stitching
+     - Grid dimensions auto-calculated (rows × cols)
+     - Example: 25,000 × 25,000 pixel raster → 5×5 grid = 25 tiles
+   - **Stage 3: Parallel Tile Processing** (lines 1110-1156)
+     - Fan-out pattern (N tiles = N parallel tasks)
+     - Per-tile: extract window → reproject → create COG
+     - Upload individual tiles to silver container
+   - **Stage 4: Create MosaicJSON + STAC Metadata**
+     - **NOT GDAL VRT** - Use MosaicJSON for virtual mosaic
+     - Generate MosaicJSON from individual COG tiles
+     - Add individual COG tiles to PgSTAC `system_tiles` collection
+     - Add MosaicJSON dataset to PgSTAC `titiler` collection (for TiTiler serving)
+     - No intermediate storage cleanup needed (all tiles kept in silver)
+
+2. **`COG_MOSAIC.md`** (33KB) - Post-Tiling Workflow
+   - MosaicJSON generation from completed COG tiles
+   - Quadkey spatial indexing (zoom level 6-8 recommended)
+   - **STAC Three-Collection Strategy**:
+     - `system_tiles`: Individual COG tiles (internal tracking)
+     - `titiler`: MosaicJSON datasets (TiTiler serving layer)
+     - `datasets`: User-facing datasets (links to titiler collection)
+   - Atomic transaction pattern for metadata visibility
+   - TiTiler-PgSTAC integration (queries titiler collection)
+
+3. **`CLAUDE.md`** (lines 669-678) - Example "stage_raster" Workflow
+   ```
+   Stage 1: Ensure metadata exists, extract if missing
+   Stage 2: If raster is gigantic, create tiling scheme
+   Stage 3: Fan-out - Parallel tasks to reproject/validate raster chunks
+   Stage 4: Fan-out - Parallel tasks to convert chunks to COGs
+   Stage 5: Create MosaicJSON + add to PgSTAC titiler collection
+   ```
+
+**CRITICAL ARCHITECTURE UPDATE (22 OCT 2025)**:
+- ❌ **OLD**: GDAL VRT mosaic → final COG with overviews
+- ✅ **NEW**: MosaicJSON virtual mosaic (no VRT, no merged COG)
+- **Why**: Individual tiles remain accessible + virtual mosaic via MosaicJSON
+- **TiTiler Integration**: Queries PgSTAC `titiler` collection for MosaicJSON datasets
+
+**Tiling Scheme Inference Logic** (RASTER_PIPELINE.md lines 1062-1107):
+```python
+{
+    "source_blob": "bronze/2024/huge_raster.tif",
+    "total_tiles": 25,  # Auto-calculated: (raster_size / tile_size)²
+    "tile_grid": {
+        "rows": 5,  # Calculated from raster height / tile_size
+        "cols": 5   # Calculated from raster width / tile_size
+    },
+    "tile_size_pixels": [5000, 5000],  # Configurable (default 5000)
+    "overlap_pixels": 100,  # Prevents seams during mosaicking
+    "tiles": [
+        {
+            "tile_id": "tile_0_0",
+            "row": 0,
+            "col": 0,
+            "window": {"row_off": 0, "col_off": 0, "width": 5000, "height": 5000},
+            "bounds": [-120.5, 39.0, -120.0, 39.5]  # CRS-specific bounds
+        },
+        # ... 24 more tiles with calculated windows and bounds
+    ]
+}
+```
+
+**When Automatic Tiling Triggers**:
+- **Threshold**: File size > 1GB (configurable via `raster_size_threshold_mb`)
+- **Why**: Rio-cogeo can struggle with large compressed files (tries to decompress entire file)
+- **Benefit**: Prevents multi-hour processing times or crashes
+- **Result**: Parallel processing across N tiles instead of single-file bottleneck
+
+### Next Steps
+
+**Ready for Implementation** (pending user approval):
+1. Apply 4 small code fixes to 2 files
+2. Deploy to Azure and test 4-stage workflow with 2 tiles
+3. Verify MosaicJSON created in blob storage
+4. Verify STAC collection created in PgSTAC
+5. Document completion in HISTORY.md
+
+**See**: `RASTER_COLLECTION_IMPLEMENTATION_PLAN.md` for complete implementation guide
+
+---
+
 ## ✅ COMPLETED: Task ID Architecture Fix + CoreMachine Validation (22 OCT 2025)
 
 **Status**: ✅ **COMPLETE** - Task IDs fixed, multi-stage workflows validated

@@ -458,9 +458,6 @@ class ProcessRasterCollectionWorkflow(JobBase):
         blob_repo = BlobRepository.instance()
 
         for i, blob_name in enumerate(blob_list):
-            # Extract tile identifier from filename
-            tile_name = blob_name.split('/')[-1].replace('.tif', '').replace('.TIF', '')
-
             # Generate blob URL with SAS token
             blob_url = blob_repo.get_blob_url_with_sas(
                 container_name=container_name,
@@ -469,7 +466,7 @@ class ProcessRasterCollectionWorkflow(JobBase):
             )
 
             task = {
-                "task_id": f"{job_id}-s1-{tile_name}",
+                "task_id": f"{job_id[:8]}-s1-validate-{i}",
                 "task_type": "validate_raster",
                 "parameters": {
                     "blob_url": blob_url,  # REQUIRED by validate_raster handler
@@ -569,7 +566,7 @@ class ProcessRasterCollectionWorkflow(JobBase):
                 output_blob_name = f"{folder_path}/{tile_name}.tif" if folder_path else f"{tile_name}.tif"
 
             task = {
-                "task_id": f"{job_id}-s2-{tile_name}",
+                "task_id": f"{job_id[:8]}-s2-cog-{i}",
                 "task_type": "create_cog",
                 "parameters": {
                     "blob_url": blob_url,  # REQUIRED by create_cog handler
@@ -645,7 +642,7 @@ class ProcessRasterCollectionWorkflow(JobBase):
 
         # Single task for MosaicJSON creation
         task = {
-            "task_id": f"{job_id}-s3-mosaicjson",
+            "task_id": f"{job_id[:8]}-s3-mosaicjson",
             "task_type": "create_mosaicjson",
             "parameters": {
                 "cog_blobs": cog_blobs,
@@ -707,7 +704,7 @@ class ProcessRasterCollectionWorkflow(JobBase):
 
         # Single task for STAC collection creation
         task = {
-            "task_id": f"{job_id}-s4-stac_collection",
+            "task_id": f"{job_id[:8]}-s4-stac",
             "task_type": "create_stac_collection",
             "parameters": {
                 "collection_id": job_params["collection_id"],

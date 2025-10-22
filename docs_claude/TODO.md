@@ -1,7 +1,92 @@
 # Active Tasks
 
-**Last Updated**: 21 OCT 2025
+**Last Updated**: 22 OCT 2025
 **Author**: Robert and Geospatial Claude Legion
+
+---
+
+## ✅ COMPLETED: Task ID Architecture Fix + CoreMachine Validation (22 OCT 2025)
+
+**Status**: ✅ **COMPLETE** - Task IDs fixed, multi-stage workflows validated
+**Completion Date**: 22 OCT 2025
+**Impact**: Fixed task ID length limits + validated CoreMachine framework works correctly
+
+### What Was Fixed
+
+**1. Task ID Length Bug** ✅
+**Problem**: Task IDs exceeded 100-character limit
+- Used full 64-char job_id instead of 8-char prefix
+- Included filename parameters in semantic name (redundant)
+- Example: `268bc942aaf069fb...40411dd6-s1-namangan14aug2019_R1C1cog_analysis` = 103 chars ❌
+- Caused Pydantic validation error: "String should have at most 100 characters"
+
+**Root Cause (Key Insight)**:
+- Semantic names should describe **TASK TYPE**, not duplicate parameters
+- Parameters already hashed in job_id + stored in task.parameters
+- Using filename in task_id violates DRY principle
+
+**Solution**:
+- Use 8-char job_id prefix (collision probability: ~0.00001% with 100K jobs)
+- Semantic names: `validate-{i}`, `cog-{i}`, `mosaicjson`, `stac`
+- Stage 1: `{job_id[:8]}-s1-validate-{i}` = 22 chars ✅
+- Stage 2: `{job_id[:8]}-s2-cog-{i}` = 17 chars ✅
+- Stage 3: `{job_id[:8]}-s3-mosaicjson` = 24 chars ✅
+- Stage 4: `{job_id[:8]}-s4-stac` = 17 chars ✅
+
+**2. Undefined Variable Bug** ✅
+**Problem**: Incomplete refactoring when removing filename from task IDs
+- Removed `tile_name` extraction logic but metadata still referenced it
+- Caused `NameError: name 'tile_name' is not defined`
+- Jobs failed before creating any tasks
+
+**Solution**: Replace `tile_name` with `blob_name` in metadata (already available)
+
+**3. `pending_analyses` Variable Scope Bug** ✅
+**Problem**: Variable calculated as `queued_analyses` but used as `pending_analyses`
+- Caused "cannot access local variable" error in job aggregation
+**Solution**: Renamed to `pending_analyses` for consistency
+
+### Validation Results
+
+**Test 1: `list_container_contents` (2-stage)**:
+- ✅ 6 tasks created, all completed
+- ✅ `pending_analyses: 0` reported correctly
+- ✅ Clean PROCESSING → QUEUED → PROCESSING transitions
+- ✅ Job completed successfully
+
+**Test 2: `hello_world` (2-stage)**:
+- ✅ 2 tasks created: `12d5de8b-s1-0`, `12d5de8b-s2-0`
+- ✅ Both tasks completed
+- ✅ Task IDs use 8-char prefix pattern
+
+**Test 3: `process_raster_collection` (4-stage)**:
+- ✅ Job ID: `822d826ddd7f7756...`
+- ✅ Tasks created:
+  - `822d826d-s1-validate-0` (22 chars) - completed
+  - `822d826d-s1-validate-1` (22 chars) - completed
+  - `822d826d-s2-cog-0` (17 chars) - processing
+  - `822d826d-s2-cog-1` (17 chars) - processing
+- ✅ All task IDs under 100-char limit
+- ✅ Multi-stage progression working (Stage 1 → Stage 2)
+
+### Files Changed
+
+- `jobs/process_raster_collection.py` - Task ID generation (4 stages)
+- `jobs/container_list.py` - pending_analyses variable fix
+- `core/machine.py` - Status transition fixes (from 21 OCT)
+
+### Key Architectural Insight
+
+**Task ID Semantic Naming Best Practice**:
+- ✅ **Good**: `validate-{i}`, `cog-{i}`, `mosaicjson` - Describes task type
+- ❌ **Bad**: `{filename}` - Duplicates parameter data already in job_id and task.parameters
+
+This follows the pattern already used successfully in other jobs like `hello_world`, `container_summary`, `create_h3_base`.
+
+**Git Commits**:
+- `2cbc5e1` - Fix task ID generation: remove redundant parameters
+- `c7ed216` - Fix undefined variable bug from task ID refactor
+- `648a60c` - Fix pending_analyses variable scope bug
 
 ---
 

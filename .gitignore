@@ -161,7 +161,8 @@ EXAMPLE_HTTP_TRIGGER_USAGE.py
 # Local utility scripts
 local_scripts/
 local_scripts*
-local_*
+local*
+local/
 # Shell scripts
 *.sh
 

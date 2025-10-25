@@ -2,7 +2,7 @@
 # CLAUDE CONTEXT - AZURE FUNCTIONS ENTRY POINT
 # ============================================================================
 # EPOCH: SHARED - BOTH EPOCHS
-# STATUS: Used by Epoch 3 and Epoch 4
+# STATUS: Epoch 4
 # NOTE: Careful migration required
 # PURPOSE: Azure Functions entry point orchestrating the geospatial ETL pipeline with HTTP and queue triggers
 # EXPORTS: app (Function App), core_machine (CoreMachine orchestrator)

@@ -47,6 +47,7 @@ from .process_raster import ProcessRasterWorkflow
 from .generate_h3_level4 import GenerateH3Level4Job
 from .create_h3_base import CreateH3BaseJob
 from .process_raster_collection import ProcessRasterCollectionWorkflow
+from .process_large_raster import ProcessLargeRasterWorkflow
 
 # ============================================================================
 # EXPLICIT JOB REGISTRY
@@ -68,6 +69,7 @@ ALL_JOBS = {
     "validate_raster_job": ValidateRasterJob,
     "process_raster": ProcessRasterWorkflow,
     "process_raster_collection": ProcessRasterCollectionWorkflow,  # Multi-tile COG + MosaicJSON (20 OCT 2025)
+    "process_large_raster": ProcessLargeRasterWorkflow,  # Large raster tiling (1-30 GB) → COG mosaic (24 OCT 2025)
     "generate_h3_level4": GenerateH3Level4Job,
     "create_h3_base": CreateH3BaseJob,
     # Add new jobs here explicitly

@@ -60,19 +60,21 @@ def create_cog(params: dict) -> dict:
 
     Args:
         params: Task parameters dict with:
-            - blob_url (str, REQUIRED): Azure blob URL for bronze raster (with SAS token)
+            - container_name (str, REQUIRED): Container name for input raster
+            - blob_name (str, REQUIRED): Blob path for input raster
             - source_crs (str, REQUIRED): CRS from validation stage
             - target_crs (str, optional): Target CRS (default: EPSG:4326)
-            - raster_type (dict, REQUIRED): Full raster_type dict from validation stage
+            - raster_type (dict, optional): Full raster_type dict from validation stage
                 Structure: {"detected_type": str, "optimal_cog_settings": {...}}
-            - output_blob_name (str, REQUIRED): Silver container blob path
-            - container_name (str): Bronze container name
-            - blob_name (str): Bronze blob name
+            - output_blob_name (str, REQUIRED): Silver container blob path for output COG
             - output_tier (str, optional): COG tier (visualization, analysis, archive) - default: analysis
             - compression (str, optional): User override for compression (DEPRECATED - use output_tier)
             - jpeg_quality (int, optional): JPEG quality (1-100)
             - overview_resampling (str, optional): User override
             - reproject_resampling (str, optional): User override
+
+        Note: blob_url is generated internally using BlobRepository.get_blob_url_with_sas()
+              with managed identity for secure access (2-hour validity)
 
     Returns:
         dict: {
@@ -127,7 +129,8 @@ def create_cog(params: dict) -> dict:
     try:
         logger.info("🔄 STEP 1: Extracting and validating parameters...")
 
-        blob_url = params.get('blob_url')
+        container_name = params.get('container_name')
+        blob_name = params.get('blob_name')
         source_crs = params.get('source_crs')
         target_crs = params.get('target_crs', 'EPSG:4326')
         raster_type = params.get('raster_type', {}).get('detected_type', 'unknown')
@@ -168,8 +171,6 @@ def create_cog(params: dict) -> dict:
         reproject_resampling = params.get('reproject_resampling') or optimal_settings.get('reproject_resampling', 'cubic')
 
         output_blob_name = params.get('output_blob_name')
-        container_name = params.get('container_name', 'unknown')
-        blob_name = params.get('blob_name', 'unknown')
 
         # Add tier suffix to output blob name
         # Example: sample.tif → sample_analysis.tif
@@ -179,9 +180,11 @@ def create_cog(params: dict) -> dict:
             output_blob_name = f"{base_name}_{output_tier.value}.{extension}"
             logger.info(f"   Added tier suffix to output: {output_blob_name}")
 
-        if not all([blob_url, source_crs, output_blob_name]):
+        # Validate required parameters
+        if not all([container_name, blob_name, source_crs, output_blob_name]):
             missing = []
-            if not blob_url: missing.append('blob_url')
+            if not container_name: missing.append('container_name')
+            if not blob_name: missing.append('blob_name')
             if not source_crs: missing.append('source_crs')
             if not output_blob_name: missing.append('output_blob_name')
 
@@ -191,6 +194,13 @@ def create_cog(params: dict) -> dict:
                 "error": "PARAMETER_ERROR",
                 "message": f"Missing required parameters: {', '.join(missing)}"
             }
+
+        # Generate blob URL with SAS token using managed identity
+        logger.info("🔄 Generating SAS URL for input blob using managed identity...")
+        from infrastructure.blob import BlobRepository
+        blob_repo = BlobRepository()
+        blob_url = blob_repo.get_blob_url_with_sas(container_name, blob_name, hours=2)
+        logger.info(f"   ✅ SAS URL generated (valid for 2 hours)")
 
         logger.info(f"✅ STEP 1: Parameters validated - blob={blob_name}, container={container_name}")
         logger.info(f"   Type: {raster_type}, Tier: {output_tier.value}, Compression: {compression}, CRS: {source_crs} → {target_crs}")

@@ -115,3 +115,8 @@ surprise*
 *.sql
 
 local_*
+# Large test raster files
+*.tif
+*.tiff
+antigua.tif
+antigua_mercator.tif

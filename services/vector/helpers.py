@@ -35,7 +35,7 @@ import pandas as pd
 import geopandas as gpd
 from shapely import wkt
 from shapely.geometry import Point
-from shapely.errors import WKTReadingError
+from shapely.errors import ShapelyError
 
 DEFAULT_CRS = "EPSG:4326"
 
@@ -120,7 +120,7 @@ def wkt_df_to_gdf(
         geometry = df[wkt_column].apply(wkt.loads)
         gdf = gpd.GeoDataFrame(df, geometry=geometry, crs=crs)
         return gdf
-    except WKTReadingError as e:
+    except ShapelyError as e:
         raise ValueError(f"Invalid WKT in column '{wkt_column}': {e}")
 
 

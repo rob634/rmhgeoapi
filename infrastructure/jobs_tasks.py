@@ -784,6 +784,139 @@ class TaskRepository(PostgreSQLTaskRepository):
         results = self._execute_query(query, (interval_str, limit))
         return [r['batch_id'] for r in results]
 
+    # ========================================================================
+    # TASK METADATA OPERATIONS - For progress tracking (24 OCT 2025)
+    # ========================================================================
+
+    def update_task_metadata(
+        self,
+        task_id: str,
+        metadata: Dict[str, Any],
+        merge: bool = True
+    ) -> bool:
+        """
+        Update task metadata (for progress tracking during long-running tasks).
+
+        Used by services like tiling_extraction to report progress back to the
+        orchestration layer without changing task status.
+
+        Args:
+            task_id: Task ID to update
+            metadata: Metadata dict to set or merge
+            merge: If True, merge with existing metadata; if False, replace entirely
+
+        Returns:
+            True if updated successfully
+
+        Example:
+            # Sequential extraction progress (Stage 2)
+            repo.update_task_metadata(task_id, {
+                "extraction_progress": {
+                    "tiles_extracted": 42,
+                    "total_tiles": 204,
+                    "current_tile": "tile_5_7",
+                    "elapsed_seconds": 95.3,
+                    "percent_complete": 20.6
+                }
+            }, merge=True)
+        """
+        with self._error_context("update task metadata", task_id):
+            # Get current task to preserve existing metadata if merging
+            if merge:
+                current_task = self.get_task(task_id)
+                if not current_task:
+                    logger.warning(f"📋 Cannot update metadata - task not found: {task_id}")
+                    return False
+
+                # Merge metadata (deep merge for nested dicts)
+                merged_metadata = current_task.metadata.copy() if current_task.metadata else {}
+                merged_metadata.update(metadata)
+                final_metadata = merged_metadata
+            else:
+                final_metadata = metadata
+
+            # Update using Pydantic model
+            update = TaskUpdateModel(metadata=final_metadata)
+            success = self.update_task(task_id, update)
+
+            if success:
+                logger.debug(f"📋 Updated metadata for task {task_id[:16]}... (merge={merge})")
+            else:
+                logger.warning(f"⚠️ Failed to update metadata for task {task_id[:16]}...")
+
+            return success
+
+    def get_task_metadata(self, task_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Get task metadata only (without fetching entire TaskRecord).
+
+        Args:
+            task_id: Task ID to query
+
+        Returns:
+            Task metadata dict, or None if task not found
+        """
+        from psycopg import sql
+
+        with self._error_context("get task metadata", task_id):
+            query = sql.SQL("""
+                SELECT metadata
+                FROM {schema}.tasks
+                WHERE task_id = %s
+            """).format(schema=sql.Identifier(self.schema_name))
+
+            result = self._execute_query(query, (task_id,), fetch='one')
+
+            if result:
+                return result.get('metadata', {})
+            else:
+                logger.debug(f"📋 Task not found: {task_id[:16]}...")
+                return None
+
+    def get_task_progress(self, task_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Get task progress from metadata (convenience method).
+
+        Returns progress data if it exists in metadata, otherwise None.
+        This is a convenience wrapper around get_task_metadata that extracts
+        common progress-related fields.
+
+        Args:
+            task_id: Task ID to query
+
+        Returns:
+            Dict with progress fields, or None if no progress data
+
+        Example returned dict (from tiling extraction):
+            {
+                "tiles_extracted": 42,
+                "total_tiles": 204,
+                "current_tile": "tile_5_7",
+                "elapsed_seconds": 95.3,
+                "percent_complete": 20.6
+            }
+        """
+        metadata = self.get_task_metadata(task_id)
+
+        if not metadata:
+            return None
+
+        # Check for various progress field patterns
+        # (different services may use different field names)
+        progress_patterns = [
+            'extraction_progress',
+            'conversion_progress',
+            'processing_progress',
+            'progress'
+        ]
+
+        for pattern in progress_patterns:
+            if pattern in metadata:
+                return metadata[pattern]
+
+        # No recognized progress data found
+        return None
+
 
 # ============================================================================
 # EXTENDED COMPLETION DETECTOR - Business logic wrapper

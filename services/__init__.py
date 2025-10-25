@@ -85,6 +85,8 @@ from .handler_h3_base import h3_base_generate
 from .vector.tasks import prepare_vector_chunks, upload_pickled_chunk
 from .raster_mosaicjson import create_mosaicjson
 from .stac_collection import create_stac_collection
+from .tiling_scheme import generate_tiling_scheme
+from .tiling_extraction import extract_tiles
 
 # ============================================================================
 # EXPLICIT HANDLER REGISTRY
@@ -117,6 +119,9 @@ ALL_HANDLERS = {
     # Raster collection handlers (20 OCT 2025)
     "create_mosaicjson": create_mosaicjson,          # Stage 3: Create MosaicJSON from COG collection
     "create_stac_collection": create_stac_collection,  # Stage 4: Create STAC collection item
+    # Big Raster ETL handlers (24 OCT 2025)
+    "generate_tiling_scheme": generate_tiling_scheme,  # Stage 1: Generate tiling scheme in EPSG:4326
+    "extract_tiles": extract_tiles,                   # Stage 2: Extract tiles sequentially
 }
 
 # ============================================================================

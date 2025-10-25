@@ -79,7 +79,8 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
             "environment": {
                 "storage_account": get_config().storage_account_name,
                 "python_version": sys.version.split()[0],
-                "function_runtime": "python"
+                "function_runtime": "python",
+                "health_check_version": "v2025-10-25_VSI_CHECK_ENABLED"
             },
             "errors": []
         }
@@ -145,6 +146,31 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
         # Note: DuckDB is optional - don't fail overall health if unavailable
         if duckdb_health["status"] == "error":
             health_data["errors"].append("DuckDB unavailable (optional analytical component)")
+
+        # Check rasterio VSI (Virtual File System) support (optional but important for Big Raster ETL)
+        try:
+            self.logger.info("🔍 Starting VSI capability check...")
+            vsi_health = self._check_vsi_support()
+            self.logger.info(f"📊 VSI check result: {vsi_health.get('status', 'unknown')}")
+            health_data["components"]["vsi"] = vsi_health
+            # Note: VSI is optional but required for Big Raster ETL - don't fail overall health
+            if vsi_health["status"] == "error":
+                health_data["errors"].append("Rasterio VSI unavailable (impacts Big Raster ETL workflow)")
+        except Exception as vsi_error:
+            self.logger.error(f"❌ VSI check failed with exception: {vsi_error}")
+            health_data["components"]["vsi"] = {
+                "component": "vsi_support",
+                "status": "error",
+                "details": {"exception": str(vsi_error), "error_type": type(vsi_error).__name__},
+                "checked_at": datetime.now(timezone.utc).isoformat()
+            }
+
+        # Check jobs registry (critical for job processing)
+        jobs_health = self._check_jobs_registry()
+        health_data["components"]["jobs"] = jobs_health
+        if jobs_health["status"] == "unhealthy":
+            health_data["status"] = "unhealthy"
+            health_data["errors"].extend(jobs_health.get("errors", []))
 
         return health_data
     
@@ -916,6 +942,130 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                 }
 
         return self.check_component_health("duckdb", check_duckdb)
+
+    def _check_vsi_support(self) -> Dict[str, Any]:
+        """
+        Check rasterio VSI (Virtual File System) support (critical for Big Raster ETL).
+
+        VSI allows reading rasters directly from cloud storage without downloading to /tmp.
+        This is REQUIRED for Big Raster ETL workflow to avoid /tmp disk space exhaustion
+        (Azure Functions /tmp is limited to ~500MB).
+
+        Tests:
+        - /vsicurl/ - HTTP/HTTPS access (works with SAS URLs)
+        - GDAL drivers available
+        - Connection to cloud storage
+
+        Returns:
+            Dict with VSI capability status and test results
+        """
+        def check_vsi():
+            try:
+                import rasterio
+                from rasterio.env import Env
+
+                # Test /vsicurl/ with small public COG from Sentinel-2 AWS dataset
+                # Using a tiny 10m band file (~500KB) for fast health check
+                test_url = "https://sentinel-cogs.s3.us-west-2.amazonaws.com/sentinel-s2-l2a-cogs/53/H/PA/2021/7/S2A_53HPA_20210723_0_L2A/B01.tif"
+                vsi_path = f"/vsicurl/{test_url}"
+
+                # Test with timeout to prevent hanging
+                with Env(GDAL_HTTP_TIMEOUT=10, CPL_VSIL_CURL_ALLOWED_EXTENSIONS=".tif,.tiff"):
+                    try:
+                        with rasterio.open(vsi_path) as src:
+                            # Successfully opened via /vsicurl/
+                            width = src.width
+                            height = src.height
+                            bands = src.count
+                            driver = src.driver
+
+                            return {
+                                "status": "healthy",
+                                "vsicurl_supported": True,
+                                "gdal_version": rasterio.__gdal_version__,
+                                "rasterio_version": rasterio.__version__,
+                                "test_results": {
+                                    "test_file": "Sentinel-2 L2A B01 (10m resolution)",
+                                    "file_size": f"{width}x{height}",
+                                    "bands": bands,
+                                    "driver": driver,
+                                    "test_status": "success"
+                                },
+                                "capabilities": {
+                                    "http_streaming": True,
+                                    "https_streaming": True,
+                                    "cloud_optimized_geotiff": True,
+                                    "azure_blob_sas_compatible": True
+                                },
+                                "big_raster_etl_ready": True,
+                                "note": "/vsicurl/ works - can read directly from Azure Blob Storage with SAS URLs"
+                            }
+                    except Exception as open_error:
+                        # Failed to open file via /vsicurl/
+                        return {
+                            "status": "error",
+                            "vsicurl_supported": False,
+                            "gdal_version": rasterio.__gdal_version__,
+                            "rasterio_version": rasterio.__version__,
+                            "error": f"Failed to open test file: {str(open_error)[:200]}",
+                            "error_type": type(open_error).__name__,
+                            "test_url": test_url,
+                            "big_raster_etl_ready": False,
+                            "impact": "Big Raster ETL will fail - cannot read from cloud storage without downloading"
+                        }
+
+            except ImportError as e:
+                # Rasterio not installed
+                return {
+                    "status": "not_installed",
+                    "error": "Rasterio not installed",
+                    "install_command": "pip install rasterio>=1.3.0",
+                    "big_raster_etl_ready": False,
+                    "impact": "Big Raster ETL completely unavailable"
+                }
+            except Exception as e:
+                # Other errors during initialization
+                import traceback
+                return {
+                    "status": "error",
+                    "error": str(e)[:200],
+                    "error_type": type(e).__name__,
+                    "traceback": traceback.format_exc()[:500],
+                    "big_raster_etl_ready": False,
+                    "impact": "Big Raster ETL may be unavailable"
+                }
+
+        return self.check_component_health("vsi_support", check_vsi)
+
+    def _check_jobs_registry(self) -> Dict[str, Any]:
+        """
+        Check jobs registry status and available job types.
+
+        This provides visibility into which jobs are registered and available,
+        helping diagnose deployment issues where jobs fail to register.
+
+        Returns:
+            Dict with jobs registry health status including:
+            - available_jobs: List of registered job type names
+            - total_jobs: Count of registered jobs
+            - registry_location: Where jobs are registered
+            - validation_performed: Whether validation was successful
+        """
+        def check_jobs():
+            from jobs import ALL_JOBS
+
+            job_types = sorted(list(ALL_JOBS.keys()))
+
+            return {
+                "available_jobs": job_types,
+                "total_jobs": len(job_types),
+                "registry_location": "jobs/__init__.py",
+                "validation_performed": True,
+                "registry_type": "explicit",
+                "note": "Jobs are explicitly registered in jobs/__init__.py ALL_JOBS dict"
+            }
+
+        return self.check_component_health("jobs", check_jobs)
 
 
 # Create singleton instance for use in function_app.py

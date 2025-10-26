@@ -1,17 +1,81 @@
 # File Catalog
 
-**Date**: 15 OCT 2025 (Updated with Phase 2 ABC Migration)
-**Total Python Files**: 56+ (excluding test files)
+**Date**: 26 OCT 2025 (Complete Root Folder Update)
+**Total Python Files**: 135 (actual count)
 **Purpose**: Quick file lookup with one-line descriptions
 **Author**: Robert and Geospatial Claude Legion
-**Status**: ✅ Updated - Phase 2 ABC migration complete, all 10 jobs inherit from JobBase
+**Status**: ✅ Updated - Root folder files cataloged with current descriptions
 
-## 🎯 Core Entry Points (2 files)
+## 📊 Quick Stats
+- **Root Python files**: 6
+- **Root documentation**: 21 markdown files
+- **Core directories**: 12 folders
+- **Services**: 25 files
+- **Triggers**: 19 files
+- **Jobs**: 12 files (all using JobBase ABC)
 
+## 🎯 Root Level Files (32 files)
+
+### Core Entry Points (6 Python files)
+| File | Purpose | Lines |
+|------|---------|-------|
+| `function_app.py` | Azure Functions entry point - HTTP, Queue, Service Bus, Timer triggers | 62,167 |
+| `config.py` | Strongly typed configuration with Pydantic v2 - includes COG tier profiles | 40,758 |
+| `exceptions.py` | Custom exception hierarchy for business logic vs contract violations | 4,092 |
+| `util_logger.py` | Centralized logging factory with component types for structured logs | 21,109 |
+| `service_stac.py` | STAC metadata extraction and catalog operations | 10,288 |
+| `service_statistics.py` | Statistical analysis services for data processing | 10,150 |
+
+### Configuration Files (6 files)
 | File | Purpose |
 |------|---------|
-| `function_app.py` | Azure Functions entry point - HTTP, Queue, Service Bus, Timer triggers |
-| `config.py` | Strongly typed configuration with Pydantic v2 |
+| `host.json` | Azure Functions runtime configuration (retry, logging, extensions) |
+| `requirements.txt` | Python dependencies - Azure SDKs, GDAL, psycopg, etc. |
+| `local.settings.json` | Local development environment variables (not in git) |
+| `local.settings.example.json` | Template for local settings configuration |
+| `docker-compose.yml` | Local PostgreSQL + pgAdmin for development |
+| `import_validation_registry.json` | Auto-discovered module import health tracking |
+
+### Documentation Files (21 markdown files)
+| File | Purpose | Status |
+|------|---------|--------|
+| `CLAUDE.md` | Primary entry point redirecting to docs_claude/ | ⭐ START HERE |
+| `RASTER_PIPELINE.md` | Comprehensive raster ETL workflow documentation | Production guide |
+| `COG_MOSAIC.md` | MosaicJSON generation from COG tiles | Technical spec |
+| `STAC_IMPLEMENTATION_PLAN.md` | STAC catalog implementation roadmap | Planning doc |
+| `VECTOR_ETL_IMPLEMENTATION_PLAN.md` | Vector ingestion pipeline design | Implementation guide |
+| `H3.md` | H3 hexagon grid system documentation | Reference |
+| `ARCHITECTURE_REVIEW.md` | System architecture analysis and patterns | Technical review |
+| `JOB_CREATION_QUICKSTART.md` | Guide for creating new job types | Developer guide |
+| `COREMACHINE_STATUS_TRANSITION_FIX.md` | Bug fix documentation for status transitions | Fixed 21 OCT |
+| `DIAMOND_PATTERN_TEST.md` | Fan-out/fan-in workflow testing | Test results |
+| `FINAL_STATUS_24OCT2025.md` | System status checkpoint | Status report |
+| `PHASE_2_DEPLOYMENT_GUIDE.md` | Phase 2 deployment procedures | Deployment guide |
+| `POSTGRES_REQUIREMENTS.md` | PostgreSQL setup and requirements | Infrastructure |
+| `PYTHON_HEADER_REVIEW_TRACKING.md` | Code header standardization tracking | Maintenance |
+| `QUICK_FIX_GUIDE.md` | Common fixes and troubleshooting | Operations |
+| `ROOT_CLEANUP_ANALYSIS.md` | Analysis of root folder organization | Cleanup plan |
+| `ABC_ENFORCEMENT_OPPORTUNITIES.md` | Abstract base class implementation opportunities | Architecture |
+| `duckdb_parameter.md` | DuckDB configuration parameters | Reference |
+| `vector_api.md` | Vector API endpoint documentation | API reference |
+| `robertnotes.md` | Robert's personal development notes | Notes |
+
+## 📁 Directory Structure (12 folders)
+
+| Directory | Purpose | Key Contents |
+|-----------|---------|--------------|
+| `core/` | Clean architecture implementation (CoreMachine) | 17 files - orchestration, models, state management |
+| `docs/` | Archived documentation | Legacy docs moved from root |
+| `docs_claude/` | ⭐ PRIMARY documentation for Claude | TODO.md, HISTORY.md, context docs |
+| `infrastructure/` | Repository pattern implementations | 12 files - blob, postgresql, service bus, duckdb |
+| `jobs/` | Job workflow definitions | 12 files - all inherit from JobBase ABC |
+| `models/` | Additional Pydantic models | Supporting data models |
+| `services/` | Business logic and handlers | 30+ files - raster, vector, STAC, container ops |
+| `sql/` | SQL scripts and migrations | Database schema definitions |
+| `test/` | Test files and fixtures | Unit and integration tests |
+| `triggers/` | Azure Function HTTP triggers | 7+ files - API endpoints |
+| `utils/` | Utility modules | Contract validator (moved from root) |
+| `vector/` | Vector processing utilities | Vector-specific operations |
 
 ## 🏗️ Core Architecture (core/ folder, 17 files) ⭐ UPDATED 4 OCT
 
@@ -311,4 +375,4 @@ DuckDB is an **optional component** in `/api/health`:
 
 ---
 
-**Last Updated**: 10 OCT 2025 - DuckDB infrastructure complete, STAC + Raster ETL production-ready
+**Last Updated**: 26 OCT 2025 - Complete root folder catalog, accurate file counts, directory structure added

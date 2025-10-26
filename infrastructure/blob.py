@@ -574,7 +574,13 @@ class BlobRepository(IBlobRepository):
             logger.error(f"Failed to get blob properties: {e}")
             raise
     
-    def get_blob_url_with_sas(self, container_name: str, blob_name: str, hours: int = 1) -> str:
+    def get_blob_url_with_sas(
+        self,
+        container_name: str,
+        blob_name: str,
+        hours: int = 1,
+        write: bool = False  # NOTE: Retained for future /vsiaz/ use cases; current /vsimem/ pattern doesn't use this
+    ) -> str:
         """
         Generate blob URL with user delegation SAS token.
 
@@ -585,16 +591,33 @@ class BlobRepository(IBlobRepository):
             container_name: Container name
             blob_name: Blob path
             hours: SAS token validity in hours (default: 1)
+            write: Enable write/create permissions (default: False)
+                   NOTE: Current raster COG pipeline uses /vsimem/ in-memory pattern
+                   (download → /vsimem/ → process → /vsimem/ → upload) which doesn't
+                   require write-enabled SAS tokens. This parameter is retained for:
+                   - Future /vsiaz/ direct write use cases
+                   - Other services that may need write access via GDAL VSI drivers
+                   - Backward compatibility with existing code
 
         Returns:
             Full blob URL with SAS token appended
 
-        Example:
-            url = repo.get_blob_url_with_sas('bronze', 'path/file.tif')
-            # Returns: https://storage.blob.core.windows.net/bronze/path/file.tif?sv=...
+        Examples:
+            # Read-only (default) - Used by current /vsimem/ pattern
+            url = repo.get_blob_url_with_sas('bronze', 'input.tif')
+
+            # Write-enabled for future /vsiaz/ direct write scenarios
+            url = repo.get_blob_url_with_sas('silver', 'output.tif', hours=2, write=True)
+
+        Security:
+            - Uses managed identity (no account key exposure)
+            - Short-lived tokens (1-4 hours typical)
+            - Scoped to single blob
+            - Requires 'Storage Blob Delegator' role on managed identity
         """
         try:
-            logger.debug(f"Generating SAS URL for {container_name}/{blob_name} (validity: {hours}h)")
+            permissions = "READ+WRITE" if write else "READ"
+            logger.debug(f"Generating {permissions} SAS URL for {container_name}/{blob_name} (validity: {hours}h)")
 
             # Get blob client
             blob_client = self._get_container_client(container_name).get_blob_client(blob_name)
@@ -614,13 +637,21 @@ class BlobRepository(IBlobRepository):
                 logger.error(f"Failed to get user delegation key: {e}")
                 raise ValueError(f"Failed to generate user delegation key. Ensure managed identity has 'Storage Blob Delegator' role: {e}")
 
+            # Configure permissions based on write flag
+            # NOTE: write=True adds write+create permissions for GDAL /vsiaz/ direct write
+            # Current /vsimem/ pattern only uses read-only SAS (write=False default)
+            if write:
+                permissions_obj = BlobSasPermissions(read=True, write=True, create=True)
+            else:
+                permissions_obj = BlobSasPermissions(read=True)
+
             # Generate SAS token using user delegation key
             sas_token = generate_blob_sas(
                 account_name=self.storage_account,
                 container_name=container_name,
                 blob_name=blob_name,
                 user_delegation_key=user_delegation_key,
-                permission=BlobSasPermissions(read=True),
+                permission=permissions_obj,
                 expiry=expiry_time,
                 start=start_time
             )

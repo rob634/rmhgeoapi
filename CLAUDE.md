@@ -17,12 +17,13 @@ This is your main starting point - it contains everything you need to understand
 ### Documentation Structure:
 ```
 docs_claude/
-├── CLAUDE_CONTEXT.md         # 🎯 START HERE - Primary context
-├── TODO.md                   # ⚡ PRIMARY TASK LIST - Only active TODO file
-├── ARCHITECTURE_REFERENCE.md # Deep technical specifications
-├── FILE_CATALOG.md           # Quick file lookup
-├── DEPLOYMENT_GUIDE.md       # Deployment procedures
-└── HISTORY.md                # Completed work log
+├── CLAUDE_CONTEXT.md                      # 🎯 START HERE - Primary context
+├── TODO.md                                # ⚡ PRIMARY TASK LIST - Only active TODO file
+├── COREMACHINE_PLATFORM_ARCHITECTURE.md   # 🏗️ NEW - Two-layer architecture (26 OCT 2025)
+├── ARCHITECTURE_REFERENCE.md              # Deep technical specifications
+├── FILE_CATALOG.md                        # Quick file lookup
+├── DEPLOYMENT_GUIDE.md                    # Deployment procedures
+└── HISTORY.md                             # Completed work log
 ```
 
 ### Quick Access Commands:

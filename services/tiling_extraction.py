@@ -2,19 +2,19 @@
 # CLAUDE CONTEXT - SERVICE - TILING EXTRACTION
 # ============================================================================
 # EPOCH: 4 - ACTIVE ✅
-# STATUS: Service - Sequential tile extraction with progress reporting
+# STATUS: Service - Sequential tile extraction with VSI + BytesIO (zero /tmp usage)
 # PURPOSE: Extract tiles from large rasters following tiling scheme (Stage 2)
-# LAST_REVIEWED: 24 OCT 2025
+# LAST_REVIEWED: 25 OCT 2025
 # EXPORTS: extract_tiles() - Main handler function
 # INTERFACES: Handler pattern for task execution (Stage 2 of raster tiling)
 # PYDANTIC_MODELS: None (returns dict)
-# DEPENDENCIES: rasterio, azure-storage-blob, config
-# SOURCE: Bronze container rasters, tiling scheme GeoJSON from Stage 1
+# DEPENDENCIES: rasterio (VSI), azure-storage-blob, config
+# SOURCE: Azure Blob Storage via VSI (/vsicurl/), tiling scheme GeoJSON from Stage 1
 # SCOPE: Stage 2 of Big Raster ETL workflow (sequential extraction)
 # VALIDATION: Input validation via rasterio, bounds validation
-# PATTERNS: Handler pattern, sequential processing with progress updates
+# PATTERNS: VSI cloud-native access, BytesIO in-memory processing, zero /tmp disk usage
 # ENTRY_POINTS: Called by task processor with parameters dict
-# ARCHITECTURE: Extracts raw tiles in source CRS (reprojection happens in Stage 3)
+# ARCHITECTURE: VSI /vsicurl/ + BytesIO eliminates /tmp disk usage (500MB limit)
 # ============================================================================
 
 """
@@ -34,15 +34,21 @@ Why Sequential Extraction?:
 3. **Progress Reporting**: Single task can update metadata with progress
 4. **Simplicity**: No coordination needed between tasks
 
+VSI Architecture (NEW - 25 OCT 2025):
+- **ZERO /tmp disk usage**: Reads directly from Azure Blob via /vsicurl/
+- **In-memory processing**: BytesIO for tile buffers (no disk writes)
+- **Eliminates 500MB /tmp limit**: Can process unlimited-size rasters
+- **Faster**: No download time, no disk I/O overhead
+
 Example:
     A 11 GB raster with 204 tiles:
-    - Stage 1: Generate tiling scheme (1 task)
-    - Stage 2: Extract 204 tiles sequentially (~3 minutes, THIS service)
+    - Stage 1: Generate tiling scheme via VSI (1 task, ~0MB /tmp)
+    - Stage 2: Extract 204 tiles via VSI + BytesIO (~3 minutes, ~0MB /tmp)
     - Stage 3: Convert 204 tiles to COG in parallel (204 tasks)
     - Stage 4: Generate MosaicJSON + STAC (1 task)
 
 Author: Robert and Geospatial Claude Legion
-Date: 24 OCT 2025
+Date: 25 OCT 2025
 """
 
 import json
@@ -150,13 +156,14 @@ def extract_tiles(params: dict) -> dict:
     """
     Extract tiles from large raster - Stage 2 of Big Raster ETL.
 
-    Downloads raster and tiling scheme from blob storage, extracts all tiles
-    sequentially, uploads tiles to blob storage.
+    Uses GDAL VSI (/vsicurl/) to read raster directly from Azure Blob Storage,
+    extracts tiles in-memory using BytesIO, uploads to blob storage.
 
     CRITICAL: This is a LONG-RUNNING task that extracts ALL tiles sequentially.
     - Sequential I/O is MUCH faster than parallel random access
     - Progress is reported via task metadata updates
     - Stage 3 will create N parallel tasks for COG conversion
+    - ZERO /tmp disk usage (VSI + BytesIO eliminates 500MB limit)
 
     Args:
         params: Task parameters dict with:
@@ -189,6 +196,8 @@ def extract_tiles(params: dict) -> dict:
         }
     """
     from infrastructure.blob import BlobRepository
+    import rasterio
+    from rasterio.windows import Window
 
     start_time = datetime.now(timezone.utc)
 
@@ -217,36 +226,113 @@ def extract_tiles(params: dict) -> dict:
         # Initialize repository
         blob_repo = BlobRepository()
 
-        # Download raster to temporary file (streaming to avoid OOM)
-        print(f"📥 Streaming raster to disk: {blob_name}")
-        with tempfile.NamedTemporaryFile(suffix=".tif", delete=False) as tmp_raster:
-            tmp_raster_path = tmp_raster.name
-            # Stream in 128MB chunks (optimal for large files on Azure Functions)
-            # 128MB = 3.7% of EP1 RAM, safe and 30x faster than 4MB default
-            chunk_size = 128 * 1024 * 1024  # 128 MB
-            for chunk in blob_repo.read_blob_chunked(container_name, blob_name, chunk_size=chunk_size):
-                tmp_raster.write(chunk)
+        # Generate SAS URL for VSI access (4-hour expiry for long-running task)
+        print(f"🌐 Generating SAS URL for VSI access: {blob_name}")
+        sas_url = blob_repo.get_blob_url_with_sas(
+            container_name=container_name,
+            blob_name=blob_name,
+            hours=4  # 4-hour buffer for long-running extraction (204 tiles ~3-4 min)
+        )
+
+        # Create VSI path for GDAL to access blob via HTTP
+        vsi_raster_path = f"/vsicurl/{sas_url}"
+        print(f"✅ VSI path created: /vsicurl/https://...")
+        print(f"   Reading raster directly from Azure Blob Storage (no /tmp download)")
 
         # Download tiling scheme
         print(f"📥 Downloading tiling scheme: {tiling_scheme_blob}")
         tiling_scheme_json = blob_repo.read_blob(tiling_scheme_container, tiling_scheme_blob)
         tiling_scheme = json.loads(tiling_scheme_json)
 
-        # Create temporary directory for tiles
-        tmp_tiles_dir = Path(tempfile.mkdtemp(prefix="tiles_"))
+        # Extract tiles directly from VSI path and upload in-memory (no /tmp writes)
+        print(f"📦 Extracting and uploading tiles via VSI + BytesIO...")
+        extraction_start = datetime.now(timezone.utc)
+        tile_blobs = []
+        tiles = tiling_scheme['features']
+        total_tiles = len(tiles)
 
+        # Import BytesIO for in-memory tile handling
+        from io import BytesIO
+
+        # Open source raster via VSI (no /tmp download)
         try:
-            # Define progress callback for metadata updates
-            def progress_callback(tile_idx, total_tiles, tile_id, elapsed_sec):
-                """Update task metadata with progress."""
+            src = rasterio.open(vsi_raster_path)
+        except Exception as e:
+            # VSI-specific error handling
+            error_str = str(e)
+            if "HTTP" in error_str or "404" in error_str or "403" in error_str:
+                raise ValueError(f"VSI HTTP error accessing blob: {error_str}. Check SAS URL validity and blob existence.")
+            elif "timeout" in error_str.lower():
+                raise ValueError(f"VSI timeout accessing blob: {error_str}. Blob may be too large or network issues.")
+            else:
+                raise  # Re-raise other errors
+
+        with src:
+            print(f"✅ Opened source raster via VSI: {src.width} × {src.height} pixels")
+            print(f"   CRS: {src.crs}")
+            print(f"   Processing {total_tiles} tiles...")
+            print("")
+
+            for i, tile_feature in enumerate(tiles):
+                # Extract tile metadata
+                props = tile_feature['properties']
+                tile_id = props['tile_id']
+                pw = props['pixel_window']
+
+                # Read tile data from VSI raster into memory
+                window = Window(
+                    col_off=pw['col_off'],
+                    row_off=pw['row_off'],
+                    width=pw['width'],
+                    height=pw['height']
+                )
+                tile_data = src.read(window=window)
+                tile_transform = src.window_transform(window)
+
+                # Write tile to BytesIO (in-memory buffer)
+                tile_buffer = BytesIO()
+                profile = src.profile.copy()
+                profile.update({
+                    'width': pw['width'],
+                    'height': pw['height'],
+                    'transform': tile_transform
+                })
+
+                with rasterio.open(tile_buffer, 'w', **profile) as dst:
+                    dst.write(tile_data)
+
+                # Upload directly to blob storage from memory
+                tile_buffer.seek(0)  # Reset buffer position for reading
+                blob_name_full = f"{output_prefix}{tile_id}.tif"
+
+                blob_repo.write_blob(
+                    container=output_container,
+                    blob_path=blob_name_full,
+                    data=tile_buffer,
+                    overwrite=True,
+                    content_type="image/tiff"
+                )
+
+                tile_blobs.append(blob_name_full)
+
+                # Progress reporting
+                elapsed = (datetime.now(timezone.utc) - extraction_start).total_seconds()
+                progress = (i + 1) / total_tiles
+                eta = (elapsed / progress) - elapsed if progress > 0 else 0
+
+                # Log every 10 tiles or at completion
+                if (i + 1) % 10 == 0 or (i + 1) == total_tiles:
+                    print(f"   [{i+1:3d}/{total_tiles:3d}] {tile_id:15s} [{progress*100:5.1f}% - ETA: {eta:5.1f}s]")
+
+                # Update task metadata with progress (if provided)
                 if repository and task_id:
                     progress_metadata = {
                         "extraction_progress": {
-                            "tiles_extracted": tile_idx,
+                            "tiles_extracted": i + 1,
                             "total_tiles": total_tiles,
                             "current_tile": tile_id,
-                            "elapsed_seconds": round(elapsed_sec, 2),
-                            "percent_complete": round((tile_idx / total_tiles) * 100, 2)
+                            "elapsed_seconds": round(elapsed, 2),
+                            "percent_complete": round(progress * 100, 2)
                         }
                     }
                     try:
@@ -254,76 +340,33 @@ def extract_tiles(params: dict) -> dict:
                     except Exception as e:
                         print(f"⚠️  Failed to update metadata: {e}")
 
-            # Extract tiles
-            extraction_start = datetime.now(timezone.utc)
-            extracted_tiles = extract_tiles_from_raster(
-                raster_path=tmp_raster_path,
-                tiling_scheme=tiling_scheme,
-                output_dir=tmp_tiles_dir,
-                progress_callback=progress_callback
-            )
-            extraction_time = (datetime.now(timezone.utc) - extraction_start).total_seconds()
+        # Calculate total processing time
+        processing_time = (datetime.now(timezone.utc) - start_time).total_seconds()
+        extraction_time = (datetime.now(timezone.utc) - extraction_start).total_seconds()
 
-            # Upload tiles to blob storage
-            print(f"\n📤 Uploading {len(extracted_tiles)} tiles to {output_container}/{output_prefix}")
-            upload_start = datetime.now(timezone.utc)
-            tile_blobs = []
+        print(f"\n✅ Tile extraction complete!")
+        print(f"   Extracted + Uploaded: {len(tile_blobs)} tiles in {extraction_time:.1f}s")
+        print(f"   Total: {processing_time:.1f}s")
+        print(f"   💾 /tmp disk usage: ~0MB (VSI + BytesIO in-memory processing)")
 
-            for i, tile_path in enumerate(extracted_tiles):
-                tile_name = tile_path.name
-                blob_name_full = f"{output_prefix}{tile_name}"
-
-                with open(tile_path, 'rb') as tile_data:
-                    blob_repo.write_blob(
-                        container=output_container,
-                        blob_path=blob_name_full,
-                        data=tile_data,
-                        overwrite=True,
-                        content_type="image/tiff"
-                    )
-
-                tile_blobs.append(blob_name_full)
-
-                # Log upload progress every 20 tiles
-                if (i + 1) % 20 == 0 or (i + 1) == len(extracted_tiles):
-                    progress = (i + 1) / len(extracted_tiles)
-                    print(f"   Uploaded: [{i+1:3d}/{len(extracted_tiles):3d}] ({progress*100:5.1f}%)")
-
-            upload_time = (datetime.now(timezone.utc) - upload_start).total_seconds()
-
-            # Calculate total processing time
-            processing_time = (datetime.now(timezone.utc) - start_time).total_seconds()
-
-            print(f"\n✅ Tile extraction complete!")
-            print(f"   Extracted: {len(extracted_tiles)} tiles in {extraction_time:.1f}s")
-            print(f"   Uploaded: {len(tile_blobs)} tiles in {upload_time:.1f}s")
-            print(f"   Total: {processing_time:.1f}s")
-
-            return {
-                "success": True,
-                "result": {
-                    "tiles_blob_prefix": output_prefix,
-                    "tiles_container": output_container,
-                    "total_tiles": len(tile_blobs),
-                    "tile_blobs": tile_blobs,
-                    "source_blob": blob_name,
-                    "source_container": container_name,
-                    "tiling_scheme_blob": tiling_scheme_blob,
-                    "source_crs": tiling_scheme['metadata']['source_crs'],
-                    # Pass through raster metadata from Stage 1 for Stage 3 COG creation
-                    "raster_metadata": tiling_scheme['metadata'].get('raster_metadata', {}),
-                    "extraction_time_seconds": round(extraction_time, 2),
-                    "upload_time_seconds": round(upload_time, 2),
-                    "processing_time_seconds": round(processing_time, 2)
-                }
+        return {
+            "success": True,
+            "result": {
+                "tiles_blob_prefix": output_prefix,
+                "tiles_container": output_container,
+                "total_tiles": len(tile_blobs),
+                "tile_blobs": tile_blobs,
+                "source_blob": blob_name,
+                "source_container": container_name,
+                "tiling_scheme_blob": tiling_scheme_blob,
+                "source_crs": tiling_scheme['metadata']['source_crs'],
+                # Pass through raster metadata from Stage 1 for Stage 3 COG creation
+                "raster_metadata": tiling_scheme['metadata'].get('raster_metadata', {}),
+                "extraction_time_seconds": round(extraction_time, 2),
+                "upload_time_seconds": round(extraction_time, 2),  # Combined now
+                "processing_time_seconds": round(processing_time, 2)
             }
-
-        finally:
-            # Clean up temporary files
-            for tile_path in tmp_tiles_dir.glob("*.tif"):
-                tile_path.unlink(missing_ok=True)
-            tmp_tiles_dir.rmdir()
-            Path(tmp_raster_path).unlink(missing_ok=True)
+        }
 
     except Exception as e:
         processing_time = (datetime.now(timezone.utc) - start_time).total_seconds()

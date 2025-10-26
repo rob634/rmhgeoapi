@@ -963,10 +963,26 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
             try:
                 import rasterio
                 from rasterio.env import Env
+                from infrastructure.factory import RepositoryFactory
+                from config import get_config
 
-                # Test /vsicurl/ with small public COG from Sentinel-2 AWS dataset
-                # Using a tiny 10m band file (~500KB) for fast health check
-                test_url = "https://sentinel-cogs.s3.us-west-2.amazonaws.com/sentinel-s2-l2a-cogs/53/H/PA/2021/7/S2A_53HPA_20210723_0_L2A/B01.tif"
+                # Get configuration
+                config = get_config()
+
+                # Get BlobRepository to generate SAS URL
+                blob_repo = RepositoryFactory.create_blob_repository()
+
+                # Test with dctest3_R1C2.tif from bronze container
+                test_blob = "dctest3_R1C2.tif"
+                test_container = config.bronze_container_name
+
+                # Generate SAS URL (4 hour expiry for health check stability)
+                test_url = blob_repo.get_blob_url_with_sas(
+                    container_name=test_container,
+                    blob_name=test_blob,
+                    hours=4
+                )
+
                 vsi_path = f"/vsicurl/{test_url}"
 
                 # Test with timeout to prevent hanging
@@ -985,7 +1001,8 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                                 "gdal_version": rasterio.__gdal_version__,
                                 "rasterio_version": rasterio.__version__,
                                 "test_results": {
-                                    "test_file": "Sentinel-2 L2A B01 (10m resolution)",
+                                    "test_file": f"dctest3_R1C2.tif (bronze container)",
+                                    "container": test_container,
                                     "file_size": f"{width}x{height}",
                                     "bands": bands,
                                     "driver": driver,
@@ -998,7 +1015,7 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                                     "azure_blob_sas_compatible": True
                                 },
                                 "big_raster_etl_ready": True,
-                                "note": "/vsicurl/ works - can read directly from Azure Blob Storage with SAS URLs"
+                                "note": f"/vsicurl/ works with Azure Blob Storage SAS URLs - tested with {test_container}/{test_blob}"
                             }
                     except Exception as open_error:
                         # Failed to open file via /vsicurl/
@@ -1009,7 +1026,8 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                             "rasterio_version": rasterio.__version__,
                             "error": f"Failed to open test file: {str(open_error)[:200]}",
                             "error_type": type(open_error).__name__,
-                            "test_url": test_url,
+                            "test_url": f"{test_container}/{test_blob}",
+                            "test_container": test_container,
                             "big_raster_etl_ready": False,
                             "impact": "Big Raster ETL will fail - cannot read from cloud storage without downloading"
                         }

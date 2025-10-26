@@ -443,61 +443,69 @@ def generate_tiling_scheme(params: dict) -> dict:
         # Initialize repository
         blob_repo = BlobRepository()
 
-        # Download raster to temporary file (streaming to avoid OOM)
-        print(f"📥 Streaming raster to disk: {blob_name}")
-        with tempfile.NamedTemporaryFile(suffix=".tif", delete=False) as tmp_file:
-            tmp_path = tmp_file.name
-            # Stream in 128MB chunks (optimal for large files on Azure Functions)
-            # 128MB = 3.7% of EP1 RAM, safe and 30x faster than 4MB default
-            chunk_size = 128 * 1024 * 1024  # 128 MB
-            for chunk in blob_repo.read_blob_chunked(container_name, blob_name, chunk_size=chunk_size):
-                tmp_file.write(chunk)
+        # Generate SAS URL for VSI access (2-hour expiry for processing buffer)
+        print(f"🌐 Generating SAS URL for VSI access: {blob_name}")
+        sas_url = blob_repo.get_blob_url_with_sas(
+            container_name=container_name,
+            blob_name=blob_name,
+            hours=2  # 2-hour buffer for large file processing
+        )
 
+        # Create VSI path for GDAL to access blob via HTTP
+        vsi_path = f"/vsicurl/{sas_url}"
+        print(f"✅ VSI path created: /vsicurl/https://...")
+        print(f"   Reading raster directly from Azure Blob Storage (no /tmp download)")
+
+        # Generate tiling scheme using VSI (no temporary file needed)
+        print(f"🔲 Generating tiling scheme via VSI...")
         try:
-            # Generate tiling scheme
-            print(f"🔲 Generating tiling scheme...")
             geojson = generate_tiling_scheme_from_raster(
-                raster_path=tmp_path,
+                raster_path=vsi_path,
                 tile_size=tile_size,
                 overlap=overlap
             )
+        except Exception as e:
+            # VSI-specific error handling
+            error_str = str(e)
+            if "HTTP" in error_str or "404" in error_str or "403" in error_str:
+                raise ValueError(f"VSI HTTP error accessing blob: {error_str}. Check SAS URL validity and blob existence.")
+            elif "timeout" in error_str.lower():
+                raise ValueError(f"VSI timeout accessing blob: {error_str}. Blob may be too large or network issues.")
+            else:
+                raise  # Re-raise other errors
 
-            # Upload tiling scheme to blob storage
-            print(f"📤 Uploading tiling scheme: {output_blob_name}")
-            geojson_bytes = json.dumps(geojson, indent=2).encode('utf-8')
-            blob_repo.write_blob(
-                container=output_container,
-                blob_path=output_blob_name,
-                data=geojson_bytes,
-                content_type="application/geo+json"
-            )
+        # Upload tiling scheme to blob storage
+        print(f"📤 Uploading tiling scheme: {output_blob_name}")
+        geojson_bytes = json.dumps(geojson, indent=2).encode('utf-8')
+        blob_repo.write_blob(
+            container=output_container,
+            blob_path=output_blob_name,
+            data=geojson_bytes,
+            content_type="application/geo+json"
+        )
 
-            # Calculate processing time
-            processing_time = (datetime.now(timezone.utc) - start_time).total_seconds()
+        # Calculate processing time
+        processing_time = (datetime.now(timezone.utc) - start_time).total_seconds()
 
-            print(f"✅ Tiling scheme generated: {geojson['metadata']['total_tiles']} tiles")
+        print(f"✅ Tiling scheme generated: {geojson['metadata']['total_tiles']} tiles")
 
-            return {
-                "success": True,
-                "result": {
-                    "tiling_scheme_blob": output_blob_name,
-                    "tiling_scheme_container": output_container,
-                    "total_tiles": geojson['metadata']['total_tiles'],
-                    "grid": geojson['metadata']['grid'],
-                    "source_blob": blob_name,
-                    "source_container": container_name,
-                    "source_crs": geojson['metadata']['source_crs'],
-                    "target_crs": geojson['metadata']['target_crs'],
-                    "target_bounds": geojson['metadata']['target_bounds'],
-                    "target_dimensions": geojson['metadata']['target_dimensions'],
-                    "target_resolution": geojson['metadata']['target_resolution'],
-                    "processing_time_seconds": round(processing_time, 2)
-                }
+        return {
+            "success": True,
+            "result": {
+                "tiling_scheme_blob": output_blob_name,
+                "tiling_scheme_container": output_container,
+                "total_tiles": geojson['metadata']['total_tiles'],
+                "grid": geojson['metadata']['grid'],
+                "source_blob": blob_name,
+                "source_container": container_name,
+                "source_crs": geojson['metadata']['source_crs'],
+                "target_crs": geojson['metadata']['target_crs'],
+                "target_bounds": geojson['metadata']['target_bounds'],
+                "target_dimensions": geojson['metadata']['target_dimensions'],
+                "target_resolution": geojson['metadata']['target_resolution'],
+                "processing_time_seconds": round(processing_time, 2)
             }
-
-        finally:
-            # Clean up temporary file
-            Path(tmp_path).unlink(missing_ok=True)
+        }
 
     except Exception as e:
         processing_time = (datetime.now(timezone.utc) - start_time).total_seconds()

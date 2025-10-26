@@ -194,6 +194,10 @@ from triggers.ingest_vector import ingest_vector_trigger
 from triggers.test_raster_create import test_raster_create_trigger
 from triggers.test_duckdb_overture import test_duckdb_overture_trigger
 
+# Platform Service Layer triggers (25 OCT 2025)
+from triggers.trigger_platform import platform_request_submit
+from triggers.trigger_platform_status import platform_request_status
+
 # ========================================================================
 # PHASE 2: EXPLICIT REGISTRATION PATTERN (Parallel with decorators)
 # ========================================================================
@@ -640,6 +644,66 @@ def stac_extract(req: func.HttpRequest) -> func.HttpResponse:
         STAC Item metadata and insertion result
     """
     return stac_extract_trigger.handle_request(req)
+
+
+# ============================================================================
+# PLATFORM SERVICE LAYER ENDPOINTS (25 OCT 2025)
+# ============================================================================
+# Platform orchestration layer above CoreMachine for external applications (DDH)
+# Follows same patterns as Job→Task: PlatformRequest→Jobs→Tasks
+
+@app.route(route="platform/submit", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
+async def platform_submit(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Submit a platform request from external application (DDH).
+
+    POST /api/platform/submit
+
+    Body:
+        {
+            "dataset_id": "landsat-8",
+            "resource_id": "LC08_L1TP_044034_20210622",
+            "version_id": "v1.0",
+            "data_type": "raster",
+            "source_location": "https://rmhazuregeo.blob.core.windows.net/bronze/...",
+            "parameters": {},
+            "client_id": "ddh"
+        }
+
+    Returns:
+        {
+            "success": true,
+            "request_id": "abc123...",
+            "status": "processing",
+            "jobs_created": ["job1", "job2", "job3"],
+            "monitor_url": "/api/platform/status/abc123"
+        }
+    """
+    return await platform_request_submit(req)
+
+
+@app.route(route="platform/status/{request_id}", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+async def platform_status_by_id(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Get status of a platform request.
+
+    GET /api/platform/status/{request_id}
+
+    Returns detailed status including all CoreMachine jobs.
+    """
+    return await platform_request_status(req)
+
+
+@app.route(route="platform/status", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+async def platform_status_list(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    List all platform requests.
+
+    GET /api/platform/status?limit=100&status=pending
+
+    Returns list of all platform requests with optional filtering.
+    """
+    return await platform_request_status(req)
 
 
 @app.route(route="stac/vector", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)

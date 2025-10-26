@@ -132,7 +132,7 @@ class ProcessLargeRasterWorkflow(JobBase):
             "type": "int",
             "required": False,
             "default": 512,
-            "description": "Overlap in pixels (default: 512, matches COG blocksize)"
+            "description": "Overlap in pixels (default: 512, matches COG blocksize) - CRITICAL: Must be 512 for production to align with COG internal tiles"
         },
         "raster_type": {
             "type": "str",
@@ -221,6 +221,7 @@ class ProcessLargeRasterWorkflow(JobBase):
             raise ValueError("overlap must be a non-negative integer")
         if overlap >= tile_size:
             raise ValueError(f"overlap ({overlap}) must be less than tile_size ({tile_size})")
+        # NOTE: overlap != 512 is FOR TESTING ONLY - production must use 512 to match COG blocksize
         validated["overlap"] = overlap
 
         # Validate raster_type
@@ -455,8 +456,7 @@ class ProcessLargeRasterWorkflow(JobBase):
                 "optimal_cog_settings": {}
             }
 
-            logger.info(f"Stage 3: Creating {len(tile_blobs)} COG conversion tasks")
-            logger.info(f"Raster metadata: {raster_type}")
+            # Stage 3: Creating N COG conversion tasks (one per tile)
 
             # Create task for each tile
             tasks = []

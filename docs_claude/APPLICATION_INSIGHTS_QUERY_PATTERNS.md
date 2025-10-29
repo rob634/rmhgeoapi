@@ -310,6 +310,133 @@ chmod +x /tmp/query_ai.sh && /tmp/query_ai.sh | python3 -m json.tool
 
 ---
 
+## 🚨 CRITICAL: Azure Functions Python Logging Severity Mapping Issue
+
+**Date Discovered**: 28 OCT 2025
+**Status**: KNOWN AZURE SDK BUG - No Fix Available
+
+### The Problem
+
+Azure Functions Python SDK **incorrectly maps Python logging levels to Application Insights severity levels**. Specifically:
+
+| Python Level | Python Value | Expected AI Severity | Actual AI Severity | Status |
+|--------------|--------------|---------------------|-------------------|--------|
+| `logging.DEBUG` | 10 | 0 (DEBUG) | **1 (INFO)** | ❌ WRONG |
+| `logging.INFO` | 20 | 1 (INFO) | 1 (INFO) | ✅ Correct |
+| `logging.WARNING` | 30 | 2 (WARNING) | 2 (WARNING) | ✅ Correct |
+| `logging.ERROR` | 40 | 3 (ERROR) | 3 (ERROR) | ✅ Correct |
+
+**Impact**: All `logger.debug()` calls are captured but mis-categorized as severity 1 (INFO) instead of severity 0 (DEBUG).
+
+### Evidence
+
+When querying Application Insights, you'll see messages with `"level": "DEBUG"` in the JSON content, but Application Insights reports them as `severityLevel: 1`:
+
+```json
+{
+  "timestamp": "2025-10-28T19:21:23.861Z",
+  "severityLevel": 1,    // ❌ WRONG - should be 0
+  "message": "{\"timestamp\": \"2025-10-28T19:21:23.861396+00:00\", \"level\": \"DEBUG\", \"message\": \"🔍 [CHECKPOINT_BLOB_REPO] Initializing...\"}"
+}
+```
+
+### Root Cause
+
+The issue occurs when Python loggers propagate to Azure's root logger:
+1. `util_logger.py` creates loggers with `logger.propagate = True` (line 422)
+2. Logs flow to Azure's Application Insights SDK
+3. Azure SDK maps severity based on ordinal values, treating `logging.DEBUG` (10) as INFO instead of DEBUG
+
+### Workaround: Query by Message Content, Not Severity
+
+**❌ DON'T search by severity level:**
+```kql
+traces
+| where timestamp >= ago(15m)
+| where severityLevel == 0  // ❌ This returns ZERO DEBUG logs
+| order by timestamp desc
+```
+
+**✅ DO search by JSON message content:**
+```kql
+traces
+| where timestamp >= ago(15m)
+| where message contains '"level": "DEBUG"'  // ✅ This works!
+| order by timestamp desc
+```
+
+### Verified Working Pattern
+
+```bash
+cat > /tmp/query_debug_logs.sh << 'EOF'
+#!/bin/bash
+TOKEN=$(az account get-access-token --resource https://api.applicationinsights.io --query accessToken -o tsv)
+curl -s -H "Authorization: Bearer $TOKEN" \
+  "https://api.applicationinsights.io/v1/apps/829adb94-5f5c-46ae-9f00-18e731529222/query" \
+  --data-urlencode "query=traces | where timestamp >= ago(15m) | where message contains '\"level\": \"DEBUG\"' | order by timestamp desc | take 20" \
+  -G
+EOF
+chmod +x /tmp/query_debug_logs.sh && /tmp/query_debug_logs.sh | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+rows = data.get('tables', [{}])[0].get('rows', [])
+print(f'Found {len(rows)} DEBUG logs (all mis-categorized as severity 1)\n')
+for row in rows[:10]:
+    ts = row[0].split('T')[1][:12]
+    msg_json = json.loads(row[1])
+    msg = msg_json.get('message', '')[:100]
+    print(f'🐛 {ts} | {msg}')
+"
+```
+
+### Configuration Requirements
+
+For DEBUG logs to be emitted (even if mis-categorized), ensure:
+
+1. **Environment Variable Set** in Azure Functions:
+   ```bash
+   DEBUG_LOGGING=true
+   ```
+
+2. **host.json Configuration**:
+   ```json
+   {
+     "logging": {
+       "logLevel": {
+         "default": "Debug"  // Can be "Warning" - Python logger controls emission
+       }
+     }
+   }
+   ```
+
+The `DEBUG_LOGGING` environment variable is checked by `util_logger.py` (line 326):
+```python
+default_level = LogLevel.DEBUG if os.getenv('DEBUG_LOGGING', '').lower() == 'true' else LogLevel.INFO
+```
+
+### Verification
+
+After setting `DEBUG_LOGGING=true` and restarting the function app, verify DEBUG logs appear:
+
+```bash
+# Check if DEBUG_LOGGING is set
+az functionapp config appsettings list --name rmhgeoapibeta --resource-group rmhazure_rg --query "[?name=='DEBUG_LOGGING']"
+
+# Search for DEBUG logs by content (not severity)
+# Use the pattern above to query for '"level": "DEBUG"' in message content
+```
+
+### Why This Matters
+
+DEBUG logs contain critical information like:
+- `CHECKPOINT_*` markers for tracking execution flow
+- Detailed parameter values for debugging
+- Internal state information not exposed at INFO level
+
+Without this workaround, these logs appear "invisible" when searching by severity level, making debugging nearly impossible.
+
+---
+
 ## ⚠️ Important Notes
 
 ### Token Expiration
@@ -364,5 +491,6 @@ Script files work because:
 
 ---
 
-**Last Updated**: 3 OCT 2025
+**Last Updated**: 28 OCT 2025
 **Verified Working**: All patterns tested against `rmhgeoapibeta` Function App
+**Critical Update**: Azure Functions Python severity mapping issue documented (28 OCT 2025)

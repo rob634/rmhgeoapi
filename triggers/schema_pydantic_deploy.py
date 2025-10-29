@@ -318,8 +318,81 @@ class PydanticSchemaDeployTrigger:
                             "statement": stmt_preview,
                             "error": error_msg
                         })
-                
-                # Commit all changes
+
+                # Deploy Platform schema (for Platform-as-a-Service layer)
+                # Added 26 OCT 2025 - Centralized schema deployment (Issue #3)
+                # Re-enabled after fixing orphaned except block
+                self.logger.info("📦 Deploying Platform schema (Platform-as-a-Service layer)...")
+
+                platform_schema_statements = [
+                    sql.SQL("CREATE SCHEMA IF NOT EXISTS {schema}").format(
+                        schema=sql.Identifier("platform")
+                    ),
+                    sql.SQL("""
+                        CREATE TABLE IF NOT EXISTS {schema}.{table} (
+                            request_id VARCHAR(32) PRIMARY KEY,
+                            dataset_id VARCHAR(255) NOT NULL,
+                            resource_id VARCHAR(255) NOT NULL,
+                            version_id VARCHAR(50) NOT NULL,
+                            data_type VARCHAR(50) NOT NULL,
+                            status VARCHAR(20) NOT NULL DEFAULT 'pending',
+                            job_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+                            parameters JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+                            metadata JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+                            result_data JSONB,
+                            created_at TIMESTAMPTZ DEFAULT NOW(),
+                            updated_at TIMESTAMPTZ DEFAULT NOW()
+                        )
+                    """).format(
+                        schema=sql.Identifier("platform"),
+                        table=sql.Identifier("requests")
+                    ),
+                    sql.SQL("CREATE INDEX IF NOT EXISTS {index} ON {schema}.{table}({column})").format(
+                        index=sql.Identifier("idx_platform_status"),
+                        schema=sql.Identifier("platform"),
+                        table=sql.Identifier("requests"),
+                        column=sql.Identifier("status")
+                    ),
+                    sql.SQL("CREATE INDEX IF NOT EXISTS {index} ON {schema}.{table}({column})").format(
+                        index=sql.Identifier("idx_platform_dataset"),
+                        schema=sql.Identifier("platform"),
+                        table=sql.Identifier("requests"),
+                        column=sql.Identifier("dataset_id")
+                    ),
+                    sql.SQL("CREATE INDEX IF NOT EXISTS {index} ON {schema}.{table}({column} DESC)").format(
+                        index=sql.Identifier("idx_platform_created"),
+                        schema=sql.Identifier("platform"),
+                        table=sql.Identifier("requests"),
+                        column=sql.Identifier("created_at")
+                    ),
+                    sql.SQL("""
+                        CREATE TABLE IF NOT EXISTS {schema}.{table} (
+                            request_id VARCHAR(32) NOT NULL,
+                            job_id VARCHAR(32) NOT NULL,
+                            job_type VARCHAR(100) NOT NULL,
+                            sequence INTEGER NOT NULL DEFAULT 1,
+                            status VARCHAR(20) NOT NULL DEFAULT 'pending',
+                            created_at TIMESTAMPTZ DEFAULT NOW(),
+                            PRIMARY KEY (request_id, job_id)
+                        )
+                    """).format(
+                        schema=sql.Identifier("platform"),
+                        table=sql.Identifier("request_jobs")
+                    ),
+                ]
+
+                platform_stmt_count = 0
+                for platform_stmt in platform_schema_statements:
+                    try:
+                        cur.execute(platform_stmt)
+                        platform_stmt_count += 1
+                    except Exception as platform_error:
+                        if "already exists" not in str(platform_error).lower():
+                            self.logger.warning(f"Platform schema error (non-fatal): {platform_error}")
+
+                self.logger.info(f"✅ Platform schema deployed: {platform_stmt_count} statements executed")
+
+                # Commit all changes (app schema + platform schema)
                 conn.commit()
                 
                 # Verify deployment

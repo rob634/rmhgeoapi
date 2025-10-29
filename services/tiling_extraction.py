@@ -4,7 +4,7 @@
 # EPOCH: 4 - ACTIVE ✅
 # STATUS: Service - Sequential tile extraction with VSI + BytesIO (zero /tmp usage)
 # PURPOSE: Extract tiles from large rasters following tiling scheme (Stage 2)
-# LAST_REVIEWED: 25 OCT 2025
+# LAST_REVIEWED: 27 OCT 2025
 # EXPORTS: extract_tiles() - Main handler function
 # INTERFACES: Handler pattern for task execution (Stage 2 of raster tiling)
 # PYDANTIC_MODELS: None (returns dict)
@@ -12,9 +12,10 @@
 # SOURCE: Azure Blob Storage via VSI (/vsicurl/), tiling scheme GeoJSON from Stage 1
 # SCOPE: Stage 2 of Big Raster ETL workflow (sequential extraction)
 # VALIDATION: Input validation via rasterio, bounds validation
-# PATTERNS: VSI cloud-native access, BytesIO in-memory processing, zero /tmp disk usage
+# PATTERNS: VSI cloud-native access, BytesIO in-memory processing, job-scoped folders
 # ENTRY_POINTS: Called by task processor with parameters dict
 # ARCHITECTURE: VSI /vsicurl/ + BytesIO eliminates /tmp disk usage (500MB limit)
+# STORAGE_PATTERN: Job-scoped folders ({job_id[:8]}/tiles/) for intermediate tiles
 # ============================================================================
 
 """
@@ -41,14 +42,20 @@ VSI Architecture (NEW - 25 OCT 2025):
 - **Faster**: No download time, no disk I/O overhead
 
 Example:
-    A 11 GB raster with 204 tiles:
+    A 11 GB raster (job ID: 598fc149...) with 204 tiles:
     - Stage 1: Generate tiling scheme via VSI (1 task, ~0MB /tmp)
     - Stage 2: Extract 204 tiles via VSI + BytesIO (~3 minutes, ~0MB /tmp)
+      Writes to: 598fc149/tiles/17apr2024wv2_tile_0_0.tif (job-scoped folder)
     - Stage 3: Convert 204 tiles to COG in parallel (204 tasks)
+      Reads from: 598fc149/tiles/ (temporary intermediate storage)
+      Writes to: cogs/17apr2024wv2/ (permanent COG storage)
     - Stage 4: Generate MosaicJSON + STAC (1 task)
 
+Cleanup: Intermediate tiles (598fc149/tiles/) cleaned by SEPARATE timer trigger
+         (NOT part of ETL workflow stages)
+
 Author: Robert and Geospatial Claude Legion
-Date: 25 OCT 2025
+Date: 27 OCT 2025
 """
 
 import json
@@ -57,6 +64,11 @@ import traceback
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+# Logging
+from util_logger import LoggerFactory, ComponentType
+
+logger = LoggerFactory.create_logger(ComponentType.SERVICE, "TilingExtraction")
 
 # Lazy imports for Azure environment compatibility
 def _lazy_imports():
@@ -93,12 +105,11 @@ def extract_tiles_from_raster(
     start_time = datetime.now(timezone.utc)
     extracted_tiles = []
 
-    print(f"📦 Extracting {total_tiles} tiles from raster...")
+    logger.info(f"📦 Extracting {total_tiles} tiles from raster...")
 
     with rasterio.open(raster_path) as src:
-        print(f"✅ Opened source raster: {src.width} × {src.height} pixels")
-        print(f"   CRS: {src.crs}")
-        print("")
+        logger.info(f"✅ Opened source raster: {src.width} × {src.height} pixels")
+        logger.debug(f"   CRS: {src.crs}")
 
         for i, tile_feature in enumerate(tiles):
             props = tile_feature['properties']
@@ -140,14 +151,14 @@ def extract_tiles_from_raster(
 
             # Log every 10 tiles or at completion
             if (i + 1) % 10 == 0 or (i + 1) == total_tiles:
-                print(f"   [{i+1:3d}/{total_tiles:3d}] {tile_id:15s} [{progress*100:5.1f}% - ETA: {eta:5.1f}s]")
+                logger.info(f"   [{i+1:3d}/{total_tiles:3d}] {tile_id:15s} [{progress*100:5.1f}% - ETA: {eta:5.1f}s]")
 
             # Call progress callback if provided
             if progress_callback:
                 progress_callback(i + 1, total_tiles, tile_id, elapsed)
 
     total_duration = (datetime.now(timezone.utc) - start_time).total_seconds()
-    print(f"\n✅ Extraction complete: {total_tiles} tiles in {total_duration:.1f} seconds")
+    logger.info(f"✅ Extraction complete: {total_tiles} tiles in {total_duration:.1f} seconds")
 
     return extracted_tiles
 
@@ -171,8 +182,9 @@ def extract_tiles(params: dict) -> dict:
             - blob_name (str, REQUIRED): Bronze blob name
             - tiling_scheme_blob (str, REQUIRED): Tiling scheme blob name (from Stage 1)
             - tiling_scheme_container (str, optional): Tiling scheme container (default: same as source)
-            - output_container (str, optional): Output container (default: same as source)
-            - output_prefix (str, optional): Output blob prefix (default: "tiles/<source_stem>/")
+            - output_container (str, optional): Output container (default: config.resolved_intermediate_tiles_container)
+            - output_prefix (str, optional): Output blob prefix (default: "{job_id[:8]}/tiles/")
+            - job_id (str, optional): Job ID for folder naming (uses first 8 chars as prefix)
             - task_id (str, optional): Task ID for metadata progress updates
             - repository (object, optional): Repository instance for metadata updates
 
@@ -198,17 +210,20 @@ def extract_tiles(params: dict) -> dict:
     from infrastructure.blob import BlobRepository
     import rasterio
     from rasterio.windows import Window
-
+    logger.debug("Extract tiles imports loaded")
     start_time = datetime.now(timezone.utc)
 
     try:
+        # 🔍 CHECKPOINT 1: Handler Entry
+        logger.info(f"🔍 [CHECKPOINT_START] extract_tiles handler entry for job_id: {params.get('job_id', 'unknown')[:16]}")
+        logger.debug(f"   Parameters keys: {list(params.keys())}")
+
         # Extract parameters
         container_name = params.get("container_name")
         blob_name = params.get("blob_name")
         tiling_scheme_blob = params.get("tiling_scheme_blob")
         tiling_scheme_container = params.get("tiling_scheme_container", container_name)
-        output_container = params.get("output_container", container_name)
-        output_prefix = params.get("output_prefix")
+        job_id = params.get("job_id")
         task_id = params.get("task_id")
         repository = params.get("repository")
 
@@ -218,34 +233,70 @@ def extract_tiles(params: dict) -> dict:
                 "error": "Missing required parameters: container_name, blob_name, tiling_scheme_blob"
             }
 
+        # 🔍 CHECKPOINT 2: Config Init
+        try:
+            logger.debug(f"🔍 [CHECKPOINT_CONFIG] Loading config...")
+            from config import get_config
+            config = get_config()
+            logger.debug(f"✅ [CHECKPOINT_CONFIG] Config loaded successfully")
+        except Exception as e:
+            error_msg = f"❌ [CHECKPOINT_CONFIG] FAILED: {str(e)}\n{traceback.format_exc()}"
+            logger.error(error_msg)
+            return {"success": False, "error": error_msg}
+
+        # Resolve output container (default to intermediate tiles container from config)
+        output_container = params.get("output_container", config.resolved_intermediate_tiles_container)
+
         # Generate default output prefix if not provided
+        # Pattern: {job_id[:8]}/tiles/ (job-scoped folder for intermediate tiles)
+        output_prefix = params.get("output_prefix")
+        blob_stem = Path(blob_name).stem
+
         if not output_prefix:
-            blob_stem = Path(blob_name).stem
-            output_prefix = f"tiles/{blob_stem}/"
+            job_id_prefix = job_id[:8] if job_id else "unknown"
+            output_prefix = f"{job_id_prefix}/tiles/"
+            logger.info(f"📁 Using job-scoped folder: {output_prefix} (container: {output_container})")
 
-        # Initialize repository
-        blob_repo = BlobRepository()
+        # 🔍 CHECKPOINT 3: BlobRepository Init
+        try:
+            logger.debug(f"🔍 [CHECKPOINT_BLOB_REPO] Initializing BlobRepository...")
+            blob_repo = BlobRepository()
+            logger.debug(f"✅ [CHECKPOINT_BLOB_REPO] BlobRepository initialized successfully")
+        except Exception as e:
+            error_msg = f"❌ [CHECKPOINT_BLOB_REPO] FAILED: {str(e)}\n{traceback.format_exc()}"
+            logger.error(error_msg)
+            return {"success": False, "error": error_msg}
 
-        # Generate SAS URL for VSI access (4-hour expiry for long-running task)
-        print(f"🌐 Generating SAS URL for VSI access: {blob_name}")
-        sas_url = blob_repo.get_blob_url_with_sas(
-            container_name=container_name,
-            blob_name=blob_name,
-            hours=4  # 4-hour buffer for long-running extraction (204 tiles ~3-4 min)
-        )
+        # 🔍 CHECKPOINT 4: SAS URL Generation
+        try:
+            logger.info(f"🔍 [CHECKPOINT_SAS_URL] Generating SAS URL for VSI access: {blob_name}")
+            sas_url = blob_repo.get_blob_url_with_sas(
+                container_name=container_name,
+                blob_name=blob_name,
+                hours=4  # 4-hour buffer for long-running extraction (204 tiles ~3-4 min)
+            )
+            # Create VSI path for GDAL to access blob via HTTP
+            vsi_raster_path = f"/vsicurl/{sas_url}"
+            logger.info(f"✅ [CHECKPOINT_SAS_URL] VSI path created: /vsicurl/https://...")
+            logger.debug(f"   Reading raster directly from Azure Blob Storage (no /tmp download)")
+        except Exception as e:
+            error_msg = f"❌ [CHECKPOINT_SAS_URL] FAILED: {str(e)}\n{traceback.format_exc()}"
+            logger.error(error_msg)
+            return {"success": False, "error": error_msg}
 
-        # Create VSI path for GDAL to access blob via HTTP
-        vsi_raster_path = f"/vsicurl/{sas_url}"
-        print(f"✅ VSI path created: /vsicurl/https://...")
-        print(f"   Reading raster directly from Azure Blob Storage (no /tmp download)")
-
-        # Download tiling scheme
-        print(f"📥 Downloading tiling scheme: {tiling_scheme_blob}")
-        tiling_scheme_json = blob_repo.read_blob(tiling_scheme_container, tiling_scheme_blob)
-        tiling_scheme = json.loads(tiling_scheme_json)
+        # 🔍 CHECKPOINT 5: Tiling Scheme Download
+        try:
+            logger.info(f"🔍 [CHECKPOINT_TILING_SCHEME] Downloading tiling scheme: {tiling_scheme_blob}")
+            tiling_scheme_json = blob_repo.read_blob(tiling_scheme_container, tiling_scheme_blob)
+            tiling_scheme = json.loads(tiling_scheme_json)
+            logger.debug(f"✅ [CHECKPOINT_TILING_SCHEME] Tiling scheme loaded: {len(tiling_scheme.get('features', []))} tiles")
+        except Exception as e:
+            error_msg = f"❌ [CHECKPOINT_TILING_SCHEME] FAILED: {str(e)}\n{traceback.format_exc()}"
+            logger.error(error_msg)
+            return {"success": False, "error": error_msg}
 
         # Extract tiles directly from VSI path and upload in-memory (no /tmp writes)
-        print(f"📦 Extracting and uploading tiles via VSI + BytesIO...")
+        logger.info(f"📦 Extracting and uploading tiles via VSI + BytesIO...")
         extraction_start = datetime.now(timezone.utc)
         tile_blobs = []
         tiles = tiling_scheme['features']
@@ -254,100 +305,172 @@ def extract_tiles(params: dict) -> dict:
         # Import BytesIO for in-memory tile handling
         from io import BytesIO
 
-        # Open source raster via VSI (no /tmp download)
+        # 🔍 CHECKPOINT 6: VSI Raster Open (CRITICAL - likely failure point)
         try:
-            src = rasterio.open(vsi_raster_path)
-        except Exception as e:
-            # VSI-specific error handling
-            error_str = str(e)
-            if "HTTP" in error_str or "404" in error_str or "403" in error_str:
-                raise ValueError(f"VSI HTTP error accessing blob: {error_str}. Check SAS URL validity and blob existence.")
-            elif "timeout" in error_str.lower():
-                raise ValueError(f"VSI timeout accessing blob: {error_str}. Blob may be too large or network issues.")
-            else:
-                raise  # Re-raise other errors
+            logger.info(f"🔍 [CHECKPOINT_VSI_OPEN] Opening raster via VSI: {vsi_raster_path[:100]}...")
+            logger.debug(f"   Blob: {blob_name}")
+            logger.debug(f"   Container: {container_name}")
 
+            src = rasterio.open(vsi_raster_path)
+
+            logger.info(f"✅ [CHECKPOINT_VSI_OPEN] Raster opened successfully!")
+            logger.debug(f"   Dimensions: {src.width}×{src.height} px")
+            logger.debug(f"   Bands: {src.count}, Dtype: {src.dtypes[0]}")
+            logger.debug(f"   CRS: {src.crs}")
+        except Exception as e:
+            # VSI-specific error handling with detailed diagnostics
+            error_str = str(e)
+            error_msg = f"❌ [CHECKPOINT_VSI_OPEN] FAILED to open raster via VSI\n"
+            error_msg += f"   Blob: {blob_name}\n"
+            error_msg += f"   Container: {container_name}\n"
+            error_msg += f"   VSI Path: {vsi_raster_path[:100]}...\n"
+            error_msg += f"   Error: {error_str}\n"
+
+            # Add helpful hints based on error type
+            if "HTTP" in error_str or "404" in error_str or "403" in error_str:
+                error_msg += "\n💡 HINT: VSI HTTP error - possible causes:\n"
+                error_msg += "   - SAS URL expired or invalid\n"
+                error_msg += "   - Blob does not exist in container\n"
+                error_msg += "   - Network/firewall blocking HTTPS access\n"
+            elif "timeout" in error_str.lower():
+                error_msg += "\n💡 HINT: VSI timeout - possible causes:\n"
+                error_msg += "   - Blob is too large for initial connection\n"
+                error_msg += "   - Network latency issues\n"
+                error_msg += "   - Azure Blob throttling\n"
+            else:
+                error_msg += "\n💡 HINT: Unexpected VSI error\n"
+
+            error_msg += f"\n{traceback.format_exc()}"
+            logger.error(error_msg)
+            return {"success": False, "error": error_msg}
+
+        # 🔍 CHECKPOINT 7: Tile Extraction Loop
         with src:
-            print(f"✅ Opened source raster via VSI: {src.width} × {src.height} pixels")
-            print(f"   CRS: {src.crs}")
-            print(f"   Processing {total_tiles} tiles...")
-            print("")
+            logger.info(f"✅ Opened source raster via VSI: {src.width} × {src.height} pixels")
+            logger.debug(f"   CRS: {src.crs}")
+            logger.info(f"🔍 [CHECKPOINT_TILE_LOOP] Starting tile extraction loop for {total_tiles} tiles...")
 
             for i, tile_feature in enumerate(tiles):
-                # Extract tile metadata
-                props = tile_feature['properties']
-                tile_id = props['tile_id']
-                pw = props['pixel_window']
+                try:
+                    # 🔍 CHECKPOINT 7a: Tile Iteration Start
+                    logger.debug(f"🔍 [CHECKPOINT_TILE_{i}] Starting tile {i+1}/{total_tiles}")
 
-                # Read tile data from VSI raster into memory
-                window = Window(
-                    col_off=pw['col_off'],
-                    row_off=pw['row_off'],
-                    width=pw['width'],
-                    height=pw['height']
-                )
-                tile_data = src.read(window=window)
-                tile_transform = src.window_transform(window)
+                    # Extract tile metadata
+                    props = tile_feature['properties']
+                    tile_id = props['tile_id']
+                    pw = props['pixel_window']
+                    logger.debug(f"   Tile ID: {tile_id}, Window: {pw['width']}x{pw['height']} @ ({pw['col_off']}, {pw['row_off']})")
 
-                # Write tile to BytesIO (in-memory buffer)
-                tile_buffer = BytesIO()
-                profile = src.profile.copy()
-                profile.update({
-                    'width': pw['width'],
-                    'height': pw['height'],
-                    'transform': tile_transform
-                })
-
-                with rasterio.open(tile_buffer, 'w', **profile) as dst:
-                    dst.write(tile_data)
-
-                # Upload directly to blob storage from memory
-                tile_buffer.seek(0)  # Reset buffer position for reading
-                blob_name_full = f"{output_prefix}{tile_id}.tif"
-
-                blob_repo.write_blob(
-                    container=output_container,
-                    blob_path=blob_name_full,
-                    data=tile_buffer,
-                    overwrite=True,
-                    content_type="image/tiff"
-                )
-
-                tile_blobs.append(blob_name_full)
-
-                # Progress reporting
-                elapsed = (datetime.now(timezone.utc) - extraction_start).total_seconds()
-                progress = (i + 1) / total_tiles
-                eta = (elapsed / progress) - elapsed if progress > 0 else 0
-
-                # Log every 10 tiles or at completion
-                if (i + 1) % 10 == 0 or (i + 1) == total_tiles:
-                    print(f"   [{i+1:3d}/{total_tiles:3d}] {tile_id:15s} [{progress*100:5.1f}% - ETA: {eta:5.1f}s]")
-
-                # Update task metadata with progress (if provided)
-                if repository and task_id:
-                    progress_metadata = {
-                        "extraction_progress": {
-                            "tiles_extracted": i + 1,
-                            "total_tiles": total_tiles,
-                            "current_tile": tile_id,
-                            "elapsed_seconds": round(elapsed, 2),
-                            "percent_complete": round(progress * 100, 2)
-                        }
-                    }
+                    # 🔍 CHECKPOINT 7b: VSI Read Operation
                     try:
-                        repository.update_task_metadata(task_id, progress_metadata, merge=True)
+                        logger.debug(f"🔍 [CHECKPOINT_TILE_{i}_READ] Reading tile data from VSI...")
+                        window = Window(
+                            col_off=pw['col_off'],
+                            row_off=pw['row_off'],
+                            width=pw['width'],
+                            height=pw['height']
+                        )
+                        tile_data = src.read(window=window)
+                        tile_transform = src.window_transform(window)
+                        logger.debug(f"✅ [CHECKPOINT_TILE_{i}_READ] Tile data read successfully: {tile_data.shape}")
                     except Exception as e:
-                        print(f"⚠️  Failed to update metadata: {e}")
+                        error_msg = f"❌ [CHECKPOINT_TILE_{i}_READ] FAILED to read tile from VSI: {str(e)}"
+                        logger.error(error_msg)
+                        logger.error(traceback.format_exc())
+                        raise
+
+                    # 🔍 CHECKPOINT 7c: BytesIO Write Operation
+                    try:
+                        logger.debug(f"🔍 [CHECKPOINT_TILE_{i}_WRITE] Writing tile to BytesIO buffer...")
+                        tile_buffer = BytesIO()
+                        profile = src.profile.copy()
+                        profile.update({
+                            'width': pw['width'],
+                            'height': pw['height'],
+                            'transform': tile_transform
+                        })
+
+                        with rasterio.open(tile_buffer, 'w', **profile) as dst:
+                            dst.write(tile_data)
+
+                        logger.debug(f"✅ [CHECKPOINT_TILE_{i}_WRITE] Tile written to buffer: {tile_buffer.tell()} bytes")
+                    except Exception as e:
+                        error_msg = f"❌ [CHECKPOINT_TILE_{i}_WRITE] FAILED to write tile to BytesIO: {str(e)}"
+                        logger.error(error_msg)
+                        logger.error(traceback.format_exc())
+                        raise
+
+                    # 🔍 CHECKPOINT 7d: Blob Upload Operation
+                    try:
+                        tile_buffer.seek(0)  # Reset buffer position for reading
+                        # Pattern: {job_id[:8]}/tiles/{blob_stem}_tile_0_0.tif
+                        blob_name_full = f"{output_prefix}{blob_stem}_{tile_id}.tif"
+
+                        logger.debug(f"🔍 [CHECKPOINT_TILE_{i}_UPLOAD] Uploading to blob: {blob_name_full}...")
+                        blob_repo.write_blob(
+                            container=output_container,
+                            blob_path=blob_name_full,
+                            data=tile_buffer,
+                            overwrite=True,
+                            content_type="image/tiff"
+                        )
+                        logger.debug(f"✅ [CHECKPOINT_TILE_{i}_UPLOAD] Blob uploaded successfully")
+                    except Exception as e:
+                        error_msg = f"❌ [CHECKPOINT_TILE_{i}_UPLOAD] FAILED to upload blob: {str(e)}"
+                        logger.error(error_msg)
+                        logger.error(traceback.format_exc())
+                        raise
+
+                    tile_blobs.append(blob_name_full)
+
+                    # Progress reporting
+                    elapsed = (datetime.now(timezone.utc) - extraction_start).total_seconds()
+                    progress = (i + 1) / total_tiles
+                    eta = (elapsed / progress) - elapsed if progress > 0 else 0
+
+                    # Log every 10 tiles or at completion
+                    if (i + 1) % 10 == 0 or (i + 1) == total_tiles:
+                        logger.info(f"   [{i+1:3d}/{total_tiles:3d}] {tile_id:15s} [{progress*100:5.1f}% - ETA: {eta:5.1f}s]")
+
+                    # Update task metadata with progress (if provided)
+                    if repository and task_id:
+                        progress_metadata = {
+                            "extraction_progress": {
+                                "tiles_extracted": i + 1,
+                                "total_tiles": total_tiles,
+                                "current_tile": tile_id,
+                                "elapsed_seconds": round(elapsed, 2),
+                                "percent_complete": round(progress * 100, 2)
+                            }
+                        }
+                        try:
+                            repository.update_task_metadata(task_id, progress_metadata, merge=True)
+                        except Exception as e:
+                            logger.warning(f"⚠️  Failed to update metadata: {e}")
+
+                except Exception as e:
+                    # Catch-all for any tile processing failure
+                    error_msg = f"❌ [CHECKPOINT_TILE_{i}_FAILED] Tile {i+1}/{total_tiles} (ID: {tile_id if 'tile_id' in locals() else 'unknown'}) processing failed"
+                    logger.error(error_msg)
+                    logger.error(f"   Error: {str(e)}")
+                    logger.error(traceback.format_exc())
+
+                    return {
+                        "success": False,
+                        "error": error_msg,
+                        "error_details": str(e),
+                        "tiles_completed": i,
+                        "total_tiles": total_tiles
+                    }
 
         # Calculate total processing time
         processing_time = (datetime.now(timezone.utc) - start_time).total_seconds()
         extraction_time = (datetime.now(timezone.utc) - extraction_start).total_seconds()
 
-        print(f"\n✅ Tile extraction complete!")
-        print(f"   Extracted + Uploaded: {len(tile_blobs)} tiles in {extraction_time:.1f}s")
-        print(f"   Total: {processing_time:.1f}s")
-        print(f"   💾 /tmp disk usage: ~0MB (VSI + BytesIO in-memory processing)")
+        logger.info(f"✅ Tile extraction complete!")
+        logger.info(f"   Extracted + Uploaded: {len(tile_blobs)} tiles in {extraction_time:.1f}s")
+        logger.info(f"   Total: {processing_time:.1f}s")
+        logger.debug(f"   💾 /tmp disk usage: ~0MB (VSI + BytesIO in-memory processing)")
 
         return {
             "success": True,
@@ -371,7 +494,7 @@ def extract_tiles(params: dict) -> dict:
     except Exception as e:
         processing_time = (datetime.now(timezone.utc) - start_time).total_seconds()
         error_msg = f"Failed to extract tiles: {str(e)}\n{traceback.format_exc()}"
-        print(f"❌ ERROR: {error_msg}")
+        logger.error(f"❌ ERROR: {error_msg}")
 
         return {
             "success": False,

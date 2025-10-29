@@ -35,6 +35,7 @@ This is the "turtle above CoreMachine" in our fractal pattern.
 import json
 import logging
 import hashlib
+import traceback
 from datetime import datetime
 from typing import Dict, Any, Optional, List
 from enum import Enum
@@ -43,15 +44,49 @@ import azure.functions as func
 from pydantic import BaseModel, Field, field_validator
 from azure.servicebus import ServiceBusClient, ServiceBusMessage
 
-from config import get_settings
-from infrastructure.postgresql import PostgreSQLRepository
-from infrastructure.jobs_tasks import JobRepository
-from core.machine import CoreMachine
-from core.models import JobRecord
+# Configure logging using LoggerFactory (Application Insights integration)
+from util_logger import LoggerFactory, ComponentType
+logger = LoggerFactory.create_logger(ComponentType.TRIGGER, "trigger_platform")
 
-# Configure logging
-logger = logging.getLogger(__name__)
-settings = get_settings()
+# Import config with error handling
+try:
+    from config import get_config
+    config = get_config()
+    logger.info("✅ Platform trigger: config loaded successfully")
+except ImportError as e:
+    logger.error(f"❌ CRITICAL: Failed to import get_config from config module")
+    logger.error(f"   ImportError: {e}")
+    logger.error(f"   Traceback: {traceback.format_exc()}")
+    raise
+except Exception as e:
+    logger.error(f"❌ CRITICAL: Failed to initialize config")
+    logger.error(f"   Error: {e}")
+    logger.error(f"   Traceback: {traceback.format_exc()}")
+    raise
+
+# Import infrastructure with error handling
+try:
+    from infrastructure.postgresql import PostgreSQLRepository
+    from infrastructure.jobs_tasks import JobRepository
+    logger.info("✅ Platform trigger: infrastructure modules loaded successfully")
+except ImportError as e:
+    logger.error(f"❌ CRITICAL: Failed to import infrastructure modules")
+    logger.error(f"   ImportError: {e}")
+    logger.error(f"   Traceback: {traceback.format_exc()}")
+    raise
+
+# Import core with error handling
+try:
+    from core.machine import CoreMachine
+    from core.models.job import JobRecord
+    from core.models.enums import JobStatus
+    logger.info("✅ Platform trigger: core modules loaded successfully")
+except ImportError as e:
+    logger.error(f"❌ CRITICAL: Failed to import core modules")
+    logger.error(f"   ImportError: {e}")
+    logger.error(f"   Traceback: {traceback.format_exc()}")
+    logger.error(f"   NOTE: JobRecord should be imported from core.models.job, not core.models")
+    raise
 
 # ============================================================================
 # PLATFORM REQUEST MODELS
@@ -140,10 +175,48 @@ class PlatformRepository(PostgreSQLRepository):
 
     def __init__(self):
         super().__init__()
-        self._ensure_schema()
+
+        # ISSUE #3 - RESOLVED (26 OCT 2025): Schema Initialization Moved to Centralized System
+        # ================================================================
+        # PREVIOUS BEHAVIOR: _ensure_schema() ran on EVERY HTTP request (50+ DDL statements)
+        # IMPACT: 50-100ms overhead per request, unnecessary database locks
+        #
+        # SOLUTION IMPLEMENTED:
+        #   ✅ Platform schema now deployed via triggers/schema_pydantic_deploy.py
+        #   ✅ Repository assumes schema exists (fail fast if missing)
+        #   ✅ No DDL in constructors or request handlers (CoreMachine pattern)
+        #   ✅ Schema deployed ONCE via POST /api/db/schema/redeploy?confirm=yes
+        #
+        # PERFORMANCE IMPROVEMENT: ~50-100ms per Platform request eliminated
+        #
+        # NOTE: _ensure_schema() method kept below as emergency fallback but NOT called
+        # REFERENCE: PLATFORM_LAYER_FIXES_TODO.md Issue #3 (lines 174-282)
+        # STATUS: FIXED - 26 OCT 2025
+        # ================================================================
+        # self._ensure_schema()  # ✅ REMOVED - Schema now deployed centrally
 
     def _ensure_schema(self):
-        """Create platform schema and tables if they don't exist"""
+        """
+        DEPRECATED (26 OCT 2025) - Emergency fallback only, not called in normal operation.
+
+        Create platform schema and tables if they don't exist.
+
+        ⚠️ DEPRECATED: This method is NO LONGER CALLED automatically.
+        Platform schema is now deployed via triggers/schema_pydantic_deploy.py
+
+        This method is kept as an emergency fallback in case schema deployment fails.
+        Schema should be deployed via: POST /api/db/schema/redeploy?confirm=yes
+
+        PERFORMANCE IMPACT if re-enabled: 50-100ms per request, unnecessary database locks
+        DO NOT call this from __init__() or request handlers!
+        """
+        import warnings
+        warnings.warn(
+            "PlatformRepository._ensure_schema() is deprecated. "
+            "Use centralized schema deployment via /api/db/schema/redeploy",
+            DeprecationWarning,
+            stacklevel=2
+        )
         with self._get_connection() as conn:
             with conn.cursor() as cur:
                 # Create schema
@@ -282,21 +355,32 @@ class PlatformRepository(PostgreSQLRepository):
                 return cur.rowcount > 0
 
     def _row_to_record(self, row) -> PlatformRecord:
-        """Convert database row to PlatformRecord"""
-        return PlatformRecord(
-            request_id=row[0],
-            dataset_id=row[1],
-            resource_id=row[2],
-            version_id=row[3],
-            data_type=row[4],
-            status=row[5],
-            job_ids=row[6] if row[6] else [],
-            parameters=row[7] if row[7] else {},
-            metadata=row[8] if row[8] else {},
-            result_data=row[9] if len(row) > 9 else None,
-            created_at=row[10] if len(row) > 10 else None,
-            updated_at=row[11] if len(row) > 11 else None
-        )
+        """
+        Convert database row to PlatformRecord.
+
+        Uses CoreMachine pattern (infrastructure/postgresql.py:694-709):
+        - Build intermediate dictionary with explicit column name mapping
+        - Use Pydantic model unpacking for validation
+        - Rows are dict-like (psycopg dict_row factory) NOT tuples
+        """
+        # Build intermediate dictionary with explicit column mapping
+        record_data = {
+            'request_id': row['request_id'],
+            'dataset_id': row['dataset_id'],
+            'resource_id': row['resource_id'],
+            'version_id': row['version_id'],
+            'data_type': row['data_type'],
+            'status': row['status'],
+            'job_ids': row['job_ids'] if row['job_ids'] else [],
+            'parameters': row['parameters'] if isinstance(row['parameters'], dict) else json.loads(row['parameters']) if row['parameters'] else {},
+            'metadata': row['metadata'] if isinstance(row['metadata'], dict) else json.loads(row['metadata']) if row['metadata'] else {},
+            'result_data': row.get('result_data'),  # Optional field
+            'created_at': row.get('created_at'),    # Optional field
+            'updated_at': row.get('updated_at')     # Optional field
+        }
+
+        # Use Pydantic unpacking for validation
+        return PlatformRecord(**record_data)
 
 # ============================================================================
 # HTTP HANDLER
@@ -399,9 +483,21 @@ class PlatformOrchestrator:
     """
 
     def __init__(self):
+        # Import registries explicitly (CoreMachine requires them since 10 SEP 2025)
+        from jobs import ALL_JOBS
+        from services import ALL_HANDLERS
+
         self.platform_repo = PlatformRepository()
         self.job_repo = JobRepository()
-        self.core_machine = CoreMachine()
+
+        # CoreMachine requires explicit registries (no decorator magic!)
+        # See: core/machine.py:116-149 for constructor signature
+        self.core_machine = CoreMachine(
+            all_jobs=ALL_JOBS,
+            all_handlers=ALL_HANDLERS
+        )
+
+        logger.info(f"✅ PlatformOrchestrator initialized with CoreMachine ({len(ALL_JOBS)} jobs, {len(ALL_HANDLERS)} handlers)")
 
     async def process_platform_request(self, request: PlatformRecord) -> List[str]:
         """
@@ -471,9 +567,10 @@ class PlatformOrchestrator:
             # Raster processing pipeline
             source = request.metadata.get('source_location', '')
 
+            # Use actual CoreMachine job types from jobs/__init__.py:ALL_JOBS
             jobs.extend([
                 {
-                    'job_type': 'validate_raster',
+                    'job_type': 'validate_raster_job',  # Actual job: jobs/validate_raster_job.py
                     'parameters': {
                         'source_path': source,
                         'dataset_id': request.dataset_id,
@@ -481,19 +578,12 @@ class PlatformOrchestrator:
                     }
                 },
                 {
-                    'job_type': 'create_cog',
+                    'job_type': 'process_raster',  # Actual job: jobs/process_raster.py (handles COG creation)
                     'parameters': {
                         'source_path': source,
                         'output_container': 'silver',
-                        'dataset_id': request.dataset_id
-                    }
-                },
-                {
-                    'job_type': 'create_stac_item',
-                    'parameters': {
                         'dataset_id': request.dataset_id,
-                        'resource_id': request.resource_id,
-                        'asset_path': f"silver/{request.dataset_id}/{request.resource_id}.tif"
+                        'resource_id': request.resource_id
                     }
                 }
             ])
@@ -502,18 +592,13 @@ class PlatformOrchestrator:
             # Vector processing pipeline
             source = request.metadata.get('source_location', '')
 
+            # Use actual CoreMachine job types from jobs/__init__.py:ALL_JOBS
             jobs.extend([
                 {
-                    'job_type': 'validate_vector',
+                    'job_type': 'ingest_vector',  # Actual job: jobs/ingest_vector.py (handles validation + PostGIS import)
                     'parameters': {
                         'source_path': source,
-                        'dataset_id': request.dataset_id
-                    }
-                },
-                {
-                    'job_type': 'import_to_postgis',
-                    'parameters': {
-                        'source_path': source,
+                        'dataset_id': request.dataset_id,
                         'table_name': f"{request.dataset_id}_{request.resource_id}",
                         'schema': 'geo'
                     }
@@ -522,13 +607,16 @@ class PlatformOrchestrator:
 
         elif request.data_type == DataType.POINTCLOUD.value:
             # Point cloud processing
-            jobs.append({
-                'job_type': 'process_pointcloud',
-                'parameters': {
-                    'source_path': request.metadata.get('source_location', ''),
-                    'dataset_id': request.dataset_id
-                }
-            })
+            # TODO: No point cloud job exists yet in jobs/__init__.py:ALL_JOBS
+            # When implemented, uncomment:
+            # jobs.append({
+            #     'job_type': 'process_pointcloud',
+            #     'parameters': {
+            #         'source_path': request.metadata.get('source_location', ''),
+            #         'dataset_id': request.dataset_id
+            #     }
+            # })
+            logger.warning(f"Point cloud processing requested but no job exists yet for request {request.request_id}")
 
         # Add hello_world job for testing
         if request.parameters.get('test_mode'):
@@ -549,6 +637,29 @@ class PlatformOrchestrator:
     ) -> Optional[str]:
         """
         Create a CoreMachine job and submit it to the jobs queue.
+
+        NOTE - ISSUE #4 (INTENTIONAL): Duplicate Job Submission Logic
+        ================================================================
+        This method duplicates job submission logic from triggers/trigger_job_submit.py:
+        - Job ID generation (SHA256 hash)
+        - JobRecord creation
+        - Database persistence via repository
+        - Service Bus queue submission
+
+        WHY INTENTIONAL (per Robert 26 OCT 2025):
+        "duplicate job submission logic is intentional so we can test both systems
+        - it will be reconciled in the near future"
+
+        Platform submission and standard job submission can coexist during testing.
+        When Platform is proven stable, consolidate to shared service.
+
+        FUTURE REFACTORING OPTIONS:
+        - Option A: Create shared JobSubmissionService (services/job_submission.py)
+        - Option B: Platform makes HTTP call to standard /api/jobs/submit endpoint
+
+        REFERENCE: PLATFORM_LAYER_FIXES_TODO.md Issue #4 (lines 286-363)
+        STATUS: DEFERRED - Intentional duplication for testing
+        ================================================================
         """
         try:
             # Add platform metadata to job parameters
@@ -558,14 +669,15 @@ class PlatformOrchestrator:
                 '_platform_dataset': request.dataset_id
             }
 
-            # Generate job ID
+            # Generate job ID (duplicates trigger_job_submit.py pattern)
             job_id = self._generate_job_id(job_type, job_params)
 
             # Create job record
+            # CRITICAL: Use JobStatus enum (not string) - mirrors CoreMachine pattern
             job_record = JobRecord(
                 job_id=job_id,
                 job_type=job_type,
-                status='pending',
+                status=JobStatus.QUEUED,  # Enum value - consistent with CoreMachine
                 parameters=job_params,
                 metadata={
                     'platform_request': request.request_id,
@@ -587,31 +699,47 @@ class PlatformOrchestrator:
             return None
 
     async def _submit_to_queue(self, job: JobRecord):
-        """Submit job to Service Bus jobs queue"""
+        """Submit job to Service Bus jobs queue via repository pattern"""
         try:
-            client = ServiceBusClient.from_connection_string(
-                settings.SERVICE_BUS_CONNECTION_STRING
+            import uuid
+            from infrastructure.service_bus import ServiceBusRepository
+            from core.schema.queue import JobQueueMessage
+
+            # Use repository pattern (handles connection pooling, retries, etc.)
+            service_bus_repo = ServiceBusRepository()
+
+            # Use Pydantic message model (automatic serialization + validation)
+            # Platform always creates Stage 1 jobs
+            queue_message = JobQueueMessage(
+                job_id=job.job_id,
+                job_type=job.job_type,
+                parameters=job.parameters,
+                stage=1,  # Platform creates Stage 1 jobs
+                correlation_id=str(uuid.uuid4())[:8]
             )
 
-            with client:
-                sender = client.get_queue_sender(queue_name="jobs")
+            # Send via repository (uses config.service_bus_jobs_queue)
+            message_id = service_bus_repo.send_message(
+                config.service_bus_jobs_queue,
+                queue_message
+            )
 
-                message = ServiceBusMessage(
-                    json.dumps({
-                        'job_id': job.job_id,
-                        'job_type': job.job_type
-                    })
-                )
-
-                sender.send_messages(message)
-                logger.info(f"Submitted job {job.job_id} to jobs queue")
+            logger.info(f"✅ Submitted job {job.job_id} to jobs queue (message_id: {message_id}, queue: {config.service_bus_jobs_queue})")
 
         except Exception as e:
-            logger.error(f"Failed to submit job to queue: {e}", exc_info=True)
+            logger.error(f"❌ Failed to submit job to queue: {e}")
+            logger.error(f"   Job ID: {job.job_id}")
+            logger.error(f"   Job Type: {job.job_type}")
+            logger.error(f"   Traceback: {traceback.format_exc()}")
             raise
 
     def _generate_job_id(self, job_type: str, parameters: Dict[str, Any]) -> str:
-        """Generate deterministic job ID"""
+        """
+        Generate deterministic job ID (SHA256 full 64-char hash).
+
+        CRITICAL: JobRecord requires minLength=64 for job_id validation.
+        Must return FULL SHA256 hash (64 chars), not truncated.
+        """
         # Remove platform metadata for ID generation
         clean_params = {
             k: v for k, v in parameters.items()
@@ -619,7 +747,7 @@ class PlatformOrchestrator:
         }
 
         canonical = f"{job_type}:{json.dumps(clean_params, sort_keys=True)}"
-        return hashlib.sha256(canonical.encode()).hexdigest()[:32]
+        return hashlib.sha256(canonical.encode()).hexdigest()  # FULL 64-char hash
 
 # ============================================================================
 # UTILITY FUNCTIONS

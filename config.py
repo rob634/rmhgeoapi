@@ -508,6 +508,12 @@ class AppConfig(BaseModel):
     # Raster Pipeline Configuration
     # ========================================================================
 
+    intermediate_tiles_container: Optional[str] = Field(
+        default=None,
+        description="Container for intermediate raster tiles (Stage 2 output). If None, defaults to bronze_container_name. Cleanup handled by separate timer trigger (NOT in ETL workflow).",
+        examples=["rmhazuregeobronze", "rmhazuregeotemp", "rmhazuregeosilver"]
+    )
+
     raster_intermediate_prefix: str = Field(
         default="temp/raster_etl",
         description="Blob path prefix for raster ETL intermediate files (large file tiles)",
@@ -742,10 +748,10 @@ class AppConfig(BaseModel):
     # ========================================================================
     
     function_timeout_minutes: int = Field(
-        default=5,
+        default=30,
         ge=1,
-        le=10,
-        description="Azure Function timeout in minutes (1-10 range)"
+        le=30,
+        description="Azure Function timeout in minutes (Premium EP1 supports up to 30 minutes)"
     )
     
     max_retry_attempts: int = Field(
@@ -816,9 +822,24 @@ class AppConfig(BaseModel):
                 f"@{self.postgis_host}:{self.postgis_port}/{self.postgis_database}"
             )
             logger.debug(f"  Connection string: {conn_str}")
-        
+
         return conn_str
-    
+
+    @property
+    def resolved_intermediate_tiles_container(self) -> str:
+        """
+        Get intermediate tiles container, defaulting to bronze if not specified.
+
+        Returns container name for intermediate raster tiles (Stage 2 output).
+        If intermediate_tiles_container is None, falls back to bronze_container_name.
+
+        Usage:
+            config = get_config()
+            container = config.resolved_intermediate_tiles_container
+            # Returns: "rmhazuregeobronze" (or custom value if env var set)
+        """
+        return self.intermediate_tiles_container or self.bronze_container_name
+
     # ========================================================================
     # Validation
     # ========================================================================
@@ -881,7 +902,7 @@ class AppConfig(BaseModel):
             key_vault_database_secret=os.environ.get('KEY_VAULT_DATABASE_SECRET', 'postgis-password'),
             
             # Application
-            function_timeout_minutes=int(os.environ.get('FUNCTION_TIMEOUT_MINUTES', '5')),
+            function_timeout_minutes=int(os.environ.get('FUNCTION_TIMEOUT_MINUTES', '30')),
             max_retry_attempts=int(os.environ.get('MAX_RETRY_ATTEMPTS', '3')),
             log_level=os.environ.get('LOG_LEVEL', 'INFO'),
             enable_database_health_check=os.environ.get('ENABLE_DATABASE_HEALTH_CHECK', 'true').lower() == 'true',

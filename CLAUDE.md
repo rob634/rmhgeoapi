@@ -19,7 +19,8 @@ This is your main starting point - it contains everything you need to understand
 docs_claude/
 ├── CLAUDE_CONTEXT.md                      # 🎯 START HERE - Primary context
 ├── TODO.md                                # ⚡ PRIMARY TASK LIST - Only active TODO file
-├── COREMACHINE_PLATFORM_ARCHITECTURE.md   # 🏗️ NEW - Two-layer architecture (26 OCT 2025)
+├── COREMACHINE_PLATFORM_ARCHITECTURE.md   # 🏗️ Two-layer architecture (26 OCT 2025)
+├── SERVICE_BUS_HARMONIZATION.md           # 🔧 NEW - Three-layer config architecture (27 OCT 2025)
 ├── ARCHITECTURE_REFERENCE.md              # Deep technical specifications
 ├── FILE_CATALOG.md                        # Quick file lookup
 ├── DEPLOYMENT_GUIDE.md                    # Deployment procedures
@@ -263,6 +264,7 @@ Please refer to claude_log_access.md for instructions on accessing function app 
 - docs_claude/TODO.md - ⚡ PRIMARY AND ONLY active task list
 - docs_claude/HISTORY.md - Completed work log
 - docs_claude/CLAUDE_CONTEXT.md - Primary context
+- docs_claude/SERVICE_BUS_HARMONIZATION.md - Service Bus + Functions configuration harmonization
 - docs_claude/FILE_CATALOG.md - Quick file lookup
 - docs_claude/ARCHITECTURE_REFERENCE.md - Deep technical specs
 
@@ -384,6 +386,13 @@ union requests, traces | where timestamp >= ago(30m) | where operation_Name cont
 - Standard `az monitor app-insights query` doesn't work (requires AAD auth)
 - **Full guide**: `docs_claude/APPLICATION_INSIGHTS_QUERY_PATTERNS.md`
 - **Auth details**: `docs_claude/claude_log_access.md`
+
+**🚨 CRITICAL: Azure Functions Python Severity Mapping Bug (28 OCT 2025)**
+- Azure SDK **incorrectly maps `logging.DEBUG` to severity 1 (INFO)** instead of 0 (DEBUG)
+- **DO NOT search by `severityLevel == 0`** - it returns ZERO results!
+- **DO search by message content**: `where message contains '"level": "DEBUG"'`
+- Requires `DEBUG_LOGGING=true` environment variable in Azure Functions
+- See `docs_claude/APPLICATION_INSIGHTS_QUERY_PATTERNS.md` section "Azure Functions Python Logging Severity Mapping Issue" for full details and workarounds
 
 **STORAGE ENVIRONMENT**
 Use rmhazuregeo with the storage account key to access storage to check queues and containers

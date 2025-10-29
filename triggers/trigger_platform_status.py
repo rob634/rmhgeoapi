@@ -35,8 +35,9 @@ import azure.functions as func
 
 from triggers.trigger_platform import PlatformRepository, PlatformRequestStatus
 
-# Configure logging
-logger = logging.getLogger(__name__)
+# Configure logging using LoggerFactory (Application Insights integration)
+from util_logger import LoggerFactory, ComponentType
+logger = LoggerFactory.create_logger(ComponentType.TRIGGER, "trigger_platform_status")
 
 # ============================================================================
 # EXTENDED PLATFORM REPOSITORY

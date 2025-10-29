@@ -45,6 +45,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+# Logging
+from util_logger import LoggerFactory, ComponentType
+
+logger = LoggerFactory.create_logger(ComponentType.SERVICE, "TilingScheme")
+
 # Lazy imports for Azure environment compatibility
 def _lazy_imports():
     """Lazy import to avoid module-level import failures."""
@@ -52,6 +57,76 @@ def _lazy_imports():
     from rasterio.warp import transform_bounds
     from shapely.geometry import box, mapping
     return rasterio, transform_bounds, box, mapping
+
+
+def calculate_optimal_tile_size(
+    band_count: int,
+    bit_depth: int,
+    target_tile_mb: int = 1024,
+    compression_ratio: float = 1.5
+) -> Tuple[int, int]:
+    """
+    Calculate optimal tile size based on raster characteristics.
+
+    Targets 1-2GB compressed tiles with perfect 512px COG alignment.
+    All tile sizes are multiples of 512px for perfect COG blocksize alignment.
+
+    Args:
+        band_count: Number of bands (3, 4, 8, etc.)
+        bit_depth: Bits per pixel (8, 16, 32)
+        target_tile_mb: Target compressed size in MB (default: 1024 = 1GB)
+        compression_ratio: Expected compression (default: 1.5x for LZW/DEFLATE)
+
+    Returns:
+        Tuple of (tile_size_pixels, overlap_pixels)
+        - tile_size_pixels: Always multiple of 512 (e.g., 23040 = 45×512)
+        - overlap_pixels: Always 512 (exactly 1 COG block)
+
+    Examples:
+        >>> calculate_optimal_tile_size(3, 8)   # RGB 8-bit
+        (23040, 512)  # 45×512 blocks
+
+        >>> calculate_optimal_tile_size(8, 16)  # 8-band 16-bit
+        (10240, 512)  # 20×512 blocks
+
+    Profile-based recommendations:
+        - Drone RGB 8-bit (3 bands, 8-bit):  23,040px → ~1.5GB tiles
+        - VHR Satellite MS (8 bands, 16-bit): 10,240px → ~1.5GB tiles
+        - Low-res 8-band 32-bit: 10,240px → ~2GB tiles
+    """
+    import math
+
+    # Bytes per pixel from bit depth
+    if bit_depth <= 8:
+        bytes_per_pixel = 1  # uint8
+    elif bit_depth <= 16:
+        bytes_per_pixel = 2  # uint16
+    elif bit_depth <= 32:
+        bytes_per_pixel = 4  # uint32/float32
+    else:
+        bytes_per_pixel = 8  # float64 (rare)
+
+    # Target uncompressed size accounting for compression
+    target_uncompressed_mb = target_tile_mb * compression_ratio
+    target_uncompressed_bytes = target_uncompressed_mb * 1024 * 1024
+
+    # Calculate pixels per tile: pixels = bytes / (bands * bytes_per_pixel)
+    pixels_per_tile = target_uncompressed_bytes / (band_count * bytes_per_pixel)
+
+    # Tile size (square tiles)
+    tile_size = int(math.sqrt(pixels_per_tile))
+
+    # Round to nearest 512 pixels for perfect COG alignment
+    tile_size = round(tile_size / 512) * 512
+
+    # Clamp to safe limits (also multiples of 512)
+    # Min: 10240 = 20×512, Max: 51200 = 100×512
+    tile_size = max(10240, min(51200, tile_size))
+
+    # Fixed 512px overlap (exactly 1 COG block)
+    overlap = 512
+
+    return tile_size, overlap
 
 
 def calculate_target_resolution(
@@ -288,8 +363,8 @@ def create_geojson_feature(
 
 def generate_tiling_scheme_from_raster(
     raster_path: str,
-    tile_size: int = 5000,
-    overlap: int = 512
+    tile_size: Optional[int] = None,
+    overlap: Optional[int] = None
 ) -> Dict[str, Any]:
     """
     Generate complete tiling scheme GeoJSON from raster file.
@@ -298,8 +373,8 @@ def generate_tiling_scheme_from_raster(
 
     Args:
         raster_path: Path to input raster (local or blob storage)
-        tile_size: Tile size in pixels (default: 5000)
-        overlap: Overlap in pixels (default: 512, matches COG blocksize)
+        tile_size: Tile size in pixels (None = auto-calculate based on bands/bit-depth, default: None)
+        overlap: Overlap in pixels (None = use 512px default for COG alignment)
 
     Returns:
         GeoJSON FeatureCollection dict with metadata and features
@@ -318,12 +393,44 @@ def generate_tiling_scheme_from_raster(
         band_count = src.count
         dtype = src.dtypes[0]  # First band dtype (all bands usually same)
 
+        # Determine bit depth from dtype for tile size calculation
+        dtype_str = str(dtype).lower()
+        if 'uint8' in dtype_str or 'int8' in dtype_str:
+            bit_depth = 8
+        elif 'uint16' in dtype_str or 'int16' in dtype_str:
+            bit_depth = 16
+        elif 'uint32' in dtype_str or 'int32' in dtype_str or 'float32' in dtype_str:
+            bit_depth = 32
+        else:
+            bit_depth = 64  # float64 (rare)
+
+        # Calculate optimal tile size if not explicitly provided
+        # tile_size=None means auto-calculate based on raster characteristics
+        if tile_size is None:
+            try:
+                calculated_tile_size, calculated_overlap = calculate_optimal_tile_size(
+                    band_count=band_count,
+                    bit_depth=bit_depth
+                )
+                logger.info(f"📐 Auto-calculated tile size: {calculated_tile_size}px ({calculated_tile_size//512}×512 blocks) for {band_count}-band {bit_depth}-bit raster")
+                tile_size = calculated_tile_size
+                overlap = calculated_overlap
+            except Exception as e:
+                # Fallback to safe default if calculation fails
+                logger.warning(f"⚠️ Auto-calculation failed ({e}), using fallback: 20480px (40×512 blocks)")
+                tile_size = 20480  # 40×512 blocks = ~1.2GB for 3-band 8-bit
+                overlap = 512
+
+        # If user provided tile_size but no overlap, use 512 for COG alignment
+        if overlap is None:
+            overlap = 512
+
         # Calculate target resolution in EPSG:4326
         target_bounds, target_width, target_height, degrees_per_pixel = calculate_target_resolution(
             src_crs, src_bounds, src_width, src_height
         )
 
-        # Calculate grid
+        # Calculate grid with optimal/provided tile size
         grid = calculate_tile_grid(target_width, target_height, tile_size, overlap)
 
         # Generate tile windows
@@ -391,7 +498,7 @@ def generate_tiling_scheme(params: dict) -> dict:
         params: Task parameters dict with:
             - container_name (str, REQUIRED): Bronze container name
             - blob_name (str, REQUIRED): Bronze blob name
-            - tile_size (int, optional): Tile size in pixels (default: 5000)
+            - tile_size (int, optional): Tile size in pixels (None = auto-calculate based on bands/bit-depth)
             - overlap (int, optional): Overlap in pixels (default: 512)
             - output_container (str, optional): Output container (default: same as source)
             - output_blob_name (str, optional): Output blob name (default: <source>_tiling_scheme.geojson)
@@ -424,7 +531,7 @@ def generate_tiling_scheme(params: dict) -> dict:
         # Extract parameters
         container_name = params.get("container_name")
         blob_name = params.get("blob_name")
-        tile_size = params.get("tile_size", 5000)
+        tile_size = params.get("tile_size")  # None = auto-calculate
         overlap = params.get("overlap", 512)
         output_container = params.get("output_container", container_name)
         output_blob_name = params.get("output_blob_name")
@@ -444,7 +551,7 @@ def generate_tiling_scheme(params: dict) -> dict:
         blob_repo = BlobRepository()
 
         # Generate SAS URL for VSI access (2-hour expiry for processing buffer)
-        print(f"🌐 Generating SAS URL for VSI access: {blob_name}")
+        logger.info(f"🌐 Generating SAS URL for VSI access: {blob_name}")
         sas_url = blob_repo.get_blob_url_with_sas(
             container_name=container_name,
             blob_name=blob_name,
@@ -453,11 +560,11 @@ def generate_tiling_scheme(params: dict) -> dict:
 
         # Create VSI path for GDAL to access blob via HTTP
         vsi_path = f"/vsicurl/{sas_url}"
-        print(f"✅ VSI path created: /vsicurl/https://...")
-        print(f"   Reading raster directly from Azure Blob Storage (no /tmp download)")
+        logger.info(f"✅ VSI path created: /vsicurl/https://...")
+        logger.debug(f"   Reading raster directly from Azure Blob Storage (no /tmp download)")
 
         # Generate tiling scheme using VSI (no temporary file needed)
-        print(f"🔲 Generating tiling scheme via VSI...")
+        logger.info(f"🔲 Generating tiling scheme via VSI...")
         try:
             geojson = generate_tiling_scheme_from_raster(
                 raster_path=vsi_path,
@@ -475,7 +582,7 @@ def generate_tiling_scheme(params: dict) -> dict:
                 raise  # Re-raise other errors
 
         # Upload tiling scheme to blob storage
-        print(f"📤 Uploading tiling scheme: {output_blob_name}")
+        logger.info(f"📤 Uploading tiling scheme: {output_blob_name}")
         geojson_bytes = json.dumps(geojson, indent=2).encode('utf-8')
         blob_repo.write_blob(
             container=output_container,
@@ -487,7 +594,7 @@ def generate_tiling_scheme(params: dict) -> dict:
         # Calculate processing time
         processing_time = (datetime.now(timezone.utc) - start_time).total_seconds()
 
-        print(f"✅ Tiling scheme generated: {geojson['metadata']['total_tiles']} tiles")
+        logger.info(f"✅ Tiling scheme generated: {geojson['metadata']['total_tiles']} tiles")
 
         return {
             "success": True,
@@ -510,7 +617,7 @@ def generate_tiling_scheme(params: dict) -> dict:
     except Exception as e:
         processing_time = (datetime.now(timezone.utc) - start_time).total_seconds()
         error_msg = f"Failed to generate tiling scheme: {str(e)}\n{traceback.format_exc()}"
-        print(f"❌ ERROR: {error_msg}")
+        logger.error(f"❌ ERROR: {error_msg}")
 
         return {
             "success": False,

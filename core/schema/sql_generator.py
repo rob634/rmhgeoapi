@@ -909,43 +909,43 @@ $$""").format(
                 categories["TRIGGERS"].append(stmt_str)
         
         if verbose:
-            print("=" * 80)
-            print("SQL SCHEMA INSPECTION")
-            print("=" * 80)
-            print(f"\nSchema: {self.schema_name}")
-            print(f"Total statements: {len(composed_statements)}")
-            print("=" * 80)
-            
+            self.logger.info("=" * 80)
+            self.logger.info("SQL SCHEMA INSPECTION")
+            self.logger.info("=" * 80)
+            self.logger.info(f"\nSchema: {self.schema_name}")
+            self.logger.info(f"Total statements: {len(composed_statements)}")
+            self.logger.info("=" * 80)
+
             for category, statements in categories.items():
                 if statements:
-                    print(f"\n{category} ({len(statements)} statements):")
-                    print("-" * 80)
+                    self.logger.info(f"\n{category} ({len(statements)} statements):")
+                    self.logger.info("-" * 80)
                     for stmt_str in statements:
                         # Truncate very long statements for display
                         if len(stmt_str) > 2000:
                             lines = stmt_str.split('\n')
                             if len(lines) > 30:
                                 for line in lines[:20]:
-                                    print(line)
-                                print("\n... [truncated] ...\n")
+                                    self.logger.debug(line)
+                                self.logger.debug("\n... [truncated] ...\n")
                                 for line in lines[-5:]:
-                                    print(line)
+                                    self.logger.debug(line)
                             else:
-                                print(stmt_str)
+                                self.logger.debug(stmt_str)
                         else:
-                            print(stmt_str)
-                        print(";")
-            
-            print("\n" + "=" * 80)
-            print("SUMMARY")
-            print("=" * 80)
+                            self.logger.debug(stmt_str)
+                        self.logger.debug(";")
+
+            self.logger.info("\n" + "=" * 80)
+            self.logger.info("SUMMARY")
+            self.logger.info("=" * 80)
             for category, statements in categories.items():
                 if statements:
-                    print(f"  {category:20} {len(statements):3} statements")
-            
+                    self.logger.info(f"  {category:20} {len(statements):3} statements")
+
             if not connection:
-                print("\n⚠️  Note: SQL shown without PostgreSQL rendering")
-                print("  For properly formatted SQL, provide a connection")
+                self.logger.warning("\n⚠️  Note: SQL shown without PostgreSQL rendering")
+                self.logger.warning("  For properly formatted SQL, provide a connection")
         
         return categories
 
@@ -986,7 +986,7 @@ def main():
                 continue
             try:
                 connection = psycopg.connect(conn_str, connect_timeout=2)
-                print("✅ Connected to PostgreSQL for SQL rendering\n")
+                # Connection successful - will be logged by inspect() method
                 break
             except:
                 continue

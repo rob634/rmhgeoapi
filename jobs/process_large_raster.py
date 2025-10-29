@@ -4,7 +4,7 @@
 # EPOCH: 4 - ACTIVE ✅
 # STATUS: Job workflow - Large raster tiling and processing (1-30 GB)
 # PURPOSE: 4-stage workflow for tiling large rasters into COG mosaics
-# LAST_REVIEWED: 24 OCT 2025
+# LAST_REVIEWED: 27 OCT 2025
 # EXPORTS: ProcessLargeRasterWorkflow class
 # INTERFACES: JobBase contract - create_tasks_for_stage() signature
 # PYDANTIC_MODELS: None (class attributes)
@@ -12,9 +12,10 @@
 # SOURCE: Bronze container large rasters (1-30 GB)
 # SCOPE: Large file raster processing pipeline with tiling
 # VALIDATION: All stages validate inputs
-# PATTERNS: CoreMachine compliance, fan-out/fan-in architecture
+# PATTERNS: CoreMachine compliance, fan-out/fan-in, job-scoped intermediate storage
 # ENTRY_POINTS: Registered in jobs/__init__.py ALL_JOBS
 # INDEX: ProcessLargeRasterWorkflow:60, create_tasks_for_stage:200
+# STORAGE: Intermediate tiles in job-scoped folders ({job_id[:8]}/tiles/)
 # ============================================================================
 
 """
@@ -32,13 +33,18 @@ Stage 2: Extract Tiles Sequentially (Long-running task)
 - SINGLE long-running task extracts ALL tiles
 - Sequential I/O is MUCH faster than parallel random access
 - Reports progress via task metadata
-- Uploads raw tiles to blob storage (in source CRS)
+- Uploads raw tiles to job-scoped blob storage folder (in source CRS)
+  Format: {job_id[:8]}/tiles/{blob_stem}_tile_0_0.tif
+  Example: 598fc149/tiles/17apr2024wv2_tile_0_0.tif
 - 3-4 minutes for 204 tiles from 11 GB raster
 
 Stage 3: Convert Tiles to COGs (Fan-out)
 - Parallel COG creation for all tiles (N tasks)
+- Reads from intermediate job-scoped folder: {job_id[:8]}/tiles/
 - Each task: WarpedVRT reprojection + COG optimization
-- Uploads to silver container
+- Uploads to permanent COG storage in silver container
+  Format: cogs/{blob_stem}/{blob_stem}_tile_0_0_cog.tif
+  Example: cogs/17apr2024wv2/17apr2024wv2_tile_0_0_cog.tif
 - 5-6 minutes for 204 tiles in parallel
 
 Stage 4: Create MosaicJSON + STAC (Fan-in)
@@ -50,15 +56,21 @@ Stage 4: Create MosaicJSON + STAC (Fan-in)
 
 Key Architecture Decisions:
 - Stage 1: Tiles defined in EPSG:4326 output space (no seams)
-- Stage 2: Sequential extraction (10x faster than parallel)
-- Stage 3: Parallel COG conversion (Azure Functions fan-out)
+- Stage 2: Sequential extraction (10x faster than parallel), job-scoped folders
+- Stage 3: Parallel COG conversion (Azure Functions fan-out), permanent storage
 - Stage 4: Pre-computed statistics (enables TiTiler stretching)
 
+Storage Cleanup:
+- Intermediate tiles ({job_id[:8]}/tiles/) cleaned by SEPARATE timer trigger
+- NOT part of ETL workflow stages
+- Allows debugging of failed jobs (artifacts retained)
+
 Author: Robert and Geospatial Claude Legion
-Date: 24 OCT 2025
+Date: 27 OCT 2025
 """
 
 from typing import List, Dict, Any
+from pathlib import Path
 import hashlib
 import json
 
@@ -125,8 +137,8 @@ class ProcessLargeRasterWorkflow(JobBase):
         "tile_size": {
             "type": "int",
             "required": False,
-            "default": 5000,
-            "description": "Tile size in pixels (default: 5000)"
+            "default": None,
+            "description": "Tile size in pixels (None = auto-calculate based on band count + bit depth, default: None)"
         },
         "overlap": {
             "type": "int",
@@ -209,17 +221,17 @@ class ProcessLargeRasterWorkflow(JobBase):
         else:
             validated["container_name"] = None  # Will use config default
 
-        # Validate tile_size
-        tile_size = params.get("tile_size", 5000)
-        if not isinstance(tile_size, int) or tile_size <= 0:
-            raise ValueError("tile_size must be a positive integer")
+        # Validate tile_size (None = auto-calculate)
+        tile_size = params.get("tile_size", None)
+        if tile_size is not None and (not isinstance(tile_size, int) or tile_size <= 0):
+            raise ValueError("tile_size must be a positive integer or None (auto-calculate)")
         validated["tile_size"] = tile_size
 
         # Validate overlap
         overlap = params.get("overlap", 512)
         if not isinstance(overlap, int) or overlap < 0:
             raise ValueError("overlap must be a non-negative integer")
-        if overlap >= tile_size:
+        if tile_size is not None and overlap >= tile_size:
             raise ValueError(f"overlap ({overlap}) must be less than tile_size ({tile_size})")
         # NOTE: overlap != 512 is FOR TESTING ONLY - production must use 512 to match COG blocksize
         validated["overlap"] = overlap
@@ -401,7 +413,7 @@ class ProcessLargeRasterWorkflow(JobBase):
                 "parameters": {
                     "container_name": container_name,
                     "blob_name": job_params["blob_name"],
-                    "tile_size": job_params.get("tile_size", 5000),
+                    "tile_size": job_params.get("tile_size"),  # None = auto-calculate
                     "overlap": job_params.get("overlap", 512),
                     "output_container": config.silver_container_name
                 }
@@ -428,7 +440,8 @@ class ProcessLargeRasterWorkflow(JobBase):
                     "blob_name": job_params["blob_name"],
                     "tiling_scheme_blob": tiling_scheme_blob,
                     "tiling_scheme_container": config.silver_container_name,
-                    "output_container": config.silver_container_name
+                    "output_container": config.resolved_intermediate_tiles_container,  # Use config for intermediate tiles
+                    "job_id": job_id  # Pass job_id for folder naming ({job_id[:8]}/tiles/)
                 }
             }]
 
@@ -436,13 +449,46 @@ class ProcessLargeRasterWorkflow(JobBase):
             # Stage 3: Convert Tiles to COGs (Parallel)
             # Create N tasks (one per tile) for parallel COG conversion
 
+            # DEBUG: Log previous_results structure
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.info(f"🔍 [STAGE3_DEBUG] Creating Stage 3 tasks for job {job_id[:16]}...")
+            logger.info(f"🔍 [STAGE3_DEBUG] previous_results type: {type(previous_results)}")
+            logger.info(f"🔍 [STAGE3_DEBUG] previous_results length: {len(previous_results) if previous_results else 0}")
+
+            if previous_results and len(previous_results) > 0:
+                logger.info(f"🔍 [STAGE3_DEBUG] previous_results[0] keys: {previous_results[0].keys()}")
+                logger.info(f"🔍 [STAGE3_DEBUG] previous_results[0]['success']: {previous_results[0].get('success')}")
+                if "result" in previous_results[0]:
+                    logger.info(f"🔍 [STAGE3_DEBUG] previous_results[0]['result'] keys: {previous_results[0]['result'].keys()}")
+                    result = previous_results[0]['result']
+                    if "tile_blobs" in result:
+                        logger.info(f"🔍 [STAGE3_DEBUG] tile_blobs count: {len(result['tile_blobs'])}")
+                        logger.info(f"🔍 [STAGE3_DEBUG] First 3 tile_blobs: {result['tile_blobs'][:3]}")
+
             # Get tile list from Stage 2 results
             if not previous_results or not previous_results[0].get("success"):
-                raise ValueError("Stage 2 failed - no tiles extracted")
+                error_msg = f"Stage 2 failed - no tiles extracted. previous_results: {previous_results}"
+                logger.error(f"❌ [STAGE3_DEBUG] {error_msg}")
+                raise ValueError(error_msg)
 
             stage2_result = previous_results[0]["result"]
+
+            # Validate stage2_result has required fields
+            if "tile_blobs" not in stage2_result:
+                error_msg = f"Stage 2 result missing 'tile_blobs' field. Keys: {stage2_result.keys()}"
+                logger.error(f"❌ [STAGE3_DEBUG] {error_msg}")
+                raise ValueError(error_msg)
+
+            if "source_crs" not in stage2_result:
+                error_msg = f"Stage 2 result missing 'source_crs' field. Keys: {stage2_result.keys()}"
+                logger.error(f"❌ [STAGE3_DEBUG] {error_msg}")
+                raise ValueError(error_msg)
+
             tile_blobs = stage2_result["tile_blobs"]
             source_crs = stage2_result["source_crs"]
+
+            logger.info(f"✅ [STAGE3_DEBUG] Stage 2 validation passed - {len(tile_blobs)} tiles, CRS: {source_crs}")
 
             # Get raster metadata passed through from Stage 1 via Stage 2
             raster_metadata = stage2_result.get("raster_metadata", {})
@@ -458,24 +504,30 @@ class ProcessLargeRasterWorkflow(JobBase):
 
             # Stage 3: Creating N COG conversion tasks (one per tile)
 
+            # Extract blob_stem for path generation
+            blob_stem = Path(job_params['blob_name']).stem
+
             # Create task for each tile
             tasks = []
             for idx, tile_blob in enumerate(tile_blobs):
                 # Extract tile identifier from blob path for readable task IDs
-                # e.g., "antigua/tiles/tile_x5_y10.tif" → "x5_y10"
-                tile_id = tile_blob.split('/')[-1].replace('tile_', '').replace('.tif', '')
+                # New pattern: "598fc149/tiles/17apr2024wv2_tile_0_0.tif" → "0_0"
+                tile_filename = tile_blob.split('/')[-1]  # e.g., "17apr2024wv2_tile_0_0.tif"
+                # Remove blob_stem prefix and "tile_" to get grid coordinates
+                tile_id = tile_filename.replace(f"{blob_stem}_tile_", "").replace(".tif", "")
 
                 tasks.append({
                     "task_id": f"{job_id[:8]}-s3-cog-{tile_id}",
                     "task_type": "create_cog",
                     "parameters": {
-                        "container_name": config.silver_container_name,
+                        "container_name": config.resolved_intermediate_tiles_container,  # Read from intermediate tiles container
                         "blob_name": tile_blob,
                         "source_crs": source_crs,
                         "target_crs": "EPSG:4326",
                         "raster_type": raster_type,
                         "output_tier": job_params.get("output_tier", "analysis"),
-                        "output_blob_name": tile_blob.replace("/tiles/", "/cogs/").replace(".tif", "_cog.tif"),
+                        # Output to permanent cogs/ folder: cogs/17apr2024wv2/17apr2024wv2_tile_0_0_cog.tif
+                        "output_blob_name": f"cogs/{blob_stem}/{tile_filename.replace('.tif', '_cog.tif')}",
                         "jpeg_quality": job_params.get("jpeg_quality", 85)
                     }
                 })

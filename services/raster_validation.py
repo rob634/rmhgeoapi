@@ -146,18 +146,15 @@ def validate_raster(params: dict) -> dict:
     """
     import traceback
 
-    # CRITICAL: Log entry BEFORE any imports
-    print(f"🚀 HANDLER ENTRY: validate_raster called with params keys: {list(params.keys())}", file=sys.stderr, flush=True)
-    print(f"🚀 HANDLER ENTRY: blob_name={params.get('blob_name', 'MISSING')}", file=sys.stderr, flush=True)
-
-    # STEP 0: Initialize logger
+    # STEP 0: Initialize logger BEFORE any other operations
     logger = None
     try:
-        print(f"📦 STEP 0: Importing logger...", file=sys.stderr, flush=True)
         from util_logger import LoggerFactory, ComponentType
         logger = LoggerFactory.create_logger(ComponentType.SERVICE, "validate_raster")
+        logger.info("🚀 [CHECKPOINT_ENTRY] Handler entry - validate_raster called")
+        logger.debug(f"   Params keys: {list(params.keys())}")
+        logger.debug(f"   blob_name: {params.get('blob_name', 'MISSING')}")
         logger.info("✅ STEP 0: Logger initialized successfully")
-        print(f"✅ STEP 0: Logger initialized", file=sys.stderr, flush=True)
     except Exception as e:
         print(f"❌ STEP 0 FAILED: Logger initialization error: {e}", file=sys.stderr, flush=True)
         return {
@@ -529,7 +526,9 @@ def _validate_crs(src, input_crs: Optional[str], bounds, skip_validation: bool =
                 # MISMATCH: User says one thing, file says another
                 if skip_validation:
                     # Testing mode: allow override with warning
-                    print(f"⚠️ VALIDATION CRS: TESTING MODE - Override file CRS {file_crs_str} with user CRS {input_crs}", file=sys.stderr, flush=True)
+                    from util_logger import LoggerFactory, ComponentType
+                    logger = LoggerFactory.create_logger(ComponentType.SERVICE, "validate_raster")
+                    logger.warning(f"⚠️ VALIDATION CRS: TESTING MODE - Override file CRS {file_crs_str} with user CRS {input_crs}")
                     return {
                         "success": True,
                         "source_crs": input_crs,
@@ -542,7 +541,9 @@ def _validate_crs(src, input_crs: Optional[str], bounds, skip_validation: bool =
                     }
                 else:
                     # Production mode: FAIL on mismatch
-                    print(f"❌ VALIDATION CRS: MISMATCH - File: {file_crs_str}, User: {input_crs}", file=sys.stderr, flush=True)
+                    from util_logger import LoggerFactory, ComponentType
+                    logger = LoggerFactory.create_logger(ComponentType.SERVICE, "validate_raster")
+                    logger.error(f"❌ VALIDATION CRS: MISMATCH - File: {file_crs_str}, User: {input_crs}")
                     return {
                         "success": False,
                         "error": "CRS_MISMATCH",
@@ -558,10 +559,14 @@ def _validate_crs(src, input_crs: Optional[str], bounds, skip_validation: bool =
                     }
             else:
                 # Match: User CRS matches file CRS (redundant but OK)
-                print(f"✅ VALIDATION CRS: User CRS matches file CRS - {file_crs_str}", file=sys.stderr, flush=True)
+                from util_logger import LoggerFactory, ComponentType
+                logger = LoggerFactory.create_logger(ComponentType.SERVICE, "validate_raster")
+                logger.info(f"✅ VALIDATION CRS: User CRS matches file CRS - {file_crs_str}")
 
         # Use file CRS (either user didn't specify, or user matched file)
-        print(f"📍 VALIDATION CRS: From file metadata - {file_crs_str}", file=sys.stderr, flush=True)
+        from util_logger import LoggerFactory, ComponentType
+        logger = LoggerFactory.create_logger(ComponentType.SERVICE, "validate_raster")
+        logger.info(f"📍 VALIDATION CRS: From file metadata - {file_crs_str}")
 
         # Sanity check bounds
         bounds_warning = _check_bounds_sanity(file_crs, bounds)
@@ -579,9 +584,12 @@ def _validate_crs(src, input_crs: Optional[str], bounds, skip_validation: bool =
 
     # Case 2: File has NO CRS
     else:
+        from util_logger import LoggerFactory, ComponentType
+        logger = LoggerFactory.create_logger(ComponentType.SERVICE, "validate_raster")
+
         if input_crs:
             # User provides CRS for file with no metadata (necessary override)
-            print(f"🔧 VALIDATION CRS: File has no CRS, using user override - {input_crs}", file=sys.stderr, flush=True)
+            logger.info(f"🔧 VALIDATION CRS: File has no CRS, using user override - {input_crs}")
             return {
                 "success": True,
                 "source_crs": input_crs,
@@ -595,7 +603,7 @@ def _validate_crs(src, input_crs: Optional[str], bounds, skip_validation: bool =
             }
         else:
             # No CRS available anywhere - FAIL
-            print(f"❌ VALIDATION CRS: Missing CRS, no user override", file=sys.stderr, flush=True)
+            logger.error(f"❌ VALIDATION CRS: Missing CRS, no user override")
             return {
                 "success": False,
                 "error": "CRS_MISSING",
@@ -657,7 +665,9 @@ def _check_bit_depth_efficiency(src, dtype, strict_mode: bool) -> dict:
 
     # ORGANIZATIONAL POLICY: Flag ALL 64-bit data types immediately
     if dtype in ['float64', 'int64', 'uint64', 'complex64', 'complex128']:
-        print(f"🚨 VALIDATION BIT-DEPTH: CRITICAL - 64-bit data type {dtype}", file=sys.stderr, flush=True)
+        from util_logger import LoggerFactory, ComponentType
+        logger = LoggerFactory.create_logger(ComponentType.SERVICE, "validate_raster")
+        logger.error(f"🚨 VALIDATION BIT-DEPTH: CRITICAL - 64-bit data type {dtype}")
         return {
             "efficient": False,
             "current_dtype": str(dtype),
@@ -685,7 +695,9 @@ def _check_bit_depth_efficiency(src, dtype, strict_mode: bool) -> dict:
         unique_values = np.unique(sample[~np.isnan(sample)])
         value_range = (float(sample.min()), float(sample.max()))
     except Exception as e:
-        print(f"⚠️ VALIDATION BIT-DEPTH: Could not sample data: {e}", file=sys.stderr, flush=True)
+        from util_logger import LoggerFactory, ComponentType
+        logger = LoggerFactory.create_logger(ComponentType.SERVICE, "validate_raster")
+        logger.warning(f"⚠️ VALIDATION BIT-DEPTH: Could not sample data: {e}")
         return {
             "efficient": True,
             "current_dtype": str(dtype),
@@ -701,7 +713,9 @@ def _check_bit_depth_efficiency(src, dtype, strict_mode: bool) -> dict:
             recommended = "uint16"
             savings = ((np.dtype(dtype).itemsize - 2) / np.dtype(dtype).itemsize) * 100
 
-        print(f"⚠️ VALIDATION BIT-DEPTH: HIGH - Categorical {len(unique_values)} values in {dtype}", file=sys.stderr, flush=True)
+        from util_logger import LoggerFactory, ComponentType
+        logger = LoggerFactory.create_logger(ComponentType.SERVICE, "validate_raster")
+        logger.warning(f"⚠️ VALIDATION BIT-DEPTH: HIGH - Categorical {len(unique_values)} values in {dtype}")
         return {
             "efficient": False,
             "current_dtype": str(dtype),
@@ -744,7 +758,9 @@ def _check_bit_depth_efficiency(src, dtype, strict_mode: bool) -> dict:
 
             savings = ((np.dtype(dtype).itemsize - np.dtype(recommended).itemsize) / np.dtype(dtype).itemsize) * 100
 
-            print(f"⚠️ VALIDATION BIT-DEPTH: MEDIUM - Integer data in {dtype}", file=sys.stderr, flush=True)
+            from util_logger import LoggerFactory, ComponentType
+            logger = LoggerFactory.create_logger(ComponentType.SERVICE, "validate_raster")
+            logger.warning(f"⚠️ VALIDATION BIT-DEPTH: MEDIUM - Integer data in {dtype}")
             return {
                 "efficient": False,
                 "current_dtype": str(dtype),
@@ -789,7 +805,9 @@ def _detect_raster_type(src, user_type: str) -> dict:
         sample_size = min(1000, src.width), min(1000, src.height)
         sample = src.read(1, window=Window(0, 0, sample_size[0], sample_size[1]))
     except Exception as e:
-        print(f"⚠️ VALIDATION TYPE: Could not sample data: {e}", file=sys.stderr, flush=True)
+        from util_logger import LoggerFactory, ComponentType
+        logger = LoggerFactory.create_logger(ComponentType.SERVICE, "validate_raster")
+        logger.warning(f"⚠️ VALIDATION TYPE: Could not sample data: {e}")
         sample = None
 
     # Detect type from file characteristics
@@ -884,12 +902,14 @@ def _detect_raster_type(src, user_type: str) -> dict:
         elif band_count in [12, 13]:
             evidence.append("Band count matches Sentinel-2")
 
-    print(f"🔍 VALIDATION TYPE: Detected {detected_type} ({confidence})", file=sys.stderr, flush=True)
+    from util_logger import LoggerFactory, ComponentType
+    logger = LoggerFactory.create_logger(ComponentType.SERVICE, "validate_raster")
+    logger.info(f"🔍 VALIDATION TYPE: Detected {detected_type} ({confidence})")
 
     # User type validation (STRICT)
     if user_type and user_type != "auto":
         if user_type != detected_type:
-            print(f"❌ VALIDATION TYPE: MISMATCH - User: {user_type}, Detected: {detected_type}", file=sys.stderr, flush=True)
+            logger.error(f"❌ VALIDATION TYPE: MISMATCH - User: {user_type}, Detected: {detected_type}")
             return {
                 "success": False,
                 "error": "RASTER_TYPE_MISMATCH",

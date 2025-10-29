@@ -1,7 +1,273 @@
 # Active Tasks
 
-**Last Updated**: 22 OCT 2025
+**Last Updated**: 29 OCT 2025
 **Author**: Robert and Geospatial Claude Legion
+
+---
+
+## 🔥 CRITICAL: Large Raster Workflow Silent Failures (29 OCT 2025)
+
+**Status**: 🚨 **CRITICAL INVESTIGATION** - Multiple silent failures identified in process_large_raster
+**Started**: 28 OCT 2025, **Escalated**: 29 OCT 2025
+**Priority**: P0 - BLOCKING production use of all large raster workflows
+
+### Problem Summary
+
+**NEW FINDING (29 OCT 2025)**: Stage 2 `extract_tiles` is **failing silently** immediately after entry!
+- Job: `7f8be55203646ed919b79896adbdeda9b3ce40a56342a7a72c2e8b25037682cf`
+- File: `17apr2024wv2.tif` (production raster)
+- Stage 1 (generate_tiling_scheme) ✅ Completes in 0.46s
+- Stage 2 (extract_tiles) ❌ **SILENT FAILURE** - Starts but never logs progress
+- Last log: `02:47:36.312` "CHECKPOINT_START extract_tiles handler entry"
+- Task stuck in 'processing' status for 10+ minutes with ZERO subsequent logs
+- Function app restarted multiple times (02:49, 02:50, 02:52)
+
+**ORIGINAL ISSUE (28 OCT 2025)**: Stage 3 `create_cog` tasks never created
+- Stage 1 (generate_tiling_scheme) ✅ Completes successfully
+- Stage 2 (extract_tiles) ✅ Completes successfully (when it works), creates 72-204 intermediate tiles
+- Stage 3 (create_cog) ❌ **ZERO tasks created** - silent failure
+- No Stage 3 tasks appear in database
+- No error logs visible in Application Insights
+
+### Investigation Progress (29 OCT 2025)
+
+**✅ Stage 2 Silent Failure Investigation**:
+1. **Timeline Analysis** (Job `7f8be55203646ed9...`):
+   - `02:47:29` - Job submitted via HTTP
+   - `02:47:31` - Job processor started Stage 1
+   - `02:47:35` - Stage 1 completed successfully (0.46s)
+   - `02:47:35` - Job advanced to Stage 2, task created: `7f8be552-s2-extract-tiles`
+   - `02:47:36` - Task started, status → 'processing'
+   - `02:47:36.312` - **LAST LOG**: "CHECKPOINT_START extract_tiles handler entry"
+   - `02:47:36.297` - Task database record updated
+   - `02:48:00+` - **NO SUBSEQUENT LOGS** (complete silence)
+   - `02:49:00+` - Function app restarts (multiple times)
+   - `02:52:42` - Service Bus listeners stopped
+   - `02:58:00` - Task still stuck in 'processing' status
+
+2. **Evidence of Silent Failure**:
+   - ✅ Handler `extract_tiles` IS registered correctly
+   - ✅ Task created and queued to Service Bus successfully
+   - ✅ Task processor picked up message and called handler
+   - ✅ Handler entry checkpoint logged
+   - ❌ **ZERO logs after entry checkpoint**
+   - ❌ No exception logs, no error messages, no progress updates
+   - ❌ Task never completed or failed - orphaned in 'processing'
+
+3. **Failure Pattern Identified**:
+   - Handler enters (`CHECKPOINT_START` logged)
+   - **Code execution stops immediately after entry**
+   - No subsequent logging statements execute
+   - No exception handling catches the failure
+   - Python worker may crash (SIGABRT/segfault)
+   - Task left orphaned without cleanup
+
+**🔍 Root Cause Hypotheses (Stage 2 Failure)**:
+
+**Hypothesis A: GDAL/Rasterio Native Library Crash**
+- `extract_tiles` uses rasterio/GDAL to open raster file
+- Native C++ library crash (segfault) would kill Python worker
+- No Python exception raised - worker process terminates
+- Evidence: Function app restarts after task starts
+- **Location**: First rasterio operation after entry checkpoint
+- **Code**: `services/tiling_extraction.py` lines 475-492
+
+**Hypothesis B: Missing/Invalid Tiling Scheme Data**
+- Stage 1 result structure doesn't match expected format
+- Code tries to access missing key → crashes before logging
+- No defensive validation after entry checkpoint
+- **Location**: Accessing Stage 1 result data in handler
+- **Code**: `services/tiling_extraction.py` parsing `previous_results`
+
+**Hypothesis C: Azure Functions Memory/Timeout**
+- File too large, crashes during initial rasterio.open()
+- Memory exhaustion before first log statement
+- Python worker killed by Azure Functions runtime
+- **File**: `17apr2024wv2.tif` - size unknown
+
+**Hypothesis D: Missing Logging After Entry**
+- Code IS executing but not logging
+- Silent exception swallowing
+- Early return/exit without logging
+- **Evidence**: No error logs, no completion, just silence
+
+**✅ Completed Investigations (Stage 3 - Original Issue)**:
+1. **Handler Registration** - Verified `create_cog` IS properly registered in `services/__init__.py:112`
+2. **Registration Pattern** - Confirmed system uses explicit registration (not decorators)
+3. **Task Creation Code** - Found `create_tasks_for_stage()` method in `jobs/process_large_raster.py:448-535`
+4. **Expected Data Flow** - Stage 2 returns `{"tile_blobs": [...], "source_crs": "..."}` which Stage 3 consumes
+5. **Added Debug Logging** - Comprehensive logging added to Stage 3 task creation (not yet deployed)
+
+**🚧 Current Status**:
+- **Stage 2 failure takes priority** - Stage 3 won't run if Stage 2 fails
+- Stage 3 debug logging ready but not deployed (waiting for Stage 2 fix)
+
+### Immediate Action Items (Priority Order)
+
+**PHASE 1: Add Defensive Logging to Stage 2 Handler** 🔥 **CRITICAL**
+1. [ ] Add logging checkpoints in `services/tiling_extraction.py` after entry:
+   ```python
+   logger.info(f"[CHECKPOINT_1] Parsing tiling scheme from previous_results")
+   logger.info(f"[CHECKPOINT_2] Opening raster with rasterio: {blob_name}")
+   logger.info(f"[CHECKPOINT_3] Raster opened successfully - dims: {width}x{height}")
+   logger.info(f"[CHECKPOINT_4] Extracting tile window: {window}")
+   logger.info(f"[CHECKPOINT_5] Tile extracted, uploading to blob storage")
+   logger.info(f"[CHECKPOINT_6] Upload complete, returning result")
+   ```
+2. [ ] Add try/except around EVERY rasterio/GDAL operation with detailed error logging
+3. [ ] Add Stage 1 result validation BEFORE using tiling scheme data
+4. [ ] Deploy with enhanced logging
+5. [ ] Re-test with `17apr2024wv2.tif`
+6. [ ] Analyze logs to identify exact failure point
+
+**PHASE 2: Investigate Native Library Crash** (if checkpoints stop mid-execution)
+1. [ ] Check rasterio/GDAL version compatibility with Azure Functions Python 3.12
+2. [ ] Review `17apr2024wv2.tif` file properties (size, compression, CRS)
+3. [ ] Test with smaller raster first to rule out memory issues
+4. [ ] Add memory usage logging before/after rasterio operations
+5. [ ] Consider GDAL error handler configuration
+
+**PHASE 3: Fix Stage 3 Task Creation** (once Stage 2 works)
+1. [ ] Deploy Stage 3 debug logging already written
+2. [ ] Submit test job for `antigua.tif` (72 tiles expected)
+3. [ ] Query logs for `[STAGE3_DEBUG]` markers
+4. [ ] Identify exact failure point in task creation
+5. [ ] Apply fix based on actual error discovered
+6. [ ] Remove debug logging after fix confirmed
+
+**PHASE 4: End-to-End Validation**
+1. [ ] Test complete workflow: Stage 1 → 2 → 3 → 4
+2. [ ] Verify all stages complete successfully
+3. [ ] Check COG output quality
+4. [ ] Validate STAC metadata creation
+5. [ ] Update documentation with findings
+
+### Diagnostic Data (29 OCT 2025)
+
+**Failed Job Details**:
+```json
+{
+  "job_id": "7f8be55203646ed919b79896adbdeda9b3ce40a56342a7a72c2e8b25037682cf",
+  "job_type": "process_large_raster",
+  "file": "17apr2024wv2.tif",
+  "container": "rmhazuregeobronze",
+  "status": "processing",
+  "stage": 1,
+  "total_stages": 4,
+  "created_at": "2025-10-29T02:47:29.454937",
+  "updated_at": "2025-10-29T02:47:35.904920"
+}
+```
+
+**Failed Task Details**:
+```json
+{
+  "task_id": "7f8be552-s2-extract-tiles",
+  "parent_job_id": "7f8be55203646ed919b79896adbdeda9b3ce40a56342a7a72c2e8b25037682cf",
+  "task_type": "extract_tiles",
+  "status": "processing",
+  "stage": 2,
+  "created_at": "2025-10-29T02:47:36.295",
+  "updated_at": "2025-10-29T02:47:36.297875",
+  "stuck_duration": "10+ minutes"
+}
+```
+
+**Last Known Log Entry**:
+```
+Timestamp: 2025-10-29T02:47:36.312740Z
+Message: "🔍 [CHECKPOINT_START] extract_tiles handler entry for job_id: 7f8be55203646ed9"
+Component: service.TilingExtraction
+```
+
+**System Events**:
+- Function app restarts: 02:49:04, 02:49:42, 02:50:05, 02:50:29
+- Service Bus listeners stopped: 02:52:42
+- Python worker crashes suspected (exit code 134 seen in other scenarios)
+
+### Related Files
+
+- **🔥 CRITICAL**: [`services/tiling_extraction.py`](services/tiling_extraction.py:475-492) - Stage 2 handler (FAILING)
+- **Workflow Definition**: [`jobs/process_large_raster.py`](jobs/process_large_raster.py)
+- **Handler Registry**: [`services/__init__.py`](services/__init__.py:112)
+- **Stage 3 Handler**: [`services/raster_cog.py`](services/raster_cog.py:101) - (Not reached yet)
+- **CoreMachine Task Creation**: [`core/machine.py`](core/machine.py:300-313)
+
+### Testing Commands
+
+**Submit Test Job**:
+```bash
+# Test with 17apr2024wv2.tif (current failure case)
+curl -X POST https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/jobs/submit/process_large_raster \
+  -H "Content-Type: application/json" \
+  -d '{"blob_name": "17apr2024wv2.tif", "container_name": "rmhazuregeobronze"}'
+
+# Alternative: Test with smaller raster
+curl -X POST https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/jobs/submit/process_large_raster \
+  -H "Content-Type: application/json" \
+  -d '{"blob_name": "antigua.tif", "container_name": "rmhazuregeobronze"}'
+```
+
+**Monitor Stage 2 Processing**:
+```bash
+# Check for extract_tiles checkpoint logs
+cat > /tmp/query_stage2_checkpoints.sh << 'EOF'
+#!/bin/bash
+TOKEN=$(az account get-access-token --resource https://api.applicationinsights.io --query accessToken -o tsv)
+curl -s -H "Authorization: Bearer $TOKEN" \
+  "https://api.applicationinsights.io/v1/apps/829adb94-5f5c-46ae-9f00-18e731529222/query" \
+  --data-urlencode "query=traces | where timestamp >= ago(15m) | where message contains 'CHECKPOINT' or message contains 'extract_tiles' | order by timestamp asc | project timestamp, message, severityLevel" \
+  -G | python3 -m json.tool
+EOF
+chmod +x /tmp/query_stage2_checkpoints.sh
+/tmp/query_stage2_checkpoints.sh
+```
+
+**Check for Crashes/Errors**:
+```bash
+# Look for worker crashes and exceptions
+cat > /tmp/query_crashes.sh << 'EOF'
+#!/bin/bash
+TOKEN=$(az account get-access-token --resource https://api.applicationinsights.io --query accessToken -o tsv)
+curl -s -H "Authorization: Bearer $TOKEN" \
+  "https://api.applicationinsights.io/v1/apps/829adb94-5f5c-46ae-9f00-18e731529222/query" \
+  --data-urlencode "query=union traces, exceptions | where timestamp >= ago(15m) | where severityLevel >= 3 or itemType == 'exception' or message contains 'crash' or message contains 'exit' | order by timestamp desc | take 20 | project timestamp, message, severityLevel" \
+  -G | python3 -m json.tool
+EOF
+chmod +x /tmp/query_crashes.sh
+/tmp/query_crashes.sh
+```
+
+**Get Job/Task Status**:
+```bash
+# Check job status
+JOB_ID="7f8be55203646ed919b79896adbdeda9b3ce40a56342a7a72c2e8b25037682cf"
+curl -s "https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/jobs/status/${JOB_ID}" | python3 -m json.tool
+
+# Check task details
+curl -s "https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/db/tasks/${JOB_ID}" | python3 -c "import sys, json; data=json.load(sys.stdin); [print(f'Task: {t[\"task_id\"]}, stage={t[\"stage\"]}, status={t[\"status\"]}, updated={t[\"updated_at\"]}') for t in data['tasks']]"
+```
+
+**Query Stage 3 Debug Logs** (when Stage 2 works):
+```bash
+cat > /tmp/query_stage3_debug.sh << 'EOF'
+#!/bin/bash
+TOKEN=$(az account get-access-token --resource https://api.applicationinsights.io --query accessToken -o tsv)
+curl -s -H "Authorization: Bearer $TOKEN" \
+  "https://api.applicationinsights.io/v1/apps/829adb94-5f5c-46ae-9f00-18e731529222/query" \
+  --data-urlencode "query=traces | where timestamp >= ago(15m) | where message contains '[STAGE3_DEBUG]' | order by timestamp desc | take 50" \
+  -G | python3 -m json.tool
+EOF
+chmod +x /tmp/query_stage3_debug.sh
+/tmp/query_stage3_debug.sh
+```
+
+### Known Issues
+
+**Azure Functions Python Severity Mapping Bug** (28 OCT 2025):
+- Azure SDK maps `logging.DEBUG` to severity 1 (INFO) instead of 0 (DEBUG)
+- **Workaround**: Query by message content, not severity level
+- See: [`docs_claude/APPLICATION_INSIGHTS_QUERY_PATTERNS.md`](docs_claude/APPLICATION_INSIGHTS_QUERY_PATTERNS.md#azure-functions-python-logging-severity-mapping-issue)
 
 ---
 
@@ -442,9 +708,179 @@ def handler(params):
 
 ## ⏭️ Next Up
 
-### 1. Multi-Tier COG Architecture 🌟 **HIGH VALUE**
+### 1. Platform Layer Fixes 🔥 **CRITICAL - BLOCKING PLATFORM USE**
 
-**Status**: 🎯 **NEXT PRIORITY** - Ready for implementation
+**Status**: 🚨 **IMMEDIATE ACTION REQUIRED** - 2 critical runtime issues
+**Started**: 25 OCT 2025, **Investigated**: 29 OCT 2025
+**Priority**: P0 - Platform endpoints will crash when called
+**Effort**: 20 minutes total
+
+#### Context
+
+The Platform Service Layer was implemented on 25 OCT 2025 to create a "Platform-as-a-Service" layer above CoreMachine. This implements the fractal "turtle above CoreMachine" pattern where external applications (like DDH - Data Discovery Hub) can submit high-level requests that get translated into CoreMachine jobs.
+
+**Architecture Pattern**:
+```
+External App (DDH) → Platform Layer → CoreMachine → Tasks
+                      (trigger_platform.py)  (core/machine.py)
+```
+
+**What's Working**:
+- ✅ All imports load successfully
+- ✅ Function app starts without errors
+- ✅ HTTP routes registered in function_app.py
+- ✅ Platform models, repository, orchestrator implemented
+- ✅ Complete documentation exists
+
+**What's Broken**:
+- ❌ Platform endpoints will crash immediately when called
+- ❌ CoreMachine instantiation missing required registries
+- ❌ Service Bus usage violates repository pattern
+
+#### Fix #1: CoreMachine Instantiation Missing Required Registries 🔴 CRITICAL
+
+**Location**: [`triggers/trigger_platform.py:438`](triggers/trigger_platform.py:438)
+
+**Current Code (BROKEN)**:
+```python
+def __init__(self):
+    self.platform_repo = PlatformRepository()
+    self.job_repo = JobRepository()
+    self.core_machine = CoreMachine()  # ❌ Missing required parameters
+```
+
+**Problem**:
+CoreMachine requires **explicit job and handler registries** passed as constructor arguments. The decorator-based auto-discovery was removed on 10 SEP 2025 due to import timing issues.
+
+**Error When Called**:
+```python
+TypeError: __init__() missing 2 required positional arguments: 'all_jobs' and 'all_handlers'
+```
+
+**Fix Required**:
+```python
+def __init__(self):
+    from jobs import ALL_JOBS
+    from services import ALL_HANDLERS
+
+    self.platform_repo = PlatformRepository()
+    self.job_repo = JobRepository()
+    self.core_machine = CoreMachine(
+        all_jobs=ALL_JOBS,
+        all_handlers=ALL_HANDLERS
+    )
+```
+
+**Reference**: See `core/machine.py:116-149` for CoreMachine constructor signature
+
+**Impact**: 🔴 **CRITICAL** - Platform endpoints will crash immediately when `PlatformOrchestrator()` is instantiated
+**Effort**: 5 minutes
+
+**Testing After Fix**:
+```bash
+# Test Platform request submission
+curl -X POST 'https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/platform/submit' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "dataset_id": "test-dataset",
+    "resource_id": "test-resource",
+    "version_id": "v1.0",
+    "data_type": "raster",
+    "source_location": "https://rmhazuregeo.blob.core.windows.net/bronze/test.tif",
+    "parameters": {},
+    "client_id": "test"
+  }'
+```
+
+#### Fix #2: Direct Service Bus Usage Instead of Repository Pattern 🟠 MEDIUM
+
+**Location**: [`triggers/trigger_platform.py:621-643`](triggers/trigger_platform.py:621-643)
+
+**Current Code (INCONSISTENT)**:
+```python
+async def _submit_to_queue(self, job: JobRecord):
+    """Submit job to Service Bus jobs queue"""
+    try:
+        client = ServiceBusClient.from_connection_string(
+            config.service_bus_connection_string
+        )
+
+        with client:
+            sender = client.get_queue_sender(queue_name="jobs")  # ❌ Hardcoded
+
+            message = ServiceBusMessage(
+                json.dumps({  # ❌ Manual JSON serialization
+                    'job_id': job.job_id,
+                    'job_type': job.job_type
+                })
+            )
+
+            sender.send_messages(message)
+```
+
+**Problems**:
+1. **Violates repository pattern** - creates `ServiceBusClient` directly instead of using `ServiceBusRepository`
+2. **Hardcoded queue name** - uses `"jobs"` instead of `config.service_bus_jobs_queue`
+3. **Manual serialization** - uses `json.dumps()` instead of Pydantic `JobQueueMessage` model
+4. **Connection management** - creates new client per message (inefficient)
+
+**Fix Required**:
+```python
+async def _submit_to_queue(self, job: JobRecord):
+    """Submit job to Service Bus jobs queue via repository pattern"""
+    try:
+        import uuid
+        from infrastructure.service_bus import ServiceBusRepository
+        from core.schema.queue import JobQueueMessage
+
+        # Use repository pattern (handles connection pooling, retries, etc.)
+        service_bus_repo = ServiceBusRepository()
+
+        # Use Pydantic message model (automatic serialization + validation)
+        queue_message = JobQueueMessage(
+            job_id=job.job_id,
+            job_type=job.job_type,
+            parameters=job.parameters,
+            stage=1,  # Platform always creates Stage 1 jobs
+            correlation_id=str(uuid.uuid4())[:8]
+        )
+
+        # Send via repository (uses correct queue name from config)
+        service_bus_repo.send_job_message(queue_message)
+
+        logger.info(f"✅ Job {job.job_id} submitted to Service Bus")
+        return True
+
+    except Exception as e:
+        logger.error(f"❌ Failed to submit job to queue: {e}")
+        raise
+```
+
+**Impact**: 🟠 Inconsistent with architecture patterns, potential connection issues
+**Effort**: 15 minutes
+
+#### Related Documentation
+
+- **Architecture Guide**: [`docs_claude/COREMACHINE_PLATFORM_ARCHITECTURE.md`](docs_claude/COREMACHINE_PLATFORM_ARCHITECTURE.md)
+- **Detailed Fixes**: [`PLATFORM_LAYER_FIXES_TODO.md`](PLATFORM_LAYER_FIXES_TODO.md)
+- **Deployment Guide**: [`docs_claude/PLATFORM_DEPLOYMENT_STATUS.md`](docs_claude/PLATFORM_DEPLOYMENT_STATUS.md)
+
+#### Success Criteria
+
+After fixes applied:
+1. [ ] Platform endpoints don't crash on instantiation
+2. [ ] Test request successfully creates Platform record in database
+3. [ ] Platform orchestrator creates CoreMachine job(s)
+4. [ ] Jobs submitted to Service Bus via repository pattern
+5. [ ] Status endpoint returns Platform request with associated job IDs
+
+**Total Effort**: ~20 minutes to fix both issues + test
+
+---
+
+### 2. Multi-Tier COG Architecture 🌟 **HIGH VALUE**
+
+**Status**: 🎯 **READY FOR IMPLEMENTATION** - After Platform fixes deployed
 **Business Case**: Tiered storage for different access patterns and use cases
 
 #### Storage Trade-offs
@@ -795,6 +1231,135 @@ stages = [
 ## 💡 Future Ideas (Backlog)
 
 ### Performance & Operations
+- [ ] **Timer Cleanup Function** 🌟 **HIGH PRIORITY** - Orphaned Task Recovery
+  - **Status**: Validated against real production failure (29 OCT 2025)
+  - **Business Case**: Prevents single stuck tasks from blocking entire jobs indefinitely
+
+  **Real-World Scenario Encountered** (29 OCT 2025):
+  - Job: `list_container_contents` with 6,179 tasks
+  - Issue: 1 task stuck in 'processing', 1 in 'queued' for 15+ minutes
+  - Impact: Job blocked at stage 2 despite 6,177 tasks (99.97%) completed successfully
+  - Root Cause: Azure Functions 30-minute timeout killed job processor mid-execution
+  - Result: Orphaned tasks with no Service Bus messages, never processed
+
+  **Architecture Design Validation**:
+  - ✅ "Last task turns out lights" pattern **working as designed**
+  - ✅ Completion logic correctly waits for ALL tasks before advancing
+  - ✅ One stuck task = entire stage blocked = **prevents partial results**
+  - ❌ **Missing**: Timeout/recovery mechanism for orphaned tasks
+
+  **Timer Cleanup Mitigation Strategy**:
+
+  ```python
+  # Azure Timer Trigger: Every 5 minutes
+  @app.timer_trigger(schedule="0 */5 * * * *", arg_name="timer")
+  def cleanup_orphaned_tasks(timer: func.TimerRequest) -> None:
+      """
+      Detect and recover orphaned tasks that prevent job completion.
+
+      Scenarios Handled:
+      1. Tasks stuck in 'processing' >10min with no heartbeat update
+      2. Tasks stuck in 'queued' >15min (never picked up by Service Bus)
+      3. Jobs with function timeout failures leaving tasks mid-flight
+      4. Python worker crashes during task execution
+      """
+
+      # Query 1: Find tasks orphaned in 'processing' status
+      orphaned_processing = """
+          SELECT task_id, parent_job_id, updated_at,
+                 NOW() - updated_at AS stuck_duration
+          FROM app.tasks
+          WHERE status = 'processing'
+            AND updated_at < NOW() - INTERVAL '10 minutes'
+            AND (heartbeat IS NULL OR heartbeat < NOW() - INTERVAL '5 minutes')
+          ORDER BY updated_at ASC
+          LIMIT 100
+      """
+
+      # Query 2: Find tasks orphaned in 'queued' status
+      orphaned_queued = """
+          SELECT task_id, parent_job_id, created_at,
+                 NOW() - created_at AS stuck_duration
+          FROM app.tasks
+          WHERE status = 'queued'
+            AND created_at < NOW() - INTERVAL '15 minutes'
+          ORDER BY created_at ASC
+          LIMIT 100
+      """
+
+      # For each orphaned task:
+      # 1. Mark as 'failed' with diagnostic error message
+      # 2. Set error_details: "Auto-failed by cleanup: stuck in {status} for {duration}"
+      # 3. Trigger stage completion check (may unblock waiting jobs)
+      # 4. Log recovery action to Application Insights
+      # 5. Emit metric: orphaned_tasks_recovered counter
+  ```
+
+  **Detection Thresholds**:
+  - **Processing timeout**: 10 minutes (tasks should complete or update heartbeat)
+  - **Queued timeout**: 15 minutes (Service Bus should pick up within seconds normally)
+  - **Heartbeat staleness**: 5 minutes (tasks should heartbeat every 1-2 min if long-running)
+
+  **Recovery Actions**:
+  ```python
+  # For 'processing' orphans:
+  UPDATE app.tasks
+  SET status = 'failed',
+      error_details = 'Auto-failed by cleanup: stuck in processing for {duration}, no heartbeat',
+      updated_at = NOW()
+  WHERE task_id = '{orphaned_task_id}'
+
+  # Trigger completion check (may unblock job)
+  SELECT complete_task_and_check_stage(
+      p_task_id := '{orphaned_task_id}',
+      p_job_id := '{job_id}',
+      p_stage := {stage},
+      p_result_data := NULL,
+      p_error_details := 'Auto-failed by cleanup: timeout'
+  )
+  ```
+
+  **Benefits**:
+  - ✅ **Job Unblocking**: 6,177/6,179 tasks complete → job can advance/complete
+  - ✅ **Visibility**: Clear error messages explain why task failed ("timeout", "orphaned")
+  - ✅ **Automatic Recovery**: No manual intervention required
+  - ✅ **Failure Transparency**: Job shows 99.97% success rate with specific failed tasks
+  - ✅ **Prevents Silent Hangs**: Jobs stuck forever → jobs complete with error report
+
+  **Metrics to Track**:
+  - `orphaned_tasks_processing_count` - Tasks auto-failed from 'processing'
+  - `orphaned_tasks_queued_count` - Tasks auto-failed from 'queued'
+  - `jobs_unblocked_count` - Jobs that advanced/completed after cleanup
+  - `cleanup_duration_ms` - Cleanup function execution time
+
+  **Edge Cases Handled**:
+  1. **Race Condition**: Task completes between query and update
+     - Solution: Use `WHERE status = 'processing'` in UPDATE (no-op if already completed)
+  2. **Legitimate Long Tasks**: Some tasks take >10 minutes
+     - Solution: Implement heartbeat updates in long-running handlers
+     - Alternative: Configurable timeout per task_type
+  3. **Mass Failures**: What if 1000+ tasks orphaned?
+     - Solution: `LIMIT 100` per cleanup run, process in batches
+     - Metric: Queue depth of orphaned tasks for monitoring
+
+  **Implementation Priority**: HIGH
+  - **Effort**: ~4 hours (timer function, queries, testing, monitoring)
+  - **Impact**: Prevents entire jobs from hanging indefinitely
+  - **Validated**: Real production scenario (list_container_contents 6,179 tasks)
+
+  **Testing Checklist**:
+  - [ ] Submit job with intentional task timeout (sleep 15 min)
+  - [ ] Verify cleanup function detects and fails orphaned task
+  - [ ] Verify job advances after cleanup runs
+  - [ ] Test with multiple orphaned tasks across different jobs
+  - [ ] Verify cleanup doesn't affect legitimately processing tasks
+  - [ ] Monitor Application Insights for cleanup metrics
+
+  **See Also**:
+  - Real failure case documented in investigation session (29 OCT 2025)
+  - Job: `3107f1c37b64e3c0dcfaece79ab3385127ece1d72f5c3d6c2d56db627a6393e5`
+  - Tasks: `ce9402272aece9fc` (processing), `2c099ba501afd78a` (queued)
+
 - [ ] Job cancellation endpoint
 - [ ] Task replay for failed jobs
 - [ ] Historical analytics dashboard

@@ -2,19 +2,42 @@
 # CLAUDE CONTEXT - BLOB REPOSITORY
 # ============================================================================
 # EPOCH: 4 - ACTIVE ✅
-# STATUS: Infrastructure - Azure Blob Storage repository
-# PURPOSE: Centralized Azure Blob Storage repository with managed authentication
-# LAST_REVIEWED: 16 OCT 2025
+# STATUS: Infrastructure - Azure Blob Storage repository with decorator validation
+# PURPOSE: Centralized Azure Blob Storage repository with fail-fast validation
+# LAST_REVIEWED: 28 OCT 2025
+# UPDATES:
+#   - Added container_exists() and validate_container_and_blob() methods
+#   - Implemented @validate_container and @validate_container_and_blob decorators
+#   - All read/delete methods validate container+blob existence before execution
+#   - All write/list methods validate container existence before execution
+#   - Fail-fast pattern prevents cryptic Azure SDK errors deep in call stacks
 # EXPORTS: BlobRepository singleton with DefaultAzureCredential authentication
 # INTERFACES: IBlobRepository for dependency injection
 # PYDANTIC_MODELS: None - operates on raw bytes and streams
-# DEPENDENCIES: azure-storage-blob, azure-identity, io.BytesIO, typing, config
+# DEPENDENCIES: azure-storage-blob, azure-identity, decorators_blob, util_logger
 # SOURCE: Azure Blob Storage containers (Bronze/Silver/Gold tiers)
 # SCOPE: ALL blob operations for entire ETL pipeline
-# VALIDATION: Blob existence, size limits, content type validation
-# PATTERNS: Singleton, Repository, DefaultAzureCredential, Connection pooling
+# VALIDATION:
+#   - Decorator-based pre-flight validation (automatic)
+#   - Container existence (before all operations)
+#   - Blob existence (before read/delete operations)
+#   - Manual validation via container_exists(), validate_container_and_blob()
+# PATTERNS:
+#   - Singleton (connection reuse)
+#   - Repository (data access abstraction)
+#   - Decorator (automatic validation)
+#   - DefaultAzureCredential (managed auth)
+#   - Connection pooling (cached container clients)
 # ENTRY_POINTS: BlobRepository.instance(), RepositoryFactory.create_blob_repository()
-# INDEX: IBlobRepository:60, BlobRepository:100, upload_blob:200, download_blob:300
+# DECORATED_METHODS:
+#   - @validate_container_and_blob: read_blob, read_blob_chunked, delete_blob, get_blob_properties
+#   - @validate_container: write_blob, list_blobs, batch_download
+# INDEX:
+#   - IBlobRepository: line 89
+#   - BlobRepository: line 143
+#   - Validation: container_exists (293), validate_container_and_blob (321)
+#   - Core Operations: read_blob (377), write_blob (457), list_blobs (543)
+#   - Decorators: infrastructure/decorators_blob.py
 # ============================================================================
 
 """
@@ -71,6 +94,11 @@ from azure.core.exceptions import ResourceNotFoundError
 
 # Application imports
 from util_logger import LoggerFactory, ComponentType
+from infrastructure.decorators_blob import (
+    validate_container as dec_validate_container,
+    validate_blob as dec_validate_blob,
+    validate_container_and_blob as dec_validate_container_and_blob
+)
 
 logger = LoggerFactory.create_logger(ComponentType.REPOSITORY, __name__)
 
@@ -82,33 +110,47 @@ logger = LoggerFactory.create_logger(ComponentType.REPOSITORY, __name__)
 class IBlobRepository(ABC):
     """
     Interface for blob storage operations.
-    
+
     Enables dependency injection and testing/mocking of blob operations.
     All blob repositories must implement this interface.
     """
-    
+
+    @abstractmethod
+    def container_exists(self, container: str) -> bool:
+        """Check if container exists"""
+        pass
+
+    @abstractmethod
+    def validate_container_and_blob(self, container: str, blob_path: str) -> Dict[str, Any]:
+        """
+        Validate both container and blob existence.
+
+        Returns dict with container_exists, blob_exists, valid, and message fields.
+        """
+        pass
+
     @abstractmethod
     def read_blob(self, container: str, blob_path: str) -> bytes:
         """Read entire blob to memory"""
         pass
-    
+
     @abstractmethod
     def write_blob(self, container: str, blob_path: str, data: Union[bytes, BinaryIO],
                    overwrite: bool = True, content_type: str = "application/octet-stream",
                    metadata: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
         """Write blob from bytes or stream"""
         pass
-    
+
     @abstractmethod
     def list_blobs(self, container: str, prefix: str = "", limit: Optional[int] = None) -> List[Dict[str, Any]]:
         """List blobs with metadata"""
         pass
-    
+
     @abstractmethod
     def blob_exists(self, container: str, blob_path: str) -> bool:
         """Check if blob exists"""
         pass
-    
+
     @abstractmethod
     def delete_blob(self, container: str, blob_path: str) -> bool:
         """Delete a blob"""
@@ -230,42 +272,145 @@ class BlobRepository(IBlobRepository):
             cls._instance = cls(connection_string=connection_string, storage_account=storage_account)
         return cls._instance
     
-    def _get_container_client(self, container: str) -> ContainerClient:
+    def _get_container_client(self, container: str, validate: bool = False) -> ContainerClient:
         """
-        Get or create cached container client.
-        
+        Get or create cached container client with optional validation.
+
         Uses connection pooling by caching container clients.
-        
+        Optionally validates container existence for fail-fast error handling.
+
         Args:
             container: Container name
-            
+            validate: If True, verify container exists before returning client (default: False)
+
         Returns:
             Cached or new ContainerClient
+
+        Raises:
+            ResourceNotFoundError: If validate=True and container doesn't exist
         """
         if container not in self._container_clients:
-            self._container_clients[container] = self.blob_service.get_container_client(container)
+            container_client = self.blob_service.get_container_client(container)
+
+            # Validate container exists if requested
+            if validate:
+                try:
+                    container_client.get_container_properties()
+                except ResourceNotFoundError:
+                    logger.error(f"Container does not exist: {container}")
+                    raise ResourceNotFoundError(
+                        f"Container '{container}' does not exist in storage account '{self.storage_account}'"
+                    )
+
+            self._container_clients[container] = container_client
             logger.debug(f"Created new container client for: {container}")
+
         return self._container_clients[container]
     
     # ========================================================================
+    # VALIDATION OPERATIONS
+    # ========================================================================
+
+    def container_exists(self, container: str) -> bool:
+        """
+        Check if container exists.
+
+        Validates container existence before expensive operations.
+        Use this for pre-flight checks to fail fast with clear errors.
+
+        Args:
+            container: Container name
+
+        Returns:
+            True if container exists, False otherwise
+
+        Raises:
+            Exception: For errors other than ResourceNotFoundError
+        """
+        try:
+            container_client = self.blob_service.get_container_client(container)
+            container_client.get_container_properties()
+            logger.debug(f"Container exists: {container}")
+            return True
+        except ResourceNotFoundError:
+            logger.debug(f"Container does not exist: {container}")
+            return False
+        except Exception as e:
+            logger.error(f"Error checking container existence for '{container}': {e}")
+            raise
+
+    def validate_container_and_blob(self, container: str, blob_path: str) -> Dict[str, Any]:
+        """
+        Validate both container and blob existence.
+
+        Useful for pre-flight checks before expensive operations.
+        Provides clear diagnostic information about what exists and what doesn't.
+
+        Args:
+            container: Container name
+            blob_path: Blob path
+
+        Returns:
+            Dict with validation results:
+            {
+                "container_exists": bool,
+                "blob_exists": bool,
+                "valid": bool,  # True if both exist
+                "message": str  # Descriptive message
+            }
+
+        Example:
+            result = blob_repo.validate_container_and_blob('bronze', 'data.tif')
+            if not result['valid']:
+                logger.error(result['message'])
+                return {"success": False, "error": result['message']}
+        """
+        result = {
+            "container_exists": False,
+            "blob_exists": False,
+            "valid": False,
+            "message": ""
+        }
+
+        # Check container first
+        if not self.container_exists(container):
+            result["message"] = f"Container '{container}' does not exist in storage account '{self.storage_account}'"
+            return result
+
+        result["container_exists"] = True
+
+        # Check blob
+        if not self.blob_exists(container, blob_path):
+            result["message"] = f"Blob '{blob_path}' does not exist in container '{container}'"
+            return result
+
+        result["blob_exists"] = True
+        result["valid"] = True
+        result["message"] = f"Both container '{container}' and blob '{blob_path}' exist"
+
+        return result
+
+    # ========================================================================
     # CORE BLOB OPERATIONS
     # ========================================================================
-    
+
+    @dec_validate_container_and_blob
     def read_blob(self, container: str, blob_path: str) -> bytes:
         """
         Read entire blob to memory.
-        
+
         Best for small files (<100MB). For larger files, use read_blob_chunked.
-        
+        Container and blob existence validated automatically by decorator.
+
         Args:
             container: Container name
             blob_path: Path to blob
-            
+
         Returns:
             Blob content as bytes
-            
+
         Raises:
-            ResourceNotFoundError: If blob doesn't exist
+            ResourceNotFoundError: If container or blob doesn't exist (validated pre-flight)
         """
         try:
             container_client = self._get_container_client(container)
@@ -300,15 +445,18 @@ class BlobRepository(IBlobRepository):
         data = self.read_blob(container, blob_path)
         return BytesIO(data)
     
+    @dec_validate_container_and_blob
     def read_blob_chunked(self, container: str, blob_path: str, chunk_size: int = 4*1024*1024) -> Iterator[bytes]:
         """
         Stream blob in chunks for large files.
-        
+
+        Container and blob existence validated automatically by decorator.
+
         Args:
             container: Container name
             blob_path: Path to blob
             chunk_size: Size of each chunk (default 4MB)
-            
+
         Yields:
             Chunks of blob data
         """
@@ -326,12 +474,16 @@ class BlobRepository(IBlobRepository):
             logger.error(f"Failed to stream blob {container}/{blob_path}: {e}")
             raise
     
+    @dec_validate_container
     def write_blob(self, container: str, blob_path: str, data: Union[bytes, BinaryIO],
                    overwrite: bool = True, content_type: str = "application/octet-stream",
                    metadata: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
         """
         Write blob from bytes or stream.
-        
+
+        Container existence validated automatically by decorator.
+        Blob doesn't need to exist (we're creating/overwriting it).
+
         Args:
             container: Container name
             blob_path: Path for blob
@@ -339,7 +491,7 @@ class BlobRepository(IBlobRepository):
             overwrite: Whether to overwrite existing blob
             content_type: MIME type for blob
             metadata: Optional metadata dictionary
-            
+
         Returns:
             Dict with blob properties (etag, last_modified, size)
         """
@@ -408,9 +560,12 @@ class BlobRepository(IBlobRepository):
             logger.error(f"Failed to copy blob: {e}")
             raise
     
+    @dec_validate_container
     def list_blobs(self, container: str, prefix: str = "", limit: Optional[int] = None) -> List[Dict[str, Any]]:
         """
         List blobs with metadata.
+
+        Container existence validated automatically by decorator.
 
         Special handling for .gdb (Esri File Geodatabase) folders:
         - Treats entire .gdb as a single unit
@@ -519,14 +674,17 @@ class BlobRepository(IBlobRepository):
             logger.error(f"Error checking blob existence: {e}")
             raise
     
+    @dec_validate_container_and_blob
     def delete_blob(self, container: str, blob_path: str) -> bool:
         """
         Delete a blob.
-        
+
+        Container and blob existence validated automatically by decorator.
+
         Args:
             container: Container name
             blob_path: Path to blob
-            
+
         Returns:
             True if deleted, False if not found
         """
@@ -545,14 +703,17 @@ class BlobRepository(IBlobRepository):
             logger.error(f"Failed to delete blob: {e}")
             raise
     
+    @dec_validate_container_and_blob
     def get_blob_properties(self, container: str, blob_path: str) -> Dict[str, Any]:
         """
         Get detailed blob properties.
-        
+
+        Container and blob existence validated automatically by decorator.
+
         Args:
             container: Container name
             blob_path: Path to blob
-            
+
         Returns:
             Dict with blob properties
         """
@@ -671,9 +832,13 @@ class BlobRepository(IBlobRepository):
     # ADVANCED OPERATIONS
     # ========================================================================
 
+    @dec_validate_container
     def batch_download(self, container: str, blob_paths: List[str], max_workers: int = 10) -> Dict[str, BytesIO]:
         """
         Download multiple blobs in parallel.
+
+        Container existence validated automatically by decorator.
+        Individual blob validation happens per-download (via read_blob_to_stream decorator).
 
         Args:
             container: Container name

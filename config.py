@@ -452,40 +452,227 @@ def determine_applicable_tiers(band_count: int, data_type: str) -> List[CogTier]
     return applicable
 
 
+# ============================================================================
+# MULTI-ACCOUNT STORAGE CONFIGURATION (29 OCT 2025)
+# ============================================================================
+# Three-account storage pattern for trust zone separation
+# See: MULTI_ACCOUNT_STORAGE_ARCHITECTURE.md
+# ============================================================================
+
+class StorageAccountConfig(BaseModel):
+    """
+    Configuration for a single storage account with purpose-specific containers.
+
+    Design: Currently all three "accounts" use rmhazuregeo, but container
+    names are prefixed to simulate separation (bronze-*, silver-*, silverext-*).
+
+    Future: Each account will be a separate Azure Storage Account with
+    independent networking, access policies, and lifecycle rules.
+
+    Trust Zones:
+        Bronze: Untrusted user uploads (write-only for users, read-only for ETL)
+        Silver: Trusted processed data (ETL read-write, REST API read-only)
+        SilverExternal: Airgapped replica (ETL push-only, one-way sync)
+    """
+    account_name: str = Field(
+        description="Azure Storage Account name"
+    )
+
+    container_prefix: str = Field(
+        description="Prefix for containers in this account (e.g., 'bronze', 'silver')"
+    )
+
+    # Purpose-specific containers (flat namespace within account)
+    vectors: str = Field(description="Vector data container (Shapefiles, GeoJSON, GeoPackage)")
+    rasters: str = Field(description="Raster data container (GeoTIFF, raw rasters)")
+    cogs: str = Field(description="Cloud Optimized GeoTIFFs (analysis + visualization tiers)")
+    tiles: str = Field(description="Raster tiles (temporary or permanent)")
+    mosaicjson: str = Field(description="MosaicJSON metadata files")
+    stac_assets: str = Field(description="STAC asset files (thumbnails, metadata)")
+    misc: str = Field(description="Miscellaneous files (logs, reports)")
+    temp: str = Field(description="Temporary processing files (auto-cleanup)")
+
+    # Optional: Connection override (for airgapped external)
+    connection_string: Optional[str] = Field(
+        default=None,
+        description="Override connection string for isolated networks"
+    )
+
+    def get_container(self, purpose: str) -> str:
+        """
+        Get fully qualified container name.
+
+        Args:
+            purpose: Data purpose (vectors, rasters, cogs, tiles, etc.)
+
+        Returns:
+            Container name with account prefix
+
+        Example:
+            bronze_account.get_container("vectors") → "bronze-vectors"
+            silver_account.get_container("cogs") → "silver-cogs"
+
+        Raises:
+            ValueError: If purpose is unknown
+        """
+        if not hasattr(self, purpose):
+            raise ValueError(
+                f"Unknown container purpose: {purpose}. "
+                f"Valid options: vectors, rasters, cogs, tiles, mosaicjson, "
+                f"stac_assets, misc, temp"
+            )
+        return getattr(self, purpose)
+
+
+class MultiAccountStorageConfig(BaseModel):
+    """
+    Multi-account storage configuration for trust zones.
+
+    Current State (29 OCT 2025):
+    - All three "accounts" use rmhazuregeo storage account
+    - Containers are prefixed to simulate account separation:
+      - bronze-vectors, bronze-rasters (simulates Bronze account)
+      - silver-cogs, silver-vectors (simulates Silver account)
+      - silverext-cogs, silverext-vectors (simulates SilverExternal account)
+
+    Future State (When Ready for Production):
+    - Bronze: Separate storage account (rmhgeo-bronze) in untrusted VNET
+    - Silver: Separate storage account (rmhgeo-silver) in trusted VNET
+    - SilverExternal: Separate storage account in airgapped VNET (no internet)
+
+    Migration Path:
+    - Change bronze.account_name to new account → zero code changes
+    - Change silver.account_name to new account → zero code changes
+    - Container names stay the same (bronze-vectors, silver-cogs, etc.)
+    """
+
+    # BRONZE: Untrusted raw data zone
+    bronze: StorageAccountConfig = Field(
+        default_factory=lambda: StorageAccountConfig(
+            account_name=os.getenv("STORAGE_ACCOUNT_NAME", "rmhazuregeo"),
+            container_prefix="bronze",
+            vectors="bronze-vectors",
+            rasters="bronze-rasters",
+            misc="bronze-misc",
+            temp="bronze-temp",
+            # Not used in Bronze (no processed outputs):
+            cogs="bronze-notused",
+            tiles="bronze-notused",
+            mosaicjson="bronze-notused",
+            stac_assets="bronze-notused"
+        )
+    )
+
+    # SILVER: Trusted processed data + REST API serving
+    silver: StorageAccountConfig = Field(
+        default_factory=lambda: StorageAccountConfig(
+            account_name=os.getenv("STORAGE_ACCOUNT_NAME", "rmhazuregeo"),
+            container_prefix="silver",
+            vectors="silver-vectors",
+            rasters="silver-rasters",
+            cogs="silver-cogs",
+            tiles="silver-tiles",
+            mosaicjson="silver-mosaicjson",
+            stac_assets="silver-stac-assets",
+            misc="silver-misc",
+            temp="silver-temp"
+        )
+    )
+
+    # SILVER EXTERNAL: Airgapped secure environment replica
+    silverext: StorageAccountConfig = Field(
+        default_factory=lambda: StorageAccountConfig(
+            account_name=os.getenv("STORAGE_ACCOUNT_NAME", "rmhazuregeo"),
+            container_prefix="silverext",
+            vectors="silverext-vectors",
+            rasters="silverext-rasters",
+            cogs="silverext-cogs",
+            tiles="silverext-tiles",
+            mosaicjson="silverext-mosaicjson",
+            stac_assets="silverext-stac-assets",
+            misc="silverext-misc",
+            temp="silverext-temp",
+            # Optional: Connection string for airgapped network
+            connection_string=os.getenv("SILVEREXT_CONNECTION_STRING")
+        )
+    )
+
+    def get_account(self, zone: str) -> StorageAccountConfig:
+        """
+        Get storage account config by trust zone.
+
+        Args:
+            zone: Trust zone ("bronze", "silver", "silverext")
+
+        Returns:
+            StorageAccountConfig for that zone
+
+        Example:
+            storage.get_account("bronze").get_container("vectors")
+            → "bronze-vectors"
+
+        Raises:
+            ValueError: If zone is unknown
+        """
+        if zone == "bronze":
+            return self.bronze
+        elif zone == "silver":
+            return self.silver
+        elif zone == "silverext":
+            return self.silverext
+        else:
+            raise ValueError(
+                f"Unknown storage zone: {zone}. "
+                f"Valid options: bronze, silver, silverext"
+            )
+
+
 class AppConfig(BaseModel):
     """
     Strongly typed application configuration using Pydantic v2.
-    
+
     All environment variables are documented, validated, and typed.
     Provides single source of truth for configuration management.
     """
-    
+
     # ========================================================================
-    # Azure Storage Configuration
+    # Multi-Account Storage Configuration (NEW - 29 OCT 2025)
     # ========================================================================
-    
+
+    storage: MultiAccountStorageConfig = Field(
+        default_factory=MultiAccountStorageConfig,
+        description="Multi-account storage configuration for trust zones (Bronze/Silver/SilverExternal)"
+    )
+
+    # ========================================================================
+    # Azure Storage Configuration (DEPRECATED - Use storage.* instead)
+    # ========================================================================
+
     storage_account_name: str = Field(
         ...,  # Required field
         description="Azure Storage Account name for managed identity authentication",
         examples=["rmhazuregeo"]
     )
-    
+
     bronze_container_name: str = Field(
         ...,
-        description="Bronze tier container name for raw geospatial data",
-        examples=["rmhazuregeobronze"]
+        description="DEPRECATED: Use storage.bronze.get_container('rasters') instead. Bronze tier container name for raw geospatial data",
+        examples=["rmhazuregeobronze"],
+        deprecated="Use storage.bronze.get_container() instead"
     )
-    
+
     silver_container_name: str = Field(
         ...,
-        description="Silver tier container name for processed COGs and structured data",
-        examples=["rmhazuregeosilver"]
+        description="DEPRECATED: Use storage.silver.get_container('cogs') instead. Silver tier container name for processed COGs and structured data",
+        examples=["rmhazuregeosilver"],
+        deprecated="Use storage.silver.get_container() instead"
     )
-    
+
     gold_container_name: str = Field(
         ...,
-        description="Gold tier container name for GeoParquet exports and analytics",
-        examples=["rmhazuregeogold"]
+        description="DEPRECATED: Gold tier not used in trust zone pattern. Gold tier container name for GeoParquet exports and analytics",
+        examples=["rmhazuregeogold"],
+        deprecated="Gold tier not used in trust zone pattern"
     )
 
     # ========================================================================

@@ -1,17 +1,19 @@
 # File Catalog
 
-**Date**: 26 OCT 2025 (Complete Root Folder Update)
-**Total Python Files**: 135 (actual count)
+**Date**: 29 OCT 2025 (Platform Layer + Vector Services + Infrastructure Updates)
+**Total Python Files**: 140 (actual count)
 **Purpose**: Quick file lookup with one-line descriptions
 **Author**: Robert and Geospatial Claude Legion
-**Status**: ✅ Updated - Root folder files cataloged with current descriptions
+**Status**: ✅ Updated - Platform layer, enhanced vector services, and blob decorators added
 
-## 📊 Quick Stats
+## 📊 Quick Stats (Updated 29 OCT 2025)
 - **Root Python files**: 6
-- **Root documentation**: 21 markdown files
+- **Root documentation**: 26 markdown files (25 + CODE_QUALITY_REVIEW)
+- **Platform documentation**: 4 new files (hello_world, enum patterns, fixes, boundary analysis)
 - **Core directories**: 12 folders
-- **Services**: 25 files
-- **Triggers**: 19 files
+- **Infrastructure**: 13 files (added decorators_blob.py)
+- **Services**: 30+ files (added vector/postgis_handler_enhanced.py, vector/tasks_enhanced.py)
+- **Triggers**: 11 files (added Platform layer: trigger_platform.py, trigger_platform_status.py)
 - **Jobs**: 12 files (all using JobBase ABC)
 
 ## 🎯 Root Level Files (32 files)
@@ -36,10 +38,21 @@
 | `docker-compose.yml` | Local PostgreSQL + pgAdmin for development |
 | `import_validation_registry.json` | Auto-discovered module import health tracking |
 
-### Documentation Files (21 markdown files)
+### Documentation Files (25 markdown files) ⭐ UPDATED 29 OCT
+
+#### Platform Layer Documentation ⭐ NEW 25-29 OCT (4 files)
+| File | Purpose | Status |
+|------|---------|--------|
+| `PLATFORM_HELLO_WORLD.md` | ⭐ Platform layer hello_world reference implementation (fractal pattern demo) | ✅ NEW 29 OCT |
+| `PLATFORM_PYDANTIC_ENUM_PATTERNS.md` | ⭐ Platform/CoreMachine enum consistency patterns (JobStatus, DataType) | ✅ NEW 29 OCT |
+| `PLATFORM_LAYER_FIXES_TODO.md` | Platform layer known issues and fixes (26 OCT 2025) | Reference |
+| `PLATFORM_BOUNDARY_ANALYSIS.md` | Platform vs CoreMachine boundary analysis | Architecture |
+
+#### Core Documentation (21 files)
 | File | Purpose | Status |
 |------|---------|--------|
 | `CLAUDE.md` | Primary entry point redirecting to docs_claude/ | ⭐ START HERE |
+| `CODE_QUALITY_REVIEW_29OCT2025.md` | ⭐ Code quality review - Platform + vector services documentation audit | ✅ NEW 29 OCT |
 | `RASTER_PIPELINE.md` | Comprehensive raster ETL workflow documentation | Production guide |
 | `COG_MOSAIC.md` | MosaicJSON generation from COG tiles | Technical spec |
 | `STAC_IMPLEMENTATION_PLAN.md` | STAC catalog implementation roadmap | Planning doc |
@@ -143,7 +156,7 @@
 |------|---------|
 | `interfaces/repository.py` | IQueueRepository and other repository interfaces |
 
-## 💾 Infrastructure Layer (12 files in infrastructure/ folder) ⭐ UPDATED 10 OCT
+## 💾 Infrastructure Layer (13 files in infrastructure/ folder) ⭐ UPDATED 29 OCT
 
 | File | Purpose | Status |
 |------|---------|--------|
@@ -151,24 +164,41 @@
 | `infrastructure/factory.py` | Central factory for all repository instances (includes DuckDB) | ✅ Updated 10 OCT |
 | `infrastructure/jobs_tasks.py` | Business logic for job and task management + batch operations | ✅ Working |
 | `infrastructure/postgresql.py` | PostgreSQL-specific implementation with psycopg | ✅ Working |
-| `infrastructure/blob.py` | Azure Blob Storage operations with managed identity | ✅ Working |
+| `infrastructure/blob.py` | Azure Blob Storage operations with managed identity + decorator validation | ✅ Updated 29 OCT |
+| `infrastructure/decorators_blob.py` | ⭐ NEW - Fail-fast validation decorators for blob operations (@validate_container, @validate_blob) | ✅ NEW 28 OCT |
 | `infrastructure/queue.py` | Queue Storage operations with singleton pattern | ✅ Working |
 | `infrastructure/service_bus.py` | Service Bus implementation with batch support | ✅ Working |
 | `infrastructure/vault.py` | Azure Key Vault integration (currently disabled) | ⚠️ Disabled |
 | `infrastructure/stac.py` | pgSTAC operations for STAC catalog | ✅ Working |
-| `infrastructure/duckdb.py` | ⭐ NEW - DuckDB analytical query engine with spatial+azure extensions | ✅ NEW 10 OCT |
+| `infrastructure/duckdb.py` | DuckDB analytical query engine with spatial+azure extensions | ✅ Working 10 OCT |
 | `infrastructure/interface_repository.py` | Repository interfaces (IJobRepository, ITaskRepository, IDuckDBRepository) | ✅ Updated 10 OCT |
 | `infrastructure/__init__.py` | Infrastructure module exports | ✅ Working |
 
-## ⚙️ Services (5 files in services/ folder) ⭐ UPDATED 4 OCT
+## ⚙️ Services (services/ folder) ⭐ UPDATED 29 OCT
 
+### Core Services (5 files - Root Level)
 | File | Purpose |
 |------|---------|
 | `services/service_hello_world.py` | Hello World task processing logic |
 | `services/service_blob.py` | Blob storage service handlers |
 | `services/service_stac_setup.py` | STAC setup service |
-| `services/container_summary.py` | ⭐ NEW - Container aggregate statistics handler |
-| `services/container_list.py` | ⭐ NEW - Container blob listing and analysis handlers |
+| `services/container_summary.py` | Container aggregate statistics handler |
+| `services/container_list.py` | Container blob listing and analysis handlers |
+
+### Raster Services (services/ - Root Level)
+| File | Purpose |
+|------|---------|
+| `services/raster_validation.py` | Raster validation and metadata extraction |
+| `services/raster_cog.py` | COG (Cloud Optimized GeoTIFF) generation |
+| `services/tiling_scheme.py` | Tiling scheme generation for large rasters |
+| `services/tiling_extraction.py` | Tile extraction from large rasters |
+
+### Vector Services (services/vector/ subfolder) ⭐ NEW 26 OCT
+| File | Purpose | Status |
+|------|---------|--------|
+| `services/vector/postgis_handler_enhanced.py` | ⭐ NEW - Enhanced PostGIS ingestion with comprehensive error handling | ✅ NEW 26 OCT |
+| `services/vector/tasks_enhanced.py` | ⭐ NEW - Enhanced vector ETL task handlers with granular error tracking | ✅ NEW 26 OCT |
+| `services/vector/converters.py` | Format-specific converters (CSV, GeoJSON, Shapefile, KML, etc.) | ✅ Working |
 
 ## 📋 Job Workflows (12 files in jobs/ folder) ⭐ UPDATED 15 OCT 2025
 
@@ -233,17 +263,41 @@
 | `task_factory.py` | TaskHandlerFactory for task routing |
 | `task_handlers.py` | Task processor implementations |
 
-## ⚙️ Trigger Handlers (7 files in triggers/ folder)
+## ⚙️ Trigger Handlers (triggers/ folder) ⭐ UPDATED 29 OCT
 
+### HTTP Triggers - CoreMachine (7 files)
 | File | Purpose |
 |------|---------|
-| `triggers/health.py` | Health check endpoint |
-| `triggers/submit_job.py` | Job submission HTTP trigger |
+| `triggers/health.py` | Health check endpoint with import validation |
+| `triggers/submit_job.py` | CoreMachine job submission HTTP trigger |
 | `triggers/list_jobs.py` | Job listing endpoint |
 | `triggers/job_status.py` | Job status query endpoint |
-| `triggers/db_admin.py` | Database administration endpoints |
-| `triggers/db_query.py` | Database query endpoints |
+| `triggers/db_admin.py` | Database administration endpoints (schema deployment, nuke) |
+| `triggers/db_query.py` | Database query endpoints (jobs, tasks, statistics) |
 | `triggers/container.py` | Container operation triggers |
+
+### HTTP Triggers - Platform Layer ⭐ NEW 25-29 OCT
+| File | Purpose | Status |
+|------|---------|--------|
+| `triggers/trigger_platform.py` | ⭐ NEW - Platform request submission (DDH orchestration above CoreMachine) | ✅ NEW 25 OCT |
+| `triggers/trigger_platform_status.py` | ⭐ NEW - Platform request status monitoring with job aggregation | ✅ NEW 25 OCT |
+
+**Platform Layer Pattern**:
+- External applications (DDH) submit requests to Platform layer
+- Platform orchestrator determines which CoreMachine jobs to create
+- "Turtle above CoreMachine" - business logic orchestration
+- Single Platform request → Multiple CoreMachine jobs
+- Status endpoint aggregates all job results
+
+### Service Bus Triggers (1 file)
+| File | Purpose |
+|------|---------|
+| `triggers/trigger_job_processor.py` | Service Bus job queue processor - CoreMachine orchestration |
+
+### Schema Deployment (1 file)
+| File | Purpose |
+|------|---------|
+| `triggers/schema_pydantic_deploy.py` | Pydantic-driven schema deployment with Platform schema support |
 
 ## 📝 Documentation (Root Level) ✅ CLEANED UP 30 SEP
 

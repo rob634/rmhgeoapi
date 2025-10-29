@@ -225,45 +225,60 @@ class RepositoryFactory:
 
     @staticmethod
     def create_blob_repository(
+        zone: str = "silver",
         storage_account: Optional[str] = None,
         use_default_credential: bool = True,
         connection_string: Optional[str] = None
     ) -> 'BlobRepository':
         """
-        Create blob storage repository with authentication.
-        
+        Create blob storage repository for specific trust zone.
+
         This is THE centralized authentication point for all blob operations.
         Uses DefaultAzureCredential for seamless auth across environments.
-        
+
+        Multi-Account Pattern (NEW - 29 OCT 2025):
+        - Bronze: Untrusted user uploads (read-only for ETL)
+        - Silver: Trusted processed data (ETL read-write, REST API read-only)
+        - SilverExternal: Airgapped replica (ETL push-only)
+
         Args:
-            storage_account: Storage account name (uses env if not provided)
+            zone: Trust zone ("bronze", "silver", "silverext"). Default: "silver"
+            storage_account: DEPRECATED - use zone parameter instead
             use_default_credential: Use DefaultAzureCredential (True) or connection string (False)
-            connection_string: Optional connection string (alternative to DefaultAzureCredential)
-            
+            connection_string: Optional connection string (for airgapped accounts)
+
         Returns:
-            BlobRepository singleton instance
-            
+            BlobRepository singleton instance for that zone
+
         Example:
-            # Recommended usage
+            # RECOMMENDED: Zone-based access (multi-account support)
+            bronze_repo = RepositoryFactory.create_blob_repository("bronze")
+            silver_repo = RepositoryFactory.create_blob_repository("silver")
+
+            # ETL pattern: Bronze → Silver
+            raw_data = bronze_repo.read_blob("bronze-rasters", "user_upload.tif")
+            silver_repo.write_blob("silver-cogs", "processed.tif", cog_data)
+
+            # Legacy usage still works (defaults to Silver)
             blob_repo = RepositoryFactory.create_blob_repository()
-            
-            # With specific account
-            blob_repo = RepositoryFactory.create_blob_repository(
-                storage_account="myaccount"
-            )
         """
         from .blob import BlobRepository
-        
-        logger.info("🏭 Creating Blob Storage repository")
-        logger.debug(f"  Storage account: {storage_account or 'from environment'}")
-        logger.debug(f"  Use DefaultAzureCredential: {use_default_credential}")
-        
-        # Create repository based on authentication method
-        if connection_string:
+
+        logger.info(f"🏭 Creating Blob Storage repository for zone: {zone}")
+
+        # Multi-account pattern (RECOMMENDED)
+        if zone and zone in ["bronze", "silver", "silverext"]:
+            logger.debug(f"  Using zone-based repository: {zone}")
+            blob_repo = BlobRepository.for_zone(zone)
+
+        # Legacy pattern (backward compatible)
+        elif connection_string:
+            logger.debug("  Using connection string authentication")
             blob_repo = BlobRepository.instance(connection_string=connection_string)
         else:
-            blob_repo = BlobRepository.instance(storage_account=storage_account)
-        
+            logger.debug(f"  Using DefaultAzureCredential for account: {storage_account or 'from config'}")
+            blob_repo = BlobRepository.instance(account_name=storage_account)
+
         logger.info("✅ Blob repository created successfully")
         return blob_repo
     

@@ -5,6 +5,248 @@
 
 ---
 
+## 📋 SYSTEMATIC DOCUMENTATION REVIEW PROJECT (Started 29 OCT 2025)
+
+**Status**: 🎯 **ACTIVE** - Systematic review of all Python files for documentation standards
+**Priority**: P1 - Quality assurance and maintenance
+**Goal**: Ensure 100% of Python files have complete Claude context headers and comprehensive docstrings
+
+### Overview
+
+Systematically review all 140 Python files in the codebase to verify:
+1. ✅ **Claude Context Header** present and complete
+2. ✅ **Module-level docstring** present and accurate
+3. ✅ **Class docstrings** for all classes
+4. ✅ **Function/method docstrings** for all public functions
+5. ✅ **LAST_REVIEWED date** is current (within 60 days)
+6. ✅ **INDEX section** includes line numbers for major components
+
+### Review Plan - Phased Approach
+
+**Phase 1: High-Priority Files** (Est: 2-3 hours)
+- Triggers (11 files) - User-facing HTTP endpoints
+- Jobs (12 files) - Workflow definitions
+- Infrastructure (13 files) - Critical repository layer
+- **Total**: 36 files
+
+**Phase 2: Service Layer** (Est: 3-4 hours)
+- Core services (5 files)
+- Raster services (4 files)
+- Vector services (3 files)
+- Container services (2 files)
+- STAC services (2 files)
+- **Total**: 16+ files
+
+**Phase 3: Core Architecture** (Est: 2-3 hours)
+- core/ folder (17 files) - CoreMachine orchestration
+- **Total**: 17 files
+
+**Phase 4: Supporting Files** (Est: 3-4 hours)
+- Root Python files (6 files)
+- Schemas (10 files) - Legacy and active
+- Utils (3 files)
+- Models (misc files)
+- **Total**: 19+ files
+
+**Phase 5: Update FILE_CATALOG.md** (Est: 1 hour)
+- Add "Last Reviewed" column to all sections
+- Update status markers
+- Document completion percentage
+
+### Review Checklist Per File
+
+For each Python file, verify:
+
+```markdown
+## File: {filename}
+
+### Claude Context Header
+- [ ] Header present (Lines 1-20)
+- [ ] EPOCH designation included
+- [ ] STATUS description current
+- [ ] PURPOSE one-liner accurate
+- [ ] LAST_REVIEWED date current (< 60 days old)
+- [ ] EXPORTS list complete
+- [ ] INTERFACES documented (if applicable)
+- [ ] PYDANTIC_MODELS listed (if applicable)
+- [ ] DEPENDENCIES accurate
+- [ ] SOURCE documented
+- [ ] SCOPE defined
+- [ ] VALIDATION described
+- [ ] PATTERNS documented
+- [ ] ENTRY_POINTS listed
+- [ ] INDEX with line numbers (if file > 200 lines)
+
+### Module Docstring
+- [ ] Present immediately after header
+- [ ] Clear purpose statement
+- [ ] Key features/improvements listed (if applicable)
+- [ ] Usage examples (for utilities/decorators)
+- [ ] Author and date attribution
+
+### Class Documentation
+- [ ] All classes have docstrings
+- [ ] Public methods documented
+- [ ] Private methods have purpose comments
+- [ ] Custom exceptions documented
+
+### Function Documentation
+- [ ] All public functions have docstrings
+- [ ] Args/Parameters documented
+- [ ] Returns documented
+- [ ] Raises/Exceptions documented
+- [ ] Examples provided (for complex functions)
+
+### Issues Found
+- [ ] None OR list specific issues
+
+### Action Required
+- [ ] None OR describe fixes needed
+```
+
+### Progress Tracking
+
+**Phase 1: High-Priority Files** (36 files)
+- [ ] **Triggers** (11 files)
+  - [x] trigger_platform.py - ✅ EXCELLENT (reviewed 29 OCT)
+  - [x] trigger_platform_status.py - ✅ EXCELLENT (reviewed 29 OCT)
+  - [ ] trigger_job_processor.py
+  - [ ] health.py
+  - [ ] submit_job.py
+  - [ ] list_jobs.py
+  - [ ] job_status.py
+  - [ ] db_admin.py
+  - [ ] db_query.py
+  - [ ] container.py
+  - [ ] schema_pydantic_deploy.py
+
+- [ ] **Jobs** (12 files)
+  - [ ] base.py
+  - [ ] hello_world.py
+  - [ ] create_h3_base.py
+  - [ ] generate_h3_level4.py
+  - [ ] ingest_vector.py
+  - [ ] validate_raster_job.py
+  - [ ] container_summary.py
+  - [ ] container_list.py
+  - [ ] container_list_diamond.py
+  - [ ] stac_catalog_container.py
+  - [ ] stac_catalog_vectors.py
+  - [ ] process_raster.py
+  - [ ] process_large_raster.py
+
+- [ ] **Infrastructure** (13 files)
+  - [x] decorators_blob.py - ✅ EXCELLENT (reviewed 29 OCT)
+  - [ ] base.py
+  - [ ] factory.py
+  - [ ] jobs_tasks.py
+  - [ ] postgresql.py
+  - [ ] blob.py
+  - [ ] queue.py
+  - [ ] service_bus.py
+  - [ ] vault.py
+  - [ ] stac.py
+  - [ ] duckdb.py
+  - [ ] interface_repository.py
+  - [ ] __init__.py
+
+**Phase 2: Service Layer** (16+ files)
+- [ ] **Vector Services** (3 files)
+  - [x] vector/postgis_handler_enhanced.py - ✅ EXCELLENT (reviewed 29 OCT)
+  - [x] vector/tasks_enhanced.py - ✅ EXCELLENT (reviewed 29 OCT)
+  - [ ] vector/converters.py
+
+- [ ] **Core Services** (5 files)
+  - [ ] service_hello_world.py
+  - [ ] service_blob.py
+  - [ ] service_stac_setup.py
+  - [ ] container_summary.py
+  - [ ] container_list.py
+
+- [ ] **Raster Services** (4 files)
+  - [ ] raster_validation.py
+  - [ ] raster_cog.py
+  - [ ] tiling_scheme.py
+  - [ ] tiling_extraction.py
+
+**Phase 3: Core Architecture** (17 files)
+- [ ] core/machine.py
+- [ ] core/task_id.py
+- [ ] core/state_manager.py
+- [ ] core/orchestration_manager.py
+- [ ] core/models/enums.py
+- [ ] core/models/job.py
+- [ ] core/models/task.py
+- [ ] core/models/results.py
+- [ ] core/models/context.py
+- [ ] core/models/__init__.py
+- [ ] core/logic/task_creation.py
+- [ ] core/logic/stage_advancement.py
+- [ ] core/logic/job_completion.py
+- [ ] core/schema/workflow.py
+- [ ] core/schema/orchestration.py
+- [ ] core/schema/queue.py
+- [ ] core/schema/updates.py
+
+**Phase 4: Supporting Files** (19+ files)
+- [ ] **Root Python** (6 files)
+  - [ ] function_app.py
+  - [ ] config.py
+  - [ ] exceptions.py
+  - [ ] util_logger.py
+  - [ ] service_stac.py
+  - [ ] service_statistics.py
+
+- [ ] **Utils** (3 files)
+  - [ ] utils/contract_validator.py
+  - [ ] util_azure_sql.py
+  - [ ] task_factory.py
+
+- [ ] **Schemas** (10 files) - Legacy
+  - [ ] schema_base.py
+  - [ ] schema_workflow.py
+  - [ ] schema_orchestration.py
+  - [ ] schema_queue.py
+  - [ ] schema_updates.py
+  - [ ] schema_file_item.py
+  - [ ] schema_geospatial.py
+  - [ ] schema_postgis.py
+  - [ ] schema_stac.py
+  - [ ] model_core.py
+
+**Completion Stats**:
+- Phase 1: 3/36 complete (8%) - trigger_platform.py, trigger_platform_status.py, decorators_blob.py
+- Phase 2: 2/16 complete (13%) - postgis_handler_enhanced.py, tasks_enhanced.py
+- Phase 3: 0/17 complete (0%)
+- Phase 4: 0/19 complete (0%)
+- **Overall**: 5/88 files reviewed (6%)
+
+### Output Format
+
+Each file review will produce:
+1. **Updated Claude Context Header** (if needed)
+2. **Added/Updated Docstrings** (if needed)
+3. **FILE_CATALOG.md update** - Mark as "Reviewed DD MMM YYYY"
+4. **Review report** - Issues found and fixed
+
+### Success Criteria
+
+- ✅ 100% of Python files have Claude context headers
+- ✅ 100% of Python files have module docstrings
+- ✅ 100% of classes have docstrings
+- ✅ 100% of public functions have docstrings
+- ✅ All LAST_REVIEWED dates < 60 days old
+- ✅ FILE_CATALOG.md tracks review status
+
+### Timeline
+
+- **Start Date**: 29 OCT 2025
+- **Target Completion**: 15 NOV 2025 (2 weeks)
+- **Estimated Effort**: 10-15 hours total
+- **Cadence**: Review 5-10 files per session
+
+---
+
 ## 🔥 CRITICAL: Large Raster Workflow Silent Failures (29 OCT 2025)
 
 **Status**: 🚨 **CRITICAL INVESTIGATION** - Multiple silent failures identified in process_large_raster

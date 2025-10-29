@@ -163,114 +163,205 @@ class IBlobRepository(ABC):
 
 class BlobRepository(IBlobRepository):
     """
-    Centralized blob storage repository with managed authentication.
-    
+    Multi-account blob storage repository with trust zone awareness.
+
     CRITICAL: This is THE authentication point for all blob operations.
     - Uses DefaultAzureCredential for seamless auth across environments
-    - Singleton pattern ensures connection reuse
+    - Multi-instance singleton pattern (one instance PER storage account)
     - All ETL services use this for blob access
-    
+
     Design Principles:
     - Single source of authentication for all blob operations
-    - Connection pooling for performance
-    - Thread-safe singleton implementation
+    - Separate connection pools per storage account (Bronze/Silver/SilverExternal)
+    - Thread-safe multi-instance singleton implementation
     - Consistent error handling and logging
-    
+
     Usage:
-        # Get singleton instance
+        # Get repository for specific trust zone (RECOMMENDED)
+        bronze_repo = BlobRepository.for_zone("bronze")
+        silver_repo = BlobRepository.for_zone("silver")
+
+        # Or through factory (also recommended)
+        bronze_repo = RepositoryFactory.create_blob_repository("bronze")
+
+        # Legacy usage still works (defaults to Silver)
         blob_repo = BlobRepository.instance()
-        
-        # Or through factory (recommended)
-        blob_repo = RepositoryFactory.create_blob_repository()
     """
-    
-    _instance: Optional['BlobRepository'] = None
-    _initialized: bool = False
-    
-    def __new__(cls, connection_string: Optional[str] = None, *args, **kwargs):
+
+    # Multi-instance singleton: one instance per storage account
+    _instances: Dict[str, 'BlobRepository'] = {}
+
+    def __new__(cls, account_name: str = None, connection_string: Optional[str] = None, *args, **kwargs):
         """
-        Thread-safe singleton creation.
-        
-        Modified to accept connection_string for pattern consistency with
-        other repositories, though DefaultAzureCredential is preferred.
-        """
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-        return cls._instance
-    
-    def __init__(self, connection_string: Optional[str] = None, storage_account: Optional[str] = None):
-        """
-        Initialize with DefaultAzureCredential - happens once.
-        
+        Multi-instance singleton creation.
+
+        Creates one singleton instance PER storage account.
+        This allows separate connection pools for Bronze/Silver/SilverExternal.
+
         Args:
+            account_name: Storage account name (defaults to Silver account from config)
             connection_string: Optional connection string for compatibility
-            storage_account: Storage account name (uses env if not provided)
         """
-        if not self._initialized:
+        # Determine account name
+        if account_name is None:
+            # Default to Silver account for backward compatibility
+            from config import get_config
+            account_name = get_config().storage.silver.account_name
+
+        # Check if instance exists for this account
+        if account_name not in cls._instances:
+            instance = super().__new__(cls)
+            cls._instances[account_name] = instance
+
+        return cls._instances[account_name]
+    
+    def __init__(self, account_name: str = None, connection_string: Optional[str] = None):
+        """
+        Initialize blob repository for specific storage account.
+
+        Args:
+            account_name: Storage account name (defaults to Silver)
+            connection_string: Optional connection string for airgapped accounts
+        """
+        # Prevent re-initialization of existing instance
+        if hasattr(self, '_initialized') and self._initialized:
+            return
+
+        from config import get_config
+        config = get_config()
+
+        # Determine account name
+        self.account_name = account_name or config.storage.silver.account_name
+
+        try:
+            # Use connection string if provided (for airgapped SilverExternal)
+            if connection_string:
+                logger.info(f"Initializing BlobRepository with connection string for {self.account_name}")
+                self.blob_service = BlobServiceClient.from_connection_string(connection_string)
+            else:
+                # Use DefaultAzureCredential (for Bronze/Silver)
+                self.account_url = f"https://{self.account_name}.blob.core.windows.net"
+                logger.info(f"Initializing BlobRepository with DefaultAzureCredential for {self.account_name}")
+
+                # Create credential
+                self.credential = DefaultAzureCredential()
+
+                # Create blob service client
+                self.blob_service = BlobServiceClient(
+                    account_url=self.account_url,
+                    credential=self.credential
+                )
+
+            # Cache container clients
+            self._container_clients: Dict[str, ContainerClient] = {}
+
+            # Pre-cache containers for THIS account
+            self._pre_cache_containers(config)
+
+            self._initialized = True
+            logger.info(f"✅ BlobRepository initialized for account: {self.account_name}")
+
+        except Exception as e:
+            logger.error(f"Failed to initialize BlobRepository for {self.account_name}: {e}")
+            raise
+
+    def _pre_cache_containers(self, config):
+        """
+        Pre-cache container clients based on account name.
+
+        Determines which trust zone (bronze/silver/silverext) this instance
+        represents and caches appropriate containers.
+        """
+        # Determine which account we are
+        if self.account_name == config.storage.bronze.account_name:
+            zone_config = config.storage.bronze
+            logger.debug("Pre-caching BRONZE containers")
+        elif self.account_name == config.storage.silver.account_name:
+            zone_config = config.storage.silver
+            logger.debug("Pre-caching SILVER containers")
+        elif self.account_name == config.storage.silverext.account_name:
+            zone_config = config.storage.silverext
+            logger.debug("Pre-caching SILVER EXTERNAL containers")
+        else:
+            logger.warning(f"Unknown account {self.account_name}, skipping pre-cache")
+            return
+
+        # Cache all containers for this zone
+        containers_to_cache = [
+            zone_config.vectors,
+            zone_config.rasters,
+            zone_config.cogs,
+            zone_config.tiles,
+            zone_config.mosaicjson,
+            zone_config.stac_assets,
+            zone_config.misc,
+            zone_config.temp
+        ]
+
+        for container in containers_to_cache:
+            if "notused" in container:
+                continue  # Skip unused containers (e.g., bronze-cogs)
+
             try:
-                if connection_string:
-                    # Use connection string (for consistency with other repos)
-                    logger.info("Initializing BlobRepository with connection string")
-                    self.blob_service = BlobServiceClient.from_connection_string(connection_string)
-                    self.storage_account = self.blob_service.account_name
-                else:
-                    # Use DefaultAzureCredential (preferred for blob storage)
-                    from config import get_config
-                    config = get_config()
-                    storage_account = storage_account or config.storage_account_name
-                    self.storage_account = storage_account
-                    self.account_url = f"https://{storage_account}.blob.core.windows.net"
-                    
-                    logger.info(f"Initializing BlobRepository with DefaultAzureCredential for account: {storage_account}")
-                    
-                    # Create credential
-                    self.credential = DefaultAzureCredential()
-                    
-                    # Create blob service client
-                    self.blob_service = BlobServiceClient(
-                        account_url=self.account_url,
-                        credential=self.credential
-                    )
-                
-                # Cache frequently used container clients
-                self._container_clients: Dict[str, ContainerClient] = {}
-                
-                # Pre-initialize common containers for connection pooling
-                common_containers = [
-                    'rmhazuregeobronze',
-                    'rmhazuregeosilver', 
-                    'rmhazuregeogold'
-                ]
-                
-                for container in common_containers:
-                    try:
-                        self._get_container_client(container)
-                        logger.debug(f"Pre-cached container client: {container}")
-                    except Exception as e:
-                        logger.warning(f"Could not pre-cache container {container}: {e}")
-                
-                BlobRepository._initialized = True
-                logger.info(f"✅ BlobRepository initialized successfully for account: {self.storage_account}")
-                
+                self._get_container_client(container)
+                logger.debug(f"Pre-cached container: {container}")
             except Exception as e:
-                logger.error(f"Failed to initialize BlobRepository: {e}")
-                raise
+                logger.warning(f"Could not pre-cache container {container}: {e}")
     
     @classmethod
-    def instance(cls, connection_string: Optional[str] = None, storage_account: Optional[str] = None) -> 'BlobRepository':
+    def for_zone(cls, zone: str) -> 'BlobRepository':
         """
-        Get singleton instance.
-        
+        Get BlobRepository instance for a trust zone.
+
+        This is the RECOMMENDED factory method for multi-account access.
+
         Args:
-            connection_string: Optional connection string
-            storage_account: Optional storage account name
-            
+            zone: Trust zone ("bronze", "silver", "silverext")
+
         Returns:
-            BlobRepository singleton instance
+            BlobRepository connected to that zone's storage account
+
+        Example:
+            # ETL reads from Bronze (untrusted user uploads)
+            bronze_repo = BlobRepository.for_zone("bronze")
+            raw_data = bronze_repo.read_blob("bronze-rasters", "user_upload.tif")
+
+            # ETL writes to Silver (trusted processed data)
+            silver_repo = BlobRepository.for_zone("silver")
+            silver_repo.write_blob("silver-cogs", "processed.tif", cog_data)
+
+            # Future: Sync to SilverExternal (airgapped replica)
+            ext_repo = BlobRepository.for_zone("silverext")
+            ext_repo.write_blob("silverext-cogs", "processed.tif", cog_data)
+
+        Raises:
+            ValueError: If zone is unknown
         """
-        if cls._instance is None:
-            cls._instance = cls(connection_string=connection_string, storage_account=storage_account)
-        return cls._instance
+        from config import get_config
+        config = get_config()
+
+        zone_config = config.storage.get_account(zone)
+
+        return cls(
+            account_name=zone_config.account_name,
+            connection_string=zone_config.connection_string
+        )
+
+    @classmethod
+    def instance(cls, account_name: Optional[str] = None, connection_string: Optional[str] = None) -> 'BlobRepository':
+        """
+        Get singleton instance (backward compatible).
+
+        DEPRECATED: Use for_zone() instead for multi-account support.
+
+        Args:
+            account_name: Optional storage account name (defaults to Silver)
+            connection_string: Optional connection string
+
+        Returns:
+            BlobRepository singleton instance (defaults to Silver zone)
+        """
+        return cls(account_name=account_name, connection_string=connection_string)
     
     def _get_container_client(self, container: str, validate: bool = False) -> ContainerClient:
         """

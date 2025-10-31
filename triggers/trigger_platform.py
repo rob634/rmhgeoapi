@@ -387,12 +387,14 @@ class PlatformOrchestrator:
             # })
             logger.warning(f"Point cloud processing requested but no job exists yet for request {request.request_id}")
 
-        # Add hello_world job for testing
-        if request.parameters.get('test_mode'):
-            jobs.insert(0, {
+        elif request.data_type == "hello_world":
+            # Simple test job for Platform callback validation (31 OCT 2025)
+            # Not a real data type - used for testing Platform orchestration
+            jobs.append({
                 'job_type': 'hello_world',
                 'parameters': {
-                    'message': f"Testing platform request {request.request_id}"
+                    'message': f"Platform request {request.request_id}",
+                    'n': request.parameters.get('n', 2)  # Optional: number of parallel tasks
                 }
             })
 

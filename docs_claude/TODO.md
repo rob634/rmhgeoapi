@@ -66,6 +66,11 @@
 ```
 
 **Implementation Tasks**:
+- [ ] **Investigate /api/db/debug/all endpoint failure** (31 OCT 2025)
+  - Returns "Debug dump failed: 0" instead of jobs/tasks data
+  - Check exception handling in function_app.py lines 1310-1318
+  - Verify PostgreSQLRepository schema exists and connection works
+  - Test: `curl https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/db/debug/all?limit=5`
 - [ ] **Test existing vector ETL**: Verify ingest_vector job works end-to-end
 - [ ] **Test existing STAC creation**: Verify STAC catalog jobs work with vectors
 - [ ] **Platform orchestration**: Update Platform layer to chain these jobs

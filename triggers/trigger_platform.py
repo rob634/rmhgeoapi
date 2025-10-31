@@ -242,11 +242,22 @@ class PlatformOrchestrator:
 
         # Replace with our handler (chain if original exists)
         def combined_callback(job_id: str, job_type: str, status: str, result: dict):
-            # Call our handler first
-            self._handle_job_completion(job_id, job_type, status, result)
+            logger.info(f"🔗 CALLBACK CHAIN: Entry point for job {job_id[:16]}, type={job_type}, status={status}")
+            try:
+                # Call our handler first
+                self._handle_job_completion(job_id, job_type, status, result)
+                logger.info(f"🔗 CALLBACK CHAIN: Platform handler completed successfully")
+            except Exception as e:
+                logger.error(f"🔗 CALLBACK CHAIN: Platform handler failed: {e}", exc_info=True)
+                # Don't re-raise - callback failures should not break job completion
+
             # Call original handler if it wasn't just a pass statement
             if original_callback and original_callback.__code__.co_code != (lambda: None).__code__.co_code:
-                original_callback(job_id, job_type, status, result)
+                logger.debug(f"🔗 CALLBACK CHAIN: Calling original callback (if any)")
+                try:
+                    original_callback(job_id, job_type, status, result)
+                except Exception as e:
+                    logger.warning(f"🔗 CALLBACK CHAIN: Original callback failed: {e}")
 
         function_app._global_platform_callback = combined_callback
 
@@ -255,6 +266,7 @@ class PlatformOrchestrator:
 
         logger.info(f"✅ PlatformOrchestrator initialized - callback injected into global CoreMachine")
         logger.info(f"   🔗 All jobs processed via Service Bus will now trigger Platform callbacks")
+        logger.info(f"   🔍 Callback verification: {function_app.core_machine.on_job_complete.__name__}")
 
     async def process_platform_request(self, request: ApiRequest) -> List[str]:
         """

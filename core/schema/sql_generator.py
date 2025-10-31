@@ -36,7 +36,16 @@ from psycopg import sql
 from annotated_types import MaxLen  # Import at top for health check validation
 
 # Import the core models
-from ..models import JobRecord, TaskRecord, JobStatus, TaskStatus
+from ..models import (
+    JobRecord,
+    TaskRecord,
+    JobStatus,
+    TaskStatus,
+    ApiRequest,
+    OrchestrationJob,
+    PlatformRequestStatus,
+    DataType
+)
 
 
 class PydanticToSQL:
@@ -267,11 +276,11 @@ class PydanticToSQL:
                 elif isinstance(field_info.default, (int, float)):
                     column_parts.extend([sql.SQL(" DEFAULT "), sql.Literal(field_info.default)])
             elif hasattr(field_info, 'default_factory') and field_info.default_factory is not None:
-                if field_name in ["parameters", "stage_results"]:
+                if field_name in ["parameters", "stage_results", "metadata", "jobs"]:
                     column_parts.extend([sql.SQL(" DEFAULT "), sql.SQL("'{}'")])  # JSONB empty object
                 elif field_name in ["created_at", "updated_at"]:
                     column_parts.extend([sql.SQL(" DEFAULT NOW()")])
-            
+
             # Special defaults for specific fields
             if field_name == "created_at" and " DEFAULT" not in str(sql.SQL("").join(column_parts)):
                 column_parts.extend([sql.SQL(" DEFAULT NOW()")])
@@ -280,6 +289,10 @@ class PydanticToSQL:
             elif field_name == "parameters" and " DEFAULT" not in str(sql.SQL("").join(column_parts)):
                 column_parts.extend([sql.SQL(" DEFAULT '{}'")])  # JSONB empty object
             elif field_name == "stage_results" and " DEFAULT" not in str(sql.SQL("").join(column_parts)):
+                column_parts.extend([sql.SQL(" DEFAULT '{}'")])  # JSONB empty object
+            elif field_name == "metadata" and " DEFAULT" not in str(sql.SQL("").join(column_parts)):
+                column_parts.extend([sql.SQL(" DEFAULT '{}'")])  # JSONB empty object
+            elif field_name == "jobs" and " DEFAULT" not in str(sql.SQL("").join(column_parts)):
                 column_parts.extend([sql.SQL(" DEFAULT '{}'")])  # JSONB empty object
             
             columns.append(sql.SQL("").join(column_parts))
@@ -299,6 +312,25 @@ class PydanticToSQL:
                     sql.Identifier(self.schema_name),
                     sql.Identifier("jobs"),
                     sql.Identifier("job_id")
+                )
+            )
+        elif table_name == "api_requests":
+            constraints.append(
+                sql.SQL("PRIMARY KEY ({})").format(sql.Identifier("request_id"))
+            )
+        elif table_name == "orchestration_jobs":
+            constraints.append(
+                sql.SQL("PRIMARY KEY ({}, {})").format(
+                    sql.Identifier("request_id"),
+                    sql.Identifier("job_id")
+                )
+            )
+            constraints.append(
+                sql.SQL("FOREIGN KEY ({}) REFERENCES {}.{} ({}) ON DELETE CASCADE").format(
+                    sql.Identifier("request_id"),
+                    sql.Identifier(self.schema_name),
+                    sql.Identifier("api_requests"),
+                    sql.Identifier("request_id")
                 )
             )
         
@@ -806,18 +838,24 @@ $$""").format(
         # Generate ENUMs using composed SQL (returns list of statements)
         composed.extend(self.generate_enum("job_status", JobStatus))
         composed.extend(self.generate_enum("task_status", TaskStatus))
-        
+        composed.extend(self.generate_enum("platform_request_status", PlatformRequestStatus))
+        composed.extend(self.generate_enum("data_type", DataType))
+
         # For tables, indexes, functions, and triggers, we still need string format
         # because they are complex multi-line statements
         # But we'll return them as sql.SQL objects for consistency
-        
+
         # Tables - now using composed SQL
         composed.append(self.generate_table_composed(JobRecord, "jobs"))
         composed.append(self.generate_table_composed(TaskRecord, "tasks"))
-        
+        composed.append(self.generate_table_composed(ApiRequest, "api_requests"))
+        composed.append(self.generate_table_composed(OrchestrationJob, "orchestration_jobs"))
+
         # Indexes - now using composed SQL
         composed.extend(self.generate_indexes_composed("jobs", JobRecord))
         composed.extend(self.generate_indexes_composed("tasks", TaskRecord))
+        composed.extend(self.generate_indexes_composed("api_requests", ApiRequest))
+        composed.extend(self.generate_indexes_composed("orchestration_jobs", OrchestrationJob))
             
         # Functions - already sql.Composed objects
         composed.extend(self.generate_static_functions())

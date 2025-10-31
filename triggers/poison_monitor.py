@@ -1,20 +1,20 @@
 # ============================================================================
-# CLAUDE CONTEXT - CONTROLLER
+# CLAUDE CONTEXT - HTTP TRIGGER
 # ============================================================================
-# CATEGORY: HTTP TRIGGER ENDPOINTS
-# PURPOSE: Azure Functions HTTP API endpoint
-# EPOCH: Shared by all epochs (API layer)
-# TODO: Audit for framework logic that may belong in CoreMachine# PURPOSE: Poison queue monitoring HTTP trigger for detecting and processing failed queue messages
-# EXPORTS: PoisonQueueMonitorTrigger (HTTP trigger class for poison queue monitoring)
-# INTERFACES: SystemMonitoringTrigger (inherited from trigger_http_base)
+# EPOCH: 4 - ACTIVE ✅
+# STATUS: HTTP Trigger - Poison queue monitoring and cleanup (DEPRECATED - Storage Queues)
+# PURPOSE: Poison queue monitoring HTTP trigger for detecting and processing failed queue messages
+# LAST_REVIEWED: 29 OCT 2025
+# EXPORTS: PoisonQueueMonitorTrigger, poison_queue_monitor_trigger (singleton instance)
+# INTERFACES: SystemMonitoringTrigger (inherited from http_base)
 # PYDANTIC_MODELS: None directly - uses dict for monitoring results
-# DEPENDENCIES: trigger_http_base, poison_queue_monitor (service), typing, azure.functions (implicit)
+# DEPENDENCIES: http_base.SystemMonitoringTrigger, services.poison_queue_monitor, azure.functions, typing
 # SOURCE: HTTP GET/POST requests, Azure Storage poison queues via service layer
-# SCOPE: Queue health monitoring - poison message detection, processing, and cleanup
+# SCOPE: Queue health monitoring - poison message detection, processing, cleanup (DEPRECATED - now using Service Bus)
 # VALIDATION: Queue existence validation, poison message correlation with jobs/tasks
-# PATTERNS: Template Method (implements base class), Observer pattern (monitoring), Command pattern (cleanup)
-# ENTRY_POINTS: trigger = PoisonQueueMonitorTrigger(); response = trigger.handle_request(req)
-# INDEX: PoisonQueueMonitorTrigger:117, process_request:140, _check_poison_status:200, _process_poison_messages:300
+# PATTERNS: Template Method (base class), Observer pattern (monitoring), Command pattern (cleanup)
+# ENTRY_POINTS: GET /api/monitor/poison (status), POST /api/monitor/poison (process)
+# INDEX: PoisonQueueMonitorTrigger:129, process_request:152, _check_poison_status:212, _process_poison_messages:312
 # ============================================================================
 
 """

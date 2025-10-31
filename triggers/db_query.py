@@ -1,45 +1,77 @@
 # ============================================================================
-# CLAUDE CONTEXT - CONTROLLER
+# CLAUDE CONTEXT - HTTP TRIGGER
 # ============================================================================
-# CATEGORY: HTTP TRIGGER ENDPOINTS
-# PURPOSE: Azure Functions HTTP API endpoint
-# EPOCH: Shared by all epochs (API layer)
-# TODO: Audit for framework logic that may belong in CoreMachine# PURPOSE: Database query HTTP triggers providing direct PostgreSQL access for monitoring and debugging
-# EXPORTS: DatabaseQueryTrigger, JobsQueryTrigger, TasksQueryTrigger, DatabaseStatsQueryTrigger, EnumDiagnosticTrigger, SchemaNukeQueryTrigger
-# INTERFACES: BaseHttpTrigger (inherited from trigger_http_base)
+# EPOCH: 4 - ACTIVE ✅
+# STATUS: HTTP Trigger - Database monitoring and debugging endpoints
+# PURPOSE: Database query HTTP triggers providing direct PostgreSQL access for monitoring and debugging
+# LAST_REVIEWED: 29 OCT 2025
+# EXPORTS: DatabaseQueryTrigger, JobsQueryTrigger, TasksQueryTrigger, ApiRequestsQueryTrigger, OrchestrationJobsQueryTrigger, DatabaseStatsQueryTrigger, EnumDiagnosticTrigger, SchemaNukeQueryTrigger
+# INTERFACES: BaseHttpTrigger (inherited from http_base)
 # PYDANTIC_MODELS: None directly - uses dict for query results
-# DEPENDENCIES: trigger_http_base, config, util_logger, psycopg, azure.functions, typing, datetime
-# SOURCE: HTTP GET/POST requests with query parameters, PostgreSQL database via psycopg
-# SCOPE: HTTP endpoints for database queries, statistics, diagnostics, and schema management
-# VALIDATION: Query parameter validation, job ID validation, SQL injection prevention
-# PATTERNS: Template Method (implements base class), Query Object pattern, Factory (trigger types)
-# ENTRY_POINTS: trigger = JobsQueryTrigger(); response = trigger.handle_request(req)
-# INDEX: DatabaseQueryTrigger:48, JobsQueryTrigger:182, TasksQueryTrigger:268, DatabaseStatsQueryTrigger:424, SchemaNukeQueryTrigger:620
+# DEPENDENCIES: http_base.BaseHttpTrigger, config, util_logger, psycopg, psycopg.sql, azure.functions, typing, datetime
+# SOURCE: HTTP GET/POST requests with query parameters, PostgreSQL database (app schema) via psycopg direct connection
+# SCOPE: HTTP endpoints for database queries, statistics, diagnostics, schema management (DEV/TEST only - not for production)
+# VALIDATION: Query parameter validation, job ID validation, SQL injection prevention via psycopg.sql composition
+# PATTERNS: Template Method (base class), Query Object pattern, Factory (multiple trigger types)
+# ENTRY_POINTS: GET /api/db/jobs, GET /api/db/tasks, GET /api/db/stats, POST /api/db/schema/nuke
+# INDEX: DatabaseQueryTrigger:60, JobsQueryTrigger:194, TasksQueryTrigger:280, ApiRequestsQueryTrigger:458, OrchestrationJobsQueryTrigger:609, DatabaseStatsQueryTrigger:747, SchemaNukeQueryTrigger:943
 # ============================================================================
 
 """
-Database Query HTTP Triggers - Production Database Monitoring
+Database Query HTTP Triggers - Database Monitoring & Debugging
 
 Provides dedicated HTTP endpoints for querying the PostgreSQL database directly
 from the web, bypassing network restrictions that block DBeaver access.
 
-Endpoints:
+**IMPORTANT**: These endpoints are for DEV/TEST environments only. For production,
+use proper monitoring tools (Application Insights, Azure Monitor) and restrict
+database access to infrastructure components only.
+
+Endpoints (10 total):
+    CoreMachine Layer:
     GET /api/db/jobs?limit=10&status=processing&hours=24
     GET /api/db/jobs/{job_id}
     GET /api/db/tasks/{job_id}
     GET /api/db/tasks?status=failed&limit=20
+
+    Platform Layer:
+    GET /api/db/api_requests?limit=10&status=processing
+    GET /api/db/api_requests/{request_id}
+    GET /api/db/orchestration_jobs?request_id={request_id}
+    GET /api/db/orchestration_jobs/{request_id}
+
+    System:
     GET /api/db/stats
     GET /api/db/functions/test
+    POST /api/db/schema/nuke?confirm=yes  (⚠️ DANGEROUS - drops all tables)
 
 Features:
-    - Parameter validation and sanitization
-    - Query result caching for performance
-    - Error handling with detailed logging
-    - Security measures against SQL injection
-    - Real-time database diagnostics
+- Direct PostgreSQL query execution via psycopg
+- Parameter validation and sanitization
+- SQL injection prevention via psycopg.sql composition
+- Error handling with detailed logging
+- Real-time database diagnostics
+- PostgreSQL function testing
+- Schema management (nuke and redeploy)
 
-Author: Azure Geospatial ETL Team
-Date: September 3, 2025
+Query Parameters:
+- limit: Max results (default 100, max 1000)
+- status: Filter by job/task status (queued, processing, completed, failed)
+- hours: Only show records from last N hours
+- job_type: Filter by job type (CoreMachine queries)
+- request_id: Filter orchestration jobs by request ID (Platform queries)
+- dataset_id: Filter API requests by dataset (Platform queries)
+- offset: Pagination offset
+
+Security Notes:
+- SQL injection prevented via psycopg.sql.SQL composition
+- No raw string concatenation in queries
+- Parameter validation before query execution
+- Confirmation required for destructive operations (nuke)
+
+Author: Robert and Geospatial Claude Legion
+Date: 3 September 2025
+Last Updated: 29 OCT 2025
 """
 
 from typing import Dict, Any, List, Optional, Union
@@ -432,6 +464,295 @@ class TasksQueryTrigger(DatabaseQueryTrigger):
                 "error": "Failed to query tasks",
                 "details": result
             }
+
+
+class ApiRequestsQueryTrigger(DatabaseQueryTrigger):
+    """
+    Query API requests (Platform layer) with filtering and pagination.
+
+    ⚠️ DEV/TEST ONLY - For debugging without DBeaver access.
+    """
+
+    def __init__(self):
+        super().__init__("db_api_requests_query")
+
+    def process_request(self, req: func.HttpRequest) -> Dict[str, Any]:
+        """
+        Query API requests with optional filtering.
+
+        URL Parameters:
+            request_id: Request ID to get (in URL path)
+
+        Query Parameters:
+            limit: Number of results (1-100, default: 10)
+            status: Filter by request status (pending, processing, completed, failed)
+            hours: Hours to look back (1-168, default: 24)
+            dataset_id: Filter by dataset ID
+        """
+
+        # Check if request_id is in the URL path
+        request_id = req.route_params.get('request_id')
+
+        if request_id:
+            return self._query_request_by_id(request_id)
+        else:
+            return self._query_requests_with_filters(req)
+
+    def _query_request_by_id(self, request_id: str) -> Dict[str, Any]:
+        """Query specific API request by ID."""
+
+        if not self._validate_request_id(request_id):
+            return {
+                "error": "Invalid request ID format",
+                "message": "Request ID must be a 32-character hexadecimal string"
+            }
+
+        query = f"""
+            SELECT request_id, dataset_id, resource_id, version_id, data_type,
+                   status::text, jobs, parameters, metadata, result_data,
+                   created_at, updated_at
+            FROM {self.config.app_schema}.api_requests
+            WHERE request_id = %s
+        """
+
+        result = self._execute_safe_query(query, (request_id,))
+
+        if result["success"] and result["results"]:
+            row = result["results"][0]
+            return {
+                "request": self._format_api_request_row(row),
+                "query_info": {
+                    "execution_time_ms": result["execution_time_ms"]
+                }
+            }
+        elif result["success"]:
+            return {
+                "error": "API request not found",
+                "request_id": request_id
+            }
+        else:
+            return {
+                "error": "Failed to query API request",
+                "request_id": request_id,
+                "details": result
+            }
+
+    def _query_requests_with_filters(self, req: func.HttpRequest) -> Dict[str, Any]:
+        """Query API requests with filtering parameters."""
+
+        # Extract and validate parameters
+        limit = self._validate_limit_param(req.params.get('limit'))
+        hours = self._validate_hours_param(req.params.get('hours'))
+        status_filter = req.params.get('status')
+        dataset_filter = req.params.get('dataset_id')
+
+        # Build query with filters
+        query_parts = [
+            f"SELECT request_id, dataset_id, resource_id, version_id, data_type,",
+            f"       status::text, jobs, parameters, metadata, result_data,",
+            f"       created_at, updated_at",
+            f"FROM {self.config.app_schema}.api_requests",
+            f"WHERE created_at >= NOW() - INTERVAL '{hours} hours'"
+        ]
+
+        params = []
+
+        if status_filter:
+            query_parts.append("AND status::text = %s")
+            params.append(status_filter)
+
+        if dataset_filter:
+            query_parts.append("AND dataset_id = %s")
+            params.append(dataset_filter)
+
+        query_parts.extend([
+            "ORDER BY created_at DESC",
+            f"LIMIT {limit}"
+        ])
+
+        query = " ".join(query_parts)
+
+        # Execute query
+        result = self._execute_safe_query(query, tuple(params) if params else None)
+
+        if result["success"]:
+            requests = [self._format_api_request_row(row) for row in result["results"]]
+
+            return {
+                "api_requests": requests,
+                "query_info": {
+                    "limit": limit,
+                    "hours_back": hours,
+                    "status_filter": status_filter,
+                    "dataset_filter": dataset_filter,
+                    "total_found": len(requests),
+                    "execution_time_ms": result["execution_time_ms"]
+                }
+            }
+        else:
+            return {
+                "error": "Failed to query API requests",
+                "details": result
+            }
+
+    def _format_api_request_row(self, row) -> Dict[str, Any]:
+        """Format API request row for JSON response."""
+        return {
+            "request_id": row[0],
+            "dataset_id": row[1],
+            "resource_id": row[2],
+            "version_id": row[3],
+            "data_type": row[4],
+            "status": row[5],
+            "jobs": row[6],
+            "parameters": row[7],
+            "metadata": row[8],
+            "result_data": row[9],
+            "created_at": row[10].isoformat() if row[10] else None,
+            "updated_at": row[11].isoformat() if row[11] else None
+        }
+
+    def _validate_request_id(self, request_id: str) -> bool:
+        """Validate request ID format (32-char hex string)."""
+        return isinstance(request_id, str) and len(request_id) == 32 and all(c in '0123456789abcdef' for c in request_id.lower())
+
+
+class OrchestrationJobsQueryTrigger(DatabaseQueryTrigger):
+    """
+    Query orchestration jobs (Platform layer) with filtering and pagination.
+
+    ⚠️ DEV/TEST ONLY - For debugging without DBeaver access.
+    """
+
+    def __init__(self):
+        super().__init__("db_orchestration_jobs_query")
+
+    def process_request(self, req: func.HttpRequest) -> Dict[str, Any]:
+        """
+        Query orchestration jobs with filtering.
+
+        URL Parameters:
+            request_id: API request ID to get jobs for (in URL path)
+
+        Query Parameters:
+            limit: Number of results (1-100, default: 50)
+            status: Filter by job status
+            hours: Hours to look back (1-168, default: 24)
+            job_type: Filter by CoreMachine job type
+        """
+
+        # Check if request_id is in the URL path
+        request_id = req.route_params.get('request_id')
+
+        if request_id:
+            return self._query_jobs_for_request(request_id)
+        else:
+            return self._query_jobs_with_filters(req)
+
+    def _query_jobs_for_request(self, request_id: str) -> Dict[str, Any]:
+        """Query all orchestration jobs for a specific API request."""
+
+        if not self._validate_request_id(request_id):
+            return {
+                "error": "Invalid request ID format",
+                "message": "Request ID must be a 32-character hexadecimal string"
+            }
+
+        query = f"""
+            SELECT request_id, job_id, job_type, sequence, status, created_at
+            FROM {self.config.app_schema}.orchestration_jobs
+            WHERE request_id = %s
+            ORDER BY sequence ASC
+        """
+
+        result = self._execute_safe_query(query, (request_id,))
+
+        if result["success"]:
+            jobs = [self._format_orchestration_job_row(row) for row in result["results"]]
+
+            return {
+                "request_id": request_id,
+                "orchestration_jobs": jobs,
+                "query_info": {
+                    "total_jobs": len(jobs),
+                    "execution_time_ms": result["execution_time_ms"]
+                }
+            }
+        else:
+            return {
+                "error": "Failed to query orchestration jobs for request",
+                "request_id": request_id,
+                "details": result
+            }
+
+    def _query_jobs_with_filters(self, req: func.HttpRequest) -> Dict[str, Any]:
+        """Query orchestration jobs with filtering parameters."""
+
+        limit = self._validate_limit_param(req.params.get('limit'), default=50)
+        hours = self._validate_hours_param(req.params.get('hours'))
+        status_filter = req.params.get('status')
+        job_type_filter = req.params.get('job_type')
+
+        query_parts = [
+            f"SELECT request_id, job_id, job_type, sequence, status, created_at",
+            f"FROM {self.config.app_schema}.orchestration_jobs",
+            f"WHERE created_at >= NOW() - INTERVAL '{hours} hours'"
+        ]
+
+        params = []
+
+        if status_filter:
+            query_parts.append("AND status = %s")
+            params.append(status_filter)
+
+        if job_type_filter:
+            query_parts.append("AND job_type = %s")
+            params.append(job_type_filter)
+
+        query_parts.extend([
+            "ORDER BY created_at DESC",
+            f"LIMIT {limit}"
+        ])
+
+        query = " ".join(query_parts)
+
+        # Execute query
+        result = self._execute_safe_query(query, tuple(params) if params else None)
+
+        if result["success"]:
+            jobs = [self._format_orchestration_job_row(row) for row in result["results"]]
+
+            return {
+                "orchestration_jobs": jobs,
+                "query_info": {
+                    "limit": limit,
+                    "hours_back": hours,
+                    "status_filter": status_filter,
+                    "job_type_filter": job_type_filter,
+                    "total_found": len(jobs),
+                    "execution_time_ms": result["execution_time_ms"]
+                }
+            }
+        else:
+            return {
+                "error": "Failed to query orchestration jobs",
+                "details": result
+            }
+
+    def _format_orchestration_job_row(self, row) -> Dict[str, Any]:
+        """Format orchestration job row for JSON response."""
+        return {
+            "request_id": row[0],
+            "job_id": row[1],
+            "job_type": row[2],
+            "sequence": row[3],
+            "status": row[4],
+            "created_at": row[5].isoformat() if row[5] else None
+        }
+
+    def _validate_request_id(self, request_id: str) -> bool:
+        """Validate request ID format (32-char hex string)."""
+        return isinstance(request_id, str) and len(request_id) == 32 and all(c in '0123456789abcdef' for c in request_id.lower())
 
 
 class DatabaseStatsQueryTrigger(DatabaseQueryTrigger):
@@ -890,6 +1211,8 @@ class FunctionTestQueryTrigger(DatabaseQueryTrigger):
 # Create trigger instances for registration
 jobs_query_trigger = JobsQueryTrigger()
 tasks_query_trigger = TasksQueryTrigger()
+api_requests_query_trigger = ApiRequestsQueryTrigger()
+orchestration_jobs_query_trigger = OrchestrationJobsQueryTrigger()
 db_stats_trigger = DatabaseStatsQueryTrigger()
 enum_diagnostic_trigger = EnumDiagnosticTrigger()
 schema_nuke_trigger = SchemaNukeQueryTrigger()

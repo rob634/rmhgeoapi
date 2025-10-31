@@ -1,10 +1,10 @@
 # File Catalog
 
-**Date**: 29 OCT 2025 (Platform Layer + Vector Services + Infrastructure Updates)
+**Date**: 29 OCT 2025 (OGC Features API SQL Fix + Integration)
 **Total Python Files**: 140 (actual count)
 **Purpose**: Quick file lookup with one-line descriptions
 **Author**: Robert and Geospatial Claude Legion
-**Status**: ✅ Updated - Platform layer, enhanced vector services, and blob decorators added
+**Status**: ✅ Updated - OGC Features API integrated and SQL parameter bug fixed
 
 ## 📊 Quick Stats (Updated 29 OCT 2025)
 - **Root Python files**: 6
@@ -266,15 +266,15 @@
 ## ⚙️ Trigger Handlers (triggers/ folder) ⭐ UPDATED 29 OCT
 
 ### HTTP Triggers - CoreMachine (7 files)
-| File | Purpose |
-|------|---------|
-| `triggers/health.py` | Health check endpoint with import validation |
-| `triggers/submit_job.py` | CoreMachine job submission HTTP trigger |
-| `triggers/list_jobs.py` | Job listing endpoint |
-| `triggers/job_status.py` | Job status query endpoint |
-| `triggers/db_admin.py` | Database administration endpoints (schema deployment, nuke) |
-| `triggers/db_query.py` | Database query endpoints (jobs, tasks, statistics) |
-| `triggers/container.py` | Container operation triggers |
+| File | Purpose | Status |
+|------|---------|--------|
+| `triggers/health.py` | Health check endpoint with import validation | ✅ Active |
+| `triggers/submit_job.py` | CoreMachine job submission HTTP trigger | ✅ Active |
+| `triggers/list_jobs.py` | Job listing endpoint | ✅ Active |
+| `triggers/job_status.py` | Job status query endpoint | ✅ Active |
+| `triggers/db_admin.py` | Database administration endpoints (schema deployment, nuke) | ✅ Active |
+| `triggers/db_query.py` | ⭐ Database query endpoints - CoreMachine (jobs, tasks) + Platform (api_requests, orchestration_jobs) | ✅ Updated 29 OCT |
+| `triggers/container.py` | Container operation triggers | ✅ Active |
 
 ### HTTP Triggers - Platform Layer ⭐ NEW 25-29 OCT
 | File | Purpose | Status |
@@ -429,4 +429,4 @@ DuckDB is an **optional component** in `/api/health`:
 
 ---
 
-**Last Updated**: 26 OCT 2025 - Complete root folder catalog, accurate file counts, directory structure added
+**Last Updated**: 29 OCT 2025 - Added Platform database query endpoints (api_requests, orchestration_jobs)

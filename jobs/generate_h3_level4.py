@@ -1,17 +1,20 @@
 # ============================================================================
-# CLAUDE CONTEXT - JOB WORKFLOW
+# CLAUDE CONTEXT - JOB DEFINITION
 # ============================================================================
+# EPOCH: 4 - ACTIVE ✅
+# STATUS: Job - Single-stage H3 Level 4 land grid generation
 # PURPOSE: Generate global Level 4 H3 land grid and save to gold container
-# EXPORTS: GenerateH3Level4Job (job class)
-# INTERFACES: Epoch 4 job pattern (stages + create_tasks_for_stage)
+# LAST_REVIEWED: 29 OCT 2025
+# EXPORTS: GenerateH3Level4Job (JobBase implementation)
+# INTERFACES: JobBase (implements 5-method contract)
 # PYDANTIC_MODELS: None (uses dict parameters)
-# DEPENDENCIES: services.handler_h3_level4 (h3_level4_generate)
-# SOURCE: HTTP POST requests to /api/jobs/submit/generate_h3_level4
-# SCOPE: Global H3 Level 4 grid generation (~875 land cells)
-# VALIDATION: Parameter validation in handler
-# PATTERNS: Single-stage job workflow
-# ENTRY_POINTS: Job registered in jobs/__init__.py as "generate_h3_level4"
-# INDEX: Stages:30, create_tasks:50
+# DEPENDENCIES: jobs.base.JobBase, services.handler_h3_level4
+# SOURCE: HTTP POST requests to /api/jobs/generate_h3_level4
+# SCOPE: Global H3 Level 4 grid generation (~875 land cells filtered)
+# VALIDATION: Parameter validation in handler service
+# PATTERNS: Single-stage job workflow, Land filtering, GeoParquet output
+# ENTRY_POINTS: Registered in jobs/__init__.py ALL_JOBS as "generate_h3_level4"
+# INDEX: GenerateH3Level4Job:29, stages:41, create_tasks_for_stage:61
 # ============================================================================
 
 """

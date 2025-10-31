@@ -1,3 +1,22 @@
+# ============================================================================
+# CLAUDE CONTEXT - JOB DEFINITION
+# ============================================================================
+# EPOCH: 4 - ACTIVE ✅
+# STATUS: Job - Single-stage PostGIS vector STAC cataloging
+# PURPOSE: Catalog PostGIS vector tables into STAC (PgSTAC)
+# LAST_REVIEWED: 29 OCT 2025
+# EXPORTS: StacCatalogVectorsWorkflow (JobBase implementation)
+# INTERFACES: JobBase (implements 5-method contract)
+# PYDANTIC_MODELS: None (uses dict-based validation)
+# DEPENDENCIES: jobs.base.JobBase, hashlib, json
+# SOURCE: HTTP job submission for PostGIS table STAC cataloging
+# SCOPE: Single PostGIS table STAC metadata extraction
+# VALIDATION: Schema name, table name, collection ID validation
+# PATTERNS: Single-stage job, STAC Item generation from PostGIS
+# ENTRY_POINTS: Registered in jobs/__init__.py ALL_JOBS as "stac_catalog_vectors"
+# INDEX: StacCatalogVectorsWorkflow:16, stages:28, create_tasks_for_stage:48
+# ============================================================================
+
 """
 STAC Catalog Vectors Job Declaration - Single Stage for Vector Table Cataloging
 
@@ -6,6 +25,7 @@ Single-stage job: Extract STAC metadata from PostGIS table and insert into PgSTA
 
 Author: Robert and Geospatial Claude Legion
 Date: 8 OCT 2025
+Last Updated: 29 OCT 2025
 """
 
 from typing import List, Dict, Any

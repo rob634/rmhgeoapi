@@ -1,0 +1,867 @@
+openapi: 3.0.1
+info:
+  title: Geospatial Data Processing Platform API
+  version: 1.0.0
+  description: |
+    **Platform-as-a-Service for Geospatial Data Processing**
+
+    This API provides data processing services for DDH (Data Discovery Hub) and partners.
+    Submit raw geospatial data, receive processed REST API endpoints.
+
+    **Key Features:**
+    - Raster processing (COG creation, tiling, STAC cataloging)
+    - Vector processing (PostGIS ingestion, validation)
+    - Multi-stage orchestration with status tracking
+    - STAC-compliant metadata catalog
+
+    **Authentication:**
+    - Azure API Management subscription key (via APIM)
+    - Header: `Ocp-Apim-Subscription-Key`
+
+    **Rate Limits:**
+    - DDH Product: 1,000 requests/minute, 100,000/day
+    - Partner Product: 100 requests/minute, 10,000/day
+
+    **Base URLs:**
+    - Production (via APIM): `https://api.platform.com/v1` (when APIM provisioned)
+    - Development (direct): `https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net`
+  contact:
+    name: Geospatial Platform Team
+    email: platform-support@example.com
+  license:
+    name: Proprietary
+
+servers:
+  - url: https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net
+    description: Azure Functions backend (direct access - development)
+  - url: https://api.platform.com/v1
+    description: Azure API Management gateway (production - when provisioned)
+
+tags:
+  - name: Platform
+    description: Processing request management and orchestration
+  - name: Status
+    description: Job status monitoring and tracking
+  - name: STAC
+    description: STAC catalog queries (Phase 2)
+
+paths:
+  /api/platform/submit:
+    post:
+      summary: Submit data processing request
+      description: |
+        Submit a geospatial data processing request. The Platform will:
+        1. Validate request parameters
+        2. Create CoreMachine jobs based on data type
+        3. Return tracking ID and monitor URL
+        4. Process data asynchronously
+
+        **Processing Workflows by Data Type:**
+        - `raster`: Validate → COG creation → STAC cataloging
+        - `vector`: Validate → PostGIS ingestion → STAC cataloging
+        - `collection`: Tile detection → Parallel COG creation → MosaicJSON
+
+        **Request ID Generation:**
+        - Deterministic SHA256 hash of (dataset_id + resource_id + version_id + timestamp)
+        - Allows reprocessing same dataset multiple times
+        - Returns existing request if duplicate submission detected
+
+        **Response:**
+        - `202 Accepted`: Request queued for processing
+        - `400 Bad Request`: Invalid parameters
+        - `500 Internal Server Error`: Platform error
+      operationId: submitProcessingRequest
+      tags:
+        - Platform
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlatformRequest'
+            examples:
+              helloWorld:
+                summary: Hello World test (with test_mode flag)
+                description: Simple test request that creates hello_world job
+                value:
+                  dataset_id: "test-dataset"
+                  resource_id: "test-resource"
+                  version_id: "v1.0"
+                  data_type: "raster"
+                  source_location: "https://rmhazuregeo.blob.core.windows.net/rmhazuregeobronze/test.tif"
+                  parameters:
+                    test_mode: true
+                  client_id: "ddh"
+
+              rasterProcessing:
+                summary: Raster processing (aerial imagery)
+                description: Process aerial photo to analysis-tier COG
+                value:
+                  dataset_id: "aerial-imagery-2024"
+                  resource_id: "site-alpha"
+                  version_id: "v1.0"
+                  data_type: "raster"
+                  source_location: "https://rmhazuregeo.blob.core.windows.net/rmhazuregeobronze/aerial-alpha.tif"
+                  parameters:
+                    output_tier: "analysis"
+                    target_crs: "EPSG:4326"
+                  client_id: "ddh"
+
+              vectorProcessing:
+                summary: Vector processing (boundary data)
+                description: Ingest GeoJSON boundaries to PostGIS
+                value:
+                  dataset_id: "boundary-data-2024"
+                  resource_id: "district-boundaries"
+                  version_id: "v1.0"
+                  data_type: "vector"
+                  source_location: "https://rmhazuregeo.blob.core.windows.net/rmhazuregeobronze/boundaries.geojson"
+                  parameters:
+                    target_crs: "EPSG:4326"
+                    table_name: "district_boundaries"
+                  client_id: "ddh"
+
+              rasterCollection:
+                summary: Raster collection (satellite tiles)
+                description: Process multiple rasters as unified collection with MosaicJSON
+                value:
+                  dataset_id: "landsat-8-collection"
+                  resource_id: "scene-123456"
+                  version_id: "v1.0"
+                  data_type: "raster"
+                  source_location: "https://rmhazuregeo.blob.core.windows.net/rmhazuregeobronze/landsat/*.tif"
+                  parameters:
+                    output_tier: "visualization"
+                    create_mosaicjson: true
+                  client_id: "ddh"
+
+      responses:
+        '202':
+          description: |
+            **Request accepted for processing**
+
+            The Platform has validated and queued your request. CoreMachine jobs
+            have been created and will process asynchronously.
+
+            Use the `monitor_url` to poll for status updates, or wait for webhook
+            callback if configured.
+          headers:
+            X-Correlation-Id:
+              description: Request correlation ID for tracing
+              schema:
+                type: string
+                example: "a3f2c1b8"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProcessingResponse'
+              examples:
+                accepted:
+                  summary: Typical acceptance response
+                  value:
+                    success: true
+                    request_id: "a3f2c1b8e9d7f6a5c4b3a2e1d9c8b7a6"
+                    status: "pending"
+                    jobs_created:
+                      - "validate_raster_job_abc123"
+                      - "process_raster_job_def456"
+                    message: "Platform request submitted. 2 jobs created."
+                    monitor_url: "/api/platform/status/a3f2c1b8e9d7f6a5c4b3a2e1d9c8b7a6"
+
+        '400':
+          description: |
+            **Invalid request parameters**
+
+            Common issues:
+            - Missing required fields (dataset_id, resource_id, version_id)
+            - Invalid data_type enum value
+            - Invalid source_location URL format
+            - Invalid parameters for selected data_type
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                missingField:
+                  summary: Missing required field
+                  value:
+                    success: false
+                    error: "Field 'dataset_id' is required"
+                    error_type: "ValidationError"
+
+                invalidDataType:
+                  summary: Invalid enum value
+                  value:
+                    success: false
+                    error: "data_type must be one of: raster, vector, pointcloud, mesh_3d, tabular"
+                    error_type: "ValidationError"
+
+                invalidUrl:
+                  summary: Invalid source location
+                  value:
+                    success: false
+                    error: "source_location must be Azure blob URL (https://) or absolute path (/)"
+                    error_type: "ValidationError"
+
+        '500':
+          description: |
+            **Internal server error**
+
+            Platform encountered an error during request processing.
+            Check Application Insights logs with correlation_id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                internalError:
+                  summary: Platform error
+                  value:
+                    success: false
+                    error: "Failed to create CoreMachine jobs"
+                    error_type: "PlatformError"
+
+      security:
+        - ApiKeyAuth: []
+
+  /api/platform/status/{request_id}:
+    get:
+      summary: Get processing request status
+      description: |
+        Retrieve status of a Platform processing request including:
+        - Overall request status (pending, processing, completed, failed)
+        - Associated CoreMachine job statuses
+        - Job statistics (total, completed, failed, processing)
+        - API endpoints (when completed)
+        - Data characteristics (when completed)
+
+        **Status Values:**
+        - `pending`: Request accepted, jobs not started yet
+        - `processing`: One or more jobs actively processing
+        - `completed`: All jobs completed successfully
+        - `failed`: One or more jobs failed
+
+        **Polling Recommendations:**
+        - Poll every 5-10 seconds for small datasets
+        - Poll every 30-60 seconds for large datasets
+        - Use exponential backoff for long-running jobs
+        - Consider webhook callbacks for better UX
+      operationId: getPlatformStatus
+      tags:
+        - Status
+      parameters:
+        - name: request_id
+          in: path
+          required: true
+          description: Platform request ID (32-character hash from submit response)
+          schema:
+            type: string
+            minLength: 32
+            maxLength: 32
+            example: "a3f2c1b8e9d7f6a5c4b3a2e1d9c8b7a6"
+
+      responses:
+        '200':
+          description: |
+            **Request status retrieved successfully**
+
+            Returns comprehensive status including all associated jobs.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatusResponse'
+              examples:
+                processing:
+                  summary: Request in progress
+                  value:
+                    request_id: "a3f2c1b8e9d7f6a5c4b3a2e1d9c8b7a6"
+                    dataset_id: "aerial-imagery-2024"
+                    resource_id: "site-alpha"
+                    version_id: "v1.0"
+                    data_type: "raster"
+                    status: "processing"
+                    job_ids:
+                      - "validate_raster_job_abc123"
+                      - "process_raster_job_def456"
+                    parameters:
+                      output_tier: "analysis"
+                    metadata:
+                      client_id: "ddh"
+                      source_location: "https://storage.blob.core.windows.net/bronze/aerial-alpha.tif"
+                      submission_time: "2025-10-29T15:30:00Z"
+                    created_at: "2025-10-29T15:30:00Z"
+                    updated_at: "2025-10-29T15:32:15Z"
+                    jobs:
+                      - job_id: "validate_raster_job_abc123"
+                        job_type: "validate_raster_job"
+                        status: "completed"
+                        stage: 1
+                        created_at: "2025-10-29T15:30:00Z"
+                        updated_at: "2025-10-29T15:30:45Z"
+                      - job_id: "process_raster_job_def456"
+                        job_type: "process_raster"
+                        status: "processing"
+                        stage: 2
+                        created_at: "2025-10-29T15:30:45Z"
+                        updated_at: "2025-10-29T15:32:15Z"
+                    job_statistics:
+                      total: 2
+                      completed: 1
+                      failed: 0
+                      processing: 1
+                      pending: 0
+                    urls:
+                      jobs:
+                        - "/api/jobs/status/validate_raster_job_abc123"
+                        - "/api/jobs/status/process_raster_job_def456"
+
+                completed:
+                  summary: Request completed successfully
+                  value:
+                    request_id: "a3f2c1b8e9d7f6a5c4b3a2e1d9c8b7a6"
+                    dataset_id: "aerial-imagery-2024"
+                    resource_id: "site-alpha"
+                    version_id: "v1.0"
+                    data_type: "raster"
+                    status: "completed"
+                    job_ids:
+                      - "validate_raster_job_abc123"
+                      - "process_raster_job_def456"
+                    result_data:
+                      api_endpoints:
+                        tiles: "https://tiles.platform.com/{z}/{x}/{y}?dataset=aerial-imagery-2024&resource=site-alpha&version=v1.0"
+                        stac_item: "https://stac.platform.com/collections/aerial-imagery-2024/items/site-alpha-v1.0"
+                        download_cog: "https://rmhazuregeo.blob.core.windows.net/silver-cogs/aerial-alpha-analysis.tif"
+                      data_characteristics:
+                        bbox: [-120.5, 38.0, -119.5, 39.0]
+                        crs: "EPSG:4326"
+                        file_size_mb: 45.2
+                        band_count: 3
+                        data_type: "uint8"
+                        processing_time_seconds: 180
+                    job_statistics:
+                      total: 2
+                      completed: 2
+                      failed: 0
+                      processing: 0
+                      pending: 0
+                    created_at: "2025-10-29T15:30:00Z"
+                    updated_at: "2025-10-29T15:33:00Z"
+
+        '404':
+          description: |
+            **Request not found**
+
+            The specified request_id does not exist in Platform database.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                notFound:
+                  summary: Request ID not found
+                  value:
+                    success: false
+                    error: "Platform request a3f2c1b8e9d7f6a5c4b3a2e1d9c8b7a6 not found"
+
+      security:
+        - ApiKeyAuth: []
+
+  /api/platform/status:
+    get:
+      summary: List all processing requests
+      description: |
+        List Platform requests with optional filtering.
+
+        **Use Cases:**
+        - DDH dashboard showing all processing jobs
+        - Failed request monitoring
+        - Recent submissions audit
+
+        **Filters:**
+        - `status`: Filter by request status
+        - `limit`: Limit number of results (default 100, max 1000)
+      operationId: listPlatformRequests
+      tags:
+        - Status
+      parameters:
+        - name: status
+          in: query
+          required: false
+          description: Filter by request status
+          schema:
+            type: string
+            enum:
+              - pending
+              - processing
+              - completed
+              - failed
+        - name: limit
+          in: query
+          required: false
+          description: Maximum number of results
+          schema:
+            type: integer
+            default: 100
+            minimum: 1
+            maximum: 1000
+
+      responses:
+        '200':
+          description: |
+            **Request list retrieved successfully**
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RequestListResponse'
+              examples:
+                recentRequests:
+                  summary: Recent submissions
+                  value:
+                    success: true
+                    count: 3
+                    requests:
+                      - request_id: "a3f2c1b8e9d7f6a5c4b3a2e1d9c8b7a6"
+                        dataset_id: "aerial-imagery-2024"
+                        resource_id: "site-alpha"
+                        version_id: "v1.0"
+                        data_type: "raster"
+                        status: "completed"
+                        job_count: 2
+                        created_at: "2025-10-29T15:30:00Z"
+                        updated_at: "2025-10-29T15:33:00Z"
+                      - request_id: "b4e3d2c1f0a9e8d7c6b5a4e3d2c1b0a9"
+                        dataset_id: "boundary-data-2024"
+                        resource_id: "district-boundaries"
+                        version_id: "v1.0"
+                        data_type: "vector"
+                        status: "processing"
+                        job_count: 1
+                        created_at: "2025-10-29T15:35:00Z"
+                        updated_at: "2025-10-29T15:36:15Z"
+                      - request_id: "c5d4e3f2a1b0c9d8e7f6a5b4c3d2e1f0"
+                        dataset_id: "test-dataset"
+                        resource_id: "test-resource"
+                        version_id: "v1.0"
+                        data_type: "raster"
+                        status: "pending"
+                        job_count: 1
+                        created_at: "2025-10-29T15:40:00Z"
+                        updated_at: "2025-10-29T15:40:00Z"
+
+      security:
+        - ApiKeyAuth: []
+
+components:
+  schemas:
+    PlatformRequest:
+      type: object
+      required:
+        - dataset_id
+        - resource_id
+        - version_id
+        - data_type
+        - source_location
+        - client_id
+      properties:
+        dataset_id:
+          type: string
+          description: |
+            **DDH Dataset Identifier** (Mandatory)
+
+            Top-level organizational unit in DDH hierarchy.
+            Example: "aerial-imagery-2024", "landsat-8-collection"
+          minLength: 1
+          maxLength: 255
+          example: "aerial-imagery-2024"
+
+        resource_id:
+          type: string
+          description: |
+            **DDH Resource Identifier** (Mandatory)
+
+            Second-level identifier within dataset.
+            Example: "site-alpha", "LC08_L1TP_044034"
+          minLength: 1
+          maxLength: 255
+          example: "site-alpha"
+
+        version_id:
+          type: string
+          description: |
+            **DDH Version Identifier** (Mandatory)
+
+            Specific version of resource (allows reprocessing).
+            Example: "v1.0", "v2.0", "2024-10-29"
+          minLength: 1
+          maxLength: 50
+          example: "v1.0"
+
+        data_type:
+          type: string
+          enum:
+            - raster
+            - vector
+            - pointcloud
+            - mesh_3d
+            - tabular
+          description: |
+            **Data Type for Processing** (Mandatory)
+
+            Determines which CoreMachine workflow to execute:
+            - `raster`: Validate → COG → STAC (jobs: validate_raster_job, process_raster)
+            - `vector`: Validate → PostGIS → STAC (jobs: ingest_vector)
+            - `pointcloud`: Reserved for future (no job exists yet)
+            - `mesh_3d`: Reserved for future (no job exists yet)
+            - `tabular`: Reserved for future (no job exists yet)
+          example: "raster"
+
+        source_location:
+          type: string
+          format: uri
+          description: |
+            **Azure Blob Storage Location** (Mandatory)
+
+            Must be Azure blob URL or absolute path:
+            - HTTPS URL: `https://storage.blob.core.windows.net/container/file.tif`
+            - WASBS URL: `wasbs://container@storage.blob.core.windows.net/file.tif`
+            - Absolute path: `/mnt/data/file.tif` (if mounted)
+
+            Platform must have read access via:
+            - Managed Identity (preferred)
+            - SAS token in URL
+            - Storage account key (via environment)
+          example: "https://rmhazuregeo.blob.core.windows.net/rmhazuregeobronze/aerial-alpha.tif"
+
+        parameters:
+          type: object
+          additionalProperties: true
+          description: |
+            **Processing Parameters** (Optional)
+
+            Job-specific configuration options:
+
+            **Raster Processing:**
+            - `output_tier`: "visualization" | "analysis" | "archive" (COG compression tier)
+            - `target_crs`: "EPSG:4326" (reproject to CRS)
+            - `create_mosaicjson`: true (for collections)
+
+            **Vector Processing:**
+            - `target_crs`: "EPSG:4326" (reproject to CRS)
+            - `table_name`: "my_table" (PostGIS table name)
+            - `schema`: "geo" (PostGIS schema, default: geo)
+
+            **Testing:**
+            - `test_mode`: true (creates hello_world job instead of real processing)
+          example:
+            output_tier: "analysis"
+            target_crs: "EPSG:4326"
+
+        client_id:
+          type: string
+          description: |
+            **Client Application Identifier** (Mandatory)
+
+            Identifies which application submitted the request.
+            Used for tracking, quotas, and client-specific behavior.
+
+            **Known Clients:**
+            - "ddh" - Data Discovery Hub (primary client)
+            - "analytics" - Analytics application (future)
+            - "mobile" - Mobile app (future)
+          example: "ddh"
+
+    ProcessingResponse:
+      type: object
+      required:
+        - success
+        - request_id
+        - status
+        - jobs_created
+        - message
+        - monitor_url
+      properties:
+        success:
+          type: boolean
+          description: Whether request was accepted successfully
+          example: true
+
+        request_id:
+          type: string
+          description: |
+            Platform tracking ID (32-character SHA256 hash prefix).
+
+            Generated deterministically from:
+            `SHA256(dataset_id + resource_id + version_id + timestamp)[:32]`
+
+            Use this ID to poll status via `/api/platform/status/{request_id}`
+          minLength: 32
+          maxLength: 32
+          example: "a3f2c1b8e9d7f6a5c4b3a2e1d9c8b7a6"
+
+        status:
+          type: string
+          enum:
+            - pending
+            - processing
+            - completed
+            - failed
+          description: |
+            Current request status:
+            - `pending`: Accepted, jobs queued but not started
+            - `processing`: One or more jobs actively running
+            - `completed`: All jobs completed successfully
+            - `failed`: One or more jobs failed
+          example: "pending"
+
+        jobs_created:
+          type: array
+          items:
+            type: string
+          description: |
+            List of CoreMachine job IDs created for this request.
+
+            Each job can be monitored individually via:
+            `/api/jobs/status/{job_id}`
+          example:
+            - "validate_raster_job_abc123"
+            - "process_raster_job_def456"
+
+        message:
+          type: string
+          description: Human-readable status message
+          example: "Platform request submitted. 2 jobs created."
+
+        monitor_url:
+          type: string
+          format: uri-reference
+          description: |
+            Relative URL to poll for status updates.
+
+            Append to base URL:
+            - Direct: `https://rmhgeoapibeta-...{monitor_url}`
+            - APIM: `https://api.platform.com/v1{monitor_url}`
+          example: "/api/platform/status/a3f2c1b8e9d7f6a5c4b3a2e1d9c8b7a6"
+
+    StatusResponse:
+      type: object
+      required:
+        - request_id
+        - dataset_id
+        - resource_id
+        - version_id
+        - data_type
+        - status
+        - job_ids
+        - created_at
+        - updated_at
+      properties:
+        request_id:
+          type: string
+          minLength: 32
+          maxLength: 32
+        dataset_id:
+          type: string
+        resource_id:
+          type: string
+        version_id:
+          type: string
+        data_type:
+          type: string
+        status:
+          type: string
+          enum:
+            - pending
+            - processing
+            - completed
+            - failed
+        job_ids:
+          type: array
+          items:
+            type: string
+          description: List of CoreMachine job IDs
+        parameters:
+          type: object
+          additionalProperties: true
+          description: Original request parameters
+        metadata:
+          type: object
+          additionalProperties: true
+          description: Request metadata (client_id, submission_time, etc.)
+        result_data:
+          type: object
+          nullable: true
+          description: |
+            Processing results (only present when status=completed).
+            Contains API endpoints and data characteristics.
+          properties:
+            api_endpoints:
+              type: object
+              description: REST API endpoints for accessing processed data
+              properties:
+                tiles:
+                  type: string
+                  format: uri
+                  description: Tile server URL (for rasters)
+                stac_item:
+                  type: string
+                  format: uri
+                  description: STAC item URL
+                download_cog:
+                  type: string
+                  format: uri
+                  description: Direct download URL for COG
+            data_characteristics:
+              type: object
+              description: Metadata about processed data
+              properties:
+                bbox:
+                  type: array
+                  items:
+                    type: number
+                  minItems: 4
+                  maxItems: 4
+                  description: Bounding box [minx, miny, maxx, maxy]
+                crs:
+                  type: string
+                  description: Coordinate reference system
+                file_size_mb:
+                  type: number
+                  description: Output file size in megabytes
+                processing_time_seconds:
+                  type: integer
+                  description: Total processing time
+        jobs:
+          type: array
+          description: Detailed status of each CoreMachine job
+          items:
+            type: object
+            properties:
+              job_id:
+                type: string
+              job_type:
+                type: string
+              status:
+                type: string
+              stage:
+                type: integer
+              created_at:
+                type: string
+                format: date-time
+              updated_at:
+                type: string
+                format: date-time
+        job_statistics:
+          type: object
+          description: Summary statistics of jobs
+          properties:
+            total:
+              type: integer
+            completed:
+              type: integer
+            failed:
+              type: integer
+            processing:
+              type: integer
+            pending:
+              type: integer
+        urls:
+          type: object
+          description: Helpful URLs for job monitoring
+          properties:
+            jobs:
+              type: array
+              items:
+                type: string
+                format: uri-reference
+        created_at:
+          type: string
+          format: date-time
+          description: Request creation timestamp (UTC)
+        updated_at:
+          type: string
+          format: date-time
+          description: Last update timestamp (UTC)
+
+    RequestListResponse:
+      type: object
+      required:
+        - success
+        - count
+        - requests
+      properties:
+        success:
+          type: boolean
+          example: true
+        count:
+          type: integer
+          description: Number of requests returned
+          example: 3
+        requests:
+          type: array
+          items:
+            type: object
+            properties:
+              request_id:
+                type: string
+              dataset_id:
+                type: string
+              resource_id:
+                type: string
+              version_id:
+                type: string
+              data_type:
+                type: string
+              status:
+                type: string
+              job_count:
+                type: integer
+                description: Number of CoreMachine jobs for this request
+              created_at:
+                type: string
+                format: date-time
+              updated_at:
+                type: string
+                format: date-time
+
+    ErrorResponse:
+      type: object
+      required:
+        - success
+        - error
+      properties:
+        success:
+          type: boolean
+          example: false
+        error:
+          type: string
+          description: Human-readable error message
+          example: "Field 'dataset_id' is required"
+        error_type:
+          type: string
+          description: Error classification
+          example: "ValidationError"
+
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: Ocp-Apim-Subscription-Key
+      description: |
+        **Azure API Management Subscription Key**
+
+        Obtain from APIM developer portal after subscribing to:
+        - DDH-Platform-API product (1000 req/min, 100K/day)
+        - Partner-Platform-API product (100 req/min, 10K/day)
+
+        **Header Format:**
+        ```
+        Ocp-Apim-Subscription-Key: your_subscription_key_here
+        ```
+
+        **Development (Direct Function App):**
+        When testing directly against Function App (bypassing APIM),
+        this header is optional but recommended for consistency.
+
+security:
+  - ApiKeyAuth: []

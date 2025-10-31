@@ -1,17 +1,20 @@
 # ============================================================================
-# CLAUDE CONTEXT - JOB WORKFLOW - PROCESS RASTER COLLECTION
+# CLAUDE CONTEXT - JOB DEFINITION
 # ============================================================================
+# EPOCH: 4 - ACTIVE ✅
+# STATUS: Job - Four-stage raster collection processing (multi-tile vendor deliveries)
 # PURPOSE: 4-stage workflow for processing raster tile collections to COGs + MosaicJSON
-# EXPORTS: ProcessRasterCollectionWorkflow class
-# INTERFACES: CoreMachine contract - create_tasks_for_stage() signature
-# PYDANTIC_MODELS: None (class attributes)
-# DEPENDENCIES: core.models.enums.TaskStatus
-# SOURCE: Bronze container raster tiles (vendor deliveries)
+# LAST_REVIEWED: 29 OCT 2025
+# EXPORTS: ProcessRasterCollectionWorkflow (JobBase implementation)
+# INTERFACES: JobBase (implements 5-method contract)
+# PYDANTIC_MODELS: None (uses dict-based validation)
+# DEPENDENCIES: jobs.base.JobBase, core.models.enums.TaskStatus
+# SOURCE: HTTP job submission for raster tile collections (Bronze container vendor deliveries)
 # SCOPE: Multi-tile raster processing with MosaicJSON output
 # VALIDATION: Stage 1 validates all tiles, Stage 2 creates COGs, Stage 3 creates MosaicJSON, Stage 4 creates STAC collection
-# PATTERNS: CoreMachine compliance, fan-out/fan-in architecture
-# ENTRY_POINTS: Registered in jobs/__init__.py ALL_JOBS
-# INDEX: ProcessRasterCollectionWorkflow:50, create_tasks_for_stage:150
+# PATTERNS: Four-stage workflow, Fan-out/fan-in architecture, MosaicJSON aggregation
+# ENTRY_POINTS: Registered in jobs/__init__.py ALL_JOBS as "process_raster_collection"
+# INDEX: ProcessRasterCollectionWorkflow:62, stages:74, create_tasks_for_stage:162
 # ============================================================================
 
 """

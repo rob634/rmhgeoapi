@@ -1,16 +1,20 @@
 # ============================================================================
-# CLAUDE CONTEXT - JOB WORKFLOW - PROCESS RASTER
+# CLAUDE CONTEXT - JOB DEFINITION
 # ============================================================================
-# PURPOSE: 2-stage workflow for processing rasters to COGs (<= 1GB)
-# EXPORTS: ProcessRasterWorkflow class
-# INTERFACES: CoreMachine contract - create_tasks_for_stage() signature
-# PYDANTIC_MODELS: None (class attributes)
-# DEPENDENCIES: core.models.enums.TaskStatus
-# SOURCE: Bronze container rasters
-# SCOPE: Small file raster processing pipeline (<= 1GB)
-# VALIDATION: Stage 1 validates, Stage 2 creates COG
-# PATTERNS: CoreMachine compliance - NO old patterns, NO fallbacks
-# ENTRY_POINTS: Registered in jobs/__init__.py ALL_JOBS
+# EPOCH: 4 - ACTIVE ✅
+# STATUS: Job - Two-stage small raster processing (<= 1GB)
+# PURPOSE: 2-stage workflow for processing small rasters to COGs (<= 1GB)
+# LAST_REVIEWED: 29 OCT 2025
+# EXPORTS: ProcessRasterWorkflow (JobBase implementation)
+# INTERFACES: JobBase (implements 5-method contract)
+# PYDANTIC_MODELS: None (uses dict-based validation)
+# DEPENDENCIES: jobs.base.JobBase, core.models.enums.TaskStatus
+# SOURCE: HTTP job submission for small raster processing (Bronze container)
+# SCOPE: Small file raster processing pipeline (<= 1GB files)
+# VALIDATION: Stage 1 validates raster, Stage 2 creates COG
+# PATTERNS: Two-stage workflow, Direct COG conversion (no tiling)
+# ENTRY_POINTS: Registered in jobs/__init__.py ALL_JOBS as "process_raster"
+# INDEX: ProcessRasterWorkflow:30, stages:42, create_tasks_for_stage:68
 # MIGRATION: 9 OCT 2025 - Removed create_stage_X_tasks, added create_tasks_for_stage
 # ============================================================================
 

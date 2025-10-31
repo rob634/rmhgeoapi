@@ -1,14 +1,34 @@
+# ============================================================================
+# CLAUDE CONTEXT - JOB DEFINITION
+# ============================================================================
+# EPOCH: 4 - ACTIVE ✅
+# STATUS: Job - Two-stage container inventory with fan-out pattern
+# PURPOSE: List and analyze blob container contents using fan-out parallelism
+# LAST_REVIEWED: 29 OCT 2025
+# EXPORTS: ListContainerContentsWorkflow (JobBase implementation)
+# INTERFACES: JobBase (implements 5-method contract)
+# PYDANTIC_MODELS: None (uses dict-based validation)
+# DEPENDENCIES: jobs.base.JobBase, hashlib, json
+# SOURCE: HTTP job submission for container analysis
+# SCOPE: Container-wide blob listing with per-blob metadata analysis
+# VALIDATION: Container name validation, blob count limits
+# PATTERNS: Two-stage fan-out (1 → N), Result storage in PostgreSQL JSONB
+# ENTRY_POINTS: Registered in jobs/__init__.py ALL_JOBS as "list_container_contents"
+# INDEX: ListContainerContentsWorkflow:18, stages:30, create_tasks_for_stage:60
+# ============================================================================
+
 """
 Container List Job Declaration - Two-Stage Fan-Out Pattern
 
 This file declares a two-stage job that:
-- Stage 1: Lists all blobs in a container
-- Stage 2: Analyzes each blob individually (fan-out parallelism)
+- Stage 1: Lists all blobs in a container (single task)
+- Stage 2: Analyzes each blob individually (fan-out parallelism - N tasks)
 
 Results stored in task.result_data JSONB fields for SQL querying.
 
 Author: Robert and Geospatial Claude Legion
 Date: 4 OCT 2025
+Last Updated: 29 OCT 2025
 """
 
 from typing import List, Dict, Any

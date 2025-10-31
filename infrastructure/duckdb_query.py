@@ -1,15 +1,18 @@
 # ============================================================================
 # CLAUDE CONTEXT - INFRASTRUCTURE
 # ============================================================================
+# EPOCH: 4 - ACTIVE ✅
+# STATUS: Infrastructure - DuckDB SQL query composition utility
 # PURPOSE: Safe SQL query composition for DuckDB (similar to psycopg.sql)
+# LAST_REVIEWED: 29 OCT 2025
 # EXPORTS: QueryBuilder, Identifier, Literal, QueryParam, OvertureQueryBuilder
 # INTERFACES: None - utility classes for SQL composition
 # PYDANTIC_MODELS: None (uses dataclasses)
 # DEPENDENCIES: re (regex), typing, dataclasses
 # SOURCE: N/A - infrastructure utility
 # SCOPE: DuckDB SQL injection prevention via composition
-# VALIDATION: Identifier format, whitelist literals, parameter types
-# PATTERNS: Builder pattern, validation decorators
+# VALIDATION: Identifier format validation, whitelist literals, parameter type checking
+# PATTERNS: Builder pattern, SQL composition (injection-safe), Validation decorators
 # ENTRY_POINTS: qb = QueryBuilder(); qb.append(...); query, params = qb.build()
 # INDEX: QueryParam:40, Identifier:50, Literal:75, QueryBuilder:100, OvertureQueryBuilder:180
 # ============================================================================

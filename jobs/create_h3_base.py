@@ -1,3 +1,22 @@
+# ============================================================================
+# CLAUDE CONTEXT - JOB DEFINITION
+# ============================================================================
+# EPOCH: 4 - ACTIVE ✅
+# STATUS: Job - Single-stage H3 base grid generation (resolutions 0-4)
+# PURPOSE: Generate complete H3 hexagonal grids at resolutions 0-4 (no filtering)
+# LAST_REVIEWED: 29 OCT 2025
+# EXPORTS: CreateH3BaseJob (JobBase implementation)
+# INTERFACES: JobBase (implements 5-method contract)
+# PYDANTIC_MODELS: None (uses dict parameters)
+# DEPENDENCIES: jobs.base.JobBase
+# SOURCE: HTTP job submission for H3 grid generation
+# SCOPE: Global H3 grids at resolutions 0-4 (complete hierarchical structure)
+# VALIDATION: Resolution range validation (0-4)
+# PATTERNS: Single-stage job, Hierarchical grid generation, No filtering
+# ENTRY_POINTS: Registered in jobs/__init__.py ALL_JOBS as "create_h3_base"
+# INDEX: CreateH3BaseJob:17, stages:29, create_tasks_for_stage:49
+# ============================================================================
+
 """
 Create H3 Base Grid Job Declaration
 
@@ -7,6 +26,7 @@ Pure hierarchical generation using H3's deterministic structure.
 Author: Robert and Geospatial Claude Legion
 Date: 15 OCT 2025
 Updated: 15 OCT 2025 - Phase 2: Migrated to JobBase ABC
+Last Updated: 29 OCT 2025
 """
 
 from typing import List, Dict, Any

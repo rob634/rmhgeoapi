@@ -1,20 +1,20 @@
 # ============================================================================
-# CLAUDE CONTEXT - CONTROLLER
+# CLAUDE CONTEXT - HTTP TRIGGER
 # ============================================================================
-# CATEGORY: HTTP TRIGGER ENDPOINTS
-# PURPOSE: Azure Functions HTTP API endpoint
-# EPOCH: Shared by all epochs (API layer)
-# TODO: Audit for framework logic that may belong in CoreMachine# PURPOSE: Job status retrieval HTTP trigger handling GET /api/jobs/{job_id} requests
-# EXPORTS: JobStatusTrigger (HTTP trigger class for job status retrieval)
-# INTERFACES: JobManagementTrigger (inherited from trigger_http_base)
-# PYDANTIC_MODELS: JobRecord (imported from schema_core for type safety)
-# DEPENDENCIES: trigger_http_base, schema_core, typing, azure.functions (implicit)
-# SOURCE: HTTP GET requests with job_id path parameter, job records from repository
-# SCOPE: HTTP endpoint for retrieving job status, progress, and results
-# VALIDATION: Job ID format validation, job existence validation
-# PATTERNS: Template Method (implements base class abstract methods), Adapter (field name transformation)
-# ENTRY_POINTS: trigger = JobStatusTrigger(); response = trigger.handle_request(req)
-# INDEX: JobStatusTrigger:92, process_request:110, _transform_to_camel_case:180, _format_job_response:220
+# EPOCH: 4 - ACTIVE ✅
+# STATUS: HTTP Trigger - Job status retrieval endpoint for Job→Stage→Task architecture
+# PURPOSE: Job status retrieval HTTP trigger handling GET /api/jobs/{job_id} requests
+# LAST_REVIEWED: 29 OCT 2025
+# EXPORTS: JobStatusTrigger, get_job_status_trigger (singleton instance)
+# INTERFACES: JobManagementTrigger (inherited from http_base)
+# PYDANTIC_MODELS: JobRecord (from core.models)
+# DEPENDENCIES: http_base.JobManagementTrigger, core.models.JobRecord, azure.functions
+# SOURCE: HTTP GET requests with job_id path parameter, job records from PostgreSQL via JobRepository
+# SCOPE: HTTP endpoint for retrieving real-time job status, progress, stage results, and final results
+# VALIDATION: Job ID format validation (SHA256), job existence validation, enum value extraction
+# PATTERNS: Template Method (base class), Adapter (snake_case to camelCase transformation for JavaScript)
+# ENTRY_POINTS: GET /api/jobs/{job_id} - Used by function_app.py via get_job_status_trigger singleton
+# INDEX: JobStatusTrigger:102, process_request:112, _format_job_response:152
 # ============================================================================
 
 """
@@ -31,65 +31,126 @@ Key Features:
 - Snake_case to camelCase field transformation for JavaScript compatibility
 - Enhanced metadata including architecture information
 - Comprehensive error handling for missing or invalid jobs
+- Enum value extraction (JobStatus.COMPLETED → "completed")
 
 Job Status Flow:
-1. Extract and validate job_id from URL path parameter
-2. Retrieve job record from repository using validated ID
-3. Format internal job record for API response
-4. Transform field names for frontend compatibility
-5. Add enhanced metadata and architecture information
-6. Return comprehensive job status response
+1. Extract and validate job_id from URL path parameter (SHA256 format validation)
+2. Retrieve job record from JobRepository using validated ID
+3. Format internal JobRecord (snake_case) for API response
+4. Transform field names to camelCase for frontend compatibility
+5. Extract enum values (status.value) for JSON serialization
+6. Add enhanced metadata (architecture pattern, schema validation)
+7. Return comprehensive job status response
 
-Job Status States:
-- queued: Job created and waiting for processing
-- processing: Job currently being processed (may include stage info)
+Job Status States (JobStatus enum):
+- queued: Job created and waiting for CoreMachine processing
+- processing: Job currently being processed (includes stage/total_stages)
 - completed: All stages completed successfully with results
 - failed: Job failed with error details
 - completed_with_errors: Partial success with some task failures
 
 Response Data Categories:
-- Basic Information: job_id, job_type, status, timestamps
-- Progress Tracking: stage, total_stages, stage_results
+- Basic Information: jobId, jobType, status, timestamps
+- Progress Tracking: stage (current), totalStages, stageResults
 - Input Data: parameters (original job submission parameters)
-- Output Data: result_data (aggregated results from completed tasks)
-- Error Information: error_details (when status is failed)
-- Metadata: Architecture pattern and validation information
+- Output Data: resultData (aggregated results from completed tasks)
+- Error Information: errorDetails (when status is failed)
+- Metadata: architecture, pattern, schema_validated
 
 Integration Points:
-- Uses JobManagementTrigger base class for repository access
-- Reads from job storage via RepositoryFactory
-- Formats JobRecord schema objects for API consumption
-- Provides data for frontend dashboards and monitoring
+- JobManagementTrigger base class (http_base.py) - Common repository access patterns
+- JobRepository (infrastructure.jobs_tasks) - Database access via job_repository property
+- JobRecord (core.models) - Pydantic model with JobStatus enum
+- RepositoryFactory - Lazy initialization of repositories
+- Frontend dashboards and monitoring tools
 
 API Endpoint:
     GET /api/jobs/{job_id}
-    
+
 Path Parameters:
-    job_id: SHA256 hash of job parameters (validates format)
-    
-Response:
+    job_id: SHA256 hash of job parameters (64 hex characters)
+
+Response (Processing):
     {
         "jobId": "sha256_hash_of_parameters",
-        "jobType": "operation_name",
-        "status": "queued|processing|completed|failed",
+        "jobType": "process_large_raster",
+        "status": "processing",
         "stage": 2,                           # Current stage (1-indexed)
-        "totalStages": 3,                     # Total stages in workflow
-        "parameters": {...original_params},    # Job submission parameters
-        "stageResults": {...},                # Results from completed stages
-        "resultData": {...},                  # Final aggregated results
-        "errorDetails": {...},                # Error information if failed
-        "createdAt": "2025-01-30T12:34:56.789Z",
-        "updatedAt": "2025-01-30T12:45:12.123Z",
+        "totalStages": 5,                     # Total stages in workflow
+        "parameters": {
+            "dataset_id": "bronze-rasters",
+            "resource_id": "large_file.tif",
+            "version_id": "v1.0"
+        },
+        "stageResults": {
+            "stage_1": {"status": "completed", "tiles_created": 100},
+            "stage_2": {"status": "processing", "tiles_processed": 45}
+        },
+        "createdAt": "2025-10-29T12:00:00.000Z",
+        "updatedAt": "2025-10-29T12:05:30.123Z",
         "architecture": "strong_typing_discipline",
-        "pattern": "Job→Stage→Task with Pydantic validation"
+        "pattern": "Job→Stage→Task with Pydantic validation",
+        "schema_validated": true
+    }
+
+Response (Completed):
+    {
+        "jobId": "sha256_hash_of_parameters",
+        "jobType": "hello_world",
+        "status": "completed",
+        "stage": 2,
+        "totalStages": 2,
+        "parameters": {"message": "test"},
+        "stageResults": {
+            "stage_1": {"status": "completed", "greeting": "Hello"},
+            "stage_2": {"status": "completed", "farewell": "Goodbye"}
+        },
+        "resultData": {
+            "final_message": "Hello and Goodbye",
+            "execution_time_seconds": 5.2
+        },
+        "createdAt": "2025-10-29T12:00:00.000Z",
+        "updatedAt": "2025-10-29T12:05:05.200Z",
+        "architecture": "strong_typing_discipline",
+        "pattern": "Job→Stage→Task with Pydantic validation",
+        "schema_validated": true
+    }
+
+Response (Failed):
+    {
+        "jobId": "sha256_hash_of_parameters",
+        "jobType": "ingest_vector",
+        "status": "failed",
+        "stage": 1,
+        "totalStages": 2,
+        "parameters": {...},
+        "errorDetails": {
+            "error": "PostGIS connection failed",
+            "error_type": "DatabaseError",
+            "stage": 1,
+            "task_id": "task_xyz",
+            "timestamp": "2025-10-29T12:01:00.000Z"
+        },
+        "createdAt": "2025-10-29T12:00:00.000Z",
+        "updatedAt": "2025-10-29T12:01:00.500Z",
+        "architecture": "strong_typing_discipline",
+        "pattern": "Job→Stage→Task with Pydantic validation",
+        "schema_validated": true
     }
 
 Error Responses:
-- 400: Invalid job_id format
-- 404: Job not found
-- 500: Internal server error during retrieval
+- 400 Bad Request: Invalid job_id format (not SHA256 hex)
+- 404 Not Found: Job does not exist in database
+- 500 Internal Server Error: Database error or unexpected failure
 
-Author: Azure Geospatial ETL Team
+Field Name Transformation:
+- Internal (Python): snake_case (job_id, created_at, stage_results)
+- API (JavaScript): camelCase (jobId, createdAt, stageResults)
+- Preserves Python conventions internally while supporting frontend standards
+
+Author: Robert and Geospatial Claude Legion
+Date: Original implementation 2025
+Last Updated: 29 OCT 2025
 """
 
 from typing import Dict, Any, List, Optional

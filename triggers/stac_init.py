@@ -1,3 +1,22 @@
+# ============================================================================
+# CLAUDE CONTEXT - HTTP TRIGGER
+# ============================================================================
+# EPOCH: 4 - ACTIVE ✅
+# STATUS: HTTP Trigger - STAC collection initialization
+# PURPOSE: Initialize STAC production collections (dev, cogs, vectors, geoparquet)
+# LAST_REVIEWED: 29 OCT 2025
+# EXPORTS: handle_request (function-based trigger)
+# INTERFACES: Direct Azure Functions HttpTrigger (func.HttpRequest -> func.HttpResponse)
+# PYDANTIC_MODELS: None (uses dict for request/response)
+# DEPENDENCIES: azure.functions, infrastructure.stac.StacInfrastructure
+# SOURCE: HTTP POST requests to /api/stac/init with optional collection list
+# SCOPE: STAC infrastructure - collection creation for Bronze/Silver/Gold tiers
+# VALIDATION: Collection name validation, PgSTAC availability check
+# PATTERNS: Function-based trigger (not class-based), Batch operations
+# ENTRY_POINTS: POST /api/stac/init
+# INDEX: handle_request:20
+# ============================================================================
+
 """
 STAC Initialization Trigger - Create Production Collections
 
@@ -5,6 +24,7 @@ HTTP endpoint to initialize STAC production collections.
 
 Author: Robert and Geospatial Claude Legion
 Date: 5 OCT 2025
+Last Updated: 29 OCT 2025
 """
 
 import azure.functions as func

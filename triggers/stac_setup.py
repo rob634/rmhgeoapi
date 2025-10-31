@@ -1,17 +1,20 @@
 # ============================================================================
 # CLAUDE CONTEXT - HTTP TRIGGER
 # ============================================================================
+# EPOCH: 4 - ACTIVE ✅
+# STATUS: HTTP Trigger - STAC/PgSTAC infrastructure management
 # PURPOSE: STAC setup and status HTTP endpoints for PgSTAC installation management
-# EXPORTS: stac_setup_trigger (StacSetupTrigger instance)
-# INTERFACES: Extends BaseHttpTrigger
+# LAST_REVIEWED: 29 OCT 2025
+# EXPORTS: stac_setup_trigger (StacSetupTrigger instance), StacSetupTrigger
+# INTERFACES: BaseHttpTrigger (inherited from http_base)
 # PYDANTIC_MODELS: None (uses dict responses)
-# DEPENDENCIES: triggers.http_base, infrastructure.stac, util_logger
+# DEPENDENCIES: http_base.BaseHttpTrigger, infrastructure.stac, util_logger
 # SOURCE: HTTP GET/POST requests to /api/stac/setup
-# SCOPE: STAC infrastructure management - installation, status, verification
-# VALIDATION: Installation status checks, confirmation parameters
-# PATTERNS: HTTP Trigger pattern, Infrastructure delegation
+# SCOPE: STAC infrastructure management - PgSTAC installation, status, verification
+# VALIDATION: Installation status checks, confirmation parameters (confirm=yes), destructive operation checks (drop=true)
+# PATTERNS: Template Method (base class), Infrastructure delegation, Idempotent operations
 # ENTRY_POINTS: GET /api/stac/setup (status), POST /api/stac/setup?confirm=yes (install)
-# INDEX: StacSetupTrigger:40, process_request:70, _handle_status:120, _handle_install:180
+# INDEX: StacSetupTrigger:48, process_request:78, _handle_status:128, _handle_install:188
 # ============================================================================
 
 """
@@ -20,19 +23,39 @@ STAC Setup HTTP Trigger
 Provides HTTP endpoints for PgSTAC installation and status checking.
 This is the user-facing API for STAC infrastructure management.
 
+PgSTAC (PostgreSQL STAC) provides a PostgreSQL-native implementation of the
+SpatioTemporal Asset Catalog (STAC) specification for managing geospatial assets.
+
 Endpoints:
-- GET  /api/stac/setup         - Check STAC installation status
-- GET  /api/stac/setup?verify  - Full verification of STAC installation
-- POST /api/stac/setup?confirm=yes&drop=true - Install/reinstall PgSTAC
+- GET  /api/stac/setup              - Check STAC installation status
+- GET  /api/stac/setup?verify       - Full verification of STAC installation
+- POST /api/stac/setup?confirm=yes  - Install PgSTAC (safe if already installed)
+- POST /api/stac/setup?confirm=yes&drop=true - Reinstall PgSTAC (⚠️ DROPS EXISTING DATA)
 
 Safety Features:
-- Installation requires explicit confirmation
-- Drop operation requires additional parameter
+- Installation requires explicit confirmation (confirm=yes)
+- Drop operation requires additional parameter (drop=true)
 - Read-only operations (GET) are always safe
-- All operations are idempotent
+- All operations are idempotent (safe to repeat)
+- Transactional installation (rollback on error)
+
+Installation Process:
+1. Check if PgSTAC is already installed
+2. Create pgstac extension in PostgreSQL
+3. Create STAC tables and indexes (items, collections, etc.)
+4. Verify installation with test queries
+5. Return detailed status report
+
+Status Checks:
+- Extension installed (pgstac)
+- Tables created (items, collections, searches)
+- Indexes present
+- Functions available
+- Sample data accessible
 
 Author: Robert and Geospatial Claude Legion
 Date: 4 OCT 2025
+Last Updated: 29 OCT 2025
 """
 
 import azure.functions as func

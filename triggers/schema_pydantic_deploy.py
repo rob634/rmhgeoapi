@@ -1,28 +1,62 @@
 # ============================================================================
-# CLAUDE CONTEXT - CONTROLLER
+# CLAUDE CONTEXT - HTTP TRIGGER
 # ============================================================================
-# CATEGORY: HTTP TRIGGER ENDPOINTS
-# PURPOSE: Azure Functions HTTP API endpoint
-# EPOCH: Shared by all epochs (API layer)
-# TODO: Audit for framework logic that may belong in CoreMachine# PURPOSE: HTTP trigger for deploying Pydantic-generated schema directly to PostgreSQL database
-# EXPORTS: PydanticSchemaDeployTrigger (HTTP trigger class for schema deployment)
-# INTERFACES: Azure Functions HttpTrigger interface (func.HttpRequest -> func.HttpResponse)
-# PYDANTIC_MODELS: JobRecord, TaskRecord (imported from schema_core for SQL generation)
-# DEPENDENCIES: azure.functions, psycopg, psycopg.sql, schema_sql_generator, schema_core, config, util_logger
-# SOURCE: HTTP GET/POST requests, Pydantic models for schema generation
-# SCOPE: Database schema deployment - DDL generation, execution, verification
-# VALIDATION: Schema comparison, deployment confirmation, rollback on error
-# PATTERNS: Command pattern (deployment), Template Method (request handling), Builder (SQL generation)
-# ENTRY_POINTS: trigger = PydanticSchemaDeployTrigger(); response = trigger.handle_request(req)
-# INDEX: PydanticSchemaDeployTrigger:29, handle_request:39, _deploy_schema:218, _verify_deployment:373
+# EPOCH: 4 - ACTIVE ✅
+# STATUS: HTTP Trigger - Pydantic-to-PostgreSQL schema deployment
+# PURPOSE: HTTP trigger for deploying Pydantic-generated schema directly to PostgreSQL database
+# LAST_REVIEWED: 29 OCT 2025
+# EXPORTS: PydanticSchemaDeployTrigger, pydantic_schema_deploy_trigger (singleton instance)
+# INTERFACES: Direct Azure Functions HttpTrigger (func.HttpRequest -> func.HttpResponse)
+# PYDANTIC_MODELS: JobRecord, TaskRecord (from core.models for SQL generation)
+# DEPENDENCIES: azure.functions, psycopg, psycopg.sql, core.schema.sql_generator.PydanticToSQL, core.models, config, util_logger
+# SOURCE: HTTP GET/POST requests, Pydantic models for DDL generation
+# SCOPE: Database schema deployment - DDL generation from Pydantic models, execution, verification, rollback
+# VALIDATION: Schema comparison (existing vs generated), deployment confirmation (confirm=yes required), rollback on error
+# PATTERNS: Command pattern (deployment), Builder (SQL generation from Pydantic), SQL Composition (injection-safe)
+# ENTRY_POINTS: GET /api/db/schema/pydantic?action=info|compare, POST /api/db/schema/pydantic?confirm=yes
+# INDEX: PydanticSchemaDeployTrigger:41, handle_request:51, _deploy_schema:230, _verify_deployment:385
 # ============================================================================
 
 """
 Pydantic Schema Deployment Trigger
 
-NO BACKWARD COMPATIBILITY - Only uses psycopg.sql composed statements.
-Ensures SQL injection safety through proper identifier escaping.
-Single deployment path: Pydantic models -> Composed SQL -> Database
+Deploys database schema generated directly from Pydantic models (JobRecord, TaskRecord)
+to PostgreSQL using ONLY composed SQL statements for injection safety.
+
+NO BACKWARD COMPATIBILITY - Single deployment path:
+    Pydantic models → PydanticToSQL → psycopg.sql.SQL composition → PostgreSQL
+
+Key Features:
+- Automatic DDL generation from Pydantic field types and constraints
+- SQL injection safety via psycopg.sql composition (NO string concatenation)
+- Schema comparison (existing vs generated) before deployment
+- Transactional deployment with automatic rollback on error
+- Verification after deployment (table existence, column types)
+- Comprehensive error handling and logging
+
+Endpoints:
+    GET /api/db/schema/pydantic?action=info - Show current schema info
+    GET /api/db/schema/pydantic?action=compare - Compare existing vs generated schema
+    POST /api/db/schema/pydantic?confirm=yes - Deploy schema (requires confirmation)
+
+Deployment Flow:
+1. Generate DDL from JobRecord and TaskRecord Pydantic models
+2. Compare generated schema with existing database schema
+3. Require explicit confirmation (confirm=yes) for destructive operations
+4. Execute DDL statements in transaction (CREATE TABLE, indexes, constraints)
+5. Verify deployment (check tables exist, columns match)
+6. Rollback on any error
+
+Safety Measures:
+- Confirmation required for deployment (confirm=yes query parameter)
+- Transactional execution (rollback on error)
+- SQL composition (no string concatenation or f-strings)
+- Schema comparison before deployment
+- Verification after deployment
+
+Author: Robert and Geospatial Claude Legion
+Date: Original implementation 2025
+Last Updated: 29 OCT 2025
 """
 
 import azure.functions as func
@@ -35,7 +69,12 @@ from util_logger import LoggerFactory
 from util_logger import ComponentType, LogLevel, LogContext
 from config import get_config
 from core.schema.sql_generator import PydanticToSQL
-from core.models import JobRecord, TaskRecord
+from core.models import (
+    JobRecord,
+    TaskRecord,
+    ApiRequest,
+    OrchestrationJob
+)
 
 class PydanticSchemaDeployTrigger:
     """
@@ -319,80 +358,34 @@ class PydanticSchemaDeployTrigger:
                             "error": error_msg
                         })
 
-                # Deploy Platform schema (for Platform-as-a-Service layer)
-                # Added 26 OCT 2025 - Centralized schema deployment (Issue #3)
-                # Re-enabled after fixing orphaned except block
-                self.logger.info("📦 Deploying Platform schema (Platform-as-a-Service layer)...")
+                # ================================================================
+                # PLATFORM TABLES - NOW AUTO-GENERATED (29 OCT 2025)
+                # ================================================================
+                # Platform tables are now auto-generated from Pydantic models:
+                #   - core/models/platform.py: ApiRequest, OrchestrationJob
+                #   - core/schema/sql_generator.py: Added to generate_composed_statements()
+                #
+                # Previously: 70 lines of manual DDL here
+                # Now: 0 lines - Infrastructure-as-Code pattern!
+                #
+                # Tables created (renamed 29 OCT 2025):
+                #   - app.api_requests (from ApiRequest, previously PlatformRecord)
+                #   - app.orchestration_jobs (from OrchestrationJob, previously PlatformRequestJobMapping)
+                #   - app.platform_request_status_enum (from PlatformRequestStatus)
+                #   - app.data_type_enum (from DataType)
+                #
+                # Benefits:
+                #   - Zero drift between Pydantic models and database schema
+                #   - Consistent with JobRecord/TaskRecord pattern
+                #   - Update model → schema updates automatically
+                #   - Reduced LOC (70 lines removed!)
+                #
+                # Reference: PLATFORM_SCHEMA_COMPARISON.md
+                # ================================================================
 
-                platform_schema_statements = [
-                    sql.SQL("CREATE SCHEMA IF NOT EXISTS {schema}").format(
-                        schema=sql.Identifier("platform")
-                    ),
-                    sql.SQL("""
-                        CREATE TABLE IF NOT EXISTS {schema}.{table} (
-                            request_id VARCHAR(32) PRIMARY KEY,
-                            dataset_id VARCHAR(255) NOT NULL,
-                            resource_id VARCHAR(255) NOT NULL,
-                            version_id VARCHAR(50) NOT NULL,
-                            data_type VARCHAR(50) NOT NULL,
-                            status VARCHAR(20) NOT NULL DEFAULT 'pending',
-                            job_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
-                            parameters JSONB NOT NULL DEFAULT '{{}}'::jsonb,
-                            metadata JSONB NOT NULL DEFAULT '{{}}'::jsonb,
-                            result_data JSONB,
-                            created_at TIMESTAMPTZ DEFAULT NOW(),
-                            updated_at TIMESTAMPTZ DEFAULT NOW()
-                        )
-                    """).format(
-                        schema=sql.Identifier("platform"),
-                        table=sql.Identifier("requests")
-                    ),
-                    sql.SQL("CREATE INDEX IF NOT EXISTS {index} ON {schema}.{table}({column})").format(
-                        index=sql.Identifier("idx_platform_status"),
-                        schema=sql.Identifier("platform"),
-                        table=sql.Identifier("requests"),
-                        column=sql.Identifier("status")
-                    ),
-                    sql.SQL("CREATE INDEX IF NOT EXISTS {index} ON {schema}.{table}({column})").format(
-                        index=sql.Identifier("idx_platform_dataset"),
-                        schema=sql.Identifier("platform"),
-                        table=sql.Identifier("requests"),
-                        column=sql.Identifier("dataset_id")
-                    ),
-                    sql.SQL("CREATE INDEX IF NOT EXISTS {index} ON {schema}.{table}({column} DESC)").format(
-                        index=sql.Identifier("idx_platform_created"),
-                        schema=sql.Identifier("platform"),
-                        table=sql.Identifier("requests"),
-                        column=sql.Identifier("created_at")
-                    ),
-                    sql.SQL("""
-                        CREATE TABLE IF NOT EXISTS {schema}.{table} (
-                            request_id VARCHAR(32) NOT NULL,
-                            job_id VARCHAR(32) NOT NULL,
-                            job_type VARCHAR(100) NOT NULL,
-                            sequence INTEGER NOT NULL DEFAULT 1,
-                            status VARCHAR(20) NOT NULL DEFAULT 'pending',
-                            created_at TIMESTAMPTZ DEFAULT NOW(),
-                            PRIMARY KEY (request_id, job_id)
-                        )
-                    """).format(
-                        schema=sql.Identifier("platform"),
-                        table=sql.Identifier("request_jobs")
-                    ),
-                ]
+                self.logger.info("✅ Platform tables auto-generated from Pydantic models (Infrastructure-as-Code)")
 
-                platform_stmt_count = 0
-                for platform_stmt in platform_schema_statements:
-                    try:
-                        cur.execute(platform_stmt)
-                        platform_stmt_count += 1
-                    except Exception as platform_error:
-                        if "already exists" not in str(platform_error).lower():
-                            self.logger.warning(f"Platform schema error (non-fatal): {platform_error}")
-
-                self.logger.info(f"✅ Platform schema deployed: {platform_stmt_count} statements executed")
-
-                # Commit all changes (app schema + platform schema)
+                # Commit all changes (app schema with Platform tables auto-generated)
                 conn.commit()
                 
                 # Verify deployment

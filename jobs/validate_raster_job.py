@@ -1,16 +1,20 @@
 # ============================================================================
-# CLAUDE CONTEXT - JOB WORKFLOW - VALIDATE RASTER
+# CLAUDE CONTEXT - JOB DEFINITION
 # ============================================================================
+# EPOCH: 4 - ACTIVE ✅
+# STATUS: Job - Single-stage raster validation (no processing)
 # PURPOSE: Single-stage workflow for validating rasters without processing
-# EXPORTS: ValidateRasterJob class
-# INTERFACES: Job workflow pattern with single stage
-# PYDANTIC_MODELS: None (class attributes)
-# DEPENDENCIES: None at module level
-# SOURCE: Bronze container rasters
-# SCOPE: Standalone validation for any raster file
-# VALIDATION: CRS, bit-depth, type detection, bounds checking
-# PATTERNS: Single-stage workflow, validation only
-# ENTRY_POINTS: Registered in jobs/__init__.py ALL_JOBS
+# LAST_REVIEWED: 29 OCT 2025
+# EXPORTS: ValidateRasterJob (JobBase implementation)
+# INTERFACES: JobBase (implements 5-method contract)
+# PYDANTIC_MODELS: None (uses dict-based validation)
+# DEPENDENCIES: jobs.base.JobBase
+# SOURCE: HTTP job submission for raster validation (Bronze container)
+# SCOPE: Standalone raster validation for any raster file
+# VALIDATION: CRS, bit-depth, data type detection, bounds checking, NoData value
+# PATTERNS: Single-stage workflow, Read-only validation, No file modification
+# ENTRY_POINTS: Registered in jobs/__init__.py ALL_JOBS as "validate_raster"
+# INDEX: ValidateRasterJob:28, stages:40, create_tasks_for_stage:60
 # ============================================================================
 
 """

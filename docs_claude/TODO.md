@@ -1,7 +1,566 @@
 # Active Tasks
 
-**Last Updated**: 29 OCT 2025
+**Last Updated**: 30 OCT 2025
 **Author**: Robert and Geospatial Claude Legion
+
+---
+
+## 🎯 CURRENT PRIORITY: Production Readiness & APIM Architecture (30 OCT 2025)
+
+**Status**: 🎉 **MAJOR MILESTONE ACHIEVED** - Standards-compliant geospatial data platform operational
+**Context**: OGC Features API integrated successfully, STAC API working, Platform layer operational
+**Next Phase**: Production deployment architecture with Azure API Management
+
+### What We've Built (30 OCT 2025)
+
+✅ **Three Standards-Compliant APIs**:
+1. **STAC API** (pgstac/) - STAC v1.0 metadata catalog
+2. **OGC Features API** (ogc_features/) - OGC API - Features Core 1.0 vector access
+3. **Platform/CoreMachine** - Custom job orchestration + data processing
+
+✅ **Interactive Web Application** 🎉:
+- **Live URL**: https://rmhazuregeo.z13.web.core.windows.net/
+- **User Quote**: *"omg my very first web app loading geojson from a postgis database!!!"*
+- Leaflet map with collection selector
+- Load 50-1000 features from any of 7 PostGIS collections
+- Click polygons for popups, hover to highlight
+- Azure Storage Static Website hosting
+- CORS configured for cross-origin API access
+
+✅ **All APIs Tested & Working** in browser:
+- STAC collections and items serving properly
+- OGC Features returning GeoJSON with PostGIS geometries
+- Platform layer processing requests
+- 7 vector collections available via OGC
+- **End-to-end data flow**: PostgreSQL → OGC API → Web Map ✨
+
+### 🚀 NEXT UP: End-to-End Vector Workflow (Platform Layer)
+
+**Priority**: P0 - Finalize complete vector data pipeline
+**Goal**: Platform-orchestrated workflow from upload → PostGIS → STAC → OGC Features URL
+**Philosophy**: Platform layer changes, CoreMachine stays stable (no changes)
+
+**Complete Workflow**:
+```
+1. User uploads vector file (GeoJSON/Shapefile/etc.) via Platform API
+   ↓
+2. Platform → Vector ETL Job (CoreMachine)
+   - Ingest to PostGIS (geo schema)
+   - Validate geometries
+   - Create spatial indexes
+   ↓
+3. Platform → STAC Catalog Job (CoreMachine)
+   - Generate STAC Collection metadata
+   - Create STAC Items for features
+   - Write to pgstac schema
+   ↓
+4. Platform returns response:
+   - PostGIS table name
+   - STAC Collection ID
+   - OGC Features API URL: /api/features/collections/{table_name}/items
+   ↓
+5. User can immediately:
+   - Query via OGC Features API
+   - Search via STAC API
+   - View on web map: https://rmhazuregeo.z13.web.core.windows.net/
+```
+
+**Implementation Tasks**:
+- [ ] **Test existing vector ETL**: Verify ingest_vector job works end-to-end
+- [ ] **Test existing STAC creation**: Verify STAC catalog jobs work with vectors
+- [ ] **Platform orchestration**: Update Platform layer to chain these jobs
+- [ ] **Response formatting**: Return OGC Features URL in Platform response
+- [ ] **Idempotency verification**: Test re-submitting same file (should detect existing data)
+- [ ] **Service layer edits**: Update services/ as needed (avoid CoreMachine changes)
+- [ ] **End-to-end test**: Upload test file → verify all steps → access via OGC URL
+- [ ] **Documentation**: Document complete workflow with curl examples
+
+**Success Criteria**:
+✅ Upload vector file → Get OGC Features URL back in < 2 minutes
+✅ Re-upload same file → Returns existing OGC URL (idempotent)
+✅ Can immediately view data on web map
+✅ STAC catalog searchable
+✅ CoreMachine unchanged (all edits in Platform/services layers)
+
+**Notes**:
+- Leverage existing CoreMachine jobs (ingest_vector, stac_catalog_vectors)
+- Platform layer handles orchestration and response formatting
+- Services layer may need updates for better OGC/STAC integration
+- Goal: Platform API returns everything user needs to access their data
+
+---
+
+### 🔧 NEXT UP: Independent STAC Query Module (Like OGC Features)
+
+**Priority**: P0 - Separate STAC query from STAC ingestion/ETL
+**Goal**: Create standalone stac_query/ module with zero dependencies on main app
+**Architecture**: Query and ETL live together, but ETL not exposed publicly
+
+**Vision**:
+```
+Same Function App Structure:
+├── ogc_features/          (Query only - public API)
+│   ├── repository.py      → PostGIS queries
+│   ├── service.py         → Business logic
+│   ├── triggers.py        → HTTP endpoints
+│   └── map.html           → Web UI
+│
+├── stac_query/            (Query only - public API) ⭐ NEW
+│   ├── repository.py      → pgstac queries (read-only)
+│   ├── service.py         → STAC search/filter logic
+│   ├── triggers.py        → HTTP endpoints (/collections, /search, /items)
+│   └── config.py          → Independent configuration
+│
+└── infrastructure/stac.py (ETL/Ingestion - internal only)
+    ├── install_pgstac()   → Schema setup
+    ├── create_collection() → Write operations
+    ├── add_items()        → Write operations
+    └── clear_stac_data()  → Nuclear button (DEV only)
+```
+
+**Key Principle - Separation of Concerns**:
+- **stac_query/**: Read-only, public-facing, zero dependencies on main app
+- **infrastructure/stac.py**: Write operations, ETL logic, called by CoreMachine jobs
+- **Both use pgstac**: Different operations on same schema
+
+**Benefits**:
+✅ Query module can be deployed independently (future microservice)
+✅ ETL stays internal (not exposed to public API)
+✅ Same pattern as OGC Features (consistent architecture)
+✅ Zero dependencies = easy to test and maintain
+✅ Can add caching/optimization to queries without affecting ETL
+
+**Implementation Tasks**:
+- [ ] Create stac_query/ folder structure
+- [ ] Extract read-only queries from infrastructure/stac.py
+- [ ] Create stac_query/repository.py (pgstac SELECT queries only)
+- [ ] Create stac_query/service.py (STAC API v1.0 compliance)
+- [ ] Create stac_query/triggers.py (HTTP endpoints)
+- [ ] Create stac_query/config.py (independent configuration)
+- [ ] Update function_app.py with explicit STAC query routes
+- [ ] Keep infrastructure/stac.py for ETL operations (no changes to callers)
+- [ ] Test all existing STAC endpoints still work
+- [ ] Verify CoreMachine jobs (stac_catalog_*) still work
+
+**Endpoints to Implement** (Read-Only):
+```bash
+# STAC API v1.0 Core (query only)
+GET  /api/collections                    # List all collections
+GET  /api/collections/{id}               # Get collection metadata
+GET  /api/collections/{id}/items         # Get items in collection
+GET  /api/collections/{id}/items/{id}    # Get single item
+POST /api/search                         # STAC search with filters
+GET  /api/conformance                    # STAC conformance classes
+GET  /api/                               # STAC landing page
+```
+
+**ETL Operations Stay Internal** (infrastructure/stac.py):
+- Called by CoreMachine jobs only
+- Not exposed via HTTP endpoints
+- Platform layer orchestrates via job submission
+- No public access to write operations
+
+**Success Criteria**:
+✅ stac_query/ module has zero dependencies on main app
+✅ All STAC query endpoints work via new module
+✅ ETL operations unchanged (infrastructure/stac.py still works)
+✅ CoreMachine jobs don't need changes
+✅ Same architecture pattern as OGC Features (consistency)
+✅ Can be split into separate Function App in future (APIM ready)
+
+**Notes**:
+- Mirrors OGC Features architecture (proven pattern)
+- Enables future microservices split
+- Query and ETL coexist but serve different purposes
+- Public API consumers only see stac_query/ endpoints
+- Internal Platform/CoreMachine only uses infrastructure/stac.py for writes
+
+---
+
+### 🚀 Future: Production Architecture with APIM
+
+**Vision**: Single custom domain with Azure API Management routing to multiple Function Apps
+
+```
+User Request:
+https://geospatial.rmh.org/api/features/*     → OGC Features Function App
+https://geospatial.rmh.org/api/collections/*  → STAC API Function App
+https://geospatial.rmh.org/api/platform/*     → Platform Function App
+https://geospatial.rmh.org/api/jobs/*         → CoreMachine Function App
+```
+
+**Benefits**:
+- ✅ Seamless user experience (single domain)
+- ✅ Independent scaling per API
+- ✅ Separate deployment cycles
+- ✅ API versioning (/v1/, /v2/)
+- ✅ Centralized auth/rate limiting/caching
+- ✅ SSL/TLS termination
+- ✅ Request/response transformation
+
+### Task Breakdown
+
+**Phase 1: APIM Setup & Routing** (NOT STARTED)
+- [ ] Create Azure API Management instance (Developer or Standard tier)
+- [ ] Configure custom domain: geospatial.rmh.org
+- [ ] Set up SSL certificate (Azure-managed or custom)
+- [ ] Create API definitions for each backend
+- [ ] Configure URL routing policies
+- [ ] Test routing to existing rmhgeoapibeta Function App
+
+**Phase 2: Function App Separation** (NOT STARTED)
+- [ ] Plan microservices split:
+  - OGC Features standalone (ogc_features/ → new Function App)
+  - STAC API standalone (pgstac/ + infrastructure/stac.py → new Function App)
+  - Platform layer (platform schema + triggers → existing or new)
+  - CoreMachine (jobs/tasks → existing)
+- [ ] Document shared dependencies (config.py, util_logger.py, infrastructure/)
+- [ ] Create deployment strategy (which code goes where)
+
+**Phase 3: Authentication & Security** (NOT STARTED)
+- [ ] Design auth strategy:
+  - Public APIs (/features/*, /collections/*): Azure AD token validation (any tenant user)
+  - Internal APIs (/platform/*, /jobs/*): Specific app IDs only (DDH app + future apps)
+- [ ] Configure APIM policies per API path:
+  - `/api/features/*` → validate-azure-ad-token (open to tenant)
+  - `/api/collections/*` → validate-azure-ad-token (open to tenant)
+  - `/api/platform/*` → validate-azure-ad-token with client-application-ids (DDH only)
+  - `/api/jobs/*` → validate-azure-ad-token with client-application-ids (DDH + future)
+- [ ] Set up rate limiting per API:
+  - Public APIs: 1,000 calls/minute
+  - Internal APIs: 10,000 calls/minute
+- [ ] Configure CORS policies (public APIs allow * origins, internal restrict)
+- [ ] Add request validation (content-type, headers, payload size)
+- [ ] Lock down Function Apps (VNET integration or private endpoints)
+- [ ] Set Function Apps to AuthLevel.ANONYMOUS (APIM is gatekeeper)
+
+**Phase 4: Monitoring & Analytics** (NOT STARTED)
+- [ ] Configure Application Insights per Function App
+- [ ] Set up APIM analytics
+- [ ] Create unified dashboard
+- [ ] Configure alerts
+
+**Phase 5: Documentation & Client SDKs** (NOT STARTED)
+- [ ] Generate OpenAPI specs for each API
+- [ ] Create developer portal in APIM
+- [ ] Write API usage guides
+- [ ] Consider client SDK generation
+
+### Questions to Answer
+
+1. **Deployment Strategy**: Should we split into separate Function Apps now or wait?
+2. **Shared Code**: How to handle shared modules (config, logger, infrastructure)?
+   - Option A: Duplicate in each Function App
+   - Option B: Shared Python package
+   - Option C: Git submodules
+3. **Database Access**: All Function Apps share same PostgreSQL - how to manage connection pooling?
+4. **Cost**: APIM pricing tier - Developer ($50/mo) vs Standard ($700/mo)?
+5. **Timeline**: Immediate APIM setup or continue with monolithic Function App?
+
+### Current Status: Fully Functional Monolith
+
+**What Works Right Now**:
+- Single Function App (rmhgeoapibeta) serves all APIs
+- All endpoints tested and operational
+- Standards-compliant implementations
+- Ready for production data ingestion
+
+**Decision Point**:
+- Continue with monolith + add features? (faster development)
+- Split into microservices now? (better long-term architecture)
+
+---
+
+## ✅ COMPLETED: OGC Features API Integration (30 OCT 2025)
+
+**Status**: ✅ **COMPLETE & TESTED** - 6 OGC-compliant endpoints deployed
+**Achievement**: Fixed SQL parameter bug, integrated standalone OGC module
+**Browser Tested**: User confirmed STAC JSON visible in browser! 🎉
+
+See HISTORY.md for full details (lines 10-118)
+
+---
+
+## ✅ COMPLETED: Platform Infrastructure-as-Code Migration (29 OCT 2025)
+
+**Status**: ✅ **COMPLETE & TESTED** - Platform tables now follow Infrastructure-as-Code pattern
+**Deployment ID**: `50758bb6-2` (final working deployment)
+**Priority**: P0 - Critical architecture alignment
+**Completed**: 29 OCT 2025
+
+### What Was Accomplished
+
+**🎯 Goal**: Migrate Platform from manual DDL (70+ lines) to Pydantic Infrastructure-as-Code pattern, matching Jobs/Tasks architecture.
+
+**Key Achievement**: Platform tables now have **zero drift guarantee** - Pydantic models ARE the database schema.
+
+### 5 Implementation Phases
+
+**Phase 1: Create Core Platform Models** (`core/models/platform.py` - NEW, 230+ lines)
+- ✅ Created `PlatformRecord` with Field constraints (`max_length` → `VARCHAR` lengths)
+- ✅ Created `PlatformRequestJobMapping` (bidirectional relationship table)
+- ✅ Created `PlatformRequestStatus` enum (pending/processing/completed/failed)
+- ✅ Created `DataType` enum (raster/vector/pointcloud)
+- ✅ Used structured JSONB `jobs: Dict[str, Any]` instead of array (user feedback)
+
+**Phase 2: Update SQL Generator** (`core/schema/sql_generator.py`)
+- ✅ Added Platform model imports (lines 13-16)
+- ✅ Added Platform ENUMs to generation (PlatformRequestStatus, DataType)
+- ✅ Added Platform tables to generation (platform_requests, platform_request_jobs)
+- ✅ Added PRIMARY KEY constraints (lines 313-331):
+  - `platform_requests`: PRIMARY KEY (request_id)
+  - `platform_request_jobs`: PRIMARY KEY (request_id, job_id)
+- ✅ Added FOREIGN KEY constraint (platform_request_jobs → platform_requests, ON DELETE CASCADE)
+- ✅ Added JSONB default handling for "jobs" field (lines 279-298)
+- ✅ Added Platform indexes to generation
+
+**Phase 3: Remove Manual DDL** (`triggers/schema_pydantic_deploy.py`)
+- ✅ Deleted 70+ lines of manual CREATE TABLE statements
+- ✅ Added Platform model imports (lines 72-77)
+- ✅ Replaced DDL with documentation comment explaining Infrastructure-as-Code pattern
+
+**Phase 4: Update All Imports**
+- ✅ `core/models/__init__.py` - Export Platform models
+- ✅ `triggers/trigger_platform.py` - Import from core.models
+- ✅ `triggers/trigger_platform_status.py` - Import from core.models
+- ✅ `infrastructure/platform.py` - Import from core.models (removed circular import workaround)
+
+**Phase 5: Critical Design Changes**
+
+**Change 1**: `job_ids: List[str]` → `jobs: Dict[str, Any]` (User Feedback)
+- **User request**: "can we use jsonb so there is defined structure instead of hoping things are in the correct order in an array?"
+- **New structure**:
+  ```json
+  {
+    "validate_raster": {
+      "job_id": "abc123...",
+      "job_type": "validate_raster",
+      "status": "completed",
+      "sequence": 1,
+      "created_at": "2025-10-29T12:00:00Z",
+      "completed_at": "2025-10-29T12:01:30Z"
+    }
+  }
+  ```
+- ✅ Updated SQL generator JSONB defaults: `'[]'` → `'{}'`
+- ✅ Updated `add_job_to_request()` to use `jsonb_set()` instead of array concatenation
+- ✅ Updated `_row_to_dict()` to return dict instead of array
+- ✅ Updated all SQL queries: `array_length()` → `jsonb_object_keys()`
+
+**Change 2**: Added missing datetime import
+- **Error**: `NameError: name 'datetime' is not defined`
+- ✅ Added `from datetime import datetime` to `infrastructure/platform.py` line 45
+
+### Errors Encountered and Fixed
+
+**Error 1**: Schema Mismatch
+- **Problem**: Tables created in "platform" schema, repository expected "app" schema
+- **Fix**: Changed all schema references to "app"
+
+**Error 2**: ComponentType.INFRASTRUCTURE doesn't exist
+- **Problem**: Used non-existent ComponentType
+- **Fix**: Changed to `ComponentType.REPOSITORY`
+
+**Error 3**: Circular Import
+- **Problem**: `infrastructure/platform.py` ↔ `triggers/trigger_platform.py`
+- **Fix**: Moved all models to `core/models/platform.py`
+
+**Error 4**: Missing PRIMARY KEY Constraints
+- **Problem**: `ON CONFLICT (request_id)` failed - no PRIMARY KEY
+- **Discovery**: SQL generator only handled hardcoded "jobs"/"tasks" table names
+- **Fix**: Added elif blocks for Platform tables with PRIMARY KEY + FOREIGN KEY constraints
+
+**Error 5**: Missing datetime import
+- **Problem**: Used `datetime.utcnow()` without import
+- **Fix**: Added import statement
+
+### Deployment History
+
+1. **be9073d1-3**: Initial deployment with PRIMARY KEY constraints
+2. **6cf48ae5-9**: Added structured jobs field (partial test)
+3. **d17af13a-6**: Updated repository queries for jobs dict
+4. **50758bb6-2**: ✅ **FINAL SUCCESS** - Added datetime import, full integration test passed
+
+### Test Results (Deployment 50758bb6-2)
+
+**Test**: Submit Platform request with validate_raster + process_raster jobs
+```bash
+curl -X POST https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/platform/submit \
+  -H "Content-Type: application/json" \
+  -d '{
+    "dataset_id": "global-dem",
+    "resource_id": "v1-cog",
+    "version_id": "2025",
+    "data_type": "raster",
+    "job_types": ["validate_raster", "process_raster"]
+  }'
+```
+
+**Result**: ✅ **SUCCESS**
+```json
+{
+  "success": true,
+  "request_id": "d8907c84885246b2de5f15df04515e13",
+  "status": "pending",
+  "jobs_created": ["59179b...", "848fe9..."],
+  "message": "Platform request submitted. 2 jobs created."
+}
+```
+
+### Schema Objects Created
+
+**Tables**:
+- `app.platform_requests` (from PlatformRecord)
+- `app.platform_request_jobs` (from PlatformRequestJobMapping)
+
+**ENUMs**:
+- `app.platform_request_status_enum` (pending/processing/completed/failed)
+- `app.data_type_enum` (raster/vector/pointcloud)
+
+**Constraints**:
+- PRIMARY KEY on platform_requests(request_id)
+- Composite PRIMARY KEY on platform_request_jobs(request_id, job_id)
+- FOREIGN KEY on platform_request_jobs(request_id) → platform_requests(request_id) ON DELETE CASCADE
+
+**Indexes**: Auto-generated for all indexed fields
+
+### Benefits Achieved
+
+1. **Zero Drift Guarantee**: Database schema always matches Pydantic models
+2. **Consistent Pattern**: Platform now follows same Infrastructure-as-Code pattern as Jobs/Tasks
+3. **Field Constraints**: `Field(..., max_length=32)` auto-generates `VARCHAR(32)`
+4. **Enum Safety**: Python Enums auto-generate PostgreSQL ENUM types
+5. **Structured Data**: JSONB dict with semantic keys instead of ordered arrays
+6. **Single Source of Truth**: Eliminated 70+ lines of manual DDL
+7. **Referential Integrity**: FOREIGN KEY constraints enforce relationships
+8. **Query Safety**: SQL composition pattern prevents SQL injection
+
+### Documentation Created
+
+- `PLATFORM_SCHEMA_COMPARISON.md` (comparison of manual DDL vs Infrastructure-as-Code)
+- Updated `STORAGE_CONFIG_REVIEW_29OCT2025.md` with Platform architecture notes
+
+---
+
+## ✅ COMPLETED: Platform Table Renaming (api_requests + orchestration_jobs) (29 OCT 2025)
+
+**Status**: ✅ **COMPLETE & DEPLOYED** - All 7 phases completed, tables renamed successfully
+**Priority**: P1 - Improves API clarity
+**User Decision**: "can we do app.api_requests and app.orchestration_jobs?"
+**Completed**: 29 OCT 2025
+
+### Rationale
+
+**Current Names**: `platform_requests` / `platform_request_jobs`
+- ❌ "Platform" is vague internal terminology
+- ❌ "request_jobs" doesn't convey orchestration role
+
+**New Names**: `api_requests` / `orchestration_jobs`
+- ✅ **api_requests**: Client-facing layer - RESTful API requests from DDH
+- ✅ **orchestration_jobs**: Execution layer - Maps API requests to CoreMachine jobs
+
+### Architecture Clarity
+
+```
+DDH API Request → api_requests table → orchestration_jobs mapping → CoreMachine jobs
+    (client)       (what user asked)     (execution plan)          (atomic work units)
+```
+
+**Example**:
+- **API Request**: "Process global-dem dataset" (what client asked for)
+- **Orchestration Jobs**: validate_raster → extract_metadata → create_cog (how we execute it)
+- **CoreMachine Jobs**: Individual job executions with retry logic
+
+### 7 Implementation Phases
+
+**Phase 1: Update Pydantic Models** (`core/models/platform.py`)
+- Rename `PlatformRecord` → `ApiRequest`
+- Rename `PlatformRequestJobMapping` → `OrchestrationJob`
+- Update all field descriptions and docstrings
+- Update table name metadata
+
+**Phase 2: Update SQL Generator** (`core/schema/sql_generator.py`)
+- Update import statements
+- Change table generation: "platform_requests" → "api_requests"
+- Change table generation: "platform_request_jobs" → "orchestration_jobs"
+- Update index generation calls
+- Update PRIMARY KEY / FOREIGN KEY references
+
+**Phase 3: Update Repository** (`infrastructure/platform.py`)
+- Rename class: `PlatformRepository` → `ApiRequestRepository`
+- Update all SQL table references (11 queries)
+- Update method names for clarity
+- Update imports
+
+**Phase 4: Update Triggers**
+- `triggers/trigger_platform.py`: Update imports, endpoint docs, class names
+- `triggers/trigger_platform_status.py`: Update imports, endpoint docs
+
+**Phase 5: Update Core Models Export** (`core/models/__init__.py`)
+- Update import statements
+- Update __all__ list
+
+**Phase 6: Deploy & Test**
+1. Deploy to Azure Functions: `func azure functionapp publish rmhgeoapibeta --python --build remote`
+2. Redeploy database schema: `POST /api/db/schema/redeploy?confirm=yes`
+3. Test API endpoint: `POST /api/platform/submit`
+4. Verify new tables exist: `app.api_requests`, `app.orchestration_jobs`
+5. Verify old tables dropped
+
+**Phase 7: Update Documentation**
+- `docs_claude/CLAUDE_CONTEXT.md` - Update Platform references
+- `docs_claude/COREMACHINE_PLATFORM_ARCHITECTURE.md` - Update table names
+- `docs_claude/FILE_CATALOG.md` - Update file descriptions
+
+### Implementation Summary
+
+**What Was Completed**:
+- ✅ All 7 phases completed successfully
+- ✅ Fixed import error in `triggers/schema_pydantic_deploy.py` (missed on first deployment)
+- ✅ Added backward compatibility alias: `PlatformRepository = ApiRequestRepository`
+- ✅ Updated 8 files total (models, generator, repository, triggers, exports, deployer)
+- ✅ Deployed to Azure Functions (successful after fixing imports)
+- ✅ Schema redeployed with new table names verified
+
+**Files Modified**:
+1. `core/models/platform.py` - Renamed classes, updated metadata
+2. `core/schema/sql_generator.py` - Updated imports, table names, PRIMARY KEY/FOREIGN KEY refs
+3. `infrastructure/platform.py` - Renamed class, updated all SQL queries, added alias
+4. `triggers/trigger_platform.py` - Updated imports and docs
+5. `triggers/trigger_platform_status.py` - Updated CLAUDE header
+6. `core/models/__init__.py` - Updated exports
+7. `triggers/schema_pydantic_deploy.py` - **CRITICAL FIX**: Updated imports (missed initially)
+8. `docs_claude/TODO.md` - This file!
+
+**Errors Encountered**:
+1. **Import Error**: `schema_pydantic_deploy.py` still importing `PlatformRecord` (fixed)
+2. **Type Hints**: Missed updating `Optional[PlatformRecord]` and `-> PlatformRecord` (fixed)
+3. **Inheritance**: `PlatformStatusRepository` inheriting from old name (fixed)
+
+**Deployment Summary**:
+- Deployment 1: Failed (import error)
+- Deployment 2: ✅ SUCCESS
+- Schema redeploy: ✅ New tables created (`api_requests`, `orchestration_jobs`)
+
+**Verification**:
+```json
+{
+    "table_list": [
+        "api_requests",      // ✅ NEW NAME
+        "jobs",
+        "orchestration_jobs", // ✅ NEW NAME
+        "tasks"
+    ]
+}
+```
+
+### Benefits Achieved
+
+1. **API Clarity**: "api_requests" immediately conveys client-facing nature
+2. **Execution Separation**: "orchestration_jobs" clearly indicates workflow coordination
+3. **Documentation**: Self-documenting table names
+4. **Onboarding**: New developers understand table purposes instantly
+5. **APIM Integration**: Naming aligns with future Azure API Management deployment
 
 ---
 
@@ -67,37 +626,269 @@
 
 ---
 
-## 📋 SYSTEMATIC DOCUMENTATION REVIEW PROJECT (Started 29 OCT 2025)
+## ✅ COMPLETED: Platform SQL Composition Refactoring (29 OCT 2025)
 
-**Status**: 🎯 **ACTIVE** - Systematic review of all Python files for documentation standards
+**Status**: ✅ **COMPLETE** - All 5 phases completed, awaiting deployment testing
+**Priority**: P0 - Critical architecture alignment with CoreMachine
+**Actual Effort**: ~2 hours (completed all 5 phases!)
+**Completed**: 29 OCT 2025
+
+### What Was Accomplished
+
+**🎯 Exceeded Original Plan** - Completed ALL 5 phases in one session:
+
+1. **Phase 1**: ✅ Repository Inheritance
+   - Created `infrastructure/platform.py` (545 lines)
+   - Moved both `PlatformRepository` and `PlatformStatusRepository`
+   - Added lazy loading exports to `infrastructure/__init__.py`
+   - Updated imports in both trigger files
+
+2. **Phase 2**: ✅ SQL Composition Pattern
+   - Converted ALL 11 SQL queries to use `sql.SQL().format(sql.Identifier())`
+   - Eliminated raw SQL strings (except deprecated `_ensure_schema()`)
+   - Schema-agnostic via `self.schema_name` variable
+
+3. **Phase 3**: ✅ Error Context Management
+   - Wrapped all repository methods with `_error_context()`
+   - Detailed error logging for all database operations
+
+4. **Phase 4**: ✅ Transaction Management
+   - Replaced manual `conn.commit()` with `_execute_query()` auto-commit
+   - Eliminated `with conn.cursor()` blocks
+   - Leveraged base class transaction handling
+
+5. **Phase 5**: ✅ Schema Variable Consistency
+   - Replaced hardcoded `"app"` with `self.schema_name`
+   - Syntax validation passed with `py_compile`
+
+**🔒 Circular Import Handling**:
+- Used `TYPE_CHECKING` to avoid runtime circular imports
+- Runtime imports inside methods where needed
+- String annotations for forward references
+
+**Files Changed**:
+- `infrastructure/platform.py` - NEW (545 lines, comprehensive SQL composition)
+- `infrastructure/__init__.py` - Added PlatformRepository + PlatformStatusRepository exports
+- `triggers/trigger_platform.py` - Removed repository class, updated imports
+- `triggers/trigger_platform_status.py` - Removed repository class, updated imports
+
+### Objective
+
+Refactor Platform repository layer to use CoreMachine's SQL composition patterns:
+- Use `psycopg.sql` composition for SQL injection prevention
+- Inherit from `PostgreSQLRepository` base class
+- Use `_execute_query()` and `_error_context()` helpers
+- Eliminate raw SQL strings (currently 11 occurrences)
+
+### Current Issues
+
+❌ **Platform Repository (trigger_platform.py)**:
+- Uses raw SQL strings (vulnerable to injection if schema becomes dynamic)
+- No inheritance from `PostgreSQLRepository`
+- Manual `conn.commit()` on every operation
+- No `_error_context()` for detailed error logging
+- Hardcoded schema name `"app"` throughout
+
+✅ **CoreMachine (infrastructure/postgresql.py)**:
+- 100% SQL composition with `sql.SQL()` + `sql.Identifier()`
+- Inherits from `PostgreSQLRepository` base
+- Uses `_execute_query()` with guaranteed commits
+- `_error_context()` wraps all operations
+- Schema name via `self.schema_name` variable
+
+### Implementation Phases
+
+#### Phase 1: Repository Inheritance ✅ COMPLETE (29 OCT 2025)
+- [x] Create `infrastructure/platform.py` ✅
+- [x] Move `PlatformRepository` from `trigger_platform.py` to `infrastructure/platform.py` ✅
+- [x] Make `PlatformRepository` inherit from `PostgreSQLRepository` ✅
+- [x] Move `PlatformStatusRepository` from `trigger_platform_status.py` to `infrastructure/platform.py` ✅
+- [x] Convert ALL SQL queries to composition pattern (went beyond Phase 1!) ✅
+- [x] Add error context wrappers with `_error_context()` (went beyond Phase 1!) ✅
+- [x] Update imports in trigger files ✅
+- [x] Add lazy loading exports to `infrastructure/__init__.py` ✅
+- [x] Syntax validation with py_compile ✅
+- [ ] **PENDING**: Test Platform endpoints functionality (requires deployment)
+
+**Files Changed**:
+- `infrastructure/platform.py` (NEW)
+- `triggers/trigger_platform.py` (import changes only)
+- `triggers/trigger_platform_status.py` (import changes only)
+- `infrastructure/__init__.py` (add exports)
+
+#### Phase 2: SQL Composition ✅ COMPLETE (29 OCT 2025)
+- [x] Convert `_ensure_schema()` - LEFT AS RAW SQL (deprecated DDL code) ⚠️
+- [x] Convert `create_request()` INSERT statement ✅
+- [x] Convert `get_request()` SELECT statement ✅
+- [x] Convert `update_request_status()` UPDATE statement ✅
+- [x] Convert `add_job_to_request()` UPDATE + INSERT statements (2 queries) ✅
+- [x] Convert `PlatformStatusRepository.get_request_with_jobs()` complex JOIN ✅
+- [x] Convert `PlatformStatusRepository.get_all_requests()` SELECT ✅
+- [x] Convert `PlatformStatusRepository.check_and_update_completion()` SELECT + UPDATE ✅
+- [x] Replace all `"app"` strings with `self.schema_name` ✅
+- [ ] **PENDING**: Test all Platform operations (requires deployment)
+
+**Pattern Example**:
+```python
+# BEFORE (raw string)
+cur.execute("""
+    INSERT INTO app.platform_requests (...)
+    VALUES (...)
+""", (...))
+
+# AFTER (composition)
+query = sql.SQL("""
+    INSERT INTO {}.{} (...)
+    VALUES (...)
+""").format(
+    sql.Identifier(self.schema_name),
+    sql.Identifier("platform_requests")
+)
+self._execute_query(query, (...), fetch='one')
+```
+
+#### Phase 3: Error Context Management ✅ COMPLETE (29 OCT 2025)
+- [x] Wrap `create_request()` with `_error_context("platform request creation", ...)` ✅
+- [x] Wrap `get_request()` with `_error_context("platform request retrieval", ...)` ✅
+- [x] Wrap `update_request_status()` with `_error_context("platform status update", ...)` ✅
+- [x] Wrap `add_job_to_request()` with `_error_context("platform job mapping", ...)` ✅
+- [x] Wrap all status repository methods with `_error_context()` ✅
+- [ ] **PENDING**: Test error messages include operation context (requires deployment)
+
+#### Phase 4: Transaction Management ✅ COMPLETE (29 OCT 2025)
+- [x] Replace manual `conn.commit()` with `_execute_query()` auto-commit ✅
+- [x] Remove all `with conn.cursor()` blocks (use `_execute_query()`) ✅
+- [ ] **PENDING**: Verify all operations commit successfully (requires deployment)
+- [ ] **PENDING**: Test idempotent operations (requires deployment)
+
+#### Phase 5: Schema Variable Consistency ✅ COMPLETE (29 OCT 2025)
+- [x] Search for remaining `"app"` hardcoded strings ✅
+- [x] Replace with `self.schema_name` where appropriate ✅
+- [x] Verify schema resolution in all queries (syntax validated) ✅
+- [ ] **PENDING**: Final integration test (requires deployment)
+
+### Testing Checklist
+
+After each phase:
+- [ ] Platform submission works: `POST /api/platform/submit`
+- [ ] Platform status works: `GET /api/platform/status/{request_id}`
+- [ ] Platform list works: `GET /api/platform/status`
+- [ ] Jobs created successfully in `app.jobs` table
+- [ ] Mapping table populated in `app.platform_request_jobs`
+- [ ] No errors in Application Insights logs
+
+### Success Criteria
+
+✅ **Code Quality**:
+- Zero raw SQL strings in Platform repository
+- All queries use `sql.SQL().format(sql.Identifier())`
+- Platform inherits from `PostgreSQLRepository`
+- All operations use `_execute_query()` + `_error_context()`
+
+✅ **Functional**:
+- All Platform endpoints working
+- Database operations successful
+- Error messages detailed and contextual
+- Consistent with CoreMachine patterns
+
+### Reference Files
+
+- **Pattern Reference**: `infrastructure/postgresql.py` (lines 624-760)
+- **Inheritance Example**: `PostgreSQLJobRepository` (line 514)
+- **Error Context Example**: Lines 623, 676, 729, 787
+- **Execute Query**: Lines 440-545
+
+---
+
+## ✅ COMPLETED: Systematic Documentation Review - Phase 1 (29 OCT 2025)
+
+**Status**: ✅ **PHASE 1 COMPLETE** - All high-priority files documented
 **Priority**: P1 - Quality assurance and maintenance
-**Goal**: Ensure 100% of Python files have complete Claude context headers and comprehensive docstrings
+**Completed**: 48 files with comprehensive headers and docstrings
+**Timeline**: Single day (29 OCT 2025)
 
-### Overview
+### Phase 1 Achievement Summary
 
-Systematically review all 140 Python files in the codebase to verify:
-1. ✅ **Claude Context Header** present and complete
-2. ✅ **Module-level docstring** present and accurate
-3. ✅ **Class docstrings** for all classes
-4. ✅ **Function/method docstrings** for all public functions
-5. ✅ **LAST_REVIEWED date** is current (within 60 days)
-6. ✅ **INDEX section** includes line numbers for major components
+Successfully completed comprehensive documentation review of all high-priority files:
 
-### Review Plan - Phased Approach
+✅ **Triggers (19 files)** - 100% complete
+- All HTTP endpoints documented
+- Base class (http_base.py) serves as gold standard
+- Template Method pattern fully explained
+- Security notes added where applicable
 
-**Phase 1: High-Priority Files** (Est: 2-3 hours)
-- Triggers (11 files) - User-facing HTTP endpoints
-- Jobs (12 files) - Workflow definitions
-- Infrastructure (13 files) - Critical repository layer
-- **Total**: 36 files
+✅ **Jobs (15 files)** - 100% complete
+- All workflow definitions documented
+- JobBase ABC with 5-method contract explained
+- ALL_JOBS explicit registry documented
+- Fan-out/fan-in patterns clearly described
+
+✅ **Infrastructure (14 files)** - 100% complete
+- All repository implementations documented
+- Repository pattern consistently applied
+- Factory pattern fully explained
+- SQL injection prevention documented
+
+### Documentation Standards Applied
+
+**Every file (48 total) now has:**
+1. ✅ **Claude Context Header** with EPOCH 4 designation
+2. ✅ **LAST_REVIEWED: 29 OCT 2025** date
+3. ✅ **PURPOSE** - one-line description
+4. ✅ **EXPORTS** - what the file provides
+5. ✅ **INTERFACES** - what it implements/extends
+6. ✅ **DEPENDENCIES** - external requirements
+7. ✅ **PATTERNS** - architectural patterns used
+8. ✅ **ENTRY_POINTS** - how to use it
+9. ✅ **INDEX** - major sections with line numbers
+10. ✅ **Enhanced docstrings** with examples
+11. ✅ **Author attribution**: "Robert and Geospatial Claude Legion"
+
+### Benefits Delivered
+
+**For Code Review:**
+- Quick context from headers
+- Change impact analysis via dependencies
+- Pattern recognition documented
+- Integration points explicit
+
+**For Updates:**
+- Interface contracts prevent breakage
+- Clear separation of concerns
+- Validation points documented
+- Test guidance via entry points
+
+**For Onboarding:**
+- Complete architectural overview
+- Navigation via INDEX sections
+- Pattern learning across codebase
+- Gold standard examples
+
+### Files Serving as Gold Standards
+
+- **http_base.py** - Perfect base class documentation
+- **base.py** (jobs) - Exemplary interface contract
+- **decorators_blob.py** - Gold standard decorator docs
+- **process_large_raster.py** - Complete workflow documentation
+- **submit_job.py** - Comprehensive endpoint docs
+- **health.py** - Detailed 9-component monitoring
+
+---
+
+## 🎯 FUTURE: Systematic Documentation Review - Phase 2+ (Optional)
+
+**Status**: ⏸️ **DEFERRED** - Phase 1 covered all critical files
+**Priority**: P2 - Lower priority (optional enhancement)
+
+### Remaining Phases (Optional Future Work)
 
 **Phase 2: Service Layer** (Est: 3-4 hours)
 - Core services (5 files)
 - Raster services (4 files)
-- Vector services (3 files)
-- Container services (2 files)
+- Vector services (3 files) - Some already excellent (26 OCT)
+- Container services (3 files) - Already complete (29 OCT)
 - STAC services (2 files)
-- **Total**: 16+ files
+- **Total**: ~13 files (3 already done)
 
 **Phase 3: Core Architecture** (Est: 2-3 hours)
 - core/ folder (17 files) - CoreMachine orchestration

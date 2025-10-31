@@ -1,13 +1,13 @@
 # ============================================================================
-# CLAUDE CONTEXT - PLATFORM REQUEST HTTP TRIGGER
+# CLAUDE CONTEXT - PLATFORM API REQUEST HTTP TRIGGER
 # ============================================================================
 # EPOCH: 4 - ACTIVE ✅
 # STATUS: HTTP Trigger - Platform Service Layer orchestration endpoint
 # PURPOSE: Handle external application requests (DDH) and orchestrate CoreMachine jobs
-# LAST_REVIEWED: 25 OCT 2025
+# LAST_REVIEWED: 29 OCT 2025
 # EXPORTS: platform_request_submit (HTTP trigger function)
 # INTERFACES: None
-# PYDANTIC_MODELS: PlatformRequest, PlatformRecord
+# PYDANTIC_MODELS: PlatformRequest, ApiRequest (renamed from PlatformRecord)
 # DEPENDENCIES: azure-functions, psycopg, azure-servicebus
 # SOURCE: HTTP requests from external applications (DDH)
 # SCOPE: Platform-level orchestration above CoreMachine
@@ -66,8 +66,7 @@ except Exception as e:
 
 # Import infrastructure with error handling
 try:
-    from infrastructure.postgresql import PostgreSQLRepository
-    from infrastructure.jobs_tasks import JobRepository
+    from infrastructure import PlatformRepository, JobRepository
     logger.info("✅ Platform trigger: infrastructure modules loaded successfully")
 except ImportError as e:
     logger.error(f"❌ CRITICAL: Failed to import infrastructure modules")
@@ -80,6 +79,13 @@ try:
     from core.machine import CoreMachine
     from core.models.job import JobRecord
     from core.models.enums import JobStatus
+    # Import Platform models from core (Infrastructure-as-Code pattern - 29 OCT 2025)
+    from core.models import (
+        ApiRequest,
+        PlatformRequestStatus,
+        DataType,
+        PlatformRequest
+    )
     logger.info("✅ Platform trigger: core modules loaded successfully")
 except ImportError as e:
     logger.error(f"❌ CRITICAL: Failed to import core modules")
@@ -89,298 +95,37 @@ except ImportError as e:
     raise
 
 # ============================================================================
-# PLATFORM REQUEST MODELS
+# PLATFORM MODELS MOVED TO core/models/platform.py (29 OCT 2025)
+# ============================================================================
+# Platform models now use Infrastructure-as-Code pattern.
+# Models imported above from core.models:
+#   - ApiRequest (database schema definition, renamed from PlatformRecord)
+#   - PlatformRequestStatus (enum)
+#   - DataType (enum)
+#   - PlatformRequest (DTO for HTTP requests)
+#
+# Tables renamed (29 OCT 2025):
+#   - platform_requests → api_requests (client-facing layer)
+#   - platform_request_jobs → orchestration_jobs (execution layer)
+#
+# These models are the SINGLE SOURCE OF TRUTH for database schema.
+# PostgreSQL DDL is auto-generated from Pydantic field definitions.
+#
+# Benefits:
+#   - Zero drift between Python models and database schema
+#   - Consistent with JobRecord/TaskRecord pattern
+#   - Update model → schema updates automatically
+#
+# Reference: PLATFORM_SCHEMA_COMPARISON.md
 # ============================================================================
 
-class PlatformRequestStatus(str, Enum):
-    """Platform request status - mirrors JobStatus pattern"""
-    PENDING = "pending"
-    PROCESSING = "processing"
-    COMPLETED = "completed"
-    FAILED = "failed"
-
-class DataType(str, Enum):
-    """Supported data types for processing"""
-    RASTER = "raster"
-    VECTOR = "vector"
-    POINTCLOUD = "pointcloud"
-    MESH_3D = "mesh_3d"
-    TABULAR = "tabular"
-
-class PlatformRequest(BaseModel):
-    """
-    Platform request from external application (DDH).
-    This is what DDH sends us.
-    """
-    dataset_id: str = Field(..., description="DDH dataset identifier")
-    resource_id: str = Field(..., description="DDH resource identifier")
-    version_id: str = Field(..., description="DDH version identifier")
-    data_type: DataType = Field(..., description="Type of data to process")
-    source_location: str = Field(..., description="Azure blob URL or path")
-    parameters: Dict[str, Any] = Field(default_factory=dict, description="Processing parameters")
-    client_id: str = Field(..., description="Client application identifier (e.g., 'ddh')")
-
-    @field_validator('source_location')
-    @classmethod
-    def validate_source(cls, v: str) -> str:
-        """Ensure source is Azure blob storage"""
-        if not (v.startswith('https://') or v.startswith('wasbs://') or v.startswith('/')):
-            raise ValueError("Source must be Azure blob URL or absolute path")
-        return v
-
-class PlatformRecord(BaseModel):
-    """
-    Platform request database record.
-    Follows same pattern as JobRecord.
-    """
-    request_id: str = Field(..., description="SHA256 hash of identifiers")
-    dataset_id: str
-    resource_id: str
-    version_id: str
-    data_type: str
-    status: PlatformRequestStatus = Field(default=PlatformRequestStatus.PENDING)
-    job_ids: List[str] = Field(default_factory=list, description="CoreMachine job IDs")
-    parameters: Dict[str, Any] = Field(default_factory=dict)
-    metadata: Dict[str, Any] = Field(default_factory=dict)
-    result_data: Optional[Dict[str, Any]] = None
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
-
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary for database storage"""
-        return {
-            'request_id': self.request_id,
-            'dataset_id': self.dataset_id,
-            'resource_id': self.resource_id,
-            'version_id': self.version_id,
-            'data_type': self.data_type,
-            'status': self.status.value if isinstance(self.status, Enum) else self.status,
-            'job_ids': self.job_ids,
-            'parameters': self.parameters,
-            'metadata': self.metadata,
-            'result_data': self.result_data,
-            'created_at': self.created_at.isoformat() if self.created_at else None,
-            'updated_at': self.updated_at.isoformat() if self.updated_at else None
-        }
-
 # ============================================================================
-# PLATFORM REPOSITORY
+# REPOSITORY MOVED TO infrastructure/platform.py (29 OCT 2025)
 # ============================================================================
-
-class PlatformRepository(PostgreSQLRepository):
-    """
-    Repository for platform requests.
-    Follows same pattern as JobRepository.
-    """
-
-    def __init__(self):
-        super().__init__()
-
-        # ISSUE #3 - RESOLVED (26 OCT 2025): Schema Initialization Moved to Centralized System
-        # ================================================================
-        # PREVIOUS BEHAVIOR: _ensure_schema() ran on EVERY HTTP request (50+ DDL statements)
-        # IMPACT: 50-100ms overhead per request, unnecessary database locks
-        #
-        # SOLUTION IMPLEMENTED:
-        #   ✅ Platform schema now deployed via triggers/schema_pydantic_deploy.py
-        #   ✅ Repository assumes schema exists (fail fast if missing)
-        #   ✅ No DDL in constructors or request handlers (CoreMachine pattern)
-        #   ✅ Schema deployed ONCE via POST /api/db/schema/redeploy?confirm=yes
-        #
-        # PERFORMANCE IMPROVEMENT: ~50-100ms per Platform request eliminated
-        #
-        # NOTE: _ensure_schema() method kept below as emergency fallback but NOT called
-        # REFERENCE: PLATFORM_LAYER_FIXES_TODO.md Issue #3 (lines 174-282)
-        # STATUS: FIXED - 26 OCT 2025
-        # ================================================================
-        # self._ensure_schema()  # ✅ REMOVED - Schema now deployed centrally
-
-    def _ensure_schema(self):
-        """
-        DEPRECATED (26 OCT 2025) - Emergency fallback only, not called in normal operation.
-
-        Create platform schema and tables if they don't exist.
-
-        ⚠️ DEPRECATED: This method is NO LONGER CALLED automatically.
-        Platform schema is now deployed via triggers/schema_pydantic_deploy.py
-
-        This method is kept as an emergency fallback in case schema deployment fails.
-        Schema should be deployed via: POST /api/db/schema/redeploy?confirm=yes
-
-        PERFORMANCE IMPACT if re-enabled: 50-100ms per request, unnecessary database locks
-        DO NOT call this from __init__() or request handlers!
-        """
-        import warnings
-        warnings.warn(
-            "PlatformRepository._ensure_schema() is deprecated. "
-            "Use centralized schema deployment via /api/db/schema/redeploy",
-            DeprecationWarning,
-            stacklevel=2
-        )
-        with self._get_connection() as conn:
-            with conn.cursor() as cur:
-                # Create schema
-                cur.execute("CREATE SCHEMA IF NOT EXISTS platform")
-
-                # Create platform requests table
-                cur.execute("""
-                    CREATE TABLE IF NOT EXISTS platform.requests (
-                        request_id VARCHAR(32) PRIMARY KEY,
-                        dataset_id VARCHAR(255) NOT NULL,
-                        resource_id VARCHAR(255) NOT NULL,
-                        version_id VARCHAR(50) NOT NULL,
-                        data_type VARCHAR(50) NOT NULL,
-                        status VARCHAR(20) NOT NULL DEFAULT 'pending',
-                        job_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
-                        parameters JSONB NOT NULL DEFAULT '{}'::jsonb,
-                        metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
-                        result_data JSONB,
-                        created_at TIMESTAMPTZ DEFAULT NOW(),
-                        updated_at TIMESTAMPTZ DEFAULT NOW()
-                    )
-                """)
-
-                # Create indexes
-                cur.execute("""
-                    CREATE INDEX IF NOT EXISTS idx_platform_status
-                    ON platform.requests(status)
-                """)
-                cur.execute("""
-                    CREATE INDEX IF NOT EXISTS idx_platform_dataset
-                    ON platform.requests(dataset_id)
-                """)
-                cur.execute("""
-                    CREATE INDEX IF NOT EXISTS idx_platform_created
-                    ON platform.requests(created_at DESC)
-                """)
-
-                # Create platform-job mapping table
-                cur.execute("""
-                    CREATE TABLE IF NOT EXISTS platform.request_jobs (
-                        request_id VARCHAR(32) NOT NULL,
-                        job_id VARCHAR(32) NOT NULL,
-                        job_type VARCHAR(100) NOT NULL,
-                        sequence INTEGER NOT NULL DEFAULT 1,
-                        status VARCHAR(20) NOT NULL DEFAULT 'pending',
-                        created_at TIMESTAMPTZ DEFAULT NOW(),
-                        PRIMARY KEY (request_id, job_id)
-                    )
-                """)
-
-                conn.commit()
-
-    def create_request(self, request: PlatformRecord) -> PlatformRecord:
-        """Create a new platform request"""
-        with self._get_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute("""
-                    INSERT INTO platform.requests
-                    (request_id, dataset_id, resource_id, version_id, data_type,
-                     status, parameters, metadata, created_at, updated_at)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    ON CONFLICT (request_id) DO NOTHING
-                    RETURNING *
-                """, (
-                    request.request_id,
-                    request.dataset_id,
-                    request.resource_id,
-                    request.version_id,
-                    request.data_type,
-                    request.status.value if isinstance(request.status, Enum) else request.status,
-                    json.dumps(request.parameters),
-                    json.dumps(request.metadata),
-                    request.created_at,
-                    request.updated_at
-                ))
-
-                row = cur.fetchone()
-                conn.commit()
-
-                if row:
-                    logger.info(f"Created platform request: {request.request_id}")
-                else:
-                    # Request already exists, fetch it
-                    cur.execute("""
-                        SELECT * FROM platform.requests WHERE request_id = %s
-                    """, (request.request_id,))
-                    row = cur.fetchone()
-                    logger.info(f"Platform request already exists: {request.request_id}")
-
-                return self._row_to_record(row)
-
-    def get_request(self, request_id: str) -> Optional[PlatformRecord]:
-        """Get a platform request by ID"""
-        with self._get_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute("""
-                    SELECT * FROM platform.requests WHERE request_id = %s
-                """, (request_id,))
-
-                row = cur.fetchone()
-                return self._row_to_record(row) if row else None
-
-    def update_request_status(self, request_id: str, status: PlatformRequestStatus) -> bool:
-        """Update platform request status"""
-        with self._get_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute("""
-                    UPDATE platform.requests
-                    SET status = %s, updated_at = NOW()
-                    WHERE request_id = %s
-                """, (status.value, request_id))
-
-                conn.commit()
-                return cur.rowcount > 0
-
-    def add_job_to_request(self, request_id: str, job_id: str, job_type: str) -> bool:
-        """Add a CoreMachine job to a platform request"""
-        with self._get_connection() as conn:
-            with conn.cursor() as cur:
-                # Add to job_ids array
-                cur.execute("""
-                    UPDATE platform.requests
-                    SET job_ids = job_ids || %s::jsonb,
-                        updated_at = NOW()
-                    WHERE request_id = %s
-                """, (json.dumps([job_id]), request_id))
-
-                # Add to mapping table
-                cur.execute("""
-                    INSERT INTO platform.request_jobs (request_id, job_id, job_type)
-                    VALUES (%s, %s, %s)
-                    ON CONFLICT DO NOTHING
-                """, (request_id, job_id, job_type))
-
-                conn.commit()
-                return cur.rowcount > 0
-
-    def _row_to_record(self, row) -> PlatformRecord:
-        """
-        Convert database row to PlatformRecord.
-
-        Uses CoreMachine pattern (infrastructure/postgresql.py:694-709):
-        - Build intermediate dictionary with explicit column name mapping
-        - Use Pydantic model unpacking for validation
-        - Rows are dict-like (psycopg dict_row factory) NOT tuples
-        """
-        # Build intermediate dictionary with explicit column mapping
-        record_data = {
-            'request_id': row['request_id'],
-            'dataset_id': row['dataset_id'],
-            'resource_id': row['resource_id'],
-            'version_id': row['version_id'],
-            'data_type': row['data_type'],
-            'status': row['status'],
-            'job_ids': row['job_ids'] if row['job_ids'] else [],
-            'parameters': row['parameters'] if isinstance(row['parameters'], dict) else json.loads(row['parameters']) if row['parameters'] else {},
-            'metadata': row['metadata'] if isinstance(row['metadata'], dict) else json.loads(row['metadata']) if row['metadata'] else {},
-            'result_data': row.get('result_data'),  # Optional field
-            'created_at': row.get('created_at'),    # Optional field
-            'updated_at': row.get('updated_at')     # Optional field
-        }
-
-        # Use Pydantic unpacking for validation
-        return PlatformRecord(**record_data)
+# PlatformRepository class has been moved to infrastructure/platform.py
+# Now uses SQL composition pattern for injection safety.
+# Imported above via: from infrastructure import PlatformRepository
+# ============================================================================
 
 # ============================================================================
 # HTTP HANDLER
@@ -420,7 +165,7 @@ async def platform_request_submit(req: func.HttpRequest) -> func.HttpResponse:
         )
 
         # Create platform record
-        platform_record = PlatformRecord(
+        platform_record = ApiRequest(
             request_id=request_id,
             dataset_id=platform_req.dataset_id,
             resource_id=platform_req.resource_id,
@@ -499,7 +244,7 @@ class PlatformOrchestrator:
 
         logger.info(f"✅ PlatformOrchestrator initialized with CoreMachine ({len(ALL_JOBS)} jobs, {len(ALL_HANDLERS)} handlers)")
 
-    async def process_platform_request(self, request: PlatformRecord) -> List[str]:
+    async def process_platform_request(self, request: ApiRequest) -> List[str]:
         """
         Process a platform request by creating CoreMachine jobs.
 
@@ -554,7 +299,7 @@ class PlatformOrchestrator:
             )
             raise
 
-    def _determine_jobs(self, request: PlatformRecord) -> List[Dict[str, Any]]:
+    def _determine_jobs(self, request: ApiRequest) -> List[Dict[str, Any]]:
         """
         Determine what CoreMachine jobs to create based on data type.
 
@@ -631,7 +376,7 @@ class PlatformOrchestrator:
 
     async def _create_coremachine_job(
         self,
-        request: PlatformRecord,
+        request: ApiRequest,
         job_type: str,
         parameters: Dict[str, Any]
     ) -> Optional[str]:
@@ -685,11 +430,11 @@ class PlatformOrchestrator:
                 }
             )
 
-            # Store in database
-            stored_job = self.job_repo.create_job(job_record)
+            # Store in database (returns bool: True if created, False if exists)
+            created = self.job_repo.create_job(job_record)
 
-            # Submit to Service Bus jobs queue
-            await self._submit_to_queue(stored_job)
+            # Submit to Service Bus jobs queue (use job_record, not the bool return)
+            await self._submit_to_queue(job_record)
 
             logger.info(f"Created CoreMachine job {job_id} for platform request {request.request_id}")
             return job_id

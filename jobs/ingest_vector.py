@@ -1,3 +1,22 @@
+# ============================================================================
+# CLAUDE CONTEXT - JOB DEFINITION
+# ============================================================================
+# EPOCH: 4 - ACTIVE ✅
+# STATUS: Job - Two-stage vector ETL with pickle-based intermediate storage
+# PURPOSE: Ingest vector files to PostGIS using fan-out parallelism for chunk uploads
+# LAST_REVIEWED: 29 OCT 2025
+# EXPORTS: IngestVectorJob (JobBase implementation)
+# INTERFACES: JobBase (implements 5-method contract)
+# PYDANTIC_MODELS: None (uses dict-based validation)
+# DEPENDENCIES: jobs.base.JobBase, util_logger, hashlib, json
+# SOURCE: HTTP job submission via POST /api/jobs/ingest_vector (6 supported formats: csv, geojson, gpkg, kml, kmz, shp)
+# SCOPE: Vector ETL with parallel PostGIS uploads
+# VALIDATION: File extension, table name, blob path, chunk size validation
+# PATTERNS: Two-stage fan-out, Pickle intermediate storage (avoid Service Bus 256KB limit), Parallel uploads
+# ENTRY_POINTS: Registered in jobs/__init__.py ALL_JOBS as "ingest_vector"
+# INDEX: IngestVectorJob:31, stages:46, create_tasks_for_stage:80
+# ============================================================================
+
 """
 Ingest Vector Job Declaration - Two-Stage Fan-Out for Vector → PostGIS
 
@@ -8,9 +27,18 @@ This file declares a two-stage job that:
 Uses pickle intermediate storage to avoid Service Bus 256KB message size limit.
 Each Stage 2 task receives blob reference, loads pickle, uploads to PostGIS.
 
+Supported Formats (6 total):
+- CSV (lat/lon or WKT geometry)
+- GeoJSON
+- GeoPackage (GPKG)
+- KML
+- KMZ (zipped KML)
+- Shapefile (zipped)
+
 Author: Robert and Geospatial Claude Legion
 Date: 7 OCT 2025
 Updated: 15 OCT 2025 - Phase 2: Migrated to JobBase ABC
+Last Updated: 29 OCT 2025
 """
 
 from typing import List, Dict, Any

@@ -1,3 +1,22 @@
+# ============================================================================
+# CLAUDE CONTEXT - JOB BASE CLASS
+# ============================================================================
+# EPOCH: 4 - ACTIVE ✅
+# STATUS: Core Architecture - Abstract base class for all jobs
+# PURPOSE: Enforce 5-method interface contract for Job→Stage→Task architecture
+# LAST_REVIEWED: 29 OCT 2025
+# EXPORTS: JobBase (ABC)
+# INTERFACES: ABC (Abstract Base Class) from abc module
+# PYDANTIC_MODELS: None (jobs define their own parameter models)
+# DEPENDENCIES: abc.ABC, typing
+# SOURCE: None (abstract interface definition only)
+# SCOPE: Contract enforcement for all job implementations
+# VALIDATION: Interface contract enforced at import time (fail-fast)
+# PATTERNS: Abstract Base Class, Interface Segregation, Fail-fast validation
+# ENTRY_POINTS: class YourJob(JobBase): ...
+# INDEX: JobBase:21, create_tasks_for_stage:180, validate_job_parameters:90, generate_job_id:120
+# ============================================================================
+
 """
 JobBase ABC - Minimal Interface Enforcement
 
@@ -10,8 +29,16 @@ This enables:
 - Clear contract documentation
 - No inheritance bloat (just signatures)
 
+5-Method Interface Contract:
+1. validate_job_parameters(params: dict) -> dict
+2. generate_job_id(params: dict) -> str
+3. create_job_record(job_id: str, params: dict) -> JobRecord
+4. queue_job(job_id: str, params: dict) -> dict
+5. create_tasks_for_stage(stage: int, job_params: dict, job_id: str, previous_results: list) -> List[dict]
+
 Author: Robert and Geospatial Claude Legion
 Date: 15 OCT 2025
+Last Updated: 29 OCT 2025
 """
 
 from abc import ABC, abstractmethod

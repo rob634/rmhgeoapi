@@ -1,41 +1,83 @@
 # ============================================================================
-# CLAUDE CONTEXT - CONTROLLER
+# CLAUDE CONTEXT - HTTP TRIGGER BASE CLASS
 # ============================================================================
-# CATEGORY: HTTP TRIGGER ENDPOINTS
-# PURPOSE: Azure Functions HTTP API endpoint
-# EPOCH: Shared by all epochs (API layer)
-# TODO: Audit for framework logic that may belong in CoreMachine# PURPOSE: Abstract HTTP trigger base class providing consistent request/response handling for Azure Functions
+# EPOCH: 4 - ACTIVE ✅
+# STATUS: Infrastructure - Abstract base class for all HTTP triggers
+# PURPOSE: Abstract HTTP trigger base class providing consistent request/response handling for Azure Functions
+# LAST_REVIEWED: 29 OCT 2025
 # EXPORTS: BaseHttpTrigger, JobManagementTrigger, SystemMonitoringTrigger
 # INTERFACES: ABC (Abstract Base Class) - defines contract for HTTP trigger implementations
 # PYDANTIC_MODELS: None - uses dict validation for request/response data
 # DEPENDENCIES: abc, azure.functions, util_logger, typing, json, datetime, uuid
 # SOURCE: HTTP requests from Azure Functions runtime, environment variables for configuration
-# SCOPE: HTTP infrastructure layer - request validation, response formatting, error handling
-# VALIDATION: Request method validation, required parameter checking, JSON body parsing
-# PATTERNS: Template Method pattern, Abstract Factory (for trigger types), Chain of Responsibility
-# ENTRY_POINTS: class SubmitJobTrigger(BaseHttpTrigger); trigger.handle_request(req)
-# INDEX: BaseHttpTrigger:40, handle_request:99, extract_path_params:199, JobManagementTrigger:365, SystemMonitoringTrigger:409
+# SCOPE: HTTP infrastructure layer - request validation, response formatting, error handling, repository access
+# VALIDATION: Request method validation, required parameter checking, JSON body parsing, job ID format validation
+# PATTERNS: Template Method pattern, Abstract Factory (for trigger types), Lazy Initialization (repositories)
+# ENTRY_POINTS: class MyTrigger(BaseHttpTrigger); trigger.handle_request(req)
+# INDEX: BaseHttpTrigger:52, handle_request:111, extract_path_params:211, JobManagementTrigger:377, SystemMonitoringTrigger:421
 # ============================================================================
 
 """
 HTTP Trigger Base Class - Infrastructure Layer
 
-Abstract base class for Azure Functions HTTP triggers providing:
-- Consistent error handling and response formatting
-- Parameter extraction and validation patterns  
-- Structured logging with request context
-- Standard HTTP response patterns
+Abstract base class for all Azure Functions HTTP triggers providing consistent
+infrastructure patterns for request/response handling, validation, and repository access.
+
+Key Features:
+- Template Method pattern for consistent HTTP request flow
+- Standardized error handling with proper HTTP status codes
+- Parameter extraction and validation (path params, query params, JSON body)
+- Structured logging with request context (request_id, correlation tracking)
+- Lazy repository initialization (job_repository, task_repository properties)
+- Standard HTTP response formatting (JSON serialization, headers)
+
+Three Specialized Trigger Types:
+1. BaseHttpTrigger - Generic HTTP endpoint (implement process_request)
+2. JobManagementTrigger - Job submission/status endpoints (adds repository access)
+3. SystemMonitoringTrigger - Health check/monitoring endpoints (adds component_health utility)
 
 This separates HTTP infrastructure concerns from business logic.
 HTTP triggers are system interface functions, not core business logic.
 
 Usage Pattern:
-    1. Inherit from BaseHttpTrigger
-    2. Implement abstract methods for business logic
-    3. Use provided utilities for consistent responses
+    1. Inherit from appropriate base class (BaseHttpTrigger, JobManagementTrigger, SystemMonitoringTrigger)
+    2. Implement get_allowed_methods() -> List[str]
+    3. Implement process_request(req) -> Dict[str, Any]
+    4. Use provided utilities (extract_path_params, extract_json_body, validate_job_id)
+    5. Return dict from process_request (automatically serialized to JSON)
 
-Author: Azure Geospatial ETL Team
-Version: 1.0.0 - Foundation HTTP trigger abstraction
+Template Method Flow:
+    handle_request(req) [concrete]
+    ├── Validate HTTP method
+    ├── Log request start
+    ├── Call process_request(req) [abstract - implement in subclass]
+    ├── Serialize response to JSON
+    ├── Add response headers (request_id, timestamp)
+    └── Return func.HttpResponse
+
+Example:
+    ```python
+    class MyTrigger(JobManagementTrigger):
+        def __init__(self):
+            super().__init__("my_trigger")
+
+        def get_allowed_methods(self) -> List[str]:
+            return ["POST"]
+
+        def process_request(self, req: func.HttpRequest) -> Dict[str, Any]:
+            # Extract parameters
+            params = self.extract_json_body(req, required=True)
+
+            # Use repository access (from JobManagementTrigger)
+            job = self.job_repository.get_job(params['job_id'])
+
+            # Return response dict
+            return {"status": "success", "job": job}
+    ```
+
+Author: Robert and Geospatial Claude Legion
+Date: Original implementation 2025
+Last Updated: 29 OCT 2025
 """
 
 from abc import ABC, abstractmethod

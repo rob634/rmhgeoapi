@@ -13,8 +13,9 @@
 # SCOPE: Global application entry point managing all Azure Function triggers and explicit registration
 # VALIDATION: Request validation via trigger classes, queue message validation via Pydantic models
 # PATTERNS: Explicit Registration pattern (no decorators), Catalog pattern, Dependency Injection
-# ENTRY_POINTS: Azure Functions runtime calls app routes; main entry: /api/jobs/submit/{job_type}
-# INDEX: Registration:170-338, HTTP routes:340-435, Queue processors:629-825, Helper functions:620-750
+# ENTRY_POINTS: Azure Functions runtime calls app routes; main entry: /api/jobs/submit/{job_type}, /api/platform/submit
+# INDEX: Registration:170-200, HTTP routes:210-350, Queue processors:400-600, Database queries:278-332
+# LAST_UPDATED: 29 OCT 2025 - Added Platform database query endpoints
 # ============================================================================
 
 """
@@ -56,11 +57,29 @@ Key Features:
     - Enhanced logging with visual indicators for debugging
 
 Endpoints:
+    Core System:
     GET  /api/health - System health check with component status
+
+    CoreMachine Layer:
     POST /api/jobs/submit/{job_type} - Submit processing job
     GET  /api/jobs/status/{job_id} - Get job status and results
+
+    Platform Layer:
+    POST /api/platform/submit - Submit Platform API request
+    GET  /api/platform/status/{request_id} - Get Platform request status
+
+    Database Queries (DEV/TEST):
+    GET  /api/db/jobs?status=failed&limit=10 - Query jobs
+    GET  /api/db/tasks/{job_id} - Query tasks for job
+    GET  /api/db/api_requests?limit=10 - Query Platform API requests (NEW 29 OCT 2025)
+    GET  /api/db/orchestration_jobs/{request_id} - Query Platform orchestration (NEW 29 OCT 2025)
+    GET  /api/db/stats - Database statistics
+
+    Monitoring:
     GET  /api/monitor/poison - Check poison queue status
     POST /api/monitor/poison - Process poison messages
+
+    Schema Management (DEV ONLY):
     POST /api/db/schema/nuke - Drop all schema objects (dev only)
     POST /api/db/schema/redeploy - Nuke and redeploy schema (dev only)
 
@@ -179,6 +198,8 @@ from triggers.schema_pydantic_deploy import pydantic_deploy_trigger
 from triggers.db_query import (
     jobs_query_trigger,
     tasks_query_trigger,
+    api_requests_query_trigger,
+    orchestration_jobs_query_trigger,
     db_stats_trigger,
     enum_diagnostic_trigger,
     schema_nuke_trigger,
@@ -190,13 +211,16 @@ from triggers.stac_collections import stac_collections_trigger
 from triggers.stac_init import stac_init_trigger
 from triggers.stac_extract import stac_extract_trigger
 from triggers.stac_vector import stac_vector_trigger
+from triggers.stac_nuke import stac_nuke_trigger
 from triggers.ingest_vector import ingest_vector_trigger
 from triggers.test_raster_create import test_raster_create_trigger
-from triggers.test_duckdb_overture import test_duckdb_overture_trigger
 
 # Platform Service Layer triggers (25 OCT 2025)
 from triggers.trigger_platform import platform_request_submit
 from triggers.trigger_platform_status import platform_request_status
+
+# OGC Features API - Standalone module (29 OCT 2025)
+from ogc_features import get_ogc_triggers
 
 # ========================================================================
 # PHASE 2: EXPLICIT REGISTRATION PATTERN (Parallel with decorators)
@@ -296,6 +320,31 @@ def query_tasks(req: func.HttpRequest) -> func.HttpResponse:
 def query_tasks_for_job(req: func.HttpRequest) -> func.HttpResponse:
     """Get all tasks for a job: GET /api/db/tasks/{job_id}"""
     return tasks_query_trigger.handle_request(req)
+
+
+# Platform Layer Query Endpoints (29 OCT 2025)
+@app.route(route="db/api_requests", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def query_api_requests(req: func.HttpRequest) -> func.HttpResponse:
+    """Query API requests with filtering: GET /api/db/api_requests?limit=10&status=processing"""
+    return api_requests_query_trigger.handle_request(req)
+
+
+@app.route(route="db/api_requests/{request_id}", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def query_api_request_by_id(req: func.HttpRequest) -> func.HttpResponse:
+    """Get specific API request by ID: GET /api/db/api_requests/{request_id}"""
+    return api_requests_query_trigger.handle_request(req)
+
+
+@app.route(route="db/orchestration_jobs", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def query_orchestration_jobs(req: func.HttpRequest) -> func.HttpResponse:
+    """Query orchestration jobs with filtering: GET /api/db/orchestration_jobs?request_id={request_id}"""
+    return orchestration_jobs_query_trigger.handle_request(req)
+
+
+@app.route(route="db/orchestration_jobs/{request_id}", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def query_orchestration_jobs_for_request(req: func.HttpRequest) -> func.HttpResponse:
+    """Get orchestration jobs for specific request: GET /api/db/orchestration_jobs/{request_id}"""
+    return orchestration_jobs_query_trigger.handle_request(req)
 
 
 @app.route(route="db/stats", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
@@ -584,6 +633,30 @@ def stac_setup(req: func.HttpRequest) -> func.HttpResponse:
         Installation status, verification results, or setup confirmation
     """
     return stac_setup_trigger.handle_request(req)
+
+
+# 🚨 STAC NUCLEAR BUTTON - DEVELOPMENT ONLY (29 OCT 2025)
+@app.route(route="stac/nuke", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
+def nuke_stac_data(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    🚨 NUCLEAR: Clear STAC items/collections (DEV/TEST ONLY)
+
+    POST /api/stac/nuke?confirm=yes&mode=all
+
+    Query Parameters:
+        confirm: Must be "yes" (required)
+        mode: Clearing mode (default: "all")
+              - "items": Delete only items (preserve collections)
+              - "collections": Delete collections (CASCADE deletes items)
+              - "all": Delete both collections and items
+
+    Returns:
+        Deletion results with counts and execution time
+
+    ⚠️ This clears STAC data but preserves pgstac schema (functions, indexes, partitions)
+    Much faster than full schema drop/recreate cycle
+    """
+    return stac_nuke_trigger.handle_request(req)
 
 
 @app.route(route="stac/collections/{tier}", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
@@ -995,6 +1068,76 @@ def stac_search(req: func.HttpRequest) -> func.HttpResponse:
         )
 
 
+# ============================================================================
+# OGC FEATURES API - Direct PostGIS Vector Access (29 OCT 2025)
+# ============================================================================
+# Standards-compliant OGC API - Features Core 1.0 implementation
+# Provides direct feature-level querying with spatial/temporal/attribute filters
+# Base: /api/features
+# Documentation: ogc_features/README.md
+#
+# Endpoints (6 total):
+#   GET  /api/features                              - Landing page
+#   GET  /api/features/conformance                  - Conformance classes
+#   GET  /api/features/collections                  - List collections
+#   GET  /api/features/collections/{id}             - Collection metadata
+#   GET  /api/features/collections/{id}/items       - Query features (main)
+#   GET  /api/features/collections/{id}/items/{fid} - Single feature
+#
+# Query Parameters:
+#   ?bbox=minx,miny,maxx,maxy  - Spatial filter
+#   ?datetime=2024-01-01/..    - Temporal filter
+#   ?limit=100                 - Pagination
+#   ?sortby=+field,-field      - Sorting
+#   ?simplify=100              - Geometry simplification (meters)
+#   ?precision=6               - Coordinate precision (decimals)
+
+# Get trigger configurations (contains handler references)
+_ogc_triggers = get_ogc_triggers()
+_ogc_landing = _ogc_triggers[0]['handler']
+_ogc_conformance = _ogc_triggers[1]['handler']
+_ogc_collections = _ogc_triggers[2]['handler']
+_ogc_collection = _ogc_triggers[3]['handler']
+_ogc_items = _ogc_triggers[4]['handler']
+_ogc_feature = _ogc_triggers[5]['handler']
+
+
+@app.route(route="features", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def ogc_features_landing(req: func.HttpRequest) -> func.HttpResponse:
+    """OGC Features API landing page: GET /api/features"""
+    return _ogc_landing(req)
+
+
+@app.route(route="features/conformance", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def ogc_features_conformance(req: func.HttpRequest) -> func.HttpResponse:
+    """OGC Features conformance: GET /api/features/conformance"""
+    return _ogc_conformance(req)
+
+
+@app.route(route="features/collections", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def ogc_features_collections(req: func.HttpRequest) -> func.HttpResponse:
+    """OGC Features collections list: GET /api/features/collections"""
+    return _ogc_collections(req)
+
+
+@app.route(route="features/collections/{collection_id}", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def ogc_features_collection(req: func.HttpRequest) -> func.HttpResponse:
+    """OGC Features collection metadata: GET /api/features/collections/{collection_id}"""
+    return _ogc_collection(req)
+
+
+@app.route(route="features/collections/{collection_id}/items", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def ogc_features_items(req: func.HttpRequest) -> func.HttpResponse:
+    """OGC Features items query: GET /api/features/collections/{collection_id}/items"""
+    return _ogc_items(req)
+
+
+@app.route(route="features/collections/{collection_id}/items/{feature_id}", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def ogc_features_feature(req: func.HttpRequest) -> func.HttpResponse:
+    """OGC Features single feature: GET /api/features/collections/{collection_id}/items/{feature_id}"""
+    return _ogc_feature(req)
+
+
 @app.route(route="jobs/ingest_vector", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
 def ingest_vector(req: func.HttpRequest) -> func.HttpResponse:
     """
@@ -1049,24 +1192,6 @@ def test_create_rasters(req: func.HttpRequest) -> func.HttpResponse:
     return test_raster_create_trigger.handle_request(req)
 
 
-@app.route(route="test/duckdb/overture", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
-def test_duckdb_overture(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    Test DuckDB access to Overture Maps Divisions on Azure Blob Storage.
-
-    TESTING/DEVELOPMENT ONLY - Verify DuckDB extensions work with Overture data.
-
-    GET /api/test/duckdb/overture
-    GET /api/test/duckdb/overture?country=Panama&limit=5
-
-    Query Parameters:
-        country: Optional - Filter by country name (e.g., "Panama")
-        limit: Optional - Result limit (default: 10)
-
-    Returns:
-        Query results with timing and sample Overture Divisions data
-    """
-    return test_duckdb_overture_trigger.handle_request(req)
 
 
 @app.route(route="db/debug/all", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)

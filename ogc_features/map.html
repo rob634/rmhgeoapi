@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OGC Features Map Viewer</title>
+
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+          integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+          crossorigin=""/>
+
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        }
+
+        #map {
+            height: 100vh;
+            width: 100%;
+        }
+
+        /* Control Panel */
+        .control-panel {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+            z-index: 1000;
+            max-width: 300px;
+        }
+
+        .control-panel h3 {
+            margin: 0 0 10px 0;
+            font-size: 16px;
+            color: #333;
+        }
+
+        .control-panel label {
+            display: block;
+            margin-bottom: 5px;
+            font-size: 13px;
+            color: #666;
+        }
+
+        .control-panel select {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            margin-bottom: 10px;
+            font-size: 13px;
+        }
+
+        .control-panel button {
+            width: 100%;
+            padding: 8px 12px;
+            background: #3388ff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 13px;
+            margin-bottom: 5px;
+        }
+
+        .control-panel button:hover {
+            background: #2266dd;
+        }
+
+        .control-panel button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+
+        .info-text {
+            font-size: 12px;
+            color: #666;
+            margin-top: 10px;
+            padding-top: 10px;
+            border-top: 1px solid #eee;
+        }
+
+        /* Loading Spinner */
+        .spinner {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 2000;
+            background: rgba(255, 255, 255, 0.95);
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            display: none;
+        }
+
+        .spinner.active {
+            display: block;
+        }
+
+        .spinner-icon {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #3388ff;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 10px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .spinner-text {
+            text-align: center;
+            color: #333;
+            font-size: 14px;
+        }
+
+        /* Custom Popup Styling */
+        .leaflet-popup-content {
+            margin: 8px;
+            font-size: 13px;
+        }
+
+        .popup-title {
+            font-weight: bold;
+            font-size: 14px;
+            margin-bottom: 8px;
+            color: #2c3e50;
+        }
+
+        .popup-row {
+            padding: 3px 0;
+            border-bottom: 1px solid #eee;
+        }
+
+        .popup-row:last-child {
+            border-bottom: none;
+        }
+
+        .popup-label {
+            font-weight: 600;
+            color: #555;
+        }
+
+        .popup-value {
+            color: #333;
+        }
+    </style>
+</head>
+<body>
+    <!-- Map Container -->
+    <div id="map"></div>
+
+    <!-- Control Panel -->
+    <div class="control-panel">
+        <h3>🗺️ OGC Features Viewer</h3>
+
+        <label for="collection-select">Collection:</label>
+        <select id="collection-select">
+            <option value="">Loading collections...</option>
+        </select>
+
+        <label for="limit-select">Features to Load:</label>
+        <select id="limit-select">
+            <option value="50">50 features</option>
+            <option value="100" selected>100 features</option>
+            <option value="250">250 features</option>
+            <option value="500">500 features</option>
+            <option value="1000">1000 features</option>
+        </select>
+
+        <button id="load-btn" onclick="loadFeatures()">Load Features</button>
+        <button id="zoom-btn" onclick="zoomToFeatures()" disabled>Zoom to Features</button>
+        <button id="clear-btn" onclick="clearFeatures()">Clear Map</button>
+
+        <div class="info-text">
+            <div id="status">Ready</div>
+            <div id="feature-count"></div>
+        </div>
+    </div>
+
+    <!-- Loading Spinner -->
+    <div class="spinner" id="spinner">
+        <div class="spinner-icon"></div>
+        <div class="spinner-text">Loading features...</div>
+    </div>
+
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+            integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+            crossorigin=""></script>
+
+    <script>
+        // Configuration
+        const API_BASE_URL = 'https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net';
+
+        // Initialize map centered on Chile (based on fresh_test_stac bbox)
+        const map = L.map('map').setView([-55.5, -70.5], 8);
+
+        // Add OpenStreetMap base layer
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+            maxZoom: 19
+        }).addTo(map);
+
+        // Global variables
+        let currentLayer = null;
+        let collections = [];
+
+        // Status functions
+        function setStatus(message, isError = false) {
+            const statusEl = document.getElementById('status');
+            statusEl.textContent = message;
+            statusEl.style.color = isError ? '#e74c3c' : '#666';
+        }
+
+        function showSpinner() {
+            document.getElementById('spinner').classList.add('active');
+        }
+
+        function hideSpinner() {
+            document.getElementById('spinner').classList.remove('active');
+        }
+
+        // Load available collections on page load
+        async function loadCollections() {
+            try {
+                setStatus('Loading collections...');
+                const response = await fetch(`${API_BASE_URL}/api/features/collections`);
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+
+                const data = await response.json();
+                collections = data.collections || [];
+
+                const select = document.getElementById('collection-select');
+                select.innerHTML = '';
+
+                if (collections.length === 0) {
+                    select.innerHTML = '<option value="">No collections found</option>';
+                    setStatus('No collections available', true);
+                    return;
+                }
+
+                collections.forEach(collection => {
+                    const option = document.createElement('option');
+                    option.value = collection.id;
+                    option.textContent = `${collection.id} (${collection.itemType || 'features'})`;
+                    select.appendChild(option);
+                });
+
+                // Pre-select fresh_test_stac if available
+                const freshTest = collections.find(c => c.id === 'fresh_test_stac');
+                if (freshTest) {
+                    select.value = 'fresh_test_stac';
+                }
+
+                setStatus(`${collections.length} collections available`);
+                document.getElementById('load-btn').disabled = false;
+
+            } catch (error) {
+                console.error('Error loading collections:', error);
+                setStatus(`Error: ${error.message}`, true);
+                const select = document.getElementById('collection-select');
+                select.innerHTML = '<option value="">Error loading collections</option>';
+            }
+        }
+
+        // Load features from selected collection
+        async function loadFeatures() {
+            const collectionId = document.getElementById('collection-select').value;
+            const limit = document.getElementById('limit-select').value;
+
+            if (!collectionId) {
+                setStatus('Please select a collection', true);
+                return;
+            }
+
+            try {
+                showSpinner();
+                setStatus('Loading features...');
+                document.getElementById('load-btn').disabled = true;
+
+                const url = `${API_BASE_URL}/api/features/collections/${collectionId}/items?limit=${limit}`;
+                console.log('Fetching:', url);
+
+                const response = await fetch(url);
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+
+                const geojson = await response.json();
+
+                if (!geojson.features || geojson.features.length === 0) {
+                    setStatus('No features found in collection', true);
+                    hideSpinner();
+                    document.getElementById('load-btn').disabled = false;
+                    return;
+                }
+
+                // Clear existing layer
+                if (currentLayer) {
+                    map.removeLayer(currentLayer);
+                }
+
+                // Add features to map
+                currentLayer = L.geoJSON(geojson, {
+                    style: function(feature) {
+                        return {
+                            color: '#3388ff',
+                            weight: 2,
+                            fillOpacity: 0.3,
+                            fillColor: '#3388ff'
+                        };
+                    },
+                    onEachFeature: function(feature, layer) {
+                        // Create popup content
+                        const props = feature.properties || {};
+                        let popupContent = '<div class="popup-title">Feature Properties</div>';
+
+                        // Show first 10 properties
+                        const keys = Object.keys(props).slice(0, 10);
+                        keys.forEach(key => {
+                            const value = props[key];
+                            if (value !== null && value !== undefined) {
+                                popupContent += `<div class="popup-row">
+                                    <span class="popup-label">${key}:</span>
+                                    <span class="popup-value">${value}</span>
+                                </div>`;
+                            }
+                        });
+
+                        if (Object.keys(props).length > 10) {
+                            popupContent += `<div class="popup-row" style="font-style: italic; color: #999;">
+                                ...and ${Object.keys(props).length - 10} more properties
+                            </div>`;
+                        }
+
+                        layer.bindPopup(popupContent);
+
+                        // Highlight on hover
+                        layer.on('mouseover', function() {
+                            this.setStyle({ weight: 4, fillOpacity: 0.5 });
+                        });
+
+                        layer.on('mouseout', function() {
+                            this.setStyle({ weight: 2, fillOpacity: 0.3 });
+                        });
+                    }
+                }).addTo(map);
+
+                // Update status
+                const featureCount = geojson.features.length;
+                const totalCount = geojson.numberMatched || featureCount;
+                setStatus('✅ Features loaded successfully');
+                document.getElementById('feature-count').textContent =
+                    `Showing ${featureCount} of ${totalCount} features`;
+
+                // Enable zoom button
+                document.getElementById('zoom-btn').disabled = false;
+
+                // Auto-zoom to features
+                zoomToFeatures();
+
+                console.log(`Loaded ${featureCount} features from ${collectionId}`);
+
+            } catch (error) {
+                console.error('Error loading features:', error);
+                setStatus(`Error: ${error.message}`, true);
+            } finally {
+                hideSpinner();
+                document.getElementById('load-btn').disabled = false;
+            }
+        }
+
+        // Zoom map to fit all features
+        function zoomToFeatures() {
+            if (currentLayer) {
+                const bounds = currentLayer.getBounds();
+                if (bounds.isValid()) {
+                    map.fitBounds(bounds, { padding: [50, 50] });
+                }
+            }
+        }
+
+        // Clear features from map
+        function clearFeatures() {
+            if (currentLayer) {
+                map.removeLayer(currentLayer);
+                currentLayer = null;
+                document.getElementById('feature-count').textContent = '';
+                document.getElementById('zoom-btn').disabled = true;
+                setStatus('Map cleared');
+            }
+        }
+
+        // Initialize on page load
+        window.addEventListener('load', function() {
+            console.log('OGC Features Map Viewer initialized');
+            console.log('API Base URL:', API_BASE_URL);
+            loadCollections();
+        });
+
+        // Allow Enter key to load features
+        document.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter' && !document.getElementById('load-btn').disabled) {
+                loadFeatures();
+            }
+        });
+    </script>
+</body>
+</html>

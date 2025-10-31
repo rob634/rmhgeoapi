@@ -1,14 +1,34 @@
+# ============================================================================
+# CLAUDE CONTEXT - JOB DEFINITION
+# ============================================================================
+# EPOCH: 4 - ACTIVE ✅
+# STATUS: Job - Two-stage STAC cataloging with fan-out pattern
+# PURPOSE: Catalog entire container of raster files into STAC (PgSTAC)
+# LAST_REVIEWED: 29 OCT 2025
+# EXPORTS: StacCatalogContainerWorkflow (JobBase implementation)
+# INTERFACES: JobBase (implements 5-method contract)
+# PYDANTIC_MODELS: None (uses dict-based validation)
+# DEPENDENCIES: jobs.base.JobBase, hashlib
+# SOURCE: HTTP job submission for container-wide STAC cataloging
+# SCOPE: Container-wide raster STAC metadata extraction and insertion
+# VALIDATION: Container name, collection ID validation
+# PATTERNS: Two-stage fan-out (1→N), STAC metadata extraction per file
+# ENTRY_POINTS: Registered in jobs/__init__.py ALL_JOBS as "stac_catalog_container"
+# INDEX: StacCatalogContainerWorkflow:17, stages:29, create_tasks_for_stage:55
+# ============================================================================
+
 """
 STAC Catalog Container Job Declaration - Two-Stage Fan-Out Pattern
 
 This file declares a two-stage job that:
-- Stage 1: Lists all raster files in a container
-- Stage 2: Extracts STAC metadata for each file and inserts into PgSTAC (fan-out parallelism)
+- Stage 1: Lists all raster files in a container (single task)
+- Stage 2: Extracts STAC metadata for each file and inserts into PgSTAC (N parallel tasks)
 
 Leverages existing StacMetadataService for metadata extraction.
 
 Author: Robert and Geospatial Claude Legion
 Date: 6 OCT 2025
+Last Updated: 29 OCT 2025
 """
 
 from typing import List, Dict, Any

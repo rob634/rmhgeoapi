@@ -1,3 +1,22 @@
+# ============================================================================
+# CLAUDE CONTEXT - JOB REGISTRY
+# ============================================================================
+# EPOCH: 4 - ACTIVE ✅
+# STATUS: Core Architecture - Explicit job registration (no decorators)
+# PURPOSE: Central registry of all available jobs for Job→Stage→Task architecture
+# LAST_REVIEWED: 29 OCT 2025
+# EXPORTS: ALL_JOBS (dict mapping job_type to job class), JobBase
+# INTERFACES: None (pure Python dict registry)
+# PYDANTIC_MODELS: None (individual jobs define their own models)
+# DEPENDENCIES: All job classes (hello_world, ingest_vector, process_large_raster, etc.)
+# SOURCE: Explicit imports and dictionary definition (no auto-discovery)
+# SCOPE: Job type to job class mapping for entire application
+# VALIDATION: Import-time validation (missing jobs cause immediate import errors)
+# PATTERNS: Registry pattern, Explicit registration (anti-decorator), Single source of truth
+# ENTRY_POINTS: from jobs import ALL_JOBS; job_class = ALL_JOBS["hello_world"]
+# INDEX: ALL_JOBS:61, Job imports:37-50
+# ============================================================================
+
 """
 Job Registry - Explicit Registration (No Decorators!)
 
@@ -21,10 +40,10 @@ Example:
     class ContainerListJob:
         job_type = "container_list"
         stages = [...]
-    
+
     # In jobs/__init__.py (this file):
     from .container_list import ContainerListJob
-    
+
     ALL_JOBS = {
         "hello_world": HelloWorldJob,
         "container_list": ContainerListJob,  # <- Added here!
@@ -32,6 +51,7 @@ Example:
 
 Author: Robert and Geospatial Claude Legion
 Date: 1 OCT 2025
+Last Updated: 29 OCT 2025
 """
 
 from .base import JobBase

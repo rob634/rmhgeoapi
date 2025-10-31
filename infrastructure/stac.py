@@ -4,7 +4,7 @@
 # EPOCH: 4 - ACTIVE ✅
 # STATUS: Infrastructure - PgSTAC setup and management
 # PURPOSE: STAC (SpatioTemporal Asset Catalog) infrastructure for PgSTAC setup and management
-# LAST_REVIEWED: 16 OCT 2025
+# LAST_REVIEWED: 29 OCT 2025
 # EXPORTS: StacInfrastructure class with schema detection, installation, and verification
 # INTERFACES: None - concrete infrastructure class
 # PYDANTIC_MODELS: None - uses dict responses for status
@@ -1222,6 +1222,128 @@ def search_items(
     except Exception as e:
         logger.error(f"Failed to search items: {e}")
         return {
+            'error': str(e),
+            'error_type': type(e).__name__
+        }
+
+
+# =============================================================================
+# STAC DATA CLEARING (DEV/TEST ONLY) - Added 29 OCT 2025
+# =============================================================================
+
+def clear_stac_data(mode: str = 'all') -> Dict[str, Any]:
+    """
+    Clear STAC data from pgstac tables (DEV/TEST ONLY).
+
+    ⚠️ DESTRUCTIVE OPERATION - Deletes data but preserves schema structure.
+
+    Args:
+        mode: Clearing mode
+              'items' - Delete only items (preserve collections)
+              'collections' - Delete collections (CASCADE deletes items)
+              'all' - Delete both collections and items (default)
+
+    Returns:
+        Dict with deletion results:
+        {
+            'success': True,
+            'mode': 'all',
+            'deleted': {
+                'items': 1234,
+                'collections': 5
+            },
+            'execution_time_ms': 456.78
+        }
+
+    Note:
+        - Preserves pgstac schema structure
+        - Preserves functions, indexes, partitions
+        - Much faster than full schema drop/recreate
+        - CASCADE automatically handles foreign key relationships
+
+    Author: Robert and Geospatial Claude Legion
+    Date: 29 OCT 2025
+    """
+    import time
+
+    config = get_config()
+    start_time = time.time()
+
+    try:
+        # Get counts before deletion
+        with psycopg.connect(
+            host=config.postgis_host,
+            dbname=config.postgis_database,
+            user=config.postgis_user,
+            password=config.postgis_password,
+            port=config.postgis_port
+        ) as conn:
+            with conn.cursor() as cur:
+                # Get pre-deletion counts
+                cur.execute("SELECT COUNT(*) FROM pgstac.items")
+                items_before = cur.fetchone()[0]
+
+                cur.execute("SELECT COUNT(*) FROM pgstac.collections")
+                collections_before = cur.fetchone()[0]
+
+                logger.info(f"🚨 STAC NUKE - Mode: {mode}")
+                logger.info(f"   Items before: {items_before}")
+                logger.info(f"   Collections before: {collections_before}")
+
+                deleted = {'items': 0, 'collections': 0}
+
+                if mode == 'items':
+                    # Delete items only (preserve collections)
+                    logger.warning("💣 Deleting all STAC items...")
+                    cur.execute("DELETE FROM pgstac.items")
+                    deleted['items'] = items_before
+                    conn.commit()
+                    logger.info(f"✅ Deleted {deleted['items']} items")
+
+                elif mode == 'collections':
+                    # Delete collections (CASCADE deletes items automatically)
+                    logger.warning("💣 Deleting all STAC collections (CASCADE to items)...")
+                    cur.execute("DELETE FROM pgstac.collections")
+                    deleted['collections'] = collections_before
+                    deleted['items'] = items_before  # CASCADE deleted
+                    conn.commit()
+                    logger.info(f"✅ Deleted {deleted['collections']} collections")
+                    logger.info(f"✅ CASCADE deleted {deleted['items']} items")
+
+                elif mode == 'all':
+                    # Delete everything (collections CASCADE to items)
+                    logger.warning("💣 Deleting all STAC collections and items...")
+                    cur.execute("DELETE FROM pgstac.collections")
+                    deleted['collections'] = collections_before
+                    deleted['items'] = items_before  # CASCADE deleted
+                    conn.commit()
+                    logger.info(f"✅ Deleted {deleted['collections']} collections")
+                    logger.info(f"✅ CASCADE deleted {deleted['items']} items")
+
+                else:
+                    return {
+                        'success': False,
+                        'error': f"Invalid mode: {mode}. Must be 'items', 'collections', or 'all'"
+                    }
+
+                execution_time_ms = (time.time() - start_time) * 1000
+
+                return {
+                    'success': True,
+                    'mode': mode,
+                    'deleted': deleted,
+                    'counts_before': {
+                        'items': items_before,
+                        'collections': collections_before
+                    },
+                    'execution_time_ms': round(execution_time_ms, 2),
+                    'warning': '⚠️ DEV/TEST ONLY - STAC data cleared (schema preserved)'
+                }
+
+    except Exception as e:
+        logger.error(f"Failed to clear STAC data: {e}")
+        return {
+            'success': False,
             'error': str(e),
             'error_type': type(e).__name__
         }

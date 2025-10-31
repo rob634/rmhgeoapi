@@ -1,15 +1,15 @@
 # ============================================================================
-# CLAUDE CONTEXT - PLATFORM REQUEST STATUS TRIGGER
+# CLAUDE CONTEXT - API REQUEST STATUS TRIGGER (PLATFORM LAYER)
 # ============================================================================
 # EPOCH: 4 - ACTIVE ✅
-# STATUS: HTTP Trigger - Platform request status monitoring endpoint
-# PURPOSE: Query status of platform requests and their associated CoreMachine jobs
-# LAST_REVIEWED: 25 OCT 2025
+# STATUS: HTTP Trigger - API request status monitoring endpoint
+# PURPOSE: Query status of API requests and their associated CoreMachine jobs
+# LAST_REVIEWED: 29 OCT 2025
 # EXPORTS: platform_request_status (HTTP trigger function)
 # INTERFACES: None
-# PYDANTIC_MODELS: None
+# PYDANTIC_MODELS: PlatformRequestStatus (enum)
 # DEPENDENCIES: azure-functions, psycopg
-# SOURCE: Database queries
+# SOURCE: Database queries (app.api_requests, app.orchestration_jobs)
 # SCOPE: Platform request monitoring
 # VALIDATION: None
 # PATTERNS: Repository
@@ -33,177 +33,21 @@ from typing import Dict, Any, Optional, List
 
 import azure.functions as func
 
-from triggers.trigger_platform import PlatformRepository, PlatformRequestStatus
+# Import Platform models from core (Infrastructure-as-Code pattern)
+from core.models import PlatformRequestStatus
+from infrastructure import PlatformStatusRepository
 
 # Configure logging using LoggerFactory (Application Insights integration)
 from util_logger import LoggerFactory, ComponentType
 logger = LoggerFactory.create_logger(ComponentType.TRIGGER, "trigger_platform_status")
 
 # ============================================================================
-# EXTENDED PLATFORM REPOSITORY
+# REPOSITORY MOVED TO infrastructure/platform.py (29 OCT 2025)
 # ============================================================================
-
-class PlatformStatusRepository(PlatformRepository):
-    """Extended repository with status query methods"""
-
-    def get_request_with_jobs(self, request_id: str) -> Optional[Dict[str, Any]]:
-        """Get platform request with all associated job details"""
-        with self._get_connection() as conn:
-            with conn.cursor() as cur:
-                # Get request details
-                cur.execute("""
-                    SELECT
-                        r.*,
-                        COALESCE(
-                            json_agg(
-                                json_build_object(
-                                    'job_id', j.job_id,
-                                    'job_type', j.job_type,
-                                    'status', j.status,
-                                    'stage', j.stage,
-                                    'created_at', j.created_at,
-                                    'updated_at', j.updated_at
-                                ) ORDER BY j.created_at
-                            ) FILTER (WHERE j.job_id IS NOT NULL),
-                            '[]'::json
-                        ) as jobs
-                    FROM platform.requests r
-                    LEFT JOIN LATERAL (
-                        SELECT
-                            pj.job_id,
-                            pj.job_type,
-                            j.status,
-                            j.stage,
-                            j.created_at,
-                            j.updated_at
-                        FROM platform.request_jobs pj
-                        JOIN app.jobs j ON j.job_id = pj.job_id
-                        WHERE pj.request_id = r.request_id
-                    ) j ON true
-                    WHERE r.request_id = %s
-                    GROUP BY r.request_id, r.dataset_id, r.resource_id, r.version_id,
-                             r.data_type, r.status, r.job_ids, r.parameters,
-                             r.metadata, r.result_data, r.created_at, r.updated_at
-                """, (request_id,))
-
-                row = cur.fetchone()
-                if not row:
-                    return None
-
-                # Build response
-                return {
-                    'request_id': row[0],
-                    'dataset_id': row[1],
-                    'resource_id': row[2],
-                    'version_id': row[3],
-                    'data_type': row[4],
-                    'status': row[5],
-                    'job_ids': row[6] if row[6] else [],
-                    'parameters': row[7] if row[7] else {},
-                    'metadata': row[8] if row[8] else {},
-                    'result_data': row[9] if row[9] else None,
-                    'created_at': row[10].isoformat() if row[10] else None,
-                    'updated_at': row[11].isoformat() if row[11] else None,
-                    'jobs': row[12] if len(row) > 12 else []
-                }
-
-    def get_all_requests(self, limit: int = 100, status: Optional[str] = None) -> List[Dict[str, Any]]:
-        """Get all platform requests with optional filtering"""
-        with self._get_connection() as conn:
-            with conn.cursor() as cur:
-                query = """
-                    SELECT
-                        request_id,
-                        dataset_id,
-                        resource_id,
-                        version_id,
-                        data_type,
-                        status,
-                        array_length(job_ids::text[], 1) as job_count,
-                        created_at,
-                        updated_at
-                    FROM platform.requests
-                """
-
-                params = []
-                if status:
-                    query += " WHERE status = %s"
-                    params.append(status)
-
-                query += " ORDER BY created_at DESC LIMIT %s"
-                params.append(limit)
-
-                cur.execute(query, params)
-                rows = cur.fetchall()
-
-                return [
-                    {
-                        'request_id': row[0],
-                        'dataset_id': row[1],
-                        'resource_id': row[2],
-                        'version_id': row[3],
-                        'data_type': row[4],
-                        'status': row[5],
-                        'job_count': row[6] if row[6] else 0,
-                        'created_at': row[7].isoformat() if row[7] else None,
-                        'updated_at': row[8].isoformat() if row[8] else None
-                    }
-                    for row in rows
-                ]
-
-    def check_and_update_completion(self, request_id: str) -> bool:
-        """
-        Check if all jobs are complete and update platform request status.
-        Implements "last job turns out the lights" pattern.
-        """
-        with self._get_connection() as conn:
-            with conn.cursor() as cur:
-                # Check job statuses
-                cur.execute("""
-                    SELECT
-                        COUNT(*) as total,
-                        COUNT(*) FILTER (WHERE j.status = 'completed') as completed,
-                        COUNT(*) FILTER (WHERE j.status = 'failed') as failed,
-                        COUNT(*) FILTER (WHERE j.status IN ('pending', 'processing')) as in_progress
-                    FROM platform.request_jobs pj
-                    JOIN app.jobs j ON j.job_id = pj.job_id
-                    WHERE pj.request_id = %s
-                """, (request_id,))
-
-                row = cur.fetchone()
-                if not row or row[0] == 0:  # No jobs
-                    return False
-
-                total, completed, failed, in_progress = row
-
-                # Determine platform request status
-                if in_progress > 0:
-                    # Still processing
-                    new_status = PlatformRequestStatus.PROCESSING
-                elif failed > 0:
-                    # Any failures = request failed
-                    new_status = PlatformRequestStatus.FAILED
-                elif completed == total:
-                    # All completed successfully
-                    new_status = PlatformRequestStatus.COMPLETED
-                else:
-                    # Shouldn't happen
-                    logger.warning(f"Unexpected status combination for {request_id}")
-                    return False
-
-                # Update platform request status
-                cur.execute("""
-                    UPDATE platform.requests
-                    SET status = %s, updated_at = NOW()
-                    WHERE request_id = %s AND status != %s
-                """, (new_status.value, request_id, new_status.value))
-
-                if cur.rowcount > 0:
-                    conn.commit()
-                    logger.info(f"Updated platform request {request_id} to {new_status.value}")
-                    return True
-
-                return False
+# PlatformStatusRepository class has been moved to infrastructure/platform.py
+# Now uses SQL composition pattern for injection safety.
+# Imported above via: from infrastructure import PlatformStatusRepository
+# ============================================================================
 
 # ============================================================================
 # HTTP HANDLERS

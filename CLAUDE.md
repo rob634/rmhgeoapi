@@ -299,8 +299,76 @@ curl https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/jobs
 - **Redeploy (Recommended)**: `POST /api/db/schema/redeploy?confirm=yes` - Nuke and redeploy in one operation
 - **Nuke Only**: `POST /api/db/schema/nuke?confirm=yes` - Just drop everything (use with caution)
 
+**🚨 STAC NUCLEAR BUTTON (DEV/TEST ONLY - ⭐ NEW 29 OCT 2025):**
+```bash
+# Clear all STAC items and collections (preserves schema structure)
+curl -X POST "https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/stac/nuke?confirm=yes&mode=all"
+
+# Clear only items (keep collections)
+curl -X POST "https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/stac/nuke?confirm=yes&mode=items"
+
+# Clear collections (CASCADE deletes items)
+curl -X POST "https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/stac/nuke?confirm=yes&mode=collections"
+```
+**Note**: Much faster than full schema drop - preserves pgstac functions, indexes, and partitions
+
+**🌍 OGC FEATURES API (OGC API - Features Core 1.0 Compliant - ⭐ NEW 30 OCT 2025):**
+```bash
+# Landing page (entry point)
+curl https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/features
+
+# List all vector collections (from PostGIS geometry_columns)
+curl https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/features/collections
+
+# Get collection metadata (bbox, feature count, geometry type)
+curl https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/features/collections/fresh_test_stac
+
+# Query features with pagination
+curl "https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/features/collections/fresh_test_stac/items?limit=10&offset=0"
+
+# Spatial query with bounding box (minx,miny,maxx,maxy in EPSG:4326)
+curl "https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/features/collections/fresh_test_stac/items?bbox=-70.7,-56.3,-70.6,-56.2&limit=5"
+
+# Get single feature by ID
+curl https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/features/collections/fresh_test_stac/items/1
+
+# OGC conformance classes
+curl https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/features/conformance
+```
+
+**🗺️ INTERACTIVE WEB MAP (⭐ NEW 30 OCT 2025):**
+```
+Live URL: https://rmhazuregeo.z13.web.core.windows.net/
+```
+
+**Features**:
+- ✅ Interactive Leaflet map with pan/zoom
+- ✅ Collection selector dropdown (7 PostGIS collections)
+- ✅ Load 50-1000 features from any collection
+- ✅ Click polygons → popup shows properties
+- ✅ Hover → highlights features
+- ✅ Zoom to features button
+- ✅ Loading spinner with status messages
+- ✅ Shows "X of Y features" count
+
+**Stack**:
+- Single HTML file (ogc_features/map.html)
+- Leaflet 1.9.4 from CDN
+- Vanilla JavaScript (no frameworks)
+- Azure Storage Static Website hosting
+
+**API Features**:
+- Direct PostGIS queries with ST_AsGeoJSON optimization
+- Spatial filtering (bbox via ST_Intersects)
+- Pagination with limit/offset
+- GeoJSON feature serialization
+- Auto-detection of geometry columns (geom, geometry, shape)
+- Returns 7 PostGIS collections in geo schema
+- CORS enabled for static website origin
+
 **🔍 DATABASE DEBUGGING ENDPOINTS (No DBeaver Required!):**
 ```bash
+# CoreMachine Layer (Jobs/Tasks):
 # Get all jobs and tasks (comprehensive dump)
 curl https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/db/debug/all?limit=100
 
@@ -316,6 +384,20 @@ curl https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/db/t
 # Query tasks with filters
 curl https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/db/tasks?status=failed&limit=20
 
+# Platform Layer (API Requests/Orchestration) - ⭐ NEW (29 OCT 2025):
+# Query API requests with filters
+curl https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/db/api_requests?status=processing&limit=10
+
+# Get specific API request by ID
+curl https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/db/api_requests/{REQUEST_ID}
+
+# Query orchestration jobs (by request_id)
+curl https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/db/orchestration_jobs?request_id={REQUEST_ID}
+
+# Get orchestration jobs for specific request
+curl https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/db/orchestration_jobs/{REQUEST_ID}
+
+# System:
 # Database statistics and health
 curl https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/db/stats
 
@@ -330,7 +412,9 @@ curl https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/db/e
 - `limit`: Max number of results (default: 100)
 - `status`: Filter by status (pending, processing, completed, failed)
 - `hours`: Only show records from last N hours
-- `job_type`: Filter by job type
+- `job_type`: Filter by job type (CoreMachine)
+- `request_id`: Filter orchestration jobs by request ID (Platform)
+- `dataset_id`: Filter API requests by dataset (Platform)
 
 **🔍 APPLICATION INSIGHTS LOG ACCESS (CRITICAL FOR DEBUGGING):**
 
@@ -397,6 +481,227 @@ union requests, traces | where timestamp >= ago(30m) | where operation_Name cont
 **STORAGE ENVIRONMENT**
 Use rmhazuregeo with the storage account key to access storage to check queues and containers
 [REDACTED - See Azure Portal or Key Vault for actual key]
+
+## 🎯 Future Architecture: Azure API Management (APIM)
+
+**Status**: 🎉 **MAJOR MILESTONE ACHIEVED** (30 OCT 2025)
+**Current**: Fully functional monolithic Function App with 3 standards-compliant APIs
+**Future**: Microservices architecture with APIM routing
+
+### What We've Built
+
+**Three Standards-Compliant APIs in Single Function App**:
+1. **STAC API** (pgstac/) - STAC v1.0 metadata catalog for spatial data discovery
+2. **OGC Features API** (ogc_features/) - OGC API - Features Core 1.0 for vector feature access
+3. **Platform/CoreMachine** - Custom job orchestration and geospatial data processing
+
+**Browser Tested & Operational** ✅:
+- User confirmed: "omg we have STAC json in the browser! this is fucking fantastic!"
+- 7 vector collections available via OGC Features
+- Direct PostGIS queries with GeoJSON serialization
+- STAC collections and items serving properly
+
+### Future: Seamless Multi-Backend Architecture
+
+**Vision**: Single custom domain routing to specialized Function Apps via Azure API Management
+
+```
+User Experience (Single Domain):
+https://geospatial.rmh.org/api/features/*     → OGC Features Function App (vector queries)
+https://geospatial.rmh.org/api/collections/*  → STAC API Function App (metadata search)
+https://geospatial.rmh.org/api/platform/*     → Platform Function App (data ingestion)
+https://geospatial.rmh.org/api/jobs/*         → CoreMachine Function App (job processing)
+```
+
+**APIM Benefits**:
+- ✅ **Seamless User Experience** - Single domain, users never see backend complexity
+- ✅ **Granular Access Control** - Different auth rules per API path (see security section below)
+- ✅ **Independent Scaling** - Scale each API based on its specific load patterns
+- ✅ **Separate Deployments** - Deploy OGC fixes without touching STAC or Platform
+- ✅ **API Versioning** - /v1/, /v2/ support for breaking changes
+- ✅ **Centralized Security** - Auth, rate limiting, CORS, validation in one place
+- ✅ **SSL/TLS Termination** - Custom domain with certificates
+- ✅ **Request Transformation** - Modify requests/responses without changing backends
+- ✅ **Analytics & Monitoring** - Unified dashboard across all APIs
+
+### Architecture Components
+
+**Current (Monolith)**:
+```
+Azure Function App: rmhgeoapibeta
+├── OGC Features (ogc_features/ - 2,600+ lines, standalone)
+├── STAC API (pgstac/ + infrastructure/stac.py)
+├── Platform Layer (platform schema + triggers)
+└── CoreMachine (jobs/tasks + app schema)
+```
+
+**Future (Microservices)**:
+```
+Azure API Management (geospatial.rmh.org)
+├─→ Function App: OGC Features (ogc_features/ only)
+├─→ Function App: STAC API (pgstac/ + stac infrastructure)
+├─→ Function App: Platform (platform triggers + orchestration)
+└─→ Function App: CoreMachine (job processing + tasks)
+
+All connect to: PostgreSQL (shared database with 4 schemas)
+```
+
+### Security Architecture with APIM Policies
+
+**YES! APIM manages all access control via policies** - this is one of its killer features!
+
+**Your Use Case - Perfect APIM Fit**:
+
+```xml
+<!-- Public API - Open to anyone in tenant -->
+<policies>
+  <inbound>
+    <base />
+    <validate-azure-ad-token tenant-id="{tenant-id}">
+      <audiences>
+        <audience>api://geospatial-public</audience>
+      </audiences>
+    </validate-azure-ad-token>
+    <rate-limit calls="1000" renewal-period="60" />
+    <cors>
+      <allowed-origins>
+        <origin>*</origin>
+      </allowed-origins>
+    </cors>
+    <set-backend-service base-url="https://ogc-features-app.azurewebsites.net" />
+  </inbound>
+</policies>
+
+<!-- Internal API - DDH App Only (and future apps, gods help you 😄) -->
+<policies>
+  <inbound>
+    <base />
+    <validate-azure-ad-token tenant-id="{tenant-id}">
+      <client-application-ids>
+        <application-id>{ddh-app-id}</application-id>
+        <!-- Future apps added here -->
+        <application-id>{future-app-id}</application-id>
+      </client-application-ids>
+      <audiences>
+        <audience>api://geospatial-internal</audience>
+      </audiences>
+    </validate-azure-ad-token>
+    <rate-limit calls="10000" renewal-period="60" />
+    <set-backend-service base-url="https://coremachine-app.azurewebsites.net" />
+  </inbound>
+</policies>
+```
+
+**Security Policy Examples by API**:
+
+| API Path | Access Level | Auth Method | Example Policy |
+|----------|--------------|-------------|----------------|
+| `/api/features/*` | **Public** (tenant users) | Azure AD token (any tenant user) | Validate AAD token, allow all tenant users |
+| `/api/collections/*` | **Public** (tenant users) | Azure AD token (any tenant user) | Validate AAD token, allow all tenant users |
+| `/api/platform/*` | **Internal** (DDH app only) | Managed Identity or App Registration | Validate specific client application IDs |
+| `/api/jobs/*` | **Internal** (DDH app + future apps) | Managed Identity or App Registration | Validate specific client application IDs list |
+
+**APIM Policy Capabilities for Your Security Needs**:
+
+1. **Azure AD Token Validation**:
+   - Validate tokens issued by your Azure AD tenant
+   - Check specific application IDs (DDH app, future apps)
+   - Verify user roles/groups (e.g., "GeoAdmins" group)
+   - Check token scopes and audiences
+
+2. **IP Whitelisting** (if needed):
+   ```xml
+   <ip-filter action="allow">
+     <address-range from="10.0.0.0" to="10.255.255.255" />
+     <address>12.34.56.78</address>
+   </ip-filter>
+   ```
+
+3. **Rate Limiting Per Client**:
+   - Different limits for different APIs
+   - Per-subscription keys
+   - Per-IP address
+   - Per-user identity
+
+4. **Request Validation**:
+   - Validate request headers, query params, body
+   - Block malicious payloads
+   - Enforce content type restrictions
+
+**Real-World Policy Structure**:
+
+```
+APIM Products (Subscription Units):
+├── Public Geospatial Data (open to tenant)
+│   ├── /api/features/* → Open (with AAD validation)
+│   ├── /api/collections/* → Open (with AAD validation)
+│   └── Rate Limit: 1,000 calls/minute
+│
+└── Internal Processing APIs (restricted apps)
+    ├── /api/platform/* → DDH app + future apps only
+    ├── /api/jobs/* → DDH app + future apps only
+    └── Rate Limit: 10,000 calls/minute (higher for internal)
+```
+
+**Backend Function Apps Can Be Completely Locked Down**:
+- Function Apps don't need their own auth - APIM handles it
+- Set Function App auth level to `AuthLevel.ANONYMOUS` (APIM is the gatekeeper)
+- Only APIM can reach Function Apps (using VNET integration or private endpoints)
+- Even if someone discovers your Function App URLs, they can't access them directly
+
+**Future Enhancement - User Claims in Policies**:
+```xml
+<!-- Example: Only allow users in "GeoAdmins" group to submit jobs -->
+<check-header name="X-User-Roles" failed-check-httpcode="403">
+  <value>GeoAdmins</value>
+</check-header>
+```
+
+**See**: Azure API Management Policy Reference for full policy documentation
+
+### Key Design Decisions Ahead
+
+**1. Shared Code Strategy**:
+- **Option A**: Duplicate common modules (config, logger, infrastructure) in each Function App
+- **Option B**: Create shared Python package deployed to private PyPI or Azure Artifacts
+- **Option C**: Git submodules for shared code
+- **Recommendation**: Start with duplication (simplest), migrate to package when patterns stabilize
+
+**2. Database Connection Management**:
+- All Function Apps share same PostgreSQL instance
+- Use psycopg3 connection pooling per Function App
+- Consider Azure PostgreSQL connection pooler (PgBouncer)
+- Monitor connection limits carefully
+
+**3. APIM Pricing**:
+- **Developer Tier**: $50/month - Good for development/testing
+- **Standard Tier**: $700/month - Production-ready with SLA
+- **Consumption Tier**: Pay-per-request - Best for low-volume or spiky traffic
+
+**4. When to Split**:
+- **Now**: Continue with monolith, focus on features and data ingestion
+- **Later**: Split when performance bottlenecks or deployment conflicts emerge
+- **Decision Point**: Current monolith works perfectly, no urgency to split
+
+### Architectural Notes
+
+**Why This Architecture Works**:
+1. **Standards Compliance** - All APIs follow open standards (STAC, OGC, REST)
+2. **Standalone OGC Module** - Already designed for separation (zero main app dependencies)
+3. **Schema Separation** - PostgreSQL schemas (geo, pgstac, platform, app) enable clean boundaries
+4. **Proven Pattern** - Major geospatial platforms use this architecture:
+   - Planetary Computer (Microsoft)
+   - AWS Open Data
+   - Element84 Earth Search
+
+**Current Status: Production-Ready Monolith**:
+- ✅ All APIs operational and tested
+- ✅ Standards-compliant implementations
+- ✅ Ready for production data ingestion
+- ✅ Can scale vertically (bigger Function App tier) before needing microservices
+- ✅ APIM can be added later without code changes (just routing configuration)
+
+**See**: `docs_claude/TODO.md` for APIM implementation task breakdown
 
 ## 🚨 Development Philosophy: No Backward Compatibility
 

@@ -1,18 +1,39 @@
+# ============================================================================
+# CLAUDE CONTEXT - JOB DEFINITION
+# ============================================================================
+# EPOCH: 4 - ACTIVE ✅
+# STATUS: Job - Three-stage diamond pattern (1→N→1) for container analysis
+# PURPOSE: Demonstrate complete fan-out/fan-in pattern with aggregation
+# LAST_REVIEWED: 29 OCT 2025
+# EXPORTS: ListContainerContentsDiamondWorkflow (JobBase implementation)
+# INTERFACES: JobBase (implements 5-method contract)
+# PYDANTIC_MODELS: None (uses dict-based validation)
+# DEPENDENCIES: jobs.base.JobBase, hashlib, json
+# SOURCE: HTTP job submission for container analysis with aggregation
+# SCOPE: Container-wide analysis with automatic result aggregation
+# VALIDATION: Container name validation, blob count limits
+# PATTERNS: Diamond pattern (1→N→1), Fan-out then fan-in, CoreMachine auto-aggregation
+# ENTRY_POINTS: Registered in jobs/__init__.py ALL_JOBS as "list_container_contents_diamond"
+# INDEX: ListContainerContentsDiamondWorkflow:26, stages:38, create_tasks_for_stage:75
+# ============================================================================
+
 """
 Container List Diamond Job Declaration - Three-Stage Fan-In Pattern
 
 This file declares a three-stage diamond pattern job that demonstrates fan-in aggregation:
-- Stage 1 (single): Lists all blobs in a container
-- Stage 2 (fan_out): Analyzes each blob individually (fan-out parallelism)
-- Stage 3 (fan_in): Aggregates all analysis results into summary (CoreMachine auto-creates)
+- Stage 1 (single): Lists all blobs in a container (1 task)
+- Stage 2 (fan_out): Analyzes each blob individually (N parallel tasks)
+- Stage 3 (fan_in): Aggregates all analysis results into summary (1 task - CoreMachine auto-creates)
 
 This is a demonstration of the complete diamond pattern:
     Single → Fan-Out → Fan-In → Summary
+    (1)   →   (N)   →  (1)
 
 Results stored in task.result_data JSONB fields for SQL querying.
 
 Author: Robert and Geospatial Claude Legion
 Date: 16 OCT 2025
+Last Updated: 29 OCT 2025
 """
 
 from typing import List, Dict, Any

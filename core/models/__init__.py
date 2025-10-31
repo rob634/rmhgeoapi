@@ -55,6 +55,15 @@ from .results import (
     JobCompletionResult
 )
 
+# Platform models (renamed 29 OCT 2025 for API clarity)
+from .platform import (
+    ApiRequest,
+    OrchestrationJob,
+    PlatformRequestStatus,
+    DataType,
+    PlatformRequest
+)
+
 __all__ = [
     # Enums
     'JobStatus',
@@ -80,5 +89,12 @@ __all__ = [
     'TaskResult',
     'StageResultContract',
     'StageAdvancementResult',
-    'JobCompletionResult'
+    'JobCompletionResult',
+
+    # Platform models (renamed 29 OCT 2025)
+    'ApiRequest',
+    'OrchestrationJob',
+    'PlatformRequestStatus',
+    'DataType',
+    'PlatformRequest'
 ]

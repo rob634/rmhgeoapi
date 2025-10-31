@@ -4,7 +4,7 @@
 # EPOCH: 4 - ACTIVE ✅
 # STATUS: Infrastructure - Repository and service layer
 # PURPOSE: Package initialization for repository modules with lazy imports
-# LAST_REVIEWED: 16 OCT 2025
+# LAST_REVIEWED: 29 OCT 2025
 # EXPORTS: Factory and repository classes via lazy loading
 # INTERFACES: All repository interfaces and implementations
 # PYDANTIC_MODELS: None at package level - models in individual modules
@@ -105,6 +105,8 @@ if TYPE_CHECKING:
     from .base import BaseRepository as _BaseRepository
     from .blob import BlobRepository as _BlobRepository
     from .vault import VaultRepository as _VaultRepository
+    from .platform import PlatformRepository as _PlatformRepository
+    from .platform import PlatformStatusRepository as _PlatformStatusRepository
     from .interface_repository import (
         IJobRepository as _IJobRepository,
         ITaskRepository as _ITaskRepository,
@@ -153,6 +155,14 @@ def __getattr__(name: str):
         from .vault import VaultRepository
         return VaultRepository
 
+    # Platform repositories
+    elif name == "PlatformRepository":
+        from .platform import PlatformRepository
+        return PlatformRepository
+    elif name == "PlatformStatusRepository":
+        from .platform import PlatformStatusRepository
+        return PlatformStatusRepository
+
     # Interfaces
     elif name == "IJobRepository":
         from .interface_repository import IJobRepository
@@ -183,6 +193,8 @@ __all__ = [
     "BaseRepository",
     "BlobRepository",
     "VaultRepository",
+    "PlatformRepository",
+    "PlatformStatusRepository",
     "IJobRepository",
     "ITaskRepository",
     "IBlobRepository",

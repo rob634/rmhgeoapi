@@ -1,44 +1,138 @@
 # ============================================================================
-# CLAUDE CONTEXT - CONTROLLER
+# CLAUDE CONTEXT - HTTP TRIGGER
 # ============================================================================
-# CATEGORY: HTTP TRIGGER ENDPOINTS
-# PURPOSE: Azure Functions HTTP API endpoint
-# EPOCH: Shared by all epochs (API layer)
-# TODO: Audit for framework logic that may belong in CoreMachine# PURPOSE: System health monitoring HTTP trigger handling GET /api/health requests
-# EXPORTS: HealthCheckTrigger (HTTP trigger class for comprehensive health checks)
-# INTERFACES: SystemMonitoringTrigger (inherited from trigger_http_base)
+# EPOCH: 4 - ACTIVE ✅
+# STATUS: HTTP Trigger - Comprehensive system health monitoring endpoint
+# PURPOSE: System health monitoring HTTP trigger handling GET /api/health requests
+# LAST_REVIEWED: 29 OCT 2025
+# EXPORTS: HealthCheckTrigger, health_check_trigger (singleton instance)
+# INTERFACES: SystemMonitoringTrigger (inherited from http_base)
 # PYDANTIC_MODELS: None directly - uses dict responses for health status
-# DEPENDENCIES: trigger_http_base, config, service_schema_manager, util_import_validator, azure.functions
-# SOURCE: HTTP GET requests, environment variables, component status from various services
-# SCOPE: HTTP endpoint for monitoring all system components - database, storage, queues, imports
-# VALIDATION: Component connectivity checks, schema validation, import validation, configuration checks
-# PATTERNS: Template Method (implements base class), Health Check pattern, Component pattern
-# ENTRY_POINTS: trigger = HealthCheckTrigger(); response = trigger.handle_request(req)
-# INDEX: HealthCheckTrigger:45, process_request:55, handle_request:125, _check_database:265, _check_import_validation:710
+# DEPENDENCIES: http_base.SystemMonitoringTrigger, config, core.schema.deployer.SchemaManagerFactory, utils.validator, azure.functions
+# SOURCE: HTTP GET requests, environment variables, component status from PostgreSQL/Service Bus/Blob Storage/imports
+# SCOPE: HTTP endpoint for monitoring 9 system components - database, Service Bus, imports, DuckDB, VSI, jobs registry, schema validation
+# VALIDATION: Component connectivity checks, schema validation and auto-creation, import validation with auto-discovery, configuration checks
+# PATTERNS: Template Method (base class), Health Check pattern, Component pattern, Status Code pattern (200/503/500)
+# ENTRY_POINTS: GET /api/health - Used by function_app.py via health_check_trigger singleton
+# INDEX: HealthCheckTrigger:56, process_request:66, handle_request:177, _check_database:326, _check_service_bus_queues:285, _check_import_validation:778, _check_vsi_support:946, _check_jobs_registry:1058
 # ============================================================================
 
 """
-Health Check HTTP Trigger - System Monitoring
+Health Check HTTP Trigger - Comprehensive System Monitoring
 
-Concrete implementation of health check endpoint using BaseHttpTrigger.
-Performs comprehensive health checks on all system components.
+Concrete implementation of health check endpoint using BaseHttpTrigger pattern.
+Performs comprehensive health checks on all critical and optional system components
+with proper HTTP status code semantics (200 healthy, 503 unhealthy, 500 error).
 
-Usage:
+Components Monitored (9 total):
+1. Import Validation - Critical dependency and application module validation with auto-discovery
+2. Service Bus Queues - Jobs and tasks queues connectivity and message counts
+3. Database Configuration - PostgreSQL connection string and environment variable validation
+4. Database Connectivity - PostgreSQL health with schema validation, auto-creation, and query metrics
+5. DuckDB - Optional analytical engine for serverless Parquet queries (non-critical)
+6. VSI Support - Rasterio /vsicurl/ capability for Big Raster ETL (critical for large rasters)
+7. Jobs Registry - Available job types from jobs.ALL_JOBS (critical for job submission)
+8. Azure Table Storage - Deprecated (PostgreSQL replaced for ACID compliance)
+9. Key Vault - Disabled (using environment variables only)
+
+Health Check Features:
+- Proper HTTP status codes: 200 (healthy), 503 (unhealthy), 500 (error)
+- Component-level health status with detailed error messages
+- Database query performance metrics (connection time, query time, function tests)
+- Enhanced database metrics (jobs/tasks last 24h, status breakdown, PostgreSQL function testing)
+- Schema validation and auto-creation via SchemaManagerFactory
+- Detailed schema inspection (columns, functions, signatures) for debugging
+- Import validation with auto-discovery and cache tracking
+- VSI capability testing with real blob file (/vsicurl/ with SAS URL)
+- Jobs registry validation (ensures job types are registered)
+- Cache-Control headers to prevent stale health data
+- Request ID tracking for correlation
+
+Database Health Checks:
+- PostgreSQL version and PostGIS version detection
+- Schema existence validation (app schema, postgis schema)
+- Table validation and auto-creation (jobs, tasks)
+- PostgreSQL function testing (complete_task_and_check_stage, advance_job_stage, check_job_completion)
+- Query performance metrics (connection time, query execution time)
+- Job/Task metrics for last 24 hours (status breakdown, counts)
+- STAC items count (optional)
+
+Optional Components (don't fail overall health):
+- DuckDB - Analytical engine for GeoParquet exports and serverless queries
+- VSI Support - Required for Big Raster ETL but optional for core operations
+
+API Endpoint:
     GET /api/health
-    
-Response:
+
+Response (Healthy - 200 OK):
     {
-        "status": "healthy" | "unhealthy",
+        "status": "healthy",
         "components": {
-            "storage": {...},
-            "queues": {...}, 
-            "database": {...}
+            "imports": {"status": "healthy", ...},
+            "service_bus": {"status": "healthy", ...},
+            "database_config": {"status": "healthy", ...},
+            "database": {"status": "healthy", "query_performance": {...}, ...},
+            "duckdb": {"status": "healthy", ...},
+            "vsi": {"status": "healthy", ...},
+            "jobs": {"status": "healthy", "available_jobs": [...], ...},
+            "tables": {"status": "deprecated", ...},
+            "vault": {"status": "disabled", ...}
         },
-        "timestamp": "ISO-8601",
-        "request_id": "uuid"
+        "environment": {
+            "storage_account": "rmhazuregeo",
+            "python_version": "3.11.x",
+            "function_runtime": "python",
+            "health_check_version": "v2025-10-25_VSI_CHECK_ENABLED"
+        },
+        "errors": [],
+        "request_id": "uuid",
+        "timestamp": "2025-10-29T12:34:56.789Z"
     }
 
-Author: Azure Geospatial ETL Team
+Response (Unhealthy - 503 Service Unavailable):
+    {
+        "status": "unhealthy",
+        "components": {...component_details...},
+        "errors": [
+            "Database connection failed: timeout",
+            "Service Bus queue 'jobs' inaccessible"
+        ],
+        "request_id": "uuid",
+        "timestamp": "2025-10-29T12:34:56.789Z"
+    }
+
+Response (Error - 500 Internal Server Error):
+    {
+        "error": "Internal server error",
+        "message": "Health check failed: [exception details]",
+        "request_id": "uuid",
+        "timestamp": "2025-10-29T12:34:56.789Z",
+        "status": "error"
+    }
+
+HTTP Status Code Semantics:
+- 200 OK: All components healthy, system operational
+- 503 Service Unavailable: One or more components unhealthy, system degraded
+- 500 Internal Server Error: Health check itself failed, system state unknown
+- 405 Method Not Allowed: Non-GET request attempted
+
+Integration Points:
+- SystemMonitoringTrigger base class (http_base.py) - Common monitoring patterns
+- SchemaManagerFactory (core.schema.deployer) - Database schema validation/creation
+- utils.validator - Import validation with auto-discovery
+- RepositoryFactory - Component repository access
+- Service Bus, PostgreSQL, Blob Storage - Infrastructure health checks
+
+Usage Notes:
+- Health check runs on every GET /api/health request (no caching at trigger level)
+- Database health check is OPTIONAL (controlled by ENABLE_DATABASE_HEALTH_CHECK env var)
+- Import validation uses 5-minute cache (managed by utils.validator)
+- VSI check uses 4-hour SAS token for test file access
+- Cache-Control: no-cache header prevents HTTP-level caching
+
+Author: Robert and Geospatial Claude Legion
+Date: Original implementation 2025
+Last Updated: 29 OCT 2025
 """
 
 from typing import Dict, Any, List

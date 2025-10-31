@@ -1,17 +1,20 @@
 # ============================================================================
 # CLAUDE CONTEXT - HTTP TRIGGER
 # ============================================================================
+# EPOCH: 4 - ACTIVE ✅
+# STATUS: HTTP Trigger - Vector ETL job submission endpoint
 # PURPOSE: Vector ingest HTTP trigger for POST /api/jobs/ingest_vector
+# LAST_REVIEWED: 29 OCT 2025
 # EXPORTS: IngestVectorTrigger, ingest_vector_trigger (singleton instance)
 # INTERFACES: JobManagementTrigger (inherited from http_base)
-# PYDANTIC_MODELS: None directly - uses IngestVectorJob validation
+# PYDANTIC_MODELS: None directly - uses IngestVectorJob validation in jobs/ingest_vector.py
 # DEPENDENCIES: http_base.JobManagementTrigger, azure.functions, typing
 # SOURCE: HTTP POST requests with JSON body containing vector file parameters
-# SCOPE: HTTP endpoint for vector ETL job submission
-# VALIDATION: File extension, table name, blob path validation via IngestVectorJob
-# PATTERNS: Template Method (base class), Explicit Registration (jobs registry)
-# ENTRY_POINTS: trigger = IngestVectorTrigger(); response = trigger.handle_request(req)
-# INDEX: IngestVectorTrigger:45, process_request:62, get_allowed_methods:57
+# SCOPE: HTTP endpoint for vector ETL job submission (6 supported formats)
+# VALIDATION: File extension (csv, geojson, gpkg, kml, kmz, shp, zip), table name, blob path validation via IngestVectorJob
+# PATTERNS: Template Method (base class), Explicit Registration (jobs.ALL_JOBS registry), Fan-out (parallel PostGIS uploads)
+# ENTRY_POINTS: POST /api/jobs/ingest_vector - Used by function_app.py via ingest_vector_trigger singleton
+# INDEX: IngestVectorTrigger:57, process_request:74, get_allowed_methods:69
 # ============================================================================
 
 """

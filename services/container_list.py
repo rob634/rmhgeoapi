@@ -1,3 +1,22 @@
+# ============================================================================
+# CLAUDE CONTEXT - CONTAINER LISTING SERVICE
+# ============================================================================
+# EPOCH: 4 - ACTIVE ✅
+# STATUS: Service - Three-stage diamond pattern for container analysis
+# PURPOSE: List and analyze blob container contents using fan-out/fan-in workflow pattern
+# LAST_REVIEWED: 29 OCT 2025
+# EXPORTS: list_container_blobs, analyze_single_blob, aggregate_blob_analysis
+# INTERFACES: Task handler functions for list_container_contents job
+# PYDANTIC_MODELS: None (uses dict-based parameters and results)
+# DEPENDENCIES: infrastructure.blob.BlobRepository, util_logger.LoggerFactory
+# SOURCE: Azure Blob Storage via BlobRepository
+# SCOPE: Container-wide blob listing and metadata aggregation
+# VALIDATION: Container name validation via BlobRepository decorators
+# PATTERNS: Diamond workflow (Fan-out/Fan-in), Three-stage processing
+# ENTRY_POINTS: Called by jobs/container_list.py task handlers
+# INDEX: list_container_blobs:40, analyze_single_blob:85, aggregate_blob_analysis:130
+# ============================================================================
+
 """
 Container List Services - Three-Stage Diamond Pattern Support
 
@@ -7,6 +26,7 @@ Stage 3: aggregate_blob_analysis - Aggregates all blob metadata into summary (fa
 
 Author: Robert and Geospatial Claude Legion
 Date: 4 OCT 2025 (Updated 16 OCT 2025 - Added fan-in aggregation)
+Last Updated: 29 OCT 2025
 """
 
 from typing import Any

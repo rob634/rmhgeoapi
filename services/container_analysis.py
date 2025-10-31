@@ -1,3 +1,22 @@
+# ============================================================================
+# CLAUDE CONTEXT - CONTAINER ANALYSIS SERVICE
+# ============================================================================
+# EPOCH: 4 - ACTIVE ✅
+# STATUS: Service - Post-processing analysis of container listing jobs
+# PURPOSE: Analyze list_container_contents job results to categorize files, detect patterns, and identify duplicates
+# LAST_REVIEWED: 29 OCT 2025
+# EXPORTS: analyze_container_job, ContainerAnalysisService
+# INTERFACES: None (standalone service functions)
+# PYDANTIC_MODELS: Uses JobRecord from core.models
+# DEPENDENCIES: infrastructure.jobs_tasks.JobRepository, infrastructure.blob.BlobRepository
+# SOURCE: PostgreSQL jobs/tasks tables, optionally saves results to blob storage
+# SCOPE: On-demand analysis of completed container listing jobs
+# VALIDATION: Job existence validation, job type validation (must be list_container_contents)
+# PATTERNS: Service layer, File categorization, Pattern detection
+# ENTRY_POINTS: from services.container_analysis import analyze_container_job
+# INDEX: analyze_container_job:40, ContainerAnalysisService:120, _categorize_file:250
+# ============================================================================
+
 """
 Container Analysis Service - Pure analysis logic for blob container contents.
 
@@ -13,6 +32,10 @@ Design Goals:
 - Structured output (dicts/lists for JSON serialization)
 - Optional output to Blob Storage or ADLS
 - Testable with mocked repositories
+
+Author: Robert and Geospatial Claude Legion
+Date: 4 OCT 2025
+Last Updated: 29 OCT 2025
 """
 
 from typing import Dict, List, Any, Optional, Set

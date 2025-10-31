@@ -1,12 +1,36 @@
+# ============================================================================
+# CLAUDE CONTEXT - JOB DEFINITION
+# ============================================================================
+# EPOCH: 4 - ACTIVE ✅
+# STATUS: Job - Two-stage greeting workflow for testing
+# PURPOSE: HelloWorld job declaration with pure data definition (execution in services layer)
+# LAST_REVIEWED: 29 OCT 2025
+# EXPORTS: HelloWorldJob (JobBase implementation)
+# INTERFACES: JobBase (implements 5-method contract)
+# PYDANTIC_MODELS: None (uses dict-based parameter validation)
+# DEPENDENCIES: jobs.base.JobBase, hashlib, json, typing
+# SOURCE: HTTP job submission via POST /api/jobs/hello_world
+# SCOPE: Test job for validating Job→Stage→Task workflow patterns
+# VALIDATION: Parameter schema (n, message, failure_rate), JobBase interface contract
+# PATTERNS: Job declaration (pure data), Stage definitions, Dynamic parallelism
+# ENTRY_POINTS: Registered in jobs/__init__.py ALL_JOBS as "hello_world"
+# INDEX: HelloWorldJob:19, stages:32, create_tasks_for_stage:58, validate_job_parameters:120
+# ============================================================================
+
 """
 HelloWorld Job Declaration - Pure Data (No Decorators!)
 
 This file declares WHAT the HelloWorld job is, not HOW it executes.
 Execution logic lives in services/service_hello_world.py.
 
+Two-Stage Workflow:
+1. Stage 1 (greeting): Creates N parallel tasks with greetings (N from params)
+2. Stage 2 (reply): Creates N parallel tasks with replies (matches stage 1 count)
+
 Author: Robert and Geospatial Claude Legion
 Date: 1 OCT 2025
 Updated: 15 OCT 2025 - Phase 2: Migrated to JobBase ABC
+Last Updated: 29 OCT 2025
 """
 
 from typing import List, Dict, Any

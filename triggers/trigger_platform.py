@@ -228,24 +228,33 @@ class PlatformOrchestrator:
     """
 
     def __init__(self):
-        # Import registries explicitly (CoreMachine requires them since 10 SEP 2025)
-        from jobs import ALL_JOBS
-        from services import ALL_HANDLERS
-
         self.platform_repo = PlatformRepository()
         self.job_repo = JobRepository()
 
-        # CoreMachine requires explicit registries (no decorator magic!)
-        # Pass job completion callback for Platform orchestration (30 OCT 2025)
-        # See: core/machine.py:116-159 for constructor signature
-        self.core_machine = CoreMachine(
-            all_jobs=ALL_JOBS,
-            all_handlers=ALL_HANDLERS,
-            on_job_complete=self._handle_job_completion  # Platform callback
-        )
+        # CRITICAL FIX (30 OCT 2025): Monkey-patch global callback function
+        # The global CoreMachine instance in function_app.py processes all jobs via Service Bus.
+        # We need to inject our handler into that global callback function.
+        # See: function_app.py:269 _global_platform_callback
+        import function_app
 
-        logger.info(f"✅ PlatformOrchestrator initialized with CoreMachine ({len(ALL_JOBS)} jobs, {len(ALL_HANDLERS)} handlers)")
-        logger.info(f"   ✅ Job completion callback registered for Platform orchestration")
+        # Store original callback (if any)
+        original_callback = function_app._global_platform_callback
+
+        # Replace with our handler (chain if original exists)
+        def combined_callback(job_id: str, job_type: str, status: str, result: dict):
+            # Call our handler first
+            self._handle_job_completion(job_id, job_type, status, result)
+            # Call original handler if it wasn't just a pass statement
+            if original_callback and original_callback.__code__.co_code != (lambda: None).__code__.co_code:
+                original_callback(job_id, job_type, status, result)
+
+        function_app._global_platform_callback = combined_callback
+
+        # Update the global CoreMachine's callback reference
+        function_app.core_machine.on_job_complete = combined_callback
+
+        logger.info(f"✅ PlatformOrchestrator initialized - callback injected into global CoreMachine")
+        logger.info(f"   🔗 All jobs processed via Service Bus will now trigger Platform callbacks")
 
     async def process_platform_request(self, request: ApiRequest) -> List[str]:
         """

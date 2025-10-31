@@ -259,15 +259,38 @@ from ogc_features import get_ogc_triggers
 # Initialize logger for CoreMachine initialization
 logger = LoggerFactory.create_logger(ComponentType.TRIGGER, "function_app")
 
+# ============================================================================
+# PLATFORM ORCHESTRATION CALLBACK (30 OCT 2025)
+# ============================================================================
+# Global callback for Platform job completion - imported by PlatformOrchestrator
+# This allows Platform to react to job completions from the global CoreMachine instance
+# ============================================================================
+
+def _global_platform_callback(job_id: str, job_type: str, status: str, result: dict):
+    """
+    Global callback for Platform orchestration.
+
+    This callback is invoked by the global CoreMachine instance when jobs complete.
+    It forwards completions to PlatformOrchestrator's handler if the job belongs
+    to a Platform request.
+
+    NOTE: This function is set dynamically after PlatformOrchestrator initializes.
+    See trigger_platform.py PlatformOrchestrator.__init__
+    """
+    # Will be set by PlatformOrchestrator during initialization
+    pass
+
 # Initialize CoreMachine at module level with EXPLICIT registries (reused across all triggers)
 core_machine = CoreMachine(
     all_jobs=ALL_JOBS,
-    all_handlers=ALL_HANDLERS
+    all_handlers=ALL_HANDLERS,
+    on_job_complete=_global_platform_callback
 )
 
 logger.info("✅ CoreMachine initialized with explicit registries")
 logger.info(f"   Registered jobs: {list(ALL_JOBS.keys())}")
 logger.info(f"   Registered handlers: {list(ALL_HANDLERS.keys())}")
+logger.info(f"   ✅ Platform callback registered (will be connected on Platform trigger load)")
 
 # Initialize function app with HTTP auth level
 app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)

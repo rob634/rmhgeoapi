@@ -519,10 +519,44 @@ class PlatformOrchestrator:
 
             # Handle based on job type and status
             if status == 'completed':
-                # TODO: Implement job chaining logic here
-                # e.g., if job_type == 'ingest_vector' → submit 'stac_catalog_vectors'
-                logger.info(f"   ✅ Job completed successfully - chaining logic not yet implemented")
-                pass
+                logger.info(f"   ✅ Job completed successfully")
+
+                # Job chaining logic - submit dependent jobs
+                if job_type == 'ingest_vector':
+                    # Vector ingestion complete → Submit STAC cataloging job
+                    logger.info(f"   🔗 Chaining: ingest_vector → stac_catalog_vectors")
+
+                    # Extract table name from job result
+                    table_name = result.get('table_name') or job_record.parameters.get('table_name')
+                    dataset_id = job_record.parameters.get('_platform_dataset') or job_record.parameters.get('dataset_id')
+
+                    if table_name:
+                        # Submit STAC catalog job
+                        import asyncio
+                        platform_request = self.platform_repo.get_request(platform_request_id)
+
+                        stac_job_id = asyncio.run(self._create_coremachine_job(
+                            platform_request,
+                            'stac_catalog_vectors',
+                            {
+                                'schema': 'geo',
+                                'table_name': table_name,
+                                'collection_id': dataset_id or 'vectors',
+                                'source_file': job_record.parameters.get('source_path')
+                            }
+                        ))
+
+                        if stac_job_id:
+                            logger.info(f"   ✅ Submitted stac_catalog_vectors job: {stac_job_id[:16]}")
+                            self.platform_repo.add_job_to_request(
+                                platform_request_id,
+                                stac_job_id,
+                                'stac_catalog_vectors'
+                            )
+                        else:
+                            logger.error(f"   ❌ Failed to submit STAC catalog job")
+                    else:
+                        logger.warning(f"   ⚠️ No table_name in result - cannot chain to STAC job")
 
             elif status == 'failed':
                 # Mark Platform request as failed
@@ -532,12 +566,142 @@ class PlatformOrchestrator:
                     PlatformRequestStatus.FAILED
                 )
 
-            # TODO: Check if all jobs for Platform request are complete
-            # TODO: If all complete, finalize Platform request and populate data_access URLs
+            # Check if all jobs for Platform request are complete
+            self._check_and_finalize_request(platform_request_id)
 
         except Exception as e:
             logger.error(f"Error in job completion handler: {e}", exc_info=True)
             # Don't raise - callback failures should not affect job completion
+
+    def _check_and_finalize_request(self, platform_request_id: str):
+        """
+        Check if all jobs for Platform request are complete and finalize if so.
+
+        Finalization includes:
+        1. Mark Platform request as COMPLETED
+        2. Populate data_access URLs (OGC Features, STAC, web map)
+        3. Aggregate results from all jobs
+
+        Args:
+            platform_request_id: Platform request identifier
+
+        Added: 30 OCT 2025 - Platform request finalization
+        """
+        try:
+            # Get all jobs for this Platform request
+            platform_request = self.platform_repo.get_request(platform_request_id)
+            if not platform_request:
+                logger.warning(f"Platform request {platform_request_id} not found")
+                return
+
+            # Get jobs from the JSONB jobs field
+            jobs_dict = platform_request.jobs or {}
+            if not jobs_dict:
+                logger.warning(f"No jobs found for Platform request {platform_request_id}")
+                return
+
+            # Check if all jobs are complete (completed or failed)
+            all_complete = True
+            any_failed = False
+            job_results = {}
+
+            for job_key, job_info in jobs_dict.items():
+                job_id = job_info.get('job_id')
+                if job_id:
+                    job_record = self.job_repo.get_job(job_id)
+                    if job_record:
+                        job_status = job_record.status.value if hasattr(job_record.status, 'value') else job_record.status
+
+                        if job_status not in ['completed', 'failed']:
+                            all_complete = False
+                            break
+
+                        if job_status == 'failed':
+                            any_failed = True
+
+                        # Collect results
+                        job_results[job_record.job_type] = {
+                            'status': job_status,
+                            'result': job_record.result_data
+                        }
+
+            if not all_complete:
+                logger.debug(f"Platform request {platform_request_id} - not all jobs complete yet")
+                return
+
+            logger.info(f"🏁 All jobs complete for Platform request {platform_request_id}")
+
+            # Determine final status
+            if any_failed:
+                final_status = PlatformRequestStatus.FAILED
+                logger.warning(f"   ❌ At least one job failed - marking request as FAILED")
+            else:
+                final_status = PlatformRequestStatus.COMPLETED
+                logger.info(f"   ✅ All jobs succeeded - marking request as COMPLETED")
+
+                # Populate data_access URLs (only for successful completions)
+                data_access_urls = self._generate_data_access_urls(platform_request, job_results)
+                logger.info(f"   📍 Generated data access URLs: {list(data_access_urls.keys())}")
+
+                # TODO: Store data_access_urls in Platform request metadata
+                # self.platform_repo.update_data_access_urls(platform_request_id, data_access_urls)
+
+            # Update Platform request status
+            self.platform_repo.update_request_status(platform_request_id, final_status)
+            logger.info(f"   ✅ Platform request {platform_request_id} finalized: {final_status.value}")
+
+        except Exception as e:
+            logger.error(f"Error finalizing Platform request: {e}", exc_info=True)
+
+    def _generate_data_access_urls(self, platform_request: ApiRequest, job_results: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Generate data access URLs for completed Platform request.
+
+        Args:
+            platform_request: Platform request record
+            job_results: Dictionary of job_type → {status, result}
+
+        Returns:
+            Dictionary with OGC Features, STAC, and web map URLs
+
+        Added: 30 OCT 2025 - Data access URL generation
+        """
+        base_url = config.function_app_url or "https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net"
+        web_map_url = "https://rmhazuregeo.z13.web.core.windows.net"
+
+        # Extract data from job results
+        ingest_result = job_results.get('ingest_vector', {}).get('result', {})
+        stac_result = job_results.get('stac_catalog_vectors', {}).get('result', {})
+
+        table_name = ingest_result.get('table_name')
+        collection_id = stac_result.get('collection_id') or platform_request.dataset_id
+
+        urls = {}
+
+        # PostGIS info
+        if table_name:
+            urls['postgis'] = {
+                'schema': 'geo',
+                'table': table_name
+            }
+
+            # OGC Features API URLs
+            urls['ogc_features'] = {
+                'collection_url': f"{base_url}/api/features/collections/{table_name}",
+                'items_url': f"{base_url}/api/features/collections/{table_name}/items",
+                'web_map_url': f"{web_map_url}/?collection={table_name}"
+            }
+
+        # STAC API URLs
+        if collection_id:
+            urls['stac'] = {
+                'collection_id': collection_id,
+                'collection_url': f"{base_url}/api/collections/{collection_id}",
+                'items_url': f"{base_url}/api/collections/{collection_id}/items",
+                'search_url': f"{base_url}/api/search"
+            }
+
+        return urls
 
     def _generate_job_id(self, job_type: str, parameters: Dict[str, Any]) -> str:
         """

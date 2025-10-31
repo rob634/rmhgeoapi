@@ -236,13 +236,16 @@ class PlatformOrchestrator:
         self.job_repo = JobRepository()
 
         # CoreMachine requires explicit registries (no decorator magic!)
-        # See: core/machine.py:116-149 for constructor signature
+        # Pass job completion callback for Platform orchestration (30 OCT 2025)
+        # See: core/machine.py:116-159 for constructor signature
         self.core_machine = CoreMachine(
             all_jobs=ALL_JOBS,
-            all_handlers=ALL_HANDLERS
+            all_handlers=ALL_HANDLERS,
+            on_job_complete=self._handle_job_completion  # Platform callback
         )
 
         logger.info(f"✅ PlatformOrchestrator initialized with CoreMachine ({len(ALL_JOBS)} jobs, {len(ALL_HANDLERS)} handlers)")
+        logger.info(f"   ✅ Job completion callback registered for Platform orchestration")
 
     async def process_platform_request(self, request: ApiRequest) -> List[str]:
         """
@@ -477,6 +480,64 @@ class PlatformOrchestrator:
             logger.error(f"   Job Type: {job.job_type}")
             logger.error(f"   Traceback: {traceback.format_exc()}")
             raise
+
+    def _handle_job_completion(self, job_id: str, job_type: str, status: str, result: Dict[str, Any]):
+        """
+        Handle job completion callback from CoreMachine.
+
+        This method is called by CoreMachine when ANY job completes or fails.
+        Platform uses this to:
+        1. Chain jobs (e.g., ingest_vector → stac_catalog_vectors)
+        2. Update Platform request status when all jobs complete
+        3. Populate data_access URLs in Platform response
+
+        Args:
+            job_id: Job identifier
+            job_type: Type of job that completed
+            status: 'completed' or 'failed'
+            result: Job result data (aggregated task results)
+
+        Added: 30 OCT 2025 - Platform job orchestration
+        """
+        try:
+            logger.info(f"🔔 Platform received job completion: {job_type} ({job_id[:16]}) - {status}")
+
+            # Check if this job belongs to a Platform request
+            job_record = self.job_repo.get_job(job_id)
+            if not job_record:
+                logger.warning(f"Job {job_id[:16]} not found - ignoring completion callback")
+                return
+
+            platform_request_id = job_record.parameters.get('_platform_request_id')
+            if not platform_request_id:
+                logger.debug(f"Job {job_id[:16]} not associated with Platform request - ignoring")
+                return
+
+            logger.info(f"   Platform request: {platform_request_id}")
+            logger.info(f"   Job type: {job_type}")
+            logger.info(f"   Status: {status}")
+
+            # Handle based on job type and status
+            if status == 'completed':
+                # TODO: Implement job chaining logic here
+                # e.g., if job_type == 'ingest_vector' → submit 'stac_catalog_vectors'
+                logger.info(f"   ✅ Job completed successfully - chaining logic not yet implemented")
+                pass
+
+            elif status == 'failed':
+                # Mark Platform request as failed
+                logger.warning(f"   ❌ Job failed - marking Platform request as failed")
+                self.platform_repo.update_request_status(
+                    platform_request_id,
+                    PlatformRequestStatus.FAILED
+                )
+
+            # TODO: Check if all jobs for Platform request are complete
+            # TODO: If all complete, finalize Platform request and populate data_access URLs
+
+        except Exception as e:
+            logger.error(f"Error in job completion handler: {e}", exc_info=True)
+            # Don't raise - callback failures should not affect job completion
 
     def _generate_job_id(self, job_type: str, parameters: Dict[str, Any]) -> str:
         """

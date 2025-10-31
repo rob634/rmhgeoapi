@@ -118,7 +118,8 @@ class CoreMachine:
         all_jobs: Dict[str, Any],
         all_handlers: Dict[str, callable],
         state_manager: Optional[StateManager] = None,
-        config: Optional[AppConfig] = None
+        config: Optional[AppConfig] = None,
+        on_job_complete: Optional[callable] = None
     ):
         """
         Initialize CoreMachine with EXPLICIT registries (no decorator magic!).
@@ -131,6 +132,8 @@ class CoreMachine:
             all_handlers: ALL_HANDLERS dict from services/__init__.py (explicit handler registry)
             state_manager: Database state manager (injected for testability)
             config: Application configuration (injected for testability)
+            on_job_complete: Optional callback(job_id, job_type, status, result) called when job completes/fails
+                            Used by Platform layer for job orchestration and chaining (30 OCT 2025)
         """
         # EXPLICIT REGISTRIES - No decorator magic!
         self.jobs_registry = all_jobs
@@ -139,6 +142,9 @@ class CoreMachine:
         # Composition: Inject dependencies
         self.state_manager = state_manager or StateManager()
         self.config = config or AppConfig.from_environment()
+
+        # Completion callback (Platform layer integration - 30 OCT 2025)
+        self.on_job_complete = on_job_complete
 
         # Logging
         self.logger = LoggerFactory.create_logger(
@@ -149,6 +155,8 @@ class CoreMachine:
         self.logger.info(f"🤖 CoreMachine initialized - {len(all_jobs)} jobs, {len(all_handlers)} handlers registered")
         self.logger.debug(f"   Registered jobs: {list(all_jobs.keys())}")
         self.logger.debug(f"   Registered handlers: {list(all_handlers.keys())}")
+        if on_job_complete:
+            self.logger.info(f"   ✅ Job completion callback registered (Platform integration)")
 
     # ========================================================================
     # JOB PROCESSING - Entry point for job queue messages
@@ -1001,6 +1009,21 @@ class CoreMachine:
             # Complete job in database
             self.state_manager.complete_job(job_id, final_result)
 
+            # Invoke completion callback if registered (Platform integration - 30 OCT 2025)
+            if self.on_job_complete:
+                try:
+                    self.logger.debug(f"Invoking job completion callback for {job_id[:16]}...")
+                    self.on_job_complete(
+                        job_id=job_id,
+                        job_type=job_type,
+                        status='completed',
+                        result=final_result
+                    )
+                except Exception as e:
+                    # Callback failure should not fail the job
+                    self.logger.warning(f"⚠️ Job completion callback failed (non-fatal): {e}")
+                    self.logger.warning(f"   Job {job_id[:16]} is still marked as completed")
+
             self.logger.info(f"✅ Job {job_id[:16]}... completed successfully")
 
         except Exception as e:
@@ -1014,6 +1037,21 @@ class CoreMachine:
             self.logger.info(f"🚫 Marking job {job_id[:16]}... as FAILED")
             self.state_manager.update_job_status(job_id, JobStatus.FAILED)
             self.logger.info(f"✅ Job marked as FAILED: {error_message}")
+
+            # Invoke completion callback for failures (Platform integration - 30 OCT 2025)
+            if self.on_job_complete:
+                try:
+                    self.logger.debug(f"Invoking job failure callback for {job_id[:16]}...")
+                    self.on_job_complete(
+                        job_id=job_id,
+                        job_type='unknown',  # job_type not available in this context
+                        status='failed',
+                        result={'error': error_message}
+                    )
+                except Exception as e:
+                    # Callback failure should not affect failure handling
+                    self.logger.warning(f"⚠️ Job failure callback failed (non-fatal): {e}")
+
         except Exception as e:
             self.logger.error(f"❌ Failed to mark job as FAILED: {e}")
             # Best effort - don't raise

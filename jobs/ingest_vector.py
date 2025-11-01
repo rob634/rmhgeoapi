@@ -125,7 +125,6 @@ class IngestVectorJob(JobBase):
             container_name: str - Source container (default: 'rmhazuregeobronze')
             schema: str - Target PostgreSQL schema (default: 'geo')
             chunk_size: int - Rows per chunk (default: None = auto-calculate)
-            create_stac: bool - Create System STAC record (default: True)
             converter_params: dict - Format-specific parameters
                 CSV: lat_name, lon_name OR wkt_column
                 GPKG: layer_name
@@ -207,12 +206,6 @@ class IngestVectorJob(JobBase):
         if not isinstance(converter_params, dict):
             raise ValueError("converter_params must be a dictionary")
         validated["converter_params"] = converter_params
-
-        # Optional: create_stac (for testing - bypass Stage 3 STAC cataloging)
-        create_stac = params.get("create_stac", True)  # Default: True (create STAC)
-        if not isinstance(create_stac, bool):
-            raise ValueError(f"create_stac must be a boolean, got {type(create_stac).__name__}")
-        validated["create_stac"] = create_stac
 
         # Optional: indexes (database index configuration)
         indexes = params.get("indexes", {
@@ -484,11 +477,6 @@ class IngestVectorJob(JobBase):
 
         elif stage == 3:
             # Stage 3: Create STAC Record - Single task to catalog PostGIS table
-            # BYPASS: Skip Stage 3 if create_stac=false (for testing)
-            if not job_params.get("create_stac", True):
-                logger.info(f"⏭️ Stage 3: Skipping STAC cataloging (create_stac=false)")
-                return []  # No tasks = stage completes immediately
-
             if not previous_results:
                 raise ValueError("Stage 3 requires Stage 2 results")
 

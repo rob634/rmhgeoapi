@@ -214,24 +214,53 @@ def extract_tiles(params: dict) -> dict:
     start_time = datetime.now(timezone.utc)
 
     try:
-        # 🔍 CHECKPOINT 1: Handler Entry
-        logger.info(f"🔍 [CHECKPOINT_START] extract_tiles handler entry for job_id: {params.get('job_id', 'unknown')[:16]}")
-        logger.debug(f"   Parameters keys: {list(params.keys())}")
+        # 🔍 CHECKPOINT 1: Handler Entry - Granular error handling for param extraction
+        try:
+            logger.info(f"🔍 [CHECKPOINT_START] extract_tiles handler entry for job_id: {params.get('job_id', 'unknown')[:16]}")
+        except Exception as e:
+            error_msg = f"❌ [CHECKPOINT_START] FAILED - Cannot access params.get('job_id'): {str(e)}\n{traceback.format_exc()}"
+            logger.error(error_msg)
+            return {"success": False, "error": error_msg}
 
-        # Extract parameters
-        container_name = params.get("container_name")
-        blob_name = params.get("blob_name")
-        tiling_scheme_blob = params.get("tiling_scheme_blob")
-        tiling_scheme_container = params.get("tiling_scheme_container", container_name)
-        job_id = params.get("job_id")
-        task_id = params.get("task_id")
-        repository = params.get("repository")
+        try:
+            logger.debug(f"🔍 [CHECKPOINT_PARAMS_TYPE] params type check: {type(params)}")
+            logger.debug(f"   Parameters keys: {list(params.keys())}")
+        except Exception as e:
+            error_msg = f"❌ [CHECKPOINT_PARAMS_TYPE] FAILED - params is not dict or missing keys(): {str(e)}\n{traceback.format_exc()}"
+            logger.error(error_msg)
+            return {"success": False, "error": error_msg}
 
-        if not container_name or not blob_name or not tiling_scheme_blob:
-            return {
-                "success": False,
-                "error": "Missing required parameters: container_name, blob_name, tiling_scheme_blob"
-            }
+        # Extract parameters with granular error handling
+        try:
+            logger.debug(f"🔍 [CHECKPOINT_EXTRACT_PARAMS] Extracting all parameters...")
+            container_name = params.get("container_name")
+            blob_name = params.get("blob_name")
+            tiling_scheme_blob = params.get("tiling_scheme_blob")
+            tiling_scheme_container = params.get("tiling_scheme_container", container_name)
+            job_id = params.get("job_id")
+            task_id = params.get("task_id")
+            repository = params.get("repository")
+            logger.debug(f"✅ [CHECKPOINT_EXTRACT_PARAMS] All parameters extracted successfully")
+            logger.debug(f"   container_name={container_name}")
+            logger.debug(f"   blob_name={blob_name}")
+            logger.debug(f"   tiling_scheme_blob={tiling_scheme_blob}")
+        except Exception as e:
+            error_msg = f"❌ [CHECKPOINT_EXTRACT_PARAMS] FAILED during parameter extraction: {str(e)}\n{traceback.format_exc()}"
+            logger.error(error_msg)
+            return {"success": False, "error": error_msg}
+
+        # Validate required parameters
+        try:
+            logger.debug(f"🔍 [CHECKPOINT_VALIDATE_PARAMS] Validating required parameters...")
+            if not container_name or not blob_name or not tiling_scheme_blob:
+                error_msg = f"Missing required parameters: container_name={container_name}, blob_name={blob_name}, tiling_scheme_blob={tiling_scheme_blob}"
+                logger.error(f"❌ [CHECKPOINT_VALIDATE_PARAMS] {error_msg}")
+                return {"success": False, "error": error_msg}
+            logger.debug(f"✅ [CHECKPOINT_VALIDATE_PARAMS] All required parameters present")
+        except Exception as e:
+            error_msg = f"❌ [CHECKPOINT_VALIDATE_PARAMS] FAILED during validation: {str(e)}\n{traceback.format_exc()}"
+            logger.error(error_msg)
+            return {"success": False, "error": error_msg}
 
         # 🔍 CHECKPOINT 2: Config Init
         try:

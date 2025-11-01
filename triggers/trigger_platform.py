@@ -358,21 +358,32 @@ class PlatformOrchestrator:
             ])
 
         elif request.data_type == DataType.VECTOR.value:
-            # Vector processing pipeline
-            source = request.metadata.get('source_location', '')
-
-            # Use actual CoreMachine job types from jobs/__init__.py:ALL_JOBS
-            jobs.extend([
-                {
-                    'job_type': 'ingest_vector',  # Actual job: jobs/ingest_vector.py (handles validation + PostGIS import)
+            # Check for hello_world_only testing flag (31 OCT 2025)
+            if request.parameters.get('hello_world_only'):
+                # Testing mode: ONLY hello_world job (no ingest_vector)
+                jobs.append({
+                    'job_type': 'hello_world',
                     'parameters': {
-                        'source_path': source,
-                        'dataset_id': request.dataset_id,
-                        'table_name': f"{request.dataset_id}_{request.resource_id}",
-                        'schema': 'geo'
+                        'message': f"Platform request {request.request_id}",
+                        'n': request.parameters.get('n', 2)
                     }
-                }
-            ])
+                })
+            else:
+                # Normal vector processing pipeline
+                source = request.metadata.get('source_location', '')
+
+                # Use actual CoreMachine job types from jobs/__init__.py:ALL_JOBS
+                jobs.extend([
+                    {
+                        'job_type': 'ingest_vector',  # Actual job: jobs/ingest_vector.py (handles validation + PostGIS import)
+                        'parameters': {
+                            'source_path': source,
+                            'dataset_id': request.dataset_id,
+                            'table_name': f"{request.dataset_id}_{request.resource_id}",
+                            'schema': 'geo'
+                        }
+                    }
+                ])
 
         elif request.data_type == DataType.POINTCLOUD.value:
             # Point cloud processing
@@ -386,17 +397,6 @@ class PlatformOrchestrator:
             #     }
             # })
             logger.warning(f"Point cloud processing requested but no job exists yet for request {request.request_id}")
-
-        elif request.data_type == "hello_world":
-            # Simple test job for Platform callback validation (31 OCT 2025)
-            # Not a real data type - used for testing Platform orchestration
-            jobs.append({
-                'job_type': 'hello_world',
-                'parameters': {
-                    'message': f"Platform request {request.request_id}",
-                    'n': request.parameters.get('n', 2)  # Optional: number of parallel tasks
-                }
-            })
 
         return jobs
 

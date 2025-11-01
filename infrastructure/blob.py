@@ -390,7 +390,7 @@ class BlobRepository(IBlobRepository):
                 except ResourceNotFoundError:
                     logger.error(f"Container does not exist: {container}")
                     raise ResourceNotFoundError(
-                        f"Container '{container}' does not exist in storage account '{self.storage_account}'"
+                        f"Container '{container}' does not exist in storage account '{self.account_name}'"
                     )
 
             self._container_clients[container] = container_client
@@ -465,7 +465,7 @@ class BlobRepository(IBlobRepository):
 
         # Check container first
         if not self.container_exists(container):
-            result["message"] = f"Container '{container}' does not exist in storage account '{self.storage_account}'"
+            result["message"] = f"Container '{container}' does not exist in storage account '{self.account_name}'"
             return result
 
         result["container_exists"] = True
@@ -899,7 +899,7 @@ class BlobRepository(IBlobRepository):
 
             # Generate SAS token using user delegation key
             sas_token = generate_blob_sas(
-                account_name=self.storage_account,
+                account_name=self.account_name,
                 container_name=container_name,
                 blob_name=blob_name,
                 user_delegation_key=user_delegation_key,

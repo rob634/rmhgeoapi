@@ -364,7 +364,7 @@ class VectorToPostGISHandler:
                 conn.commit()
                 logger.info(f"Uploaded {len(chunk)} rows to {schema}.{table_name}")
 
-    def create_table_only(self, chunk: gpd.GeoDataFrame, table_name: str, schema: str = "geo"):
+    def create_table_only(self, chunk: gpd.GeoDataFrame, table_name: str, schema: str = "geo", indexes: dict = None):
         """
         Create PostGIS table without inserting data (DDL only).
 
@@ -375,13 +375,17 @@ class VectorToPostGISHandler:
             chunk: Sample GeoDataFrame for schema detection (first chunk recommended)
             table_name: Target table name
             schema: Target schema (default: 'geo')
+            indexes: Index configuration dict with keys:
+                - spatial: bool (default True)
+                - attributes: list of column names for B-tree indexes
+                - temporal: list of column names for DESC B-tree indexes
 
         Raises:
             psycopg.Error: If table creation fails
         """
         with psycopg.connect(self.conn_string) as conn:
             with conn.cursor() as cur:
-                self._create_table_if_not_exists(cur, chunk, table_name, schema)
+                self._create_table_if_not_exists(cur, chunk, table_name, schema, indexes)
                 conn.commit()
                 logger.info(f"Created table {schema}.{table_name} (DDL only, no data inserted)")
 
@@ -436,7 +440,8 @@ class VectorToPostGISHandler:
         cur: psycopg.Cursor,
         chunk: gpd.GeoDataFrame,
         table_name: str,
-        schema: str
+        schema: str,
+        indexes: dict = None
     ):
         """
         Create PostGIS table if it doesn't exist.
@@ -446,6 +451,7 @@ class VectorToPostGISHandler:
             chunk: Sample GeoDataFrame for schema detection
             table_name: Table name
             schema: Schema name
+            indexes: Index configuration (spatial, attributes, temporal)
         """
         # Get geometry type from first feature
         # After normalization, all geometries should be uniform Multi- types
@@ -484,19 +490,112 @@ class VectorToPostGISHandler:
 
         cur.execute(create_table)
 
-        # Create spatial index
-        index_name = f"idx_{table_name}_geom"
-        create_index = sql.SQL("""
-            CREATE INDEX IF NOT EXISTS {index_name}
-            ON {schema}.{table}
-            USING GIST (geom)
-        """).format(
-            index_name=sql.Identifier(index_name),
-            schema=sql.Identifier(schema),
-            table=sql.Identifier(table_name)
+        # Create indexes (spatial, attribute, temporal)
+        # Use provided index configuration or defaults
+        index_config = indexes if indexes is not None else {
+            'spatial': True,
+            'attributes': [],
+            'temporal': []
+        }
+
+        # Get column names for validation
+        column_names = [col for col in chunk.columns if col != 'geometry']
+
+        self._create_indexes(
+            cur=cur,
+            table_name=table_name,
+            schema=schema,
+            index_config=index_config,
+            columns=column_names
         )
 
-        cur.execute(create_index)
+    def _create_indexes(
+        self,
+        cur: psycopg.Cursor,
+        table_name: str,
+        schema: str,
+        index_config: dict,
+        columns: list
+    ):
+        """
+        Create database indexes based on configuration.
+
+        Supports three types of indexes:
+        1. Spatial (GIST) - On geometry column for spatial queries
+        2. Attribute (B-tree) - On specified columns for WHERE clause performance
+        3. Temporal (B-tree DESC) - On date/time columns for time-series queries
+
+        Args:
+            cur: psycopg cursor
+            table_name: Table name
+            schema: Schema name
+            index_config: Index configuration dict with keys:
+                - spatial: bool (default True)
+                - attributes: list of column names
+                - temporal: list of column names for DESC indexes
+            columns: List of available column names for validation
+
+        Example config:
+            {
+                'spatial': True,
+                'attributes': ['country', 'event_type'],
+                'temporal': ['event_date', 'timestamp']
+            }
+        """
+        # 1. SPATIAL INDEX (GIST on geometry column)
+        if index_config.get('spatial', True):
+            index_name = f"idx_{table_name}_geom"
+            create_index = sql.SQL("""
+                CREATE INDEX IF NOT EXISTS {index_name}
+                ON {schema}.{table}
+                USING GIST (geom)
+            """).format(
+                index_name=sql.Identifier(index_name),
+                schema=sql.Identifier(schema),
+                table=sql.Identifier(table_name)
+            )
+            cur.execute(create_index)
+            logger.info(f"✅ Created spatial index: {index_name}")
+
+        # 2. ATTRIBUTE INDEXES (B-tree on specified columns)
+        attribute_columns = index_config.get('attributes', [])
+        for col in attribute_columns:
+            if col not in columns:
+                logger.warning(f"⚠️ Skipping index on '{col}' - column not found in table")
+                continue
+
+            index_name = f"idx_{table_name}_{col}"
+            create_index = sql.SQL("""
+                CREATE INDEX IF NOT EXISTS {index_name}
+                ON {schema}.{table} ({column})
+            """).format(
+                index_name=sql.Identifier(index_name),
+                schema=sql.Identifier(schema),
+                table=sql.Identifier(table_name),
+                column=sql.Identifier(col)
+            )
+            cur.execute(create_index)
+            logger.info(f"✅ Created attribute index: {index_name} on {col}")
+
+        # 3. TEMPORAL INDEXES (B-tree DESC for time-series queries)
+        temporal_columns = index_config.get('temporal', [])
+        for temp_col in temporal_columns:
+            if temp_col not in columns:
+                logger.warning(f"⚠️ Skipping temporal index - column '{temp_col}' not found")
+                continue
+
+            index_name = f"idx_{table_name}_{temp_col}_desc"
+            create_index = sql.SQL("""
+                CREATE INDEX IF NOT EXISTS {index_name}
+                ON {schema}.{table} ({column} DESC)
+            """).format(
+                index_name=sql.Identifier(index_name),
+                schema=sql.Identifier(schema),
+                table=sql.Identifier(table_name),
+                column=sql.Identifier(temp_col)
+            )
+            cur.execute(create_index)
+            logger.info(f"✅ Created temporal index: {index_name} on {temp_col} DESC")
 
     def _insert_features(
         self,

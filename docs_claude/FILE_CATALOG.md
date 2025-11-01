@@ -1,10 +1,10 @@
 # File Catalog
 
-**Date**: 29 OCT 2025 (OGC Features API SQL Fix + Integration)
+**Date**: 31 OCT 2025 (Process Large Raster Execution Trace Added)
 **Total Python Files**: 140 (actual count)
 **Purpose**: Quick file lookup with one-line descriptions
 **Author**: Robert and Geospatial Claude Legion
-**Status**: ✅ Updated - OGC Features API integrated and SQL parameter bug fixed
+**Status**: ✅ Updated - Added PROCESS_LARGE_RASTER_EXECUTION_TRACE.md documentation
 
 ## 📊 Quick Stats (Updated 29 OCT 2025)
 - **Root Python files**: 6
@@ -330,6 +330,9 @@
 | `FILE_CATALOG.md` | This file - quick file lookup |
 | `ARCHITECTURE_REFERENCE.md` | Deep technical specifications |
 | `DEPLOYMENT_GUIDE.md` | Azure deployment procedures |
+| `PROCESS_LARGE_RASTER_EXECUTION_TRACE.md` | ⭐ NEW 31 OCT - Complete execution trace from HTTP → Job Complete |
+| `COREMACHINE_PLATFORM_ARCHITECTURE.md` | Two-layer architecture (Platform + CoreMachine) |
+| `SERVICE_BUS_HARMONIZATION.md` | Three-layer config architecture for Service Bus + Functions |
 
 ## 🔄 Architecture Evolution
 

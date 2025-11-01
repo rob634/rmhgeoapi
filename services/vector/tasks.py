@@ -187,12 +187,16 @@ def prepare_vector_chunks(parameters: Dict[str, Any]) -> Dict[str, Any]:
     Parameters:
         job_id: str - Job ID for temp path naming
         blob_name: str - Source file path in blob storage
-        container_name: str - Source container (default: 'bronze')
+        container_name: str - Source container (default: 'rmhazuregeobronze')
         file_extension: str - File extension (csv, gpkg, etc.)
         table_name: str - Target PostGIS table name
         schema: str - Target schema (default: 'geo')
         chunk_size: int - Rows per chunk (None = auto-calculate)
         converter_params: dict - Format-specific converter parameters
+        indexes: dict - Database index configuration (default: spatial only)
+            spatial: bool - Create GIST index on geometry
+            attributes: list - Column names for B-tree indexes
+            temporal: list - Column names for DESC B-tree indexes
 
     Returns:
         chunk_paths: List[str] - Paths to pickled chunks in blob storage
@@ -210,7 +214,8 @@ def prepare_vector_chunks(parameters: Dict[str, Any]) -> Dict[str, Any]:
 
     job_id = parameters["job_id"]
     blob_name = parameters["blob_name"]
-    container_name = parameters.get("container_name", "bronze")
+    # TODO: Parameterize via env var instead of hardcoded default
+    container_name = parameters.get("container_name", "rmhazuregeobronze")
     file_extension = parameters["file_extension"]
     table_name = parameters["table_name"]
     schema = parameters.get("schema", "geo")
@@ -247,10 +252,21 @@ def prepare_vector_chunks(parameters: Dict[str, Any]) -> Dict[str, Any]:
     chunks = handler.chunk_gdf(validated_gdf, chunk_size)
     actual_chunk_size = len(chunks[0]) if chunks else 0
 
-    # 5. Pickle each chunk to temp blob storage
+    # 5. Attach index configuration as chunk metadata (31 OCT 2025)
+    # This allows upload_pickled_chunk to create indexes with proper config
+    index_config = parameters.get("indexes", {
+        "spatial": True,
+        "attributes": [],
+        "temporal": []
+    })
+
+    # 6. Pickle each chunk to temp blob storage
     chunk_paths = []
     for i, chunk in enumerate(chunks):
         chunk_path = f"{config.vector_pickle_prefix}/{job_id}/chunk_{i}.pkl"
+
+        # Attach index config as chunk metadata (persists through pickle)
+        chunk._index_config = index_config
 
         # Pickle with protocol 5 (best compression)
         pickled = pickle.dumps(chunk, protocol=5)

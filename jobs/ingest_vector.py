@@ -100,10 +100,15 @@ class IngestVectorJob(JobBase):
         "blob_name": {"type": "str", "required": True},
         "file_extension": {"type": "str", "required": True},
         "table_name": {"type": "str", "required": True},
-        "container_name": {"type": "str", "default": "bronze"},
+        "container_name": {"type": "str", "default": "rmhazuregeobronze"},  # TODO: Parameterize via env var
         "schema": {"type": "str", "default": "geo"},
         "chunk_size": {"type": "int", "default": None},  # Auto-calculate if None
-        "converter_params": {"type": "dict", "default": {}}
+        "converter_params": {"type": "dict", "default": {}},
+        "indexes": {"type": "dict", "default": {
+            "spatial": True,      # Always create spatial GIST index on geom
+            "attributes": [],     # List of attribute column names for B-tree indexes
+            "temporal": []        # List of temporal columns for DESC B-tree indexes
+        }}
     }
 
     @staticmethod
@@ -117,7 +122,7 @@ class IngestVectorJob(JobBase):
             table_name: str - Target PostGIS table name
 
         Optional:
-            container_name: str - Source container (default: 'bronze')
+            container_name: str - Source container (default: 'rmhazuregeobronze')
             schema: str - Target PostgreSQL schema (default: 'geo')
             chunk_size: int - Rows per chunk (default: None = auto-calculate)
             create_stac: bool - Create System STAC record (default: True)
@@ -125,6 +130,10 @@ class IngestVectorJob(JobBase):
                 CSV: lat_name, lon_name OR wkt_column
                 GPKG: layer_name
                 KMZ/Shapefile: optional file name in archive
+            indexes: dict - Database index configuration (optional)
+                spatial: bool - Create GIST index on geometry (default: True)
+                attributes: list - Column names for B-tree indexes (default: [])
+                temporal: list - Column names for DESC B-tree indexes (default: [])
 
         Returns:
             Validated parameters dict
@@ -170,7 +179,8 @@ class IngestVectorJob(JobBase):
         validated["table_name"] = table_name.lower()
 
         # Optional: container_name
-        validated["container_name"] = params.get("container_name", "bronze")
+        # TODO: Parameterize via env var instead of hardcoded default
+        validated["container_name"] = params.get("container_name", "rmhazuregeobronze")
 
         # Optional: schema
         schema = params.get("schema", "geo")
@@ -203,6 +213,44 @@ class IngestVectorJob(JobBase):
         if not isinstance(create_stac, bool):
             raise ValueError(f"create_stac must be a boolean, got {type(create_stac).__name__}")
         validated["create_stac"] = create_stac
+
+        # Optional: indexes (database index configuration)
+        indexes = params.get("indexes", {
+            "spatial": True,
+            "attributes": [],
+            "temporal": []
+        })
+        if not isinstance(indexes, dict):
+            raise ValueError("indexes must be a dictionary")
+
+        # Validate indexes.spatial
+        if "spatial" in indexes:
+            if not isinstance(indexes["spatial"], bool):
+                raise ValueError(f"indexes.spatial must be a boolean, got {type(indexes['spatial']).__name__}")
+
+        # Validate indexes.attributes
+        if "attributes" in indexes:
+            if not isinstance(indexes["attributes"], list):
+                raise ValueError(f"indexes.attributes must be a list, got {type(indexes['attributes']).__name__}")
+            # Validate each attribute column name
+            for attr in indexes["attributes"]:
+                if not isinstance(attr, str) or not attr.strip():
+                    raise ValueError(f"indexes.attributes must contain non-empty strings, got {attr}")
+
+        # Validate indexes.temporal
+        if "temporal" in indexes:
+            if not isinstance(indexes["temporal"], list):
+                raise ValueError(f"indexes.temporal must be a list, got {type(indexes['temporal']).__name__}")
+            # Validate each temporal column name
+            for temp_col in indexes["temporal"]:
+                if not isinstance(temp_col, str) or not temp_col.strip():
+                    raise ValueError(f"indexes.temporal must contain non-empty strings, got {temp_col}")
+
+        validated["indexes"] = {
+            "spatial": indexes.get("spatial", True),
+            "attributes": indexes.get("attributes", []),
+            "temporal": indexes.get("temporal", [])
+        }
 
         return validated
 
@@ -351,7 +399,12 @@ class IngestVectorJob(JobBase):
                         "table_name": job_params["table_name"],
                         "schema": job_params["schema"],
                         "chunk_size": job_params.get("chunk_size"),
-                        "converter_params": job_params.get("converter_params", {})
+                        "converter_params": job_params.get("converter_params", {}),
+                        "indexes": job_params.get("indexes", {
+                            "spatial": True,
+                            "attributes": [],
+                            "temporal": []
+                        })
                     }
                 }
             ]
@@ -397,12 +450,20 @@ class IngestVectorJob(JobBase):
             blob_data = blob_repo.read_blob(config.vector_pickle_container, first_chunk_path)
             first_chunk = pickle.loads(blob_data)
 
-            # Create table using PostGIS handler
+            # Create table using PostGIS handler with index configuration
             from services.vector.postgis_handler import VectorToPostGISHandler
             postgis_handler = VectorToPostGISHandler()
-            postgis_handler.create_table_only(first_chunk, table_name, schema)
 
-            logger.info(f"✅ Table {schema}.{table_name} created successfully (ready for parallel inserts)")
+            # Extract indexes configuration from job parameters
+            indexes = job_params.get("indexes", {
+                "spatial": True,
+                "attributes": [],
+                "temporal": []
+            })
+
+            postgis_handler.create_table_only(first_chunk, table_name, schema, indexes)
+
+            logger.info(f"✅ Table {schema}.{table_name} created successfully with indexes: {indexes}")
 
             # Create one task per chunk with deterministic ID
             tasks = []

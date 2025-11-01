@@ -65,20 +65,57 @@
    - View on web map: https://rmhazuregeo.z13.web.core.windows.net/
 ```
 
-**Implementation Tasks**:
-- [ ] **Investigate /api/db/debug/all endpoint failure** (31 OCT 2025)
+**NEW PRIORITY (31 OCT 2025): Individual Job Testing First, Platform Layer Second**
+**Philosophy**: Jobs must work standalone before Platform orchestration
+
+**Phase 1: Individual CoreMachine Jobs (CURRENT PRIORITY)**
+- [ ] **Test ingest_vector job standalone** (P0)
+  - Submit via: `POST /api/jobs/submit/ingest_vector`
+  - Test vector file: Valid GeoJSON/Shapefile from blob storage
+  - Verify: PostGIS table created in geo schema
+  - Verify: Spatial indexes created
+  - Verify: Job completes with table_name in result
+  - Success: Can query table via psql/OGC Features API
+
+- [ ] **Test stac_catalog_vectors job standalone** (P0)
+  - Submit via: `POST /api/jobs/submit/stac_catalog_vectors`
+  - Prerequisite: PostGIS table exists (from ingest_vector or manual)
+  - Verify: STAC collection created in pgstac schema
+  - Verify: STAC items created for features
+  - Verify: Job completes with collection_id in result
+  - Success: Can query via STAC API
+
+- [ ] **Document individual job usage** (P0)
+  - Create curl examples for each job
+  - Document required parameters
+  - Document expected results
+  - Document how to verify success
+
+- [ ] **Test all accepted vector file formats** (P0)
+  - **doc.kml** (KML format)
+  - **acled_test.csv** (CSV with coordinates)
+  - **roads.zip** (Zipped shapefile)
+  - **11.geojson** (GeoJSON)
+  - **8.geojson** (GeoJSON)
+  - **DMA/Dominica_Southeast_AOI.kml** (KML with complex geometries)
+  - For each format:
+    - Submit via ingest_vector job
+    - Verify successful ingestion to PostGIS
+    - Verify correct geometry type detection
+    - Verify proper CRS handling
+    - Document any format-specific issues
+    - Test OGC Features API access to ingested data
+
+**Phase 2: Platform Orchestration (AFTER Phase 1 Complete)**
+- [ ] **Platform job chaining**: Chain ingest_vector → stac_catalog_vectors
+- [ ] **Platform response formatting**: Return OGC Features URL + STAC Collection ID
+- [ ] **Platform idempotency**: Test re-submitting same file
+- [ ] **End-to-end Platform test**: Upload via Platform → verify all steps
+
+**Deferred Tasks**:
+- [ ] **Investigate /api/db/debug/all endpoint failure** (Low priority)
   - Returns "Debug dump failed: 0" instead of jobs/tasks data
-  - Check exception handling in function_app.py lines 1310-1318
-  - Verify PostgreSQLRepository schema exists and connection works
-  - Test: `curl https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/db/debug/all?limit=5`
-- [ ] **Test existing vector ETL**: Verify ingest_vector job works end-to-end
-- [ ] **Test existing STAC creation**: Verify STAC catalog jobs work with vectors
-- [ ] **Platform orchestration**: Update Platform layer to chain these jobs
-- [ ] **Response formatting**: Return OGC Features URL in Platform response
-- [ ] **Idempotency verification**: Test re-submitting same file (should detect existing data)
-- [ ] **Service layer edits**: Update services/ as needed (avoid CoreMachine changes)
-- [ ] **End-to-end test**: Upload test file → verify all steps → access via OGC URL
-- [ ] **Documentation**: Document complete workflow with curl examples
+  - Can use /api/db/jobs and /api/db/tasks instead
 
 **Success Criteria**:
 ✅ Upload vector file → Get OGC Features URL back in < 2 minutes

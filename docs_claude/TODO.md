@@ -1,7 +1,53 @@
 # Active Tasks
 
-**Last Updated**: 30 OCT 2025
+**Last Updated**: 01 NOV 2025
 **Author**: Robert and Geospatial Claude Legion
+
+---
+
+## 🎉 MAJOR SUCCESS: Vector Ingest Configurable Indexes + Job Completion Fix (01 NOV 2025)
+
+**Status**: ✅ **BOTH ISSUES RESOLVED** - Vector ingest fully operational with configurable database indexes
+**Achievement**: End-to-end vector ETL with spatial GIST, attribute B-tree, and temporal DESC indexes working
+
+### What We Fixed (01 NOV 2025)
+
+✅ **Issue 1: Configurable Index Creation**:
+- **Problem**: Index config code existed but wasn't connected - job params never passed to PostGIS handler
+- **Root Cause**: `jobs/ingest_vector.py` didn't extract `indexes` from job_params, handler used GeoDataFrame metadata (never set)
+- **Fix**: Pass indexes parameter through entire chain (job → handler → _create_table_if_not_exists → _create_indexes)
+- **Result**: All 3 index types working - spatial GIST, attribute B-tree, temporal B-tree DESC
+
+✅ **Issue 2: Jobs Stuck When create_stac=false**:
+- **Problem**: Jobs completed all tasks but stuck at "processing" stage 1/3, never marked complete
+- **Root Cause**: `total_stages=3` hardcoded, Stage 3 returned `[]` when create_stac=false, job never advanced to stage 3
+- **Fix**: Removed `create_stac` parameter entirely - STAC records ALWAYS created for system-vectors
+- **Result**: All vector ingest jobs complete successfully through all 3 stages
+
+✅ **Production Test - ACLED with Full Index Suite**:
+```json
+{
+  "blob_name": "acled_test.csv",
+  "table_name": "acled_1997_indexed",
+  "indexes": {
+    "spatial": true,
+    "attributes": ["country", "event_type"],
+    "temporal": ["event_date"]
+  }
+}
+```
+
+**Results**: 5,000 rows, 4 indexes created, STAC item in system-vectors, 100% success ✅
+
+**Indexes Verified in PostgreSQL**:
+1. `idx_acled_1997_indexed_geom` - GIST spatial index
+2. `idx_acled_1997_indexed_country` - B-tree attribute index
+3. `idx_acled_1997_indexed_event_type` - B-tree attribute index
+4. `idx_acled_1997_indexed_event_date_desc` - B-tree DESC temporal index
+
+**Git Commits**:
+- `9b74697` - Index creation fix (DEPLOYED)
+- `2f348c5` - Remove create_stac parameter (COMMITTED, ready to deploy)
 
 ---
 

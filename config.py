@@ -823,7 +823,23 @@ class AppConfig(BaseModel):
         default=True,
         description="Enable PostgreSQL connectivity checks in health endpoint"
     )
-    
+
+    # ========================================================================
+    # API Endpoint Configuration (NEW - 3 NOV 2025)
+    # ========================================================================
+
+    titiler_base_url: str = Field(
+        default="https://rmhtitiler-ghcyd7g0bxdvc2hc.eastus-01.azurewebsites.net",
+        description="Base URL for TiTiler-PgSTAC tile server (raster visualization). "
+                    "Production URL already deployed and operational."
+    )
+
+    ogc_features_base_url: str = Field(
+        default="https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/features",
+        description="Base URL for OGC API - Features (vector data access). "
+                    "Placeholder until custom DNS (geospatial.rmh.org) is configured."
+    )
+
     # ========================================================================
     # Computed Properties
     # ========================================================================
@@ -892,6 +908,80 @@ class AppConfig(BaseModel):
             # Returns: "silver-tiles" (or custom value if env var set)
         """
         return self.intermediate_tiles_container or self.storage.silver.get_container('tiles')
+
+    def generate_titiler_urls(self, collection_id: str, item_id: str) -> dict:
+        """
+        Generate TiTiler-PgSTAC tile serving URLs for a raster STAC item.
+
+        Use this for ALL raster workflows (process_raster, process_large_raster,
+        process_raster_collection) to provide users with ready-to-use
+        visualization endpoints.
+
+        Args:
+            collection_id: STAC collection ID (typically "cogs")
+            item_id: STAC item ID (e.g., "17apr2024wv2", "antigua-april-2013")
+
+        Returns:
+            Dict with complete set of TiTiler endpoints:
+            - tile_url_template: For Leaflet/Mapbox ({z}/{x}/{y} placeholders)
+            - preview_url: PNG thumbnail (512px default)
+            - info_url: Raster metadata (bands, stats, data type)
+            - bounds_url: Spatial extent in EPSG:4326
+            - map_viewer_url: Built-in Leaflet interactive viewer
+
+        Example:
+            >>> config = get_config()
+            >>> urls = config.generate_titiler_urls("cogs", "17apr2024wv2")
+            >>> urls["preview_url"]
+            'https://rmhtitiler-.../collections/cogs/items/17apr2024wv2/preview.png?width=512'
+
+        Notes:
+            - URLs work immediately after STAC item is created in PgSTAC
+            - No additional TiTiler configuration required
+            - Supports OGC Tiles 1.0 standard parameters (rescale, colormap, etc.)
+            - tile_url_template uses {z}/{x}/{y} placeholders for web mapping libraries
+        """
+        base = self.titiler_base_url.rstrip('/')
+
+        return {
+            "tile_url_template": f"{base}/collections/{collection_id}/items/{item_id}/WebMercatorQuad/tiles/{{z}}/{{x}}/{{y}}",
+            "preview_url": f"{base}/collections/{collection_id}/items/{item_id}/preview.png?width=512",
+            "info_url": f"{base}/collections/{collection_id}/items/{item_id}/info",
+            "bounds_url": f"{base}/collections/{collection_id}/items/{item_id}/bounds",
+            "map_viewer_url": f"{base}/collections/{collection_id}/items/{item_id}/WebMercatorQuad/map.html"
+        }
+
+    def generate_ogc_features_url(self, collection_id: str) -> str:
+        """
+        Generate OGC API - Features collection URL for vector data.
+
+        Use this for ALL vector workflows (ingest_vector) to provide users
+        with standardized GeoJSON access to their PostGIS tables.
+
+        Args:
+            collection_id: Collection name (same as PostGIS table name)
+
+        Returns:
+            OGC Features collection URL for querying vector features
+
+        Example:
+            >>> config = get_config()
+            >>> url = config.generate_ogc_features_url("acled_1997")
+            >>> url
+            'https://rmhgeoapibeta-.../api/features/collections/acled_1997'
+
+        Available Operations:
+            - GET /collections/{id} - Collection metadata (bbox, feature count)
+            - GET /collections/{id}/items - Query features (supports bbox, limit, offset)
+            - GET /collections/{id}/items/{feature_id} - Single feature by ID
+
+        Notes:
+            - Base URL is placeholder until custom DNS is configured
+            - Will become https://geospatial.rmh.org/api/features/collections/{id}
+            - Easy update: Single environment variable (OGC_FEATURES_BASE_URL)
+            - OGC API - Features Core 1.0 compliant
+        """
+        return f"{self.ogc_features_base_url.rstrip('/')}/collections/{collection_id}"
 
     # ========================================================================
     # Validation

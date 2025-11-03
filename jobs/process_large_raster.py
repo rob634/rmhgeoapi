@@ -4,7 +4,7 @@
 # EPOCH: 4 - ACTIVE ✅
 # STATUS: Job workflow - Large raster tiling and processing (1-30 GB)
 # PURPOSE: 4-stage workflow for tiling large rasters into COG mosaics
-# LAST_REVIEWED: 27 OCT 2025
+# LAST_REVIEWED: 3 NOV 2025
 # EXPORTS: ProcessLargeRasterWorkflow class
 # INTERFACES: JobBase contract - create_tasks_for_stage() signature
 # PYDANTIC_MODELS: None (class attributes)
@@ -701,35 +701,133 @@ class ProcessLargeRasterWorkflow(JobBase):
             raise ValueError(f"Invalid stage: {stage}. ProcessLargeRasterWorkflow has 5 stages.")
 
     @staticmethod
-    def finalize_job(context=None) -> Dict[str, Any]:
+    def finalize_job(context) -> Dict[str, Any]:
         """
         Create final job summary from all completed tasks.
 
-        TODO (3 NOV 2025): Implement rich pattern to extract:
-        - MosaicJSON location and metadata (Stage 4 results)
-        - STAC collection ID and item count (Stage 5 results)
-        - Total COG count and size (Stage 3 results)
-        - Tiling statistics (Stage 2 results)
-
-        Reference: jobs/process_raster.py lines 573-650 for rich pattern example
+        Extracts:
+        - Tiling statistics (Stage 1-2)
+        - COG processing results (Stage 3)
+        - MosaicJSON metadata (Stage 4)
+        - STAC collection details (Stage 5)
+        - TiTiler visualization URLs
 
         Args:
             context: JobExecutionContext with task results
 
         Returns:
-            Job summary dict
+            Comprehensive job summary with TiTiler URLs
         """
         from util_logger import LoggerFactory, ComponentType
+        from core.models import TaskStatus
+        from config import get_config
 
-        logger = LoggerFactory.create_logger(ComponentType.CONTROLLER, "ProcessLargeRasterWorkflow.finalize_job")
+        logger = LoggerFactory.create_logger(
+            ComponentType.CONTROLLER,
+            "ProcessLargeRasterWorkflow.finalize_job"
+        )
 
-        # Minimal implementation for now
-        if context:
-            logger.info(f"✅ Job {context.job_id} completed with {len(context.task_results)} tasks")
-        else:
-            logger.info("✅ ProcessLargeRaster job completed")
+        task_results = context.task_results
+        params = context.parameters
+        config = get_config()
+
+        # Extract tiling scheme results (Stage 1)
+        tiling_tasks = [t for t in task_results if t.task_type == "generate_tiling_scheme"]
+        tiling_summary = {}
+        if tiling_tasks and tiling_tasks[0].result_data:
+            tiling_result = tiling_tasks[0].result_data.get("result", {})
+            tiling_summary = {
+                "scheme_blob": tiling_result.get("tiling_scheme_blob"),
+                "tile_count": tiling_result.get("tile_count"),
+                "grid_dimensions": tiling_result.get("grid_dimensions")
+            }
+
+        # Extract tile extraction results (Stage 2)
+        extraction_tasks = [t for t in task_results if t.task_type == "extract_tiles"]
+        extraction_summary = {}
+        if extraction_tasks and extraction_tasks[0].result_data:
+            extraction_result = extraction_tasks[0].result_data.get("result", {})
+            extraction_summary = {
+                "processing_time_seconds": extraction_result.get("processing_time_seconds"),
+                "tiles_extracted": extraction_result.get("tile_count")
+            }
+
+        # Extract COG results (Stage 3 - fan-out, N tasks)
+        cog_tasks = [t for t in task_results if t.task_type == "create_cog"]
+        successful_cogs = [t for t in cog_tasks if t.status == TaskStatus.COMPLETED]
+        failed_cogs = [t for t in cog_tasks if t.status == TaskStatus.FAILED]
+
+        # Calculate total COG size
+        total_size_mb = 0
+        for cog_task in successful_cogs:
+            if cog_task.result_data and cog_task.result_data.get("result"):
+                size_mb = cog_task.result_data["result"].get("size_mb", 0)
+                total_size_mb += size_mb
+
+        cog_summary = {
+            "total_count": len(successful_cogs),
+            "successful": len(successful_cogs),
+            "failed": len(failed_cogs),
+            "total_size_mb": round(total_size_mb, 2)
+        }
+
+        # Extract MosaicJSON result (Stage 4 - fan-in)
+        mosaicjson_tasks = [t for t in task_results if t.task_type == "create_mosaicjson"]
+        mosaicjson_summary = {}
+        if mosaicjson_tasks and mosaicjson_tasks[0].result_data:
+            mosaicjson_result = mosaicjson_tasks[0].result_data.get("result", {})
+            mosaicjson_summary = {
+                "blob_path": mosaicjson_result.get("mosaicjson_blob"),
+                "url": mosaicjson_result.get("mosaicjson_url"),
+                "bounds": mosaicjson_result.get("bounds"),
+                "tile_count": mosaicjson_result.get("tile_count")
+            }
+
+        # Extract STAC result (Stage 5 - fan-in)
+        stac_tasks = [t for t in task_results if t.task_type == "create_stac_collection"]
+        stac_summary = {}
+        titiler_urls = {}
+
+        if stac_tasks and stac_tasks[0].result_data:
+            stac_result = stac_tasks[0].result_data.get("result", {})
+            collection_id = stac_result.get("collection_id", "cogs")
+            item_id = stac_result.get("stac_id") or stac_result.get("pgstac_id")
+
+            stac_summary = {
+                "collection_id": collection_id,
+                "stac_id": item_id,
+                "pgstac_id": stac_result.get("pgstac_id"),
+                "inserted_to_pgstac": stac_result.get("inserted_to_pgstac", True),
+                "ready_for_titiler": True
+            }
+
+            # Generate TiTiler URLs if we have STAC item ID
+            if item_id:
+                titiler_urls = config.generate_titiler_urls(
+                    collection_id=collection_id,
+                    item_id=item_id
+                )
+
+        logger.info(
+            f"✅ Large raster job {context.job_id[:16]} completed: "
+            f"{len(successful_cogs)} COGs, MosaicJSON created, STAC published"
+        )
 
         return {
             "job_type": "process_large_raster",
-            "status": "completed"
+            "job_id": context.job_id,
+            "source_blob": params.get("blob_name"),
+            "source_container": params.get("container_name"),
+            "tiling": tiling_summary,
+            "extraction": extraction_summary,
+            "cogs": cog_summary,
+            "mosaicjson": mosaicjson_summary,
+            "stac": stac_summary,
+            "titiler": titiler_urls,  # Ready-to-use visualization URLs
+            "stages_completed": context.current_stage,
+            "total_tasks_executed": len(task_results),
+            "tasks_by_status": {
+                "completed": sum(1 for t in task_results if t.status == TaskStatus.COMPLETED),
+                "failed": sum(1 for t in task_results if t.status == TaskStatus.FAILED)
+            }
         }

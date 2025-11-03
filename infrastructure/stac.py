@@ -533,7 +533,7 @@ class StacInfrastructure:
         Create STAC collection for any tier (Bronze/Silver/Gold).
 
         Args:
-            container: Azure Storage container name (from config.bronze/silver/gold_container_name)
+            container: Azure Storage container name (from config.storage.{zone}.get_container())
             tier: Collection tier ('bronze', 'silver', or 'gold')
             collection_id: Unique collection identifier (defaults to '{tier}-{container}')
             title: Human-readable title (defaults to generated title)
@@ -1344,6 +1344,463 @@ def clear_stac_data(mode: str = 'all') -> Dict[str, Any]:
         logger.error(f"Failed to clear STAC data: {e}")
         return {
             'success': False,
+            'error': str(e),
+            'error_type': type(e).__name__
+        }
+
+
+# ============================================================================
+# PGSTAC SCHEMA INSPECTION (2 NOV 2025)
+# ============================================================================
+# Deep inspection endpoints for pgstac schema health and statistics
+# ============================================================================
+
+def get_schema_info() -> Dict[str, Any]:
+    """
+    Get detailed information about pgstac schema structure.
+
+    Queries PostgreSQL system catalogs to inspect:
+    - Tables and their sizes
+    - Indexes
+    - Functions
+    - Partitions
+    - Roles
+
+    Returns:
+        Dict with comprehensive schema information
+    """
+    from config import get_config
+
+    config = get_config()
+    connection_string = config.postgis_connection_string
+
+    logger.info("🔍 Inspecting pgstac schema structure...")
+
+    try:
+        with psycopg.connect(connection_string) as conn:
+            with conn.cursor() as cur:
+                # Get PgSTAC version
+                version = None
+                try:
+                    cur.execute("SELECT pgstac.get_version()")
+                    version = cur.fetchone()[0]
+                except psycopg.Error:
+                    version = "unknown"
+
+                # Get table information with sizes
+                cur.execute("""
+                    SELECT
+                        t.tablename,
+                        pg_total_relation_size(quote_ident(t.schemaname) || '.' || quote_ident(t.tablename)) / 1024.0 / 1024.0 as size_mb,
+                        (SELECT COUNT(*) FROM information_schema.columns
+                         WHERE table_schema = t.schemaname AND table_name = t.tablename) as column_count
+                    FROM pg_tables t
+                    WHERE t.schemaname = 'pgstac'
+                    ORDER BY pg_total_relation_size(quote_ident(t.schemaname) || '.' || quote_ident(t.tablename)) DESC
+                """)
+                tables_raw = cur.fetchall()
+
+                tables = {}
+                for table_name, size_mb, col_count in tables_raw:
+                    # Get row count for each table
+                    try:
+                        cur.execute(
+                            sql.SQL("SELECT COUNT(*) FROM {}").format(
+                                sql.Identifier('pgstac', table_name)
+                            )
+                        )
+                        row_count = cur.fetchone()[0]
+                    except psycopg.Error:
+                        row_count = None
+
+                    # Get indexes for this table
+                    cur.execute("""
+                        SELECT indexname
+                        FROM pg_indexes
+                        WHERE schemaname = 'pgstac' AND tablename = %s
+                    """, [table_name])
+                    indexes = [row[0] for row in cur.fetchall()]
+
+                    tables[table_name] = {
+                        'row_count': row_count,
+                        'size_mb': round(size_mb, 2),
+                        'column_count': col_count,
+                        'indexes': indexes
+                    }
+
+                # Get functions
+                cur.execute("""
+                    SELECT routine_name
+                    FROM information_schema.routines
+                    WHERE routine_schema = 'pgstac'
+                    ORDER BY routine_name
+                """)
+                functions = [row[0] for row in cur.fetchall()]
+
+                # Get roles
+                cur.execute(
+                    "SELECT rolname FROM pg_roles WHERE rolname LIKE 'pgstac_%'"
+                )
+                roles = [row[0] for row in cur.fetchall()]
+
+                # Get total schema size
+                cur.execute("""
+                    SELECT
+                        pg_size_pretty(SUM(pg_total_relation_size(quote_ident(schemaname) || '.' || quote_ident(tablename)))) as total_size,
+                        SUM(pg_total_relation_size(quote_ident(schemaname) || '.' || quote_ident(tablename))) / 1024.0 / 1024.0 as total_size_mb
+                    FROM pg_tables
+                    WHERE schemaname = 'pgstac'
+                """)
+                size_data = cur.fetchone()
+
+                logger.info(f"✅ Schema inspection complete: {len(tables)} tables, {len(functions)} functions")
+
+                return {
+                    'schema': 'pgstac',
+                    'version': version,
+                    'total_size': size_data[0] if size_data else 'unknown',
+                    'total_size_mb': round(size_data[1], 2) if size_data else 0,
+                    'tables': tables,
+                    'table_count': len(tables),
+                    'function_count': len(functions),
+                    'functions': functions[:20],  # First 20 functions
+                    'roles': roles
+                }
+
+    except Exception as e:
+        logger.error(f"❌ Schema inspection failed: {e}")
+        return {
+            'error': str(e),
+            'error_type': type(e).__name__
+        }
+
+
+def get_collection_stats(collection_id: str) -> Dict[str, Any]:
+    """
+    Get detailed statistics for a specific STAC collection.
+
+    Args:
+        collection_id: Collection ID to analyze
+
+    Returns:
+        Dict with collection statistics including:
+        - Item count
+        - Total size
+        - Spatial extent (actual bbox from items)
+        - Temporal extent
+        - Asset types and counts
+        - Recent items
+    """
+    from config import get_config
+
+    config = get_config()
+    connection_string = config.postgis_connection_string
+
+    logger.info(f"📊 Getting statistics for collection '{collection_id}'...")
+
+    try:
+        with psycopg.connect(connection_string) as conn:
+            with conn.cursor() as cur:
+                # Check if collection exists
+                cur.execute(
+                    "SELECT EXISTS(SELECT 1 FROM pgstac.collections WHERE id = %s)",
+                    [collection_id]
+                )
+                if not cur.fetchone()[0]:
+                    return {
+                        'error': f"Collection '{collection_id}' not found",
+                        'collection_id': collection_id
+                    }
+
+                # Get collection metadata
+                cur.execute(
+                    "SELECT content FROM pgstac.collections WHERE id = %s",
+                    [collection_id]
+                )
+                collection_data = cur.fetchone()
+                collection_json = collection_data[0] if collection_data else {}
+
+                # Get item count
+                cur.execute(
+                    "SELECT COUNT(*) FROM pgstac.items WHERE collection = %s",
+                    [collection_id]
+                )
+                item_count = cur.fetchone()[0]
+
+                # Get spatial extent (actual bbox from items)
+                cur.execute("""
+                    SELECT
+                        ST_XMin(ST_Extent(geometry)) as xmin,
+                        ST_YMin(ST_Extent(geometry)) as ymin,
+                        ST_XMax(ST_Extent(geometry)) as xmax,
+                        ST_YMax(ST_Extent(geometry)) as ymax
+                    FROM pgstac.items
+                    WHERE collection = %s AND geometry IS NOT NULL
+                """, [collection_id])
+                bbox_data = cur.fetchone()
+                actual_bbox = None
+                if bbox_data and bbox_data[0] is not None:
+                    actual_bbox = [float(x) for x in bbox_data]
+
+                # Get temporal extent
+                cur.execute("""
+                    SELECT
+                        MIN(datetime) as earliest,
+                        MAX(datetime) as latest
+                    FROM pgstac.items
+                    WHERE collection = %s AND datetime IS NOT NULL
+                """, [collection_id])
+                temporal_data = cur.fetchone()
+
+                # Get asset types
+                cur.execute("""
+                    SELECT
+                        jsonb_object_keys(content->'assets') as asset_key,
+                        COUNT(*) as count
+                    FROM pgstac.items
+                    WHERE collection = %s
+                    GROUP BY asset_key
+                """, [collection_id])
+                assets = {row[0]: row[1] for row in cur.fetchall()}
+
+                # Get recent items (last 5)
+                cur.execute("""
+                    SELECT id, content->>'datetime' as datetime
+                    FROM pgstac.items
+                    WHERE collection = %s
+                    ORDER BY datetime DESC NULLS LAST
+                    LIMIT 5
+                """, [collection_id])
+                recent_items = [
+                    {'id': row[0], 'datetime': row[1]}
+                    for row in cur.fetchall()
+                ]
+
+                logger.info(f"✅ Collection '{collection_id}' stats: {item_count} items")
+
+                return {
+                    'collection_id': collection_id,
+                    'title': collection_json.get('title'),
+                    'description': collection_json.get('description'),
+                    'item_count': item_count,
+                    'spatial_extent': {
+                        'bbox': actual_bbox,
+                        'configured_bbox': collection_json.get('extent', {}).get('spatial', {}).get('bbox', [[]])
+                    },
+                    'temporal_extent': {
+                        'start': temporal_data[0].isoformat() if temporal_data and temporal_data[0] else None,
+                        'end': temporal_data[1].isoformat() if temporal_data and temporal_data[1] else None,
+                        'span_days': (temporal_data[1] - temporal_data[0]).days if temporal_data and temporal_data[0] and temporal_data[1] else None
+                    },
+                    'assets': assets,
+                    'recent_items': recent_items,
+                    'has_items': item_count > 0
+                }
+
+    except Exception as e:
+        logger.error(f"❌ Failed to get collection stats for '{collection_id}': {e}")
+        return {
+            'error': str(e),
+            'error_type': type(e).__name__,
+            'collection_id': collection_id
+        }
+
+
+def get_item_by_id(item_id: str, collection_id: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Get a single STAC item by ID.
+
+    Args:
+        item_id: STAC item ID
+        collection_id: Optional collection ID to narrow search
+
+    Returns:
+        STAC Item JSON or error dict
+    """
+    from config import get_config
+
+    config = get_config()
+    connection_string = config.postgis_connection_string
+
+    logger.info(f"🔍 Looking up item '{item_id}'" + (f" in collection '{collection_id}'" if collection_id else ""))
+
+    try:
+        with psycopg.connect(connection_string) as conn:
+            with conn.cursor() as cur:
+                if collection_id:
+                    # Search in specific collection
+                    cur.execute(
+                        "SELECT content FROM pgstac.items WHERE id = %s AND collection = %s",
+                        [item_id, collection_id]
+                    )
+                else:
+                    # Search across all collections
+                    cur.execute(
+                        "SELECT content FROM pgstac.items WHERE id = %s",
+                        [item_id]
+                    )
+
+                result = cur.fetchone()
+
+                if result:
+                    logger.info(f"✅ Found item '{item_id}'")
+                    return result[0]  # Return STAC Item JSON directly
+                else:
+                    logger.warning(f"⚠️ Item '{item_id}' not found")
+                    return {
+                        'error': f"Item '{item_id}' not found" + (f" in collection '{collection_id}'" if collection_id else ""),
+                        'item_id': item_id,
+                        'collection_id': collection_id
+                    }
+
+    except Exception as e:
+        logger.error(f"❌ Failed to get item '{item_id}': {e}")
+        return {
+            'error': str(e),
+            'error_type': type(e).__name__,
+            'item_id': item_id
+        }
+
+
+def get_health_metrics() -> Dict[str, Any]:
+    """
+    Get overall pgstac health metrics.
+
+    Returns:
+        Dict with health status, counts, and performance indicators
+    """
+    from config import get_config
+
+    config = get_config()
+    connection_string = config.postgis_connection_string
+
+    logger.info("🏥 Checking pgstac health...")
+
+    try:
+        with psycopg.connect(connection_string) as conn:
+            with conn.cursor() as cur:
+                # Check schema exists
+                cur.execute(
+                    "SELECT EXISTS(SELECT 1 FROM information_schema.schemata WHERE schema_name = 'pgstac')"
+                )
+                schema_exists = cur.fetchone()[0]
+
+                if not schema_exists:
+                    return {
+                        'status': 'unhealthy',
+                        'schema_exists': False,
+                        'message': 'pgstac schema does not exist'
+                    }
+
+                # Get version
+                try:
+                    cur.execute("SELECT pgstac.get_version()")
+                    version = cur.fetchone()[0]
+                except psycopg.Error:
+                    version = "unknown"
+
+                # Get counts
+                cur.execute("SELECT COUNT(*) FROM pgstac.collections")
+                collections_count = cur.fetchone()[0]
+
+                cur.execute("SELECT COUNT(*) FROM pgstac.items")
+                items_count = cur.fetchone()[0]
+
+                # Get database size
+                cur.execute("""
+                    SELECT
+                        SUM(pg_total_relation_size(quote_ident(schemaname) || '.' || quote_ident(tablename))) / 1024.0 / 1024.0
+                    FROM pg_tables
+                    WHERE schemaname = 'pgstac'
+                """)
+                db_size_mb = round(cur.fetchone()[0], 2)
+
+                # Check for issues
+                issues = []
+                if items_count == 0 and collections_count > 0:
+                    issues.append("Collections exist but no items found")
+
+                status = 'healthy' if schema_exists and not issues else 'warning'
+
+                logger.info(f"✅ Health check complete: {status}")
+
+                return {
+                    'status': status,
+                    'schema_exists': schema_exists,
+                    'version': version,
+                    'collections_count': collections_count,
+                    'items_count': items_count,
+                    'database_size_mb': db_size_mb,
+                    'issues': issues,
+                    'message': f"PgSTAC {version} - {collections_count} collections, {items_count} items"
+                }
+
+    except Exception as e:
+        logger.error(f"❌ Health check failed: {e}")
+        return {
+            'status': 'error',
+            'error': str(e),
+            'error_type': type(e).__name__
+        }
+
+
+def get_collections_summary() -> Dict[str, Any]:
+    """
+    Get quick summary of all collections with key statistics.
+
+    Returns:
+        Dict with summary statistics for all collections
+    """
+    from config import get_config
+
+    config = get_config()
+    connection_string = config.postgis_connection_string
+
+    logger.info("📋 Getting collections summary...")
+
+    try:
+        with psycopg.connect(connection_string) as conn:
+            with conn.cursor() as cur:
+                # Get all collections with item counts
+                cur.execute("""
+                    SELECT
+                        c.id,
+                        c.content->>'title' as title,
+                        c.content->>'description' as description,
+                        COUNT(i.id) as item_count,
+                        MAX(i.datetime) as last_updated
+                    FROM pgstac.collections c
+                    LEFT JOIN pgstac.items i ON i.collection = c.id
+                    GROUP BY c.id, c.content
+                    ORDER BY c.id
+                """)
+
+                collections = []
+                total_items = 0
+
+                for row in cur.fetchall():
+                    coll_id, title, description, item_count, last_updated = row
+                    total_items += item_count
+
+                    collections.append({
+                        'id': coll_id,
+                        'title': title,
+                        'description': description[:100] + '...' if description and len(description) > 100 else description,
+                        'item_count': item_count,
+                        'last_updated': last_updated.isoformat() if last_updated else None
+                    })
+
+                logger.info(f"✅ Collections summary: {len(collections)} collections, {total_items} total items")
+
+                return {
+                    'total_collections': len(collections),
+                    'total_items': total_items,
+                    'collections': collections
+                }
+
+    except Exception as e:
+        logger.error(f"❌ Failed to get collections summary: {e}")
+        return {
             'error': str(e),
             'error_type': type(e).__name__
         }

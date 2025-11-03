@@ -65,6 +65,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+# Pydantic for band_names validation
+from models.band_mapping import BandNames
+from pydantic import ValidationError
+
 # Logging
 from util_logger import LoggerFactory, ComponentType
 
@@ -240,10 +244,28 @@ def extract_tiles(params: dict) -> dict:
             job_id = params.get("job_id")
             task_id = params.get("task_id")
             repository = params.get("repository")
+
+            # Validate band_names with Pydantic (strict validation, no fallbacks)
+            band_names_raw = params.get("band_names")  # None if not provided
+            if band_names_raw is not None:
+                try:
+                    band_names_model = BandNames(mapping=band_names_raw)
+                    band_names = band_names_model.mapping  # dict[int, str] with int keys
+                    logger.debug(f"✅ [CHECKPOINT_BAND_VALIDATION] band_names validated: {band_names}")
+                except ValidationError as e:
+                    error_msg = e.errors()[0]['msg'] if e.errors() else str(e)
+                    error_str = f"Invalid band_names parameter: {error_msg}"
+                    logger.error(f"❌ [CHECKPOINT_BAND_VALIDATION] {error_str}")
+                    return {"success": False, "error": error_str}
+            else:
+                band_names = {}  # Empty dict = process all bands
+                logger.debug(f"✅ [CHECKPOINT_BAND_VALIDATION] No band_names provided, will process all bands")
+
             logger.debug(f"✅ [CHECKPOINT_EXTRACT_PARAMS] All parameters extracted successfully")
             logger.debug(f"   container_name={container_name}")
             logger.debug(f"   blob_name={blob_name}")
             logger.debug(f"   tiling_scheme_blob={tiling_scheme_blob}")
+            logger.debug(f"   band_names={band_names}")
         except Exception as e:
             error_msg = f"❌ [CHECKPOINT_EXTRACT_PARAMS] FAILED during parameter extraction: {str(e)}\n{traceback.format_exc()}"
             logger.error(error_msg)
@@ -346,6 +368,29 @@ def extract_tiles(params: dict) -> dict:
             logger.debug(f"   Dimensions: {src.width}×{src.height} px")
             logger.debug(f"   Bands: {src.count}, Dtype: {src.dtypes[0]}")
             logger.debug(f"   CRS: {src.crs}")
+
+            # Extract band indices from band_names dict
+            # band_names format: {5: 'Red', 3: 'Green', 2: 'Blue'}
+            if band_names and isinstance(band_names, dict) and len(band_names) > 0:
+                # Get sorted band indices from dict keys
+                band_indices = sorted([idx for idx in band_names.keys() if idx <= src.count])
+
+                # Validate at least one band is valid
+                if not band_indices:
+                    logger.warning(f"⚠️  No valid bands in {band_names}, using first {min(3, src.count)} bands")
+                    band_indices = list(range(1, min(4, src.count + 1)))
+                    band_desc = "fallback RGB"
+                else:
+                    # Create readable description: "bands 2,3,5 (Blue, Green, Red)"
+                    band_desc = ', '.join(f"{idx} ({band_names[idx]})" for idx in band_indices if idx in band_names)
+            else:
+                # No band selection specified, read all bands
+                band_indices = list(range(1, src.count + 1))
+                band_desc = "all bands"
+
+            logger.info(f"🎯 [CHECKPOINT_BAND_MAPPING] Will read {len(band_indices)} of {src.count} bands: {band_desc}")
+            logger.debug(f"   Band indices: {band_indices}")
+            logger.debug(f"   Requested: {band_names}")
         except Exception as e:
             # VSI-specific error handling with detailed diagnostics
             error_str = str(e)
@@ -393,15 +438,20 @@ def extract_tiles(params: dict) -> dict:
                     # 🔍 CHECKPOINT 7b: VSI Read Operation
                     try:
                         logger.debug(f"🔍 [CHECKPOINT_TILE_{i}_READ] Reading tile data from VSI...")
+                        logger.debug(f"   Reading bands: {band_indices}")
                         window = Window(
                             col_off=pw['col_off'],
                             row_off=pw['row_off'],
                             width=pw['width'],
                             height=pw['height']
                         )
-                        tile_data = src.read(window=window)
+                        # Read only the specified bands
+                        tile_data = src.read(indexes=band_indices, window=window)
                         tile_transform = src.window_transform(window)
-                        logger.debug(f"✅ [CHECKPOINT_TILE_{i}_READ] Tile data read successfully: {tile_data.shape}")
+
+                        # Calculate tile size in MB for logging
+                        tile_size_mb = tile_data.nbytes / (1024 * 1024)
+                        logger.debug(f"✅ [CHECKPOINT_TILE_{i}_READ] Tile data read successfully: {tile_data.shape} ({tile_size_mb:.2f} MB)")
                     except Exception as e:
                         error_msg = f"❌ [CHECKPOINT_TILE_{i}_READ] FAILED to read tile from VSI: {str(e)}"
                         logger.error(error_msg)
@@ -416,7 +466,8 @@ def extract_tiles(params: dict) -> dict:
                         profile.update({
                             'width': pw['width'],
                             'height': pw['height'],
-                            'transform': tile_transform
+                            'transform': tile_transform,
+                            'count': len(band_indices)  # Update band count to match extracted bands
                         })
 
                         with rasterio.open(tile_buffer, 'w', **profile) as dst:

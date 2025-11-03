@@ -101,7 +101,8 @@ class StacMetadataService:
         container: str,
         blob_name: str,
         collection_id: str = 'dev',
-        existing_metadata: Optional[Dict[str, Any]] = None
+        existing_metadata: Optional[Dict[str, Any]] = None,
+        item_id: Optional[str] = None
     ) -> Item:
         """
         Extract STAC Item from raster blob using rio-stac.
@@ -111,6 +112,7 @@ class StacMetadataService:
             blob_name: Blob path within container
             collection_id: STAC collection ID (default: 'dev')
             existing_metadata: Optional metadata from analyze_single_blob()
+            item_id: Optional custom STAC item ID (auto-generated if not provided)
 
         Returns:
             Validated stac-pydantic Item
@@ -160,16 +162,19 @@ class StacMetadataService:
             logger.error(f"   Traceback:\n{traceback.format_exc()}")
             raise ValueError(f"Failed to determine datetime: {e}")
 
-        # STEP C: Generate semantic item ID
+        # STEP C: Determine item ID (use custom if provided, otherwise auto-generate)
         try:
-            logger.debug("   Step C: Generating semantic item ID...")
-            item_id = self._generate_item_id(container, blob_name, collection_id)
-            logger.debug(f"   ✅ Step C: Item ID generated: {item_id}")
+            if item_id:
+                logger.debug(f"   Step C: Using custom item ID: {item_id}")
+            else:
+                logger.debug("   Step C: Auto-generating semantic item ID...")
+                item_id = self._generate_item_id(container, blob_name, collection_id)
+                logger.debug(f"   ✅ Step C: Item ID generated: {item_id}")
         except Exception as e:
-            logger.error(f"❌ Step C FAILED: Error generating item ID")
+            logger.error(f"❌ Step C FAILED: Error determining item ID")
             logger.error(f"   Error: {e}")
             logger.error(f"   Traceback:\n{traceback.format_exc()}")
-            raise ValueError(f"Failed to generate item ID: {e}")
+            raise ValueError(f"Failed to determine item ID: {e}")
 
         # STEP D: Determine file size and statistics extraction strategy
         try:
@@ -261,6 +266,34 @@ class StacMetadataService:
             logger.error(f"   Error: {e}")
             logger.error(f"   Traceback:\n{traceback.format_exc()}")
             raise ValueError(f"Failed to convert STAC item to dict: {e}")
+
+        # STEP G.5: Remove SAS tokens from asset URLs
+        try:
+            logger.debug("   Step G.5: Sanitizing asset URLs (removing SAS tokens)...")
+            sanitized_count = 0
+            for asset_key, asset_value in item_dict.get('assets', {}).items():
+                if 'href' in asset_value:
+                    original_url = asset_value['href']
+                    # Check if URL contains SAS token parameters
+                    if '?' in original_url:
+                        # Remove everything after '?' to strip SAS token
+                        base_url = original_url.split('?')[0]
+                        asset_value['href'] = base_url
+                        sanitized_count += 1
+                        logger.debug(f"      Sanitized asset '{asset_key}': removed SAS token")
+                        logger.debug(f"         Before: {original_url[:100]}...")
+                        logger.debug(f"         After:  {base_url}")
+
+            if sanitized_count > 0:
+                logger.info(f"   ✅ Step G.5: Sanitized {sanitized_count} asset URL(s) - removed SAS tokens")
+            else:
+                logger.debug(f"   ✅ Step G.5: No SAS tokens found in asset URLs")
+        except Exception as e:
+            logger.error(f"❌ Step G.5 FAILED: Error sanitizing asset URLs")
+            logger.error(f"   Error: {e}")
+            logger.error(f"   Traceback:\n{traceback.format_exc()}")
+            # Don't raise - this is not critical enough to fail the entire operation
+            logger.warning(f"   ⚠️  Continuing with unsanitized URLs")
 
         # STEP H: Supplement with Azure-specific properties
         try:

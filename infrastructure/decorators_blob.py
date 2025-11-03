@@ -109,7 +109,7 @@ def validate_container(func: Callable) -> Callable:
         if not self.container_exists(container):
             error_msg = (
                 f"Container '{container}' does not exist in storage account "
-                f"'{self.storage_account}'"
+                f"'{self.account_name}'"
             )
             logger.error(f"❌ Container validation failed: {error_msg}")
             raise ResourceNotFoundError(error_msg)

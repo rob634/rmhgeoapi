@@ -991,20 +991,14 @@ class CoreMachine:
             )
             context.task_results = task_results
 
-            # Aggregate results (delegate to workflow)
+            # Finalize job (delegate to workflow for custom summary)
             # Get workflow class from explicit registry
             if job_type not in self.jobs_registry:
                 raise BusinessLogicError(f"Unknown job type: {job_type}. Available: {list(self.jobs_registry.keys())}")
             workflow = self.jobs_registry[job_type]
-            if hasattr(workflow, 'aggregate_job_results'):
-                final_result = workflow.aggregate_job_results(context)
-            else:
-                # Default aggregation
-                final_result = {
-                    'job_type': job_type,
-                    'total_tasks': len(task_results),
-                    'message': 'Job completed successfully'
-                }
+
+            # Call finalize_job() - REQUIRED method (enforced by JobBase ABC)
+            final_result = workflow.finalize_job(context)
 
             # Complete job in database
             self.state_manager.complete_job(job_id, final_result)

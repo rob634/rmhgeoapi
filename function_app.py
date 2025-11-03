@@ -828,6 +828,192 @@ def stac_vector(req: func.HttpRequest) -> func.HttpResponse:
 
 
 # ============================================================================
+# PGSTAC INSPECTION ENDPOINTS (2 NOV 2025)
+# ============================================================================
+# Deep inspection endpoints for pgstac schema analysis and statistics
+# All read-only operations for monitoring and troubleshooting
+# ============================================================================
+
+from infrastructure.stac import (
+    get_schema_info,
+    get_collection_stats,
+    get_item_by_id,
+    get_health_metrics,
+    get_collections_summary
+)
+
+@app.route(route="stac/schema/info", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def stac_schema_info(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Deep inspection of pgstac schema structure.
+
+    GET /api/stac/schema/info
+
+    Returns:
+        Detailed schema information including:
+        - Tables (with row counts, sizes, indexes)
+        - Functions (first 20)
+        - Roles
+        - Total schema size
+    """
+    try:
+        result = get_schema_info()
+        return func.HttpResponse(
+            json.dumps(result, indent=2, default=str),
+            status_code=200,
+            mimetype="application/json"
+        )
+    except Exception as e:
+        logging.error(f"Error in /stac/schema/info: {e}")
+        return func.HttpResponse(
+            json.dumps({'error': str(e)}),
+            status_code=500,
+            mimetype="application/json"
+        )
+
+
+@app.route(route="stac/collections/summary", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def stac_collections_summary(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Quick summary of all collections with statistics.
+
+    GET /api/stac/collections/summary
+
+    Returns:
+        Summary with total counts and per-collection item counts
+    """
+    try:
+        result = get_collections_summary()
+        return func.HttpResponse(
+            json.dumps(result, indent=2, default=str),
+            status_code=200,
+            mimetype="application/json"
+        )
+    except Exception as e:
+        logging.error(f"Error in /stac/collections/summary: {e}")
+        return func.HttpResponse(
+            json.dumps({'error': str(e)}),
+            status_code=500,
+            mimetype="application/json"
+        )
+
+
+@app.route(route="stac/collections/{collection_id}/stats", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def stac_collection_stats(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Detailed statistics for a specific collection.
+
+    GET /api/stac/collections/{collection_id}/stats
+
+    Path Parameters:
+        collection_id: Collection ID to analyze
+
+    Returns:
+        Collection statistics including:
+        - Item count
+        - Spatial extent (actual bbox from items)
+        - Temporal extent
+        - Asset types and counts
+        - Recent items
+    """
+    try:
+        collection_id = req.route_params.get('collection_id')
+        if not collection_id:
+            return func.HttpResponse(
+                json.dumps({'error': 'collection_id required'}),
+                status_code=400,
+                mimetype="application/json"
+            )
+
+        result = get_collection_stats(collection_id)
+        return func.HttpResponse(
+            json.dumps(result, indent=2, default=str),
+            status_code=200,
+            mimetype="application/json"
+        )
+    except Exception as e:
+        logging.error(f"Error in /stac/collections/{{collection_id}}/stats: {e}")
+        return func.HttpResponse(
+            json.dumps({'error': str(e)}),
+            status_code=500,
+            mimetype="application/json"
+        )
+
+
+@app.route(route="stac/items/{item_id}", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def stac_item_lookup(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Look up a single STAC item by ID.
+
+    GET /api/stac/items/{item_id}?collection_id={optional}
+
+    Path Parameters:
+        item_id: STAC item ID to retrieve
+
+    Query Parameters:
+        collection_id: Optional collection ID to narrow search
+
+    Returns:
+        STAC Item JSON or error if not found
+    """
+    try:
+        item_id = req.route_params.get('item_id')
+        if not item_id:
+            return func.HttpResponse(
+                json.dumps({'error': 'item_id required'}),
+                status_code=400,
+                mimetype="application/json"
+            )
+
+        collection_id = req.params.get('collection_id')
+        result = get_item_by_id(item_id, collection_id)
+
+        return func.HttpResponse(
+            json.dumps(result, indent=2, default=str),
+            status_code=200,
+            mimetype="application/json"
+        )
+    except Exception as e:
+        logging.error(f"Error in /stac/items/{{item_id}}: {e}")
+        return func.HttpResponse(
+            json.dumps({'error': str(e)}),
+            status_code=500,
+            mimetype="application/json"
+        )
+
+
+@app.route(route="stac/health", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def stac_health(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Overall pgstac health check with metrics.
+
+    GET /api/stac/health
+
+    Returns:
+        Health status including:
+        - Status (healthy/warning/error)
+        - Version
+        - Collection/item counts
+        - Database size
+        - Issues detected
+    """
+    try:
+        result = get_health_metrics()
+        return func.HttpResponse(
+            json.dumps(result, indent=2, default=str),
+            status_code=200,
+            mimetype="application/json"
+        )
+    except Exception as e:
+        logging.error(f"Error in /stac/health: {e}")
+        return func.HttpResponse(
+            json.dumps({'error': str(e)}),
+            status_code=500,
+            mimetype="application/json"
+        )
+
+
+# ============================================================================
 # STAC API STANDARD ENDPOINTS (18 OCT 2025)
 # ============================================================================
 # Read-only endpoints following STAC API specification

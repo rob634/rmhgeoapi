@@ -59,10 +59,11 @@ class ProcessRasterWorkflow(JobBase):
     Stages:
     1. Validate: CRS, bit-depth, type detection
     2. Create COG: Reproject + COG in single operation
+    3. Create STAC: Generate STAC metadata for COG
     """
 
     job_type: str = "process_raster"
-    description: str = "Process raster to COG (files <= 1GB)"
+    description: str = "Process raster to COG with STAC metadata (files <= 1GB)"
 
     stages: List[Dict[str, Any]] = [
         {
@@ -78,12 +79,19 @@ class ProcessRasterWorkflow(JobBase):
             "task_type": "create_cog",
             "description": "Reproject to EPSG:4326 and create COG (single operation)",
             "parallelism": "single"
+        },
+        {
+            "number": 3,
+            "name": "create_stac",
+            "task_type": "extract_stac_metadata",
+            "description": "Create STAC metadata for COG (ready for TiTiler-pgstac)",
+            "parallelism": "single"
         }
     ]
 
     parameters_schema: Dict[str, Any] = {
         "blob_name": {"type": "str", "required": True},
-        "container_name": {"type": "str", "required": True, "default": None},  # Uses config.bronze_container_name if None
+        "container_name": {"type": "str", "required": True, "default": None},  # Uses config.storage.bronze.get_container('rasters') if None
         "input_crs": {"type": "str", "required": False, "default": None},
         "raster_type": {
             "type": "str",
@@ -98,17 +106,35 @@ class ProcessRasterWorkflow(JobBase):
             "allowed": ["visualization", "analysis", "archive", "all"],
             "description": "COG output tier: visualization (JPEG/hot), analysis (DEFLATE/hot), archive (LZW/cool), or all (create all applicable tiers)"
         },
+        "target_crs": {
+            "type": "str",
+            "required": False,
+            "default": "EPSG:4326",
+            "description": "Target CRS for output COG (default: EPSG:4326). Common: EPSG:3857 (Web Mercator), EPSG:4326 (WGS84)"
+        },
         "compression": {"type": "str", "required": False, "default": None},  # Auto-selected if None (deprecated - use output_tier)
         "jpeg_quality": {"type": "int", "required": False, "default": 85},
         "overview_resampling": {"type": "str", "required": False, "default": None},  # Auto-selected
         "reproject_resampling": {"type": "str", "required": False, "default": None},  # Auto-selected
         "strict_mode": {"type": "bool", "required": False, "default": False},
+        "collection_id": {
+            "type": "str",
+            "required": False,
+            "default": "system-rasters",
+            "description": "STAC collection ID for metadata (default: system-rasters for operational tracking)"
+        },
+        "item_id": {
+            "type": "str",
+            "required": False,
+            "default": None,
+            "description": "Custom STAC item ID (default: auto-generated from blob name and collection)"
+        },
         "_skip_validation": {"type": "bool", "required": False, "default": False},  # TESTING ONLY
         "output_folder": {
             "type": "str",
             "required": False,
             "default": None,
-            "description": "Override output folder path (e.g., 'cogs/satellite/'). If None, mirrors input folder structure."
+            "description": "Optional output folder path (e.g., 'cogs/satellite/'). If None, writes to container root."
         },
     }
 
@@ -121,7 +147,7 @@ class ProcessRasterWorkflow(JobBase):
             blob_name: str - Blob path in container
 
         Optional:
-            container_name: str - Container name (default: config.bronze_container_name)
+            container_name: str - Container name (default: config.storage.bronze.get_container('rasters'))
             input_crs: str - User-provided CRS override
             raster_type: str - Expected type for validation
             output_tier: str - COG output tier (visualization, analysis, archive, all)
@@ -180,6 +206,12 @@ class ProcessRasterWorkflow(JobBase):
             raise ValueError(f"output_tier must be one of {allowed_tiers}, got {output_tier}")
         validated["output_tier"] = output_tier
 
+        # Validate target_crs (optional)
+        target_crs = params.get("target_crs", "EPSG:4326")
+        if not isinstance(target_crs, str) or not target_crs.strip():
+            raise ValueError("target_crs must be a non-empty string")
+        validated["target_crs"] = target_crs.strip()
+
         # Validate compression (optional)
         compression = params.get("compression")
         if compression is not None:
@@ -211,6 +243,19 @@ class ProcessRasterWorkflow(JobBase):
             if not isinstance(reproject_resampling, str):
                 raise ValueError("reproject_resampling must be a string")
             validated["reproject_resampling"] = reproject_resampling
+
+        # Validate collection_id (optional)
+        collection_id = params.get("collection_id", "system-rasters")
+        if not isinstance(collection_id, str) or not collection_id.strip():
+            raise ValueError("collection_id must be a non-empty string")
+        validated["collection_id"] = collection_id.strip()
+
+        # Validate item_id (optional)
+        item_id = params.get("item_id")
+        if item_id is not None:
+            if not isinstance(item_id, str) or not item_id.strip():
+                raise ValueError("item_id must be a non-empty string")
+            validated["item_id"] = item_id.strip()
 
         # Validate strict_mode (optional)
         strict_mode = params.get("strict_mode", False)
@@ -274,16 +319,18 @@ class ProcessRasterWorkflow(JobBase):
             parameters=params,
             status=JobStatus.QUEUED,
             stage=1,
-            total_stages=2,
+            total_stages=3,
             stage_results={},
             metadata={
-                "description": "Process raster to COG pipeline",
+                "description": "Process raster to COG with STAC metadata",
                 "created_by": "ProcessRasterWorkflow",
                 "blob_name": params.get("blob_name"),
                 "container_name": params.get("container_name"),
                 "raster_type": params.get("raster_type", "auto"),
                 "output_tier": params.get("output_tier", "analysis"),
-                "output_folder": params.get("output_folder")
+                "output_folder": params.get("output_folder"),
+                "collection_id": params.get("collection_id", "system-rasters"),
+                "item_id": params.get("item_id")
             }
         )
 
@@ -358,18 +405,19 @@ class ProcessRasterWorkflow(JobBase):
 
         Stage 1: Single task to validate raster
         Stage 2: Single task to create COG (requires Stage 1 results)
+        Stage 3: Single task to create STAC metadata (requires Stage 2 results)
 
         Args:
-            stage: Stage number (1 or 2)
+            stage: Stage number (1, 2, or 3)
             job_params: Job parameters from database
             job_id: Job ID for task ID generation
-            previous_results: Results from previous stage (required for Stage 2)
+            previous_results: Results from previous stage (required for Stages 2 and 3)
 
         Returns:
             List of task parameter dicts
 
         Raises:
-            ValueError: If Stage 2 called without previous_results or invalid stage number
+            ValueError: If stage requires previous_results but not provided, or invalid stage number
         """
         from core.task_id import generate_deterministic_task_id
         from config import get_config
@@ -380,7 +428,7 @@ class ProcessRasterWorkflow(JobBase):
         if stage == 1:
             # Stage 1: Validate raster
             # Use config default if container_name not specified
-            container_name = job_params.get('container_name') or config.bronze_container_name
+            container_name = job_params.get('container_name') or config.storage.bronze.get_container('rasters')
 
             # Build blob URL with SAS token
             blob_repo = BlobRepository.instance()
@@ -427,33 +475,27 @@ class ProcessRasterWorkflow(JobBase):
                 raise ValueError("No source_crs found in Stage 1 validation results")
 
             # Use config default if container_name not specified
-            container_name = job_params.get('container_name') or config.bronze_container_name
+            container_name = job_params.get('container_name') or config.storage.bronze.get_container('rasters')
 
-            # Build blob URL with SAS token
-            blob_repo = BlobRepository.instance()
-            blob_url = blob_repo.get_blob_url_with_sas(
-                container_name=container_name,
-                blob_name=job_params['blob_name'],
-                hours=1
-            )
-
-            # Output blob name - configurable folder or mirror input structure
+            # Output blob name - extract filename and optionally prepend folder
             blob_name = job_params['blob_name']
             output_folder = job_params.get('output_folder')
 
-            if output_folder:
-                # User specified output folder - use just filename in that folder
-                filename = blob_name.split('/')[-1]
-                if filename.lower().endswith('.tif'):
-                    output_blob_name = f"{output_folder}/{filename[:-4]}_cog.tif"
-                else:
-                    output_blob_name = f"{output_folder}/{filename}_cog.tif"
+            # Extract just the filename from input path
+            filename = blob_name.split('/')[-1]
+
+            # Generate output filename (replace or append _cog)
+            if filename.lower().endswith('.tif'):
+                output_filename = f"{filename[:-4]}_cog.tif"
             else:
-                # Default: mirror input folder structure
-                if blob_name.lower().endswith('.tif'):
-                    output_blob_name = blob_name[:-4] + '_cog.tif'
-                else:
-                    output_blob_name = blob_name + '_cog.tif'
+                output_filename = f"{filename}_cog.tif"
+
+            # Prepend output folder if specified, otherwise write to root
+            if output_folder:
+                output_blob_name = f"{output_folder}/{output_filename}"
+            else:
+                # Default: write to container root (flat structure)
+                output_blob_name = output_filename
 
             task_id = generate_deterministic_task_id(job_id, 2, "create_cog")
 
@@ -462,11 +504,10 @@ class ProcessRasterWorkflow(JobBase):
                     "task_id": task_id,
                     "task_type": "create_cog",
                     "parameters": {
-                        "blob_url": blob_url,
                         "blob_name": job_params['blob_name'],
                         "container_name": container_name,
                         "source_crs": source_crs,
-                        "target_crs": "EPSG:4326",
+                        "target_crs": job_params.get('target_crs', 'EPSG:4326'),
                         "raster_type": validation_result.get('raster_type', {}),
                         "output_blob_name": output_blob_name,
                         "output_tier": job_params.get('output_tier', 'analysis'),  # COG tier selection
@@ -478,13 +519,60 @@ class ProcessRasterWorkflow(JobBase):
                 }
             ]
 
+        elif stage == 3:
+            # Stage 3: Create STAC metadata
+            # REQUIRES previous_results from Stage 2
+            if not previous_results:
+                raise ValueError("Stage 3 requires Stage 2 results - previous_results cannot be None")
+
+            # Extract COG result from Stage 2 task
+            stage_2_result = previous_results[0]
+            if not stage_2_result.get('success'):
+                raise ValueError(f"Stage 2 COG creation failed: {stage_2_result.get('error')}")
+
+            cog_result = stage_2_result.get('result', {})
+
+            # Get COG blob path and container from Stage 2
+            cog_blob = cog_result.get('output_blob') or cog_result.get('cog_blob')
+            cog_container = cog_result.get('container') or config.silver_container_name
+
+            if not cog_blob:
+                raise ValueError("Stage 2 results missing COG blob path (expected 'output_blob' or 'cog_blob')")
+
+            # Get collection ID (default to system-rasters for operational tracking)
+            collection_id = job_params.get('collection_id', 'system-rasters')
+
+            # Get custom item_id if provided
+            item_id = job_params.get('item_id')
+
+            task_id = generate_deterministic_task_id(job_id, 3, "stac")
+
+            # Build task parameters
+            task_params = {
+                "container_name": cog_container,
+                "blob_name": cog_blob,
+                "collection_id": collection_id
+            }
+
+            # Add item_id if provided
+            if item_id:
+                task_params["item_id"] = item_id
+
+            return [
+                {
+                    "task_id": task_id,
+                    "task_type": "extract_stac_metadata",  # Reuse existing handler from stac_catalog.py
+                    "parameters": task_params
+                }
+            ]
+
         else:
-            raise ValueError(f"ProcessRasterWorkflow only has 2 stages, got stage {stage}")
+            raise ValueError(f"ProcessRasterWorkflow only has 3 stages, got stage {stage}")
 
     @staticmethod
-    def aggregate_job_results(context) -> Dict[str, Any]:
+    def finalize_job(context) -> Dict[str, Any]:
         """
-        Aggregate results from all completed tasks into job summary.
+        Create final job summary from all completed tasks.
 
         Args:
             context: JobExecutionContext with task results
@@ -500,6 +588,7 @@ class ProcessRasterWorkflow(JobBase):
         # Separate by stage
         stage_1_tasks = [t for t in task_results if t.task_type == "validate_raster"]
         stage_2_tasks = [t for t in task_results if t.task_type == "create_cog"]
+        stage_3_tasks = [t for t in task_results if t.task_type == "extract_stac_metadata"]
 
         # Extract validation results
         validation_summary = {}
@@ -526,12 +615,25 @@ class ProcessRasterWorkflow(JobBase):
                 "processing_time_seconds": cog_result.get("processing_time_seconds")
             }
 
+        # Extract STAC results
+        stac_summary = {}
+        if stage_3_tasks and stage_3_tasks[0].result_data:
+            stac_result = stage_3_tasks[0].result_data.get("result", {})
+            stac_summary = {
+                "item_id": stac_result.get("item_id"),
+                "collection_id": stac_result.get("collection_id"),
+                "bbox": stac_result.get("bbox"),
+                "inserted_to_pgstac": stac_result.get("inserted_to_pgstac", True),
+                "ready_for_titiler": True  # COG + STAC = ready for serving
+            }
+
         return {
             "job_type": "process_raster",
             "source_blob": params.get("blob_name"),
             "source_container": params.get("container_name"),
             "validation": validation_summary,
             "cog": cog_summary,
+            "stac": stac_summary,
             "stages_completed": context.current_stage,
             "total_tasks_executed": len(task_results),
             "tasks_by_status": {

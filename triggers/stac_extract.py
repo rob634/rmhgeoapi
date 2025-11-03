@@ -49,7 +49,7 @@ def handle_request(req: func.HttpRequest) -> func.HttpResponse:
 
     Body:
     {
-        "container": "rmhazuregeobronze",      // Required (use config.bronze_container_name)
+        "container": "rmhazuregeobronze",      // Required (use config.storage.bronze.get_container('rasters'))
         "blob_name": "test/file.tif",          // Required
         "collection_id": "dev",                // Optional (default: "dev")
         "insert": true                         // Optional (default: true) - insert into PgSTAC

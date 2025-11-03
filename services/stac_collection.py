@@ -72,6 +72,7 @@ def create_stac_collection(
         params: Task parameters containing:
             - previous_results: List with single Stage 3 MosaicJSON result
             - collection_id: Collection identifier
+            - stac_item_id: Optional custom STAC collection ID (overrides collection_id)
             - description: Collection description
             - license: STAC license (default: "proprietary")
             - container: Container name (default: "rmhazuregeosilver")
@@ -98,13 +99,22 @@ def create_stac_collection(
     try:
         # Extract parameters from fan_in pattern
         previous_results = params.get("previous_results", [])
-        collection_id = params.get("collection_id")
-        description = params.get("description")
+        job_parameters = params.get("job_parameters", {})
+
+        # Get parameters from job_parameters (passed by CoreMachine for fan_in tasks)
+        collection_id = job_parameters.get("collection_id") or params.get("collection_id")
+        stac_item_id = job_parameters.get("stac_item_id") or params.get("stac_item_id")
+        description = job_parameters.get("collection_description") or params.get("description")
         license = params.get("license", "proprietary")
         container = params.get("container", "rmhazuregeosilver")
 
+        # Use stac_item_id if provided, otherwise use collection_id
+        final_collection_id = stac_item_id if stac_item_id else collection_id
+
         logger.info(f"🔄 STAC collection task handler invoked (fan_in aggregation)")
         logger.info(f"   Collection: {collection_id}")
+        logger.info(f"   Custom STAC ID: {stac_item_id}")
+        logger.info(f"   Final ID: {final_collection_id}")
         logger.info(f"   Previous results count: {len(previous_results)}")
 
         # Get MosaicJSON result from Stage 3
@@ -139,7 +149,7 @@ def create_stac_collection(
 
         # Call internal implementation
         result = _create_stac_collection_impl(
-            collection_id=collection_id,
+            collection_id=final_collection_id,  # Use final_collection_id (custom or default)
             mosaicjson_blob=mosaicjson_blob,
             description=description,
             tile_blobs=tile_blobs,

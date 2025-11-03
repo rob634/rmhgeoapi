@@ -61,6 +61,7 @@ from .platform import (
     OrchestrationJob,
     PlatformRequestStatus,
     DataType,
+    OperationType,
     PlatformRequest
 )
 
@@ -96,5 +97,6 @@ __all__ = [
     'OrchestrationJob',
     'PlatformRequestStatus',
     'DataType',
+    'OperationType',
     'PlatformRequest'
 ]

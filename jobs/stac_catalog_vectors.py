@@ -270,7 +270,7 @@ class StacCatalogVectorsWorkflow(JobBase):
         return result
 
     @staticmethod
-    def aggregate_job_results(context) -> Dict[str, Any]:
+    def finalize_job(context) -> Dict[str, Any]:
         """
         Aggregate results from completed task into job summary.
 

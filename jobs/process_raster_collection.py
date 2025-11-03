@@ -131,7 +131,7 @@ class ProcessRasterCollectionWorkflow(JobBase):
             "type": "str",
             "required": True,
             "default": None,
-            "description": "Source container name (uses config.bronze_container_name if None)"
+            "description": "Source container name (uses config.storage.bronze.get_container('rasters') if None)"
         },
         "input_crs": {
             "type": "str",
@@ -157,7 +157,13 @@ class ProcessRasterCollectionWorkflow(JobBase):
             "type": "str",
             "required": False,
             "default": None,
-            "description": "Override output folder path (e.g., 'cogs/satellite/'). If None, mirrors input folder structure."
+            "description": "Optional output folder path (e.g., 'cogs/satellite/'). If None, writes to container root."
+        },
+        "stac_item_id": {
+            "type": "str",
+            "required": False,
+            "default": None,
+            "description": "Custom STAC collection item ID (default: auto-generated from collection_id)"
         },
         "create_mosaicjson": {
             "type": "bool",
@@ -227,7 +233,7 @@ class ProcessRasterCollectionWorkflow(JobBase):
             # Use config default
             from config import get_config
             config = get_config()
-            validated["container_name"] = config.bronze_container_name
+            validated["container_name"] = config.storage.bronze.get_container('rasters')
         else:
             if not isinstance(container_name, str):
                 raise ValueError("container_name must be a string")
@@ -271,6 +277,13 @@ class ProcessRasterCollectionWorkflow(JobBase):
                 validated["output_folder"] = None
         else:
             validated["output_folder"] = None
+
+        # Validate stac_item_id (optional)
+        stac_item_id = params.get("stac_item_id")
+        if stac_item_id is not None:
+            if not isinstance(stac_item_id, str) or not stac_item_id.strip():
+                raise ValueError("stac_item_id must be a non-empty string")
+            validated["stac_item_id"] = stac_item_id.strip()
 
         # Validate create_mosaicjson
         create_mosaicjson = params.get("create_mosaicjson", True)
@@ -329,13 +342,14 @@ class ProcessRasterCollectionWorkflow(JobBase):
             total_stages=4,
             stage_results={},
             metadata={
-                "description": "Process raster collection to COGs with MosaicJSON",
+                "description": "Process raster collection to COGs with MosaicJSON and STAC",
                 "created_by": "ProcessRasterCollectionWorkflow",
                 "collection_id": params.get("collection_id"),
                 "tile_count": len(params.get("blob_list", [])),
                 "container_name": params.get("container_name"),
                 "output_tier": params.get("output_tier", "analysis"),
-                "output_folder": params.get("output_folder")
+                "output_folder": params.get("output_folder"),
+                "stac_item_id": params.get("stac_item_id")
             }
         )
 
@@ -558,15 +572,14 @@ class ProcessRasterCollectionWorkflow(JobBase):
             recommended_compression = validation_result.get("recommended_compression", "DEFLATE")
             recommended_resampling = validation_result.get("recommended_resampling", "bilinear")
 
-            # Determine output blob name
-            # If output_folder specified, use it; otherwise mirror input structure
+            # Determine output blob name - write to root by default
             output_folder = job_params.get("output_folder")
             if output_folder:
+                # User specified output folder
                 output_blob_name = f"{output_folder}/{tile_name}.tif"
             else:
-                # Mirror input folder structure (e.g., namangan/file.tif -> namangan/file.tif)
-                folder_path = '/'.join(blob_name.split('/')[:-1])
-                output_blob_name = f"{folder_path}/{tile_name}.tif" if folder_path else f"{tile_name}.tif"
+                # Default: write to container root (flat structure)
+                output_blob_name = f"{tile_name}.tif"
 
             task = {
                 "task_id": f"{job_id[:8]}-s2-cog-{i}",
@@ -597,3 +610,37 @@ class ProcessRasterCollectionWorkflow(JobBase):
             tasks.append(task)
 
         return tasks
+
+    @staticmethod
+    def finalize_job(context=None) -> Dict[str, Any]:
+        """
+        Create final job summary from all completed tasks.
+
+        TODO (3 NOV 2025): Implement rich pattern to extract:
+        - MosaicJSON location and metadata (Stage 3 results)
+        - STAC collection ID and item IDs (Stage 4 results)
+        - Per-tile COG statistics (Stage 2 results)
+        - Collection-level aggregations (total size, tile count, spatial extent)
+
+        Reference: jobs/process_raster.py lines 573-650 for rich pattern example
+
+        Args:
+            context: JobExecutionContext with task results
+
+        Returns:
+            Job summary dict
+        """
+        from util_logger import LoggerFactory, ComponentType
+
+        logger = LoggerFactory.create_logger(ComponentType.CONTROLLER, "ProcessRasterCollectionWorkflow.finalize_job")
+
+        # Minimal implementation for now
+        if context:
+            logger.info(f"✅ Job {context.job_id} completed with {len(context.task_results)} tasks")
+        else:
+            logger.info("✅ ProcessRasterCollection job completed")
+
+        return {
+            "job_type": "process_raster_collection",
+            "status": "completed"
+        }

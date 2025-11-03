@@ -108,13 +108,23 @@ def create_mosaicjson(
         previous_results = params.get("previous_results", [])
         job_parameters = params.get("job_parameters", {})
 
-        # Get collection_name from job_parameters (fan_in pattern)
-        collection_name = job_parameters.get("collection_id")
-        output_folder = job_parameters.get("output_folder", "mosaics")
-        container = "rmhazuregeosilver"  # Always use silver container for MosaicJSON
+        # Get collection_id from job_parameters (passed by controller)
+        collection_id = job_parameters.get("collection_id")
+        if not collection_id:
+            raise ValueError("collection_id is required parameter")
+
+        # Get output_container from job_parameters (passed by controller)
+        output_container = job_parameters.get("output_container")
+        if not output_container:
+            raise ValueError("output_container is required parameter")
+
+        # Optional output_folder (None = flat namespace, write to container root)
+        output_folder = job_parameters.get("output_folder")
 
         logger.info(f"🔄 MosaicJSON task handler invoked (fan_in aggregation)")
-        logger.info(f"   Collection: {collection_name}")
+        logger.info(f"   Collection: {collection_id}")
+        logger.info(f"   Output Container: {output_container}")
+        logger.info(f"   Output Folder: {output_folder or '(root - flat namespace)'}")
         logger.info(f"   Previous results count: {len(previous_results)}")
 
         # Extract COG blobs from Stage 2 results
@@ -141,8 +151,8 @@ def create_mosaicjson(
         # Call internal implementation
         result = _create_mosaicjson_impl(
             cog_blobs=cog_blobs,
-            collection_name=collection_name,
-            container=container,
+            collection_name=collection_id,
+            container=output_container,
             output_folder=output_folder
         )
 
@@ -248,8 +258,11 @@ def _create_mosaicjson_impl(
         logger.error(f"❌ MosaicJSON creation failed: {e}")
         raise Exception(f"Failed to create MosaicJSON: {e}")
 
-    # Generate output path
-    output_blob_name = f"{output_folder}/{collection_name}.json"
+    # Generate output path (flat namespace if no output_folder)
+    if output_folder:
+        output_blob_name = f"{output_folder}/{collection_name}.json"
+    else:
+        output_blob_name = f"{collection_name}.json"  # Flat namespace - root of container
 
     # Save to temporary file
     tmp_path = None
@@ -280,8 +293,8 @@ def _create_mosaicjson_impl(
 
         logger.info(f"✅ MosaicJSON uploaded successfully")
 
-        # Generate public URL for the uploaded MosaicJSON
-        mosaicjson_url = f"https://{blob_repo.storage_account}.blob.core.windows.net/{container}/{output_blob_name}"
+        # Generate public URL for the uploaded MosaicJSON (repository layer responsibility)
+        mosaicjson_url = blob_repo.get_blob_url(container, output_blob_name)
 
         return {
             "success": True,

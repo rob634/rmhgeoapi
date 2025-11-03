@@ -322,7 +322,7 @@ class ListContainerContentsWorkflow(JobBase):
         return result
 
     @staticmethod
-    def aggregate_job_results(context) -> Dict[str, Any]:
+    def finalize_job(context) -> Dict[str, Any]:
         """
         Aggregate results from list + analyze tasks.
 
@@ -338,7 +338,7 @@ class ListContainerContentsWorkflow(JobBase):
         from core.models import TaskStatus
         from util_logger import LoggerFactory, ComponentType
 
-        logger = LoggerFactory.create_logger(ComponentType.CONTROLLER, "ListContainerContentsWorkflow.aggregate_job_results")
+        logger = LoggerFactory.create_logger(ComponentType.CONTROLLER, "ListContainerContentsWorkflow.finalize_job")
 
         try:
             logger.info("🔄 STEP 1: Starting result aggregation...")

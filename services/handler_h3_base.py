@@ -74,7 +74,7 @@ def h3_base_generate(task_params: dict) -> dict:
         h3_service = H3GridService(
             duckdb_repo=duckdb_repo,
             blob_repo=blob_repo,
-            gold_container=config.gold_container_name
+            gold_container=config.storage.gold.get_container('misc')  # gold-h3-grids container
         )
 
         # STEP 1: Generate H3 grid

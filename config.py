@@ -2,7 +2,7 @@
 # CLAUDE CONTEXT - CONFIGURATION
 # ============================================================================
 # EPOCH: 4 - ACTIVE ✅
-# STATUS: Epoch 3 COMPLETELY DEPRECATED - Service Bus only application
+# STATUS: Production-ready configuration with multi-account storage pattern
 # NOTE: This is a SERVICE BUS ONLY application - Storage Queues are NOT supported
 # PURPOSE: Central configuration management with Pydantic v2 validation for Azure Geospatial ETL Pipeline
 # EXPORTS: AppConfig, get_config(), QueueNames, debug_config(), CogTier, CogTierProfile, COG_TIER_PROFILES, determine_applicable_tiers()
@@ -20,42 +20,29 @@
 """
 Strongly Typed Configuration Management - Azure Geospatial ETL Pipeline
 
-Centralized configuration management using Pydantic v2 for runtime validation,
-type safety, and comprehensive documentation of all environment variables.
-Provides single source of truth for application configuration across all components.
+Centralized configuration using Pydantic v2 for runtime validation, type safety,
+and comprehensive documentation of environment variables. Single source of truth
+for application configuration.
 
 Key Features:
 - Pydantic v2 schema validation with runtime type checking
-- Environment variable documentation with examples and descriptions
+- Environment variable documentation with examples
 - Computed properties for Azure service URLs and connection strings
-- Validation for Azure naming conventions and constraints
-- Factory methods for different initialization patterns
-- Development helpers with sanitized debug output
+- Azure naming convention validation
+- Factory methods and sanitized debug output
 
 Configuration Categories:
-- Azure Storage: Storage account, container names, service URLs
+- Azure Storage: Multi-account trust zones (Bronze/Silver/SilverExternal)
 - PostgreSQL/PostGIS: Database connection and schema configuration
-- Security: Azure Key Vault integration for credential management
-- Queues: Processing queue names and configuration
-- Application: Timeouts, retry policies, logging levels
+- Security: Azure Key Vault integration
+- Queues: Service Bus and Storage Queue configuration
+- Raster/Vector Pipelines: COG tiers, compression, validation
+- Application: Timeouts, retry policies, logging
 
-Integration Points:
-- Used by all Azure Functions triggers for consistent configuration
-- Repository layer uses database connection settings
-- Storage adapters use Azure Storage configuration
-- Health checks validate all configuration components
-- Vault repository retrieves secure credentials
-
-Usage Examples:
-    # Standard application usage
+Usage:
     config = get_config()
     blob_url = config.blob_service_url
-    
-    # Development debugging (safe - passwords masked)
-    debug_info = debug_config()
-    print(json.dumps(debug_info, indent=2))
-
-Author: Azure Geospatial ETL Team
+    debug_info = debug_config()  # Passwords masked
 """
 import os
 from typing import Optional, List, Literal
@@ -71,67 +58,27 @@ from pydantic import BaseModel, Field, field_validator, ValidationError
 
 class CogTier(str, Enum):
     """
-    COG output tiers for different use cases and storage strategies.
-
-    Each tier represents a different balance of compression, quality, and storage cost.
-    Tier selection depends on use case (web mapping vs. analysis) and raster type
-    (RGB vs. DEM vs. multispectral).
+    COG output tiers balancing compression, quality, and storage cost.
 
     Tiers:
-        VISUALIZATION: JPEG compression (lossy), hot storage, web-optimized
-            - Use case: Fast web maps, public viewers, visualization
-            - Compatibility: RGB only (3 bands, uint8) - JPEG limitation
-            - Typical size: ~17 MB for 200 MB original (90% reduction)
-            - Trade-off: Lossy compression, but fast access and small size
-            - Storage cost: Hot tier pricing
+        VISUALIZATION: JPEG (lossy), hot storage, web-optimized
+            - RGB only (3 bands, uint8) - ~17 MB for 200 MB (90% reduction)
 
-        ANALYSIS: DEFLATE compression (lossless), hot storage, analysis-ready
-            - Use case: Scientific analysis, GIS operations, data quality preservation
-            - Compatibility: Universal (all raster types - DEM, RGB, multispectral)
-            - Typical size: ~50 MB for 200 MB original (75% reduction)
-            - Trade-off: Lossless, but larger than JPEG
-            - Storage cost: Hot tier pricing
+        ANALYSIS: DEFLATE (lossless), hot storage, analysis-ready
+            - Universal compatibility - ~50 MB for 200 MB (75% reduction)
 
-        ARCHIVE: LZW compression (lossless), cool storage, long-term compliance
-            - Use case: Regulatory compliance, long-term storage, backup
-            - Compatibility: Universal (all raster types)
-            - Typical size: ~180 MB for 200 MB original (10% reduction)
-            - Trade-off: Lower storage cost, but slower access (cool tier)
-            - Storage cost: Cool tier pricing (cheaper than hot)
+        ARCHIVE: LZW (lossless), cool storage, long-term compliance
+            - Universal compatibility - ~180 MB for 200 MB (10% reduction)
 
-    Tier Selection Strategy (for 1000 rasters @ 200 MB each):
-        - Web only: VISUALIZATION tier → 17 GB hot storage
-        - Web + Analysis: VISUALIZATION + ANALYSIS → 67 GB hot storage
-        - Full compliance: All 3 tiers → 67 GB hot + 180 GB cool storage
-
-    Automatic Compatibility Detection:
-        RGB aerial photo (3 bands, uint8):
-            → All 3 tiers available (visualization, analysis, archive)
-
-        DEM elevation (1 band, float32):
-            → 2 tiers only (analysis, archive) - JPEG incompatible with float
-
-        Landsat satellite (8 bands, uint16):
-            → 2 tiers only (analysis, archive) - JPEG requires exactly 3 bands
-
-        RGBA drone imagery (4 bands, uint8):
-            → 2 tiers only (analysis, archive) - JPEG doesn't support alpha channel
+    Compatibility:
+        - RGB (3 bands, uint8): All 3 tiers
+        - DEM/multispectral: ANALYSIS + ARCHIVE only (JPEG incompatible)
 
     Usage:
-        # In job parameters
-        {"blob_name": "aerial.tif", "output_tier": "analysis"}
-
-        # Automatic tier detection in validation
         from config import determine_applicable_tiers
         tiers = determine_applicable_tiers(band_count=3, data_type='uint8')
-        # Returns: [CogTier.VISUALIZATION, CogTier.ANALYSIS, CogTier.ARCHIVE]
 
-    See Also:
-        - determine_applicable_tiers(): Automatic compatibility detection
-        - CogTierProfile: Detailed tier configuration with compression settings
-        - COG_TIER_PROFILES: Predefined tier profiles
-        - services/raster_validation.py: Tier detection during validation
-        - services/raster_cog.py: Tier application during COG creation
+    See Also: CogTierProfile, determine_applicable_tiers()
     """
     VISUALIZATION = "visualization"
     ANALYSIS = "analysis"
@@ -142,71 +89,35 @@ class StorageAccessTier(str, Enum):
     """Azure Blob Storage access tiers."""
     HOT = "hot"
     COOL = "cool"
-    ARCHIVE = "archive"  # Not used yet - requires rehydration
 
 
 class CogTierProfile(BaseModel):
     """
-    COG tier profile configuration with compression settings and compatibility rules.
-
-    Defines all technical parameters for a COG output tier including compression
-    algorithm, quality settings, storage tier, and compatibility rules for different
-    raster types (RGB, DEM, multispectral, etc.).
+    COG tier profile with compression settings and compatibility rules.
 
     Attributes:
         tier: CogTier enum (VISUALIZATION, ANALYSIS, ARCHIVE)
-        compression: Compression algorithm ("JPEG", "DEFLATE", "LZW", etc.)
-        quality: JPEG quality (1-100), None for lossless compression
-        predictor: Predictor for lossless compression (1=none, 2=horizontal)
-        zlevel: Compression level for DEFLATE (1-9, higher=more compression)
-        blocksize: Internal tile size in pixels (typically 512)
+        compression: Algorithm ("JPEG", "DEFLATE", "LZW")
+        quality: JPEG quality (1-100), None for lossless
+        predictor: Lossless compression predictor (1=none, 2=horizontal)
+        zlevel: DEFLATE compression level (1-9)
+        blocksize: Internal tile size in pixels (512)
         storage_tier: Azure storage tier (hot, cool, archive)
-        description: Human-readable description of tier purpose
-        use_case: Specific use cases for this tier
-
         requires_rgb: True if tier only works with RGB (3 bands, uint8)
-        supports_float: True if tier supports floating point data (float32, float64)
-        supports_multiband: True if tier supports >3 bands (multispectral)
+        supports_float: True if tier supports float32/float64
+        supports_multiband: True if tier supports >3 bands
 
     Methods:
-        is_compatible(band_count, data_type): Check raster compatibility with tier
+        is_compatible(band_count, data_type): Check raster compatibility
 
-    Compatibility Matrix:
-        VISUALIZATION tier (JPEG):
-            - Requires exactly 3 bands (RGB)
-            - Requires uint8 data type
-            - Does NOT support float data
-            - Does NOT support multispectral (>3 bands)
+    Compatibility:
+        - VISUALIZATION (JPEG): Requires exactly 3 bands + uint8
+        - ANALYSIS/ARCHIVE: Universal (all band counts and data types)
 
-        ANALYSIS tier (DEFLATE):
-            - Works with any band count (1, 3, 4, 8, etc.)
-            - Works with any data type (uint8, uint16, float32, etc.)
-            - Universal compatibility
-
-        ARCHIVE tier (LZW):
-            - Works with any band count
-            - Works with any data type
-            - Universal compatibility
-
-    Examples:
-        # Check if visualization tier compatible with RGB
+    Example:
         profile = COG_TIER_PROFILES[CogTier.VISUALIZATION]
-        compatible = profile.is_compatible(band_count=3, data_type='uint8')
-        # Returns: True
-
-        # Check if visualization tier compatible with DEM
-        compatible = profile.is_compatible(band_count=1, data_type='float32')
-        # Returns: False (JPEG doesn't support float32)
-
-        # Check if analysis tier compatible with DEM
-        profile = COG_TIER_PROFILES[CogTier.ANALYSIS]
-        compatible = profile.is_compatible(band_count=1, data_type='float32')
-        # Returns: True (DEFLATE is universal)
-
-    See Also:
-        - CogTier: Tier enum definitions with use cases
-        - COG_TIER_PROFILES: Predefined tier profiles
-        - determine_applicable_tiers(): Automatic compatibility detection
+        compatible = profile.is_compatible(3, 'uint8')  # True
+        compatible = profile.is_compatible(1, 'float32')  # False
     """
     tier: CogTier
     compression: str  # e.g., "JPEG", "DEFLATE", "LZW"
@@ -345,103 +256,30 @@ def determine_applicable_tiers(band_count: int, data_type: str) -> List[CogTier]
     """
     Determine which COG tiers are compatible with raster characteristics.
 
-    Automatically detects which output tiers (VISUALIZATION, ANALYSIS, ARCHIVE) can
-    be applied to a raster based on its band count and data type. Used during Stage 1
-    validation to determine compatibility before COG creation.
-
-    This function is the entry point for automatic tier detection. It checks each
-    tier's compatibility rules and returns only the tiers that can be successfully
-    applied to the raster.
+    Checks each tier's compatibility rules and returns applicable tiers.
+    Used during Stage 1 validation before COG creation.
 
     Args:
-        band_count: Number of bands in raster
-            - 1: Single-band (DEM, categorical, single-channel)
-            - 3: RGB imagery (aerial photos, satellite RGB composites)
-            - 4: RGBA imagery (drone photos with alpha) or RGB+NIR
-            - 8+: Multispectral (Landsat, Sentinel-2)
-
-        data_type: Numpy dtype string from rasterio
-            - 'uint8': 8-bit unsigned (0-255) - typical for RGB imagery
-            - 'uint16': 16-bit unsigned (0-65535) - typical for satellite imagery
-            - 'int16': 16-bit signed - typical for some DEMs
-            - 'float32': 32-bit float - typical for DEMs, scientific data
-            - 'float64': 64-bit float - rare, usually inefficient
+        band_count: Number of bands (1=DEM, 3=RGB, 4=RGBA, 8+=multispectral)
+        data_type: Numpy dtype ('uint8', 'uint16', 'float32', etc.)
 
     Returns:
-        List of CogTier enums representing compatible tiers.
-        Always returns at least ['ANALYSIS', 'ARCHIVE'] (universal tiers).
-        May include 'VISUALIZATION' if raster is RGB (3 bands, uint8).
+        List of compatible CogTier enums. Always includes ANALYSIS and ARCHIVE
+        (universal). Includes VISUALIZATION only for RGB (3 bands, uint8).
 
     Compatibility Rules:
-        VISUALIZATION (JPEG):
-            - Requires EXACTLY 3 bands (RGB)
-            - Requires uint8 data type
-            - ❌ Incompatible with: DEM (1 band), Landsat (8 bands), float data
-
-        ANALYSIS (DEFLATE):
-            - ✅ Compatible with ALL raster types
-            - Works with any band count
-            - Works with any data type
-
-        ARCHIVE (LZW):
-            - ✅ Compatible with ALL raster types
-            - Works with any band count
-            - Works with any data type
+        - VISUALIZATION (JPEG): Requires 3 bands + uint8
+        - ANALYSIS (DEFLATE): Universal (all rasters)
+        - ARCHIVE (LZW): Universal (all rasters)
 
     Examples:
-        # RGB aerial photo - all 3 tiers available
-        >>> determine_applicable_tiers(3, 'uint8')
+        >>> determine_applicable_tiers(3, 'uint8')  # RGB
         [CogTier.VISUALIZATION, CogTier.ANALYSIS, CogTier.ARCHIVE]
 
-        # DEM elevation data - 2 tiers (JPEG incompatible)
-        >>> determine_applicable_tiers(1, 'float32')
+        >>> determine_applicable_tiers(1, 'float32')  # DEM
         [CogTier.ANALYSIS, CogTier.ARCHIVE]
 
-        # Landsat multispectral - 2 tiers (JPEG incompatible)
-        >>> determine_applicable_tiers(8, 'uint16')
-        [CogTier.ANALYSIS, CogTier.ARCHIVE]
-
-        # RGBA drone imagery - 2 tiers (JPEG incompatible)
-        >>> determine_applicable_tiers(4, 'uint8')
-        [CogTier.ANALYSIS, CogTier.ARCHIVE]
-
-        # RGB satellite with 16-bit - 2 tiers (JPEG requires uint8)
-        >>> determine_applicable_tiers(3, 'uint16')
-        [CogTier.ANALYSIS, CogTier.ARCHIVE]
-
-    Usage in Pipeline:
-        # During Stage 1 validation (services/raster_validation.py)
-        applicable_tiers = determine_applicable_tiers(band_count, dtype)
-        result['cog_tiers'] = {
-            'applicable_tiers': applicable_tiers,
-            'total_compatible': len(applicable_tiers)
-        }
-
-        # During Stage 2 COG creation (services/raster_cog.py)
-        if requested_tier not in applicable_tiers:
-            logger.warning("Tier incompatible, falling back to 'analysis'")
-            tier = CogTier.ANALYSIS
-
-        # Future: Multi-tier fan-out (Phase 2)
-        for tier in applicable_tiers:
-            create_cog_task(tier=tier)
-
-    Implementation Details:
-        Iterates through COG_TIER_PROFILES and calls is_compatible() on each
-        tier profile. Returns list of compatible tiers in order:
-        [VISUALIZATION, ANALYSIS, ARCHIVE] (if all compatible)
-
-    See Also:
-        - CogTier: Tier enum with use cases and storage strategies
-        - CogTierProfile.is_compatible(): Individual tier compatibility check
-        - COG_TIER_PROFILES: Predefined tier configurations
-        - services/raster_validation.py: Calls this during validation
-        - services/raster_cog.py: Uses result for tier selection
-        - docs_claude/TIER_DETECTION_GUIDE.md: Complete tier detection guide
-
-    Returns:
-        List[CogTier]: List of compatible tier enums, always non-empty
-            (ANALYSIS and ARCHIVE are universally compatible)
+    See Also: CogTier, CogTierProfile.is_compatible()
     """
     applicable = []
 
@@ -528,22 +366,29 @@ class MultiAccountStorageConfig(BaseModel):
     """
     Multi-account storage configuration for trust zones.
 
-    Current State (29 OCT 2025):
-    - All three "accounts" use rmhazuregeo storage account
+    Current State (02 NOV 2025):
+    - All four "accounts" use rmhazuregeo storage account
     - Containers are prefixed to simulate account separation:
-      - bronze-vectors, bronze-rasters (simulates Bronze account)
-      - silver-cogs, silver-vectors (simulates Silver account)
-      - silverext-cogs, silverext-vectors (simulates SilverExternal account)
+      - bronze-vectors, bronze-rasters (Bronze: raw uploads)
+      - silver-cogs, silver-vectors (Silver: processed data)
+      - silverext-cogs, silverext-vectors (SilverExternal: airgapped replica)
+      - gold-geoparquet, gold-h3-grids (Gold: analytics-ready exports)
+
+    Trust Zone Pattern:
+    - Bronze: Untrusted raw data (user uploads)
+    - Silver: Trusted processed data (COGs, vectors in PostGIS)
+    - SilverExternal: Airgapped secure replica
+    - Gold: Analytics-ready exports (GeoParquet, H3 grids, DuckDB-optimized)
 
     Future State (When Ready for Production):
     - Bronze: Separate storage account (rmhgeo-bronze) in untrusted VNET
     - Silver: Separate storage account (rmhgeo-silver) in trusted VNET
-    - SilverExternal: Separate storage account in airgapped VNET (no internet)
+    - SilverExternal: Separate storage account in airgapped VNET
+    - Gold: Separate storage account (rmhgeo-gold) for analytics
 
     Migration Path:
-    - Change bronze.account_name to new account → zero code changes
-    - Change silver.account_name to new account → zero code changes
-    - Container names stay the same (bronze-vectors, silver-cogs, etc.)
+    - Change account_name per tier → zero code changes
+    - Container names stay the same (bronze-vectors, gold-geoparquet, etc.)
     """
 
     # BRONZE: Untrusted raw data zone
@@ -597,12 +442,28 @@ class MultiAccountStorageConfig(BaseModel):
         )
     )
 
+    # GOLD: Analytics-ready exports (GeoParquet, H3 grids, DuckDB-optimized)
+    gold: StorageAccountConfig = Field(
+        default_factory=lambda: StorageAccountConfig(
+            account_name=os.getenv("STORAGE_ACCOUNT_NAME", "rmhazuregeo"),
+            container_prefix="gold",
+            vectors="gold-geoparquet",     # GeoParquet vector exports
+            rasters="gold-notused",        # Not used (COGs in silver)
+            cogs="gold-notused",           # Not used (COGs in silver)
+            tiles="gold-notused",          # Not used (tiles in silver)
+            mosaicjson="gold-notused",     # Not used (MosaicJSON in silver)
+            stac_assets="gold-notused",    # Not used (STAC in silver)
+            misc="gold-h3-grids",          # H3 hexagonal grid GeoParquet files
+            temp="gold-temp"               # Temporary analytics processing
+        )
+    )
+
     def get_account(self, zone: str) -> StorageAccountConfig:
         """
         Get storage account config by trust zone.
 
         Args:
-            zone: Trust zone ("bronze", "silver", "silverext")
+            zone: Trust zone ("bronze", "silver", "silverext", "gold")
 
         Returns:
             StorageAccountConfig for that zone
@@ -610,6 +471,9 @@ class MultiAccountStorageConfig(BaseModel):
         Example:
             storage.get_account("bronze").get_container("vectors")
             → "bronze-vectors"
+
+            storage.get_account("gold").get_container("misc")
+            → "gold-h3-grids"
 
         Raises:
             ValueError: If zone is unknown
@@ -620,10 +484,12 @@ class MultiAccountStorageConfig(BaseModel):
             return self.silver
         elif zone == "silverext":
             return self.silverext
+        elif zone == "gold":
+            return self.gold
         else:
             raise ValueError(
                 f"Unknown storage zone: {zone}. "
-                f"Valid options: bronze, silver, silverext"
+                f"Valid options: bronze, silver, silverext, gold"
             )
 
 
@@ -697,8 +563,8 @@ class AppConfig(BaseModel):
 
     intermediate_tiles_container: Optional[str] = Field(
         default=None,
-        description="Container for intermediate raster tiles (Stage 2 output). If None, defaults to bronze_container_name. Cleanup handled by separate timer trigger (NOT in ETL workflow).",
-        examples=["rmhazuregeobronze", "rmhazuregeotemp", "rmhazuregeosilver"]
+        description="Container for intermediate raster tiles (Stage 2 output). If None, defaults to silver-tiles. Cleanup handled by separate timer trigger (NOT in ETL workflow).",
+        examples=["silver-tiles", "bronze-rasters", "silver-temp"]
     )
 
     raster_intermediate_prefix: str = Field(
@@ -1015,17 +881,17 @@ class AppConfig(BaseModel):
     @property
     def resolved_intermediate_tiles_container(self) -> str:
         """
-        Get intermediate tiles container, defaulting to bronze if not specified.
+        Get intermediate tiles container, defaulting to silver-tiles if not specified.
 
         Returns container name for intermediate raster tiles (Stage 2 output).
-        If intermediate_tiles_container is None, falls back to bronze_container_name.
+        If intermediate_tiles_container is None, falls back to silver-tiles.
 
         Usage:
             config = get_config()
             container = config.resolved_intermediate_tiles_container
-            # Returns: "rmhazuregeobronze" (or custom value if env var set)
+            # Returns: "silver-tiles" (or custom value if env var set)
         """
-        return self.intermediate_tiles_container or self.bronze_container_name
+        return self.intermediate_tiles_container or self.storage.silver.get_container('tiles')
 
     # ========================================================================
     # Validation

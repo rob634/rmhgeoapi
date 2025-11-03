@@ -3,8 +3,8 @@
 # ============================================================================
 # EPOCH: 4 - ACTIVE ✅
 # STATUS: Core Architecture - Abstract base class for all jobs
-# PURPOSE: Enforce 5-method interface contract for Job→Stage→Task architecture
-# LAST_REVIEWED: 29 OCT 2025
+# PURPOSE: Enforce 6-method interface contract for Job→Stage→Task architecture
+# LAST_REVIEWED: 3 NOV 2025
 # EXPORTS: JobBase (ABC)
 # INTERFACES: ABC (Abstract Base Class) from abc module
 # PYDANTIC_MODELS: None (jobs define their own parameter models)
@@ -29,12 +29,13 @@ This enables:
 - Clear contract documentation
 - No inheritance bloat (just signatures)
 
-5-Method Interface Contract:
+6-Method Interface Contract:
 1. validate_job_parameters(params: dict) -> dict
 2. generate_job_id(params: dict) -> str
 3. create_job_record(job_id: str, params: dict) -> JobRecord
 4. queue_job(job_id: str, params: dict) -> dict
 5. create_tasks_for_stage(stage: int, job_params: dict, job_id: str, previous_results: list) -> List[dict]
+6. finalize_job(context=None) -> Dict[str, Any]
 
 Author: Robert and Geospatial Claude Legion
 Date: 15 OCT 2025
@@ -49,7 +50,7 @@ class JobBase(ABC):
     """
     Abstract base class enforcing job interface contract.
 
-    All jobs must implement these 5 static methods. This ABC does NOT
+    All jobs must implement these 6 static methods. This ABC does NOT
     provide implementations - jobs remain simple classes that compose
     their own dependencies as needed.
 
@@ -81,6 +82,7 @@ class JobBase(ABC):
         create_job_record: Create and persist JobRecord
         queue_job: Queue JobQueueMessage to Service Bus
         create_tasks_for_stage: Generate task parameter dicts
+        finalize_job: Create final job summary after all stages complete
 
     Usage:
         class YourJob(JobBase):
@@ -93,7 +95,7 @@ class JobBase(ABC):
                 # Your implementation
                 return params
 
-            # ... implement other 4 methods
+            # ... implement other 5 methods
 
     Design Philosophy:
         This ABC enforces ONLY the interface (WHAT methods must exist).
@@ -405,5 +407,144 @@ class JobBase(ABC):
             # Stage 3 is fan-in - CoreMachine automatically creates aggregation task
             # Job does NOT implement create_tasks_for_stage() for fan-in stages
             # Task handler receives ALL Stage 2 results via params["previous_results"]
+        """
+        pass
+
+    @staticmethod
+    @abstractmethod
+    def finalize_job(context=None) -> Dict[str, Any]:
+        """
+        Create final job summary after all stages complete.
+
+        Called by: core/machine.py (after last task completes final stage)
+
+        This method is responsible for:
+        - Creating user-facing job summary from completed task results
+        - Extracting key outputs (STAC items, file paths, statistics)
+        - Formatting results for Platform layer (if integrated)
+        - Logging job completion
+
+        This method is REQUIRED for ALL workflows. It enables:
+        - Consistent job completion handling across all workflow types
+        - Platform integration via on_job_complete callback (optional)
+        - Standalone CoreMachine deployment ("system in a box")
+        - Progressive enhancement (minimal → rich implementations)
+
+        Args:
+            context (JobExecutionContext, optional): Contains:
+                - job_id (str): Job identifier
+                - job_type (str): Workflow type
+                - job_parameters (dict): Original job submission parameters
+                - task_results (List[dict]): All completed task results
+                - stage_results (dict): Aggregated results per stage
+
+                If None, workflow should:
+                - Log completion message
+                - Return minimal summary (job_type, status)
+
+        Returns:
+            Dict[str, Any]: Job summary with minimum fields:
+                - job_type (str): Workflow identifier
+                - status (str): "completed" or "failed"
+
+                Optional rich fields (workflow-specific):
+                - job_id (str): Job identifier
+                - total_tasks (int): Number of tasks executed
+                - outputs (dict): Key outputs (STAC items, files, stats)
+                - metadata (dict): Additional context
+                - errors (list): Any non-fatal errors encountered
+
+        Implementation Patterns:
+
+        Pattern 1 - Minimal (Hello World, Internal Workflows):
+            @staticmethod
+            def finalize_job(context=None) -> Dict[str, Any]:
+                '''Simple completion logging and minimal summary.'''
+                logger = LoggerFactory.create_logger(ComponentType.CONTROLLER, "HelloWorldWorkflow.finalize_job")
+
+                if context:
+                    logger.info(f"Job {context.job_id} completed with {len(context.task_results)} tasks")
+                else:
+                    logger.info("Job completed (no context provided)")
+
+                return {
+                    "job_type": "hello_world",
+                    "status": "completed"
+                }
+
+        Pattern 2 - Rich (User-Facing Workflows):
+            @staticmethod
+            def finalize_job(context) -> Dict[str, Any]:
+                '''Extract and format key outputs for user/Platform.'''
+                logger = LoggerFactory.create_logger(ComponentType.CONTROLLER, "ProcessRasterWorkflow.finalize_job")
+
+                # Extract STAC item from Stage 3 results
+                stac_results = [r for r in context.task_results if r.get('task_type') == 'create_stac_collection']
+                stac_item_id = stac_results[0]['result']['stac_item_id'] if stac_results else None
+
+                # Extract COG path from Stage 2 results
+                cog_results = [r for r in context.task_results if r.get('task_type') == 'create_cog']
+                cog_path = cog_results[0]['result']['output_blob'] if cog_results else None
+
+                summary = {
+                    "job_type": "process_raster",
+                    "job_id": context.job_id,
+                    "status": "completed",
+                    "total_tasks": len(context.task_results),
+                    "outputs": {
+                        "stac_item_id": stac_item_id,
+                        "cog_path": cog_path
+                    },
+                    "metadata": {
+                        "source_blob": context.job_parameters.get("blob_name"),
+                        "collection": context.job_parameters.get("collection_id")
+                    }
+                }
+
+                logger.info(f"Job {context.job_id} finalized: {summary}")
+                return summary
+
+        Platform Integration (Automatic):
+            If CoreMachine initialized with on_job_complete callback:
+            1. finalize_job() creates summary dict
+            2. CoreMachine stores summary in app.jobs.result_data
+            3. CoreMachine invokes callback(job_id, job_type, status, summary)
+            4. Platform layer receives summary and updates platform.api_requests
+
+            If no callback (standalone deployment):
+            1. finalize_job() creates summary dict
+            2. CoreMachine stores summary in app.jobs.result_data
+            3. No callback invoked (no Platform layer)
+
+        Design Philosophy:
+            - finalize_job() focuses on CREATING summary (data production)
+            - Callback focuses on CONSUMING summary (Platform orchestration)
+            - They are loosely coupled via dict interface
+            - Enables "system in a box" deployment (CoreMachine alone)
+            - Supports progressive enhancement (start minimal, add richness later)
+
+        Fail-Fast Validation:
+            - Missing finalize_job() = ImportError at application startup
+            - No runtime surprises - contract enforced at import time
+            - IDE autocomplete guides implementation
+
+        Example Usage in CoreMachine:
+            # Called after last task completes final stage
+            workflow = self.jobs_registry[job_type]
+            context = JobExecutionContext(
+                job_id=job_id,
+                job_type=job_type,
+                job_parameters=job_params,
+                task_results=all_task_results,
+                stage_results=stage_results
+            )
+            summary = workflow.finalize_job(context)  # ← Required method
+
+            # Store summary in database
+            job_repo.update_job(job_id, result_data=summary, status="completed")
+
+            # Invoke callback if present (Platform integration)
+            if self.on_job_complete:
+                self.on_job_complete(job_id, job_type, "completed", summary)
         """
         pass

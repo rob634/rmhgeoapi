@@ -4,8 +4,8 @@
 # EPOCH: 4 - ACTIVE ✅
 # STATUS: Core Models - Platform API request and orchestration database schema definitions
 # PURPOSE: Pydantic models for Platform layer - SINGLE SOURCE OF TRUTH for database schema
-# LAST_REVIEWED: 29 OCT 2025
-# EXPORTS: ApiRequest, OrchestrationJob, PlatformRequestStatus, DataType, PlatformRequest
+# LAST_REVIEWED: 1 NOV 2025
+# EXPORTS: ApiRequest, OrchestrationJob, PlatformRequestStatus, DataType, OperationType, PlatformRequest
 # INTERFACES: BaseModel (Pydantic)
 # PYDANTIC_MODELS: All models in this file define database schema via Infrastructure-as-Code
 # DEPENDENCIES: pydantic, typing, datetime, enum
@@ -46,9 +46,10 @@ Date: 29 OCT 2025 - Migrated to Infrastructure-as-Code pattern
 """
 
 from pydantic import BaseModel, Field, field_validator
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Union
 from datetime import datetime
 from enum import Enum
+import re
 
 
 # ============================================================================
@@ -80,6 +81,19 @@ class DataType(str, Enum):
     TABULAR = "tabular"
 
 
+class OperationType(str, Enum):
+    """
+    DDH operation types.
+
+    Auto-generates: CREATE TYPE app.operation_type_enum AS ENUM (...)
+
+    Added: 1 NOV 2025 - DDH APIM integration
+    """
+    CREATE = "CREATE"
+    UPDATE = "UPDATE"  # Phase 2
+    DELETE = "DELETE"  # Phase 2
+
+
 # ============================================================================
 # DATA TRANSFER OBJECTS (DTOs) - Not stored in database
 # ============================================================================
@@ -89,27 +103,163 @@ class PlatformRequest(BaseModel):
     Platform request from external application (DDH).
 
     This is a DTO (Data Transfer Object) for incoming HTTP requests.
-    NOT stored directly in database - converted to ApiRequest for persistence.
+    Accepts DDH API v1 format and transforms to internal ApiRequest format.
 
-    DDH Integration:
-    - dataset_id: DDH dataset identifier (mandatory)
-    - resource_id: DDH resource identifier (mandatory)
-    - version_id: DDH version identifier (mandatory)
+    Updated: 1 NOV 2025 - DDH APIM integration
     """
-    dataset_id: str = Field(..., description="DDH dataset identifier")
-    resource_id: str = Field(..., description="DDH resource identifier")
-    version_id: str = Field(..., description="DDH version identifier")
-    data_type: DataType = Field(..., description="Type of data to process")
-    source_location: str = Field(..., description="Azure blob URL or path")
-    parameters: Dict[str, Any] = Field(default_factory=dict, description="Processing parameters")
-    client_id: str = Field(..., description="Client application identifier (e.g., 'ddh')")
 
-    @field_validator('source_location')
+    # ========================================================================
+    # DDH Core Identifiers (Required)
+    # ========================================================================
+    dataset_id: str = Field(..., max_length=255, description="DDH dataset identifier")
+    resource_id: str = Field(..., max_length=255, description="DDH resource identifier")
+    version_id: str = Field(..., max_length=50, description="DDH version identifier")
+
+    # ========================================================================
+    # DDH Operation (Required)
+    # ========================================================================
+    operation: OperationType = Field(..., description="Operation type: CREATE/UPDATE/DELETE")
+
+    # ========================================================================
+    # DDH File Information (Required)
+    # ========================================================================
+    container_name: str = Field(..., max_length=100, description="Azure storage container name (e.g., bronze-vectors)")
+    file_name: Union[str, List[str]] = Field(..., description="File name(s) - single string or array for raster collections")
+
+    # ========================================================================
+    # DDH Service Metadata (Required)
+    # ========================================================================
+    service_name: str = Field(..., max_length=255, description="Human-readable service name (maps to STAC item_id)")
+    access_level: str = Field(..., max_length=50, description="Data classification: public, OUO, restricted")
+
+    # ========================================================================
+    # DDH Optional Metadata
+    # ========================================================================
+    description: Optional[str] = Field(None, description="Service description for API/STAC metadata")
+    tags: List[str] = Field(default_factory=list, description="Tags for categorization/search")
+
+    # ========================================================================
+    # DDH Processing Options (Optional)
+    # ========================================================================
+    processing_options: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="""
+        Processing options from DDH.
+
+        Vector Options:
+        - overwrite: bool (replace existing service)
+        - lon_column: str (CSV longitude column)
+        - lat_column: str (CSV latitude column)
+        - wkt_column: str (WKT geometry column)
+        - time_index: str | array (temporal indexing - Phase 2)
+        - attribute_index: str | array (attribute indexing - Phase 2)
+
+        Raster Options:
+        - crs: int (EPSG code)
+        - nodata_value: int (NoData value)
+        - band_descriptions: dict (band metadata - Phase 2)
+        - raster_collection: str (collection name - Phase 2)
+        - temporal_order: dict (time-series mapping - Phase 2)
+
+        Styling Options (Phase 2):
+        - type: str (unique/classed/stretch)
+        - property: str (attribute for visualization)
+        - color_ramp: str | array (color palette)
+        - classification: str (natural-breaks/quantile/equal/standard-deviation)
+        - classes: int (number of classes)
+        """
+    )
+
+    # ========================================================================
+    # Client Identifier
+    # ========================================================================
+    client_id: str = Field(default="ddh", description="Client application identifier")
+
+    # ========================================================================
+    # Computed Properties
+    # ========================================================================
+
+    @property
+    def source_location(self) -> str:
+        """
+        Construct Azure blob storage URL from container_name + file_name.
+
+        Returns:
+            Full Azure blob URL for the first file (if array) or single file
+        """
+        base_url = "https://rmhazuregeo.blob.core.windows.net"
+
+        # Handle array of file names (raster collections)
+        if isinstance(self.file_name, list):
+            first_file = self.file_name[0]
+            return f"{base_url}/{self.container_name}/{first_file}"
+
+        # Handle single file name
+        return f"{base_url}/{self.container_name}/{self.file_name}"
+
+    @property
+    def data_type(self) -> DataType:
+        """
+        Detect data type from file extension.
+
+        Returns:
+            DataType enum (RASTER, VECTOR, POINTCLOUD, MESH_3D, TABULAR)
+        """
+        # Get first file name if array
+        file_name = self.file_name[0] if isinstance(self.file_name, list) else self.file_name
+
+        # Extract extension
+        ext = file_name.lower().split('.')[-1]
+
+        # Map extension to data type
+        if ext in ['geojson', 'gpkg', 'shp', 'zip', 'csv']:
+            return DataType.VECTOR
+        elif ext in ['tif', 'tiff', 'img', 'hdf', 'nc']:
+            return DataType.RASTER
+        elif ext in ['las', 'laz', 'e57']:
+            return DataType.POINTCLOUD
+        elif ext in ['obj', 'fbx', 'gltf', 'glb']:
+            return DataType.MESH_3D
+        elif ext in ['xlsx', 'parquet']:
+            return DataType.TABULAR
+        else:
+            raise ValueError(f"Unsupported file format: {ext}")
+
+    @property
+    def stac_item_id(self) -> str:
+        """
+        Generate URL-safe STAC item_id from service_name.
+
+        Example: "King County Parcels 2024" → "king-county-parcels-2024"
+        """
+        item_id = self.service_name.lower()
+        item_id = item_id.replace(' ', '-')
+        item_id = re.sub(r'[^a-z0-9\-_]', '', item_id)
+        return item_id
+
+    # ========================================================================
+    # Validators
+    # ========================================================================
+
+    @field_validator('container_name')
     @classmethod
-    def validate_source(cls, v: str) -> str:
-        """Ensure source is Azure blob storage"""
-        if not (v.startswith('https://') or v.startswith('wasbs://') or v.startswith('/')):
-            raise ValueError("Source must be Azure blob URL or absolute path")
+    def validate_container(cls, v: str) -> str:
+        """Ensure container name follows naming convention"""
+        valid_containers = [
+            'bronze-vectors', 'bronze-rasters', 'bronze-misc', 'bronze-temp',
+            'silver-cogs', 'silver-vectors', 'silver-mosaicjson', 'silver-stac-assets'
+        ]
+        if v not in valid_containers:
+            raise ValueError(f"Container must be one of: {', '.join(valid_containers)}")
+        return v
+
+    @field_validator('access_level')
+    @classmethod
+    def validate_access_level(cls, v: str) -> str:
+        """Ensure access level is valid"""
+        valid_levels = ['public', 'OUO', 'restricted']
+        if v not in valid_levels:
+            raise ValueError(f"access_level must be one of: {', '.join(valid_levels)}")
         return v
 
 
@@ -200,7 +350,19 @@ class ApiRequest(BaseModel):
     )
     metadata: Dict[str, Any] = Field(
         default_factory=dict,
-        description="Additional metadata about the request"
+        description="""
+        Additional metadata about the request.
+
+        DDH Metadata Fields (added 1 NOV 2025):
+        - service_name: str (human-readable service name, maps to STAC title)
+        - stac_item_id: str (URL-safe STAC item identifier)
+        - access_level: str (public/OUO/restricted - enforcement Phase 2)
+        - description: str (service description for API/STAC)
+        - tags: list (categorization/search tags)
+        - client_id: str (client application identifier)
+        - source_location: str (Azure blob URL)
+        - submission_time: str (ISO 8601 timestamp)
+        """
     )
     result_data: Optional[Dict[str, Any]] = Field(
         None,

@@ -99,7 +99,7 @@ def h3_level4_generate(task_params: Dict[str, Any]) -> Dict[str, Any]:
         h3_service = H3GridService(
             duckdb_repo=duckdb_repo,
             blob_repo=blob_repo,
-            gold_container=config.gold_container_name
+            gold_container=config.storage.gold.get_container('misc')  # gold-h3-grids container
         )
 
         # STEP 1: Generate global Level 4 grid

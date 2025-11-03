@@ -1068,7 +1068,7 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
 
                 # Test with dctest3_R1C2.tif from bronze container
                 test_blob = "dctest3_R1C2.tif"
-                test_container = config.bronze_container_name
+                test_container = config.storage.bronze.get_container('rasters')
 
                 # Generate SAS URL (4 hour expiry for health check stability)
                 test_url = blob_repo.get_blob_url_with_sas(

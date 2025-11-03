@@ -2647,6 +2647,20 @@ stages = [
 - [ ] Duplicate detection
 - [ ] Quality reports
 
+### Container Operations Enhancements (3 NOV 2025)
+- [ ] **Add Fan-In Aggregation to list_container_contents**
+  - **Current**: 2-stage workflow (list → analyze N files) - results in N task records
+  - **Enhancement**: Add Stage 3 fan-in aggregation (similar to diamond test job)
+  - **Benefits**:
+    - Single aggregated summary (total files, total size, extension breakdown)
+    - Largest/smallest file identification
+    - Better user experience (one summary vs N individual records)
+  - **Reference**: `list_container_contents_diamond` has working Stage 3 aggregation handler
+  - **Effort**: ~2 hours (add Stage 3 to workflow, test with existing handler)
+  - **Priority**: P2 - Nice to have, improves UX but not blocking
+
+**Note**: `list_container_contents_diamond` is a TEST/DIAGNOSTIC tool created 16 OCT 2025 to validate CoreMachine's fan-in pattern. It demonstrates the desired aggregation behavior but is NOT the production workflow.
+
 ---
 
 ## 🏆 System Capabilities (Current)

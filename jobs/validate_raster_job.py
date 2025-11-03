@@ -69,7 +69,7 @@ class ValidateRasterJob(JobBase):
 
     parameters_schema: Dict[str, Any] = {
         "blob_name": {"type": "str", "required": True},
-        "container_name": {"type": "str", "required": True, "default": None},  # Uses config.bronze_container_name if None
+        "container_name": {"type": "str", "required": True, "default": None},  # Uses config.storage.bronze.get_container('rasters') if None
         "input_crs": {"type": "str", "required": False, "default": None},
         "raster_type": {
             "type": "str",
@@ -90,7 +90,7 @@ class ValidateRasterJob(JobBase):
             blob_name: str - Blob path in container
 
         Optional:
-            container_name: str - Container name (default: config.bronze_container_name)
+            container_name: str - Container name (default: config.storage.bronze.get_container('rasters'))
             input_crs: str - User-provided CRS override
             raster_type: str - Expected type for validation
             strict_mode: bool - Fail on warnings
@@ -180,7 +180,7 @@ class ValidateRasterJob(JobBase):
         config = get_config()
 
         # Use config default if container_name not specified
-        container_name = job_params.get('container_name') or config.bronze_container_name
+        container_name = job_params.get('container_name') or config.storage.bronze.get_container('rasters')
 
         # Build blob URL with SAS token
         blob_repo = BlobRepository.instance()
@@ -316,7 +316,7 @@ class ValidateRasterJob(JobBase):
         return result
 
     @staticmethod
-    def aggregate_job_results(context) -> Dict[str, Any]:
+    def finalize_job(context) -> Dict[str, Any]:
         """
         Aggregate results from completed task into job summary.
 

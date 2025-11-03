@@ -72,7 +72,7 @@ class StacCollectionsTrigger(BaseHttpTrigger):
 
         POST /api/stac/collections/{tier}  (tier: bronze, silver, gold)
         Body: {
-            "container": "rmhazuregeobronze",  # Required (use config.bronze/silver/gold_container_name)
+            "container": "rmhazuregeobronze",  # Required (use config.storage.{zone}.get_container())
             "collection_id": "custom-id",      # Optional
             "title": "Custom Title",           # Optional
             "description": "Custom description"# Optional

@@ -284,3 +284,33 @@ class CreateH3BaseJob(JobBase):
             "queue_type": "service_bus",
             "message_id": message.message_id
         }
+
+    @staticmethod
+    def finalize_job(context=None) -> Dict[str, Any]:
+        """
+        Create final job summary (minimal pattern - internal workflow).
+
+        TODO (3 NOV 2025): Consider adding statistics:
+        - Total H3 cells created
+        - Database table name
+        - Processing time
+
+        Args:
+            context: JobExecutionContext (optional for minimal implementations)
+
+        Returns:
+            Minimal job summary dict
+        """
+        from util_logger import LoggerFactory, ComponentType
+
+        logger = LoggerFactory.create_logger(ComponentType.CONTROLLER, "CreateH3BaseJob.finalize_job")
+
+        if context:
+            logger.info(f"✅ Job {context.job_id} completed with {len(context.task_results)} tasks")
+        else:
+            logger.info("✅ CreateH3Base job completed")
+
+        return {
+            "job_type": "create_h3_base",
+            "status": "completed"
+        }

@@ -45,6 +45,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+# Pydantic for band_names validation
+from models.band_mapping import BandNames
+from pydantic import ValidationError
+
 # Logging
 from util_logger import LoggerFactory, ComponentType
 
@@ -62,19 +66,19 @@ def _lazy_imports():
 def calculate_optimal_tile_size(
     band_count: int,
     bit_depth: int,
-    target_tile_mb: int = 1024,
+    target_tile_mb: int = 300,
     compression_ratio: float = 1.5
 ) -> Tuple[int, int]:
     """
     Calculate optimal tile size based on raster characteristics.
 
-    Targets 1-2GB compressed tiles with perfect 512px COG alignment.
-    All tile sizes are multiples of 512px for perfect COG blocksize alignment.
+    Targets 250-500MB uncompressed tiles with perfect 512px COG alignment.
+    Optimized for VSI/HTTP streaming - smaller tiles = faster network transfer.
 
     Args:
         band_count: Number of bands (3, 4, 8, etc.)
         bit_depth: Bits per pixel (8, 16, 32)
-        target_tile_mb: Target compressed size in MB (default: 1024 = 1GB)
+        target_tile_mb: Target compressed size in MB (default: 300 = ~450MB uncompressed)
         compression_ratio: Expected compression (default: 1.5x for LZW/DEFLATE)
 
     Returns:
@@ -83,16 +87,17 @@ def calculate_optimal_tile_size(
         - overlap_pixels: Always 512 (exactly 1 COG block)
 
     Examples:
-        >>> calculate_optimal_tile_size(3, 8)   # RGB 8-bit
-        (23040, 512)  # 45×512 blocks
+        >>> calculate_optimal_tile_size(3, 16)   # RGB 16-bit (WorldView-2 RGB)
+        (8192, 512)  # 16×512 blocks → ~384 MB
 
-        >>> calculate_optimal_tile_size(8, 16)  # 8-band 16-bit
-        (10240, 512)  # 20×512 blocks
+        >>> calculate_optimal_tile_size(8, 16)  # 8-band 16-bit (WorldView-2 full)
+        (5120, 512)  # 10×512 blocks → ~400 MB
 
-    Profile-based recommendations:
-        - Drone RGB 8-bit (3 bands, 8-bit):  23,040px → ~1.5GB tiles
-        - VHR Satellite MS (8 bands, 16-bit): 10,240px → ~1.5GB tiles
-        - Low-res 8-band 32-bit: 10,240px → ~2GB tiles
+    Profile-based recommendations (VSI-optimized sizes):
+        - WorldView-2 RGB (3 bands, 16-bit):   8,192px → ~384MB per tile
+        - WorldView-2 Full (8 bands, 16-bit):  5,120px → ~400MB per tile
+        - Drone RGB 8-bit (3 bands, 8-bit):   11,264px → ~360MB per tile
+        - Target: 250-500 MB uncompressed for efficient HTTP/VSI streaming
     """
     import math
 
@@ -120,8 +125,8 @@ def calculate_optimal_tile_size(
     tile_size = round(tile_size / 512) * 512
 
     # Clamp to safe limits (also multiples of 512)
-    # Min: 10240 = 20×512, Max: 51200 = 100×512
-    tile_size = max(10240, min(51200, tile_size))
+    # Min: 5120 = 10×512 (for very high band count), Max: 20480 = 40×512 (for VSI streaming)
+    tile_size = max(5120, min(20480, tile_size))
 
     # Fixed 512px overlap (exactly 1 COG block)
     overlap = 512
@@ -364,7 +369,9 @@ def create_geojson_feature(
 def generate_tiling_scheme_from_raster(
     raster_path: str,
     tile_size: Optional[int] = None,
-    overlap: Optional[int] = None
+    overlap: Optional[int] = None,
+    band_names: Optional[Dict[int, str]] = None,
+    target_crs: str = "EPSG:4326"
 ) -> Dict[str, Any]:
     """
     Generate complete tiling scheme GeoJSON from raster file.
@@ -390,7 +397,7 @@ def generate_tiling_scheme_from_raster(
         src_res = src.res
 
         # Extract raster metadata for COG creation (Stage 3)
-        band_count = src.count
+        actual_band_count = src.count
         dtype = src.dtypes[0]  # First band dtype (all bands usually same)
 
         # Determine bit depth from dtype for tile size calculation
@@ -404,6 +411,17 @@ def generate_tiling_scheme_from_raster(
         else:
             bit_depth = 64  # float64 (rare)
 
+        # Use requested band count for tile size calculation (not actual file band count)
+        # This ensures tiles are appropriately sized for the data we'll actually read
+        # band_names is a dict: {5: 'Red', 3: 'Green', 2: 'Blue'}
+        if band_names and isinstance(band_names, dict) and len(band_names) > 0:
+            band_count = len(band_names)
+            band_list = ', '.join(f"{idx}:{name}" for idx, name in sorted(band_names.items()))
+            logger.info(f"📊 Using requested band count for tile sizing: {band_count} bands [{band_list}] (file has {actual_band_count})")
+        else:
+            band_count = actual_band_count
+            logger.info(f"📊 Using full raster band count for tile sizing: {band_count} bands")
+
         # Calculate optimal tile size if not explicitly provided
         # tile_size=None means auto-calculate based on raster characteristics
         if tile_size is None:
@@ -412,7 +430,7 @@ def generate_tiling_scheme_from_raster(
                     band_count=band_count,
                     bit_depth=bit_depth
                 )
-                logger.info(f"📐 Auto-calculated tile size: {calculated_tile_size}px ({calculated_tile_size//512}×512 blocks) for {band_count}-band {bit_depth}-bit raster")
+                logger.info(f"📐 Auto-calculated tile size: {calculated_tile_size}px ({calculated_tile_size//512}×512 blocks) for {band_count}-band {bit_depth}-bit data (target: ~300MB per tile)")
                 tile_size = calculated_tile_size
                 overlap = calculated_overlap
             except Exception as e:
@@ -425,9 +443,9 @@ def generate_tiling_scheme_from_raster(
         if overlap is None:
             overlap = 512
 
-        # Calculate target resolution in EPSG:4326
+        # Calculate target resolution in specified target CRS
         target_bounds, target_width, target_height, degrees_per_pixel = calculate_target_resolution(
-            src_crs, src_bounds, src_width, src_height
+            src_crs, src_bounds, src_width, src_height, target_crs
         )
 
         # Calculate grid with optimal/provided tile size
@@ -456,7 +474,7 @@ def generate_tiling_scheme_from_raster(
                 "source_dimensions": [src_width, src_height],
                 "source_resolution": list(src_res),
 
-                "target_crs": "EPSG:4326",
+                "target_crs": target_crs,
                 "target_bounds": list(target_bounds),
                 "target_dimensions": [target_width, target_height],
                 "target_resolution": list(degrees_per_pixel),
@@ -535,6 +553,23 @@ def generate_tiling_scheme(params: dict) -> dict:
         overlap = params.get("overlap", 512)
         output_container = params.get("output_container", container_name)
         output_blob_name = params.get("output_blob_name")
+        target_crs = params.get("target_crs", "EPSG:4326")  # Target CRS for tiling scheme
+
+        # Validate band_names with Pydantic (strict validation, no fallbacks)
+        band_names_raw = params.get("band_names")  # None if not provided
+        if band_names_raw is not None:
+            try:
+                band_names_model = BandNames(mapping=band_names_raw)
+                band_names = band_names_model.mapping  # dict[int, str] with int keys
+                logger.debug(f"✅ band_names validated: {band_names}")
+            except ValidationError as e:
+                error_msg = e.errors()[0]['msg'] if e.errors() else str(e)
+                error_str = f"Invalid band_names parameter: {error_msg}"
+                logger.error(f"❌ {error_str}")
+                return {"success": False, "error": error_str}
+        else:
+            band_names = {}  # Empty dict = use all bands for tile size calculation
+            logger.debug(f"✅ No band_names provided, will use all bands for tile size calculation")
 
         if not container_name or not blob_name:
             return {
@@ -569,7 +604,9 @@ def generate_tiling_scheme(params: dict) -> dict:
             geojson = generate_tiling_scheme_from_raster(
                 raster_path=vsi_path,
                 tile_size=tile_size,
-                overlap=overlap
+                overlap=overlap,
+                band_names=band_names,
+                target_crs=target_crs
             )
         except Exception as e:
             # VSI-specific error handling

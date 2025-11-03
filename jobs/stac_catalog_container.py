@@ -338,7 +338,7 @@ class StacCatalogContainerWorkflow(JobBase):
         return result
 
     @staticmethod
-    def aggregate_job_results(context) -> Dict[str, Any]:
+    def finalize_job(context) -> Dict[str, Any]:
         """
         Aggregate results from all completed tasks into job summary.
 

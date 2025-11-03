@@ -89,7 +89,7 @@ class ProcessLargeRasterWorkflow(JobBase):
     """
 
     job_type: str = "process_large_raster"
-    description: str = "Process large raster (1-30 GB) to tiled COG mosaic"
+    description: str = "Process large raster (1-30 GB) to tiled COG mosaic with STAC"
 
     stages: List[Dict[str, Any]] = [
         {
@@ -116,8 +116,15 @@ class ProcessLargeRasterWorkflow(JobBase):
         {
             "number": 4,
             "name": "create_mosaicjson",
-            "task_type": "create_mosaicjson_with_stats",
-            "description": "Generate MosaicJSON + STAC with statistics",
+            "task_type": "create_mosaicjson",
+            "description": "Generate MosaicJSON with quadkey index and spatial statistics",
+            "parallelism": "fan_in"
+        },
+        {
+            "number": 5,
+            "name": "create_stac",
+            "task_type": "create_stac_collection",
+            "description": "Create STAC collection with MosaicJSON asset (ready for TiTiler-pgstac)",
             "parallelism": "fan_in"
         }
     ]
@@ -132,7 +139,7 @@ class ProcessLargeRasterWorkflow(JobBase):
             "type": "str",
             "required": True,
             "default": None,
-            "description": "Source container name (uses config.bronze_container_name if None)"
+            "description": "Source container name (uses config.storage.bronze.get_container('rasters') if None)"
         },
         "tile_size": {
             "type": "int",
@@ -164,7 +171,7 @@ class ProcessLargeRasterWorkflow(JobBase):
             "type": "str",
             "required": False,
             "default": None,
-            "description": "Override output folder path (e.g., 'cogs/antigua/'). If None, mirrors input folder structure."
+            "description": "Optional output folder path (e.g., 'cogs/antigua/'). If None, writes to container root."
         },
         "jpeg_quality": {
             "type": "int",
@@ -172,17 +179,53 @@ class ProcessLargeRasterWorkflow(JobBase):
             "default": 85,
             "description": "JPEG quality (1-100) for visualization tier"
         },
-        "band_names": {
-            "type": "list",
+        "compression": {
+            "type": "str",
             "required": False,
-            "default": ["Red", "Green", "Blue"],
-            "description": "Band names for STAC raster:bands extension"
+            "default": None,
+            "description": "Compression method override (deprecated - use output_tier instead). If None, uses tier default."
+        },
+        "overview_resampling": {
+            "type": "str",
+            "required": False,
+            "default": None,
+            "description": "Resampling method for overviews (e.g., 'cubic', 'bilinear', 'nearest'). If None, auto-selected based on raster type."
+        },
+        "reproject_resampling": {
+            "type": "str",
+            "required": False,
+            "default": None,
+            "description": "Resampling method for reprojection (e.g., 'cubic', 'bilinear', 'nearest'). If None, auto-selected based on raster type."
+        },
+        "band_names": {
+            "type": "dict",
+            "required": False,
+            "default": {"5": "Red", "3": "Green", "2": "Blue"},
+            "description": "Band index → name mapping (1-based indexing), e.g., {'5': 'Red', '3': 'Green', '2': 'Blue'} for WorldView-2 RGB"
+        },
+        "collection_id": {
+            "type": "str",
+            "required": False,
+            "default": "system-rasters",
+            "description": "STAC collection ID for metadata (default: system-rasters for operational tracking)"
+        },
+        "stac_item_id": {
+            "type": "str",
+            "required": False,
+            "default": None,
+            "description": "Custom STAC collection item ID (default: auto-generated from blob name and collection)"
         },
         "overview_level": {
             "type": "int",
             "required": False,
             "default": 2,
             "description": "Overview level for statistics calculation (0=full res, 2=1/4 res)"
+        },
+        "target_crs": {
+            "type": "str",
+            "required": False,
+            "default": "EPSG:4326",
+            "description": "Target CRS for output COGs and tiling scheme (default: EPSG:4326). Common: EPSG:3857 (Web Mercator), EPSG:4326 (WGS84)"
         }
     }
 
@@ -265,19 +308,72 @@ class ProcessLargeRasterWorkflow(JobBase):
             raise ValueError("jpeg_quality must be an integer between 1 and 100")
         validated["jpeg_quality"] = jpeg_quality
 
-        # Validate band_names
-        band_names = params.get("band_names", ["Red", "Green", "Blue"])
-        if not isinstance(band_names, list):
-            raise ValueError("band_names must be a list")
-        if not all(isinstance(name, str) for name in band_names):
-            raise ValueError("all band_names must be strings")
-        validated["band_names"] = band_names
+        # Validate compression (optional override)
+        compression = params.get("compression")
+        if compression is not None:
+            if not isinstance(compression, str) or not compression.strip():
+                raise ValueError("compression must be a non-empty string or None")
+            validated["compression"] = compression.strip()
+        else:
+            validated["compression"] = None
+
+        # Validate overview_resampling (optional override)
+        overview_resampling = params.get("overview_resampling")
+        if overview_resampling is not None:
+            if not isinstance(overview_resampling, str) or not overview_resampling.strip():
+                raise ValueError("overview_resampling must be a non-empty string or None")
+            validated["overview_resampling"] = overview_resampling.strip()
+        else:
+            validated["overview_resampling"] = None
+
+        # Validate reproject_resampling (optional override)
+        reproject_resampling = params.get("reproject_resampling")
+        if reproject_resampling is not None:
+            if not isinstance(reproject_resampling, str) or not reproject_resampling.strip():
+                raise ValueError("reproject_resampling must be a non-empty string or None")
+            validated["reproject_resampling"] = reproject_resampling.strip()
+        else:
+            validated["reproject_resampling"] = None
+
+        # Validate band_names (dict mapping band index → name)
+        # Use Pydantic model for automatic JSON string key → int conversion
+        from models.band_mapping import BandNames
+        from pydantic import ValidationError
+
+        band_names_raw = params.get("band_names", {"5": "Red", "3": "Green", "2": "Blue"})  # WorldView-2 RGB default
+
+        try:
+            band_names_model = BandNames(mapping=band_names_raw)
+            validated["band_names"] = band_names_model.mapping  # dict[int, str]
+        except ValidationError as e:
+            # Extract first error message for cleaner user feedback
+            error_msg = e.errors()[0]['msg'] if e.errors() else str(e)
+            raise ValueError(f"Invalid band_names: {error_msg}")
 
         # Validate overview_level
         overview_level = params.get("overview_level", 2)
         if not isinstance(overview_level, int) or overview_level < 0:
             raise ValueError("overview_level must be a non-negative integer")
         validated["overview_level"] = overview_level
+
+        # Validate collection_id (optional)
+        collection_id = params.get("collection_id", "system-rasters")
+        if not isinstance(collection_id, str) or not collection_id.strip():
+            raise ValueError("collection_id must be a non-empty string")
+        validated["collection_id"] = collection_id.strip()
+
+        # Validate stac_item_id (optional)
+        stac_item_id = params.get("stac_item_id")
+        if stac_item_id is not None:
+            if not isinstance(stac_item_id, str) or not stac_item_id.strip():
+                raise ValueError("stac_item_id must be a non-empty string")
+            validated["stac_item_id"] = stac_item_id.strip()
+
+        # Validate target_crs (optional)
+        target_crs = params.get("target_crs", "EPSG:4326")
+        if not isinstance(target_crs, str) or not target_crs.strip():
+            raise ValueError("target_crs must be a non-empty string")
+        validated["target_crs"] = target_crs.strip()
 
         return validated
 
@@ -315,11 +411,16 @@ class ProcessLargeRasterWorkflow(JobBase):
             parameters=params,
             status=JobStatus.QUEUED,
             stage=1,
-            total_stages=4,
+            total_stages=5,
             stage_results={},
             metadata={
-                "description": "Large raster tiling workflow (1-30 GB)",
-                "created_by": "ProcessLargeRasterWorkflow"
+                "description": "Large raster tiling workflow with STAC (1-30 GB)",
+                "created_by": "ProcessLargeRasterWorkflow",
+                "blob_name": params.get("blob_name"),
+                "container_name": params.get("container_name"),
+                "output_folder": params.get("output_folder"),
+                "collection_id": params.get("collection_id", "system-rasters"),
+                "stac_item_id": params.get("stac_item_id")
             }
         )
 
@@ -405,7 +506,7 @@ class ProcessLargeRasterWorkflow(JobBase):
             # Stage 1: Generate Tiling Scheme
             # Single task analyzes source raster and creates GeoJSON tiling scheme
 
-            container_name = job_params["container_name"] or config.bronze_container_name
+            container_name = job_params["container_name"] or config.storage.bronze.get_container('rasters')
 
             return [{
                 "task_id": f"{job_id[:8]}-s1-generate-tiling-scheme",
@@ -415,7 +516,9 @@ class ProcessLargeRasterWorkflow(JobBase):
                     "blob_name": job_params["blob_name"],
                     "tile_size": job_params.get("tile_size"),  # None = auto-calculate
                     "overlap": job_params.get("overlap", 512),
-                    "output_container": config.silver_container_name
+                    "output_container": config.storage.silver.get_container('tiles'),
+                    "band_names": job_params.get("band_names", {5: "Red", 3: "Green", 2: "Blue"}),  # For tile size calculation
+                    "target_crs": job_params.get("target_crs", "EPSG:4326")  # Tiling scheme calculated in target CRS
                 }
             }]
 
@@ -430,7 +533,7 @@ class ProcessLargeRasterWorkflow(JobBase):
             stage1_result = previous_results[0]["result"]
             tiling_scheme_blob = stage1_result["tiling_scheme_blob"]
 
-            container_name = job_params["container_name"] or config.bronze_container_name
+            container_name = job_params["container_name"] or config.storage.bronze.get_container('rasters')
 
             return [{
                 "task_id": f"{job_id[:8]}-s2-extract-tiles",
@@ -439,9 +542,10 @@ class ProcessLargeRasterWorkflow(JobBase):
                     "container_name": container_name,
                     "blob_name": job_params["blob_name"],
                     "tiling_scheme_blob": tiling_scheme_blob,
-                    "tiling_scheme_container": config.silver_container_name,
+                    "tiling_scheme_container": config.storage.silver.get_container('tiles'),
                     "output_container": config.resolved_intermediate_tiles_container,  # Use config for intermediate tiles
-                    "job_id": job_id  # Pass job_id for folder naming ({job_id[:8]}/tiles/)
+                    "job_id": job_id,  # Pass job_id for folder naming ({job_id[:8]}/tiles/)
+                    "band_names": job_params.get("band_names", {5: "Red", 3: "Green", 2: "Blue"})  # Pass band selection for efficient reading
                 }
             }]
 
@@ -507,6 +611,9 @@ class ProcessLargeRasterWorkflow(JobBase):
             # Extract blob_stem for path generation
             blob_stem = Path(job_params['blob_name']).stem
 
+            # Determine output folder
+            output_folder = job_params.get("output_folder")
+
             # Create task for each tile
             tasks = []
             for idx, tile_blob in enumerate(tile_blobs):
@@ -516,6 +623,17 @@ class ProcessLargeRasterWorkflow(JobBase):
                 # Remove blob_stem prefix and "tile_" to get grid coordinates
                 tile_id = tile_filename.replace(f"{blob_stem}_tile_", "").replace(".tif", "")
 
+                # Generate output filename with _cog suffix
+                output_filename = tile_filename.replace('.tif', '_cog.tif')
+
+                # Build output path - respect output_folder or write to root
+                if output_folder:
+                    # User specified folder (e.g., "cogs/antigua")
+                    output_blob_name = f"{output_folder}/{output_filename}"
+                else:
+                    # Default: write to container root (flat structure)
+                    output_blob_name = output_filename
+
                 tasks.append({
                     "task_id": f"{job_id[:8]}-s3-cog-{tile_id}",
                     "task_type": "create_cog",
@@ -523,20 +641,22 @@ class ProcessLargeRasterWorkflow(JobBase):
                         "container_name": config.resolved_intermediate_tiles_container,  # Read from intermediate tiles container
                         "blob_name": tile_blob,
                         "source_crs": source_crs,
-                        "target_crs": "EPSG:4326",
+                        "target_crs": job_params.get("target_crs", "EPSG:4326"),
                         "raster_type": raster_type,
                         "output_tier": job_params.get("output_tier", "analysis"),
-                        # Output to permanent cogs/ folder: cogs/17apr2024wv2/17apr2024wv2_tile_0_0_cog.tif
-                        "output_blob_name": f"cogs/{blob_stem}/{tile_filename.replace('.tif', '_cog.tif')}",
-                        "jpeg_quality": job_params.get("jpeg_quality", 85)
+                        "output_blob_name": output_blob_name,
+                        "jpeg_quality": job_params.get("jpeg_quality", 85),
+                        "compression": job_params.get("compression"),  # User override or None
+                        "overview_resampling": job_params.get("overview_resampling"),  # User override or None
+                        "reproject_resampling": job_params.get("reproject_resampling"),  # User override or None
                     }
                 })
 
             return tasks
 
         elif stage == 4:
-            # Stage 4: Create MosaicJSON + STAC
-            # Single task aggregates all COG paths and creates outputs
+            # Stage 4: Create MosaicJSON
+            # Single task aggregates all COG paths and creates MosaicJSON index
 
             # Get COG list from Stage 3 results
             successful_cogs = [
@@ -552,19 +672,64 @@ class ProcessLargeRasterWorkflow(JobBase):
             first_cog_result = next(r["result"] for r in previous_results if r.get("success"))
             bounds = first_cog_result.get("bounds_4326")
 
+            # Extract collection_id from blob_name (e.g., "17apr2024wv2.tif" → "17apr2024wv2")
+            blob_name = job_params.get("blob_name", "")
+            collection_id = Path(blob_name).stem if blob_name else "unknown"
+
             return [{
                 "task_id": f"{job_id[:8]}-s4-create-mosaicjson",
-                "task_type": "create_mosaicjson_with_stats",
+                "task_type": "create_mosaicjson",
                 "parameters": {
                     "cog_blobs": successful_cogs,
-                    "container_name": config.silver_container_name,
+                    "container_name": config.storage.silver.get_container('cogs'),
                     "job_id": job_id,
                     "bounds": bounds,
-                    "band_names": job_params.get("band_names", ["Red", "Green", "Blue"]),
+                    "band_names": job_params.get("band_names", {5: "Red", 3: "Green", 2: "Blue"}),  # dict[int, str] format
                     "overview_level": job_params.get("overview_level", 2),
-                    "output_container": config.silver_container_name
+                    "output_container": config.storage.silver.get_container('mosaicjson'),
+                    "collection_id": collection_id,
+                    "output_folder": None  # Flat namespace - write to container root
                 }
             }]
 
+        elif stage == 5:
+            # Stage 5: Create STAC collection
+            # fan_in - CoreMachine auto-creates task with previous_results from Stage 4
+            return []
+
         else:
-            raise ValueError(f"Invalid stage: {stage}")
+            raise ValueError(f"Invalid stage: {stage}. ProcessLargeRasterWorkflow has 5 stages.")
+
+    @staticmethod
+    def finalize_job(context=None) -> Dict[str, Any]:
+        """
+        Create final job summary from all completed tasks.
+
+        TODO (3 NOV 2025): Implement rich pattern to extract:
+        - MosaicJSON location and metadata (Stage 4 results)
+        - STAC collection ID and item count (Stage 5 results)
+        - Total COG count and size (Stage 3 results)
+        - Tiling statistics (Stage 2 results)
+
+        Reference: jobs/process_raster.py lines 573-650 for rich pattern example
+
+        Args:
+            context: JobExecutionContext with task results
+
+        Returns:
+            Job summary dict
+        """
+        from util_logger import LoggerFactory, ComponentType
+
+        logger = LoggerFactory.create_logger(ComponentType.CONTROLLER, "ProcessLargeRasterWorkflow.finalize_job")
+
+        # Minimal implementation for now
+        if context:
+            logger.info(f"✅ Job {context.job_id} completed with {len(context.task_results)} tasks")
+        else:
+            logger.info("✅ ProcessLargeRaster job completed")
+
+        return {
+            "job_type": "process_large_raster",
+            "status": "completed"
+        }

@@ -238,7 +238,7 @@ class ContainerSummaryWorkflow(JobBase):
         return result
 
     @staticmethod
-    def aggregate_job_results(context) -> Dict[str, Any]:
+    def finalize_job(context) -> Dict[str, Any]:
         """
         Aggregate results from single container summary task.
 
@@ -256,7 +256,7 @@ class ContainerSummaryWorkflow(JobBase):
 
         logger = LoggerFactory.create_logger(
             ComponentType.CONTROLLER,
-            "ContainerSummaryWorkflow.aggregate_job_results"
+            "ContainerSummaryWorkflow.finalize_job"
         )
 
         try:

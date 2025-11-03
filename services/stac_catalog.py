@@ -110,7 +110,8 @@ def extract_stac_metadata(params: dict) -> dict[str, Any]:
         params: {
             "container_name": str,
             "blob_name": str,
-            "collection_id": str (default: "dev")
+            "collection_id": str (default: "dev"),
+            "item_id": str (optional: custom STAC item ID, auto-generated if not provided)
         }
 
     Returns:
@@ -193,7 +194,8 @@ def extract_stac_metadata(params: dict) -> dict[str, Any]:
             container_name = params["container_name"]
             blob_name = params["blob_name"]
             collection_id = params.get("collection_id", "dev")
-            logger.info(f"📋 STEP 1: Parameters extracted - container={container_name}, blob={blob_name[:50]}..., collection={collection_id}")
+            item_id = params.get("item_id")  # Optional custom item ID
+            logger.info(f"📋 STEP 1: Parameters extracted - container={container_name}, blob={blob_name[:50]}..., collection={collection_id}, custom_item_id={item_id}")
         except Exception as e:
             logger.error(f"❌ STEP 1 FAILED: Parameter extraction error: {e}")
             raise
@@ -214,10 +216,12 @@ def extract_stac_metadata(params: dict) -> dict[str, Any]:
             logger.info(f"📡 STEP 3: Starting STAC extraction from blob (this may take 30-60s)...")
             extract_start = datetime.utcnow()
 
+            # Pass item_id if provided, otherwise auto-generate
             item = stac_service.extract_item_from_blob(
                 container=container_name,
                 blob_name=blob_name,
-                collection_id=collection_id
+                collection_id=collection_id,
+                item_id=item_id  # Will be None if not provided, service will auto-generate
             )
 
             extract_duration = (datetime.utcnow() - extract_start).total_seconds()

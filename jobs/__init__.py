@@ -79,10 +79,10 @@ from .process_large_raster import ProcessLargeRasterWorkflow
 # ============================================================================
 
 ALL_JOBS = {
+    # Production Workflows
     "hello_world": HelloWorldJob,
     "summarize_container": ContainerSummaryWorkflow,
     "list_container_contents": ListContainerContentsWorkflow,
-    "list_container_contents_diamond": ListContainerContentsDiamondWorkflow,  # Fan-in demo (16 OCT 2025)
     "stac_catalog_container": StacCatalogContainerWorkflow,
     "stac_catalog_vectors": StacCatalogVectorsWorkflow,
     "ingest_vector": IngestVectorJob,
@@ -92,6 +92,10 @@ ALL_JOBS = {
     "process_large_raster": ProcessLargeRasterWorkflow,  # Large raster tiling (1-30 GB) → COG mosaic (24 OCT 2025)
     "generate_h3_level4": GenerateH3Level4Job,
     "create_h3_base": CreateH3BaseJob,
+
+    # Test/Diagnostic Workflows
+    "list_container_contents_diamond": ListContainerContentsDiamondWorkflow,  # TEST ONLY - Fan-in demo (16 OCT 2025)
+
     # Add new jobs here explicitly
 }
 

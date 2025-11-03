@@ -918,6 +918,25 @@ class BlobRepository(IBlobRepository):
             logger.error(f"Failed to generate SAS URL for {container_name}/{blob_name}: {e}")
             raise
 
+    def get_blob_url(self, container: str, blob_path: str) -> str:
+        """
+        Get public HTTPS URL for a blob (no SAS token).
+
+        Use this for public blobs or when SAS tokens aren't needed.
+        For authenticated access, use get_blob_url_with_sas() instead.
+
+        Args:
+            container: Container name
+            blob_path: Blob path within container
+
+        Returns:
+            Full HTTPS URL to the blob
+
+        Example:
+            url = repo.get_blob_url('rmhazuregeosilver', 'mosaics/my_mosaic.json')
+            # Returns: https://rmhazuregeo.blob.core.windows.net/rmhazuregeosilver/mosaics/my_mosaic.json
+        """
+        return f"https://{self.account_name}.blob.core.windows.net/{container}/{blob_path}"
 
     # ========================================================================
     # ADVANCED OPERATIONS

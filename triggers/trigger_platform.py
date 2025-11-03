@@ -80,10 +80,12 @@ try:
     from core.models.job import JobRecord
     from core.models.enums import JobStatus
     # Import Platform models from core (Infrastructure-as-Code pattern - 29 OCT 2025)
+    # Updated 1 NOV 2025: Add OperationType for DDH integration
     from core.models import (
         ApiRequest,
         PlatformRequestStatus,
         DataType,
+        OperationType,
         PlatformRequest
     )
     logger.info("✅ Platform trigger: core modules loaded successfully")
@@ -164,18 +166,28 @@ async def platform_request_submit(req: func.HttpRequest) -> func.HttpResponse:
             platform_req.version_id
         )
 
-        # Create platform record
+        # Create platform record with DDH metadata (updated 1 NOV 2025)
         platform_record = ApiRequest(
             request_id=request_id,
             dataset_id=platform_req.dataset_id,
             resource_id=platform_req.resource_id,
             version_id=platform_req.version_id,
-            data_type=platform_req.data_type.value,
+            data_type=platform_req.data_type.value,  # Computed from file extension
             status=PlatformRequestStatus.PENDING,
-            parameters=platform_req.parameters,
+            parameters={
+                'operation': platform_req.operation.value,
+                'container_name': platform_req.container_name,
+                'file_name': platform_req.file_name,
+                'processing_options': platform_req.processing_options
+            },
             metadata={
+                'service_name': platform_req.service_name,
+                'stac_item_id': platform_req.stac_item_id,  # Computed from service_name
+                'access_level': platform_req.access_level,
+                'description': platform_req.description,
+                'tags': platform_req.tags,
                 'client_id': platform_req.client_id,
-                'source_location': platform_req.source_location,
+                'source_location': platform_req.source_location,  # Computed from container + file
                 'submission_time': datetime.utcnow().isoformat()
             }
         )
@@ -325,79 +337,164 @@ class PlatformOrchestrator:
 
     def _determine_jobs(self, request: ApiRequest) -> List[Dict[str, Any]]:
         """
-        Determine what CoreMachine jobs to create based on data type.
+        Determine what CoreMachine jobs to create based on operation + data_type.
+
+        Updated: 1 NOV 2025 - DDH integration with CREATE/UPDATE/DELETE operations
 
         This is where we implement the business logic of "what work needs
-        to be done for this type of data".
+        to be done for this type of data with this operation".
+
+        Args:
+            request: ApiRequest with DDH parameters
+
+        Returns:
+            List of job configurations (job_type + parameters)
         """
         jobs = []
+        operation = request.parameters.get('operation', 'CREATE')
+        data_type = request.data_type
+        source_location = request.metadata.get('source_location', '')
+        file_name = request.parameters.get('file_name')
+        processing_options = request.parameters.get('processing_options', {})
+        container_name = request.parameters.get('container_name')
 
-        if request.data_type == DataType.RASTER.value:
-            # Raster processing pipeline
-            source = request.metadata.get('source_location', '')
+        logger.info(f"Determining jobs for operation={operation}, data_type={data_type}")
 
-            # Use actual CoreMachine job types from jobs/__init__.py:ALL_JOBS
-            jobs.extend([
-                {
-                    'job_type': 'validate_raster_job',  # Actual job: jobs/validate_raster_job.py
-                    'parameters': {
-                        'source_path': source,
-                        'dataset_id': request.dataset_id,
-                        'resource_id': request.resource_id
-                    }
-                },
-                {
-                    'job_type': 'process_raster',  # Actual job: jobs/process_raster.py (handles COG creation)
-                    'parameters': {
-                        'source_path': source,
-                        'output_container': 'silver',
-                        'dataset_id': request.dataset_id,
-                        'resource_id': request.resource_id
-                    }
-                }
-            ])
+        # ================================================================
+        # CREATE OPERATION (Phase 1 - ACTIVE)
+        # ================================================================
+        if operation == OperationType.CREATE.value:
 
-        elif request.data_type == DataType.VECTOR.value:
-            # Check for hello_world_only testing flag (31 OCT 2025)
-            if request.parameters.get('hello_world_only'):
-                # Testing mode: ONLY hello_world job (no ingest_vector)
+            # ------------------------------------------------------------
+            # VECTOR CREATE: Ingest to PostGIS (3-stage job with STAC)
+            # ------------------------------------------------------------
+            if data_type == DataType.VECTOR.value:
+                logger.info(f"  → Vector CREATE: ingest_vector (3 stages: prepare, upload, STAC)")
+
+                # Determine table name from dataset_id + resource_id
+                table_name = f"{request.dataset_id}_{request.resource_id}".lower()
+                table_name = table_name.replace('-', '_')  # PostgreSQL-safe
+
+                # Detect file extension
+                file_ext = file_name.split('.')[-1] if isinstance(file_name, str) else file_name[0].split('.')[-1]
+
                 jobs.append({
-                    'job_type': 'hello_world',
+                    'job_type': 'ingest_vector',
                     'parameters': {
-                        'message': f"Platform request {request.request_id}",
-                        'n': request.parameters.get('n', 2)
+                        # File location
+                        'blob_name': file_name,
+                        'file_extension': file_ext,
+                        'container_name': container_name,
+
+                        # PostGIS target
+                        'table_name': table_name,
+                        'schema': 'geo',
+
+                        # DDH Identifiers (NEW - for STAC Stage 3)
+                        'dataset_id': request.dataset_id,
+                        'resource_id': request.resource_id,
+                        'version_id': request.version_id,
+
+                        # DDH STAC Metadata (NEW - for Stage 3)
+                        'stac_item_id': request.metadata.get('stac_item_id'),
+                        'service_name': request.metadata.get('service_name'),
+                        'description': request.metadata.get('description'),
+                        'tags': request.metadata.get('tags', []),
+                        'access_level': request.metadata.get('access_level', 'public'),
+
+                        # Processing options
+                        'converter_params': {
+                            'lon_column': processing_options.get('lon_column'),
+                            'lat_column': processing_options.get('lat_column'),
+                            'wkt_column': processing_options.get('wkt_column')
+                        } if any([
+                            processing_options.get('lon_column'),
+                            processing_options.get('lat_column'),
+                            processing_options.get('wkt_column')
+                        ]) else {},
+                        'overwrite': processing_options.get('overwrite', False)
                     }
                 })
-            else:
-                # Normal vector processing pipeline
-                source = request.metadata.get('source_location', '')
 
-                # Use actual CoreMachine job types from jobs/__init__.py:ALL_JOBS
-                jobs.extend([
-                    {
-                        'job_type': 'ingest_vector',  # Actual job: jobs/ingest_vector.py (handles validation + PostGIS import)
-                        'parameters': {
-                            'source_path': source,
-                            'dataset_id': request.dataset_id,
-                            'table_name': f"{request.dataset_id}_{request.resource_id}",
-                            'schema': 'geo'
+            # ------------------------------------------------------------
+            # RASTER CREATE: Validate + Create COG
+            # ------------------------------------------------------------
+            elif data_type == DataType.RASTER.value:
+                # Check if this is a raster collection (array of file names)
+                is_collection = isinstance(file_name, list) and len(file_name) > 1
+
+                if is_collection:
+                    logger.warning(f"  → Raster Collection CREATE not yet implemented (Phase 2) - skipping")
+                    # TODO: Implement process_raster_collection workflow (Phase 2)
+
+                else:
+                    logger.info(f"  → Raster CREATE: validate_raster_job + process_raster")
+
+                    jobs.extend([
+                        {
+                            'job_type': 'validate_raster_job',
+                            'parameters': {
+                                'source_path': source_location,
+                                'file_name': file_name,
+                                'dataset_id': request.dataset_id,
+                                'resource_id': request.resource_id,
+                                # Raster options (optional)
+                                'target_crs': processing_options.get('crs'),
+                                'nodata_value': processing_options.get('nodata_value')
+                            }
+                        },
+                        {
+                            'job_type': 'process_raster',
+                            'parameters': {
+                                'source_path': source_location,
+                                'file_name': file_name,
+                                'output_container': 'silver-cogs',
+                                'dataset_id': request.dataset_id,
+                                'resource_id': request.resource_id,
+                                # Raster options (optional)
+                                'target_crs': processing_options.get('crs'),
+                                'nodata_value': processing_options.get('nodata_value'),
+                                'band_descriptions': processing_options.get('band_descriptions')
+                            }
                         }
-                    }
-                ])
+                    ])
 
-        elif request.data_type == DataType.POINTCLOUD.value:
-            # Point cloud processing
-            # TODO: No point cloud job exists yet in jobs/__init__.py:ALL_JOBS
-            # When implemented, uncomment:
-            # jobs.append({
-            #     'job_type': 'process_pointcloud',
-            #     'parameters': {
-            #         'source_path': request.metadata.get('source_location', ''),
-            #         'dataset_id': request.dataset_id
-            #     }
-            # })
-            logger.warning(f"Point cloud processing requested but no job exists yet for request {request.request_id}")
+            # ------------------------------------------------------------
+            # POINTCLOUD CREATE (Phase 2 - Placeholder)
+            # ------------------------------------------------------------
+            elif data_type == DataType.POINTCLOUD.value:
+                logger.warning(f"  → Point cloud CREATE not yet implemented (Phase 2)")
+                # TODO: Implement point cloud workflow (Phase 2)
 
+            # ------------------------------------------------------------
+            # UNSUPPORTED DATA TYPE
+            # ------------------------------------------------------------
+            else:
+                logger.error(f"  → Unsupported data type: {data_type}")
+                raise ValueError(f"CREATE operation not supported for data type: {data_type}")
+
+        # ================================================================
+        # UPDATE OPERATION (Phase 2 - Placeholder)
+        # ================================================================
+        elif operation == OperationType.UPDATE.value:
+            logger.warning(f"UPDATE operation not yet implemented (Phase 2)")
+            raise NotImplementedError("UPDATE operation coming in Phase 2")
+
+        # ================================================================
+        # DELETE OPERATION (Phase 2 - Placeholder)
+        # ================================================================
+        elif operation == OperationType.DELETE.value:
+            logger.warning(f"DELETE operation not yet implemented (Phase 2)")
+            raise NotImplementedError("DELETE operation coming in Phase 2")
+
+        # ================================================================
+        # UNKNOWN OPERATION
+        # ================================================================
+        else:
+            logger.error(f"Unknown operation: {operation}")
+            raise ValueError(f"Unknown operation: {operation}")
+
+        logger.info(f"Determined {len(jobs)} jobs for request {request.request_id}")
         return jobs
 
     async def _create_coremachine_job(

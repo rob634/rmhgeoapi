@@ -4,7 +4,7 @@
 # EPOCH: 4 - ACTIVE ✅
 # STATUS: Job - Two-stage vector ETL with pickle-based intermediate storage
 # PURPOSE: Ingest vector files to PostGIS using fan-out parallelism for chunk uploads
-# LAST_REVIEWED: 29 OCT 2025
+# LAST_REVIEWED: 3 NOV 2025
 # EXPORTS: IngestVectorJob (JobBase implementation)
 # INTERFACES: JobBase (implements 5-method contract)
 # PYDANTIC_MODELS: None (uses dict-based validation)
@@ -519,7 +519,7 @@ class IngestVectorJob(JobBase):
             context: JobExecutionContext with task results
 
         Returns:
-            Aggregated job results dict
+            Aggregated job results dict including OGC Features API URLs
         """
         from core.models import TaskStatus
 
@@ -529,6 +529,7 @@ class IngestVectorJob(JobBase):
         # Separate tasks by stage
         stage_1_tasks = [t for t in task_results if t.task_type == "prepare_vector_chunks"]
         stage_2_tasks = [t for t in task_results if t.task_type == "upload_pickled_chunk"]
+        stage_3_tasks = [t for t in task_results if t.task_type == "create_vector_stac"]
 
         # Extract metadata from Stage 1
         total_chunks = 0
@@ -552,12 +553,37 @@ class IngestVectorJob(JobBase):
             if t.result_data
         )
 
+        # Extract STAC results from Stage 3
+        stac_summary = {}
+        if stage_3_tasks and stage_3_tasks[0].result_data:
+            stac_result = stage_3_tasks[0].result_data.get("result", {})
+            stac_summary = {
+                "collection_id": stac_result.get("collection_id", "system-vectors"),
+                "stac_id": stac_result.get("stac_id"),
+                "pgstac_id": stac_result.get("pgstac_id"),
+                "inserted_to_pgstac": stac_result.get("inserted_to_pgstac", True),
+                "feature_count": stac_result.get("feature_count"),
+                "bbox": stac_result.get("bbox")
+            }
+
+        # Generate OGC Features URL for vector access
+        from config import get_config
+        config = get_config()
+        table_name = params.get("table_name")
+        ogc_features_url = config.generate_ogc_features_url(table_name)
+
+        logger.info(
+            f"✅ Vector ingest job {context.job_id[:16]} completed: "
+            f"{total_rows_uploaded} rows uploaded to {params.get('schema')}.{table_name}, "
+            f"STAC cataloged, OGC Features URL generated"
+        )
+
         # Build aggregated result
         return {
             "job_type": "ingest_vector",
             "blob_name": params.get("blob_name"),
             "file_extension": params.get("file_extension"),
-            "table_name": params.get("table_name"),
+            "table_name": table_name,
             "schema": params.get("schema"),
             "container_name": params.get("container_name"),
             "summary": {
@@ -568,6 +594,8 @@ class IngestVectorJob(JobBase):
                 "success_rate": f"{(successful_chunks / len(stage_2_tasks) * 100):.1f}%" if stage_2_tasks else "0%",
                 "stage_1_metadata": chunk_metadata
             },
+            "stac": stac_summary,
+            "ogc_features_url": ogc_features_url,
             "stages_completed": context.current_stage,
             "total_tasks_executed": len(task_results),
             "tasks_by_status": {

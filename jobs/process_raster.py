@@ -4,7 +4,7 @@
 # EPOCH: 4 - ACTIVE ✅
 # STATUS: Job - Two-stage small raster processing (<= 1GB)
 # PURPOSE: 2-stage workflow for processing small rasters to COGs (<= 1GB)
-# LAST_REVIEWED: 29 OCT 2025
+# LAST_REVIEWED: 3 NOV 2025
 # EXPORTS: ProcessRasterWorkflow (JobBase implementation)
 # INTERFACES: JobBase (implements 5-method contract)
 # PYDANTIC_MODELS: None (uses dict-based validation)
@@ -617,15 +617,29 @@ class ProcessRasterWorkflow(JobBase):
 
         # Extract STAC results
         stac_summary = {}
+        titiler_urls = {}
+
         if stage_3_tasks and stage_3_tasks[0].result_data:
             stac_result = stage_3_tasks[0].result_data.get("result", {})
+            collection_id = stac_result.get("collection_id", "cogs")
+            item_id = stac_result.get("item_id")
+
             stac_summary = {
-                "item_id": stac_result.get("item_id"),
-                "collection_id": stac_result.get("collection_id"),
+                "item_id": item_id,
+                "collection_id": collection_id,
                 "bbox": stac_result.get("bbox"),
                 "inserted_to_pgstac": stac_result.get("inserted_to_pgstac", True),
-                "ready_for_titiler": True  # COG + STAC = ready for serving
+                "ready_for_titiler": True
             }
+
+            # Generate TiTiler URLs
+            if item_id:
+                from config import get_config
+                config = get_config()
+                titiler_urls = config.generate_titiler_urls(
+                    collection_id=collection_id,
+                    item_id=item_id
+                )
 
         return {
             "job_type": "process_raster",
@@ -634,6 +648,7 @@ class ProcessRasterWorkflow(JobBase):
             "validation": validation_summary,
             "cog": cog_summary,
             "stac": stac_summary,
+            "titiler": titiler_urls,
             "stages_completed": context.current_stage,
             "total_tasks_executed": len(task_results),
             "tasks_by_status": {

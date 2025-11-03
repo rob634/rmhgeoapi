@@ -4,7 +4,7 @@
 # EPOCH: 4 - ACTIVE ✅
 # STATUS: Job - Four-stage raster collection processing (multi-tile vendor deliveries)
 # PURPOSE: 4-stage workflow for processing raster tile collections to COGs + MosaicJSON
-# LAST_REVIEWED: 29 OCT 2025
+# LAST_REVIEWED: 3 NOV 2025
 # EXPORTS: ProcessRasterCollectionWorkflow (JobBase implementation)
 # INTERFACES: JobBase (implements 5-method contract)
 # PYDANTIC_MODELS: None (uses dict-based validation)
@@ -612,35 +612,107 @@ class ProcessRasterCollectionWorkflow(JobBase):
         return tasks
 
     @staticmethod
-    def finalize_job(context=None) -> Dict[str, Any]:
+    def finalize_job(context) -> Dict[str, Any]:
         """
         Create final job summary from all completed tasks.
 
-        TODO (3 NOV 2025): Implement rich pattern to extract:
-        - MosaicJSON location and metadata (Stage 3 results)
-        - STAC collection ID and item IDs (Stage 4 results)
-        - Per-tile COG statistics (Stage 2 results)
-        - Collection-level aggregations (total size, tile count, spatial extent)
-
-        Reference: jobs/process_raster.py lines 573-650 for rich pattern example
+        Extracts:
+        - Per-tile COG statistics (Stage 2)
+        - MosaicJSON metadata (Stage 3)
+        - STAC collection details (Stage 4)
+        - TiTiler visualization URLs
 
         Args:
             context: JobExecutionContext with task results
 
         Returns:
-            Job summary dict
+            Comprehensive job summary with TiTiler URLs
         """
         from util_logger import LoggerFactory, ComponentType
+        from core.models import TaskStatus
+        from config import get_config
 
-        logger = LoggerFactory.create_logger(ComponentType.CONTROLLER, "ProcessRasterCollectionWorkflow.finalize_job")
+        logger = LoggerFactory.create_logger(
+            ComponentType.CONTROLLER,
+            "ProcessRasterCollectionWorkflow.finalize_job"
+        )
 
-        # Minimal implementation for now
-        if context:
-            logger.info(f"✅ Job {context.job_id} completed with {len(context.task_results)} tasks")
-        else:
-            logger.info("✅ ProcessRasterCollection job completed")
+        task_results = context.task_results
+        params = context.parameters
+        config = get_config()
+
+        # Extract COG results (Stage 2 - fan-out, N tasks)
+        cog_tasks = [t for t in task_results if t.task_type == "create_cog"]
+        successful_cogs = [t for t in cog_tasks if t.status == TaskStatus.COMPLETED]
+        failed_cogs = [t for t in cog_tasks if t.status == TaskStatus.FAILED]
+
+        total_size_mb = 0
+        for cog_task in successful_cogs:
+            if cog_task.result_data and cog_task.result_data.get("result"):
+                size_mb = cog_task.result_data["result"].get("size_mb", 0)
+                total_size_mb += size_mb
+
+        cog_summary = {
+            "total_count": len(successful_cogs),
+            "successful": len(successful_cogs),
+            "failed": len(failed_cogs),
+            "total_size_mb": round(total_size_mb, 2)
+        }
+
+        # Extract MosaicJSON result (Stage 3 - fan-in)
+        mosaicjson_tasks = [t for t in task_results if t.task_type == "create_mosaicjson"]
+        mosaicjson_summary = {}
+        if mosaicjson_tasks and mosaicjson_tasks[0].result_data:
+            mosaicjson_result = mosaicjson_tasks[0].result_data.get("result", {})
+            mosaicjson_summary = {
+                "blob_path": mosaicjson_result.get("mosaicjson_blob"),
+                "url": mosaicjson_result.get("mosaicjson_url"),
+                "bounds": mosaicjson_result.get("bounds"),
+                "tile_count": mosaicjson_result.get("tile_count")
+            }
+
+        # Extract STAC result (Stage 4 - fan-in)
+        stac_tasks = [t for t in task_results if t.task_type == "create_stac_collection"]
+        stac_summary = {}
+        titiler_urls = {}
+
+        if stac_tasks and stac_tasks[0].result_data:
+            stac_result = stac_tasks[0].result_data.get("result", {})
+            collection_id = stac_result.get("collection_id", "cogs")
+            item_id = stac_result.get("stac_id") or stac_result.get("pgstac_id")
+
+            stac_summary = {
+                "collection_id": collection_id,
+                "stac_id": item_id,
+                "pgstac_id": stac_result.get("pgstac_id"),
+                "inserted_to_pgstac": stac_result.get("inserted_to_pgstac", True),
+                "ready_for_titiler": True
+            }
+
+            # Generate TiTiler URLs
+            if item_id:
+                titiler_urls = config.generate_titiler_urls(
+                    collection_id=collection_id,
+                    item_id=item_id
+                )
+
+        logger.info(
+            f"✅ Raster collection job {context.job_id[:16]} completed: "
+            f"{len(successful_cogs)} COGs, MosaicJSON created, STAC published"
+        )
 
         return {
             "job_type": "process_raster_collection",
-            "status": "completed"
+            "job_id": context.job_id,
+            "collection_id": params.get("collection_id"),
+            "cogs": cog_summary,
+            "mosaicjson": mosaicjson_summary,
+            "stac": stac_summary,
+            "titiler": titiler_urls,
+            "stages_completed": context.current_stage,
+            "total_tasks_executed": len(task_results),
+            "tasks_by_status": {
+                "completed": sum(1 for t in task_results if t.status == TaskStatus.COMPLETED),
+                "failed": sum(1 for t in task_results if t.status == TaskStatus.FAILED)
+            }
         }

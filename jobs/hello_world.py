@@ -336,7 +336,7 @@ class HelloWorldJob(JobBase):
 
         if context:
             logger.info(f"✅ Job {context.job_id} completed with {len(context.task_results)} tasks")
-            logger.debug(f"   Job parameters: {context.job_parameters}")
+            logger.debug(f"   Job parameters: {context.parameters}")
         else:
             logger.info("✅ HelloWorld job completed (no context provided)")
 

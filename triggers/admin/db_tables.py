@@ -204,9 +204,8 @@ class AdminDbTablesTrigger:
                             s.last_autovacuum,
                             s.last_analyze
                         FROM pg_stat_user_tables s
-                        JOIN pg_class c ON c.relname = s.tablename
-                        JOIN pg_namespace n ON n.oid = c.relnamespace AND n.nspname = s.schemaname
-                        WHERE s.schemaname = %s AND s.tablename = %s;
+                        JOIN pg_class c ON c.oid = s.relid
+                        WHERE s.schemaname = %s AND s.relname = %s;
                     """, (schema_name, table_name))
                     stats_row = cursor.fetchone()
 
@@ -248,8 +247,8 @@ class AdminDbTablesTrigger:
                             i.indexdef,
                             pg_size_pretty(pg_relation_size(c.oid)) as size
                         FROM pg_indexes i
-                        JOIN pg_class c ON c.relname = i.indexname
-                        JOIN pg_namespace n ON n.oid = c.relnamespace AND n.nspname = i.schemaname
+                        JOIN pg_namespace n ON n.nspname = i.schemaname
+                        JOIN pg_class c ON c.relname = i.indexname AND c.relnamespace = n.oid
                         WHERE i.schemaname = %s AND i.tablename = %s;
                     """, (schema_name, table_name))
                     index_rows = cursor.fetchall()
@@ -569,7 +568,8 @@ class AdminDbTablesTrigger:
                             pg_size_pretty(pg_relation_size(c.oid)) as size,
                             am.amname as index_type
                         FROM pg_indexes i
-                        JOIN pg_class c ON c.relname = i.indexname
+                        JOIN pg_namespace n ON n.nspname = i.schemaname
+                        JOIN pg_class c ON c.relname = i.indexname AND c.relnamespace = n.oid
                         JOIN pg_am am ON am.oid = c.relam
                         WHERE i.schemaname = %s AND i.tablename = %s
                         ORDER BY i.indexname;

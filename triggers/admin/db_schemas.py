@@ -256,8 +256,8 @@ class AdminDbSchemasTrigger:
                             t.tablename,
                             pg_size_pretty(pg_total_relation_size(c.oid)) as size
                         FROM pg_tables t
-                        JOIN pg_class c ON c.relname = t.tablename
-                        JOIN pg_namespace n ON n.oid = c.relnamespace AND n.nspname = t.schemaname
+                        JOIN pg_namespace n ON n.nspname = t.schemaname
+                        JOIN pg_class c ON c.relname = t.tablename AND c.relnamespace = n.oid
                         WHERE t.schemaname = %s
                         ORDER BY t.tablename;
                     """, (schema_name,))
@@ -286,8 +286,8 @@ class AdminDbSchemasTrigger:
                             COALESCE(SUM(pg_total_relation_size(c.oid)), 0)
                         ) as total_size
                         FROM pg_tables t
-                        JOIN pg_class c ON c.relname = t.tablename
-                        JOIN pg_namespace n ON n.oid = c.relnamespace AND n.nspname = t.schemaname
+                        JOIN pg_namespace n ON n.nspname = t.schemaname
+                        JOIN pg_class c ON c.relname = t.tablename AND c.relnamespace = n.oid
                         WHERE t.schemaname = %s;
                     """, (schema_name,))
                     total_size = cursor.fetchone()['total_size']
@@ -360,7 +360,7 @@ class AdminDbSchemasTrigger:
                     cursor.execute("""
                         SELECT
                             s.schemaname,
-                            s.tablename,
+                            s.relname as tablename,
                             s.n_live_tup as row_count,
                             pg_size_pretty(pg_total_relation_size(c.oid)) as total_size,
                             pg_size_pretty(pg_relation_size(c.oid)) as data_size,
@@ -370,8 +370,7 @@ class AdminDbSchemasTrigger:
                             s.last_analyze,
                             s.last_autoanalyze
                         FROM pg_stat_user_tables s
-                        JOIN pg_class c ON c.relname = s.tablename
-                        JOIN pg_namespace n ON n.oid = c.relnamespace AND n.nspname = s.schemaname
+                        JOIN pg_class c ON c.oid = s.relid
                         WHERE s.schemaname = %s
                         ORDER BY pg_total_relation_size(c.oid) DESC;
                     """, (schema_name,))

@@ -196,16 +196,18 @@ class AdminDbTablesTrigger:
                     # Get table statistics
                     cursor.execute("""
                         SELECT
-                            n_live_tup as row_count,
-                            pg_size_pretty(pg_total_relation_size(%s || '.' || %s)) as total_size,
-                            pg_size_pretty(pg_relation_size(%s || '.' || %s)) as data_size,
-                            pg_size_pretty(pg_indexes_size(%s || '.' || %s)) as index_size,
-                            last_vacuum,
-                            last_autovacuum,
-                            last_analyze
-                        FROM pg_stat_user_tables
-                        WHERE schemaname = %s AND tablename = %s;
-                    """, (schema_name, table_name, schema_name, table_name, schema_name, table_name, schema_name, table_name))
+                            s.n_live_tup as row_count,
+                            pg_size_pretty(pg_total_relation_size(c.oid)) as total_size,
+                            pg_size_pretty(pg_relation_size(c.oid)) as data_size,
+                            pg_size_pretty(pg_indexes_size(c.oid)) as index_size,
+                            s.last_vacuum,
+                            s.last_autovacuum,
+                            s.last_analyze
+                        FROM pg_stat_user_tables s
+                        JOIN pg_class c ON c.relname = s.tablename
+                        JOIN pg_namespace n ON n.oid = c.relnamespace AND n.nspname = s.schemaname
+                        WHERE s.schemaname = %s AND s.tablename = %s;
+                    """, (schema_name, table_name))
                     stats_row = cursor.fetchone()
 
                     if not stats_row:
@@ -242,11 +244,13 @@ class AdminDbTablesTrigger:
                     # Get indexes
                     cursor.execute("""
                         SELECT
-                            indexname,
-                            indexdef,
-                            pg_size_pretty(pg_relation_size(schemaname || '.' || indexname)) as size
-                        FROM pg_indexes
-                        WHERE schemaname = %s AND tablename = %s;
+                            i.indexname,
+                            i.indexdef,
+                            pg_size_pretty(pg_relation_size(c.oid)) as size
+                        FROM pg_indexes i
+                        JOIN pg_class c ON c.relname = i.indexname
+                        JOIN pg_namespace n ON n.oid = c.relnamespace AND n.nspname = i.schemaname
+                        WHERE i.schemaname = %s AND i.tablename = %s;
                     """, (schema_name, table_name))
                     index_rows = cursor.fetchall()
 
@@ -562,7 +566,7 @@ class AdminDbTablesTrigger:
                         SELECT
                             i.indexname,
                             i.indexdef,
-                            pg_size_pretty(pg_relation_size(i.schemaname || '.' || i.indexname)) as size,
+                            pg_size_pretty(pg_relation_size(c.oid)) as size,
                             am.amname as index_type
                         FROM pg_indexes i
                         JOIN pg_class c ON c.relname = i.indexname

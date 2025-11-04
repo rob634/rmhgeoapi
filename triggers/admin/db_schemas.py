@@ -253,11 +253,13 @@ class AdminDbSchemasTrigger:
                     # Get tables in schema
                     cursor.execute("""
                         SELECT
-                            tablename,
-                            pg_size_pretty(pg_total_relation_size(quote_ident(schemaname) || '.' || quote_ident(tablename))) as size
-                        FROM pg_tables
-                        WHERE schemaname = %s
-                        ORDER BY tablename;
+                            t.tablename,
+                            pg_size_pretty(pg_total_relation_size(c.oid)) as size
+                        FROM pg_tables t
+                        JOIN pg_class c ON c.relname = t.tablename
+                        JOIN pg_namespace n ON n.oid = c.relnamespace AND n.nspname = t.schemaname
+                        WHERE t.schemaname = %s
+                        ORDER BY t.tablename;
                     """, (schema_name,))
                     table_rows = cursor.fetchall()
 
@@ -281,10 +283,12 @@ class AdminDbSchemasTrigger:
                     # Get total schema size
                     cursor.execute("""
                         SELECT pg_size_pretty(
-                            COALESCE(SUM(pg_total_relation_size(quote_ident(schemaname) || '.' || quote_ident(tablename))), 0)
+                            COALESCE(SUM(pg_total_relation_size(c.oid)), 0)
                         ) as total_size
-                        FROM pg_tables
-                        WHERE schemaname = %s;
+                        FROM pg_tables t
+                        JOIN pg_class c ON c.relname = t.tablename
+                        JOIN pg_namespace n ON n.oid = c.relnamespace AND n.nspname = t.schemaname
+                        WHERE t.schemaname = %s;
                     """, (schema_name,))
                     total_size = cursor.fetchone()['total_size']
 
@@ -355,19 +359,21 @@ class AdminDbSchemasTrigger:
                     # Get tables with statistics
                     cursor.execute("""
                         SELECT
-                            schemaname,
-                            tablename,
-                            n_live_tup as row_count,
-                            pg_size_pretty(pg_total_relation_size(quote_ident(schemaname) || '.' || quote_ident(tablename))) as total_size,
-                            pg_size_pretty(pg_relation_size(quote_ident(schemaname) || '.' || quote_ident(tablename))) as data_size,
-                            pg_size_pretty(pg_indexes_size(quote_ident(schemaname) || '.' || quote_ident(tablename))) as index_size,
-                            last_vacuum,
-                            last_autovacuum,
-                            last_analyze,
-                            last_autoanalyze
-                        FROM pg_stat_user_tables
-                        WHERE schemaname = %s
-                        ORDER BY pg_total_relation_size(quote_ident(schemaname) || '.' || quote_ident(tablename)) DESC;
+                            s.schemaname,
+                            s.tablename,
+                            s.n_live_tup as row_count,
+                            pg_size_pretty(pg_total_relation_size(c.oid)) as total_size,
+                            pg_size_pretty(pg_relation_size(c.oid)) as data_size,
+                            pg_size_pretty(pg_indexes_size(c.oid)) as index_size,
+                            s.last_vacuum,
+                            s.last_autovacuum,
+                            s.last_analyze,
+                            s.last_autoanalyze
+                        FROM pg_stat_user_tables s
+                        JOIN pg_class c ON c.relname = s.tablename
+                        JOIN pg_namespace n ON n.oid = c.relnamespace AND n.nspname = s.schemaname
+                        WHERE s.schemaname = %s
+                        ORDER BY pg_total_relation_size(c.oid) DESC;
                     """, (schema_name,))
                     rows = cursor.fetchall()
 

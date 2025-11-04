@@ -215,6 +215,13 @@ from triggers.stac_nuke import stac_nuke_trigger
 from triggers.ingest_vector import ingest_vector_trigger
 from triggers.test_raster_create import test_raster_create_trigger
 
+# Admin API triggers (03 NOV 2025) - Consolidated under /api/admin/*
+from triggers.admin.db_schemas import admin_db_schemas_trigger
+from triggers.admin.db_tables import admin_db_tables_trigger
+from triggers.admin.db_queries import admin_db_queries_trigger
+from triggers.admin.db_health import admin_db_health_trigger
+from triggers.admin.db_maintenance import admin_db_maintenance_trigger
+
 # Platform Service Layer triggers (25 OCT 2025)
 from triggers.trigger_platform import platform_request_submit
 from triggers.trigger_platform_status import platform_request_status
@@ -303,6 +310,121 @@ app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
 def health(req: func.HttpRequest) -> func.HttpResponse:
     """Health check endpoint using HTTP trigger base class."""
     return health_check_trigger.handle_request(req)
+
+
+# ============================================================================
+# DATABASE ADMIN API ENDPOINTS - Phase 1 (03 NOV 2025)
+# ============================================================================
+# Database admin endpoints under /api/db/* (consolidated with existing db routes)
+# NOTE: Azure Functions reserves /api/admin/* for built-in admin UI
+# APIM can still restrict all /api/db/* endpoints with a single policy
+# Priority: PostgreSQL visibility (app, geo, pgstac schemas)
+# ============================================================================
+
+# Schema-level operations
+@app.route(route="db/schemas", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def db_schemas_list(req: func.HttpRequest) -> func.HttpResponse:
+    """List all schemas: GET /api/db/schemas"""
+    return admin_db_schemas_trigger.handle_request(req)
+
+
+@app.route(route="db/schemas/{schema_name}", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def db_schema_details(req: func.HttpRequest) -> func.HttpResponse:
+    """Get schema details: GET /api/db/schemas/{schema_name}"""
+    return admin_db_schemas_trigger.handle_request(req)
+
+
+@app.route(route="db/schemas/{schema_name}/tables", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def db_schema_tables(req: func.HttpRequest) -> func.HttpResponse:
+    """List schema tables: GET /api/db/schemas/{schema_name}/tables"""
+    return admin_db_schemas_trigger.handle_request(req)
+
+
+# Table-level operations
+@app.route(route="db/tables/{table_identifier}", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def db_table_details(req: func.HttpRequest) -> func.HttpResponse:
+    """Get table details: GET /api/db/tables/{schema}.{table}"""
+    return admin_db_tables_trigger.handle_request(req)
+
+
+@app.route(route="db/tables/{table_identifier}/sample", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def db_table_sample(req: func.HttpRequest) -> func.HttpResponse:
+    """Sample table rows: GET /api/db/tables/{schema}.{table}/sample"""
+    return admin_db_tables_trigger.handle_request(req)
+
+
+@app.route(route="db/tables/{table_identifier}/columns", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def db_table_columns(req: func.HttpRequest) -> func.HttpResponse:
+    """Get table columns: GET /api/db/tables/{schema}.{table}/columns"""
+    return admin_db_tables_trigger.handle_request(req)
+
+
+@app.route(route="db/tables/{table_identifier}/indexes", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def db_table_indexes(req: func.HttpRequest) -> func.HttpResponse:
+    """Get table indexes: GET /api/db/tables/{schema}.{table}/indexes"""
+    return admin_db_tables_trigger.handle_request(req)
+
+
+# Query analysis
+@app.route(route="db/queries/running", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def db_queries_running(req: func.HttpRequest) -> func.HttpResponse:
+    """Get running queries: GET /api/db/queries/running"""
+    return admin_db_queries_trigger.handle_request(req)
+
+
+@app.route(route="db/queries/slow", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def db_queries_slow(req: func.HttpRequest) -> func.HttpResponse:
+    """Get slow queries: GET /api/db/queries/slow"""
+    return admin_db_queries_trigger.handle_request(req)
+
+
+@app.route(route="db/locks", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def db_locks(req: func.HttpRequest) -> func.HttpResponse:
+    """Get database locks: GET /api/db/locks"""
+    return admin_db_queries_trigger.handle_request(req)
+
+
+@app.route(route="db/connections", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def db_connections(req: func.HttpRequest) -> func.HttpResponse:
+    """Get connection stats: GET /api/db/connections"""
+    return admin_db_queries_trigger.handle_request(req)
+
+
+# Health and performance
+@app.route(route="db/health", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def db_health(req: func.HttpRequest) -> func.HttpResponse:
+    """Get database health: GET /api/db/health"""
+    return admin_db_health_trigger.handle_request(req)
+
+
+@app.route(route="db/health/performance", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def db_health_performance(req: func.HttpRequest) -> func.HttpResponse:
+    """Get performance metrics: GET /api/db/health/performance"""
+    return admin_db_health_trigger.handle_request(req)
+
+
+# Maintenance operations
+@app.route(route="db/maintenance/nuke", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
+def db_maintenance_nuke(req: func.HttpRequest) -> func.HttpResponse:
+    """Nuke schema: POST /api/db/maintenance/nuke?confirm=yes"""
+    return admin_db_maintenance_trigger.handle_request(req)
+
+
+@app.route(route="db/maintenance/redeploy", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
+def db_maintenance_redeploy(req: func.HttpRequest) -> func.HttpResponse:
+    """Redeploy schema: POST /api/db/maintenance/redeploy?confirm=yes"""
+    return admin_db_maintenance_trigger.handle_request(req)
+
+
+@app.route(route="db/maintenance/cleanup", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
+def db_maintenance_cleanup(req: func.HttpRequest) -> func.HttpResponse:
+    """Cleanup old records: POST /api/db/maintenance/cleanup?confirm=yes&days=30"""
+    return admin_db_maintenance_trigger.handle_request(req)
+
+
+# ============================================================================
+# END DATABASE ADMIN API ENDPOINTS
+# ============================================================================
 
 
 @app.route(route="jobs/submit/{job_type}", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)

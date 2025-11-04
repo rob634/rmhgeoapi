@@ -271,8 +271,8 @@ class AdminDbHealthTrigger:
                     })
 
                     # Check if this is a replica
-                    cursor.execute("SELECT pg_is_in_recovery();")
-                    is_replica = cursor.fetchone()[0]
+                    cursor.execute("SELECT pg_is_in_recovery() as is_in_recovery;")
+                    is_replica = cursor.fetchone()['is_in_recovery']
 
             result = {
                 'status': overall_status,
@@ -359,7 +359,7 @@ class AdminDbHealthTrigger:
                             sum(heap_blks_hit) / NULLIF(sum(heap_blks_hit + heap_blks_read), 0) as cache_hit_ratio
                         FROM pg_statio_user_tables;
                     """)
-                    cache_hit = cursor.fetchone()[0]
+                    cache_hit = cursor.fetchone()['cache_hit_ratio']
 
                     # Index hit ratio
                     cursor.execute("""
@@ -367,7 +367,7 @@ class AdminDbHealthTrigger:
                             sum(idx_blks_hit) / NULLIF(sum(idx_blks_hit + idx_blks_read), 0) as index_hit_ratio
                         FROM pg_statio_user_indexes;
                     """)
-                    index_hit = cursor.fetchone()[0]
+                    index_hit = cursor.fetchone()['index_hit_ratio']
 
                     # Sequential scans
                     cursor.execute("""

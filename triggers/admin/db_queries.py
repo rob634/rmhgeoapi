@@ -282,9 +282,9 @@ class AdminDbQueriesTrigger:
                     cursor.execute("""
                         SELECT EXISTS (
                             SELECT 1 FROM pg_extension WHERE extname = 'pg_stat_statements'
-                        );
+                        ) as extension_exists;
                     """)
-                    available = cursor.fetchone()[0]
+                    available = cursor.fetchone()['extension_exists']
 
                     if not available:
                         return func.HttpResponse(

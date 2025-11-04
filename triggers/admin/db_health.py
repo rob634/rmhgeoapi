@@ -380,10 +380,10 @@ class AdminDbHealthTrigger:
                         LIMIT 10;
                     """)
                     seqscan_rows = cursor.fetchall()
-                    high_seqscans = [{'table': row[0], 'seq_scans': row[1]} for row in seqscan_rows]
+                    high_seqscans = [{'table': row['table_name'], 'seq_scans': row['seq_scan']} for row in seqscan_rows]
 
-                    cursor.execute("SELECT sum(seq_scan) FROM pg_stat_user_tables;")
-                    total_seqscans = cursor.fetchone()[0] or 0
+                    cursor.execute("SELECT sum(seq_scan) as total FROM pg_stat_user_tables;")
+                    total_seqscans = cursor.fetchone()['total'] or 0
 
                     # Transaction stats
                     cursor.execute("""
@@ -394,7 +394,7 @@ class AdminDbHealthTrigger:
                         WHERE datname = current_database();
                     """)
                     row = cursor.fetchone()
-                    commits, rollbacks = row[0], row[1]
+                    commits, rollbacks = row['xact_commit'], row['xact_rollback']
                     rollback_ratio = rollbacks / (commits + rollbacks) if (commits + rollbacks) > 0 else 0
 
             result = {

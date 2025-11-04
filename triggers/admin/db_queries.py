@@ -204,16 +204,16 @@ class AdminDbQueriesTrigger:
                     queries = []
                     for row in rows:
                         queries.append({
-                            'pid': row[0],
-                            'user': row[1],
-                            'application': row[2],
-                            'state': row[3],
-                            'query': row[4][:500] if row[4] else None,  # Truncate long queries
-                            'duration_seconds': float(row[5]) if row[5] else 0,
-                            'wait_event_type': row[6],
-                            'wait_event': row[7],
-                            'backend_start': row[8].isoformat() if row[8] else None,
-                            'query_start': row[9].isoformat() if row[9] else None
+                            'pid': row['pid'],
+                            'user': row['usename'],
+                            'application': row['application_name'],
+                            'state': row['state'],
+                            'query': row['query'][:500] if row['query'] else None,  # Truncate long queries
+                            'duration_seconds': float(row['duration_seconds']) if row['duration_seconds'] else 0,
+                            'wait_event_type': row['wait_event_type'],
+                            'wait_event': row['wait_event'],
+                            'backend_start': row['backend_start'].isoformat() if row['backend_start'] else None,
+                            'query_start': row['query_start'].isoformat() if row['query_start'] else None
                         })
 
             logger.info(f"✅ Found {len(queries)} running queries")
@@ -315,12 +315,12 @@ class AdminDbQueriesTrigger:
                     queries = []
                     for row in rows:
                         queries.append({
-                            'query': row[0][:500] if row[0] else None,  # Truncate
-                            'calls': row[1],
-                            'total_time_seconds': float(row[2]) if row[2] else 0,
-                            'avg_time_ms': float(row[3]) if row[3] else 0,
-                            'max_time_ms': float(row[4]) if row[4] else 0,
-                            'rows': row[5]
+                            'query': row['query'][:500] if row['query'] else None,  # Truncate
+                            'calls': row['calls'],
+                            'total_time_seconds': float(row['total_time_seconds']) if row['total_time_seconds'] else 0,
+                            'avg_time_ms': float(row['avg_time_ms']) if row['avg_time_ms'] else 0,
+                            'max_time_ms': float(row['max_time_ms']) if row['max_time_ms'] else 0,
+                            'rows': row['rows']
                         })
 
             logger.info(f"✅ Found {len(queries)} slow queries")
@@ -402,19 +402,19 @@ class AdminDbQueriesTrigger:
                     locks = []
                     blocking_count = 0
                     for row in rows:
-                        is_blocking = not row[3]  # not granted
+                        is_blocking = not row['granted']  # not granted
                         if is_blocking:
                             blocking_count += 1
 
                         locks.append({
-                            'pid': row[0],
-                            'lock_type': row[1],
-                            'mode': row[2],
-                            'granted': row[3],
-                            'query': row[4][:200] if row[4] else None,
-                            'duration_seconds': float(row[5]) if row[5] else 0,
-                            'wait_event_type': row[6],
-                            'wait_event': row[7],
+                            'pid': row['pid'],
+                            'lock_type': row['locktype'],
+                            'mode': row['mode'],
+                            'granted': row['granted'],
+                            'query': row['query'][:200] if row['query'] else None,
+                            'duration_seconds': float(row['duration_seconds']) if row['duration_seconds'] else 0,
+                            'wait_event_type': row['wait_event_type'],
+                            'wait_event': row['wait_event'],
                             'is_blocking': is_blocking
                         })
 

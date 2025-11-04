@@ -509,7 +509,7 @@ class AdminDbQueriesTrigger:
                     # Get max connections
                     cursor.execute("SHOW max_connections;")
                     max_conn_row = cursor.fetchone()
-                    max_conn = int(max_conn_row[list(max_conn_row.keys())[0]])
+                    max_conn = int(max_conn_row.get('max_connections', 100))
 
                     utilization = (total / max_conn * 100) if max_conn > 0 else 0
 

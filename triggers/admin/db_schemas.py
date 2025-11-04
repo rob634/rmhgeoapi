@@ -254,7 +254,7 @@ class AdminDbSchemasTrigger:
                     cursor.execute("""
                         SELECT
                             tablename,
-                            pg_size_pretty(pg_total_relation_size(schemaname || '.' || tablename)) as size
+                            pg_size_pretty(pg_total_relation_size(quote_ident(schemaname) || '.' || quote_ident(tablename))) as size
                         FROM pg_tables
                         WHERE schemaname = %s
                         ORDER BY tablename;
@@ -281,7 +281,7 @@ class AdminDbSchemasTrigger:
                     # Get total schema size
                     cursor.execute("""
                         SELECT pg_size_pretty(
-                            COALESCE(SUM(pg_total_relation_size(schemaname || '.' || tablename)), 0)
+                            COALESCE(SUM(pg_total_relation_size(quote_ident(schemaname) || '.' || quote_ident(tablename))), 0)
                         ) as total_size
                         FROM pg_tables
                         WHERE schemaname = %s;
@@ -358,16 +358,16 @@ class AdminDbSchemasTrigger:
                             schemaname,
                             tablename,
                             n_live_tup as row_count,
-                            pg_size_pretty(pg_total_relation_size(schemaname || '.' || tablename)) as total_size,
-                            pg_size_pretty(pg_relation_size(schemaname || '.' || tablename)) as data_size,
-                            pg_size_pretty(pg_indexes_size(schemaname || '.' || tablename)) as index_size,
+                            pg_size_pretty(pg_total_relation_size(quote_ident(schemaname) || '.' || quote_ident(tablename))) as total_size,
+                            pg_size_pretty(pg_relation_size(quote_ident(schemaname) || '.' || quote_ident(tablename))) as data_size,
+                            pg_size_pretty(pg_indexes_size(quote_ident(schemaname) || '.' || quote_ident(tablename))) as index_size,
                             last_vacuum,
                             last_autovacuum,
                             last_analyze,
                             last_autoanalyze
                         FROM pg_stat_user_tables
                         WHERE schemaname = %s
-                        ORDER BY pg_total_relation_size(schemaname || '.' || tablename) DESC;
+                        ORDER BY pg_total_relation_size(quote_ident(schemaname) || '.' || quote_ident(tablename)) DESC;
                     """, (schema_name,))
                     rows = cursor.fetchall()
 

@@ -567,6 +567,7 @@ class CoreMachine:
         # Step 3: Complete task and check stage (atomic)
         if result.status == TaskStatus.COMPLETED:
             try:
+                self.logger.debug(f"📝 [TASK_COMPLETE] Marking task {task_message.task_id[:16]} as COMPLETED in database... (core/machine.py:process_task_message)")
                 completion = self.state_manager.complete_task_with_sql(
                     task_message.task_id,
                     task_message.parent_job_id,
@@ -574,11 +575,12 @@ class CoreMachine:
                     result
                 )
 
-                self.logger.debug(f"✅ Task completed (stage_complete: {completion.stage_complete}, "
-                                f"remaining: {completion.remaining_tasks})")
+                self.logger.info(f"✅ [TASK_COMPLETE] Task marked COMPLETED (stage_complete: {completion.stage_complete}, "
+                                f"remaining: {completion.remaining_tasks}) (core/machine.py:process_task_message)")
 
                 # Step 4: Handle stage completion
                 if completion.stage_complete:
+                    self.logger.info(f"🎯 [TASK_COMPLETE] Last task for stage {task_message.stage} - triggering stage completion (core/machine.py:process_task_message)")
                     # FP3 FIX: Wrap stage advancement in try-catch to prevent orphaned jobs
                     try:
                         self._handle_stage_completion(
@@ -586,7 +588,7 @@ class CoreMachine:
                             task_message.job_type,
                             task_message.stage
                         )
-                        self.logger.info(f"✅ Stage {task_message.stage} advancement complete")
+                        self.logger.info(f"✅ [TASK_COMPLETE] Stage {task_message.stage} advancement complete (core/machine.py:process_task_message)")
 
                     except Exception as stage_error:
                         # Stage advancement failed - mark job as FAILED
@@ -985,38 +987,54 @@ class CoreMachine:
         Handle stage completion by advancing or completing job.
 
         This is the "last task turns out lights" pattern.
+
+        Location: core/machine.py:_handle_stage_completion()
         """
-        self.logger.info(f"🎯 Stage {completed_stage} complete for job {job_id[:16]}...")
+        self.logger.info(f"🎯 [STAGE_COMPLETE] Stage {completed_stage} complete for job {job_id[:16]}... (core/machine.py:_handle_stage_completion)")
 
         # Get workflow to check if we should advance
         # Get workflow class from explicit registry
+        self.logger.debug(f"📋 [STAGE_COMPLETE] Looking up job_type '{job_type}' in registry...")
         if job_type not in self.jobs_registry:
             raise BusinessLogicError(f"Unknown job type: {job_type}. Available: {list(self.jobs_registry.keys())}")
         workflow = self.jobs_registry[job_type]
+        self.logger.debug(f"✅ [STAGE_COMPLETE] Found workflow: {workflow.__name__}")
+
         # Get stages from class attribute (pure data approach)
         stages = workflow.stages if hasattr(workflow, 'stages') else []
+        total_stages = len(stages)
+        self.logger.debug(f"📊 [STAGE_COMPLETE] Workflow has {total_stages} total stages, just completed stage {completed_stage}")
 
         if completed_stage < len(stages):
             # Advance to next stage
-            self.logger.info(f"➡️ Advancing to stage {completed_stage + 1}")
-            self._advance_stage(job_id, job_type, completed_stage + 1)
+            next_stage = completed_stage + 1
+            self.logger.info(f"➡️ [STAGE_ADVANCE] Advancing from stage {completed_stage} → {next_stage} (core/machine.py:_advance_stage)")
+            self._advance_stage(job_id, job_type, next_stage)
         else:
             # Complete job
-            self.logger.info(f"🏁 Job complete - no more stages")
+            self.logger.info(f"🏁 [JOB_COMPLETE] All {total_stages} stages complete - finalizing job (core/machine.py:_complete_job)")
             self._complete_job(job_id, job_type)
 
     def _advance_stage(self, job_id: str, job_type: str, next_stage: int):
-        """Queue next stage job message."""
+        """
+        Queue next stage job message.
+
+        Location: core/machine.py:_advance_stage()
+        """
         try:
+            self.logger.debug(f"📝 [STAGE_ADVANCE] Step 1: Fetching job record from database... (core/machine.py:_advance_stage)")
             # Get job record for parameters
             repos = RepositoryFactory.create_repositories()
             job_record = repos['job_repo'].get_job(job_id)
+            self.logger.debug(f"✅ [STAGE_ADVANCE] Job record retrieved - has {len(job_record.parameters)} parameters")
 
+            self.logger.debug(f"📝 [STAGE_ADVANCE] Step 2: Updating job status PROCESSING → QUEUED... (core/machine.py:_advance_stage)")
             # Update job status to QUEUED before queuing next stage message
             # This allows clean QUEUED → PROCESSING transition when process_job_message() is triggered
             self.state_manager.update_job_status(job_id, JobStatus.QUEUED)
-            self.logger.info(f"✅ Job {job_id[:16]} status → QUEUED (ready for stage {next_stage})")
+            self.logger.info(f"✅ [STAGE_ADVANCE] Job {job_id[:16]} status → QUEUED (ready for stage {next_stage})")
 
+            self.logger.debug(f"📝 [STAGE_ADVANCE] Step 3: Creating JobQueueMessage for stage {next_stage}... (core/machine.py:_advance_stage)")
             # Create job message for next stage
             next_message = JobQueueMessage(
                 job_id=job_id,
@@ -1025,26 +1043,32 @@ class CoreMachine:
                 stage=next_stage,
                 correlation_id=str(uuid.uuid4())[:8]
             )
+            self.logger.debug(f"✅ [STAGE_ADVANCE] JobQueueMessage created (correlation_id: {next_message.correlation_id})")
 
+            self.logger.debug(f"📝 [STAGE_ADVANCE] Step 4: Sending message to Service Bus queue '{self.config.job_processing_queue}'... (core/machine.py:_advance_stage)")
             # Send to job queue
             service_bus_repo = RepositoryFactory.create_service_bus_repository()
             service_bus_repo.send_message(
                 self.config.job_processing_queue,
                 next_message
             )
-
-            self.logger.info(f"✅ Advanced to stage {next_stage}")
+            self.logger.info(f"✅ [STAGE_ADVANCE] Message queued for stage {next_stage} - job will restart at stage {next_stage}")
 
         except Exception as e:
-            self.logger.error(f"❌ Failed to advance stage: {e}")
+            self.logger.error(f"❌ [STAGE_ADVANCE] Failed to advance stage: {e} (core/machine.py:_advance_stage)")
             self.logger.error(f"Traceback: {traceback.format_exc()}")
             raise
 
     def _complete_job(self, job_id: str, job_type: str):
-        """Complete job by aggregating results."""
-        try:
-            self.logger.info(f"🏁 Completing job {job_id[:16]}...")
+        """
+        Complete job by aggregating results.
 
+        Location: core/machine.py:_complete_job()
+        """
+        try:
+            self.logger.info(f"🏁 [JOB_COMPLETE] Starting job completion for {job_id[:16]}... (core/machine.py:_complete_job)")
+
+            self.logger.debug(f"📝 [JOB_COMPLETE] Step 1: Fetching all task records from database... (core/machine.py:_complete_job)")
             # Get all task records
             repos = RepositoryFactory.create_repositories()
             task_records = repos['task_repo'].get_tasks_for_job(job_id)
@@ -1052,9 +1076,11 @@ class CoreMachine:
             if not task_records:
                 raise RuntimeError(f"No tasks found for job {job_id}")
 
+            self.logger.debug(f"✅ [JOB_COMPLETE] Found {len(task_records)} task records")
+
             # Convert to TaskResults
             task_results = []
-            self.logger.debug(f"Converting {len(task_records)} task records to TaskResult objects")
+            self.logger.debug(f"📝 [JOB_COMPLETE] Step 2: Converting {len(task_records)} task records to TaskResult objects... (core/machine.py:_complete_job)")
             for idx, tr in enumerate(task_records):
                 try:
                     task_result = TaskResult(
@@ -1067,14 +1093,20 @@ class CoreMachine:
                     )
                     task_results.append(task_result)
                 except Exception as e:
-                    self.logger.error(f"❌ Failed to create TaskResult for task {idx}: {tr.task_id}")
+                    self.logger.error(f"❌ [JOB_COMPLETE] Failed to create TaskResult for task {idx}: {tr.task_id}")
                     self.logger.error(f"   Error: {e}")
                     self.logger.error(f"   Task data: status={tr.status}, updated_at={tr.updated_at}, created_at={tr.created_at}")
                     raise
 
+            self.logger.debug(f"✅ [JOB_COMPLETE] All {len(task_results)} TaskResult objects created")
+
+            self.logger.debug(f"📝 [JOB_COMPLETE] Step 3: Fetching job record from database... (core/machine.py:_complete_job)")
             # Get job record
             job_record = repos['job_repo'].get_job(job_id)
 
+            self.logger.debug(f"✅ [JOB_COMPLETE] Job record retrieved")
+
+            self.logger.debug(f"📝 [JOB_COMPLETE] Step 4: Creating JobExecutionContext... (core/machine.py:_complete_job)")
             # Create context
             context = JobExecutionContext(
                 job_id=job_id,
@@ -1084,35 +1116,43 @@ class CoreMachine:
                 parameters=job_record.parameters
             )
             context.task_results = task_results
+            self.logger.debug(f"✅ [JOB_COMPLETE] Context created with {len(task_results)} task results")
 
+            self.logger.debug(f"📝 [JOB_COMPLETE] Step 5: Looking up workflow '{job_type}' for finalization... (core/machine.py:_complete_job)")
             # Finalize job (delegate to workflow for custom summary)
             # Get workflow class from explicit registry
             if job_type not in self.jobs_registry:
                 raise BusinessLogicError(f"Unknown job type: {job_type}. Available: {list(self.jobs_registry.keys())}")
             workflow = self.jobs_registry[job_type]
+            self.logger.debug(f"✅ [JOB_COMPLETE] Found workflow: {workflow.__name__}")
 
+            self.logger.info(f"📝 [JOB_COMPLETE] Step 6: Calling {workflow.__name__}.finalize_job()... (jobs/{job_type}.py:finalize_job)")
             # Call finalize_job() - REQUIRED method (enforced by JobBase ABC)
             final_result = workflow.finalize_job(context)
+            self.logger.debug(f"✅ [JOB_COMPLETE] finalize_job() returned {len(final_result)} keys: {list(final_result.keys())}")
 
+            self.logger.debug(f"📝 [JOB_COMPLETE] Step 7: Marking job as COMPLETED in database... (core/machine.py:_complete_job)")
             # Complete job in database
             self.state_manager.complete_job(job_id, final_result)
+            self.logger.info(f"✅ [JOB_COMPLETE] Job marked as COMPLETED in database")
 
             # Invoke completion callback if registered (Platform integration - 30 OCT 2025)
             if self.on_job_complete:
                 try:
-                    self.logger.debug(f"Invoking job completion callback for {job_id[:16]}...")
+                    self.logger.debug(f"📝 [JOB_COMPLETE] Step 8: Invoking Platform completion callback... (core/machine.py:_complete_job)")
                     self.on_job_complete(
                         job_id=job_id,
                         job_type=job_type,
                         status='completed',
                         result=final_result
                     )
+                    self.logger.debug(f"✅ [JOB_COMPLETE] Platform callback completed successfully")
                 except Exception as e:
                     # Callback failure should not fail the job
-                    self.logger.warning(f"⚠️ Job completion callback failed (non-fatal): {e}")
+                    self.logger.warning(f"⚠️ [JOB_COMPLETE] Platform callback failed (non-fatal): {e}")
                     self.logger.warning(f"   Job {job_id[:16]} is still marked as completed")
 
-            self.logger.info(f"✅ Job {job_id[:16]}... completed successfully")
+            self.logger.info(f"✅ [JOB_COMPLETE] Job {job_id[:16]}... completed successfully! (core/machine.py:_complete_job)")
 
         except Exception as e:
             self.logger.error(f"❌ CRITICAL: Job completion failed: {e}")

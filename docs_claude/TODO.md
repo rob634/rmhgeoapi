@@ -1,7 +1,38 @@
 # Active Tasks
 
-**Last Updated**: 01 NOV 2025
+**Last Updated**: 5 NOV 2025
 **Author**: Robert and Geospatial Claude Legion
+
+---
+
+## 🚨 NEW: CoreMachine Failure Analysis Complete (5 NOV 2025)
+
+**Status**: ✅ **ANALYSIS COMPLETE** - Comprehensive failure point analysis documented
+**Document**: `WORKFLOW_FAILURE_ANALYSIS.md`
+**Focus**: Stuck-in-processing scenarios for production-critical workflows
+
+### Key Findings
+
+**9 Failure Points Identified**:
+- **3 Critical (Code Fixes)**: Job exception swallowed, task status update failure, stage advancement failure
+- **4 Medium (Timer Trigger)**: Task timeout, database connection loss, partial failures, constraint violations
+- **2 Low (Already Handled)**: PostgreSQL deadlock (fixed), STAC insertion (handled)
+
+**Immediate Actions Required**:
+1. **FP1**: Add job failure marking in `function_app.py` job exception handler (~30 min)
+2. **FP2**: Fail-fast if task PROCESSING update fails in `core/machine.py` (~20 min)
+3. **FP3**: Wrap stage advancement in try-catch, mark job FAILED on error (~30 min)
+
+**Total Code Fix Effort**: ~1.5 hours
+**Expected Impact**: 90% reduction in stuck-in-processing scenarios
+
+**Timer Trigger Design**: Complete backup recovery function for infrastructure failures (timeout, connection loss)
+
+**Next Steps**:
+- [ ] Implement FP1-3 code fixes (Phase 1)
+- [ ] Test with invalid job submissions and simulated failures
+- [ ] Deploy and monitor in dev environment
+- [ ] Implement timer trigger cleanup function (Phase 2)
 
 ---
 

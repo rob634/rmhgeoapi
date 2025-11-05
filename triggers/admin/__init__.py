@@ -4,8 +4,8 @@
 # EPOCH: 4 - ACTIVE ✅
 # STATUS: Admin API - HTTP triggers for administrative operations
 # PURPOSE: Centralized admin API endpoints under /api/admin/* for APIM access control
-# LAST_REVIEWED: 03 NOV 2025
-# EXPORTS: AdminDbSchemasTrigger, AdminDbTablesTrigger, AdminDbQueriesTrigger, AdminDbHealthTrigger, AdminDbMaintenanceTrigger
+# LAST_REVIEWED: 04 NOV 2025
+# EXPORTS: AdminDbSchemasTrigger, AdminDbTablesTrigger, AdminDbQueriesTrigger, AdminDbHealthTrigger, AdminDbMaintenanceTrigger, ServiceBusAdminTrigger
 # INTERFACES: Azure Functions HTTP triggers
 # PYDANTIC_MODELS: None - uses dict responses for admin operations
 # DEPENDENCIES: azure.functions, infrastructure.*, util_logger
@@ -26,16 +26,16 @@ maintain and troubleshoot the system.
 
 Architecture:
 - Single APIM policy path: /api/admin/*
-- Phase 1: Database Admin API (PostgreSQL schemas)
-- Phase 2: STAC Admin API (pgstac schema)
-- Phase 3: Service Bus Admin API (queue inspection)
-- Phase 4: Storage Admin API (blob containers)
-- Phase 5: Registry & Discovery API (jobs/handlers)
-- Phase 6: Traces & Execution Analysis
-- Phase 7: System-Wide Operations
+- Phase 1: Database Admin API (PostgreSQL schemas) ✅ COMPLETE
+- Phase 2: Service Bus Admin API (queue inspection) ✅ COMPLETE
+- Phase 3: STAC Admin API (pgstac schema) - Future
+- Phase 4: Storage Admin API (blob containers) - Future
+- Phase 5: Registry & Discovery API (jobs/handlers) - Future
+- Phase 6: Traces & Execution Analysis - Future
+- Phase 7: System-Wide Operations - Future
 
 Author: Robert and Geospatial Claude Legion
-Date: 03 NOV 2025
+Date: 04 NOV 2025
 """
 
 # Phase 1: Database Admin API
@@ -45,6 +45,9 @@ from triggers.admin.db_queries import AdminDbQueriesTrigger
 from triggers.admin.db_health import AdminDbHealthTrigger
 from triggers.admin.db_maintenance import AdminDbMaintenanceTrigger
 
+# Phase 2: Service Bus Admin API
+from triggers.admin.servicebus import ServiceBusAdminTrigger
+
 # Export all admin triggers
 __all__ = [
     # Phase 1: Database Admin
@@ -53,4 +56,6 @@ __all__ = [
     'AdminDbQueriesTrigger',
     'AdminDbHealthTrigger',
     'AdminDbMaintenanceTrigger',
+    # Phase 2: Service Bus Admin
+    'ServiceBusAdminTrigger',
 ]

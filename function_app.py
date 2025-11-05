@@ -215,12 +215,13 @@ from triggers.stac_nuke import stac_nuke_trigger
 from triggers.ingest_vector import ingest_vector_trigger
 from triggers.test_raster_create import test_raster_create_trigger
 
-# Admin API triggers (03 NOV 2025) - Consolidated under /api/admin/*
+# Admin API triggers (04 NOV 2025) - Consolidated under /api/admin/*
 from triggers.admin.db_schemas import admin_db_schemas_trigger
 from triggers.admin.db_tables import admin_db_tables_trigger
 from triggers.admin.db_queries import admin_db_queries_trigger
 from triggers.admin.db_health import admin_db_health_trigger
 from triggers.admin.db_maintenance import admin_db_maintenance_trigger
+from triggers.admin.servicebus import servicebus_admin_trigger
 
 # Platform Service Layer triggers (25 OCT 2025)
 from triggers.trigger_platform import platform_request_submit
@@ -420,6 +421,55 @@ def db_maintenance_redeploy(req: func.HttpRequest) -> func.HttpResponse:
 def db_maintenance_cleanup(req: func.HttpRequest) -> func.HttpResponse:
     """Cleanup old records: POST /api/db/maintenance/cleanup?confirm=yes&days=30"""
     return admin_db_maintenance_trigger.handle_request(req)
+
+
+# ============================================================================
+# SERVICE BUS ADMIN API ENDPOINTS - Phase 2 (04 NOV 2025)
+# ============================================================================
+# Service Bus queue monitoring and management under /api/servicebus/*
+# Read-only inspection + nuclear button for clearing queues
+# Priority: Production operations and debugging
+# ============================================================================
+
+@app.route(route="servicebus/queues", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def servicebus_admin_list_queues(req: func.HttpRequest) -> func.HttpResponse:
+    """List all Service Bus queues: GET /api/servicebus/queues"""
+    return servicebus_admin_trigger.handle_request(req)
+
+
+@app.route(route="servicebus/queues/{queue_name}", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def servicebus_admin_queue_details(req: func.HttpRequest) -> func.HttpResponse:
+    """Get queue details: GET /api/servicebus/queues/{queue_name}"""
+    return servicebus_admin_trigger.handle_request(req)
+
+
+@app.route(route="servicebus/queues/{queue_name}/peek", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def servicebus_admin_peek_messages(req: func.HttpRequest) -> func.HttpResponse:
+    """Peek active messages: GET /api/servicebus/queues/{queue_name}/peek?limit=10"""
+    return servicebus_admin_trigger.handle_request(req)
+
+
+@app.route(route="servicebus/queues/{queue_name}/deadletter", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def servicebus_admin_peek_deadletter(req: func.HttpRequest) -> func.HttpResponse:
+    """Peek dead letter messages: GET /api/servicebus/queues/{queue_name}/deadletter?limit=10"""
+    return servicebus_admin_trigger.handle_request(req)
+
+
+@app.route(route="servicebus/health", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def servicebus_admin_health(req: func.HttpRequest) -> func.HttpResponse:
+    """Get Service Bus health: GET /api/servicebus/health"""
+    return servicebus_admin_trigger.handle_request(req)
+
+
+@app.route(route="servicebus/queues/{queue_name}/nuke", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
+def servicebus_admin_nuke_queue(req: func.HttpRequest) -> func.HttpResponse:
+    """🚨 NUCLEAR: Clear queue messages: POST /api/servicebus/queues/{queue_name}/nuke?confirm=yes&target=all"""
+    return servicebus_admin_trigger.handle_request(req)
+
+
+# ============================================================================
+# END SERVICE BUS ADMIN API ENDPOINTS
+# ============================================================================
 
 
 # ============================================================================

@@ -442,11 +442,52 @@ class CoreMachine:
             if success:
                 self.logger.debug(f"✅ Task {task_message.task_id[:16]} → PROCESSING")
             else:
-                self.logger.warning(f"⚠️ Failed to update task status to PROCESSING (returned False)")
+                # FP2 FIX: Fail-fast if status update fails (don't execute handler)
+                error_msg = "Failed to update task status to PROCESSING (returned False) - possible database issue"
+                self.logger.error(f"❌ {error_msg}")
+
+                # Mark task and job as FAILED
+                try:
+                    self.state_manager.mark_task_failed(task_message.task_id, error_msg)
+                    self.state_manager.mark_job_failed(
+                        task_message.parent_job_id,
+                        f"Task {task_message.task_id} failed to enter PROCESSING state: {error_msg}"
+                    )
+                    self.logger.error(f"❌ Task and job marked as FAILED - handler will NOT execute")
+                except Exception as cleanup_error:
+                    self.logger.error(f"❌ Cleanup failed: {cleanup_error}")
+
+                # Return failure - do NOT execute task handler
+                return {
+                    'success': False,
+                    'error': error_msg,
+                    'task_id': task_message.task_id,
+                    'handler_executed': False
+                }
+
         except Exception as e:
-            self.logger.error(f"❌ Exception updating task status to PROCESSING: {e}")
+            # FP2 FIX: Exception during status update - fail-fast
+            error_msg = f"Exception updating task status to PROCESSING: {e}"
+            self.logger.error(f"❌ {error_msg}")
             self.logger.error(f"Traceback: {traceback.format_exc()}")
-            # Don't fail the whole task - just log and continue
+
+            # Mark task and job as FAILED
+            try:
+                self.state_manager.mark_task_failed(task_message.task_id, error_msg)
+                self.state_manager.mark_job_failed(
+                    task_message.parent_job_id,
+                    f"Task {task_message.task_id} status update exception: {e}"
+                )
+            except Exception as cleanup_error:
+                self.logger.error(f"❌ Cleanup failed: {cleanup_error}")
+
+            # Return failure - do NOT execute handler
+            return {
+                'success': False,
+                'error': error_msg,
+                'task_id': task_message.task_id,
+                'handler_executed': False
+            }
 
         # Step 2: Execute task handler
         result = None
@@ -538,11 +579,46 @@ class CoreMachine:
 
                 # Step 4: Handle stage completion
                 if completion.stage_complete:
-                    self._handle_stage_completion(
-                        task_message.parent_job_id,
-                        task_message.job_type,
-                        task_message.stage
-                    )
+                    # FP3 FIX: Wrap stage advancement in try-catch to prevent orphaned jobs
+                    try:
+                        self._handle_stage_completion(
+                            task_message.parent_job_id,
+                            task_message.job_type,
+                            task_message.stage
+                        )
+                        self.logger.info(f"✅ Stage {task_message.stage} advancement complete")
+
+                    except Exception as stage_error:
+                        # Stage advancement failed - mark job as FAILED
+                        self.logger.error(f"❌ Stage advancement failed: {stage_error}")
+                        self.logger.error(f"Traceback: {traceback.format_exc()}")
+
+                        error_msg = (
+                            f"Stage {task_message.stage} completed but advancement to "
+                            f"stage {task_message.stage + 1} failed: {type(stage_error).__name__}: {stage_error}"
+                        )
+
+                        try:
+                            self.state_manager.mark_job_failed(
+                                task_message.parent_job_id,
+                                error_msg
+                            )
+                            self.logger.error(
+                                f"❌ Job {task_message.parent_job_id[:16]}... marked as FAILED "
+                                f"due to stage advancement failure"
+                            )
+                        except Exception as cleanup_error:
+                            self.logger.error(f"❌ Failed to mark job as FAILED: {cleanup_error}")
+
+                        # Do NOT re-raise - task is completed, just log failure
+                        # Return failure status but don't crash function
+                        return {
+                            'success': True,  # Task itself succeeded
+                            'task_completed': True,
+                            'stage_complete': True,
+                            'stage_advancement_failed': True,
+                            'error': str(stage_error)
+                        }
 
                 return {
                     'success': True,
@@ -551,9 +627,27 @@ class CoreMachine:
                 }
 
             except Exception as e:
-                self.logger.error(f"❌ Failed to complete task: {e}")
+                # Task completion SQL failed (different from stage advancement)
+                self.logger.error(f"❌ Failed to complete task SQL: {e}")
                 self.logger.error(f"Traceback: {traceback.format_exc()}")
-                raise
+
+                # Try to mark task and job as failed
+                try:
+                    self.state_manager.mark_task_failed(task_message.task_id, str(e))
+                    self.state_manager.mark_job_failed(
+                        task_message.parent_job_id,
+                        f"Task {task_message.task_id} completion SQL failed: {e}"
+                    )
+                except Exception as cleanup_error:
+                    self.logger.error(f"❌ Cleanup failed: {cleanup_error}")
+
+                # Do NOT re-raise - prevents infinite Service Bus retries
+                return {
+                    'success': False,
+                    'error': str(e),
+                    'task_id': task_message.task_id,
+                    'sql_completion_failed': True
+                }
         else:
             # Task failed - check if retry needed
             self.logger.warning(f"⚠️ Task failed: {result.error_details}")

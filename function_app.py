@@ -1751,11 +1751,28 @@ def process_service_bus_job(msg: func.ServiceBusMessage) -> None:
             logger.error(f"[{correlation_id}] 📋 Job Type: {job_message.job_type}")
             logger.error(f"[{correlation_id}] 📋 Stage: {job_message.stage}")
 
+            # FP1 FIX: Mark job as FAILED in database to prevent stuck jobs
+            try:
+                repos = RepositoryFactory.create_repositories()
+                job_repo = repos['job_repo']
+
+                error_msg = f"Job processing exception: {type(e).__name__}: {e}"
+                job_repo.mark_failed(job_message.job_id, error_msg)
+
+                logger.info(f"[{correlation_id}] ✅ Job {job_message.job_id[:16]}... marked as FAILED in database")
+
+            except Exception as cleanup_error:
+                logger.error(f"[{correlation_id}] ❌ Failed to mark job as FAILED: {cleanup_error}")
+                logger.error(f"[{correlation_id}] 💀 Job {job_message.job_id[:16]}... may be stuck - requires manual cleanup")
+        else:
+            logger.error(f"[{correlation_id}] ⚠️ job_message is None - cannot mark job as FAILED")
+            logger.error(f"[{correlation_id}] 📍 Exception occurred before job message parsing")
+
         # NOTE: Job processing errors are typically critical (workflow creation failures).
         # Unlike task retries, jobs don't have application-level retry logic.
         # Log extensively but don't re-raise to avoid Service Bus retries for job messages.
         logger.warning(f"[{correlation_id}] ⚠️ Function completing (exception logged but not re-raised)")
-        logger.warning(f"[{correlation_id}] ⚠️ Job marked as failed - check logs for details")
+        logger.warning(f"[{correlation_id}] ✅ Job failure handling complete")
 
 
 @app.service_bus_queue_trigger(

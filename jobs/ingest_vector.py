@@ -135,12 +135,20 @@ class IngestVectorJob(JobBase):
                 spatial: bool - Create GIST index on geometry (default: True)
                 attributes: list - Column names for B-tree indexes (default: [])
                 temporal: list - Column names for DESC B-tree indexes (default: [])
+            geometry_params: dict - Geometry processing options (Phase 2 - 9 NOV 2025)
+                simplify: dict - Douglas-Peucker simplification
+                    tolerance: float - Simplification tolerance in degrees
+                    preserve_topology: bool - Preserve topology (default: True)
+                quantize: dict - Coordinate precision reduction
+                    snap_to_grid: float - Grid size for coordinate quantization
+            render_params: dict - Future: Rendering optimizations (MVT tiles, etc.)
 
         Returns:
             Validated parameters dict
 
         Raises:
             ValueError: If parameters are invalid
+            ValueError: If table already exists in target schema (Phase 2A - 9 NOV 2025)
         """
         validated = {}
 
@@ -293,6 +301,21 @@ class IngestVectorJob(JobBase):
         if not isinstance(render_params, dict):
             raise ValueError("render_params must be a dictionary")
         validated["render_params"] = render_params
+
+        # NEW: Phase 2A (9 NOV 2025) - Check if table already exists
+        # Prevents silent data duplication by failing fast at validation time
+        from infrastructure.postgis import check_table_exists
+
+        schema = validated["schema"]
+        table_name = validated["table_name"]
+
+        if check_table_exists(schema, table_name):
+            raise ValueError(
+                f"Table {schema}.{table_name} already exists. "
+                f"To replace it, manually drop the table first:\n"
+                f"  DROP TABLE {schema}.{table_name} CASCADE;\n"
+                f"Or choose a different table_name."
+            )
 
         return validated
 

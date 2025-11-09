@@ -108,7 +108,9 @@ class IngestVectorJob(JobBase):
             "spatial": True,      # Always create spatial GIST index on geom
             "attributes": [],     # List of attribute column names for B-tree indexes
             "temporal": []        # List of temporal columns for DESC B-tree indexes
-        }}
+        }},
+        "geometry_params": {"type": "dict", "default": {}, "description": "Geometry processing options (simplification, quantization)"},
+        "render_params": {"type": "dict", "default": {}, "description": "Future: Rendering optimization parameters (MVT tiles, etc.)"}
     }
 
     @staticmethod
@@ -244,6 +246,53 @@ class IngestVectorJob(JobBase):
             "attributes": indexes.get("attributes", []),
             "temporal": indexes.get("temporal", [])
         }
+
+        # Optional: geometry_params (simplification & quantization)
+        geometry_params = params.get("geometry_params", {})
+        if not isinstance(geometry_params, dict):
+            raise ValueError("geometry_params must be a dictionary")
+
+        # Validate simplification settings
+        if geometry_params.get("simplify"):
+            simplify = geometry_params["simplify"]
+            if not isinstance(simplify, dict):
+                raise ValueError("geometry_params.simplify must be a dict")
+
+            # Validate tolerance
+            if "tolerance" in simplify:
+                tolerance = simplify["tolerance"]
+                if not isinstance(tolerance, (int, float)):
+                    raise ValueError(f"simplify.tolerance must be a number, got {type(tolerance).__name__}")
+                if tolerance <= 0:
+                    raise ValueError(f"simplify.tolerance must be positive, got {tolerance}")
+
+            # Validate preserve_topology
+            if "preserve_topology" in simplify:
+                preserve_topology = simplify["preserve_topology"]
+                if not isinstance(preserve_topology, bool):
+                    raise ValueError(f"simplify.preserve_topology must be a boolean, got {type(preserve_topology).__name__}")
+
+        # Validate quantization settings
+        if geometry_params.get("quantize"):
+            quantize = geometry_params["quantize"]
+            if not isinstance(quantize, dict):
+                raise ValueError("geometry_params.quantize must be a dict")
+
+            # Validate snap_to_grid
+            if "snap_to_grid" in quantize:
+                snap_to_grid = quantize["snap_to_grid"]
+                if not isinstance(snap_to_grid, (int, float)):
+                    raise ValueError(f"quantize.snap_to_grid must be a number, got {type(snap_to_grid).__name__}")
+                if snap_to_grid <= 0:
+                    raise ValueError(f"quantize.snap_to_grid must be positive, got {snap_to_grid}")
+
+        validated["geometry_params"] = geometry_params
+
+        # Optional: render_params (placeholder for future rendering optimizations)
+        render_params = params.get("render_params", {})
+        if not isinstance(render_params, dict):
+            raise ValueError("render_params must be a dictionary")
+        validated["render_params"] = render_params
 
         return validated
 
@@ -397,7 +446,9 @@ class IngestVectorJob(JobBase):
                             "spatial": True,
                             "attributes": [],
                             "temporal": []
-                        })
+                        }),
+                        "geometry_params": job_params.get("geometry_params", {}),
+                        "render_params": job_params.get("render_params", {})
                     }
                 }
             ]
@@ -502,7 +553,8 @@ class IngestVectorJob(JobBase):
                         "collection_id": "system-vectors",
                         "source_file": job_params.get("blob_name"),
                         "source_format": job_params.get("file_extension"),
-                        "job_id": job_id
+                        "job_id": job_id,
+                        "geometry_params": job_params.get("geometry_params", {})
                     }
                 }
             ]

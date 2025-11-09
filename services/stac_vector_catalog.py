@@ -90,8 +90,15 @@ def create_vector_stac(params: dict) -> dict[str, Any]:
             "etl:job_id": job_id,
             "vector:source_format": source_format,
             "vector:source_file": source_file,
+            "system:reserved": collection_id == "system-vectors",  # NEW: Phase 2 (9 NOV 2025) - Mark system datasets
             "created": datetime.utcnow().isoformat() + "Z"
         }
+
+        # NEW: Phase 2 (9 NOV 2025) - Document geometry processing if applied
+        # This helps users understand if they're querying full or generalized geometries
+        geometry_params = params.get("geometry_params", {})
+        if geometry_params:
+            additional_properties["processing:geometry"] = geometry_params
 
         item = stac_service.extract_item_from_table(
             schema=schema,

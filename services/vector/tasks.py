@@ -221,6 +221,7 @@ def prepare_vector_chunks(parameters: Dict[str, Any]) -> Dict[str, Any]:
     schema = parameters.get("schema", "geo")
     chunk_size = parameters.get("chunk_size")
     converter_params = parameters.get("converter_params", {})
+    geometry_params = parameters.get("geometry_params", {})  # NEW: Phase 2 (9 NOV 2025)
 
     # 1. Load vector file from blob storage
     blob_repo = BlobRepository.instance()
@@ -243,10 +244,10 @@ def prepare_vector_chunks(parameters: Dict[str, Any]) -> Dict[str, Any]:
 
     gdf = converters[file_extension](file_data, **converter_params)
 
-    # 3. Validate and prepare GeoDataFrame
+    # 3. Validate, prepare, and optionally process geometries
     from .postgis_handler import VectorToPostGISHandler
     handler = VectorToPostGISHandler()
-    validated_gdf = handler.prepare_gdf(gdf)
+    validated_gdf = handler.prepare_gdf(gdf, geometry_params=geometry_params)
 
     # 4. Calculate optimal chunk size and split
     chunks = handler.chunk_gdf(validated_gdf, chunk_size)

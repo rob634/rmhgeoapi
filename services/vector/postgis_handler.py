@@ -55,9 +55,9 @@ class VectorToPostGISHandler:
         config = get_config()
         self.conn_string = config.postgis_connection_string
 
-    def prepare_gdf(self, gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    def prepare_gdf(self, gdf: gpd.GeoDataFrame, geometry_params: dict = None) -> gpd.GeoDataFrame:
         """
-        Validate, reproject, and clean GeoDataFrame.
+        Validate, reproject, clean, and optionally process GeoDataFrame geometries.
 
         Operations:
         1. Remove null geometries
@@ -65,9 +65,13 @@ class VectorToPostGISHandler:
         3. Reproject to EPSG:4326 if needed
         4. Clean column names (lowercase, replace spaces with underscores)
         5. Remove geometry column from attributes
+        6. Apply geometry processing (simplification, quantization) if requested
 
         Args:
             gdf: Input GeoDataFrame
+            geometry_params: Optional geometry processing settings:
+                - simplify: dict with tolerance, preserve_topology
+                - quantize: dict with snap_to_grid
 
         Returns:
             Cleaned and validated GeoDataFrame
@@ -216,6 +220,64 @@ class VectorToPostGISHandler:
             .replace(')', '')
             for col in gdf.columns
         ]
+
+        # ========================================================================
+        # GEOMETRY PROCESSING - Simplification & Quantization (Phase 2 - 9 NOV 2025)
+        # ========================================================================
+        # Apply optional geometry processing for generalized tables
+        # Used for creating web-optimized versions with reduced vertex counts
+        # ========================================================================
+        if geometry_params:
+            # Simplification (Douglas-Peucker algorithm)
+            if geometry_params.get("simplify"):
+                simplify = geometry_params["simplify"]
+                tolerance = simplify.get("tolerance", 0.001)  # Default: ~111m at equator
+                preserve_topology = simplify.get("preserve_topology", True)
+
+                logger.info(f"🔧 SIMPLIFICATION: tolerance={tolerance}, preserve_topology={preserve_topology}")
+
+                # Count vertices before simplification
+                def _count_vertices(geom):
+                    """Count total vertices in any geometry type."""
+                    if hasattr(geom, 'coords'):
+                        return len(geom.coords)
+                    elif hasattr(geom, 'geoms'):
+                        return sum(_count_vertices(g) for g in geom.geoms)
+                    elif hasattr(geom, 'exterior'):
+                        # Polygon: exterior + interiors
+                        total = len(geom.exterior.coords)
+                        total += sum(len(interior.coords) for interior in geom.interiors)
+                        return total
+                    return 0
+
+                vertices_before = gdf.geometry.apply(_count_vertices).sum()
+
+                # Apply simplification
+                gdf['geometry'] = gdf.geometry.simplify(tolerance, preserve_topology=preserve_topology)
+
+                # Count vertices after
+                vertices_after = gdf.geometry.apply(_count_vertices).sum()
+                reduction = (1 - vertices_after / vertices_before) * 100 if vertices_before > 0 else 0
+
+                logger.info(f"✅ Simplified: {vertices_before:,} → {vertices_after:,} vertices ({reduction:.1f}% reduction)")
+
+            # Quantization (coordinate precision reduction)
+            if geometry_params.get("quantize"):
+                quantize = geometry_params["quantize"]
+                snap_to_grid = quantize.get("snap_to_grid", 0.0001)  # Default: ~11m precision
+
+                logger.info(f"📐 QUANTIZATION: snap_to_grid={snap_to_grid}")
+
+                try:
+                    from shapely import set_precision
+
+                    # Set coordinate precision (Shapely 2.0+)
+                    gdf['geometry'] = gdf.geometry.apply(lambda g: set_precision(g, grid_size=snap_to_grid))
+
+                    logger.info(f"✅ Quantized coordinates to grid: {snap_to_grid}")
+
+                except ImportError:
+                    logger.warning("⚠️  Shapely 2.0+ required for quantization - skipping (install: pip install shapely>=2.0)")
 
         return gdf
 

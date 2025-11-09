@@ -280,7 +280,7 @@ class JobBase(ABC):
                     stage=1,
                     parameters=params,
                     message_id=str(uuid.uuid4()),
-                    correlation_id=str(uuid.uuid4())
+                    correlation_id=str(uuid.uuid4())[:8]
                 )
 
                 config = get_config()

@@ -1,7 +1,845 @@
 # Active Tasks
 
-**Last Updated**: 5 NOV 2025
+**Last Updated**: 8 NOV 2025
 **Author**: Robert and Geospatial Claude Legion
+
+---
+
+## 🆕 PRIORITY: H3 Grid Workflows - Standardization + PostGIS Integration (8 NOV 2025)
+
+**Status**: ⏳ **PLANNED** - Two-phase implementation
+**Goal**: Standardize H3 job finalization AND implement PostGIS storage for H3 grids
+**Scope**: Both `create_h3_base` and `generate_h3_level4` jobs
+
+---
+
+### **PHASE 1: Standardize finalize_job Methods** (30 minutes)
+
+**Status**: ✅ **COMPLETED** (9 NOV 2025)
+**Pattern**: Follow `ingest_vector` and `process_raster` exemplary patterns
+
+#### Current State (MINIMAL) ❌
+```python
+@staticmethod
+def finalize_job(context=None) -> Dict[str, Any]:
+    return {
+        "job_type": "create_h3_base",
+        "status": "completed"
+    }
+```
+
+#### Target State (COMPREHENSIVE) ✅
+```python
+@staticmethod
+def finalize_job(context) -> Dict[str, Any]:
+    from core.models import TaskStatus
+
+    task_results = context.task_results
+    params = context.parameters
+
+    # Extract task result (single task for H3 jobs)
+    task = task_results[0] if task_results else None
+    result_data = task.result_data.get("result", {}) if task and task.result_data else {}
+
+    # Build comprehensive response
+    return {
+        "job_type": "create_h3_base",
+        "resolution": params.get("resolution"),
+        "total_cells": result_data.get("total_cells"),
+        "antimeridian_cells_excluded": result_data.get("antimeridian_cells_excluded"),
+        "blob_path": result_data.get("blob_path"),
+        "file_size_mb": result_data.get("file_size_mb"),
+        "processing_time_seconds": result_data.get("processing_time_seconds"),
+        "download_url": f"https://rmhazuregeo.blob.core.windows.net/gold-h3-grids/{result_data.get('blob_path')}",
+        "grid_stats": {
+            "min_h3_index": result_data.get("min_h3_index"),
+            "max_h3_index": result_data.get("max_h3_index"),
+            "memory_mb": result_data.get("memory_mb")
+        },
+        "stages_completed": context.current_stage,
+        "total_tasks_executed": len(task_results),
+        "tasks_by_status": {
+            "completed": sum(1 for t in task_results if t.status == TaskStatus.COMPLETED),
+            "failed": sum(1 for t in task_results if t.status == TaskStatus.FAILED)
+        }
+    }
+```
+
+#### Files Modified:
+- [x] `jobs/create_h3_base.py` - ✅ Updated finalize_job (lines 289-357)
+- [x] `jobs/generate_h3_level4.py` - ✅ Updated finalize_job (lines 265-343)
+
+#### Testing Commands:
+```bash
+# Test H3 base (resolution 0 = fast, 122 cells)
+curl -X POST https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/jobs/submit/create_h3_base \
+  -H "Content-Type: application/json" \
+  -d '{"resolution": 0, "output_folder": "h3/base"}'
+
+# Verify response includes full statistics
+curl https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/jobs/status/{JOB_ID}
+```
+
+**Expected Output**:
+```json
+{
+  "job_id": "abc123...",
+  "status": "completed",
+  "result": {
+    "job_type": "create_h3_base",
+    "resolution": 0,
+    "total_cells": 122,
+    "blob_path": "h3/base/h3_res0_global.parquet",
+    "file_size_mb": 0.05,
+    "download_url": "https://rmhazuregeo.blob.core.windows.net/gold-h3-grids/h3/base/h3_res0_global.parquet",
+    "stages_completed": 1,
+    "tasks_by_status": {"completed": 1, "failed": 0}
+  }
+}
+```
+
+#### Implementation Summary (9 NOV 2025)
+
+**Changes Made**:
+
+1. **`jobs/create_h3_base.py`** - Enhanced finalize_job method:
+   - Extracts task results from context.task_results
+   - Returns comprehensive statistics: total_cells, blob_path, file_size_mb, processing_time
+   - Builds download URL for GeoParquet file
+   - Includes stage_results breakdown
+   - Defensive handling for missing context
+
+2. **`jobs/generate_h3_level4.py`** - Enhanced finalize_job method:
+   - Extracts land filtering statistics: total_generated, total_land_cells, filtering_method
+   - Returns comprehensive metadata: resolution, overture_release, land_geojson_path
+   - Builds download URL for GeoParquet file
+   - Includes stage_results breakdown
+   - Defensive handling for missing context
+
+**Pattern Compliance**: Both jobs now follow the same comprehensive finalize_job pattern as `ingest_vector` and `process_raster`, providing:
+- Full task result extraction
+- Download URLs
+- Processing statistics
+- Stage-by-stage breakdown
+- User-friendly response format
+
+**Next Step**: Phase 2 (PostGIS integration) ready for implementation when needed.
+
+---
+
+### **PHASE 2: PostGIS H3 Grid Storage** (2-3 hours)
+
+**Status**: ✅ **COMPLETED** (9 NOV 2025)
+**Architecture**: Dual storage pattern (GeoParquet for analytics + PostGIS for spatial queries)
+
+#### Why PostGIS for H3 Grids?
+
+**Current State**: GeoParquet-only storage in gold container
+- ✅ Good for analytics (DuckDB queries)
+- ✅ Good for file downloads
+- ❌ **Missing**: Spatial queries (intersect with user areas)
+- ❌ **Missing**: OGC Features API exposure
+- ❌ **Missing**: STAC cataloging
+- ❌ **Missing**: Web map visualization
+
+**With PostGIS**:
+- ✅ Spatial indexing (GIST on H3 hexagon geometry)
+- ✅ Fast intersection queries (find H3 cells in AOI)
+- ✅ OGC Features API exposure (same as vector data)
+- ✅ STAC cataloging (H3 grids become discoverable)
+- ✅ Web map visualization (Leaflet rendering)
+- ✅ Integration with existing vector workflows
+
+#### PostgreSQL H3 Extension vs Native Storage
+
+**Option A: PostgreSQL H3 Extension** (Recommended for H3 operations)
+- Extension: https://github.com/zachasme/h3-pg
+- Functions: `h3_lat_lng_to_cell()`, `h3_cell_to_boundary()`, `h3_grid_disk()`, etc.
+- **Pros**: Native H3 functions in SQL, fast neighbor queries
+- **Cons**: Requires extension installation (Azure Flexible Server supports it)
+
+**Option B: Native PostGIS Storage** (Simpler, use for Phase 2)
+- Store H3 index as `bigint` + geometry as `geometry(Polygon, 4326)`
+- **Pros**: No extension required, works immediately
+- **Cons**: H3 functions require application-layer computation
+
+**DECISION**: Start with **Option B** (native storage), migrate to **Option A** if H3 functions needed
+
+#### Database Schema Design
+
+**New Table: `geo.h3_grids`**
+```sql
+CREATE TABLE geo.h3_grids (
+    id SERIAL PRIMARY KEY,
+
+    -- H3 Identification
+    h3_index BIGINT NOT NULL,                    -- H3 cell index (uint64)
+    resolution INTEGER NOT NULL,                 -- H3 resolution (0-15)
+
+    -- Geometry (hexagon boundary)
+    geom GEOMETRY(Polygon, 4326) NOT NULL,      -- Hexagon polygon
+
+    -- Grid Metadata
+    grid_id VARCHAR(255) NOT NULL,               -- Grid identifier (e.g., "global_res4", "land_res4")
+    grid_type VARCHAR(50) NOT NULL,              -- Type: "global", "land", "ocean", "custom"
+
+    -- Source Information
+    source_job_id VARCHAR(255),                  -- Job that created this cell
+    source_blob_path TEXT,                       -- Original GeoParquet path
+
+    -- Classification (for land grids)
+    is_land BOOLEAN DEFAULT NULL,                -- NULL = unknown, true = land, false = ocean
+    land_percentage DECIMAL(5,2) DEFAULT NULL,   -- % land coverage (for coastal cells)
+
+    -- Administrative Attributes (optional, populated from Overture)
+    country_code VARCHAR(3),                     -- ISO 3166-1 alpha-3
+    admin_level_1 VARCHAR(255),                  -- State/province
+
+    -- Timestamps
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+
+    -- Constraints
+    CONSTRAINT h3_grids_unique_cell UNIQUE (h3_index, grid_id),
+    CONSTRAINT h3_grids_resolution_check CHECK (resolution >= 0 AND resolution <= 15),
+    CONSTRAINT h3_grids_land_pct_check CHECK (land_percentage >= 0 AND land_percentage <= 100)
+);
+
+-- Indexes
+CREATE INDEX idx_h3_grids_geom ON geo.h3_grids USING GIST(geom);           -- Spatial queries
+CREATE INDEX idx_h3_grids_h3_index ON geo.h3_grids (h3_index);            -- H3 lookup
+CREATE INDEX idx_h3_grids_resolution ON geo.h3_grids (resolution);         -- Resolution filtering
+CREATE INDEX idx_h3_grids_grid_id ON geo.h3_grids (grid_id);              -- Grid filtering
+CREATE INDEX idx_h3_grids_is_land ON geo.h3_grids (is_land) WHERE is_land IS NOT NULL;  -- Land/ocean filtering
+CREATE INDEX idx_h3_grids_country ON geo.h3_grids (country_code) WHERE country_code IS NOT NULL;  -- Country queries
+
+-- Comment
+COMMENT ON TABLE geo.h3_grids IS 'H3 hexagonal grid cells with spatial indexing for geospatial queries';
+```
+
+#### Three-Stage Workflow (Updated)
+
+**Current**: 1-stage (generate → save to GeoParquet)
+**New**: 3-stage (generate → save GeoParquet → insert PostGIS → create STAC)
+
+**Stage 1: Generate H3 Grid** (EXISTING)
+- Task: `h3_base_generate` or `h3_level4_generate`
+- Output: GeoParquet to gold container
+- Returns: blob_path, cell count, file size
+
+**Stage 2: Insert to PostGIS** (NEW)
+- Task: `insert_h3_to_postgis`
+- Input: blob_path from Stage 1
+- Process:
+  1. Load GeoParquet from blob (DuckDB or pandas)
+  2. Batch insert to `geo.h3_grids` table
+  3. Set grid_id (e.g., "global_res4", "land_res4")
+  4. Set grid_type ("global" or "land")
+  5. Link source_job_id and source_blob_path
+- Output: rows_inserted, table_name, bbox
+
+**Stage 3: Create STAC Record** (NEW)
+- Task: `create_h3_stac`
+- Input: table_name, bbox from Stage 2
+- Process:
+  1. Generate STAC item for H3 grid
+  2. Collection: "system-h3-grids"
+  3. Add properties: resolution, grid_type, cell_count
+  4. Insert to pgstac.items
+- Output: stac_id, collection_id
+
+#### New Task Handler: `insert_h3_to_postgis`
+
+**File**: `tasks/insert_h3_postgis.py` (NEW)
+```python
+def insert_h3_to_postgis(task_params: dict) -> dict:
+    """
+    Load H3 grid from GeoParquet and insert to PostGIS.
+
+    Args:
+        task_params:
+            - blob_path: GeoParquet blob path
+            - grid_id: Grid identifier (e.g., "global_res4")
+            - grid_type: Grid type ("global" or "land")
+            - resolution: H3 resolution
+            - source_job_id: Originating job ID
+
+    Returns:
+        Task result with rows_inserted, table_name, bbox
+    """
+    from infrastructure.blob import BlobRepository
+    from infrastructure.factory import RepositoryFactory
+    from config import get_config
+    import pandas as pd
+    import geopandas as gpd
+    from shapely import wkt
+    from sqlalchemy import create_engine
+
+    config = get_config()
+    blob_repo = BlobRepository.instance()
+
+    # STEP 1: Load GeoParquet from blob storage
+    logger.info(f"Loading GeoParquet from {task_params['blob_path']}...")
+    blob_data = blob_repo.read_blob(
+        container=config.storage.gold.get_container('misc'),
+        blob_path=task_params['blob_path']
+    )
+
+    # Load with pandas (GeoParquet has WKT geometry)
+    import io
+    df = pd.read_parquet(io.BytesIO(blob_data))
+
+    # STEP 2: Convert WKT to PostGIS-ready geometry
+    logger.info(f"Converting {len(df)} H3 cells to PostGIS format...")
+    gdf = gpd.GeoDataFrame(
+        df,
+        geometry=df['geometry_wkt'].apply(wkt.loads),
+        crs='EPSG:4326'
+    )
+
+    # STEP 3: Prepare data for insertion
+    gdf['grid_id'] = task_params['grid_id']
+    gdf['grid_type'] = task_params['grid_type']
+    gdf['source_job_id'] = task_params['source_job_id']
+    gdf['source_blob_path'] = task_params['blob_path']
+
+    # For land grids, mark is_land=True
+    if task_params['grid_type'] == 'land':
+        gdf['is_land'] = True
+
+    # STEP 4: Batch insert to PostGIS
+    logger.info(f"Inserting to geo.h3_grids...")
+    engine = create_engine(config.get_postgres_connection_string())
+
+    gdf.to_postgis(
+        name='h3_grids',
+        con=engine,
+        schema='geo',
+        if_exists='append',
+        index=False,
+        chunksize=1000  # Batch size
+    )
+
+    # STEP 5: Calculate bbox
+    bbox = gdf.total_bounds.tolist()  # [minx, miny, maxx, maxy]
+
+    logger.info(f"✅ Inserted {len(gdf)} H3 cells to geo.h3_grids")
+
+    return {
+        "success": True,
+        "rows_inserted": len(gdf),
+        "table_name": "geo.h3_grids",
+        "grid_id": task_params['grid_id'],
+        "bbox": bbox,
+        "resolution": task_params['resolution']
+    }
+```
+
+#### Updated Job Files
+
+**`jobs/create_h3_base.py`** - Add Stages 2 and 3:
+```python
+stages: List[Dict[str, Any]] = [
+    {
+        "number": 1,
+        "name": "generate",
+        "task_type": "h3_base_generate",
+        "parallelism": "single",
+        "description": "Generate complete H3 grid and save to GeoParquet"
+    },
+    {
+        "number": 2,
+        "name": "insert_postgis",
+        "task_type": "insert_h3_to_postgis",
+        "parallelism": "single",
+        "description": "Load GeoParquet and insert to PostGIS geo.h3_grids table"
+    },
+    {
+        "number": 3,
+        "name": "create_stac",
+        "task_type": "create_h3_stac",
+        "parallelism": "single",
+        "description": "Create STAC item for H3 grid in system-h3-grids collection"
+    }
+]
+```
+
+**Update `create_tasks_for_stage`**:
+```python
+@staticmethod
+def create_tasks_for_stage(stage: int, job_params: dict, job_id: str, previous_results: list = None) -> list[dict]:
+    if stage == 1:
+        # EXISTING: Generate grid
+        return [...]
+
+    elif stage == 2:
+        # NEW: Insert to PostGIS
+        if not previous_results:
+            raise ValueError("Stage 2 requires Stage 1 results")
+
+        stage_1_result = previous_results[0]
+        if not stage_1_result.get('success'):
+            raise ValueError(f"Stage 1 failed: {stage_1_result.get('error')}")
+
+        blob_path = stage_1_result['result']['blob_path']
+        resolution = job_params['resolution']
+
+        task_id = generate_deterministic_task_id(job_id, 2, "postgis")
+        return [
+            {
+                "task_id": task_id,
+                "task_type": "insert_h3_to_postgis",
+                "parameters": {
+                    "blob_path": blob_path,
+                    "grid_id": f"global_res{resolution}",
+                    "grid_type": "global",
+                    "resolution": resolution,
+                    "source_job_id": job_id
+                }
+            }
+        ]
+
+    elif stage == 3:
+        # NEW: Create STAC
+        if not previous_results:
+            raise ValueError("Stage 3 requires Stage 2 results")
+
+        stage_2_result = previous_results[0]
+        if not stage_2_result.get('success'):
+            raise ValueError(f"Stage 2 failed: {stage_2_result.get('error')}")
+
+        result_data = stage_2_result['result']
+
+        task_id = generate_deterministic_task_id(job_id, 3, "stac")
+        return [
+            {
+                "task_id": task_id,
+                "task_type": "create_h3_stac",
+                "parameters": {
+                    "grid_id": result_data['grid_id'],
+                    "table_name": result_data['table_name'],
+                    "bbox": result_data['bbox'],
+                    "resolution": result_data['resolution'],
+                    "collection_id": "system-h3-grids",
+                    "source_blob": stage_1_result['result']['blob_path']
+                }
+            }
+        ]
+```
+
+#### New Task Handler: `create_h3_stac`
+
+**File**: `tasks/create_h3_stac.py` (NEW)
+```python
+def create_h3_stac(task_params: dict) -> dict:
+    """
+    Create STAC item for H3 grid in PostGIS.
+
+    Similar to create_vector_stac but for H3 grids.
+    """
+    from infrastructure.stac import StacInfrastructure
+    from pystac import Item, Asset
+    from datetime import datetime, timezone
+
+    grid_id = task_params['grid_id']
+    collection_id = task_params['collection_id']
+
+    # Generate STAC item ID
+    item_id = f"h3-{grid_id}"
+
+    # Create STAC item
+    item = Item(
+        id=item_id,
+        geometry=None,  # Use bbox instead (grid covers large area)
+        bbox=task_params['bbox'],
+        datetime=datetime.now(timezone.utc),
+        properties={
+            "grid_id": grid_id,
+            "resolution": task_params['resolution'],
+            "grid_type": "h3_hexagonal",
+            "table": task_params['table_name'],
+            "source_blob": task_params['source_blob']
+        }
+    )
+
+    # Add asset pointing to PostGIS table
+    item.add_asset(
+        "postgis",
+        Asset(
+            href=f"postgresql://geo.h3_grids?grid_id={grid_id}",
+            media_type="application/vnd.geo+json",
+            title="H3 Grid in PostGIS"
+        )
+    )
+
+    # Add asset pointing to GeoParquet
+    item.add_asset(
+        "parquet",
+        Asset(
+            href=f"https://rmhazuregeo.blob.core.windows.net/gold-h3-grids/{task_params['source_blob']}",
+            media_type="application/vnd.apache.parquet",
+            title="H3 Grid GeoParquet"
+        )
+    )
+
+    # Insert to pgstac
+    stac = StacInfrastructure()
+    result = stac.insert_item(item, collection_id)
+
+    return {
+        "success": True,
+        "stac_id": item_id,
+        "collection_id": collection_id,
+        "bbox": task_params['bbox'],
+        "postgis_table": task_params['table_name']
+    }
+```
+
+#### OGC Features API Integration
+
+**After PostGIS insertion, H3 grids automatically available via OGC Features API!**
+
+```bash
+# List H3 grid collections
+curl https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/features/collections
+
+# Get specific H3 grid metadata
+curl https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/features/collections/h3_grids/items?grid_id=global_res4
+
+# Spatial query: Get H3 cells intersecting bounding box
+curl "https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/features/collections/h3_grids/items?bbox=-180,-90,180,90&limit=1000&grid_id=land_res4"
+
+# Get single H3 cell by ID
+curl https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/features/collections/h3_grids/items/{h3_index}
+```
+
+#### Web Map Visualization
+
+**Interactive H3 Grid Viewer** (extends existing map at https://rmhazuregeo.z13.web.core.windows.net/)
+
+```javascript
+// Add H3 grid layer selector
+const h3Grids = [
+    { name: "Global Resolution 0", grid_id: "global_res0" },
+    { name: "Global Resolution 4", grid_id: "global_res4" },
+    { name: "Land Resolution 4", grid_id: "land_res4" }
+];
+
+// Load H3 grid from OGC Features API
+async function loadH3Grid(grid_id) {
+    const url = `https://rmhgeoapibeta-.../api/features/collections/h3_grids/items?grid_id=${grid_id}&limit=1000`;
+    const response = await fetch(url);
+    const data = await response.json();
+
+    // Add to map with styling
+    L.geoJSON(data, {
+        style: {
+            fillColor: '#00ff00',
+            fillOpacity: 0.2,
+            color: '#0000ff',
+            weight: 1
+        },
+        onEachFeature: (feature, layer) => {
+            layer.bindPopup(`
+                <strong>H3 Index:</strong> ${feature.properties.h3_index}<br>
+                <strong>Resolution:</strong> ${feature.properties.resolution}<br>
+                <strong>Is Land:</strong> ${feature.properties.is_land}
+            `);
+        }
+    }).addTo(map);
+}
+```
+
+#### Implementation Checklist
+
+**Phase 1: Standardize finalize_job** (30 min):
+- [ ] Update `jobs/create_h3_base.py` finalize_job method
+- [ ] Update `jobs/generate_h3_level4.py` finalize_job method
+- [ ] Test with resolution 0 (fast test)
+- [ ] Verify response includes statistics and download URL
+
+**Phase 2: PostGIS Integration** (2-3 hours):
+
+**Database Setup** (30 min):
+- [ ] Create `geo.h3_grids` table schema
+- [ ] Create spatial and attribute indexes
+- [ ] Create STAC collection `system-h3-grids`
+- [ ] Test manual insert of sample H3 cells
+
+**Task Handlers** (1 hour):
+- [ ] Create `tasks/insert_h3_postgis.py` handler
+- [ ] Create `tasks/create_h3_stac.py` handler
+- [ ] Register both handlers in `tasks/__init__.py`
+- [ ] Add Pydantic models if needed
+
+**Job Updates** (1 hour):
+- [ ] Update `jobs/create_h3_base.py` - Add stages 2 and 3
+- [ ] Update `jobs/create_h3_base.py` - Update create_tasks_for_stage
+- [ ] Update `jobs/create_h3_base.py` - Update finalize_job (include PostGIS stats)
+- [ ] Update `jobs/generate_h3_level4.py` - Same updates
+- [ ] Update both jobs: total_stages=1 → total_stages=3
+
+**Testing** (30 min):
+- [ ] Test create_h3_base with resolution 0 (122 cells → PostGIS)
+- [ ] Verify geo.h3_grids table populated
+- [ ] Verify STAC item created in system-h3-grids
+- [ ] Test OGC Features API query: `/api/features/collections/h3_grids/items?grid_id=global_res0`
+- [ ] Test web map visualization
+- [ ] Test generate_h3_level4 (land grid → PostGIS)
+
+**Future Enhancements** (Backlog):
+- [ ] Install PostgreSQL H3 extension for native H3 functions
+- [ ] Add H3 neighbor queries (k-ring, hex-ring)
+- [ ] Add administrative attributes from Overture (country, state)
+- [ ] Add ocean/land percentage for coastal cells
+- [ ] Create H3 grid aggregation views (e.g., sum values by H3 cell)
+
+#### Benefits
+
+**For Users**:
+- ✅ Spatial queries on H3 grids (find cells in AOI)
+- ✅ Web map visualization of hexagonal grids
+- ✅ OGC Features API access (standard geospatial interface)
+- ✅ STAC cataloging (discoverable alongside rasters/vectors)
+
+**For Analytics**:
+- ✅ Join H3 grids with vector data (aggregate by hexagon)
+- ✅ Join H3 grids with raster data (zonal statistics)
+- ✅ Fast spatial indexing (GIST on hexagon geometry)
+- ✅ Dual storage (PostGIS for queries + GeoParquet for analytics)
+
+**For Development**:
+- ✅ Follows existing patterns (3-stage workflow like ingest_vector)
+- ✅ Reuses existing infrastructure (OGC Features, STAC, PostGIS)
+- ✅ Consistent finalize_job pattern across all jobs
+
+#### Performance Estimates
+
+**Resolution 0** (122 cells):
+- Stage 1 (generate): ~1 second
+- Stage 2 (PostGIS insert): ~0.5 seconds
+- Stage 3 (STAC): ~0.5 seconds
+- **Total: ~2 seconds**
+
+**Resolution 4** (288,122 cells):
+- Stage 1 (generate): ~120 seconds
+- Stage 2 (PostGIS insert): ~60 seconds (batch insert 1000/chunk)
+- Stage 3 (STAC): ~1 second
+- **Total: ~181 seconds (~3 minutes)**
+
+**Land Resolution 4** (~78,000 cells):
+- Stage 1 (generate + filter): ~75 seconds
+- Stage 2 (PostGIS insert): ~20 seconds
+- Stage 3 (STAC): ~1 second
+- **Total: ~96 seconds (~1.5 minutes)**
+
+#### Implementation Summary (9 NOV 2025)
+
+**✅ ALL COMPONENTS IMPLEMENTED AND INTEGRATED**
+
+**Files Created:**
+1. **`sql/init/02_create_h3_grids_table.sql`** - PostgreSQL schema (geo.h3_grids table with spatial indexes)
+2. **`services/handler_insert_h3_postgis.py`** - Stage 2 handler (GeoParquet → PostGIS insertion)
+3. **`services/handler_create_h3_stac.py`** - Stage 3 handler (STAC item creation for H3 grids)
+
+**Files Modified:**
+1. **`jobs/create_h3_base.py`**:
+   - Updated stages from 1 → 3 (generate → PostGIS → STAC)
+   - Updated `create_tasks_for_stage()` to handle all 3 stages with result forwarding
+   - Updated `create_job_record()` to set `total_stages=3`
+   - Updated `finalize_job()` to extract all 3 stage results and build comprehensive response
+
+2. **`jobs/generate_h3_level4.py`**:
+   - Updated stages from 1 → 3 (generate → PostGIS → STAC)
+   - Updated `create_tasks_for_stage()` to handle all 3 stages with result forwarding
+   - Updated `create_job_record()` to set `total_stages=3`
+   - Updated `finalize_job()` to extract all 3 stage results and build comprehensive response
+
+3. **`services/__init__.py`**:
+   - Added imports for `insert_h3_to_postgis` and `create_h3_stac`
+   - Registered both handlers in `ALL_HANDLERS` registry
+
+**Database Schema:**
+- Table: `geo.h3_grids` with 7 indexes (spatial GIST, resolution, grid_id, land classification, country, composite)
+- Columns: h3_index (BIGINT), resolution, geom (POLYGON), grid_id, grid_type, source info, land classification, admin attributes
+- Comments on table and all columns for documentation
+
+**Integration Points:**
+- ✅ OGC Features API (automatic - geo.h3_grids is a PostGIS table)
+- ✅ STAC API (pgstac.items with collection "system-h3-grids")
+- ✅ Web Map (Leaflet can query h3_grids via OGC Features)
+- ✅ CoreMachine (3-stage workflow with proper result passing)
+
+**New Job Workflow:**
+```
+Stage 1: Generate H3 grid → Save to GeoParquet (existing)
+         ↓ (blob_path)
+Stage 2: Load GeoParquet → Insert to geo.h3_grids PostGIS table (NEW)
+         ↓ (grid_id, table_name, bbox)
+Stage 3: Query PostGIS → Create STAC item in system-h3-grids collection (NEW)
+         ↓
+Complete: Job returns comprehensive result with:
+          - GeoParquet download URL
+          - PostGIS table name and grid_id
+          - OGC Features API URL
+          - STAC item ID and URL
+          - Bbox, cell count, file size, processing time
+```
+
+**Testing Status:**
+- ⏳ Needs deployment to Azure Functions
+- ⏳ Needs database schema deployment (`02_create_h3_grids_table.sql`)
+- ⏳ Needs test job submission (resolution 0 for fast testing)
+- ⏳ Needs verification of all 3 stages completing successfully
+
+**Next Steps:**
+1. Deploy to Azure Functions: `func azure functionapp publish rmhgeoapibeta --python --build remote`
+2. Deploy schema: Run `sql/init/02_create_h3_grids_table.sql` against PostgreSQL
+3. Test with minimal job: `POST /api/jobs/submit/create_h3_base {"resolution": 0}`
+4. Verify OGC Features access: `GET /api/features/collections/h3_grids/items?grid_id=global_res0`
+5. Verify STAC access: `GET /api/collections/system-h3-grids/items/h3-global_res0`
+
+---
+
+## 🔴 PRIORITY: Implement Explicit File Not Found Error in HTTP Response
+
+**Status**: ⏳ **PENDING**
+
+**Issue**: When a blob path is incorrect (e.g., `namangan14aug2019_R2C2cog.tif` instead of `namangan/namangan14aug2019_R2C2cog.tif`), the task fails with generic `FILE_UNREADABLE` error without clear indication that the file doesn't exist.
+
+**Current Behavior**:
+```json
+{
+  "status": "failed",
+  "errorDetails": "Job failed due to task df9d5c6e6e17fb2b exceeding max retries (3). Task error: FILE_UNREADABLE"
+}
+```
+
+**Desired Behavior**:
+```json
+{
+  "status": "failed",
+  "errorDetails": "Job failed due to task df9d5c6e6e17fb2b exceeding max retries (3). Task error: FILE_NOT_FOUND - Blob 'namangan14aug2019_R2C2cog.tif' does not exist in container 'rmhazuregeobronze'"
+}
+```
+
+**Implementation Requirements**:
+1. Catch Azure blob storage 404 errors explicitly
+2. Return clear error message with exact blob path and container name
+3. Differentiate between:
+   - File doesn't exist (404)
+   - File exists but unreadable (permission/corruption issues)
+   - Network/timeout errors
+4. Update task error handling to preserve detailed error messages
+
+**Files to Modify**:
+- `services/raster_validation.py` - Add explicit blob existence check before GDAL operations
+- Task error handling - Preserve full error details in task.error_details field
+- Consider adding `check_blob_exists()` utility method
+
+**Benefits**:
+- Faster debugging (no need to check Azure Portal or CLI)
+- Better user experience
+- Clearer distinction between user errors (wrong path) vs system errors
+
+---
+
+## ✅ COMPLETED: Raster Pipeline Parameterization (8 NOV 2025)
+
+**Status**: ✅ **COMPLETE** - Two critical parameters now configurable
+
+### 1. `in_memory` Parameter for COG Processing
+- **Purpose**: Control whether rio-cogeo uses RAM (/vsimem/) vs disk-based (/tmp) processing
+- **Default**: `true` (in-memory, faster for small files)
+- **Config**: `config.raster_cog_in_memory` (env: `RASTER_COG_IN_MEMORY`)
+- **Per-Job Override**: Add `"in_memory": false` to job submission for large files
+- **Files Modified**:
+  - `config.py` - Added field with documentation
+  - `services/raster_cog.py` - Parameter extraction with config fallback
+  - `jobs/process_raster.py` - Added to parameters_schema
+  - `jobs/process_large_raster.py` - Added to parameters_schema
+  - `jobs/process_raster_collection.py` - Added to parameters_schema
+
+### 2. `maxzoom` Parameter for MosaicJSON Tile Serving
+- **Purpose**: Control maximum zoom level for tile serving (addresses zoom 18 limitation)
+- **Default**: `19` (0.30m/pixel - high-res satellite imagery)
+- **Config**: `config.raster_mosaicjson_maxzoom` (env: `RASTER_MOSAICJSON_MAXZOOM`)
+- **Per-Job Override**: Add `"maxzoom": 21` for drone imagery (0.07m/pixel)
+- **Zoom Reference**:
+  - Zoom 18 = 0.60m/pixel (standard satellite)
+  - Zoom 19 = 0.30m/pixel (high-res satellite) ← NEW DEFAULT
+  - Zoom 20 = 0.15m/pixel (drone)
+  - Zoom 21 = 0.07m/pixel (very high-res drone)
+- **Files Modified**:
+  - `config.py` - Added field with Pydantic validation (ge=0, le=24)
+  - `services/raster_mosaicjson.py` - Parameter extraction with resolution logging
+  - `jobs/process_large_raster.py` - Added to parameters_schema + task passthrough
+  - `jobs/process_raster_collection.py` - Added to parameters_schema
+
+### Pattern Established
+- **Config Default**: Global setting via environment variable
+- **Per-Job Override**: Optional parameter in job submission
+- **Fallback Logic**: `params.get('param') or config.param_name`
+- **Logging**: Shows which value being used (user-specified vs config default)
+
+### 🔄 ONGOING: API Parameter Discovery
+**Status**: 🔍 **ONGOING** - Continuously identifying new parameters to expose via API
+**Process**: As we use the system and identify hardcoded values that should be configurable, we parameterize them following the pattern above
+**Next Candidates**: TBD based on operational experience
+
+---
+
+## 🎉 VICTORY: Vector Ingest Production-Ready (7 NOV 2025)
+
+**Status**: ✅ **PRODUCTION READY** - Complete vector data ingestion pipeline validated
+**Achievement**: End-to-end testing of 4 vector formats with all 3 geometry types
+**Impact**: Can now ingest any vector file → PostGIS → STAC → OGC Features API in under 1 minute
+
+### What We Proved (7 NOV 2025)
+
+✅ **4 File Formats Working**:
+1. **GeoJSON** - 3,301 MultiPolygon features in 24 seconds
+2. **KML** - 12,228 MultiPolygon features in 44 seconds
+3. **CSV with lat/lon** - 5,000 Point features in 13 seconds
+4. **Zipped Shapefile** - 483 LineString features in 6 seconds
+
+✅ **All Geometry Types Validated**:
+- **Point** - CSV coordinate conversion working
+- **LineString** - Shapefile roads working
+- **Polygon/MultiPolygon** - GeoJSON and KML working
+
+✅ **Advanced Features Working**:
+- Custom indexes: Spatial GIST + Attribute B-tree + Temporal DESC
+- Zipped file handling: Automatic extraction for .zip files
+- STAC integration: All formats create STAC items in system-vectors
+- OGC Features API: All formats immediately queryable
+- Parallel processing: 2-21 chunks processed concurrently
+- Global extent: Data from Mexico, Honduras, Asia/Pacific, Antarctica
+
+✅ **Performance Validated**:
+- Small datasets (483): 6 seconds
+- Medium datasets (3K-5K): 13-24 seconds
+- Large datasets (12K): 44 seconds
+- Throughput: 80-385 features/second
+
+✅ **Production Architecture**:
+- FP1-3 fixes deployed (no stuck jobs)
+- Service Bus triggers operational
+- 3-stage pipeline (prepare → upload → STAC) working
+- Job completion with OGC URLs
+- Web map visualization working
+
+**Real-World Test Results**:
+```
+Format      | Features | Time | Geometry    | Result
+------------|----------|------|-------------|------------------
+GeoJSON     | 3,301    | 24s  | MultiPoly   | ✅ PASS
+KML         | 12,228   | 44s  | MultiPoly   | ✅ PASS
+CSV (lat/lon)| 5,000   | 13s  | Point       | ✅ PASS (indexes)
+Shapefile.zip| 483     | 6s   | LineString  | ✅ PASS (OSM)
+```
+
+**Next Priority**: Platform orchestration layer (chain jobs, return URLs)
 
 ---
 
@@ -33,6 +871,204 @@
 - [ ] Test with invalid job submissions and simulated failures
 - [ ] Deploy and monitor in dev environment
 - [ ] Implement timer trigger cleanup function (Phase 2)
+
+---
+
+## 🔧 NEW: TiTiler PgSTAC Integration Fix + Repository Pattern (6 NOV 2025)
+
+**Status**: 🚨 **CRITICAL FIX NEEDED** - TiTiler cannot find STAC items due to PostgreSQL search_path issue
+**Root Cause**: PgSTAC functions use unqualified table names, require `pgstac` schema in search_path
+**Impact**: TiTiler tile server returns "No item found" even though items exist in database
+
+### Problem Analysis
+
+**What's Happening**:
+- TiTiler calls `pgstac.search()` function to find STAC items
+- Inside `pgstac.search()`, functions reference tables without schema prefix (e.g., `searches`, `partition_steps`)
+- PostgreSQL uses caller's `search_path` to resolve unqualified names
+- Current `search_path` for rob634 user: `"$user", public, sde` (missing `pgstac`)
+- Result: `ERROR: relation "searches" does not exist`
+
+**Evidence**:
+- Direct queries work: `SELECT * FROM pgstac.items WHERE id = '...'` ✅
+- PgSTAC function fails: `SELECT pgstac.search('{"ids": ["..."]}')` ❌
+- Setting search_path fixes it: `SET search_path TO pgstac, public;` ✅
+
+**STAC Item Insertion**: ✅ **Already correct** - uses `pgstac.create_item()` function properly
+
+### Task 1: Permanent Fix (Requires Corporate eService Request) ⭐ PRIORITY 1
+
+**Goal**: Set default search_path for rob634 database user permanently
+
+**SQL Command** (requires DBA privileges):
+```sql
+ALTER ROLE rob634 SET search_path TO pgstac, public;
+```
+
+**eService Request Template**:
+```
+Title: Set search_path for rob634 PostgreSQL user on geopgflex database
+
+Description:
+Please execute the following SQL command on the geopgflex PostgreSQL database:
+
+ALTER ROLE rob634 SET search_path TO pgstac, public;
+
+Justification:
+- The rob634 user accesses tables in the pgstac schema for geospatial STAC catalog operations
+- Current default search_path ("$user", public, sde) does not include the pgstac schema
+- This causes PgSTAC spatial query functions to fail when resolving unqualified table names
+- Setting search_path is a standard PostgreSQL configuration practice
+- No security impact: rob634 already has SELECT privileges on pgstac schema tables
+
+Business Impact:
+- Required for TiTiler geospatial tile server (rmhtitiler) to function correctly
+- Blocks visualization of STAC catalog data in web mapping applications
+- Impacts ability to serve dynamic map tiles from cloud-optimized GeoTIFFs
+
+Technical Details:
+- Database: geopgflex.postgres.database.azure.com
+- User: rob634
+- Schema: pgstac (PgSTAC 0.8.5)
+- No downtime required - takes effect on next connection
+```
+
+**Steps**:
+- [ ] Submit eService request with template above
+- [ ] Wait for DBA approval and execution
+- [ ] Test TiTiler after change: `curl "https://rmhtitiler-.../collections/system-rasters/items/{item-id}/info"`
+- [ ] Verify search_path: `psql -U rob634 -c "SHOW search_path;"`
+- [ ] Document in deployment guide
+
+**Estimated Time**:
+- Submit request: 15 minutes
+- Corporate approval: 2-5 business days
+- Testing: 15 minutes
+
+---
+
+### Task 2: Session-Level Fallback (Immediate - No Privileges Required) 🔄 FALLBACK
+
+**Goal**: Configure TiTiler to set search_path at connection time as temporary workaround
+
+**Why This Fallback is Appropriate**:
+- Normally avoid fallbacks that mask architectural issues
+- This case: Fallback is **equally correct** technically, just requires per-connection overhead
+- Enables immediate testing while waiting for corporate DBA approval
+- No code changes - pure configuration
+- Easy to remove once permanent fix is applied
+
+**Implementation**: Add environment variable to TiTiler Azure App Service
+
+**Azure Portal Steps**:
+```bash
+# Navigate to: rmhtitiler → Configuration → Application Settings
+# Add new setting:
+
+Name:  POSTGRES_OPTIONS
+Value: -c search_path=pgstac,public
+```
+
+**Alternative** (if POSTGRES_OPTIONS doesn't work):
+```bash
+# Modify connection string format (check TiTiler docs):
+POSTGRES_DSN=postgresql://rob634:password@host/geopgflex?options=-c%20search_path=pgstac,public
+```
+
+**Steps**:
+- [ ] Add `POSTGRES_OPTIONS` environment variable to rmhtitiler App Service
+- [ ] Restart TiTiler web app: `az webapp restart --resource-group rmhazure_rg --name rmhtitiler`
+- [ ] Test item access: `curl "https://rmhtitiler-.../collections/system-rasters/items/system-rasters-05APR13082706_cog_analysis-tif/info"`
+- [ ] Verify search works: Should return COG metadata JSON (not "No item found")
+- [ ] Document as temporary workaround until Task 1 completes
+- [ ] **CLEANUP**: Remove this config once Task 1 permanent fix is deployed
+
+**Estimated Time**: 30 minutes
+
+---
+
+### Task 3: Create PgSTAC Repository Pattern (Code Quality Improvement) 📦 BACKLOG
+
+**Goal**: Centralize all PgSTAC database operations in dedicated repository class for consistency
+
+**Current State**: ✅ **Already Using PgSTAC Functions Correctly**
+- `infrastructure/stac.py` uses `pgstac.create_item()` for insertions
+- NO manual `INSERT INTO pgstac.items` statements found
+- Code is correct, just not organized optimally
+
+**Proposed Architecture**:
+
+Create `repositories/repository_stac.py`:
+```python
+class StacRepository:
+    """
+    Repository pattern for PgSTAC database operations.
+
+    Centralizes all pgstac function calls with consistent:
+    - Error handling and logging
+    - Connection management
+    - Retry logic
+    - Type hints and validation
+    """
+
+    def insert_item(self, item: Item, collection_id: str) -> Dict[str, Any]:
+        """Insert STAC item using pgstac.create_item()"""
+
+    def bulk_insert_items(self, items: List[Item], collection_id: str) -> Dict[str, Any]:
+        """Bulk insert using pgstac.create_items()"""
+
+    def get_item(self, item_id: str, collection_id: str) -> Optional[Item]:
+        """Get item using pgstac.get_item()"""
+
+    def search_items(self, search_params: Dict) -> Dict[str, Any]:
+        """Search items using pgstac.search()"""
+
+    def delete_item(self, item_id: str, collection_id: str) -> bool:
+        """Delete item using pgstac.delete_item()"""
+
+    def item_exists(self, item_id: str, collection_id: str) -> bool:
+        """Check if item exists"""
+
+    def upsert_item(self, item: Item, collection_id: str) -> Dict[str, Any]:
+        """Upsert using pgstac.upsert_item() for idempotent updates"""
+```
+
+**Migration Plan**:
+
+**Phase 1: Create Repository** (1-2 hours):
+- [ ] Create `repositories/repository_stac.py` with class skeleton
+- [ ] Move item insertion methods from `infrastructure/stac.py` → repository
+- [ ] Add type hints (stac-pydantic types)
+- [ ] Add comprehensive docstrings
+- [ ] Keep `StacInfrastructure` for schema installation/migration ONLY
+
+**Phase 2: Update Callers** (30 minutes):
+- [ ] Update `services/stac_catalog.py` to use `StacRepository`
+- [ ] Update `services/service_stac_vector.py` to use repository
+- [ ] Update HTTP triggers that directly call STAC operations
+- [ ] Update any job handlers using STAC insertion
+
+**Phase 3: Add Advanced Features** (optional, future):
+- [ ] Connection pooling optimization
+- [ ] Retry logic with exponential backoff
+- [ ] Batch operation helpers
+- [ ] Caching layer for frequently accessed items
+- [ ] Metrics/telemetry for STAC operations
+
+**Benefits**:
+- ✅ Single source of truth for pgstac operations
+- ✅ Consistent error handling and logging across all STAC ops
+- ✅ Easier to add retry logic, connection pooling, caching
+- ✅ Clear separation of concerns (repository pattern)
+- ✅ Testable isolation - mock repository for unit tests
+- ✅ Future-proof for pgstac upgrades
+
+**Not Urgent Because**:
+- Current implementation already uses pgstac functions correctly
+- No bugs related to STAC insertion
+- Pure code quality/maintainability improvement
+
+**Estimated Time**: 2-3 hours total (can be done incrementally)
 
 ---
 
@@ -145,43 +1181,53 @@
 **NEW PRIORITY (31 OCT 2025): Individual Job Testing First, Platform Layer Second**
 **Philosophy**: Jobs must work standalone before Platform orchestration
 
-**Phase 1: Individual CoreMachine Jobs (CURRENT PRIORITY)**
-- [ ] **Test ingest_vector job standalone** (P0)
-  - Submit via: `POST /api/jobs/submit/ingest_vector`
-  - Test vector file: Valid GeoJSON/Shapefile from blob storage
-  - Verify: PostGIS table created in geo schema
-  - Verify: Spatial indexes created
-  - Verify: Job completes with table_name in result
-  - Success: Can query table via psql/OGC Features API
+**Phase 1: Individual CoreMachine Jobs** ✅ **COMPLETE** (7 NOV 2025)
 
-- [ ] **Test stac_catalog_vectors job standalone** (P0)
-  - Submit via: `POST /api/jobs/submit/stac_catalog_vectors`
-  - Prerequisite: PostGIS table exists (from ingest_vector or manual)
-  - Verify: STAC collection created in pgstac schema
-  - Verify: STAC items created for features
-  - Verify: Job completes with collection_id in result
-  - Success: Can query via STAC API
+- [x] ✅ **Test ingest_vector job standalone** (P0) - COMPLETE
+  - Submit via: `POST /api/jobs/submit/ingest_vector` ✅
+  - Test vector file: Valid GeoJSON/Shapefile from blob storage ✅
+  - Verify: PostGIS table created in geo schema ✅
+  - Verify: Spatial indexes created ✅
+  - Verify: Job completes with table_name in result ✅
+  - Success: Can query table via psql/OGC Features API ✅
 
-- [ ] **Document individual job usage** (P0)
-  - Create curl examples for each job
-  - Document required parameters
-  - Document expected results
-  - Document how to verify success
+- [x] ✅ **Test stac_catalog_vectors job standalone** (P0) - COMPLETE
+  - Submit via: `POST /api/jobs/submit/stac_catalog_vectors` ✅
+  - Prerequisite: PostGIS table exists (from ingest_vector or manual) ✅
+  - Verify: STAC collection created in pgstac schema ✅
+  - Verify: STAC items created for features ✅
+  - Verify: Job completes with collection_id in result ✅
+  - Success: Can query via STAC API ✅
 
-- [ ] **Test all accepted vector file formats** (P0)
-  - **doc.kml** (KML format)
-  - **acled_test.csv** (CSV with coordinates)
-  - **roads.zip** (Zipped shapefile)
-  - **11.geojson** (GeoJSON)
-  - **8.geojson** (GeoJSON)
-  - **DMA/Dominica_Southeast_AOI.kml** (KML with complex geometries)
-  - For each format:
-    - Submit via ingest_vector job
-    - Verify successful ingestion to PostGIS
-    - Verify correct geometry type detection
-    - Verify proper CRS handling
-    - Document any format-specific issues
-    - Test OGC Features API access to ingested data
+- [x] ✅ **Document individual job usage** (P0) - COMPLETE
+  - Create curl examples for each job ✅
+  - Document required parameters ✅
+  - Document expected results ✅
+  - Document how to verify success ✅
+
+- [x] ✅ **Test all accepted vector file formats** (P0) - **4/7 FORMATS VALIDATED**
+  - [x] ✅ **11.geojson** (GeoJSON) - 3,301 features, 24s, MultiPolygon
+  - [x] ✅ **doc.kml** (KML format) - 12,228 features, 44s, MultiPolygon
+  - [x] ✅ **acled_test.csv** (CSV with coordinates) - 5,000 features, 13s, Point, custom indexes tested
+  - [x] ✅ **roads.zip** (Zipped shapefile) - 483 features, 6s, LineString, OSM roads
+  - [ ] ⏸️ **8.geojson** (GeoJSON) - Deferred (GeoJSON already validated)
+  - [ ] ⏸️ **DMA/Dominica_Southeast_AOI.kml** (KML) - Deferred (KML already validated)
+
+  **All Core Formats Validated** ✅:
+  - ✅ Point geometries (CSV with lat/lon)
+  - ✅ LineString geometries (Shapefile)
+  - ✅ Polygon/MultiPolygon geometries (GeoJSON, KML)
+  - ✅ Zipped file format (Shapefile .zip)
+  - ✅ Coordinate conversion (CSV lat/lon → PostGIS Point)
+  - ✅ Custom indexes (spatial GIST + attribute B-tree + temporal DESC)
+  - ✅ STAC integration (all formats create STAC items)
+  - ✅ OGC Features API (all formats queryable)
+
+  **Performance Validated** ✅:
+  - Small datasets: 483 features in 6s
+  - Medium datasets: 3,301-5,000 features in 13-24s
+  - Large datasets: 12,228 features in 44s
+  - Throughput: 80-385 features/second depending on geometry complexity
 
 **Phase 2: Platform Orchestration (AFTER Phase 1 Complete)**
 - [ ] **Platform job chaining**: Chain ingest_vector → stac_catalog_vectors

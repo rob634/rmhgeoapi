@@ -117,6 +117,12 @@ class ProcessRasterWorkflow(JobBase):
         "overview_resampling": {"type": "str", "required": False, "default": None},  # Auto-selected
         "reproject_resampling": {"type": "str", "required": False, "default": None},  # Auto-selected
         "strict_mode": {"type": "bool", "required": False, "default": False},
+        "in_memory": {
+            "type": "bool",
+            "required": False,
+            "default": None,
+            "description": "Process COG in-memory (True) vs disk-based (False). If not specified, uses config.raster_cog_in_memory. In-memory is faster for small files (<1GB), disk-based is better for large files."
+        },
         "collection_id": {
             "type": "str",
             "required": False,
@@ -372,7 +378,7 @@ class ProcessRasterWorkflow(JobBase):
         service_bus_repo = ServiceBusRepository()
 
         # Create job queue message
-        correlation_id = str(uuid.uuid4())
+        correlation_id = str(uuid.uuid4())[:8]
         job_message = JobQueueMessage(
             job_id=job_id,
             job_type="process_raster",
@@ -534,7 +540,8 @@ class ProcessRasterWorkflow(JobBase):
 
             # Get COG blob path and container from Stage 2
             cog_blob = cog_result.get('output_blob') or cog_result.get('cog_blob')
-            cog_container = cog_result.get('container') or config.silver_container_name
+            # CRITICAL: Stage 2 returns 'cog_container' (not 'container') - see tasks/create_cog.py result structure
+            cog_container = cog_result.get('cog_container') or config.silver_container_name
 
             if not cog_blob:
                 raise ValueError("Stage 2 results missing COG blob path (expected 'output_blob' or 'cog_blob')")
@@ -617,7 +624,9 @@ class ProcessRasterWorkflow(JobBase):
 
         # Extract STAC results
         stac_summary = {}
-        titiler_urls = {}
+        # titiler_pgstac_urls = {}  # COMMENTED OUT (7 NOV 2025) - may restore later if TiTiler-PgSTAC deployed
+        vanilla_titiler_urls = {}
+        share_url = None
 
         if stage_3_tasks and stage_3_tasks[0].result_data:
             stac_result = stage_3_tasks[0].result_data.get("result", {})
@@ -632,14 +641,30 @@ class ProcessRasterWorkflow(JobBase):
                 "ready_for_titiler": True
             }
 
-            # Generate TiTiler URLs
-            if item_id:
-                from config import get_config
-                config = get_config()
-                titiler_urls = config.generate_titiler_urls(
+            # Generate TiTiler URLs based on configured mode (8 NOV 2025)
+            from config import get_config
+            config = get_config()
+
+            titiler_pgstac_urls = None
+            vanilla_titiler_urls = None
+
+            if config.titiler_mode == "pgstac" and item_id:
+                # PgSTAC mode: Generate database-backed TiTiler URLs
+                titiler_pgstac_urls = config.generate_titiler_urls(
                     collection_id=collection_id,
                     item_id=item_id
                 )
+                share_url = titiler_pgstac_urls.get("viewer_url")
+            elif config.titiler_mode == "vanilla" and cog_summary.get('cog_blob') and cog_summary.get('cog_container'):
+                # Vanilla mode: Generate direct /vsiaz/ TiTiler URLs
+                vanilla_titiler_urls = config.generate_vanilla_titiler_urls(
+                    container=cog_summary['cog_container'],
+                    blob_name=cog_summary['cog_blob']
+                )
+                share_url = vanilla_titiler_urls.get("viewer_url")
+            else:
+                # xarray mode or missing data - no URLs generated
+                share_url = None
 
         return {
             "job_type": "process_raster",
@@ -648,7 +673,10 @@ class ProcessRasterWorkflow(JobBase):
             "validation": validation_summary,
             "cog": cog_summary,
             "stac": stac_summary,
-            "titiler": titiler_urls,
+            "titiler_pgstac": titiler_pgstac_urls,  # Database-backed URLs (if mode=pgstac)
+            "titiler_direct": vanilla_titiler_urls,  # Direct /vsiaz/ URLs (if mode=vanilla)
+            "share_url": share_url,  # PRIMARY URL - share this with end users!
+            "titiler_mode": config.titiler_mode,  # Which mode was used
             "stages_completed": context.current_stage,
             "total_tasks_executed": len(task_results),
             "tasks_by_status": {

@@ -36,7 +36,7 @@ from stac_pydantic.shared import Asset
 from shapely.geometry import box
 
 from config import get_config
-from infrastructure.stac import StacInfrastructure
+from infrastructure.stac import PgStacInfrastructure
 from util_logger import LoggerFactory, ComponentType
 
 # Component-specific logger for structured logging (Application Insights)
@@ -57,7 +57,7 @@ class StacVectorService:
     def __init__(self):
         """Initialize STAC vector service."""
         self.config = get_config()
-        self.stac = StacInfrastructure()
+        self.stac = PgStacInfrastructure()
 
     def extract_item_from_table(
         self,

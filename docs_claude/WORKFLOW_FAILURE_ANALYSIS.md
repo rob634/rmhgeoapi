@@ -21,12 +21,12 @@ This document analyzes **9 critical failure points** where jobs/tasks can become
 
 ### Failure Categorization
 
-**🔴 Critical (Code Fixes Required + Timer Trigger Backup)**
-- 3 failure points where exceptions are swallowed without state cleanup
-- Jobs/tasks remain in PROCESSING indefinitely
-- Require immediate code fixes
+**✅ Critical (Code Fixes COMPLETE - 5 NOV 2025)**
+- 3 failure points where exceptions were swallowed without state cleanup
+- Jobs/tasks would remain in PROCESSING indefinitely
+- **ALL FIXES DEPLOYED AND OPERATIONAL**
 
-**🟡 Medium (Timer Trigger Primary Solution)**
+**🟡 Medium (Timer Trigger Primary Solution - Phase 2)**
 - 4 failure points inherent to distributed systems
 - Azure Functions timeout, database connection loss, infrastructure failures
 - Best handled by periodic cleanup timer
@@ -148,11 +148,11 @@ Final State: Job COMPLETED with TiTiler URLs ✅
 
 ## 🔍 DETAILED FAILURE POINT ANALYSIS
 
-### **FP1: Job Processing Exception (CRITICAL)** 🔴
+### **FP1: Job Processing Exception (FIXED)** ✅
 
-**Category**: Code Fix Required
-**Location**: [function_app.py:1741-1758](../function_app.py#L1741-L1758)
-**Severity**: Critical - Job stuck forever, no automatic recovery
+**Category**: Code Fix Complete (5 NOV 2025)
+**Location**: [function_app.py:1754-1766](../function_app.py#L1754-L1766)
+**Severity**: Critical - Job stuck forever, no automatic recovery (NOW FIXED)
 
 #### Problem
 
@@ -234,48 +234,29 @@ Azure Functions Service Bus trigger behavior:
 | User Experience | Job appears to be processing forever |
 | Database | Job record exists but never completes |
 
-#### Recommended Fix
+#### Implemented Fix (5 NOV 2025) ✅
+
+**Actual implementation** in [function_app.py:1754-1766](../function_app.py#L1754-L1766):
 
 ```python
-@app.service_bus_queue_trigger(queue_name="geospatial-jobs")
-def process_service_bus_job(msg: func.ServiceBusMessage) -> None:
-    correlation_id = str(uuid.uuid4())[:8]
-    job_message = None
+except Exception as e:
+    logger.error(f"[{correlation_id}] ❌ EXCEPTION in process_service_bus_job...")
 
-    try:
-        # Parse and process job message
-        message_body = msg.get_body().decode('utf-8')
-        job_message = JobQueueMessage.model_validate_json(message_body)
+    # FP1 FIX: Mark job as FAILED in database to prevent stuck jobs
+    if 'job_message' in locals() and job_message:
+        try:
+            repos = RepositoryFactory.create_repositories()
+            job_repo = repos['job_repo']
 
-        result = core_machine.process_job_message(job_message)
-        logger.info(f"[{correlation_id}] ✅ Job processed successfully")
+            error_msg = f"Job processing exception: {type(e).__name__}: {e}"
+            job_repo.mark_failed(job_message.job_id, error_msg)
 
-    except Exception as e:
-        # Log error extensively
-        logger.error(f"[{correlation_id}] ❌ Job processing failed: {e}")
-        logger.error(f"[{correlation_id}] Full traceback:\n{traceback.format_exc()}")
+            logger.info(f"[{correlation_id}] ✅ Job {job_message.job_id[:16]}... marked as FAILED in database")
 
-        # CRITICAL FIX: Mark job as FAILED in database
-        if job_message:
-            try:
-                from core import StateManager
-                state_manager = StateManager()
+        except Exception as cleanup_error:
+            logger.error(f"[{correlation_id}] ❌ Failed to mark job as FAILED: {cleanup_error}")
 
-                error_msg = f"Job processing exception: {type(e).__name__}: {e}"
-                state_manager.mark_job_failed(job_message.job_id, error_msg)
-
-                logger.info(f"[{correlation_id}] ✅ Job {job_message.job_id[:16]} marked as FAILED")
-
-            except Exception as cleanup_error:
-                logger.error(f"[{correlation_id}] ❌ Failed to mark job as FAILED: {cleanup_error}")
-                logger.error(f"[{correlation_id}] Job {job_message.job_id} may be stuck - requires manual cleanup")
-        else:
-            logger.error(f"[{correlation_id}] ⚠️ job_message is None - cannot mark job as FAILED")
-            logger.error(f"[{correlation_id}] Exception occurred before job message parsing")
-
-        # Do NOT re-raise - prevents Service Bus infinite retries
-        # Exception already logged, job marked as FAILED (if possible)
-        logger.warning(f"[{correlation_id}] ⚠️ Function completing without re-raising exception")
+    logger.warning(f"[{correlation_id}] ⚠️ Function completing (exception logged but not re-raised)")
 ```
 
 #### Why Not Re-Raise?
@@ -291,19 +272,19 @@ def process_service_bus_job(msg: func.ServiceBusMessage) -> None:
 
 #### Testing Checklist
 
-- [ ] Submit job with unknown job type → Job marked as FAILED
-- [ ] Submit job with invalid blob path → Job marked as FAILED
-- [ ] Simulate database connection loss → Job marked as FAILED (or timer cleanup)
-- [ ] Verify error message stored in job.result_data
-- [ ] Verify user can query job status and see failure reason
+- [x] ✅ Submit job with unknown job type → Job marked as FAILED
+- [x] ✅ Submit job with invalid blob path → Job marked as FAILED
+- [x] ✅ Simulate database connection loss → Job marked as FAILED (or timer cleanup)
+- [x] ✅ Verify error message stored in job.result_data
+- [x] ✅ Verify user can query job status and see failure reason
 
 ---
 
-### **FP2: Task Status Update Failure (CRITICAL)** 🔴
+### **FP2: Task Status Update Failure (FIXED)** ✅
 
-**Category**: Code Fix Required
-**Location**: [core/machine.py:436-449](../core/machine.py#L436-L449)
-**Severity**: Critical - Task executes but cannot complete, job stuck
+**Category**: Code Fix Complete (5 NOV 2025)
+**Location**: [core/machine.py:436-487](../core/machine.py#L436-L487)
+**Severity**: Critical - Task executes but cannot complete, job stuck (NOW FIXED)
 
 #### Problem
 
@@ -417,56 +398,36 @@ if task.status != TaskStatus.PROCESSING:
 | Service Bus | **Redelivers message** (function raised exception) |
 | Side Effects | **Duplicate processing** (handler runs multiple times) |
 
-#### Recommended Fix
+#### Implemented Fix (5 NOV 2025) ✅
+
+**Actual implementation** in [core/machine.py:436-487](../core/machine.py#L436-L487):
 
 ```python
-def process_task_message(self, task_message: TaskQueueMessage):
-    # Step 1.5: Update task status to PROCESSING before execution
-    try:
-        success = self.state_manager.update_task_status_direct(
-            task_message.task_id,
-            TaskStatus.PROCESSING
-        )
-
-        if not success:
-            error_msg = "Failed to update task status to PROCESSING (returned False)"
-            self.logger.error(f"❌ {error_msg}")
-
-            # CRITICAL FIX: Mark task and job as FAILED immediately
-            try:
-                self.state_manager.mark_task_failed(task_message.task_id, error_msg)
-                self.state_manager.mark_job_failed(
-                    task_message.parent_job_id,
-                    f"Task {task_message.task_id} failed to enter PROCESSING state - possible database issue"
-                )
-                self.logger.error(f"❌ Task and job marked as FAILED - will not execute handler")
-            except Exception as cleanup_error:
-                self.logger.error(f"❌ Cleanup failed: {cleanup_error}")
-
-            # Return failure - DO NOT execute task handler
-            return {
-                'success': False,
-                'error': error_msg,
-                'task_id': task_message.task_id,
-                'handler_executed': False
-            }
-
-    except Exception as e:
-        error_msg = f"Exception updating task status to PROCESSING: {e}"
+# Step 1.5: Update task status to PROCESSING before execution
+try:
+    success = self.state_manager.update_task_status_direct(
+        task_message.task_id,
+        TaskStatus.PROCESSING
+    )
+    if success:
+        self.logger.debug(f"✅ Task {task_message.task_id[:16]} → PROCESSING")
+    else:
+        # FP2 FIX: Fail-fast if status update fails (don't execute handler)
+        error_msg = "Failed to update task status to PROCESSING (returned False) - possible database issue"
         self.logger.error(f"❌ {error_msg}")
-        self.logger.error(f"Traceback: {traceback.format_exc()}")
 
-        # Same failure handling as above
+        # Mark task and job as FAILED
         try:
             self.state_manager.mark_task_failed(task_message.task_id, error_msg)
             self.state_manager.mark_job_failed(
                 task_message.parent_job_id,
-                f"Task {task_message.task_id} status update exception: {e}"
+                f"Task {task_message.task_id} failed to enter PROCESSING state: {error_msg}"
             )
+            self.logger.error(f"❌ Task and job marked as FAILED - handler will NOT execute")
         except Exception as cleanup_error:
             self.logger.error(f"❌ Cleanup failed: {cleanup_error}")
 
-        # Return failure - DO NOT execute handler
+        # Return failure - do NOT execute task handler
         return {
             'success': False,
             'error': error_msg,
@@ -474,9 +435,29 @@ def process_task_message(self, task_message: TaskQueueMessage):
             'handler_executed': False
         }
 
-    # Step 2: Execute task handler (only if status update succeeded)
-    result = handler(task_message.parameters)
-    ...
+except Exception as e:
+    # FP2 FIX: Exception during status update - fail-fast
+    error_msg = f"Exception updating task status to PROCESSING: {e}"
+    self.logger.error(f"❌ {error_msg}")
+    self.logger.error(f"Traceback: {traceback.format_exc()}")
+
+    # Mark task and job as FAILED
+    try:
+        self.state_manager.mark_task_failed(task_message.task_id, error_msg)
+        self.state_manager.mark_job_failed(
+            task_message.parent_job_id,
+            f"Task {task_message.task_id} status update exception: {e}"
+        )
+    except Exception as cleanup_error:
+        self.logger.error(f"❌ Cleanup failed: {cleanup_error}")
+
+    # Return failure - do NOT execute handler
+    return {
+        'success': False,
+        'error': error_msg,
+        'task_id': task_message.task_id,
+        'handler_executed': False
+    }
 ```
 
 #### Why Fail Fast?
@@ -493,19 +474,19 @@ def process_task_message(self, task_message: TaskQueueMessage):
 
 #### Testing Checklist
 
-- [ ] Simulate database connection timeout → Task and job marked as FAILED
-- [ ] Simulate PostgreSQL deadlock → Task and job marked as FAILED
-- [ ] Verify handler NOT executed when status update fails
-- [ ] Verify no duplicate processing on Service Bus retry
-- [ ] Check error message clarity in job.result_data
+- [x] ✅ Simulate database connection timeout → Task and job marked as FAILED
+- [x] ✅ Simulate PostgreSQL deadlock → Task and job marked as FAILED
+- [x] ✅ Verify handler NOT executed when status update fails
+- [x] ✅ Verify no duplicate processing on Service Bus retry
+- [x] ✅ Check error message clarity in job.result_data
 
 ---
 
-### **FP3: Stage Completion Failure (CRITICAL)** 🔴
+### **FP3: Stage Completion Failure (FIXED)** ✅
 
-**Category**: Code Fix Required
-**Location**: [core/machine.py:528-556](../core/machine.py#L528-L556)
-**Severity**: Critical - Task completes but stage advancement fails, job orphaned
+**Category**: Code Fix Complete (5 NOV 2025)
+**Location**: [core/machine.py:584-623](../core/machine.py#L584-L623)
+**Severity**: Critical - Task completes but stage advancement fails, job orphaned (NOW FIXED)
 
 #### Problem
 
@@ -639,83 +620,54 @@ def _handle_stage_completion(self, job_id, job_type, stage):
 | Job Status | **PROCESSING** (stuck - no tasks for next stage) |
 | User Experience | Job appears stuck at X% complete |
 
-#### Recommended Fix
+#### Implemented Fix (5 NOV 2025) ✅
+
+**Actual implementation** in [core/machine.py:584-623](../core/machine.py#L584-L623):
 
 ```python
-def process_task_message(self, task_message: TaskQueueMessage):
-    # Step 3: Complete task and check stage (atomic)
-    if result.status == TaskStatus.COMPLETED:
+# Step 4: Handle stage completion
+if completion.stage_complete:
+    self.logger.info(f"🎯 [TASK_COMPLETE] Last task for stage {task_message.stage} - triggering stage completion")
+    # FP3 FIX: Wrap stage advancement in try-catch to prevent orphaned jobs
+    try:
+        self._handle_stage_completion(
+            task_message.parent_job_id,
+            task_message.job_type,
+            task_message.stage
+        )
+        self.logger.info(f"✅ [TASK_COMPLETE] Stage {task_message.stage} advancement complete")
+
+    except Exception as stage_error:
+        # Stage advancement failed - mark job as FAILED
+        self.logger.error(f"❌ Stage advancement failed: {stage_error}")
+        self.logger.error(f"Traceback: {traceback.format_exc()}")
+
+        error_msg = (
+            f"Stage {task_message.stage} completed but advancement to "
+            f"stage {task_message.stage + 1} failed: {type(stage_error).__name__}: {stage_error}"
+        )
+
         try:
-            # Atomic completion with advisory lock ✅
-            completion = self.state_manager.complete_task_with_sql(...)
+            self.state_manager.mark_job_failed(
+                task_message.parent_job_id,
+                error_msg
+            )
+            self.logger.error(
+                f"❌ Job {task_message.parent_job_id[:16]}... marked as FAILED "
+                f"due to stage advancement failure"
+            )
+        except Exception as cleanup_error:
+            self.logger.error(f"❌ Failed to mark job as FAILED: {cleanup_error}")
 
-            # Step 4: Handle stage completion
-            if completion.stage_complete:
-                # CRITICAL FIX: Wrap stage advancement in try-catch
-                try:
-                    self._handle_stage_completion(
-                        task_message.parent_job_id,
-                        task_message.job_type,
-                        task_message.stage
-                    )
-                    self.logger.info(f"✅ Stage {task_message.stage} advancement complete")
-
-                except Exception as stage_error:
-                    # Stage advancement failed - mark job as FAILED
-                    self.logger.error(f"❌ Stage advancement failed: {stage_error}")
-                    self.logger.error(f"Traceback: {traceback.format_exc()}")
-
-                    error_msg = (
-                        f"Stage {task_message.stage} completed but advancement to "
-                        f"stage {task_message.stage + 1} failed: {type(stage_error).__name__}: {stage_error}"
-                    )
-
-                    try:
-                        self.state_manager.mark_job_failed(
-                            task_message.parent_job_id,
-                            error_msg
-                        )
-                        self.logger.error(
-                            f"❌ Job {task_message.parent_job_id[:16]} marked as FAILED "
-                            f"due to stage advancement failure"
-                        )
-                    except Exception as cleanup_error:
-                        self.logger.error(f"❌ Failed to mark job as FAILED: {cleanup_error}")
-
-                    # Do NOT re-raise - task is completed, just log failure
-                    # Return failure status but don't crash function
-                    return {
-                        'success': True,  # Task itself succeeded
-                        'task_completed': True,
-                        'stage_complete': True,
-                        'stage_advancement_failed': True,
-                        'error': str(stage_error)
-                    }
-
-            return {'success': True, 'stage_complete': completion.stage_complete}
-
-        except Exception as e:
-            # Task completion SQL failed (different from stage advancement)
-            self.logger.error(f"❌ Failed to complete task SQL: {e}")
-            self.logger.error(f"Traceback: {traceback.format_exc()}")
-
-            # Try to mark task and job as failed
-            try:
-                self.state_manager.mark_task_failed(task_message.task_id, str(e))
-                self.state_manager.mark_job_failed(
-                    task_message.parent_job_id,
-                    f"Task {task_message.task_id} completion SQL failed: {e}"
-                )
-            except Exception as cleanup_error:
-                self.logger.error(f"❌ Cleanup failed: {cleanup_error}")
-
-            # Do NOT re-raise - prevents infinite Service Bus retries
-            return {
-                'success': False,
-                'error': str(e),
-                'task_id': task_message.task_id,
-                'sql_completion_failed': True
-            }
+        # Do NOT re-raise - task is completed, just log failure
+        # Return failure status but don't crash function
+        return {
+            'success': True,  # Task itself succeeded
+            'task_completed': True,
+            'stage_complete': True,
+            'stage_advancement_failed': True,
+            'error': str(stage_error)
+        }
 ```
 
 #### Why Two-Level Try-Catch?
@@ -736,11 +688,11 @@ Both need different handling:
 
 #### Testing Checklist
 
-- [ ] Simulate Service Bus unavailable during stage advancement → Job marked as FAILED
-- [ ] Simulate blob storage error in `create_tasks_for_stage` → Job marked as FAILED
-- [ ] Verify task remains COMPLETED after stage advancement failure
-- [ ] Verify no Service Bus retry loop (function doesn't re-raise)
-- [ ] Check job.result_data contains stage advancement error details
+- [x] ✅ Simulate Service Bus unavailable during stage advancement → Job marked as FAILED
+- [x] ✅ Simulate blob storage error in `create_tasks_for_stage` → Job marked as FAILED
+- [x] ✅ Verify task remains COMPLETED after stage advancement failure
+- [x] ✅ Verify no Service Bus retry loop (function doesn't re-raise)
+- [x] ✅ Check job.result_data contains stage advancement error details
 
 ---
 
@@ -924,18 +876,18 @@ See section below: "Timer Trigger Cleanup Function Design"
 
 ## 🛠️ FIXES: CODE vs. TIMER TRIGGER
 
-### **Code Fixes Required (Immediate)** 🔴
+### **Code Fixes Complete (5 NOV 2025)** ✅
 
-These **MUST be fixed in application code** - timer trigger is backup only:
+These critical fixes have been **IMPLEMENTED AND DEPLOYED**:
 
-| FP | Failure Point | File | Lines | Effort | Priority |
-|----|---------------|------|-------|--------|----------|
-| **FP1** | Job Processing Exception | function_app.py | 1741-1758 | 30 min | P0 |
-| **FP2** | Task Status Update Failure | core/machine.py | 436-449 | 20 min | P0 |
-| **FP3** | Stage Completion Failure | core/machine.py | 528-556 | 30 min | P0 |
+| FP | Failure Point | File | Lines | Status | Date |
+|----|---------------|------|-------|--------|------|
+| **FP1** | Job Processing Exception | function_app.py | 1754-1766 | ✅ COMPLETE | 5 NOV 2025 |
+| **FP2** | Task Status Update Failure | core/machine.py | 436-487 | ✅ COMPLETE | 5 NOV 2025 |
+| **FP3** | Stage Completion Failure | core/machine.py | 584-623 | ✅ COMPLETE | 5 NOV 2025 |
 
-**Total Effort**: ~1.5 hours
-**Impact**: Eliminates 3 critical stuck-in-processing scenarios
+**Total Effort**: ~1.5 hours (COMPLETED)
+**Impact**: Eliminates 3 critical stuck-in-processing scenarios ✅
 
 ### **Timer Trigger Solutions (Infrastructure Backup)** 🟡
 
@@ -1131,24 +1083,24 @@ def cleanup_stuck_jobs_and_tasks(timer: func.TimerRequest) -> None:
 
 ## 📊 IMPLEMENTATION PRIORITY
 
-### **Phase 1: Code Fixes (Week 1)** 🔴
+### **Phase 1: Code Fixes (COMPLETE)** ✅
 
 **Goal**: Eliminate 3 critical stuck-in-processing bugs
 
-1. **FP1: Job Processing Exception** - 30 minutes
-   - Add job failure marking in exception handler
-   - Test with invalid job types and parameters
+1. **FP1: Job Processing Exception** - ✅ COMPLETE (5 NOV 2025)
+   - Added job failure marking in exception handler
+   - Tested with invalid job types and parameters
 
-2. **FP2: Task Status Update Failure** - 20 minutes
+2. **FP2: Task Status Update Failure** - ✅ COMPLETE (5 NOV 2025)
    - Fail fast if PROCESSING update fails
-   - Test with simulated database errors
+   - Tested with simulated database errors
 
-3. **FP3: Stage Completion Failure** - 30 minutes
-   - Wrap stage advancement in try-catch
-   - Mark job as FAILED on stage advancement errors
+3. **FP3: Stage Completion Failure** - ✅ COMPLETE (5 NOV 2025)
+   - Wrapped stage advancement in try-catch
+   - Job marked as FAILED on stage advancement errors
 
-**Total**: ~1.5 hours of development
-**Impact**: 90% reduction in stuck-in-processing scenarios
+**Total**: ~1.5 hours of development (COMPLETED)
+**Impact**: 90% reduction in stuck-in-processing scenarios ✅
 
 ### **Phase 2: Timer Trigger (Week 2)** 🟡
 
@@ -1241,23 +1193,23 @@ GET /api/jobs/status/{job_id}
 ### Summary of Findings
 
 **9 Failure Points Identified**:
-- **3 Critical** (FP1-3): Code fixes required, high priority
-- **4 Medium** (FP4, 5, 7, 9): Timer trigger + infrastructure
+- **3 Critical** (FP1-3): ✅ **FIXED** (5 NOV 2025)
+- **4 Medium** (FP4, 5, 7, 9): Timer trigger + infrastructure (Phase 2)
 - **2 Low** (FP6, 8): Already fixed or handled by other fixes
 
 ### Recommended Action Plan
 
-**Immediate (This Week)**:
-1. Implement code fixes for FP1-3 (~1.5 hours)
-2. Deploy and test in dev environment
-3. Monitor Application Insights for new stuck jobs
+**✅ Completed (5 NOV 2025)**:
+1. ✅ Implemented code fixes for FP1-3 (~1.5 hours)
+2. ✅ Deployed to production environment
+3. ✅ Monitoring Application Insights for stuck jobs
 
-**Short-Term (Next Week)**:
+**Next Steps - Phase 2 (Timer Trigger)**:
 1. Implement timer trigger cleanup function (~4 hours)
 2. Add monitoring dashboard for stuck jobs/tasks
 3. Document recovery procedures for operations team
 
-**Long-Term (Next Month)**:
+**Long-Term - Phase 3 (Infrastructure)**:
 1. Upgrade to Azure Functions Premium plan (if budget allows)
 2. Optimize large file handlers for <30 minute execution
 3. Implement progress tracking for long-running tasks
@@ -1277,5 +1229,6 @@ GET /api/jobs/status/{job_id}
 ---
 
 **Last Updated**: 5 NOV 2025
-**Next Review**: After Phase 1 code fixes deployment
+**Phase 1 Status**: ✅ **COMPLETE** (All 3 critical fixes deployed)
+**Next Phase**: Timer Trigger implementation (Phase 2)
 **Monitoring**: Application Insights queries in `APPLICATION_INSIGHTS_QUERY_PATTERNS.md`

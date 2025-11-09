@@ -632,10 +632,10 @@ def redeploy_schema(req: func.HttpRequest) -> func.HttpResponse:
             logging.info("📦 Step 3: Creating System STAC collections")
             stac_collections_result = {"collections_created": [], "collections_failed": []}
             try:
-                from infrastructure.stac import StacInfrastructure
-                logging.info("✅ StacInfrastructure imported")
-                stac = StacInfrastructure()
-                logging.info("✅ StacInfrastructure initialized")
+                from infrastructure.stac import PgStacInfrastructure
+                logging.info("✅ PgStacInfrastructure imported")
+                stac = PgStacInfrastructure()
+                logging.info("✅ PgStacInfrastructure initialized")
 
                 # Create system-vectors collection (database-level idempotency)
                 logging.info("🔄 Creating system-vectors collection...")
@@ -1711,19 +1711,49 @@ def process_service_bus_job(msg: func.ServiceBusMessage) -> None:
     - Better throughput for high-volume scenarios
     - Built-in dead letter queue support
     """
+    # Generate correlation_id for function invocation tracing
+    # Purpose: Log prefix [abc12345] to filter Application Insights logs for this execution
+    # Scope: Local to this function invocation (not propagated to JobQueueMessage.correlation_id)
+    # Usage: Search Application Insights: traces | where message contains '[abc12345]'
+    # Note: This is different from JobQueueMessage.correlation_id (stage advancement tracking)
+    # See: core/schema/queue.py for JobQueueMessage.correlation_id documentation
     correlation_id = str(uuid.uuid4())[:8]
     start_time = time.time()
 
-    logger.info(f"[{correlation_id}] 🤖 COREMACHINE JOB TRIGGER (Service Bus)")
+    logger.info(
+        f"[{correlation_id}] 🤖 COREMACHINE JOB TRIGGER (Service Bus)",
+        extra={
+            'checkpoint': 'JOB_TRIGGER_START',
+            'correlation_id': correlation_id,
+            'trigger_type': 'service_bus',
+            'queue_name': 'geospatial-jobs'
+        }
+    )
 
     try:
         # Extract message body (no base64 decoding needed for Service Bus)
         message_body = msg.get_body().decode('utf-8')
-        logger.info(f"[{correlation_id}] 📦 Message size: {len(message_body)} bytes")
+        logger.info(
+            f"[{correlation_id}] 📦 Message size: {len(message_body)} bytes",
+            extra={
+                'checkpoint': 'JOB_TRIGGER_RECEIVE_MESSAGE',
+                'correlation_id': correlation_id,
+                'message_size_bytes': len(message_body)
+            }
+        )
 
         # Parse message
         job_message = JobQueueMessage.model_validate_json(message_body)
-        logger.info(f"[{correlation_id}] ✅ Parsed job: {job_message.job_id[:16]}..., type={job_message.job_type}")
+        logger.info(
+            f"[{correlation_id}] ✅ Parsed job: {job_message.job_id[:16]}..., type={job_message.job_type}",
+            extra={
+                'checkpoint': 'JOB_TRIGGER_PARSE_SUCCESS',
+                'correlation_id': correlation_id,
+                'job_id': job_message.job_id,
+                'job_type': job_message.job_type,
+                'stage': job_message.stage
+            }
+        )
 
         # Add correlation ID for tracking
         if job_message.parameters is None:
@@ -1792,6 +1822,12 @@ def process_service_bus_task(msg: func.ServiceBusMessage) -> None:
     - Better concurrency handling
     - Lower latency for high-volume scenarios
     """
+    # Generate correlation_id for function invocation tracing
+    # Purpose: Log prefix [abc12345] to filter Application Insights logs for this execution
+    # Scope: Local to this function invocation (not propagated to TaskQueueMessage)
+    # Usage: Search Application Insights: traces | where message contains '[abc12345]'
+    # Note: TaskQueueMessage doesn't have correlation_id field (only JobQueueMessage does)
+    # See: core/schema/queue.py for correlation_id field documentation
     correlation_id = str(uuid.uuid4())[:8]
     start_time = time.time()
 

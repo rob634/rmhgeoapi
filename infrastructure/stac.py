@@ -45,13 +45,14 @@ from psycopg import sql
 from util_logger import LoggerFactory, ComponentType
 from config import get_config
 
-logger = LoggerFactory.create_logger(ComponentType.SERVICE, "StacInfrastructure")
+logger = LoggerFactory.create_logger(ComponentType.SERVICE, "PgStacInfrastructure")
 
 
-class StacInfrastructure:
+class PgStacInfrastructure:
     """
-    PgSTAC infrastructure management.
+    PgSTAC Infrastructure Management (PostgreSQL STAC Extension).
 
+    Handles PgSTAC (PostgreSQL STAC extension) installation, configuration, and operations.
     Provides idempotent installation and verification of PgSTAC schema.
     All schema naming is controlled by PgSTAC library - we just trigger
     installation and verify results.
@@ -60,6 +61,12 @@ class StacInfrastructure:
     - Schema: pgstac (hardcoded, cannot change)
     - Roles: pgstac_admin, pgstac_ingest, pgstac_read
     - Tables: collections, items, partitions, etc.
+
+    Note: This class specifically manages PgSTAC (PostgreSQL extension), not generic STAC.
+          For general STAC metadata generation, see services/service_stac_metadata.py
+
+    Author: Robert and Geospatial Claude Legion
+    Date: 5 OCT 2025 (Renamed to PgStacInfrastructure: 8 NOV 2025)
     """
 
     # PgSTAC schema constants (controlled by library)

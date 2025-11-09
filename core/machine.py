@@ -567,7 +567,15 @@ class CoreMachine:
         # Step 3: Complete task and check stage (atomic)
         if result.status == TaskStatus.COMPLETED:
             try:
-                self.logger.debug(f"📝 [TASK_COMPLETE] Marking task {task_message.task_id[:16]} as COMPLETED in database... (core/machine.py:process_task_message)")
+                self.logger.debug(
+                    f"📝 [TASK_COMPLETE] Marking task {task_message.task_id[:16]} as COMPLETED in database... (core/machine.py:process_task_message)",
+                    extra={
+                        'checkpoint': 'TASK_COMPLETE',
+                        'task_id': task_message.task_id,
+                        'job_id': task_message.parent_job_id,
+                        'stage': task_message.stage
+                    }
+                )
                 completion = self.state_manager.complete_task_with_sql(
                     task_message.task_id,
                     task_message.parent_job_id,
@@ -575,12 +583,32 @@ class CoreMachine:
                     result
                 )
 
-                self.logger.info(f"✅ [TASK_COMPLETE] Task marked COMPLETED (stage_complete: {completion.stage_complete}, "
-                                f"remaining: {completion.remaining_tasks}) (core/machine.py:process_task_message)")
+                self.logger.info(
+                    f"✅ [TASK_COMPLETE] Task marked COMPLETED (stage_complete: {completion.stage_complete}, "
+                    f"remaining: {completion.remaining_tasks}) (core/machine.py:process_task_message)",
+                    extra={
+                        'checkpoint': 'TASK_COMPLETE_SUCCESS',
+                        'task_id': task_message.task_id,
+                        'job_id': task_message.parent_job_id,
+                        'stage': task_message.stage,
+                        'stage_complete': completion.stage_complete,
+                        'remaining_tasks': completion.remaining_tasks,
+                        'is_last_task': completion.stage_complete
+                    }
+                )
 
                 # Step 4: Handle stage completion
                 if completion.stage_complete:
-                    self.logger.info(f"🎯 [TASK_COMPLETE] Last task for stage {task_message.stage} - triggering stage completion (core/machine.py:process_task_message)")
+                    self.logger.info(
+                        f"🎯 [TASK_COMPLETE] Last task for stage {task_message.stage} - triggering stage completion (core/machine.py:process_task_message)",
+                        extra={
+                            'checkpoint': 'TASK_COMPLETE_LAST_TASK',
+                            'task_id': task_message.task_id,
+                            'job_id': task_message.parent_job_id,
+                            'stage': task_message.stage,
+                            'last_task_detected': True
+                        }
+                    )
                     # FP3 FIX: Wrap stage advancement in try-catch to prevent orphaned jobs
                     try:
                         self._handle_stage_completion(
@@ -588,7 +616,16 @@ class CoreMachine:
                             task_message.job_type,
                             task_message.stage
                         )
-                        self.logger.info(f"✅ [TASK_COMPLETE] Stage {task_message.stage} advancement complete (core/machine.py:process_task_message)")
+                        self.logger.info(
+                            f"✅ [TASK_COMPLETE] Stage {task_message.stage} advancement complete (core/machine.py:process_task_message)",
+                            extra={
+                                'checkpoint': 'TASK_COMPLETE_STAGE_ADVANCEMENT_SUCCESS',
+                                'task_id': task_message.task_id,
+                                'job_id': task_message.parent_job_id,
+                                'stage': task_message.stage,
+                                'stage_advanced': True
+                            }
+                        )
 
                     except Exception as stage_error:
                         # Stage advancement failed - mark job as FAILED
@@ -990,29 +1027,80 @@ class CoreMachine:
 
         Location: core/machine.py:_handle_stage_completion()
         """
-        self.logger.info(f"🎯 [STAGE_COMPLETE] Stage {completed_stage} complete for job {job_id[:16]}... (core/machine.py:_handle_stage_completion)")
+        self.logger.info(
+            f"🎯 [STAGE_COMPLETE] Stage {completed_stage} complete for job {job_id[:16]}... (core/machine.py:_handle_stage_completion)",
+            extra={
+                'checkpoint': 'STAGE_COMPLETE',
+                'job_id': job_id,
+                'job_type': job_type,
+                'completed_stage': completed_stage,
+                'timestamp': datetime.now(timezone.utc).isoformat()
+            }
+        )
 
         # Get workflow to check if we should advance
         # Get workflow class from explicit registry
-        self.logger.debug(f"📋 [STAGE_COMPLETE] Looking up job_type '{job_type}' in registry...")
+        self.logger.debug(
+            f"📋 [STAGE_COMPLETE] Looking up job_type '{job_type}' in registry...",
+            extra={
+                'checkpoint': 'STAGE_COMPLETE_LOOKUP_WORKFLOW',
+                'job_id': job_id,
+                'job_type': job_type
+            }
+        )
         if job_type not in self.jobs_registry:
             raise BusinessLogicError(f"Unknown job type: {job_type}. Available: {list(self.jobs_registry.keys())}")
         workflow = self.jobs_registry[job_type]
-        self.logger.debug(f"✅ [STAGE_COMPLETE] Found workflow: {workflow.__name__}")
+        self.logger.debug(
+            f"✅ [STAGE_COMPLETE] Found workflow: {workflow.__name__}",
+            extra={
+                'checkpoint': 'STAGE_COMPLETE_LOOKUP_WORKFLOW_SUCCESS',
+                'job_id': job_id,
+                'workflow_name': workflow.__name__
+            }
+        )
 
         # Get stages from class attribute (pure data approach)
         stages = workflow.stages if hasattr(workflow, 'stages') else []
         total_stages = len(stages)
-        self.logger.debug(f"📊 [STAGE_COMPLETE] Workflow has {total_stages} total stages, just completed stage {completed_stage}")
+        self.logger.debug(
+            f"📊 [STAGE_COMPLETE] Workflow has {total_stages} total stages, just completed stage {completed_stage}",
+            extra={
+                'checkpoint': 'STAGE_COMPLETE_CHECK_STAGES',
+                'job_id': job_id,
+                'total_stages': total_stages,
+                'completed_stage': completed_stage,
+                'has_more_stages': completed_stage < total_stages
+            }
+        )
 
         if completed_stage < len(stages):
             # Advance to next stage
             next_stage = completed_stage + 1
-            self.logger.info(f"➡️ [STAGE_ADVANCE] Advancing from stage {completed_stage} → {next_stage} (core/machine.py:_advance_stage)")
+            self.logger.info(
+                f"➡️ [STAGE_ADVANCE] Advancing from stage {completed_stage} → {next_stage} (core/machine.py:_advance_stage)",
+                extra={
+                    'checkpoint': 'STAGE_ADVANCE_INIT',
+                    'job_id': job_id,
+                    'job_type': job_type,
+                    'from_stage': completed_stage,
+                    'to_stage': next_stage,
+                    'timestamp': datetime.now(timezone.utc).isoformat()
+                }
+            )
             self._advance_stage(job_id, job_type, next_stage)
         else:
             # Complete job
-            self.logger.info(f"🏁 [JOB_COMPLETE] All {total_stages} stages complete - finalizing job (core/machine.py:_complete_job)")
+            self.logger.info(
+                f"🏁 [JOB_COMPLETE] All {total_stages} stages complete - finalizing job (core/machine.py:_complete_job)",
+                extra={
+                    'checkpoint': 'JOB_COMPLETE_INIT',
+                    'job_id': job_id,
+                    'job_type': job_type,
+                    'total_stages': total_stages,
+                    'all_stages_complete': True
+                }
+            )
             self._complete_job(job_id, job_type)
 
     def _advance_stage(self, job_id: str, job_type: str, next_stage: int):
@@ -1022,41 +1110,125 @@ class CoreMachine:
         Location: core/machine.py:_advance_stage()
         """
         try:
-            self.logger.debug(f"📝 [STAGE_ADVANCE] Step 1: Fetching job record from database... (core/machine.py:_advance_stage)")
+            self.logger.debug(
+                f"📝 [STAGE_ADVANCE] Step 1: Fetching job record from database... (core/machine.py:_advance_stage)",
+                extra={
+                    'checkpoint': 'STAGE_ADVANCE_GET_JOB',
+                    'job_id': job_id,
+                    'next_stage': next_stage
+                }
+            )
             # Get job record for parameters
             repos = RepositoryFactory.create_repositories()
             job_record = repos['job_repo'].get_job(job_id)
-            self.logger.debug(f"✅ [STAGE_ADVANCE] Job record retrieved - has {len(job_record.parameters)} parameters")
+            self.logger.debug(
+                f"✅ [STAGE_ADVANCE] Job record retrieved - has {len(job_record.parameters)} parameters",
+                extra={
+                    'checkpoint': 'STAGE_ADVANCE_GET_JOB_SUCCESS',
+                    'job_id': job_id,
+                    'parameter_count': len(job_record.parameters),
+                    'current_stage': job_record.stage
+                }
+            )
 
-            self.logger.debug(f"📝 [STAGE_ADVANCE] Step 2: Updating job status PROCESSING → QUEUED... (core/machine.py:_advance_stage)")
+            self.logger.debug(
+                f"📝 [STAGE_ADVANCE] Step 2: Updating job status PROCESSING → QUEUED... (core/machine.py:_advance_stage)",
+                extra={
+                    'checkpoint': 'STAGE_ADVANCE_STATUS_UPDATE',
+                    'job_id': job_id,
+                    'from_status': 'PROCESSING',
+                    'to_status': 'QUEUED',
+                    'next_stage': next_stage
+                }
+            )
             # Update job status to QUEUED before queuing next stage message
             # This allows clean QUEUED → PROCESSING transition when process_job_message() is triggered
             self.state_manager.update_job_status(job_id, JobStatus.QUEUED)
-            self.logger.info(f"✅ [STAGE_ADVANCE] Job {job_id[:16]} status → QUEUED (ready for stage {next_stage})")
+            self.logger.info(
+                f"✅ [STAGE_ADVANCE] Job {job_id[:16]} status → QUEUED (ready for stage {next_stage})",
+                extra={
+                    'checkpoint': 'STAGE_ADVANCE_STATUS_UPDATE_SUCCESS',
+                    'job_id': job_id,
+                    'status': 'QUEUED',
+                    'next_stage': next_stage,
+                    'ready_for_processing': True
+                }
+            )
 
-            self.logger.debug(f"📝 [STAGE_ADVANCE] Step 3: Creating JobQueueMessage for stage {next_stage}... (core/machine.py:_advance_stage)")
+            self.logger.debug(
+                f"📝 [STAGE_ADVANCE] Step 3: Creating JobQueueMessage for stage {next_stage}... (core/machine.py:_advance_stage)",
+                extra={
+                    'checkpoint': 'STAGE_ADVANCE_CREATE_MESSAGE',
+                    'job_id': job_id,
+                    'job_type': job_type,
+                    'stage': next_stage
+                }
+            )
+
             # Create job message for next stage
+            # correlation_id: Tracks which CoreMachine execution created this stage advancement
+            # - Generated fresh for each stage transition (8-char UUID)
+            # - Used for debugging: "Which execution advanced job to stage 2?"
+            # - Different from function trigger correlation_id (log prefix [abc12345])
+            # - Can be queried in Application Insights: customDimensions.correlation_id
+            # - See core/schema/queue.py for full correlation_id documentation
             next_message = JobQueueMessage(
                 job_id=job_id,
                 job_type=job_type,
                 parameters=job_record.parameters,
                 stage=next_stage,
-                correlation_id=str(uuid.uuid4())[:8]
+                correlation_id=str(uuid.uuid4())[:8]  # Stage advancement tracing
             )
-            self.logger.debug(f"✅ [STAGE_ADVANCE] JobQueueMessage created (correlation_id: {next_message.correlation_id})")
+            self.logger.debug(
+                f"✅ [STAGE_ADVANCE] JobQueueMessage created (correlation_id: {next_message.correlation_id})",
+                extra={
+                    'checkpoint': 'STAGE_ADVANCE_CREATE_MESSAGE_SUCCESS',
+                    'job_id': job_id,
+                    'message_correlation_id': next_message.correlation_id,
+                    'stage': next_stage,
+                    'message_created': True
+                }
+            )
 
-            self.logger.debug(f"📝 [STAGE_ADVANCE] Step 4: Sending message to Service Bus queue '{self.config.job_processing_queue}'... (core/machine.py:_advance_stage)")
+            self.logger.debug(
+                f"📝 [STAGE_ADVANCE] Step 4: Sending message to Service Bus queue '{self.config.job_processing_queue}'... (core/machine.py:_advance_stage)",
+                extra={
+                    'checkpoint': 'STAGE_ADVANCE_QUEUE_MESSAGE',
+                    'job_id': job_id,
+                    'queue_name': self.config.job_processing_queue,
+                    'stage': next_stage
+                }
+            )
             # Send to job queue
             service_bus_repo = RepositoryFactory.create_service_bus_repository()
             service_bus_repo.send_message(
                 self.config.job_processing_queue,
                 next_message
             )
-            self.logger.info(f"✅ [STAGE_ADVANCE] Message queued for stage {next_stage} - job will restart at stage {next_stage}")
+            self.logger.info(
+                f"✅ [STAGE_ADVANCE] Message queued for stage {next_stage} - job will restart at stage {next_stage}",
+                extra={
+                    'checkpoint': 'STAGE_ADVANCE_QUEUE_MESSAGE_SUCCESS',
+                    'job_id': job_id,
+                    'queue_name': self.config.job_processing_queue,
+                    'stage': next_stage,
+                    'message_queued': True
+                }
+            )
 
         except Exception as e:
-            self.logger.error(f"❌ [STAGE_ADVANCE] Failed to advance stage: {e} (core/machine.py:_advance_stage)")
-            self.logger.error(f"Traceback: {traceback.format_exc()}")
+            self.logger.error(
+                f"❌ [STAGE_ADVANCE] Failed to advance stage: {e} (core/machine.py:_advance_stage)",
+                extra={
+                    'checkpoint': 'STAGE_ADVANCE_FAILED',
+                    'job_id': job_id,
+                    'job_type': job_type,
+                    'next_stage': next_stage,
+                    'error_type': type(e).__name__,
+                    'error_message': str(e),
+                    'traceback': traceback.format_exc()
+                }
+            )
             raise
 
     def _complete_job(self, job_id: str, job_type: str):
@@ -1131,10 +1303,26 @@ class CoreMachine:
             final_result = workflow.finalize_job(context)
             self.logger.debug(f"✅ [JOB_COMPLETE] finalize_job() returned {len(final_result)} keys: {list(final_result.keys())}")
 
-            self.logger.debug(f"📝 [JOB_COMPLETE] Step 7: Marking job as COMPLETED in database... (core/machine.py:_complete_job)")
+            self.logger.debug(
+                f"📝 [JOB_COMPLETE] Step 7: Marking job as COMPLETED in database... (core/machine.py:_complete_job)",
+                extra={
+                    'checkpoint': 'JOB_COMPLETE_MARK_COMPLETE',
+                    'job_id': job_id,
+                    'job_type': job_type
+                }
+            )
             # Complete job in database
             self.state_manager.complete_job(job_id, final_result)
-            self.logger.info(f"✅ [JOB_COMPLETE] Job marked as COMPLETED in database")
+            self.logger.info(
+                f"✅ [JOB_COMPLETE] Job marked as COMPLETED in database",
+                extra={
+                    'checkpoint': 'JOB_COMPLETE_MARK_COMPLETE_SUCCESS',
+                    'job_id': job_id,
+                    'job_type': job_type,
+                    'status': 'COMPLETED',
+                    'result_keys': list(final_result.keys()) if final_result else []
+                }
+            )
 
             # Invoke completion callback if registered (Platform integration - 30 OCT 2025)
             if self.on_job_complete:
@@ -1152,11 +1340,29 @@ class CoreMachine:
                     self.logger.warning(f"⚠️ [JOB_COMPLETE] Platform callback failed (non-fatal): {e}")
                     self.logger.warning(f"   Job {job_id[:16]} is still marked as completed")
 
-            self.logger.info(f"✅ [JOB_COMPLETE] Job {job_id[:16]}... completed successfully! (core/machine.py:_complete_job)")
+            self.logger.info(
+                f"✅ [JOB_COMPLETE] Job {job_id[:16]}... completed successfully! (core/machine.py:_complete_job)",
+                extra={
+                    'checkpoint': 'JOB_COMPLETE_SUCCESS',
+                    'job_id': job_id,
+                    'job_type': job_type,
+                    'total_stages': total_stages if 'total_stages' in locals() else None,
+                    'completion_confirmed': True
+                }
+            )
 
         except Exception as e:
-            self.logger.error(f"❌ CRITICAL: Job completion failed: {e}")
-            self.logger.error(f"Traceback: {traceback.format_exc()}")
+            self.logger.error(
+                f"❌ CRITICAL: Job completion failed: {e}",
+                extra={
+                    'checkpoint': 'JOB_COMPLETE_FAILED',
+                    'job_id': job_id,
+                    'job_type': job_type,
+                    'error_type': type(e).__name__,
+                    'error_message': str(e),
+                    'traceback': traceback.format_exc()
+                }
+            )
             raise  # Must re-raise to fail the message
 
     def _mark_job_failed(self, job_id: str, error_message: str):

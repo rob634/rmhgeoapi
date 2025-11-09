@@ -5,8 +5,8 @@
 # STATUS: Used by Epoch 3 and Epoch 4
 # NOTE: Careful migration required
 # PURPOSE: JSON-only structured logging for Azure Functions with Application Insights
-# EXPORTS: ComponentType, LogLevel, LogContext, LogEvent, LoggerFactory, log_exceptions
-# INTERFACES: Dataclass models, enums, factory, JSON formatter, exception decorator
+# EXPORTS: ComponentType, LogLevel, LogContext, LogEvent, LoggerFactory, log_exceptions, get_memory_stats, log_memory_checkpoint
+# INTERFACES: Dataclass models, enums, factory, JSON formatter, exception decorator, DEBUG_MODE memory tracking
 # DEPENDENCIES: enum, dataclasses, typing, datetime, logging, json, traceback (stdlib only!)
 # SOURCE: Application architecture layers define component types
 # SCOPE: Foundation and factory layers for all logging in the application
@@ -45,6 +45,102 @@ import sys
 import json
 import traceback
 from functools import wraps
+
+
+# ============================================================================
+# DEBUG MODE - Lazy imports for memory tracking (8 NOV 2025)
+# ============================================================================
+
+def _lazy_import_psutil():
+    """
+    Lazy import psutil for memory tracking.
+
+    Returns tuple of (psutil, os) modules or (None, None) if unavailable.
+    This prevents import failures if psutil is not installed.
+    """
+    try:
+        import psutil
+        import os
+        return psutil, os
+    except ImportError:
+        return None, None
+
+
+def get_memory_stats() -> Optional[Dict[str, float]]:
+    """
+    Get current process and system memory statistics.
+
+    Only executes if DEBUG_MODE=true in config.
+
+    Returns:
+        dict with memory stats or None if debug disabled or psutil unavailable
+        {
+            'process_rss_mb': float,      # Resident Set Size (actual RAM used)
+            'process_vms_mb': float,      # Virtual Memory Size
+            'system_available_mb': float, # Available system memory
+            'system_percent': float       # System memory usage %
+        }
+    """
+    # Check if debug mode enabled
+    try:
+        from config import get_config
+        config = get_config()
+
+        if not config.debug_mode:
+            return None
+    except Exception as e:
+        # Fail silently - debug feature shouldn't break anything
+        # But print to stderr for debugging during development
+        import sys
+        print(f"DEBUG_MODE check failed: {e}", file=sys.stderr, flush=True)
+        return None
+
+    # Lazy import psutil
+    psutil_module, os_module = _lazy_import_psutil()
+    if not psutil_module:
+        import sys
+        print("DEBUG_MODE: psutil import failed", file=sys.stderr, flush=True)
+        return None
+
+    try:
+        process = psutil_module.Process(os_module.getpid())
+        mem_info = process.memory_info()
+        system_mem = psutil_module.virtual_memory()
+
+        return {
+            'process_rss_mb': round(mem_info.rss / (1024**2), 1),
+            'process_vms_mb': round(mem_info.vms / (1024**2), 1),
+            'system_available_mb': round(system_mem.available / (1024**2), 1),
+            'system_percent': round(system_mem.percent, 1)
+        }
+    except Exception as e:
+        # Fail silently - debug feature shouldn't break production
+        import sys
+        print(f"DEBUG_MODE: memory stats collection failed: {e}", file=sys.stderr, flush=True)
+        return None
+
+
+def log_memory_checkpoint(logger: logging.Logger, checkpoint_name: str, **extra_fields):
+    """
+    Log a memory usage checkpoint.
+
+    Only logs if DEBUG_MODE=true. Otherwise, this is a no-op.
+    Adds memory stats and custom fields to the log entry.
+
+    Args:
+        logger: Python logger instance
+        checkpoint_name: Descriptive name for this checkpoint
+        **extra_fields: Additional context fields (e.g., file_size_mb=815)
+
+    Example:
+        logger = LoggerFactory.create_logger(ComponentType.SERVICE, "create_cog")
+        log_memory_checkpoint(logger, "After blob download", file_size_mb=815)
+    """
+    mem_stats = get_memory_stats()
+    if mem_stats:
+        # Merge memory stats with extra fields
+        all_fields = {**mem_stats, **extra_fields, 'checkpoint': checkpoint_name}
+        logger.info(f"📊 MEMORY CHECKPOINT: {checkpoint_name}", extra={'custom_dimensions': all_fields})
 
 
 # ============================================================================
@@ -428,21 +524,26 @@ class LoggerFactory:
             """Wrapper to inject context as custom dimensions."""
             if extra is None:
                 extra = {}
-            
-            # Add context as custom dimensions if available
+
+            # Build base custom dimensions from context
             if context:
                 custom_dims = context.to_dict()
                 custom_dims['component_type'] = component_type.value
                 custom_dims['component_name'] = name
-                extra['custom_dimensions'] = custom_dims
             else:
-                extra['custom_dimensions'] = {
+                custom_dims = {
                     'component_type': component_type.value,
                     'component_name': name
                 }
-            
+
+            # Merge with any custom_dimensions passed in extra (for DEBUG_MODE, etc.)
+            if 'custom_dimensions' in extra:
+                custom_dims.update(extra['custom_dimensions'])
+
+            extra['custom_dimensions'] = custom_dims
+
             # Call original log method
-            original_log(level, msg, args, exc_info=exc_info, extra=extra, 
+            original_log(level, msg, args, exc_info=exc_info, extra=extra,
                         stack_info=stack_info, stacklevel=stacklevel)
         
         # Replace the _log method with our wrapper

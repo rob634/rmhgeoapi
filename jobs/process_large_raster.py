@@ -197,6 +197,12 @@ class ProcessLargeRasterWorkflow(JobBase):
             "default": None,
             "description": "Resampling method for reprojection (e.g., 'cubic', 'bilinear', 'nearest'). If None, auto-selected based on raster type."
         },
+        "in_memory": {
+            "type": "bool",
+            "required": False,
+            "default": None,
+            "description": "Process COG in-memory (True) vs disk-based (False). If not specified, uses config.raster_cog_in_memory. In-memory is faster for small tiles, disk-based is better for large tiles."
+        },
         "band_names": {
             "type": "dict",
             "required": False,
@@ -220,6 +226,14 @@ class ProcessLargeRasterWorkflow(JobBase):
             "required": False,
             "default": 2,
             "description": "Overview level for statistics calculation (0=full res, 2=1/4 res)"
+        },
+        "maxzoom": {
+            "type": "int",
+            "required": False,
+            "default": None,
+            "description": "Maximum zoom level for MosaicJSON tile serving. If not specified, uses config.raster_mosaicjson_maxzoom (default: 19). "
+                          "Set based on imagery resolution: 18 for 0.5m GSD (standard satellite), 19 for 0.3m GSD (high-res satellite), "
+                          "20 for 0.15m GSD (drone), 21 for 0.07m GSD (very high-res drone). Higher zoom = more detail but larger tile requests."
         },
         "target_crs": {
             "type": "str",
@@ -686,6 +700,7 @@ class ProcessLargeRasterWorkflow(JobBase):
                     "bounds": bounds,
                     "band_names": job_params.get("band_names", {5: "Red", 3: "Green", 2: "Blue"}),  # dict[int, str] format
                     "overview_level": job_params.get("overview_level", 2),
+                    "maxzoom": job_params.get("maxzoom"),  # Pass through maxzoom (None = use config default)
                     "output_container": config.storage.silver.get_container('mosaicjson'),
                     "collection_id": collection_id,
                     "output_folder": None  # Flat namespace - write to container root
@@ -787,6 +802,11 @@ class ProcessLargeRasterWorkflow(JobBase):
         stac_tasks = [t for t in task_results if t.task_type == "create_stac_collection"]
         stac_summary = {}
         titiler_urls = {}
+        # TODO (7 NOV 2025): Update to match process_raster_collection pattern
+        # - Comment out PgSTAC URLs (line 789, 804-809, 826)
+        # - Add vanilla TiTiler URLs for MosaicJSON (use generate_vanilla_titiler_urls)
+        # - Add share_url field (MosaicJSON viewer)
+        # - See process_raster_collection.py:674-738 for reference implementation
 
         if stac_tasks and stac_tasks[0].result_data:
             stac_result = stac_tasks[0].result_data.get("result", {})
@@ -801,12 +821,30 @@ class ProcessLargeRasterWorkflow(JobBase):
                 "ready_for_titiler": True
             }
 
-            # Generate TiTiler URLs if we have STAC item ID
-            if item_id:
-                titiler_urls = config.generate_titiler_urls(
-                    collection_id=collection_id,
-                    item_id=item_id
-                )
+        # Generate TiTiler URLs based on configured mode (8 NOV 2025)
+        titiler_pgstac_urls = None
+        vanilla_titiler_urls = None
+
+        if config.titiler_mode == "pgstac" and item_id:
+            # PgSTAC mode: Generate database-backed TiTiler URLs
+            titiler_pgstac_urls = config.generate_titiler_urls(
+                collection_id=collection_id,
+                item_id=item_id
+            )
+            share_url = titiler_pgstac_urls.get("viewer_url")
+        elif config.titiler_mode == "vanilla" and mosaicjson_summary.get("blob_path"):
+            # Vanilla mode: Generate MosaicJSON viewer URLs
+            mosaicjson_blob = mosaicjson_summary["blob_path"]
+            mosaic_container = config.resolved_intermediate_tiles_container  # "silver-tiles"
+
+            vanilla_titiler_urls = config.generate_vanilla_titiler_urls(
+                container=mosaic_container,
+                blob_name=mosaicjson_blob
+            )
+            share_url = vanilla_titiler_urls.get("viewer_url")
+        else:
+            # xarray mode or missing data - no URLs generated
+            share_url = None
 
         logger.info(
             f"✅ Large raster job {context.job_id[:16]} completed: "
@@ -823,7 +861,10 @@ class ProcessLargeRasterWorkflow(JobBase):
             "cogs": cog_summary,
             "mosaicjson": mosaicjson_summary,
             "stac": stac_summary,
-            "titiler": titiler_urls,  # Ready-to-use visualization URLs
+            "titiler_pgstac": titiler_pgstac_urls,  # Database-backed URLs (if mode=pgstac)
+            "titiler_direct": vanilla_titiler_urls,  # Direct URLs (if mode=vanilla)
+            "share_url": share_url,  # PRIMARY URL - share this with end users!
+            "titiler_mode": config.titiler_mode,  # Which mode was used
             "stages_completed": context.current_stage,
             "total_tasks_executed": len(task_results),
             "tasks_by_status": {

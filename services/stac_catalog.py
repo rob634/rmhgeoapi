@@ -155,7 +155,7 @@ def extract_stac_metadata(params: dict) -> dict[str, Any]:
 
         print(f"📦 STEP 0C: Importing StacInfrastructure...", file=sys.stderr, flush=True)
         logger.info("📦 STEP 0C: Importing StacInfrastructure...")
-        from infrastructure.stac import StacInfrastructure
+        from infrastructure.stac import PgStacInfrastructure
         logger.info("✅ STEP 0C: StacInfrastructure imported successfully")
         print(f"✅ STEP 0C: All imports successful!", file=sys.stderr, flush=True)
 
@@ -233,11 +233,11 @@ def extract_stac_metadata(params: dict) -> dict[str, Any]:
 
         # STEP 4: Initialize PgSTAC infrastructure
         try:
-            logger.debug(f"🗄️ STEP 4: Initializing StacInfrastructure...")
-            stac_infra = StacInfrastructure()
-            logger.info(f"✅ STEP 4: StacInfrastructure initialized")
+            logger.debug(f"🗄️ STEP 4: Initializing PgStacInfrastructure...")
+            stac_infra = PgStacInfrastructure()
+            logger.info(f"✅ STEP 4: PgStacInfrastructure initialized")
         except Exception as e:
-            logger.error(f"❌ STEP 4 FAILED: StacInfrastructure initialization error: {e}\n{traceback.format_exc()}")
+            logger.error(f"❌ STEP 4 FAILED: PgStacInfrastructure initialization error: {e}\n{traceback.format_exc()}")
             raise
 
         # STEP 5: Insert into PgSTAC (with idempotency check)

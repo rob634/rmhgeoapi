@@ -19,6 +19,9 @@ cogeo-mosaic>=7.0.0
 # STRONG TYPING DISCIPLINE - Schema validation and enforcement
 pydantic>=2.0.0
 
+# DEBUG MODE - Memory and performance profiling
+psutil>=5.9.0
+
 # STAC Implementation - PgSTAC database and Python libraries
 pypgstac==0.8.5
 psycopg-pool>=3.1.0

@@ -82,6 +82,9 @@ def create_cog(params: dict) -> dict:
             - jpeg_quality (int, optional): JPEG quality (1-100)
             - overview_resampling (str, optional): User override
             - reproject_resampling (str, optional): User override
+            - in_memory (bool, optional): Process in-memory (True) vs disk-based (False).
+                If not specified, uses config.raster_cog_in_memory (default: True).
+                In-memory is faster for small files (<1GB), disk-based is better for large files.
 
         Note: blob_url is generated internally using BlobRepository.get_blob_url_with_sas()
               with managed identity for secure access (2-hour validity)
@@ -277,6 +280,10 @@ def create_cog(params: dict) -> dict:
             )
             input_size_mb = len(input_blob_bytes) / (1024 * 1024)
             logger.info(f"   Downloaded input tile: {input_size_mb:.2f} MB")
+
+            # Memory checkpoint 1 (DEBUG_MODE only)
+            from util_logger import log_memory_checkpoint
+            log_memory_checkpoint(logger, "After blob download", input_size_mb=input_size_mb)
         except Exception as e:
             logger.error(f"❌ STEP 3 FAILED: Cannot download input tile from {container_name}/{blob_name}")
             logger.error(f"   Error: {e}")
@@ -312,8 +319,14 @@ def create_cog(params: dict) -> dict:
             logger.warning(f"⚠️ Unknown resampling '{overview_resampling}', using cubic")
             overview_resampling_enum = Resampling.cubic
 
-        # Get in_memory setting from config
-        in_memory = config_obj.raster_cog_in_memory
+        # Get in_memory setting (parameter overrides config default)
+        in_memory_param = params.get('in_memory')
+        if in_memory_param is not None:
+            in_memory = in_memory_param
+            logger.info(f"   Using user-specified in_memory={in_memory}")
+        else:
+            in_memory = config_obj.raster_cog_in_memory
+            logger.info(f"   Using config default in_memory={in_memory}")
 
         logger.info(f"✅ STEP 3: COG profile configured")
         logger.info(f"   Processing mode: {'in-memory (RAM)' if in_memory else 'disk-based (/tmp SSD)'}")
@@ -327,6 +340,10 @@ def create_cog(params: dict) -> dict:
 
         # Open input bytes with MemoryFile
         with MemoryFile(input_blob_bytes) as input_memfile:
+            # Memory checkpoint 2 (DEBUG_MODE only)
+            from util_logger import log_memory_checkpoint
+            log_memory_checkpoint(logger, "After opening MemoryFile")
+
             with input_memfile.open() as src:
                 # Get source CRS from raster
                 detected_source_crs = src.crs
@@ -357,6 +374,12 @@ def create_cog(params: dict) -> dict:
                 overview_resampling_name = overview_resampling_enum.name if hasattr(overview_resampling_enum, 'name') else overview_resampling
                 logger.info(f"   Overview resampling (for cog_translate): {overview_resampling_name}")
 
+                # Memory checkpoint 3 (DEBUG_MODE only)
+                from util_logger import log_memory_checkpoint
+                log_memory_checkpoint(logger, "Before cog_translate",
+                                      in_memory=in_memory,
+                                      compression=compression)
+
                 # Create output MemoryFile for COG
                 with MemoryFile() as output_memfile:
                     try:
@@ -381,6 +404,11 @@ def create_cog(params: dict) -> dict:
                     logger.info(f"✅ STEP 5: COG created successfully in memory")
                     logger.info(f"   Processing time: {elapsed_time:.2f}s")
 
+                    # Memory checkpoint 4 (DEBUG_MODE only)
+                    from util_logger import log_memory_checkpoint
+                    log_memory_checkpoint(logger, "After cog_translate",
+                                          processing_time_seconds=elapsed_time)
+
                     # Read metadata from COG
                     with output_memfile.open() as dst:
                         output_shape = dst.shape
@@ -398,6 +426,11 @@ def create_cog(params: dict) -> dict:
                         cog_bytes = output_memfile.read()
                         output_size_mb = len(cog_bytes) / (1024 * 1024)
                         logger.info(f"   Read COG from memory: {output_size_mb:.2f} MB")
+
+                        # Memory checkpoint 5 (DEBUG_MODE only)
+                        from util_logger import log_memory_checkpoint
+                        log_memory_checkpoint(logger, "After reading COG bytes",
+                                              output_size_mb=output_size_mb)
                     except Exception as e:
                         logger.error(f"❌ STEP 6 FAILED: Cannot read COG from MemoryFile")
                         logger.error(f"   Error: {e}")
@@ -420,6 +453,10 @@ def create_cog(params: dict) -> dict:
 
                     logger.info(f"✅ STEP 6: COG uploaded successfully")
                     logger.info(f"   Size: {output_size_mb:.1f} MB, Overview levels: {len(overviews)}")
+
+                    # Memory checkpoint 6 (DEBUG_MODE only)
+                    from util_logger import log_memory_checkpoint
+                    log_memory_checkpoint(logger, "After upload (cleanup)")
 
                     # No STEP 7 needed - MemoryFile context managers handle cleanup automatically!
 

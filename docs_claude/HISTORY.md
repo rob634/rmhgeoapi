@@ -1,9 +1,279 @@
 # Project History
 
-**Last Updated**: 30 OCT 2025 - OGC Features API Integrated ✅
+**Last Updated**: 8 NOV 2025 - Raster Pipeline Parameterization ✅
 **Note**: For project history prior to September 11, 2025, see **OLDER_HISTORY.md**
 
 This document tracks completed architectural changes and improvements to the Azure Geospatial ETL Pipeline from September 11, 2025 onwards.
+
+---
+
+## 8 NOV 2025: Raster Pipeline Parameterization - `in_memory` and `maxzoom` ✅
+
+**Status**: ✅ **COMPLETE** - Two critical raster processing parameters now configurable
+**Impact**: Users can optimize COG processing performance and control tile serving zoom levels
+**Timeline**: Full implementation completed 8 NOV 2025
+**Author**: Robert and Geospatial Claude Legion
+
+### 🎯 Problem Solved
+
+**Issue 1: Hardcoded COG Processing Mode**
+- rio-cogeo `in_memory` parameter was hardcoded to `True` (RAM-based processing)
+- Large files (>1GB) could cause out-of-memory errors
+- No way to switch to disk-based processing for better reliability
+
+**Issue 2: Zoom Level 18 Limitation**
+- MosaicJSON maxzoom was auto-calculated to 18 for most imagery
+- High-resolution satellite (0.3m GSD) and drone imagery (0.07-0.15m GSD) needed zoom 19-21
+- Tiles weren't accessible beyond zoom 18 in web viewers
+
+### 🔧 Solution: Parameterization Pattern Established
+
+Created a consistent pattern for configurable parameters:
+1. **Global Default**: Environment variable with Pydantic validation
+2. **Per-Job Override**: Optional parameter in job submission
+3. **Fallback Logic**: `params.get('param') or config.param_name`
+4. **Logging**: Shows which value is being used (user-specified vs config default)
+
+### Implementation Details
+
+#### Parameter 1: `in_memory` (COG Processing Mode)
+
+**Configuration** (`config.py`):
+- Field: `raster_cog_in_memory: bool = Field(default=True)`
+- Environment Variable: `RASTER_COG_IN_MEMORY`
+- Validation: Boolean conversion from string
+
+**Service Update** (`services/raster_cog.py`):
+```python
+# Get in_memory setting (parameter overrides config default)
+in_memory_param = params.get('in_memory')
+if in_memory_param is not None:
+    in_memory = in_memory_param
+    logger.info(f"   Using user-specified in_memory={in_memory}")
+else:
+    in_memory = config_obj.raster_cog_in_memory
+    logger.info(f"   Using config default in_memory={in_memory}")
+```
+
+**Job Schemas Updated**:
+- `jobs/process_raster.py` - Small file pipeline
+- `jobs/process_large_raster.py` - Tiled large file pipeline
+- `jobs/process_raster_collection.py` - Multi-tile collections
+
+**Usage**:
+```bash
+# Use default (in-memory, fast for small files)
+{"blob_name": "small.tif", "container_name": "bronze-rasters"}
+
+# Override to disk-based (safer for large files)
+{"blob_name": "huge.tif", "container_name": "bronze-rasters", "in_memory": false}
+```
+
+#### Parameter 2: `maxzoom` (MosaicJSON Tile Serving)
+
+**Configuration** (`config.py`):
+- Field: `raster_mosaicjson_maxzoom: int = Field(default=19, ge=0, le=24)`
+- Environment Variable: `RASTER_MOSAICJSON_MAXZOOM`
+- Validation: Integer between 0-24
+- **NEW DEFAULT: 19** (was auto-calculated to 18)
+
+**Service Update** (`services/raster_mosaicjson.py`):
+```python
+# Get maxzoom setting (parameter overrides config default)
+maxzoom_param = job_parameters.get('maxzoom')
+if maxzoom_param is not None:
+    maxzoom = maxzoom_param
+    logger.info(f"   Using user-specified maxzoom={maxzoom}")
+else:
+    maxzoom = config_obj.raster_mosaicjson_maxzoom
+    logger.info(f"   Using config default maxzoom={maxzoom}")
+
+# Calculate resolution at equator
+resolution_meters = round(156543.03392 / (2 ** maxzoom), 2)
+logger.info(f"   Max zoom level: {maxzoom} (~{resolution_meters}m/pixel at equator)")
+
+mosaic = MosaicJSON.from_urls(cog_urls, minzoom=None, maxzoom=maxzoom, ...)
+```
+
+**Job Schemas Updated**:
+- `jobs/process_large_raster.py` - Added to parameters_schema + task passthrough (line 703)
+- `jobs/process_raster_collection.py` - Added to parameters_schema
+
+**Zoom Level Reference**:
+| Zoom | Resolution (m/pixel) | Imagery Type |
+|------|---------------------|--------------|
+| 18 | 0.60 | Standard satellite (Sentinel-2, Landsat) |
+| **19** | **0.30** | **High-res satellite (NEW DEFAULT)** |
+| 20 | 0.15 | Drone/aerial imagery |
+| 21 | 0.07 | Very high-res drone |
+
+**Usage**:
+```bash
+# Use default (zoom 19 for 0.3m GSD imagery)
+{"blob_name": "satellite.tif", "container_name": "bronze-rasters"}
+
+# Override for drone imagery (zoom 21 for 0.07m GSD)
+{"blob_name": "drone.tif", "container_name": "bronze-rasters", "maxzoom": 21}
+
+# Override for standard satellite (zoom 18 for 0.5m GSD)
+{"blob_name": "sentinel.tif", "container_name": "bronze-rasters", "maxzoom": 18}
+```
+
+### Files Modified
+
+**Core Configuration**:
+- `config.py` - Added both fields to AppConfig class and from_environment() method
+
+**Services**:
+- `services/raster_cog.py` - Parameter extraction for in_memory with config fallback
+- `services/raster_mosaicjson.py` - Parameter extraction for maxzoom with resolution logging
+
+**Job Definitions**:
+- `jobs/process_raster.py` - Added in_memory to parameters_schema
+- `jobs/process_large_raster.py` - Added both in_memory and maxzoom to parameters_schema
+- `jobs/process_raster_collection.py` - Added both in_memory and maxzoom to parameters_schema
+
+### Benefits
+
+✅ **Better Performance Control**: Choose RAM vs disk based on file size
+✅ **Higher Zoom Levels**: Tiles now work beyond zoom 18 for high-res imagery
+✅ **Backward Compatible**: Existing jobs use new defaults automatically
+✅ **Flexible**: Override per-job for different imagery types
+✅ **Smart Defaults**: Zoom 19 supports most high-res satellite imagery
+✅ **Well Documented**: Clear guidance in parameter descriptions
+✅ **Consistent Pattern**: Same approach for future parameter additions
+
+### Pattern for Future Parameters
+
+This establishes the template for adding new configurable parameters:
+
+1. Add to `config.py` with Pydantic Field validation
+2. Add to `from_environment()` with `os.environ.get('ENV_VAR', 'default')`
+3. Update service/handler to extract parameter with fallback
+4. Add to relevant job `parameters_schema` dicts
+5. Update docstrings and add clear usage guidance
+
+**Next Candidates**: TBD based on operational experience (ongoing discovery process)
+
+---
+
+## 7 NOV 2025: Vector Ingest Pipeline Validated Production-Ready 🎉
+
+**Status**: ✅ **PRODUCTION READY** - Complete vector ingestion pipeline validated
+**Impact**: 4 file formats, 3 geometry types, custom indexes, STAC integration, OGC API
+**Timeline**: Comprehensive testing session (7 NOV 2025)
+**Author**: Robert and Geospatial Claude Legion
+
+### 🎯 Major Achievement: End-to-End Vector Pipeline Validated
+
+Completed comprehensive testing of the vector ingestion pipeline across multiple file formats, geometry types, and data sources. All core functionality validated and working in production environment.
+
+### What We Validated
+
+**4 File Formats Tested** ✅:
+1. **GeoJSON** (11.geojson) - 3,301 MultiPolygon features, 24 seconds
+2. **KML** (doc.kml) - 12,228 MultiPolygon features, 44 seconds
+3. **CSV with lat/lon** (acled_test.csv) - 5,000 Point features, 13 seconds
+4. **Zipped Shapefile** (roads.zip) - 483 LineString features, 6 seconds
+
+**All Geometry Types Working** ✅:
+- **Point**: CSV coordinate conversion (lat/lon → PostGIS Point)
+- **LineString**: Shapefile roads (OSM data)
+- **Polygon/MultiPolygon**: GeoJSON and KML formats
+
+**Advanced Features Validated** ✅:
+- Custom database indexes: Spatial GIST + Attribute B-tree + Temporal DESC
+- Zipped file handling: Automatic extraction for .zip files
+- STAC integration: All formats create STAC items in system-vectors collection
+- OGC Features API: All ingested data immediately queryable
+- Parallel processing: 2-21 chunks processed concurrently
+- Performance: 80-385 features/second depending on geometry complexity
+
+### Test Results Summary
+
+| Format | File | Features | Time | Geometry | Notes |
+|--------|------|----------|------|----------|-------|
+| GeoJSON | 11.geojson | 3,301 | 24s | MultiPolygon | Antarctic region data |
+| KML | doc.kml | 12,228 | 44s | MultiPolygon | Largest dataset tested |
+| CSV | acled_test.csv | 5,000 | 13s | Point | Custom indexes validated |
+| Shapefile | roads.zip | 483 | 6s | LineString | OSM roads, zipped format |
+
+### Production Architecture Validated
+
+**3-Stage Pipeline Working** ✅:
+1. **Stage 1**: Prepare chunks (validate, chunk data, pickle to blob storage)
+2. **Stage 2**: Parallel upload (create PostGIS table, upload chunks, create indexes)
+3. **Stage 3**: STAC cataloging (create STAC items, insert to PgSTAC)
+
+**Error Handling Validated** ✅:
+- FP1-3 fixes operational (no stuck jobs)
+- Service Bus triggers processing messages correctly
+- Failed jobs marked as FAILED with clear error messages
+- CSV format requires converter_params (lat_name/lon_name) - error message clear
+
+**Integration Points Validated** ✅:
+- PostGIS: Tables created with correct geometry types and CRS
+- Indexes: Spatial, attribute, and temporal indexes created correctly
+- STAC: Items inserted into system-vectors collection
+- OGC Features API: All tables immediately queryable
+- Web Map: Data visible on interactive map (https://rmhazuregeo.z13.web.core.windows.net/)
+
+### CSV Format Discovery
+
+**Key Learning**: CSV files with lat/lon coordinates require converter_params:
+```json
+{
+  "file_extension": "csv",
+  "converter_params": {
+    "lat_name": "latitude",
+    "lon_name": "longitude"
+  }
+}
+```
+
+**First Attempt**: Job failed with clear error: "CSV conversion requires either 'wkt_column' or both 'lat_name' and 'lon_name'"
+**Second Attempt**: Success with converter_params specified
+
+### Custom Index Testing
+
+**Test Case**: ACLED CSV data with multiple index types:
+```json
+{
+  "indexes": {
+    "spatial": true,
+    "attributes": ["event_type", "country", "admin1", "year"],
+    "temporal": ["event_date", "timestamp"]
+  }
+}
+```
+
+**Result**: All 7 indexes created successfully (1 GIST + 4 B-tree + 2 B-tree DESC)
+
+### Performance Observations
+
+**Throughput Variation**:
+- **LineString** (roads): ~80 features/second (6s for 483 features)
+- **MultiPolygon** (GeoJSON): ~138 features/second (24s for 3,301 features)
+- **MultiPolygon** (KML): ~278 features/second (44s for 12,228 features)
+- **Point** (CSV): ~385 features/second (13s for 5,000 features)
+
+**Factors**: Geometry complexity, attribute count, file format overhead
+
+### Success Criteria Met
+
+✅ Multiple file formats working (GeoJSON, KML, CSV, Shapefile)
+✅ All geometry types supported (Point, LineString, Polygon/MultiPolygon)
+✅ Custom indexes configurable and created correctly
+✅ STAC integration automatic for all formats
+✅ OGC Features API immediate access to all data
+✅ Zipped file handling automatic
+✅ Performance acceptable (under 1 minute for all test files)
+✅ Error handling clear and actionable
+✅ Web map visualization working
+
+### Next Priority
+
+**Platform Orchestration Layer**: Chain ingest_vector → stac_catalog_vectors jobs, return complete response with OGC Features URL + STAC Collection ID.
 
 ---
 

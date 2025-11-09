@@ -600,6 +600,12 @@ class AppConfig(BaseModel):
         examples=["cubic", "bilinear", "average", "mode", "nearest"]
     )
 
+    raster_target_crs: str = Field(
+        default="EPSG:4326",
+        description="Default target CRS for raster reprojection (WGS84 geographic coordinates)",
+        examples=["EPSG:4326", "EPSG:3857", "EPSG:32637"]
+    )
+
     raster_reproject_resampling: str = Field(
         default="cubic",
         description="Resampling method for reprojection",
@@ -613,9 +619,38 @@ class AppConfig(BaseModel):
 
     raster_cog_in_memory: bool = Field(
         default=True,
-        description="Process COG creation in-memory (True) vs disk-based (False). "
-                    "In-memory is faster for small files (<1GB) but uses more RAM. "
-                    "Disk-based uses local SSD temp storage, better for large files.",
+        description="Default setting for COG processing mode (in-memory vs disk-based). "
+                    "Can be overridden per-job via 'in_memory' parameter. "
+                    "In-memory (True) is faster for small files (<1GB) but uses more RAM. "
+                    "Disk-based (False) uses local SSD temp storage, better for large files. "
+                    "Environment variable: RASTER_COG_IN_MEMORY",
+    )
+
+    raster_mosaicjson_maxzoom: int = Field(
+        default=19,
+        ge=0,
+        le=24,
+        description="Default maximum zoom level for MosaicJSON tile serving. "
+                    "Can be overridden per-job via 'maxzoom' parameter. "
+                    "Zoom 18 = 0.60m/pixel (standard satellite), "
+                    "Zoom 19 = 0.30m/pixel (high-res satellite), "
+                    "Zoom 20 = 0.15m/pixel (drone imagery), "
+                    "Zoom 21 = 0.07m/pixel (very high-res drone). "
+                    "Set based on your imagery's native resolution. "
+                    "Environment variable: RASTER_MOSAICJSON_MAXZOOM",
+    )
+
+    # ========================================================================
+    # Debug Configuration (8 NOV 2025)
+    # ========================================================================
+
+    debug_mode: bool = Field(
+        default=False,
+        description="Enable debug mode for verbose diagnostics. "
+                    "WARNING: Increases logging overhead and log volume. "
+                    "Features enabled: memory tracking, detailed timing, payload logging. "
+                    "Set DEBUG_MODE=true in environment to enable.",
+        examples=[True, False]
     )
 
     # ========================================================================
@@ -840,6 +875,15 @@ class AppConfig(BaseModel):
                     "Placeholder until custom DNS (geospatial.rmh.org) is configured."
     )
 
+    titiler_mode: str = Field(
+        default="pgstac",
+        description="TiTiler deployment mode for ETL workflows. Options:\n"
+                    "  - 'vanilla': Direct /vsiaz/ blob access (simplest, no database)\n"
+                    "  - 'pgstac': Database-backed STAC catalog (default, production mode)\n"
+                    "  - 'xarray': Multi-dimensional datasets (future support)\n"
+                    "Determines which TiTiler URL endpoints are generated during ETL."
+    )
+
     # ========================================================================
     # Computed Properties
     # ========================================================================
@@ -951,6 +995,57 @@ class AppConfig(BaseModel):
             "map_viewer_url": f"{base}/collections/{collection_id}/items/{item_id}/WebMercatorQuad/map.html"
         }
 
+    def generate_vanilla_titiler_urls(self, container: str, blob_name: str) -> dict:
+        """
+        Generate Vanilla TiTiler URLs using direct /vsiaz/ COG access.
+
+        Use this when you have a COG blob path and want immediate visualization
+        WITHOUT requiring PgSTAC database lookup. Works with managed identity
+        authentication.
+
+        Args:
+            container: Azure Storage container name (e.g., "silver-cogs")
+            blob_name: Blob path within container (e.g., "05APR13082706_cog.tif")
+
+        Returns:
+            Dict with vanilla TiTiler endpoints using /vsiaz/ paths:
+            - viewer_url: Interactive map viewer (PRIMARY - share this!)
+            - thumbnail_url: PNG thumbnail (256px)
+            - info_url: COG metadata JSON
+            - info_geojson_url: COG bounds as GeoJSON
+            - statistics_url: Band statistics (min/max/mean/stddev)
+            - tilejson_url: TileJSON specification for web maps
+            - tiles_url_template: XYZ tile URL template
+
+        Example:
+            >>> config = get_config()
+            >>> urls = config.generate_vanilla_titiler_urls("silver-cogs", "05APR13082706_cog.tif")
+            >>> urls["viewer_url"]
+            'https://rmhtitiler-.../cog/WebMercatorQuad/map.html?url=/vsiaz/silver-cogs/...'
+
+        Notes:
+            - URLs work IMMEDIATELY after COG creation (no PgSTAC required)
+            - Managed identity authentication handles Azure Storage access
+            - viewer_url is the PRIMARY URL to share with end users
+            - See STAC-INTEGRATION-GUIDE.md for additional usage patterns
+        """
+        import urllib.parse
+
+        base = self.titiler_base_url.rstrip('/')
+        vsiaz_path = f"/vsiaz/{container}/{blob_name}"
+        # URL-encode the path for safe use in query parameters
+        encoded_vsiaz = urllib.parse.quote(vsiaz_path, safe='')
+
+        return {
+            "viewer_url": f"{base}/cog/WebMercatorQuad/map.html?url={encoded_vsiaz}",
+            "thumbnail_url": f"{base}/cog/preview.png?url={encoded_vsiaz}&max_size=256",
+            "info_url": f"{base}/cog/info?url={encoded_vsiaz}",
+            "info_geojson_url": f"{base}/cog/info.geojson?url={encoded_vsiaz}",
+            "statistics_url": f"{base}/cog/statistics?url={encoded_vsiaz}",
+            "tilejson_url": f"{base}/cog/WebMercatorQuad/tilejson.json?url={encoded_vsiaz}",
+            "tiles_url_template": f"{base}/cog/tiles/WebMercatorQuad/{{z}}/{{x}}/{{y}}.png?url={encoded_vsiaz}"
+        }
+
     def generate_ogc_features_url(self, collection_id: str) -> str:
         """
         Generate OGC API - Features collection URL for vector data.
@@ -1007,6 +1102,15 @@ class AppConfig(BaseModel):
         if len(v) < 3 or len(v) > 24:
             raise ValueError("storage_account_name must be 3-24 characters long")
         return v
+
+    @field_validator('titiler_mode')
+    @classmethod
+    def validate_titiler_mode(cls, v: str) -> str:
+        """Validate TiTiler mode is one of the supported deployment types"""
+        valid_modes = {'vanilla', 'pgstac', 'xarray'}
+        if v.lower() not in valid_modes:
+            raise ValueError(f"titiler_mode must be one of: {', '.join(valid_modes)}")
+        return v.lower()
     
     # ========================================================================
     # Factory Methods
@@ -1049,6 +1153,7 @@ class AppConfig(BaseModel):
             max_retry_attempts=int(os.environ.get('MAX_RETRY_ATTEMPTS', '3')),
             log_level=os.environ.get('LOG_LEVEL', 'INFO'),
             enable_database_health_check=os.environ.get('ENABLE_DATABASE_HEALTH_CHECK', 'true').lower() == 'true',
+            debug_mode=os.environ.get('DEBUG_MODE', 'false').lower() == 'true',
             
             # Queues (usually defaults are fine)
             job_processing_queue=os.environ.get('JOB_PROCESSING_QUEUE', 'geospatial-jobs'),
@@ -1066,6 +1171,14 @@ class AppConfig(BaseModel):
             task_max_retries=int(os.environ.get('TASK_MAX_RETRIES', '3')),
             task_retry_base_delay=int(os.environ.get('TASK_RETRY_BASE_DELAY', '5')),
             task_retry_max_delay=int(os.environ.get('TASK_RETRY_MAX_DELAY', '300')),
+
+            # Raster pipeline configuration
+            raster_mosaicjson_maxzoom=int(os.environ.get('RASTER_MOSAICJSON_MAXZOOM', '19')),
+
+            # API endpoint configuration
+            titiler_base_url=os.environ.get('TITILER_BASE_URL', 'https://rmhtitiler-ghcyd7g0bxdvc2hc.eastus-01.azurewebsites.net'),
+            ogc_features_base_url=os.environ.get('OGC_FEATURES_BASE_URL', 'https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/features'),
+            titiler_mode=os.environ.get('TITILER_MODE', 'pgstac'),
         )
     
     def validate_runtime_dependencies(self) -> None:

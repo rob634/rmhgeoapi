@@ -74,7 +74,7 @@ except Exception as e:
     raise
 
 from infrastructure.blob import BlobRepository
-from infrastructure.stac import StacInfrastructure
+from infrastructure.stac import PgStacInfrastructure
 
 # Component-specific logger for structured logging (Application Insights)
 logger = LoggerFactory.create_logger(
@@ -94,7 +94,7 @@ class StacMetadataService:
     def __init__(self):
         """Initialize STAC metadata service."""
         self.blob_repo = BlobRepository.instance()
-        self.stac = StacInfrastructure()
+        self.stac = PgStacInfrastructure()
 
     def extract_item_from_blob(
         self,
@@ -314,6 +314,55 @@ class StacMetadataService:
             logger.error(f"   Error: {e}")
             logger.error(f"   Traceback:\n{traceback.format_exc()}")
             raise ValueError(f"Failed to add Azure properties: {e}")
+
+        # STEP H.5: Add vanilla TiTiler visualization links and thumbnail asset
+        try:
+            logger.debug("   Step H.5: Adding vanilla TiTiler visualization links...")
+            from config import get_config
+            import urllib.parse
+
+            config = get_config()
+            titiler_base = config.titiler_base_url.rstrip('/')
+            vsiaz_path = f"/vsiaz/{container}/{blob_name}"
+            encoded_vsiaz = urllib.parse.quote(vsiaz_path, safe='')
+
+            # Add thumbnail asset (overwrites rio-stac generated asset if present)
+            item_dict['assets']['thumbnail'] = {
+                'href': f"{titiler_base}/cog/preview.png?url={encoded_vsiaz}&max_size=256",
+                'type': 'image/png',
+                'roles': ['thumbnail'],
+                'title': 'Thumbnail preview via TiTiler'
+            }
+            logger.debug("      Added thumbnail asset (vanilla TiTiler)")
+
+            # Add vanilla TiTiler visualization links
+            titiler_links = [
+                {
+                    'rel': 'preview',
+                    'href': f"{titiler_base}/cog/WebMercatorQuad/map.html?url={encoded_vsiaz}",
+                    'type': 'text/html',
+                    'title': 'Interactive map viewer (vanilla TiTiler)'
+                },
+                {
+                    'rel': 'tilejson',
+                    'href': f"{titiler_base}/cog/WebMercatorQuad/tilejson.json?url={encoded_vsiaz}",
+                    'type': 'application/json',
+                    'title': 'TileJSON specification for web maps'
+                }
+            ]
+
+            # Append to existing links or create new list
+            if 'links' not in item_dict:
+                item_dict['links'] = []
+            item_dict['links'].extend(titiler_links)
+
+            logger.debug(f"   ✅ Step H.5: Added {len(titiler_links)} vanilla TiTiler links + thumbnail asset")
+        except Exception as e:
+            logger.error(f"❌ Step H.5 FAILED: Error adding TiTiler visualization links")
+            logger.error(f"   Error: {e}")
+            logger.error(f"   Traceback:\n{traceback.format_exc()}")
+            # Don't raise - this is not critical enough to fail the entire operation
+            logger.warning(f"   ⚠️  Continuing without TiTiler links")
 
         # STEP I: Validate with stac-pydantic
         try:

@@ -159,6 +159,38 @@ class ProcessRasterCollectionWorkflow(JobBase):
             "default": None,
             "description": "Optional output folder path (e.g., 'cogs/satellite/'). If None, writes to container root."
         },
+        "output_container": {
+            "type": "str",
+            "required": False,
+            "default": None,
+            "description": "Output container for COGs (uses config.storage.silver.get_container('cogs') if None)"
+        },
+        "mosaicjson_container": {
+            "type": "str",
+            "required": False,
+            "default": None,
+            "description": "Output container for MosaicJSON (uses config.resolved_intermediate_tiles_container if None)"
+        },
+        "target_crs": {
+            "type": "str",
+            "required": False,
+            "default": None,
+            "description": "Target CRS for COG reprojection (uses config.raster_target_crs 'EPSG:4326' if None)"
+        },
+        "in_memory": {
+            "type": "bool",
+            "required": False,
+            "default": None,
+            "description": "Process COG in-memory (True) vs disk-based (False). If not specified, uses config.raster_cog_in_memory. In-memory is faster for small tiles, disk-based is better for large tiles."
+        },
+        "maxzoom": {
+            "type": "int",
+            "required": False,
+            "default": None,
+            "description": "Maximum zoom level for MosaicJSON tile serving. If not specified, uses config.raster_mosaicjson_maxzoom (default: 19). "
+                          "Set based on imagery resolution: 18 for 0.5m GSD (standard satellite), 19 for 0.3m GSD (high-res satellite), "
+                          "20 for 0.15m GSD (drone), 21 for 0.07m GSD (very high-res drone)."
+        },
         "stac_item_id": {
             "type": "str",
             "required": False,
@@ -278,6 +310,42 @@ class ProcessRasterCollectionWorkflow(JobBase):
         else:
             validated["output_folder"] = None
 
+        # Validate output_container (optional - defaults to config)
+        output_container = params.get("output_container")
+        if output_container is None:
+            # Use config default
+            from config import get_config
+            config = get_config()
+            validated["output_container"] = config.storage.silver.get_container('cogs')
+        else:
+            if not isinstance(output_container, str):
+                raise ValueError("output_container must be a string")
+            validated["output_container"] = output_container
+
+        # Validate mosaicjson_container (optional - defaults to config)
+        mosaicjson_container = params.get("mosaicjson_container")
+        if mosaicjson_container is None:
+            # Use config default
+            from config import get_config
+            config = get_config()
+            validated["mosaicjson_container"] = config.resolved_intermediate_tiles_container
+        else:
+            if not isinstance(mosaicjson_container, str):
+                raise ValueError("mosaicjson_container must be a string")
+            validated["mosaicjson_container"] = mosaicjson_container
+
+        # Validate target_crs (optional - defaults to config)
+        target_crs = params.get("target_crs")
+        if target_crs is None:
+            # Use config default
+            from config import get_config
+            config = get_config()
+            validated["target_crs"] = config.raster_target_crs
+        else:
+            if not isinstance(target_crs, str):
+                raise ValueError("target_crs must be a string")
+            validated["target_crs"] = target_crs
+
         # Validate stac_item_id (optional)
         stac_item_id = params.get("stac_item_id")
         if stac_item_id is not None:
@@ -347,6 +415,9 @@ class ProcessRasterCollectionWorkflow(JobBase):
                 "collection_id": params.get("collection_id"),
                 "tile_count": len(params.get("blob_list", [])),
                 "container_name": params.get("container_name"),
+                "output_container": params.get("output_container"),
+                "mosaicjson_container": params.get("mosaicjson_container"),
+                "target_crs": params.get("target_crs"),
                 "output_tier": params.get("output_tier", "analysis"),
                 "output_folder": params.get("output_folder"),
                 "stac_item_id": params.get("stac_item_id")
@@ -391,7 +462,7 @@ class ProcessRasterCollectionWorkflow(JobBase):
         service_bus_repo = ServiceBusRepository()
 
         # Create job queue message
-        correlation_id = str(uuid.uuid4())
+        correlation_id = str(uuid.uuid4())[:8]
         job_message = JobQueueMessage(
             job_id=job_id,
             job_type="process_raster_collection",
@@ -589,11 +660,12 @@ class ProcessRasterCollectionWorkflow(JobBase):
                     "blob_name": blob_name,
                     "container_name": container_name,
                     "source_crs": source_crs,  # REQUIRED by create_cog handler
-                    "target_crs": "EPSG:4326",
+                    "target_crs": job_params.get("target_crs", "EPSG:4326"),  # Parameterized (defaults from config)
                     "raster_type": raster_type_dict,  # Pass full raster_type dict from validation
                     "output_blob_name": output_blob_name,  # REQUIRED by create_cog handler
                     "output_tier": job_params.get("output_tier", "analysis"),
                     "output_folder": job_params.get("output_folder"),
+                    "output_container": job_params.get("output_container"),  # Parameterized (defaults from config)
                     "compression": recommended_compression,
                     "jpeg_quality": job_params.get("jpeg_quality", 85),
                     "overview_resampling": recommended_resampling,
@@ -674,7 +746,9 @@ class ProcessRasterCollectionWorkflow(JobBase):
         # Extract STAC result (Stage 4 - fan-in)
         stac_tasks = [t for t in task_results if t.task_type == "create_stac_collection"]
         stac_summary = {}
-        titiler_urls = {}
+        # titiler_pgstac_urls = {}  # COMMENTED OUT (7 NOV 2025) - may restore later if TiTiler-PgSTAC deployed
+        vanilla_titiler_urls = {}
+        share_url = None
 
         if stac_tasks and stac_tasks[0].result_data:
             stac_result = stac_tasks[0].result_data.get("result", {})
@@ -689,12 +763,30 @@ class ProcessRasterCollectionWorkflow(JobBase):
                 "ready_for_titiler": True
             }
 
-            # Generate TiTiler URLs
-            if item_id:
-                titiler_urls = config.generate_titiler_urls(
-                    collection_id=collection_id,
-                    item_id=item_id
-                )
+        # Generate TiTiler URLs based on configured mode (8 NOV 2025)
+        titiler_pgstac_urls = None
+        vanilla_titiler_urls = None
+
+        if config.titiler_mode == "pgstac" and item_id:
+            # PgSTAC mode: Generate database-backed TiTiler URLs
+            titiler_pgstac_urls = config.generate_titiler_urls(
+                collection_id=collection_id,
+                item_id=item_id
+            )
+            share_url = titiler_pgstac_urls.get("viewer_url")
+        elif config.titiler_mode == "vanilla" and mosaicjson_summary.get("blob_path"):
+            # Vanilla mode: Generate MosaicJSON viewer URLs
+            mosaicjson_blob = mosaicjson_summary["blob_path"]
+            mosaic_container = config.resolved_intermediate_tiles_container  # "silver-tiles"
+
+            vanilla_titiler_urls = config.generate_vanilla_titiler_urls(
+                container=mosaic_container,
+                blob_name=mosaicjson_blob
+            )
+            share_url = vanilla_titiler_urls.get("viewer_url")
+        else:
+            # xarray mode or missing data - no URLs generated
+            share_url = None
 
         logger.info(
             f"✅ Raster collection job {context.job_id[:16]} completed: "
@@ -708,7 +800,10 @@ class ProcessRasterCollectionWorkflow(JobBase):
             "cogs": cog_summary,
             "mosaicjson": mosaicjson_summary,
             "stac": stac_summary,
-            "titiler": titiler_urls,
+            "titiler_pgstac": titiler_pgstac_urls,  # Database-backed URLs (if mode=pgstac)
+            "titiler_direct": vanilla_titiler_urls,  # Direct URLs (if mode=vanilla)
+            "share_url": share_url,  # PRIMARY URL - share this with end users!
+            "titiler_mode": config.titiler_mode,  # Which mode was used
             "stages_completed": context.current_stage,
             "total_tasks_executed": len(task_results),
             "tasks_by_status": {

@@ -282,7 +282,7 @@ class HelloWorldJob(JobBase):
 
         # Create job queue message
         try:
-            correlation_id = str(uuid.uuid4())
+            correlation_id = str(uuid.uuid4())[:8]
             logger.debug(f"📨 STEP 4: Creating JobQueueMessage with correlation_id={correlation_id}")
             job_message = JobQueueMessage(
                 job_id=job_id,

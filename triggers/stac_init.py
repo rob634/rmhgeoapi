@@ -32,7 +32,7 @@ from typing import Dict, Any
 import json
 import logging
 
-from infrastructure.stac import StacInfrastructure
+from infrastructure.stac import PgStacInfrastructure
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +56,7 @@ def handle_request(req: func.HttpRequest) -> func.HttpResponse:
         body = req.get_json() if req.get_body() else {}
         collections_to_create = body.get('collections', ['dev', 'cogs', 'vectors', 'geoparquet'])
 
-        stac = StacInfrastructure()
+        stac = PgStacInfrastructure()
         results = {}
 
         for collection_type in collections_to_create:

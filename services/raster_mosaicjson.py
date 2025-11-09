@@ -75,6 +75,9 @@ def create_mosaicjson(
             - collection_name (str, REQUIRED): Collection identifier
             - output_folder (str, optional): Output folder path (default: "mosaics")
             - container (str, optional): Container name (default: "rmhazuregeosilver")
+            - maxzoom (int, optional): Maximum zoom level for tile serving.
+                If not specified, uses config.raster_mosaicjson_maxzoom (default: 19).
+                Zoom 18 = 0.60m/pixel, 19 = 0.30m/pixel, 20 = 0.15m/pixel, 21 = 0.07m/pixel.
         context: Optional task context (unused)
 
     Returns:
@@ -114,9 +117,14 @@ def create_mosaicjson(
             raise ValueError("collection_id is required parameter")
 
         # Get output_container from job_parameters (passed by controller)
-        output_container = job_parameters.get("output_container")
+        # Falls back to config default if not provided (7 NOV 2025)
+        output_container = job_parameters.get("output_container") or job_parameters.get("mosaicjson_container")
         if not output_container:
-            raise ValueError("output_container is required parameter")
+            # Use config default for MosaicJSON storage
+            from config import get_config
+            config = get_config()
+            output_container = config.resolved_intermediate_tiles_container
+            logger.info(f"   Using default container from config: {output_container}")
 
         # Optional output_folder (None = flat namespace, write to container root)
         output_folder = job_parameters.get("output_folder")
@@ -235,6 +243,26 @@ def _create_mosaicjson_impl(
     if len(cog_urls) > 5:
         logger.info(f"   ... and {len(cog_urls) - 5} more")
 
+    # Memory checkpoint 1 (DEBUG_MODE only)
+    from util_logger import log_memory_checkpoint
+    log_memory_checkpoint(logger, "Before processing COG list", cog_count=len(cog_urls))
+
+    # Get maxzoom setting (parameter overrides config default)
+    from config import get_config
+    config_obj = get_config()
+
+    maxzoom_param = job_parameters.get('maxzoom')
+    if maxzoom_param is not None:
+        maxzoom = maxzoom_param
+        logger.info(f"   Using user-specified maxzoom={maxzoom}")
+    else:
+        maxzoom = config_obj.raster_mosaicjson_maxzoom
+        logger.info(f"   Using config default maxzoom={maxzoom}")
+
+    # Calculate resolution at equator for this zoom level
+    resolution_meters = round(156543.03392 / (2 ** maxzoom), 2)
+    logger.info(f"   Max zoom level: {maxzoom} (~{resolution_meters}m/pixel at equator)")
+
     try:
         # Create mosaic definition
         # cogeo-mosaic will read each COG to determine tile bounds
@@ -243,7 +271,7 @@ def _create_mosaicjson_impl(
         mosaic = MosaicJSON.from_urls(
             cog_urls,
             minzoom=None,  # Auto-calculate optimal zoom range
-            maxzoom=None,
+            maxzoom=maxzoom,  # Use parameter or config default
             max_threads=10,  # Parallel COG reads
             quiet=False
         )
@@ -253,6 +281,12 @@ def _create_mosaicjson_impl(
         logger.info(f"   Zoom range: {mosaic.minzoom} - {mosaic.maxzoom}")
         logger.info(f"   Quadkeys: {len(mosaic.tiles)}")
         logger.info(f"   Center: {mosaic.center}")
+
+        # Memory checkpoint 2 (DEBUG_MODE only)
+        from util_logger import log_memory_checkpoint
+        log_memory_checkpoint(logger, "After mosaic creation",
+                              quadkey_count=len(mosaic.tiles),
+                              tile_count=len(cog_urls))
 
     except Exception as e:
         logger.error(f"❌ MosaicJSON creation failed: {e}")
@@ -292,6 +326,11 @@ def _create_mosaicjson_impl(
             )
 
         logger.info(f"✅ MosaicJSON uploaded successfully")
+
+        # Memory checkpoint 3 (DEBUG_MODE only)
+        from util_logger import log_memory_checkpoint
+        log_memory_checkpoint(logger, "After mosaic upload",
+                              blob_path=output_blob_name)
 
         # Generate public URL for the uploaded MosaicJSON (repository layer responsibility)
         mosaicjson_url = blob_repo.get_blob_url(container, output_blob_name)

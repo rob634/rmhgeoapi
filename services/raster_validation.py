@@ -240,6 +240,10 @@ def validate_raster(params: dict) -> dict:
         logger.debug(f"   Blob URL: {blob_url[:100]}...")
         src = rasterio.open(blob_url)
         logger.info(f"✅ STEP 3: File opened successfully - {src.count} bands, {src.shape}")
+
+        # Memory checkpoint 1 (DEBUG_MODE only)
+        from util_logger import log_memory_checkpoint
+        log_memory_checkpoint(logger, "After GDAL open")
     except Exception as e:
         logger.error(f"❌ STEP 3 FAILED: Cannot open raster file: {e}\n{traceback.format_exc()}")
         return {
@@ -264,6 +268,13 @@ def validate_raster(params: dict) -> dict:
             nodata = src.nodata
             logger.info(f"✅ STEP 4: File info extracted - {band_count} bands, {dtype}, shape {shape}")
             logger.debug(f"   Bounds: {bounds}, nodata: {nodata}")
+
+            # Memory checkpoint 2 (DEBUG_MODE only)
+            from util_logger import log_memory_checkpoint
+            log_memory_checkpoint(logger, "After metadata extraction",
+                                  band_count=band_count,
+                                  shape_height=shape[0],
+                                  shape_width=shape[1])
 
             # Warnings list
             warnings = []
@@ -472,6 +483,13 @@ def validate_raster(params: dict) -> dict:
 
                 logger.info(f"✅ STEP 9: Result built successfully")
                 logger.info(f"✅ VALIDATION COMPLETE: Type={detected_type}, CRS={source_crs}, Tiers={len(applicable_tiers)}, Warnings={len(warnings)}")
+
+                # Memory checkpoint 3 (DEBUG_MODE only)
+                from util_logger import log_memory_checkpoint
+                log_memory_checkpoint(logger, "Validation complete",
+                                      detected_type=detected_type,
+                                      warnings_count=len(warnings))
+
                 return result
 
             except Exception as e:

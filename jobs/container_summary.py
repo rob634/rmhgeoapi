@@ -213,7 +213,7 @@ class ContainerSummaryWorkflow(JobBase):
         service_bus_repo = ServiceBusRepository()
 
         # Create job queue message
-        correlation_id = str(uuid.uuid4())
+        correlation_id = str(uuid.uuid4())[:8]
         job_message = JobQueueMessage(
             job_id=job_id,
             job_type="summarize_container",

@@ -629,17 +629,18 @@ curl "https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/db/
 - `POST /api/jobs/submit/{job_type}` - Submit job
 - `GET /api/jobs/status/{job_id}` - Get status
 
-### 2. **STAC API** (Standards-Compliant)
-- `GET /collections` - List STAC collections
-- `GET /collections/{id}` - Get collection
-- `GET /collections/{id}/items` - Query items
-- `POST /search` - Search across collections
+### 2. **STAC API** (Standards-Compliant - STAC v1.0.0)
+- `GET /api/stac` - Landing page (catalog root)
+- `GET /api/stac/conformance` - Conformance classes
+- `GET /api/stac/collections` - List STAC collections
+- **Full Documentation**: [stac_api/README.md](stac_api/README.md) | [Unified API Docs](docs/API_DOCUMENTATION.md)
 
-### 3. **OGC Features API** (Core 1.0)
+### 3. **OGC API - Features** (OGC Core 1.0)
 - `GET /api/features` - Landing page
-- `GET /api/features/collections` - List PostGIS tables
-- `GET /api/features/collections/{id}/items` - Query features
-- Query params: `?bbox=minx,miny,maxx,maxy&limit=100`
+- `GET /api/features/collections` - List PostGIS vector collections
+- `GET /api/features/collections/{id}/items` - Query features with filters
+- Query params: `?bbox=minx,miny,maxx,maxy&limit=100&simplify=10`
+- **Full Documentation**: [ogc_features/README.md](ogc_features/README.md) | [Unified API Docs](docs/API_DOCUMENTATION.md)
 
 ### 4. **Platform API** (DDH Integration)
 - `POST /api/platform/submit` - Submit platform request

@@ -213,10 +213,9 @@ from triggers.stac_extract import stac_extract_trigger
 from triggers.stac_vector import stac_vector_trigger
 from triggers.stac_nuke import stac_nuke_trigger
 
-# STAC API v1.0.0 Standard Endpoints (10 NOV 2025)
-from triggers.stac_api_landing import stac_api_landing_trigger
-from triggers.stac_api_conformance import stac_api_conformance_trigger
-from triggers.stac_api_collections import stac_api_collections_trigger
+# STAC API v1.0.0 Portable Module (10 NOV 2025)
+from stac_api import get_stac_triggers
+
 from triggers.ingest_vector import ingest_vector_trigger
 from triggers.test_raster_create import test_raster_create_trigger
 
@@ -814,71 +813,20 @@ def discover_delivery_structure(req: func.HttpRequest) -> func.HttpResponse:
 
 
 # ============================================================================
-# STAC API v1.0.0 STANDARD ENDPOINTS (10 NOV 2025)
+# STAC API v1.0.0 PORTABLE MODULE (10 NOV 2025)
 # ============================================================================
 # Specification: https://api.stacspec.org/v1.0.0/core
-# These endpoints provide standard STAC API discovery and navigation
+# Portable module pattern - mirrors ogc_features/ architecture
+# Can be moved to separate Function App for APIM routing
 # ============================================================================
 
-@app.route(route="stac", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
-def stac_api_landing(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    STAC API Landing Page (Catalog Root): GET /api/stac/
-
-    Returns the STAC catalog descriptor with:
-    - Catalog metadata (id, title, description, STAC version)
-    - Conformance classes supported
-    - Navigation links to collections, search, conformance endpoints
-
-    Specification: https://api.stacspec.org/v1.0.0/core
-
-    This is the entry point for STAC clients to discover the catalog structure.
-
-    Returns:
-        JSON: STAC Catalog object with navigation links
-    """
-    return stac_api_landing_trigger.handle_request(req)
-
-
-@app.route(route="stac/conformance", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
-def stac_api_conformance(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    STAC API Conformance Classes: GET /api/stac/conformance
-
-    Returns the list of STAC API conformance classes that this implementation supports:
-    - STAC API Core v1.0.0
-    - STAC API Collections v1.0.0
-    - OGC API - Features Core
-    - GeoJSON support
-
-    Specification: https://api.stacspec.org/v1.0.0/core
-
-    Clients use this endpoint to determine which STAC API features are available.
-
-    Returns:
-        JSON: Object with 'conformsTo' array of URI strings
-    """
-    return stac_api_conformance_trigger.handle_request(req)
-
-
-@app.route(route="stac/collections", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
-def stac_api_collections_list(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    STAC API Collections List: GET /api/stac/collections
-
-    Returns all STAC collections in the catalog with:
-    - Collection metadata (id, title, description, license)
-    - Spatial and temporal extents
-    - Navigation links (self, root, parent, items)
-
-    Specification: https://api.stacspec.org/v1.0.0/collections
-
-    Standard endpoint for discovering available data collections.
-
-    Returns:
-        JSON: Object with 'collections' array and 'links' array
-    """
-    return stac_api_collections_trigger.handle_request(req)
+# Register STAC API endpoints using trigger registry pattern
+for trigger in get_stac_triggers():
+    app.route(
+        route=trigger['route'],
+        methods=trigger['methods'],
+        auth_level=func.AuthLevel.ANONYMOUS
+    )(trigger['handler'])
 
 
 # ============================================================================

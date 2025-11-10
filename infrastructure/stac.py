@@ -1862,7 +1862,7 @@ def get_all_collections() -> Dict[str, Any]:
         """
 
         # Execute query using psycopg pattern
-        with psycopg.connect(config.database.connection_string) as conn:
+        with psycopg.connect(config.postgis_connection_string) as conn:
             with conn.cursor() as cur:
                 cur.execute(query)
                 rows = cur.fetchall()

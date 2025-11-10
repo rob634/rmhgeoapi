@@ -267,33 +267,52 @@ class StacMetadataService:
             logger.error(f"   Traceback:\n{traceback.format_exc()}")
             raise ValueError(f"Failed to convert STAC item to dict: {e}")
 
-        # STEP G.5: Remove SAS tokens from asset URLs
+        # STEP G.5: Convert asset URLs to /vsiaz/ paths for OAuth compatibility
         try:
-            logger.debug("   Step G.5: Sanitizing asset URLs (removing SAS tokens)...")
-            sanitized_count = 0
+            logger.debug("   Step G.5: Converting asset URLs to /vsiaz/ paths for OAuth...")
+            converted_count = 0
             for asset_key, asset_value in item_dict.get('assets', {}).items():
                 if 'href' in asset_value:
                     original_url = asset_value['href']
-                    # Check if URL contains SAS token parameters
-                    if '?' in original_url:
-                        # Remove everything after '?' to strip SAS token
-                        base_url = original_url.split('?')[0]
-                        asset_value['href'] = base_url
-                        sanitized_count += 1
-                        logger.debug(f"      Sanitized asset '{asset_key}': removed SAS token")
-                        logger.debug(f"         Before: {original_url[:100]}...")
-                        logger.debug(f"         After:  {base_url}")
 
-            if sanitized_count > 0:
-                logger.info(f"   ✅ Step G.5: Sanitized {sanitized_count} asset URL(s) - removed SAS tokens")
+                    # Convert HTTPS URLs to /vsiaz/ paths for OAuth-based access
+                    if original_url.startswith('https://'):
+                        # Extract container and blob path from HTTPS URL
+                        # Format: https://account.blob.core.windows.net/container/path/to/blob.tif?sas_token
+                        # Target: /vsiaz/container/path/to/blob.tif
+
+                        # Remove SAS token if present
+                        base_url = original_url.split('?')[0]
+
+                        # Extract path after blob.core.windows.net/
+                        # Example: https://rmhazuregeo.blob.core.windows.net/silver-cogs/file.tif
+                        #       -> silver-cogs/file.tif
+                        if '.blob.core.windows.net/' in base_url:
+                            path_part = base_url.split('.blob.core.windows.net/', 1)[1]
+                            vsiaz_path = f"/vsiaz/{path_part}"
+                            asset_value['href'] = vsiaz_path
+                            converted_count += 1
+                            logger.debug(f"      Converted asset '{asset_key}' to /vsiaz/ path")
+                            logger.debug(f"         Before: {original_url[:100]}...")
+                            logger.debug(f"         After:  {vsiaz_path}")
+                        else:
+                            logger.warning(f"      Could not parse HTTPS URL for asset '{asset_key}': {original_url[:100]}...")
+                    elif original_url.startswith('/vsiaz/'):
+                        # Already a /vsiaz/ path - no conversion needed
+                        logger.debug(f"      Asset '{asset_key}' already uses /vsiaz/ path: {original_url}")
+                    else:
+                        logger.debug(f"      Asset '{asset_key}' uses non-HTTPS URL: {original_url[:100]}...")
+
+            if converted_count > 0:
+                logger.info(f"   ✅ Step G.5: Converted {converted_count} asset URL(s) to /vsiaz/ paths for OAuth")
             else:
-                logger.debug(f"   ✅ Step G.5: No SAS tokens found in asset URLs")
+                logger.debug(f"   ✅ Step G.5: No HTTPS URLs to convert (assets may already use /vsiaz/ paths)")
         except Exception as e:
-            logger.error(f"❌ Step G.5 FAILED: Error sanitizing asset URLs")
+            logger.error(f"❌ Step G.5 FAILED: Error converting asset URLs to /vsiaz/ paths")
             logger.error(f"   Error: {e}")
             logger.error(f"   Traceback:\n{traceback.format_exc()}")
             # Don't raise - this is not critical enough to fail the entire operation
-            logger.warning(f"   ⚠️  Continuing with unsanitized URLs")
+            logger.warning(f"   ⚠️  Continuing with original URLs")
 
         # STEP H: Supplement with Azure-specific properties
         try:
@@ -430,12 +449,18 @@ class StacMetadataService:
         Create a validated STAC Asset for a Cloud Optimized GeoTIFF.
 
         Args:
-            blob_url: Full URL to COG in Azure Storage
+            blob_url: Asset href - can be either:
+                      - /vsiaz/ path (recommended for OAuth): /vsiaz/container/blob
+                      - HTTPS URL (for SAS token access): https://account.blob.core.windows.net/...
             title: Human-readable asset title
             roles: Asset roles (data, thumbnail, overview, etc.)
 
         Returns:
             Validated stac-pydantic Asset
+
+        Note:
+            For OAuth-based access in TiTiler-pgSTAC, use /vsiaz/ paths.
+            HTTPS URLs will bypass OAuth authentication.
         """
         asset = Asset(
             href=blob_url,

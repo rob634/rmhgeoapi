@@ -703,7 +703,30 @@ class AppConfig(BaseModel):
         default="app",
         description="PostgreSQL schema name for application tables (jobs, tasks, etc.)"
     )
-    
+
+    system_admin0_table: str = Field(
+        default="geo.system_admin0_boundaries",
+        description="""PostgreSQL table name for system admin0 (country) boundaries with ISO3 codes.
+
+        Table structure:
+            - iso3 VARCHAR(3) PRIMARY KEY (includes 'XXX' for disputed territories)
+            - iso2 VARCHAR(2) (optional)
+            - name TEXT (country/territory name)
+            - geometry GEOMETRY(MultiPolygon, 4326)
+            - status VARCHAR(20) (e.g., 'recognized', 'disputed', 'partial')
+
+        Special ISO3 Codes:
+            - 'XXX': Disputed territories (Western Sahara, Kashmir, etc.)
+            - Standard ISO 3166-1 alpha-3 for recognized countries
+
+        Usage:
+            SELECT iso3 FROM {system_admin0_table}
+            WHERE ST_Intersects(geometry, ST_MakeEnvelope(...))
+
+        Note: Custom table to handle geopolitical complexities not covered by standard ISO 3166-1
+        """
+    )
+
     # ========================================================================
     # Queue Processing Configuration
     # ========================================================================
@@ -1045,6 +1068,155 @@ class AppConfig(BaseModel):
             "tilejson_url": f"{base}/cog/WebMercatorQuad/tilejson.json?url={encoded_vsiaz}",
             "tiles_url_template": f"{base}/cog/tiles/WebMercatorQuad/{{z}}/{{x}}/{{y}}.png?url={encoded_vsiaz}"
         }
+
+    def generate_titiler_urls_unified(
+        self,
+        mode: str,  # Literal["cog", "mosaicjson", "pgstac"] - using str for Python 3.9 compatibility
+        container: str = None,
+        blob_name: str = None,
+        search_id: str = None
+    ) -> dict:
+        """
+        Generate TiTiler URLs for all three access patterns (10 NOV 2025).
+
+        Consolidates three TiTiler visualization patterns into single method:
+        1. Single COG - Direct /vsiaz/ access to individual raster
+        2. MosaicJSON - Collection of COGs as single layer
+        3. PgSTAC Search - Dynamic queries across STAC catalog
+
+        Args:
+            mode: URL generation mode
+                - "cog": Single COG via /vsiaz/ path (IMPLEMENTED)
+                - "mosaicjson": MosaicJSON via /vsiaz/ path (PLACEHOLDER - pending pattern verification)
+                - "pgstac": PgSTAC search results via search_id (NOT IMPLEMENTED - future enhancement)
+            container: Azure container name (required for cog/mosaicjson modes)
+            blob_name: Blob path within container (required for cog/mosaicjson modes)
+            search_id: PgSTAC search hash (required for pgstac mode)
+
+        Returns:
+            Dict with TiTiler URLs appropriate for the mode:
+            - viewer_url: Interactive map viewer (PRIMARY URL)
+            - info_url: COG/mosaic metadata JSON
+            - preview_url: PNG thumbnail
+            - tiles_url_template: XYZ tile template for web maps
+            - (additional URLs vary by mode)
+
+        Raises:
+            ValueError: If required parameters missing for selected mode
+            NotImplementedError: If mode="mosaicjson" or mode="pgstac" (not yet implemented)
+
+        Example - Single COG:
+            >>> config = get_config()
+            >>> urls = config.generate_titiler_urls_unified(
+            ...     mode="cog",
+            ...     container="silver-cogs",
+            ...     blob_name="raster.tif"
+            ... )
+            >>> urls["viewer_url"]
+            'https://rmhtitiler-.../cog/WebMercatorQuad/map.html?url=/vsiaz/silver-cogs/raster.tif'
+
+        Notes:
+            - All URLs use correct /cog/ endpoint (NOT STAC API /collections/ endpoints)
+            - See TITILER-VALIDATION-TASK.md lines 124-174 for URL format details
+            - MosaicJSON and PgSTAC modes are placeholders pending implementation
+        """
+        import urllib.parse
+
+        base = self.titiler_base_url.rstrip('/')
+
+        # ========================================================================
+        # MODE 1: Single COG (IMPLEMENTED)
+        # ========================================================================
+        if mode == "cog":
+            # Validate required parameters
+            if not container or not blob_name:
+                raise ValueError(
+                    "mode='cog' requires container and blob_name parameters. "
+                    f"Got: container={container}, blob_name={blob_name}"
+                )
+
+            # Construct /vsiaz/ path and URL-encode
+            vsiaz_path = f"/vsiaz/{container}/{blob_name}"
+            encoded_vsiaz = urllib.parse.quote(vsiaz_path, safe='')
+
+            # Generate URLs (same as generate_vanilla_titiler_urls)
+            return {
+                "viewer_url": f"{base}/cog/WebMercatorQuad/map.html?url={encoded_vsiaz}",
+                "info_url": f"{base}/cog/info?url={encoded_vsiaz}",
+                "preview_url": f"{base}/cog/preview.png?url={encoded_vsiaz}&max_size=512",
+                "thumbnail_url": f"{base}/cog/preview.png?url={encoded_vsiaz}&max_size=256",
+                "statistics_url": f"{base}/cog/statistics?url={encoded_vsiaz}",
+                "bounds_url": f"{base}/cog/bounds?url={encoded_vsiaz}",
+                "info_geojson_url": f"{base}/cog/info.geojson?url={encoded_vsiaz}",
+                "tilejson_url": f"{base}/cog/WebMercatorQuad/tilejson.json?url={encoded_vsiaz}",
+                "tiles_url_template": f"{base}/cog/tiles/WebMercatorQuad/{{z}}/{{x}}/{{y}}.png?url={encoded_vsiaz}"
+            }
+
+        # ========================================================================
+        # MODE 2: MosaicJSON (PLACEHOLDER - HIGH PRIORITY)
+        # ========================================================================
+        elif mode == "mosaicjson":
+            # TODO (HIGH PRIORITY): Verify URL pattern with TiTiler deployment
+            # Expected pattern based on TiTiler docs:
+            #   /mosaicjson/WebMercatorQuad/map.html?url=/vsiaz/{container}/{mosaic}.json
+            #
+            # Implementation requirements:
+            # 1. Validate container + blob_name (must be .json file)
+            # 2. Construct /vsiaz/ path to MosaicJSON file
+            # 3. URL-encode path
+            # 4. Generate URLs using /mosaicjson/ endpoint (NOT /cog/)
+            #
+            # Test with existing MosaicJSON from process_raster_collection workflow
+            # Container: silver-tiles (or silver-mosaicjson)
+            # Example blob: "collection_id.json" or "mosaics/collection_id.json"
+            #
+            # Reference: TITILER-VALIDATION-TASK.md lines 148-168
+            raise NotImplementedError(
+                "MosaicJSON URL generation not yet implemented. "
+                "Requires verification of TiTiler /mosaicjson/ endpoint pattern. "
+                "Expected: /mosaicjson/WebMercatorQuad/map.html?url=/vsiaz/{container}/{blob}.json"
+            )
+
+        # ========================================================================
+        # MODE 3: PgSTAC Search (FUTURE ENHANCEMENT)
+        # ========================================================================
+        elif mode == "pgstac":
+            # TODO (FUTURE): Implement PgSTAC search workflow
+            #
+            # Requires two-step process:
+            # 1. Create search in PgSTAC database:
+            #    POST /searches with CQL2 query body:
+            #    {
+            #        "collections": ["system-rasters"],
+            #        "bbox": [minx, miny, maxx, maxy],
+            #        "datetime": "2024-01-01/2024-12-31"
+            #    }
+            # 2. Extract search_id from response (SHA256 hash)
+            # 3. Generate URLs using search_id:
+            #    /searches/{search_id}/WebMercatorQuad/map.html
+            #
+            # Benefits:
+            # - Dynamic queries across entire STAC catalog
+            # - Automatic mosaicking of matching items
+            # - No pre-generated MosaicJSON files needed
+            #
+            # Implementation notes:
+            # - Requires PgSTAC search API endpoint (separate from TiTiler)
+            # - Search IDs are deterministic (same query = same ID)
+            # - Can be cached for performance
+            #
+            # Reference: TITILER-VALIDATION-TASK.md lines 148-168
+            raise NotImplementedError(
+                "PgSTAC search URL generation not yet implemented. "
+                "Requires PgSTAC search creation workflow. "
+                "For now, search IDs must be created manually and URLs constructed directly: "
+                f"{base}/searches/{{search_id}}/WebMercatorQuad/map.html"
+            )
+
+        else:
+            raise ValueError(
+                f"Invalid mode: {mode}. Must be one of: 'cog', 'mosaicjson', 'pgstac'"
+            )
 
     def generate_ogc_features_url(self, collection_id: str) -> str:
         """

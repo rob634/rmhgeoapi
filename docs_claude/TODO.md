@@ -5,6 +5,578 @@
 
 ---
 
+## 🔴 UP NEXT: Add ISO3 Country Codes to STAC Items (10 NOV 2025)
+
+**Status**: ⏳ **READY TO IMPLEMENT**
+**Priority**: High - Enables country-based STAC search
+**Approach**: Spatial intersection with custom admin0 boundaries table
+**Estimated Time**: 2-3 hours
+
+### Overview
+
+Add ISO3 country codes to STAC item properties for country-based filtering. Uses spatial intersection with custom `geo.system_admin0_boundaries` table that handles disputed territories (Western Sahara, Kashmir, etc.) with special 'XXX' codes.
+
+### Implementation Steps
+
+#### **Step 1: Create ISO3 Extraction Utility** (30 min)
+
+**File**: `utils/geo_utils.py` (NEW)
+
+```python
+"""
+Geospatial utility functions for ISO3 extraction and spatial operations.
+"""
+from typing import List, Optional
+from config import get_config
+from infrastructure.database import execute_sql
+from util_logger import LoggerFactory, ComponentType
+
+logger = LoggerFactory.create_logger(ComponentType.SERVICE, "GeoUtils")
+
+
+def get_iso3_from_bbox(
+    minx: float,
+    miny: float,
+    maxx: float,
+    maxy: float
+) -> List[str]:
+    """
+    Get ISO3 country codes that intersect with a bounding box.
+
+    Uses spatial query against geo.system_admin0_boundaries table.
+    Handles disputed territories with 'XXX' ISO3 code.
+
+    Args:
+        minx, miny, maxx, maxy: Bounding box coordinates in EPSG:4326
+
+    Returns:
+        List of ISO3 codes (e.g., ['IDN'] or ['IDN', 'MYS'] for border regions)
+        Includes 'XXX' for disputed territories
+
+    Example:
+        # Indonesia raster
+        iso3_codes = get_iso3_from_bbox(95.0, -11.0, 141.0, 6.0)
+        # Returns: ['IDN']
+
+        # Kashmir (disputed)
+        iso3_codes = get_iso3_from_bbox(74.0, 32.0, 80.0, 37.0)
+        # Returns: ['IND', 'PAK', 'CHN', 'XXX']
+    """
+    try:
+        config = get_config()
+        admin0_table = config.system_admin0_table
+
+        query = f"""
+            SELECT DISTINCT iso3, name, status
+            FROM {admin0_table}
+            WHERE ST_Intersects(
+                geometry,
+                ST_MakeEnvelope(%s, %s, %s, %s, 4326)
+            )
+            ORDER BY
+                CASE WHEN status = 'disputed' THEN 1 ELSE 0 END,  -- Disputed last
+                iso3
+        """
+
+        result = execute_sql(
+            query,
+            params=(minx, miny, maxx, maxy),
+            schema="geo"
+        )
+
+        if 'error' in result:
+            logger.error(f"Error querying admin0 boundaries: {result['error']}")
+            return []
+
+        iso3_codes = []
+        for row in result.get('rows', []):
+            iso3 = row[0]
+            name = row[1]
+            status = row[2]
+
+            iso3_codes.append(iso3)
+
+            if status == 'disputed':
+                logger.info(f"   ℹ️ Raster intersects disputed territory: {name} ({iso3})")
+            else:
+                logger.debug(f"   ✅ Raster intersects: {name} ({iso3})")
+
+        return iso3_codes
+
+    except Exception as e:
+        logger.error(f"Failed to extract ISO3 codes from bbox: {e}", exc_info=True)
+        return []
+
+
+def get_primary_iso3(iso3_codes: List[str]) -> Optional[str]:
+    """
+    Get primary ISO3 code from a list.
+
+    Rules:
+    - If single country: Return that code
+    - If multiple countries: Return first non-'XXX' code
+    - If only 'XXX': Return 'XXX' (fully within disputed territory)
+
+    Args:
+        iso3_codes: List of ISO3 codes from spatial query
+
+    Returns:
+        Primary ISO3 code or None if empty list
+    """
+    if not iso3_codes:
+        return None
+
+    # Filter out 'XXX' for primary selection
+    non_disputed = [code for code in iso3_codes if code != 'XXX']
+
+    if non_disputed:
+        return non_disputed[0]  # First recognized country
+    else:
+        return 'XXX'  # Only disputed territory
+```
+
+**Key Features**:
+- Queries custom admin0 table with disputed territory support
+- Returns all intersecting countries (handles border regions)
+- Prioritizes recognized countries over disputed territories
+- Logs disputed territory intersections for visibility
+
+---
+
+#### **Step 2: Modify STAC Metadata Service** (45 min)
+
+**File**: `services/service_stac_metadata.py` (MODIFY)
+
+Add ISO3 extraction in Step G.3 (around line 240-270):
+
+```python
+# STEP G.3: Build item properties
+try:
+    logger.debug("   Step G.3: Building item properties...")
+    item_dict["properties"] = {
+        "datetime": datetime_str,
+        "gsd": gsd,
+        "proj:epsg": epsg,
+        "proj:shape": [height, width]
+    }
+
+    # STEP G.3.5: Extract ISO3 country codes from spatial intersection
+    try:
+        logger.debug("   Step G.3.5: Extracting ISO3 country codes from bbox...")
+
+        from utils.geo_utils import get_iso3_from_bbox, get_primary_iso3
+
+        # bbox format: [minx, miny, maxx, maxy]
+        if bbox and len(bbox) == 4:
+            iso3_codes = get_iso3_from_bbox(*bbox)
+
+            if iso3_codes:
+                # Primary country (for simple filtering)
+                primary_iso3 = get_primary_iso3(iso3_codes)
+                item_dict['properties']['iso3'] = primary_iso3
+
+                # All countries (for border regions or disputed territories)
+                if len(iso3_codes) > 1:
+                    item_dict['properties']['iso3_all'] = iso3_codes
+
+                logger.info(f"   ✅ Step G.3.5: ISO3 codes extracted: primary={primary_iso3}, all={iso3_codes}")
+            else:
+                logger.warning("   ⚠️ Step G.3.5: No countries found for bbox (ocean/Antarctica?)")
+
+        else:
+            logger.warning("   ⚠️ Step G.3.5: Invalid or missing bbox - cannot extract ISO3")
+
+    except Exception as e:
+        logger.warning(f"   ⚠️ Step G.3.5: ISO3 extraction failed (non-critical): {e}")
+        # Non-critical error - continue without ISO3 codes
+
+    logger.debug("   ✅ Step G.3: Item properties built")
+```
+
+**Integration Notes**:
+- Runs during STAC item creation (process_raster workflow)
+- Non-critical failure (continues without ISO3 if extraction fails)
+- Uses existing bbox from raster metadata
+- Adds both `iso3` (primary) and `iso3_all` (complete list) properties
+
+---
+
+#### **Step 3: Create Admin0 Table Schema** (15 min)
+
+**File**: `infrastructure/database_schema.sql` (ADD)
+
+```sql
+-- ============================================================================
+-- System Admin0 (Country) Boundaries Table
+-- ============================================================================
+-- Custom admin0 boundaries with support for disputed territories
+-- ISO3 codes include 'XXX' for geopolitically complex regions
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS geo.system_admin0_boundaries (
+    -- Primary identifiers
+    iso3 VARCHAR(3) PRIMARY KEY,
+    iso2 VARCHAR(2),
+    name TEXT NOT NULL,
+
+    -- Geopolitical status
+    status VARCHAR(20) NOT NULL DEFAULT 'recognized',
+    -- Values: 'recognized', 'disputed', 'partial'
+
+    -- Geometry (MultiPolygon for countries with islands)
+    geometry GEOMETRY(MultiPolygon, 4326) NOT NULL,
+
+    -- Metadata
+    source TEXT,  -- Data source attribution
+    notes TEXT,   -- Special handling notes (e.g., "Western Sahara - claimed by Morocco")
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Spatial index for fast bbox intersection queries
+CREATE INDEX IF NOT EXISTS idx_admin0_geometry
+ON geo.system_admin0_boundaries USING GIST(geometry);
+
+-- Index for ISO3 lookups
+CREATE INDEX IF NOT EXISTS idx_admin0_iso3
+ON geo.system_admin0_boundaries(iso3);
+
+-- Index for status filtering
+CREATE INDEX IF NOT EXISTS idx_admin0_status
+ON geo.system_admin0_boundaries(status);
+
+-- Comments
+COMMENT ON TABLE geo.system_admin0_boundaries IS
+'Custom admin0 (country) boundaries with support for disputed territories. Uses XXX ISO3 code for geopolitically complex regions like Western Sahara, Kashmir, etc.';
+
+COMMENT ON COLUMN geo.system_admin0_boundaries.iso3 IS
+'ISO 3166-1 alpha-3 country code. Special code XXX used for disputed territories.';
+
+COMMENT ON COLUMN geo.system_admin0_boundaries.status IS
+'Geopolitical status: recognized (UN member), disputed (conflicting claims), partial (limited recognition)';
+```
+
+**Special ISO3 Codes**:
+- `'XXX'` - Disputed territories (Western Sahara, Kashmir, etc.)
+- Standard ISO 3166-1 alpha-3 for recognized countries
+- Multi-polygon geometry for archipelagic nations
+
+---
+
+#### **Step 4: Add Database Deployment Function** (30 min)
+
+**File**: `infrastructure/stac.py` (ADD METHOD)
+
+```python
+def deploy_admin0_table() -> Dict[str, Any]:
+    """
+    Deploy or update system_admin0_boundaries table.
+
+    Creates table structure with spatial indexes.
+    Does NOT populate data (manual/separate process).
+
+    Returns:
+        Dict with deployment status and details
+    """
+    try:
+        logger.info("📍 Deploying system_admin0_boundaries table...")
+
+        # Read schema SQL
+        schema_file = Path(__file__).parent / "database_schema.sql"
+
+        if not schema_file.exists():
+            return {
+                "success": False,
+                "error": "database_schema.sql not found"
+            }
+
+        with open(schema_file, 'r') as f:
+            schema_sql = f.read()
+
+        # Extract admin0 table section
+        # (Assumes section is marked with comments)
+        admin0_section_start = schema_sql.find("-- System Admin0")
+        admin0_section_end = schema_sql.find("-- ===", admin0_section_start + 1)
+
+        if admin0_section_start == -1:
+            return {
+                "success": False,
+                "error": "Admin0 table schema not found in database_schema.sql"
+            }
+
+        admin0_sql = schema_sql[admin0_section_start:admin0_section_end]
+
+        # Execute schema deployment
+        result = execute_sql(admin0_sql, schema="geo")
+
+        if 'error' in result:
+            logger.error(f"❌ Failed to deploy admin0 table: {result['error']}")
+            return {
+                "success": False,
+                "error": result['error']
+            }
+
+        logger.info("✅ Admin0 table deployed successfully")
+
+        # Check if table is empty
+        count_result = execute_sql(
+            "SELECT COUNT(*) FROM geo.system_admin0_boundaries",
+            schema="geo"
+        )
+
+        row_count = count_result['rows'][0][0] if count_result.get('rows') else 0
+
+        return {
+            "success": True,
+            "table_created": True,
+            "row_count": row_count,
+            "note": "Table created but not populated. Load country boundaries separately."
+        }
+
+    except Exception as e:
+        logger.error(f"❌ Admin0 table deployment failed: {e}", exc_info=True)
+        return {
+            "success": False,
+            "error": str(e)
+        }
+```
+
+---
+
+#### **Step 5: Add HTTP Endpoint for Admin0 Deployment** (15 min)
+
+**File**: `function_app.py` (ADD ROUTE)
+
+```python
+@app.route(route="admin/admin0/deploy", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
+def deploy_admin0_table(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Deploy system_admin0_boundaries table structure.
+
+    POST /api/admin/admin0/deploy?confirm=yes
+
+    Note: This creates the table structure only.
+    Country boundary data must be loaded separately.
+
+    Returns:
+        Deployment status with row count
+    """
+    try:
+        confirm = req.params.get('confirm', '').lower()
+
+        if confirm != 'yes':
+            return func.HttpResponse(
+                json.dumps({
+                    "error": "Deployment requires confirm=yes parameter"
+                }),
+                mimetype="application/json",
+                status_code=400
+            )
+
+        from infrastructure.stac import deploy_admin0_table
+
+        result = deploy_admin0_table()
+
+        status_code = 200 if result.get('success') else 500
+
+        return func.HttpResponse(
+            json.dumps(result, indent=2),
+            mimetype="application/json",
+            status_code=status_code
+        )
+
+    except Exception as e:
+        return func.HttpResponse(
+            json.dumps({"error": str(e)}),
+            mimetype="application/json",
+            status_code=500
+        )
+```
+
+---
+
+#### **Step 6: Test with Existing Dataset** (30 min)
+
+**Test Steps**:
+
+1. Deploy admin0 table:
+   ```bash
+   curl -X POST "https://rmhgeoapibeta-.../api/admin/admin0/deploy?confirm=yes"
+   ```
+
+2. Load sample country boundaries (manual SQL):
+   ```sql
+   -- Insert Indonesia for testing
+   INSERT INTO geo.system_admin0_boundaries (iso3, iso2, name, status, geometry)
+   VALUES (
+       'IDN',
+       'ID',
+       'Indonesia',
+       'recognized',
+       ST_GeomFromText('MULTIPOLYGON(...)', 4326)  -- Simplified geometry
+   );
+   ```
+
+3. Reprocess existing raster with ISO3 extraction:
+   ```bash
+   curl -X POST "https://rmhgeoapibeta-.../api/jobs/submit/process_raster" \
+     -H "Content-Type: application/json" \
+     -d '{
+       "container_name": "rmhazuregeobronze",
+       "blob_name": "dctest3_R1C2_cog.tif",
+       "collection_id": "system-rasters"
+     }'
+   ```
+
+4. Query STAC item to verify ISO3 property:
+   ```bash
+   curl "https://rmhgeoapibeta-.../api/stac/items/{ITEM_ID}"
+   ```
+
+   Expected response:
+   ```json
+   {
+     "properties": {
+       "datetime": "...",
+       "iso3": "IDN",  // ← New field
+       "proj:epsg": 32752
+     }
+   }
+   ```
+
+5. Test search by ISO3:
+   ```sql
+   SELECT * FROM pgstac.search('{
+     "filter": {
+       "op": "=",
+       "args": [{"property": "iso3"}, "IDN"]
+     }
+   }');
+   ```
+
+---
+
+### Files to Create/Modify
+
+**New Files**:
+- `utils/geo_utils.py` - ISO3 extraction utilities
+- `infrastructure/database_schema.sql` - Admin0 table schema
+
+**Modified Files**:
+- `config.py` - ✅ DONE - Added `system_admin0_table` config field
+- `services/service_stac_metadata.py` - Add Step G.3.5 for ISO3 extraction
+- `infrastructure/stac.py` - Add `deploy_admin0_table()` method
+- `function_app.py` - Add admin0 deployment endpoint
+
+---
+
+### Future Enhancements
+
+1. **Country Boundary Data Loading**:
+   - Create utility to load Natural Earth or custom boundary data
+   - Handle disputed territories (Western Sahara, Kashmir, etc.)
+   - Automated boundary updates
+
+2. **STAC API Search by Country**:
+   - Implement `/api/stac/search` POST endpoint (Phase 2)
+   - Add `/api/stac/items/country/{iso3}` convenience endpoint
+   - Support CQL2 filtering on iso3 property
+
+3. **Multi-Country Analysis**:
+   - Use `iso3_all` property for border-crossing datasets
+   - Generate country coverage statistics
+   - Handle partial intersections (% of raster in each country)
+
+4. **Disputed Territory Handling**:
+   - Document geopolitical decisions in admin0 table notes
+   - Add configurable ISO3 code for disputed areas
+   - Support user-specific boundary datasets
+
+---
+
+### Success Criteria
+
+- ✅ Config entry added for `system_admin0_table`
+- ✅ `utils/geo_utils.py` created with spatial query functions
+- ✅ STAC items include `iso3` property from spatial intersection
+- ✅ Admin0 table deployed with indexes
+- ✅ Test raster shows correct ISO3 code in STAC metadata
+- ✅ Search by ISO3 code returns correct items
+
+**Estimated Total Time**: 2-3 hours
+**Dependencies**: None (admin0 data loading is separate task)
+**Breaking Changes**: None (adds new optional STAC properties)
+
+---
+
+## 🔴 PRIORITY: STAC Collection Validation for process_raster (10 NOV 2025)
+
+**Status**: ⏳ **PENDING**
+
+**Issue**: When a user submits a `process_raster` job with a custom `collection_id` that doesn't exist in PgSTAC, the job completes successfully but STAC insertion fails silently (`"inserted_to_pgstac": false`). This leaves the COG without metadata, making TiTiler URLs non-functional.
+
+**Current Behavior**:
+```json
+// Job submission with non-existent collection
+{"collection_id": "namangan-test", ...}
+
+// Job completes but STAC insertion fails
+{
+  "status": "completed",
+  "stac": {
+    "inserted_to_pgstac": false  // ❌ Silent failure
+  }
+}
+```
+
+**Desired Behavior**:
+```json
+// Validate collection exists BEFORE job execution
+{
+  "status": "failed",
+  "error": "VALIDATION_ERROR: STAC collection 'namangan-test' does not exist. Available collections: system-rasters, system-vectors. Create collection first or use default."
+}
+```
+
+**Implementation Requirements**:
+
+1. **Create STAC Parameter Validation Module**:
+   - File: `validators/stac_validation.py` (new)
+   - Function: `validate_stac_collection_exists(collection_id: str) -> bool`
+   - Query PgSTAC to check if collection exists
+   - Return clear error if not found
+
+2. **Integrate Validation into process_raster**:
+   - File: `jobs/process_raster.py` - Update `validate_parameters()` method
+   - Call STAC validator during parameter validation phase
+   - Fail fast BEFORE creating tasks
+
+3. **List Available Collections in Error**:
+   - Query PgSTAC for all existing collections
+   - Include list in error message for user guidance
+
+4. **Consider Caching**:
+   - Cache collection list for 5 minutes to reduce database queries
+   - Invalidate cache on collection creation
+
+**Files to Create/Modify**:
+- `validators/stac_validation.py` (NEW) - STAC-specific validators
+- `jobs/process_raster.py:validate_parameters()` - Add collection validation
+- `jobs/process_raster_collection.py:validate_parameters()` - Same validation
+- `jobs/process_large_raster.py:validate_parameters()` - Same validation
+
+**Benefits**:
+- Fail fast with clear error messages
+- Prevent silent STAC insertion failures
+- Guide users to correct collection names
+- Save compute resources (don't process COG if STAC will fail)
+
+**Related Parameters to Validate**:
+- `collection_id` - Must exist in PgSTAC (CRITICAL)
+- `item_id` - Must be unique within collection (optional, auto-generated if not provided)
+
+---
+
 ## 🚀 PERFORMANCE: Optimize Vector Ingest with Batched executemany() (9 NOV 2025)
 
 **Status**: ⏳ **PLANNED**

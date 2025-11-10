@@ -118,7 +118,59 @@ def validate_titiler_cog(params: dict) -> dict:
    - Internal tiling present
 7. Attempt to read sample metadata (bands, bounds, etc.)
 8. **Optional**: Test TiTiler /cog/info endpoint via HTTP
-9. Return detailed validation report
+9. **Generate correct TiTiler URLs** (see URL format section below)
+10. Return detailed validation report
+
+**CRITICAL: Correct TiTiler URL Format**
+
+TiTiler is a **Direct COG Access** tile server, NOT a STAC API server. URLs must use the `/cog/` endpoint with the `/vsiaz/` path as a query parameter.
+
+**✅ CORRECT Format** (Direct COG Access):
+```
+Base: https://rmhtitiler-ghcyd7g0bxdvc2hc.eastus-01.azurewebsites.net/cog/
+
+Info:    {base}/cog/info?url=/vsiaz/{container}/{blob_path}
+Preview: {base}/cog/preview.png?url=/vsiaz/{container}/{blob_path}&max_size=512
+Viewer:  {base}/cog/WebMercatorQuad/map.html?url=/vsiaz/{container}/{blob_path}
+Tiles:   {base}/cog/tiles/WebMercatorQuad/{z}/{x}/{y}.png?url=/vsiaz/{container}/{blob_path}
+```
+
+**❌ WRONG Format** (STAC API - does not exist):
+```
+https://rmhtitiler-ghcyd7g0bxdvc2hc.eastus-01.azurewebsites.net/collections/system-rasters/items/{item_id}/WebMercatorQuad/map.html
+```
+
+**Why the wrong format doesn't work**:
+- TiTiler-pgSTAC does NOT expose STAC item endpoints (`/collections/.../items/...`)
+- Item-based URLs require a separate STAC API server (deployed at `rmhgeoapi`)
+- TiTiler only serves tiles via `/cog/` (direct) or `/searches/` (pgSTAC mosaic)
+
+**Example - Correct URL Construction**:
+```python
+# Given:
+container = "silver-cogs"
+blob_name = "nam_r2c2/namangan14aug2019_R2C2cog_cog_analysis.tif"
+titiler_base_url = "https://rmhtitiler-ghcyd7g0bxdvc2hc.eastus-01.azurewebsites.net"
+
+# Construct /vsiaz/ path
+vsiaz_path = f"/vsiaz/{container}/{blob_name}"
+# Result: /vsiaz/silver-cogs/nam_r2c2/namangan14aug2019_R2C2cog_cog_analysis.tif
+
+# URL-encode the path for query parameter
+import urllib.parse
+encoded_path = urllib.parse.quote(vsiaz_path, safe='')
+# Result: %2Fvsiaz%2Fsilver-cogs%2Fnam_r2c2%2Fnamangan14aug2019_R2C2cog_cog_analysis.tif
+
+# Generate URLs
+info_url = f"{titiler_base_url}/cog/info?url={encoded_path}"
+viewer_url = f"{titiler_base_url}/cog/WebMercatorQuad/map.html?url={encoded_path}"
+preview_url = f"{titiler_base_url}/cog/preview.png?url={encoded_path}&max_size=512"
+```
+
+**Result URLs**:
+- Info: `https://rmhtitiler-.../cog/info?url=%2Fvsiaz%2Fsilver-cogs%2Fnam_r2c2%2Fnamangan14aug2019_R2C2cog_cog_analysis.tif`
+- Viewer: `https://rmhtitiler-.../cog/WebMercatorQuad/map.html?url=%2Fvsiaz%2Fsilver-cogs%2Fnam_r2c2%2Fnamangan14aug2019_R2C2cog_cog_analysis.tif`
+- Preview: `https://rmhtitiler-.../cog/preview.png?url=%2Fvsiaz%2Fsilver-cogs%2Fnam_r2c2%2Fnamangan14aug2019_R2C2cog_cog_analysis.tif&max_size=512`
 
 **Error Handling**:
 - If `validation_mode == "warn"`: Log errors but return `success=True`

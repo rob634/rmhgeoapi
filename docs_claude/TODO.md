@@ -1482,7 +1482,15 @@ If Phase 3 implementation encounters issues:
 ### 🔄 ONGOING: API Parameter Discovery
 **Status**: 🔍 **ONGOING** - Continuously identifying new parameters to expose via API
 **Process**: As we use the system and identify hardcoded values that should be configurable, we parameterize them following the pattern above
-**Next Candidates**: TBD based on operational experience
+
+**Next Candidates**:
+1. **Output Container for COGs** (8 NOV 2025)
+   - **Current**: Hardcoded to `silver-cogs` in [services/raster_cog.py:270](services/raster_cog.py#L270)
+   - **Proposed**: Add `output_container` parameter to job submission
+   - **Use Case**: Allow users to specify different output containers for testing/isolation
+   - **Current Workaround**: `output_folder` parameter controls blob path within container
+   - **Consideration**: May break Bronze→Silver→Gold tier architecture pattern
+   - **Priority**: Low (architecture pattern is intentional design choice)
 
 ---
 

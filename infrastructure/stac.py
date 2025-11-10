@@ -1811,3 +1811,139 @@ def get_collections_summary() -> Dict[str, Any]:
             'error': str(e),
             'error_type': type(e).__name__
         }
+
+
+def get_all_collections() -> Dict[str, Any]:
+    """
+    Get all collections in STAC API v1.0.0 compliant format.
+
+    Returns collections with full STAC-spec metadata including spatial/temporal extents
+    and navigation links. Used by GET /collections endpoint.
+
+    Returns:
+        Dict with 'collections' array and 'links' array
+
+    Example response:
+        {
+            "collections": [
+                {
+                    "id": "system-rasters",
+                    "type": "Collection",
+                    "title": "System Rasters",
+                    "description": "...",
+                    "stac_version": "1.0.0",
+                    "license": "proprietary",
+                    "extent": {
+                        "spatial": {"bbox": [...]},
+                        "temporal": {"interval": [...]}
+                    },
+                    "links": [...]
+                }
+            ],
+            "links": [
+                {"rel": "self", "href": "..."},
+                {"rel": "root", "href": "..."}
+            ]
+        }
+    """
+    try:
+        config = get_config()
+
+        # Base URL for STAC API
+        base_url = "https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/stac"
+
+        # Query all collections with full content
+        query = """
+            SELECT
+                c.id,
+                c.content
+            FROM pgstac.collections c
+            ORDER BY c.id;
+        """
+
+        result = execute_sql(query, schema="pgstac")
+
+        if 'error' in result:
+            logger.error(f"Error querying collections: {result['error']}")
+            return {
+                'collections': [],
+                'links': [
+                    {"rel": "self", "type": "application/json", "href": f"{base_url}/collections"},
+                    {"rel": "root", "type": "application/json", "href": base_url}
+                ]
+            }
+
+        collections = []
+        for row in result.get('rows', []):
+            collection_id = row[0]
+            content = row[1]
+
+            # Add self and root links to each collection
+            if 'links' not in content:
+                content['links'] = []
+
+            # Ensure required links exist
+            has_self = any(link.get('rel') == 'self' for link in content['links'])
+            has_root = any(link.get('rel') == 'root' for link in content['links'])
+            has_parent = any(link.get('rel') == 'parent' for link in content['links'])
+            has_items = any(link.get('rel') == 'items' for link in content['links'])
+
+            if not has_self:
+                content['links'].insert(0, {
+                    "rel": "self",
+                    "type": "application/json",
+                    "href": f"{base_url}/collections/{collection_id}"
+                })
+
+            if not has_root:
+                content['links'].insert(1, {
+                    "rel": "root",
+                    "type": "application/json",
+                    "href": base_url
+                })
+
+            if not has_parent:
+                content['links'].append({
+                    "rel": "parent",
+                    "type": "application/json",
+                    "href": base_url
+                })
+
+            if not has_items:
+                content['links'].append({
+                    "rel": "items",
+                    "type": "application/geo+json",
+                    "href": f"{base_url}/collections/{collection_id}/items"
+                })
+
+            collections.append(content)
+
+        # Return STAC-compliant collections response
+        return {
+            "collections": collections,
+            "links": [
+                {
+                    "rel": "self",
+                    "type": "application/json",
+                    "href": f"{base_url}/collections"
+                },
+                {
+                    "rel": "root",
+                    "type": "application/json",
+                    "href": base_url
+                }
+            ]
+        }
+
+    except Exception as e:
+        logger.error(f"Error in get_all_collections: {e}", exc_info=True)
+        base_url = "https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/stac"
+        return {
+            'collections': [],
+            'links': [
+                {"rel": "self", "type": "application/json", "href": f"{base_url}/collections"},
+                {"rel": "root", "type": "application/json", "href": base_url}
+            ],
+            'error': str(e),
+            'error_type': type(e).__name__
+        }

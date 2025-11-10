@@ -158,6 +158,8 @@ async def stream_to_postgis_async(
         raise RuntimeError(f"Cannot stream to PostGIS - missing asyncpg: {e}")
 
     from config import get_config
+    from infrastructure.database_utils import batched_executemany_async
+
     config = get_config()
 
     logger.info(f"Starting async stream to PostGIS (grid_id={grid_id}, batch_size={batch_size})")
@@ -170,62 +172,41 @@ async def stream_to_postgis_async(
         command_timeout=60
     )
 
-    batch = []
-    total_inserted = 0
-    batch_count = 0
-
     try:
         async with pool.acquire() as conn:
-            for cell_data in cells_generator:
-                batch.append((
-                    cell_data['h3_index'],
-                    cell_data['resolution'],
-                    cell_data['geom_wkt'],
-                    grid_id,
-                    grid_type,
-                    source_job_id
-                ))
+            # Prepare SQL statement (asyncpg uses $1, $2 placeholders)
+            stmt = """
+                INSERT INTO geo.h3_grids
+                    (h3_index, resolution, geom, grid_id, grid_type, source_job_id)
+                VALUES
+                    ($1, $2, ST_GeomFromText($3, 4326), $4, $5, $6)
+                ON CONFLICT (h3_index, grid_id) DO NOTHING
+            """
 
-                # Batch insert every N cells
-                if len(batch) >= batch_size:
-                    await conn.executemany(
-                        """
-                        INSERT INTO geo.h3_grids
-                            (h3_index, resolution, geom, grid_id, grid_type, source_job_id)
-                        VALUES
-                            ($1, $2, ST_GeomFromText($3, 4326), $4, $5, $6)
-                        ON CONFLICT (h3_index, grid_id) DO NOTHING
-                        """,
-                        batch
+            # Transform generator output to tuple format for batched insert
+            def data_rows():
+                for cell_data in cells_generator:
+                    yield (
+                        cell_data['h3_index'],
+                        cell_data['resolution'],
+                        cell_data['geom_wkt'],
+                        grid_id,
+                        grid_type,
+                        source_job_id
                     )
-                    total_inserted += len(batch)
-                    batch_count += 1
 
-                    # Log progress every 10 batches
-                    if batch_count % 10 == 0:
-                        logger.debug(f"Inserted {total_inserted} cells ({batch_count} batches)...")
-
-                    batch = []
-
-            # Insert remaining cells
-            if batch:
-                await conn.executemany(
-                    """
-                    INSERT INTO geo.h3_grids
-                        (h3_index, resolution, geom, grid_id, grid_type, source_job_id)
-                    VALUES
-                        ($1, $2, ST_GeomFromText($3, 4326), $4, $5, $6)
-                    ON CONFLICT (h3_index, grid_id) DO NOTHING
-                    """,
-                    batch
-                )
-                total_inserted += len(batch)
-                batch_count += 1
+            # Use shared batched_executemany_async utility
+            total_inserted = await batched_executemany_async(
+                conn,
+                stmt,
+                data_rows(),
+                batch_size=batch_size,
+                description="H3 cells"
+            )
 
     finally:
         await pool.close()
 
-    logger.info(f"PostGIS streaming complete - {total_inserted} cells inserted in {batch_count} batches")
     return total_inserted
 
 

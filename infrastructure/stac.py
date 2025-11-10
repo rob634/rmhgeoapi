@@ -1861,20 +1861,14 @@ def get_all_collections() -> Dict[str, Any]:
             ORDER BY c.id;
         """
 
-        result = execute_sql(query, schema="pgstac")
-
-        if 'error' in result:
-            logger.error(f"Error querying collections: {result['error']}")
-            return {
-                'collections': [],
-                'links': [
-                    {"rel": "self", "type": "application/json", "href": f"{base_url}/collections"},
-                    {"rel": "root", "type": "application/json", "href": base_url}
-                ]
-            }
+        # Execute query using psycopg pattern
+        with psycopg.connect(config.database.connection_string) as conn:
+            with conn.cursor() as cur:
+                cur.execute(query)
+                rows = cur.fetchall()
 
         collections = []
-        for row in result.get('rows', []):
+        for row in rows:
             collection_id = row[0]
             content = row[1]
 

@@ -198,16 +198,16 @@ class STACLandingPageTrigger(BaseSTACTrigger):
             STAC Catalog JSON response
         """
         try:
-            logger.info("=ú STAC API Landing Page requested")
+            logger.info("STAC API Landing Page requested")
 
             base_url = self._get_base_url(req)
             catalog = self.service.get_catalog(base_url)
 
-            logger.info(" STAC API landing page generated successfully")
+            logger.info("STAC API landing page generated successfully")
             return self._json_response(catalog)
 
         except Exception as e:
-            logger.error(f"L Error generating STAC API landing page: {e}", exc_info=True)
+            logger.error(f"Error generating STAC API landing page: {e}", exc_info=True)
             return self._error_response(
                 message=str(e),
                 status_code=500,
@@ -233,15 +233,15 @@ class STACConformanceTrigger(BaseSTACTrigger):
             STAC conformance JSON response
         """
         try:
-            logger.info("=Ë STAC API Conformance requested")
+            logger.info("STAC API Conformance requested")
 
             conformance = self.service.get_conformance()
 
-            logger.info(" STAC API conformance generated successfully")
+            logger.info("STAC API conformance generated successfully")
             return self._json_response(conformance)
 
         except Exception as e:
-            logger.error(f"L Error generating STAC API conformance: {e}", exc_info=True)
+            logger.error(f"Error generating STAC API conformance: {e}", exc_info=True)
             return self._error_response(
                 message=str(e),
                 status_code=500,
@@ -267,13 +267,13 @@ class STACCollectionsTrigger(BaseSTACTrigger):
             STAC collections JSON response
         """
         try:
-            logger.info("=Ú STAC API Collections list requested")
+            logger.info("STAC API Collections list requested")
 
             collections = self.service.get_collections()
 
             # Check for errors from infrastructure layer
             if 'error' in collections:
-                logger.error(f"L Error retrieving collections: {collections['error']}")
+                logger.error(f"Error retrieving collections: {collections['error']}")
                 return self._error_response(
                     message=collections['error'],
                     status_code=500,
@@ -281,12 +281,12 @@ class STACCollectionsTrigger(BaseSTACTrigger):
                 )
 
             collections_count = len(collections.get('collections', []))
-            logger.info(f" Returning {collections_count} STAC collections")
+            logger.info(f"Returning {collections_count} STAC collections")
 
             return self._json_response(collections)
 
         except Exception as e:
-            logger.error(f"L Error processing collections request: {e}", exc_info=True)
+            logger.error(f"Error processing collections request: {e}", exc_info=True)
             return self._error_response(
                 message=str(e),
                 status_code=500,

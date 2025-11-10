@@ -5,6 +5,728 @@
 
 ---
 
+## 🔴 URGENT FIX: Refactor STAC API as Portable Module (10 NOV 2025)
+
+**Status**: ⚠️ **CRITICAL** - Current implementation broken (BaseHttpTrigger adds non-spec fields)
+**Priority**: Highest - Blocks STAC API functionality
+**Pattern**: Mirror OGC Features portable module architecture
+**Estimated Time**: 30-45 minutes
+
+### Problem Statement
+
+Current STAC API triggers (`triggers/stac_api_*.py`) inherit from `BaseHttpTrigger`, which:
+1. **Adds non-spec fields** (`request_id`, `timestamp`) to every response
+2. **Breaks STAC compliance** - responses must be pure STAC JSON
+3. **Not portable** - can't move to separate Function App for APIM routing
+4. **Wrong pattern** - should follow OGC Features module architecture
+
+**Current Error**:
+```
+GET /api/stac → 500 Internal Server Error
+"'HttpResponse' object is not a mapping"
+```
+
+**Root Cause**: BaseHttpTrigger expects `process_request()` to return `Dict[str, Any]`, then adds extra fields. STAC API needs pure spec-compliant JSON.
+
+---
+
+### Solution: Create `stac_api/` Portable Module
+
+**Pattern**: Mirror `ogc_features/` module architecture (fully portable, zero dependencies on main app)
+
+**New Folder Structure**:
+```
+stac_api/
+├── __init__.py          # Export get_stac_triggers()
+├── triggers.py          # BaseSTACTrigger + endpoint handler classes
+├── service.py           # STACAPIService (business logic)
+└── config.py            # STACAPIConfig (optional for now)
+```
+
+**Architecture** (Identical to OGC Features):
+```
+┌─────────────────────────────────────────┐
+│ function_app.py                         │
+│   from stac_api import get_stac_triggers│
+│   for trigger in get_stac_triggers():   │
+│       app.route(...)(trigger['handler']) │
+└─────────────────────────────────────────┘
+           ↓
+┌─────────────────────────────────────────┐
+│ stac_api/triggers.py                    │
+│   get_stac_triggers() → List[Dict]      │
+│   BaseSTACTrigger (common methods)      │
+│   STACLandingPageTrigger.handle()       │
+│   STACConformanceTrigger.handle()       │
+│   STACCollectionsTrigger.handle()       │
+└─────────────────────────────────────────┘
+           ↓
+┌─────────────────────────────────────────┐
+│ stac_api/service.py                     │
+│   STACAPIService.get_catalog()          │
+│   STACAPIService.get_conformance()      │
+│   STACAPIService.get_collections()      │
+└─────────────────────────────────────────┘
+           ↓
+┌─────────────────────────────────────────┐
+│ infrastructure/stac.py (unchanged)      │
+│   get_all_collections() → Dict          │
+└─────────────────────────────────────────┘
+```
+
+---
+
+### Implementation Steps
+
+#### **Step 1: Create `stac_api/` Module Structure** (5 min)
+
+```bash
+mkdir stac_api
+touch stac_api/__init__.py
+touch stac_api/triggers.py
+touch stac_api/service.py
+touch stac_api/config.py
+```
+
+---
+
+#### **Step 2: Create `stac_api/__init__.py`** (2 min)
+
+```python
+"""
+STAC API Portable Module
+
+Provides STAC API v1.0.0 compliant endpoints as a fully portable module.
+Can be deployed standalone or integrated into existing Function App.
+
+Integration (in function_app.py):
+    from stac_api import get_stac_triggers
+
+    for trigger in get_stac_triggers():
+        app.route(
+            route=trigger['route'],
+            methods=trigger['methods'],
+            auth_level=func.AuthLevel.ANONYMOUS
+        )(trigger['handler'])
+
+Author: Robert and Geospatial Claude Legion
+Date: 10 NOV 2025
+"""
+
+from .triggers import get_stac_triggers
+
+__all__ = ['get_stac_triggers']
+```
+
+---
+
+#### **Step 3: Create `stac_api/config.py`** (5 min)
+
+```python
+"""
+STAC API Configuration
+
+Minimal configuration for STAC API module.
+Auto-detects base URL from requests if not explicitly set.
+
+Author: Robert and Geospatial Claude Legion
+Date: 10 NOV 2025
+"""
+
+from typing import Optional
+from pydantic import BaseModel, Field
+
+
+class STACAPIConfig(BaseModel):
+    """STAC API module configuration."""
+
+    catalog_id: str = Field(
+        default="rmh-geospatial-stac",
+        description="STAC catalog ID"
+    )
+
+    catalog_title: str = Field(
+        default="RMH Geospatial STAC API",
+        description="Human-readable catalog title"
+    )
+
+    catalog_description: str = Field(
+        default="STAC catalog for geospatial raster and vector data with OAuth-based tile serving via TiTiler-pgSTAC",
+        description="Catalog description"
+    )
+
+    stac_version: str = Field(
+        default="1.0.0",
+        description="STAC specification version"
+    )
+
+    stac_base_url: Optional[str] = Field(
+        default=None,
+        description="Base URL for STAC API (auto-detected if None)"
+    )
+
+
+def get_stac_config() -> STACAPIConfig:
+    """Get STAC API configuration (singleton pattern)."""
+    return STACAPIConfig()
+```
+
+---
+
+#### **Step 4: Create `stac_api/service.py`** (10 min)
+
+```python
+"""
+STAC API Service Layer
+
+Business logic for STAC API endpoints.
+Calls infrastructure.stac for database operations.
+
+Author: Robert and Geospatial Claude Legion
+Date: 10 NOV 2025
+"""
+
+from typing import Dict, Any
+from .config import STACAPIConfig
+
+
+class STACAPIService:
+    """STAC API business logic layer."""
+
+    def __init__(self, config: STACAPIConfig):
+        """Initialize service with configuration."""
+        self.config = config
+
+    def get_catalog(self, base_url: str) -> Dict[str, Any]:
+        """
+        Get STAC catalog descriptor (landing page).
+
+        Args:
+            base_url: Base URL for link generation
+
+        Returns:
+            STAC Catalog object
+        """
+        return {
+            "id": self.config.catalog_id,
+            "type": "Catalog",
+            "title": self.config.catalog_title,
+            "description": self.config.catalog_description,
+            "stac_version": self.config.stac_version,
+            "conformsTo": [
+                "https://api.stacspec.org/v1.0.0/core",
+                "https://api.stacspec.org/v1.0.0/collections",
+                "https://api.stacspec.org/v1.0.0/ogcapi-features"
+            ],
+            "links": [
+                {
+                    "rel": "self",
+                    "type": "application/json",
+                    "href": f"{base_url}/api/stac",
+                    "title": "This catalog"
+                },
+                {
+                    "rel": "root",
+                    "type": "application/json",
+                    "href": f"{base_url}/api/stac",
+                    "title": "Root catalog"
+                },
+                {
+                    "rel": "conformance",
+                    "type": "application/json",
+                    "href": f"{base_url}/api/stac/conformance",
+                    "title": "STAC API conformance classes"
+                },
+                {
+                    "rel": "data",
+                    "type": "application/json",
+                    "href": f"{base_url}/api/stac/collections",
+                    "title": "Collections in this catalog"
+                },
+                {
+                    "rel": "search",
+                    "type": "application/geo+json",
+                    "href": f"{base_url}/api/stac/search",
+                    "method": "GET",
+                    "title": "STAC search endpoint (GET)"
+                },
+                {
+                    "rel": "search",
+                    "type": "application/geo+json",
+                    "href": f"{base_url}/api/stac/search",
+                    "method": "POST",
+                    "title": "STAC search endpoint (POST)"
+                },
+                {
+                    "rel": "service-desc",
+                    "type": "text/html",
+                    "href": "https://stacspec.org/en/api/",
+                    "title": "STAC API specification"
+                },
+                {
+                    "rel": "service-doc",
+                    "type": "text/html",
+                    "href": f"{base_url}/api/stac/collections/summary",
+                    "title": "Custom collections summary endpoint"
+                }
+            ]
+        }
+
+    def get_conformance(self) -> Dict[str, Any]:
+        """
+        Get STAC API conformance classes.
+
+        Returns:
+            Conformance object with conformsTo array
+        """
+        return {
+            "conformsTo": [
+                "https://api.stacspec.org/v1.0.0/core",
+                "https://api.stacspec.org/v1.0.0/collections",
+                "https://api.stacspec.org/v1.0.0/ogcapi-features",
+                "http://www.opengis.net/spec/ogcapi-features-1/1.0/conf/core",
+                "http://www.opengis.net/spec/ogcapi-features-1/1.0/conf/geojson"
+            ]
+        }
+
+    def get_collections(self) -> Dict[str, Any]:
+        """
+        Get all STAC collections with metadata.
+
+        Returns:
+            Collections object with collections array and links
+        """
+        # Import here to avoid circular dependency
+        from infrastructure.stac import get_all_collections
+
+        return get_all_collections()
+```
+
+---
+
+#### **Step 5: Create `stac_api/triggers.py`** (15 min)
+
+**Reference**: `ogc_features/triggers.py` (lines 73-244)
+
+```python
+"""
+STAC API HTTP Triggers
+
+Azure Functions HTTP handlers for STAC API v1.0.0 endpoints.
+
+Endpoints:
+- GET /api/stac - Landing page (catalog root)
+- GET /api/stac/conformance - Conformance classes
+- GET /api/stac/collections - Collections list
+
+Integration (in function_app.py):
+    from stac_api import get_stac_triggers
+
+    for trigger in get_stac_triggers():
+        app.route(
+            route=trigger['route'],
+            methods=trigger['methods'],
+            auth_level=func.AuthLevel.ANONYMOUS
+        )(trigger['handler'])
+
+Author: Robert and Geospatial Claude Legion
+Date: 10 NOV 2025
+"""
+
+import azure.functions as func
+import json
+import logging
+from typing import Dict, Any, List
+
+from .config import get_stac_config
+from .service import STACAPIService
+
+logger = logging.getLogger(__name__)
+
+
+# ============================================================================
+# TRIGGER REGISTRY FUNCTION
+# ============================================================================
+
+def get_stac_triggers() -> List[Dict[str, Any]]:
+    """
+    Get list of STAC API trigger configurations for function_app.py.
+
+    This is the ONLY integration point with the main application.
+    Returns trigger configurations that can be registered with Azure Functions.
+
+    Returns:
+        List of dicts with keys:
+        - route: URL route pattern
+        - methods: List of HTTP methods
+        - handler: Callable trigger handler
+
+    Usage:
+        from stac_api import get_stac_triggers
+
+        for trigger in get_stac_triggers():
+            app.route(
+                route=trigger['route'],
+                methods=trigger['methods'],
+                auth_level=func.AuthLevel.ANONYMOUS
+            )(trigger['handler'])
+    """
+    return [
+        {
+            'route': 'stac',
+            'methods': ['GET'],
+            'handler': STACLandingPageTrigger().handle
+        },
+        {
+            'route': 'stac/conformance',
+            'methods': ['GET'],
+            'handler': STACConformanceTrigger().handle
+        },
+        {
+            'route': 'stac/collections',
+            'methods': ['GET'],
+            'handler': STACCollectionsTrigger().handle
+        }
+    ]
+
+
+# ============================================================================
+# BASE TRIGGER CLASS
+# ============================================================================
+
+class BaseSTACTrigger:
+    """
+    Base class for STAC API triggers.
+
+    Provides common functionality:
+    - Base URL extraction from request
+    - JSON response formatting
+    - Error handling
+    - Logging
+    """
+
+    def __init__(self):
+        """Initialize trigger with service."""
+        self.config = get_stac_config()
+        self.service = STACAPIService(self.config)
+
+    def _get_base_url(self, req: func.HttpRequest) -> str:
+        """
+        Extract base URL from request.
+
+        Args:
+            req: Azure Functions HTTP request
+
+        Returns:
+            Base URL (e.g., https://example.com)
+        """
+        # Try configured base URL first
+        if self.config.stac_base_url:
+            return self.config.stac_base_url.rstrip("/")
+
+        # Auto-detect from request URL
+        full_url = req.url
+        if "/api/stac" in full_url:
+            return full_url.split("/api/stac")[0]
+
+        # Fallback
+        return "http://localhost:7071"
+
+    def _json_response(
+        self,
+        data: Any,
+        status_code: int = 200,
+        content_type: str = "application/json"
+    ) -> func.HttpResponse:
+        """
+        Create JSON HTTP response.
+
+        Args:
+            data: Data to serialize (dict or Pydantic model)
+            status_code: HTTP status code
+            content_type: Response content type
+
+        Returns:
+            Azure Functions HttpResponse
+        """
+        # Handle Pydantic models
+        if hasattr(data, 'model_dump'):
+            data = data.model_dump(mode='json', exclude_none=True)
+
+        return func.HttpResponse(
+            body=json.dumps(data, indent=2),
+            status_code=status_code,
+            mimetype=content_type
+        )
+
+    def _error_response(
+        self,
+        message: str,
+        status_code: int = 400,
+        error_type: str = "BadRequest"
+    ) -> func.HttpResponse:
+        """
+        Create error response.
+
+        Args:
+            message: Error message
+            status_code: HTTP status code
+            error_type: Error type string
+
+        Returns:
+            Azure Functions HttpResponse with error JSON
+        """
+        error_body = {
+            "code": error_type,
+            "description": message
+        }
+        return func.HttpResponse(
+            body=json.dumps(error_body, indent=2),
+            status_code=status_code,
+            mimetype="application/json"
+        )
+
+
+# ============================================================================
+# ENDPOINT TRIGGERS
+# ============================================================================
+
+class STACLandingPageTrigger(BaseSTACTrigger):
+    """
+    Landing page trigger.
+
+    Endpoint: GET /api/stac
+    """
+
+    def handle(self, req: func.HttpRequest) -> func.HttpResponse:
+        """
+        Handle landing page request.
+
+        Args:
+            req: Azure Functions HTTP request
+
+        Returns:
+            STAC Catalog JSON response
+        """
+        try:
+            logger.info("🗺️ STAC API Landing Page requested")
+
+            base_url = self._get_base_url(req)
+            catalog = self.service.get_catalog(base_url)
+
+            logger.info("✅ STAC API landing page generated successfully")
+            return self._json_response(catalog)
+
+        except Exception as e:
+            logger.error(f"❌ Error generating STAC API landing page: {e}", exc_info=True)
+            return self._error_response(
+                message=str(e),
+                status_code=500,
+                error_type="InternalServerError"
+            )
+
+
+class STACConformanceTrigger(BaseSTACTrigger):
+    """
+    Conformance classes trigger.
+
+    Endpoint: GET /api/stac/conformance
+    """
+
+    def handle(self, req: func.HttpRequest) -> func.HttpResponse:
+        """
+        Handle conformance request.
+
+        Args:
+            req: Azure Functions HTTP request
+
+        Returns:
+            STAC conformance JSON response
+        """
+        try:
+            logger.info("📋 STAC API Conformance requested")
+
+            conformance = self.service.get_conformance()
+
+            logger.info("✅ STAC API conformance generated successfully")
+            return self._json_response(conformance)
+
+        except Exception as e:
+            logger.error(f"❌ Error generating STAC API conformance: {e}", exc_info=True)
+            return self._error_response(
+                message=str(e),
+                status_code=500,
+                error_type="InternalServerError"
+            )
+
+
+class STACCollectionsTrigger(BaseSTACTrigger):
+    """
+    Collections list trigger.
+
+    Endpoint: GET /api/stac/collections
+    """
+
+    def handle(self, req: func.HttpRequest) -> func.HttpResponse:
+        """
+        Handle collections list request.
+
+        Args:
+            req: Azure Functions HTTP request
+
+        Returns:
+            STAC collections JSON response
+        """
+        try:
+            logger.info("📚 STAC API Collections list requested")
+
+            collections = self.service.get_collections()
+
+            # Check for errors from infrastructure layer
+            if 'error' in collections:
+                logger.error(f"❌ Error retrieving collections: {collections['error']}")
+                return self._error_response(
+                    message=collections['error'],
+                    status_code=500,
+                    error_type="InternalServerError"
+                )
+
+            collections_count = len(collections.get('collections', []))
+            logger.info(f"✅ Returning {collections_count} STAC collections")
+
+            return self._json_response(collections)
+
+        except Exception as e:
+            logger.error(f"❌ Error processing collections request: {e}", exc_info=True)
+            return self._error_response(
+                message=str(e),
+                status_code=500,
+                error_type="InternalServerError"
+            )
+```
+
+---
+
+#### **Step 6: Update `function_app.py`** (5 min)
+
+**Delete old imports** (lines 216-219):
+```python
+# DELETE THESE:
+from triggers.stac_api_landing import stac_api_landing_trigger
+from triggers.stac_api_conformance import stac_api_conformance_trigger
+from triggers.stac_api_collections import stac_api_collections_trigger
+```
+
+**Delete old route definitions** (lines 811-881):
+```python
+# DELETE THIS ENTIRE SECTION:
+# ============================================================================
+# STAC API v1.0.0 STANDARD ENDPOINTS (10 NOV 2025)
+# ============================================================================
+...
+def stac_api_collections_list(req: func.HttpRequest) -> func.HttpResponse:
+    ...
+```
+
+**Add new import and registration** (add after line 215):
+```python
+# STAC API v1.0.0 Portable Module (10 NOV 2025)
+from stac_api import get_stac_triggers
+
+# Register STAC API endpoints (add after OGC Features registration)
+for trigger in get_stac_triggers():
+    app.route(
+        route=trigger['route'],
+        methods=trigger['methods'],
+        auth_level=func.AuthLevel.ANONYMOUS
+    )(trigger['handler'])
+```
+
+---
+
+#### **Step 7: Delete Old Trigger Files** (2 min)
+
+```bash
+rm triggers/stac_api_landing.py
+rm triggers/stac_api_conformance.py
+rm triggers/stac_api_collections.py
+```
+
+---
+
+#### **Step 8: Test Implementation** (10 min)
+
+```bash
+# Deploy to Azure
+func azure functionapp publish rmhgeoapibeta --python --build remote
+
+# Wait for deployment, then test:
+
+# 1. Landing page (should return pure STAC catalog JSON)
+curl https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/stac | python3 -m json.tool
+
+# Verify response has NO request_id or timestamp fields
+# Should see: {"id": "rmh-geospatial-stac", "type": "Catalog", ...}
+
+# 2. Conformance
+curl https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/stac/conformance | python3 -m json.tool
+
+# Should see: {"conformsTo": ["https://api.stacspec.org/v1.0.0/core", ...]}
+
+# 3. Collections
+curl https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/stac/collections | python3 -m json.tool
+
+# Should see: {"collections": [{...}], "links": [...]}
+```
+
+---
+
+### Success Criteria
+
+✅ All 3 endpoints return pure STAC JSON (no `request_id`/`timestamp` fields)
+✅ Responses are STAC API v1.0.0 compliant
+✅ `stac_api/` module has zero dependencies on main app
+✅ Pattern matches OGC Features architecture exactly
+✅ Can be moved to separate Function App with no changes
+
+---
+
+### Benefits
+
+1. **STAC Spec Compliance** - Pure STAC JSON responses (no extra fields)
+2. **Portable Module** - Zero dependencies on main app (just like OGC Features)
+3. **APIM-Ready** - Can move to separate Function App when ready for API Management
+4. **Consistent Pattern** - Matches OGC Features architecture exactly
+5. **Easy Maintenance** - All STAC API code in one folder
+6. **Future Extensibility** - Easy to add more endpoints (search, collection detail, item detail)
+
+---
+
+### Future Path to APIM (No Code Changes Needed)
+
+When ready for Azure API Management:
+
+1. **Create new Function App** for STAC API
+2. **Copy `stac_api/` folder** to new project
+3. **Create minimal function_app.py**:
+   ```python
+   import azure.functions as func
+   from stac_api import get_stac_triggers
+
+   app = func.FunctionApp()
+
+   for trigger in get_stac_triggers():
+       app.route(
+           route=trigger['route'],
+           methods=trigger['methods'],
+           auth_level=func.AuthLevel.ANONYMOUS
+       )(trigger['handler'])
+   ```
+4. **Configure APIM** to route `/api/stac/*` to new Function App
+5. **Done** - No code changes needed!
+
+---
+
 ## 🔴 UP NEXT: Add ISO3 Country Codes to STAC Items (10 NOV 2025)
 
 **Status**: ⏳ **READY TO IMPLEMENT**

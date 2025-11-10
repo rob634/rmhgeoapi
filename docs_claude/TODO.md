@@ -1,7 +1,95 @@
 # Active Tasks
 
-**Last Updated**: 8 NOV 2025
+**Last Updated**: 10 NOV 2025
 **Author**: Robert and Geospatial Claude Legion
+
+---
+
+## 🔧 Azure Functions Error Pages - JSON Response Configuration (10 NOV 2025)
+
+**Status**: ⏳ **PLANNED**
+**Priority**: Medium
+**Goal**: Configure Azure Functions to return JSON error responses instead of HTML for 404/403 errors
+**Context**: QGIS OGC Features API client fails to parse HTML error pages
+
+### Problem
+Azure Functions default error handling returns HTML pages for 404/403 errors:
+```html
+<html>
+  <head><title>404 Not Found</title></head>
+  <body>...</body>
+</html>
+```
+
+This causes JSON parsing errors in API clients like QGIS:
+```
+Cannot decode JSON document: parse error at line 1, column 1:
+syntax error while parsing value - invalid literal; last read: '<'
+```
+
+### Solution Options
+
+**Option 1: Custom Error Handler Middleware** (Recommended)
+Add global error handler in `function_app.py` that intercepts all responses:
+
+```python
+from azure.functions import HttpResponse
+
+def create_json_error_response(status_code: int, message: str) -> HttpResponse:
+    """Create JSON error response."""
+    error_body = {
+        "error": "error",
+        "message": message,
+        "status_code": status_code,
+        "timestamp": datetime.utcnow().isoformat() + "Z"
+    }
+    return HttpResponse(
+        body=json.dumps(error_body),
+        status_code=status_code,
+        headers={"Content-Type": "application/json"},
+        mimetype="application/json"
+    )
+
+# Wrap all route handlers to catch 404/403
+```
+
+**Option 2: Azure Functions Host Configuration**
+Modify `host.json` to customize error responses (limited support):
+```json
+{
+  "extensions": {
+    "http": {
+      "customHeaders": {
+        "Content-Type": "application/json"
+      }
+    }
+  }
+}
+```
+
+**Option 3: API Management Layer** (Future)
+Use Azure API Management to handle all error responses consistently.
+
+### Implementation Tasks
+- [ ] Add custom error handler middleware to function_app.py
+- [ ] Test 404 responses return JSON
+- [ ] Test 403 responses return JSON
+- [ ] Update OGC Features error handling to use custom handler
+- [ ] Document error response format in API docs
+
+### Testing
+```bash
+# Should return JSON, not HTML
+curl -I https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/nonexistent
+
+# Expected:
+Content-Type: application/json
+{"error": "NotFound", "message": "...", "status_code": 404}
+
+# NOT:
+Content-Type: text/html
+<html>...</html>
+```
 
 ---
 

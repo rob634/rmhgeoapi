@@ -239,15 +239,16 @@ class VectorToPostGISHandler:
                 # Count vertices before simplification
                 def _count_vertices(geom):
                     """Count total vertices in any geometry type."""
-                    if hasattr(geom, 'coords'):
+                    geom_type = geom.geom_type
+
+                    if geom_type in ('Point', 'LineString'):
                         return len(geom.coords)
-                    elif hasattr(geom, 'geoms'):
-                        return sum(_count_vertices(g) for g in geom.geoms)
-                    elif hasattr(geom, 'exterior'):
-                        # Polygon: exterior + interiors
+                    elif geom_type == 'Polygon':
                         total = len(geom.exterior.coords)
                         total += sum(len(interior.coords) for interior in geom.interiors)
                         return total
+                    elif geom_type in ('MultiPoint', 'MultiLineString', 'MultiPolygon', 'GeometryCollection'):
+                        return sum(_count_vertices(g) for g in geom.geoms)
                     return 0
 
                 vertices_before = gdf.geometry.apply(_count_vertices).sum()

@@ -54,6 +54,14 @@ class StacApiConformanceTrigger(BaseHttpTrigger):
     Returns the list of STAC API conformance classes that this implementation supports.
     """
 
+    def __init__(self):
+        """Initialize the trigger."""
+        super().__init__(trigger_name="stac_api_conformance")
+
+    def get_allowed_methods(self) -> List[str]:
+        """Return allowed HTTP methods."""
+        return ["GET"]
+
     def process_request(self, req: func.HttpRequest) -> func.HttpResponse:
         """
         Process STAC API conformance request.

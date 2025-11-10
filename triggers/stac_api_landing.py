@@ -40,7 +40,7 @@ Date: 10 NOV 2025
 
 import azure.functions as func
 import json
-from typing import Dict, Any
+from typing import Dict, Any, List
 
 from triggers.http_base import BaseHttpTrigger
 from util_logger import LoggerFactory, ComponentType
@@ -56,6 +56,14 @@ class StacApiLandingTrigger(BaseHttpTrigger):
     Returns the STAC catalog root descriptor - the entry point for STAC API clients.
     Provides links to collections, search, and conformance endpoints.
     """
+
+    def __init__(self):
+        """Initialize the trigger."""
+        super().__init__(trigger_name="stac_api_landing")
+
+    def get_allowed_methods(self) -> List[str]:
+        """Return allowed HTTP methods."""
+        return ["GET"]
 
     def process_request(self, req: func.HttpRequest) -> func.HttpResponse:
         """

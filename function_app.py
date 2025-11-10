@@ -820,13 +820,29 @@ def discover_delivery_structure(req: func.HttpRequest) -> func.HttpResponse:
 # Can be moved to separate Function App for APIM routing
 # ============================================================================
 
-# Register STAC API endpoints using trigger registry pattern
-for trigger in get_stac_triggers():
-    app.route(
-        route=trigger['route'],
-        methods=trigger['methods'],
-        auth_level=func.AuthLevel.ANONYMOUS
-    )(trigger['handler'])
+# Get trigger configurations (contains handler references)
+_stac_triggers = get_stac_triggers()
+_stac_landing = _stac_triggers[0]['handler']
+_stac_conformance = _stac_triggers[1]['handler']
+_stac_collections = _stac_triggers[2]['handler']
+
+
+@app.route(route="stac", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def stac_api_landing(req: func.HttpRequest) -> func.HttpResponse:
+    """STAC API landing page: GET /api/stac"""
+    return _stac_landing(req)
+
+
+@app.route(route="stac/conformance", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def stac_api_conformance(req: func.HttpRequest) -> func.HttpResponse:
+    """STAC API conformance: GET /api/stac/conformance"""
+    return _stac_conformance(req)
+
+
+@app.route(route="stac/collections", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def stac_api_collections_list(req: func.HttpRequest) -> func.HttpResponse:
+    """STAC API collections list: GET /api/stac/collections"""
+    return _stac_collections(req)
 
 
 # ============================================================================

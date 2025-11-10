@@ -5,6 +5,291 @@
 
 ---
 
+## 🚀 PERFORMANCE: Optimize Vector Ingest with Batched executemany() (9 NOV 2025)
+
+**Status**: ⏳ **PLANNED**
+**Priority**: Medium-High (10x performance improvement available)
+**Goal**: Replace row-by-row INSERT with batched `executemany()` in vector upload workflow
+**Context**: Discovered during H3 Phase 3 analysis - vector workflow uses inefficient row-by-row inserts
+
+### Current Implementation (Inefficient)
+
+**File**: `services/vector/postgis_handler.py:706-714`
+
+```python
+# ❌ Current: Row-by-row INSERT (slow)
+for idx, row in chunk.iterrows():
+    geom_wkt = row.geometry.wkt
+    values = [geom_wkt] + [row[col] for col in attr_cols]
+    cur.execute(insert_stmt, values)  # 1 round-trip per row
+```
+
+**Performance**: ~20-30 seconds for 10k rows
+
+### Proposed Implementation (Option 2)
+
+**File**: `services/vector/postgis_handler.py` (refactor `_insert_features()`)
+
+```python
+# ✅ Proposed: Batched executemany() (10x faster)
+def _insert_features_batched(
+    self,
+    cur: psycopg.Cursor,
+    chunk: gpd.GeoDataFrame,
+    table_name: str,
+    schema: str,
+    batch_size: int = None  # Dynamic based on data
+):
+    """
+    Insert GeoDataFrame features using batched executemany().
+
+    Args:
+        batch_size: Rows per batch (auto-calculated if None):
+            - Simple geometries (Point): 5000 rows/batch
+            - Medium geometries (LineString): 2000 rows/batch
+            - Complex geometries (Polygon): 1000 rows/batch
+            - Very complex (MultiPolygon): 500 rows/batch
+    """
+    # Auto-calculate batch size based on geometry complexity
+    if batch_size is None:
+        batch_size = _calculate_optimal_batch_size(chunk)
+
+    # Get attribute columns (exclude geometry)
+    attr_cols = [col for col in chunk.columns if col != 'geometry']
+
+    # Build INSERT statement (same as before)
+    insert_stmt = sql.SQL("""
+        INSERT INTO {schema}.{table} (geom, {cols})
+        VALUES (ST_GeomFromText(%s, 4326), {placeholders})
+    """).format(...)
+
+    # Prepare batch data
+    batch = []
+    for idx, row in chunk.iterrows():
+        geom_wkt = row.geometry.wkt
+        values = tuple([geom_wkt] + [row[col] for col in attr_cols])
+        batch.append(values)
+
+        # Execute batch when full
+        if len(batch) >= batch_size:
+            cur.executemany(insert_stmt, batch)
+            batch = []
+
+    # Execute remaining rows
+    if batch:
+        cur.executemany(insert_stmt, batch)
+```
+
+### Helper Function: Dynamic Batch Size Calculation
+
+**File**: `services/vector/postgis_handler.py` (new helper)
+
+```python
+def _calculate_optimal_batch_size(chunk: gpd.GeoDataFrame) -> int:
+    """
+    Calculate optimal batch size based on geometry complexity.
+
+    Strategy:
+    - Sample first 100 geometries to estimate complexity
+    - Measure average WKT string length as proxy for complexity
+    - Adjust batch size inversely proportional to complexity
+
+    Returns:
+        Optimal batch size (500-5000 rows)
+    """
+    sample = chunk.head(100)
+    avg_wkt_len = sample.geometry.apply(lambda g: len(g.wkt)).mean()
+    geom_type = sample.geometry.iloc[0].geom_type
+
+    # Batch size heuristics
+    if geom_type == 'Point':
+        # Simple points: large batches
+        return 5000 if avg_wkt_len < 50 else 3000
+
+    elif geom_type in ['LineString', 'MultiPoint']:
+        # Medium complexity: moderate batches
+        return 2000 if avg_wkt_len < 500 else 1000
+
+    elif geom_type in ['Polygon', 'MultiLineString']:
+        # Complex polygons: smaller batches
+        return 1000 if avg_wkt_len < 2000 else 500
+
+    elif geom_type in ['MultiPolygon', 'GeometryCollection']:
+        # Very complex: small batches
+        return 500 if avg_wkt_len < 5000 else 250
+
+    else:
+        # Unknown: conservative default
+        return 1000
+```
+
+### Modularize executemany() Pattern (Shared Utility)
+
+**File**: `infrastructure/database_utils.py` (NEW)
+
+```python
+"""
+Shared PostgreSQL utilities for bulk operations.
+
+Reusable patterns for efficient database operations across
+vector, H3, and raster workflows.
+"""
+
+from typing import List, Tuple, Any, Callable
+import psycopg
+from psycopg import sql
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+def batched_executemany(
+    cur: psycopg.Cursor,
+    stmt: sql.Composable,
+    data_generator: Callable[[], List[Tuple[Any, ...]]],
+    batch_size: int = 1000,
+    description: str = "rows"
+) -> int:
+    """
+    Execute batched INSERT/UPDATE using executemany().
+
+    Reusable utility for any bulk PostgreSQL operation.
+
+    Args:
+        cur: psycopg cursor
+        stmt: Prepared SQL statement (sql.SQL object)
+        data_generator: Function that yields data tuples
+        batch_size: Rows per batch
+        description: Log description (e.g., "H3 cells", "vector features")
+
+    Returns:
+        Total rows inserted
+
+    Example:
+        stmt = sql.SQL("INSERT INTO geo.h3_grids VALUES (%s, %s, %s)")
+
+        def generate_rows():
+            for cell in h3_cells:
+                yield (cell.h3_index, cell.resolution, cell.geom_wkt)
+
+        total = batched_executemany(cur, stmt, generate_rows, 1000, "H3 cells")
+    """
+    batch = []
+    total_inserted = 0
+    batch_count = 0
+
+    for row_data in data_generator():
+        batch.append(row_data)
+
+        if len(batch) >= batch_size:
+            cur.executemany(stmt, batch)
+            total_inserted += len(batch)
+            batch_count += 1
+
+            # Log progress every 10 batches
+            if batch_count % 10 == 0:
+                logger.debug(f"Inserted {total_inserted} {description} ({batch_count} batches)...")
+
+            batch = []
+
+    # Insert remaining rows
+    if batch:
+        cur.executemany(stmt, batch)
+        total_inserted += len(batch)
+        batch_count += 1
+
+    logger.info(f"✅ Batched insert complete: {total_inserted} {description} in {batch_count} batches")
+    return total_inserted
+
+
+# Optional: Async version for asyncpg
+async def batched_executemany_async(
+    conn: 'asyncpg.Connection',
+    stmt: str,
+    data_generator: Callable[[], List[Tuple[Any, ...]]],
+    batch_size: int = 1000,
+    description: str = "rows"
+) -> int:
+    """
+    Async version for asyncpg (used in H3 Phase 3).
+
+    Same interface as sync version.
+    """
+    batch = []
+    total_inserted = 0
+
+    for row_data in data_generator():
+        batch.append(row_data)
+
+        if len(batch) >= batch_size:
+            await conn.executemany(stmt, batch)
+            total_inserted += len(batch)
+            batch = []
+
+    if batch:
+        await conn.executemany(stmt, batch)
+        total_inserted += len(batch)
+
+    logger.info(f"✅ Async batched insert: {total_inserted} {description}")
+    return total_inserted
+```
+
+### Implementation Tasks
+
+**1. Create Shared Utility Module** (30 min):
+- [ ] Create `infrastructure/database_utils.py`
+- [ ] Implement `batched_executemany()` sync version
+- [ ] Implement `batched_executemany_async()` for asyncpg
+- [ ] Add unit tests for both sync/async
+
+**2. Refactor Vector Handler** (1 hour):
+- [ ] Create `_calculate_optimal_batch_size()` helper in `services/vector/postgis_handler.py`
+- [ ] Refactor `_insert_features()` to use batched approach
+- [ ] Update `insert_features_only()` to pass batch_size parameter
+- [ ] Add logging for batch size selection and performance
+
+**3. Update H3 Handler (Optional - Use Shared Utility)** (30 min):
+- [ ] Refactor `services/handler_h3_native_streaming.py` to use `batched_executemany_async()`
+- [ ] Remove duplicate batching logic
+- [ ] Benefit: Consistent batching logic across codebase
+
+**4. Testing** (1 hour):
+- [ ] Test with small file (100 rows)
+- [ ] Test with medium file (10k rows)
+- [ ] Test with large file (100k rows)
+- [ ] Test with each geometry type (Point, LineString, Polygon, MultiPolygon)
+- [ ] Verify batch size auto-calculation
+- [ ] Measure performance improvement (expect 10x speedup)
+
+### Expected Performance Improvement
+
+| File Size | Current (row-by-row) | With executemany() | Speedup |
+|-----------|----------------------|-------------------|---------|
+| 10k rows | ~30 seconds/chunk | ~3 seconds/chunk | 10x |
+| 100k rows | ~300 seconds total | ~30 seconds total | 10x |
+| 1M rows | ~3000 seconds total | ~300 seconds total | 10x |
+
+### Success Metrics
+
+- ✅ 10x performance improvement for vector uploads
+- ✅ Batch size automatically adapts to geometry complexity
+- ✅ Reusable `batched_executemany()` utility used across codebase
+- ✅ No change to external API or job submission
+- ✅ Backward compatible (same table schema, same results)
+
+### Comparison: Three Approaches
+
+| Approach | Speed | Complexity | Control |
+|----------|-------|------------|---------|
+| **Row-by-row** (current) | ❌ Slow (100-500 rows/sec) | Simple | Full |
+| **`.to_postgis()`** (H3 Phase 2) | ✅ Fast (~10k rows/sec) | Simple | Limited |
+| **`executemany()`** (proposed) | ✅ Fast (~10k rows/sec) | Moderate | Full |
+| **PostgreSQL COPY** (future) | 🚀 Fastest (~50k rows/sec) | Complex | Full |
+
+**Decision**: Use `executemany()` for best balance of performance, control, and simplicity.
+
+---
+
 ## 🔧 Azure Functions Error Pages - JSON Response Configuration (10 NOV 2025)
 
 **Status**: ⏳ **PLANNED**

@@ -789,6 +789,330 @@ Complete: Job returns comprehensive result with:
 
 ---
 
+### **PHASE 3: Optimize H3 Generation with Python Native h3-py** (2-3 hours)
+
+**Status**: ⏳ **PLANNED** (9 NOV 2025)
+**Goal**: Replace DuckDB-based H3 generation with Python native h3-py for 3-4x performance improvement
+**Context**: Temporary maxConcurrentCalls increase to 4 during implementation, revert to 1 after
+
+#### Why h3-py Instead of DuckDB?
+
+**Current Implementation** (`services/h3_grid.py`):
+- Uses DuckDB H3 extension: `h3_cell_to_boundary_wkt()`
+- Performance: 60-90 seconds for resolution 4 (~288k cells)
+- Memory: ~150 MB
+- Overhead: SQL query parsing and DuckDB execution layer
+
+**Proposed h3-py Native Implementation**:
+- Uses h3-py Python bindings to C library
+- Performance: **15-25 seconds** for resolution 4 (3-4x faster)
+- Memory: ~120 MB (slightly less)
+- Direct: Python → C function calls (no SQL overhead)
+
+**Why h3-py is Faster**:
+- **C Native Bindings**: Direct Python wrapper around compiled C code
+- **No SQL Overhead**: Direct function calls vs SQL parsing
+- **Optimized Memory**: Generator-based approach with streaming to PostGIS
+
+#### Implementation Strategy
+
+**Key Decision: Single-Process + Async I/O Streaming**
+
+Why NOT ProcessPoolExecutor:
+- EP1 has only **1 vCPU** - no benefit from multiprocessing
+- Raster jobs already constrained memory (2-3 GB each)
+- Keep `maxConcurrentCalls: 1` for production safety
+
+Why YES to Async I/O:
+- Overlaps CPU generation with database I/O writes
+- Uses `asyncpg` for non-blocking PostgreSQL operations
+- Generator pattern for memory efficiency
+
+**Expected Performance**:
+- **Current**: 120 seconds (DuckDB → GeoParquet → PostGIS via handler)
+- **Optimized**: 30-35 seconds (h3-py → async streaming → PostGIS)
+- **Speedup**: 3.5x faster with same memory footprint (~200 MB)
+
+#### Implementation Tasks
+
+**Pre-Implementation Setup** (15 min):
+- [ ] Update `host.json`: Change `maxConcurrentCalls: 1 → 4` (TEMPORARY for testing)
+- [ ] Add to `requirements.txt`: `h3>=4.0.0` (h3-py with C bindings)
+- [ ] Add to `requirements.txt`: `asyncpg>=0.29.0` (async PostgreSQL driver)
+- [ ] Verify Azure Flexible PostgreSQL supports concurrent connections (check connection limits)
+- [ ] Deploy schema: Ensure `sql/init/02_create_h3_grids_table.sql` is deployed
+- [ ] Commit with message: "Prepare for H3 optimization - add h3-py and asyncpg dependencies"
+
+**Create New Handler** (1 hour):
+- [ ] Create `services/handler_h3_native_streaming.py` (new file)
+- [ ] Implement h3-py generator function:
+  ```python
+  def generate_h3_cells_native(resolution: int, land_filter: bool = False):
+      """Generate H3 cells using h3-py with optional land filtering."""
+      import h3
+      from shapely.geometry import Polygon
+
+      # Get all resolution 0 cells (122 base cells)
+      base_cells = h3.get_res0_cells()
+
+      for base_cell in base_cells:
+          # Get children at target resolution
+          children = h3.cell_to_children(base_cell, resolution)
+
+          for cell in children:
+              # Convert to WKT polygon
+              boundary = h3.cell_to_boundary(cell)  # Returns list of (lat, lon) tuples
+
+              # Shapely expects (lon, lat) order for WKT
+              coords = [(lon, lat) for lat, lon in boundary]
+              polygon = Polygon(coords)
+
+              yield {
+                  'h3_index': int(cell, 16),  # Convert hex string to bigint
+                  'resolution': resolution,
+                  'geom_wkt': polygon.wkt
+              }
+  ```
+
+- [ ] Implement async PostgreSQL streaming:
+  ```python
+  async def stream_to_postgis_async(
+      cells_generator,
+      grid_id: str,
+      grid_type: str,
+      source_job_id: str,
+      batch_size: int = 1000
+  ):
+      """Stream H3 cells directly to PostGIS using async I/O."""
+      import asyncpg
+      from config import get_config
+
+      config = get_config()
+
+      # Create async connection pool
+      pool = await asyncpg.create_pool(config.postgis_connection_string, min_size=2, max_size=4)
+
+      batch = []
+      total_inserted = 0
+
+      try:
+          async with pool.acquire() as conn:
+              for cell_data in cells_generator:
+                  batch.append((
+                      cell_data['h3_index'],
+                      cell_data['resolution'],
+                      cell_data['geom_wkt'],
+                      grid_id,
+                      grid_type,
+                      source_job_id
+                  ))
+
+                  # Batch insert every 1000 cells
+                  if len(batch) >= batch_size:
+                      await conn.executemany(
+                          """
+                          INSERT INTO geo.h3_grids (h3_index, resolution, geom, grid_id, grid_type, source_job_id)
+                          VALUES ($1, $2, ST_GeomFromText($3, 4326), $4, $5, $6)
+                          ON CONFLICT (h3_index, grid_id) DO NOTHING
+                          """,
+                          batch
+                      )
+                      total_inserted += len(batch)
+                      batch = []
+
+              # Insert remaining cells
+              if batch:
+                  await conn.executemany(...)
+                  total_inserted += len(batch)
+
+      finally:
+          await pool.close()
+
+      return total_inserted
+  ```
+
+- [ ] Implement main handler function:
+  ```python
+  def h3_native_streaming_postgis(task_params: dict) -> dict:
+      """
+      Generate H3 grid using h3-py and stream directly to PostGIS.
+
+      Args:
+          task_params: {
+              'resolution': int (0-15),
+              'grid_id': str,
+              'grid_type': str ('global', 'land', etc.),
+              'source_job_id': str,
+              'land_filter': bool (optional, default False)
+          }
+
+      Returns:
+          {
+              'success': True,
+              'result': {
+                  'grid_id': str,
+                  'table_name': 'geo.h3_grids',
+                  'rows_inserted': int,
+                  'bbox': [minx, miny, maxx, maxy],
+                  'processing_time_seconds': float,
+                  'memory_used_mb': float
+              }
+          }
+      """
+      import time
+      import psutil
+      import asyncio
+
+      start_time = time.time()
+      process = psutil.Process()
+      start_memory = process.memory_info().rss / 1024 / 1024  # MB
+
+      # Extract parameters
+      resolution = task_params['resolution']
+      grid_id = task_params['grid_id']
+      grid_type = task_params['grid_type']
+      source_job_id = task_params['source_job_id']
+      land_filter = task_params.get('land_filter', False)
+
+      # Generate cells using h3-py
+      cells_generator = generate_h3_cells_native(resolution, land_filter)
+
+      # Stream to PostGIS using async I/O
+      rows_inserted = asyncio.run(stream_to_postgis_async(
+          cells_generator,
+          grid_id,
+          grid_type,
+          source_job_id
+      ))
+
+      # Calculate bbox from PostGIS
+      import psycopg
+      from config import get_config
+      config = get_config()
+
+      with psycopg.connect(config.postgis_connection_string) as conn:
+          with conn.cursor() as cur:
+              cur.execute("""
+                  SELECT
+                      ST_XMin(extent) as minx,
+                      ST_YMin(extent) as miny,
+                      ST_XMax(extent) as maxx,
+                      ST_YMax(extent) as maxy
+                  FROM (
+                      SELECT ST_Extent(geom) as extent
+                      FROM geo.h3_grids
+                      WHERE grid_id = %s
+                  ) AS bbox_calc
+              """, (grid_id,))
+              bbox_row = cur.fetchone()
+              bbox = list(bbox_row) if bbox_row else [-180, -90, 180, 90]
+
+      end_memory = process.memory_info().rss / 1024 / 1024
+      processing_time = time.time() - start_time
+
+      return {
+          'success': True,
+          'result': {
+              'grid_id': grid_id,
+              'table_name': 'geo.h3_grids',
+              'rows_inserted': rows_inserted,
+              'bbox': bbox,
+              'processing_time_seconds': round(processing_time, 2),
+              'memory_used_mb': round(end_memory - start_memory, 2)
+          }
+      }
+  ```
+
+**Register Handler** (5 min):
+- [ ] Update `services/__init__.py`:
+  ```python
+  from .handler_h3_native_streaming import h3_native_streaming_postgis
+
+  ALL_HANDLERS = {
+      # ... existing handlers
+      "h3_native_streaming_postgis": h3_native_streaming_postgis,  # NEW: Direct h3-py → PostGIS streaming
+  }
+  ```
+
+**Update Jobs to Use New Handler** (30 min):
+- [ ] Update `jobs/create_h3_base.py`:
+  - Change Stage 1 task_type: `"h3_base_generate"` → `"h3_native_streaming_postgis"`
+  - Update `create_tasks_for_stage()` Stage 1 to pass PostGIS params directly
+  - Remove Stage 2 (no longer need separate PostGIS insertion step)
+  - Keep Stage 2 as STAC creation (renumber stages: 1=generate+insert, 2=stac)
+  - Update `total_stages` from 3 to 2
+
+- [ ] Update `jobs/generate_h3_level4.py`:
+  - Same changes as create_h3_base.py
+  - Update land filtering logic to pass to h3_native_streaming_postgis handler
+
+**Testing** (30 min):
+- [ ] Deploy to Azure: `func azure functionapp publish rmhgeoapibeta --python --build remote`
+- [ ] Test with resolution 0 (122 cells, ~5 seconds):
+  ```bash
+  curl -X POST https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/jobs/submit/create_h3_base \
+    -H "Content-Type: application/json" \
+    -d '{"resolution": 0}'
+  ```
+- [ ] Verify PostGIS insertion: `SELECT COUNT(*) FROM geo.h3_grids WHERE grid_id = 'global_res0'`
+- [ ] Verify STAC creation: `GET /api/collections/system-h3-grids/items/h3-global_res0`
+- [ ] Test with resolution 4 (~288k cells, expect ~30-35 seconds)
+- [ ] Monitor memory usage (should stay under 250 MB)
+- [ ] Compare performance vs old DuckDB approach (expect 3.5x speedup)
+
+**Post-Implementation Cleanup** (10 min):
+- [ ] Revert `host.json`: Change `maxConcurrentCalls: 4 → 1` (CRITICAL for production safety)
+- [ ] Update TODO.md: Mark Phase 3 as completed, add performance metrics
+- [ ] Update HISTORY.md: Document optimization work and results
+- [ ] Commit with message: "Complete H3 optimization - h3-py native streaming (3.5x faster)"
+
+#### Architecture Comparison
+
+**Before (Phase 2 - DuckDB)**:
+```
+Job Stage 1: DuckDB H3 generation → GeoParquet → Blob Storage (60-90 sec)
+     ↓ (blob_path)
+Job Stage 2: Load GeoParquet → Batch insert to PostGIS (30-40 sec)
+     ↓ (grid_id, bbox)
+Job Stage 3: Query PostGIS → Create STAC item (5 sec)
+Total: 95-135 seconds
+Memory: ~200 MB
+```
+
+**After (Phase 3 - h3-py Streaming)**:
+```
+Job Stage 1: h3-py generation → async stream to PostGIS (30-35 sec)
+     ↓ (grid_id, bbox, rows_inserted)
+Job Stage 2: Query PostGIS → Create STAC item (5 sec)
+Total: 35-40 seconds (3.5x faster ✅)
+Memory: ~200 MB (same)
+Benefits:
+  - Eliminates GeoParquet intermediate file
+  - Eliminates blob storage read/write
+  - Overlaps CPU generation with I/O writes
+  - Simpler 2-stage workflow
+```
+
+#### Rollback Plan
+
+If Phase 3 implementation encounters issues:
+1. Revert `services/__init__.py` handler registration
+2. Revert job files (create_h3_base.py, generate_h3_level4.py) to Phase 2 versions
+3. Revert `host.json` to `maxConcurrentCalls: 1`
+4. Fall back to Phase 2 DuckDB approach (still functional)
+
+#### Success Metrics
+
+- ✅ Resolution 4 generation completes in <40 seconds (vs 120 seconds = 3x faster)
+- ✅ Memory stays under 250 MB
+- ✅ PostGIS insertion succeeds with correct row counts
+- ✅ STAC items created successfully
+- ✅ OGC Features API returns H3 cells
+- ✅ No connection pool exhaustion errors
+- ✅ `host.json` reverted to `maxConcurrentCalls: 1` after testing
+
+---
+
 ## 🔴 PRIORITY: Implement Explicit File Not Found Error in HTTP Response
 
 **Status**: ⏳ **PENDING**

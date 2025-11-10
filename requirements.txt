@@ -32,3 +32,9 @@ stac-pydantic>=3.4.0
 # DuckDB - Analytical query engine with spatial and Azure extensions
 duckdb>=1.1.0
 pyarrow>=10.0.0
+
+# H3 - Uber's hexagonal hierarchical geospatial indexing system (Python bindings to C library)
+h3>=4.0.0
+
+# AsyncPG - Async PostgreSQL driver for non-blocking database operations
+asyncpg>=0.29.0

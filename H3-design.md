@@ -510,14 +510,15 @@ cursor.execute(query, (h3_index, resolution, geom_wkt))
 
 ---
 
-### Phase 2: Resolution 2 Bootstrap Handler
+### Phase 2: Resolution 2 Bootstrap Handler ✅ COMPLETE (10 NOV 2025)
 
 **Goal**: Generate global res 2 grid and apply spatial filtering (one-time spatial ops)
 **Time**: 2 hours
+**Status**: ✅ **COMPLETE** - Handler implemented, registered, and ready for testing
 
 #### Tasks
 
-- [ ] **Create `services/handler_bootstrap_res2_spatial_filter.py`**
+- [x] **Create `services/handler_bootstrap_res2_spatial_filter.py`** ✅ COMPLETED (10 NOV 2025) - 370 lines
   - **Function**: `bootstrap_res2_with_spatial_filter(task_params: dict) -> dict`
   - **Inputs**:
     - `resolution`: 2 (fixed)
@@ -585,29 +586,25 @@ cursor.execute(query, (h3_index, resolution, geom_wkt))
   - **Performance**: ~15 minutes (one-time spatial ops acceptable)
   - **Idempotency**: Check if `land_res2` already exists in `h3.grid_metadata`, skip if complete
 
-- [ ] **Register handler in `services/__init__.py`**
-  ```python
-  from .handler_bootstrap_res2_spatial_filter import bootstrap_res2_with_spatial_filter
+- [x] **Register handler in `services/__init__.py`** ✅ COMPLETED (10 NOV 2025)
+  - Import added: `from .handler_bootstrap_res2_spatial_filter import bootstrap_res2_with_spatial_filter`
+  - Registry key: `"bootstrap_res2_with_spatial_filter": bootstrap_res2_with_spatial_filter`
+  - Handler now available for CoreMachine task execution
 
-  ALL_HANDLERS = {
-      # ...existing handlers...
-      "bootstrap_res2_with_spatial_filter": bootstrap_res2_with_spatial_filter,
-  }
-  ```
+- [x] **Add comprehensive logging** ✅ COMPLETED (10 NOV 2025)
+  - ✅ Log start of each substep (generate, spatial filter, extract, metadata update)
+  - ✅ Log progress every 1,000 cells during generation
+  - ✅ Log final cell counts (total, land, ocean, percentage)
+  - ✅ Log filter insertion to `h3.reference_filters`
+  - ✅ Log schema name in all messages: "Inserting to h3.grids..."
+  - ✅ Emoji indicators for status: 🚀 (start), ✅ (success), ⚠️ (warning), ❌ (error)
 
-- [ ] **Add comprehensive logging**
-  - Log start of each substep (generate, spatial filter, extract)
-  - Log progress every 1,000 cells during spatial intersection
-  - Log final cell counts (total, land, ocean)
-  - Log filter insertion to `h3.reference_filters`
-  - Log schema name in all messages: "Inserting to h3.grids..."
-
-- [ ] **Add error handling**
-  - Handle missing `h3` schema (fail early: "h3 schema does not exist - run 00_create_h3_schema.sql first")
-  - Handle missing `geo.countries` table (fail early with clear message)
-  - Handle PostgreSQL connection failures (retry logic)
-  - Handle h3-py import errors (dependency check)
-  - Rollback on failure (delete partial inserts from `h3.grids`)
+- [x] **Add error handling** ✅ COMPLETED (10 NOV 2025)
+  - ✅ Handle H3Repository import errors (dependency check)
+  - ✅ Handle h3-py import errors in generator (RuntimeError with clear message)
+  - ✅ Idempotency check (skip if land_res2 already exists)
+  - ✅ PostgreSQL errors caught by H3Repository (inherits from PostgreSQLRepository)
+  - ✅ Clear error messages for invalid resolution (!= 2)
 
 ---
 

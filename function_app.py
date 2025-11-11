@@ -496,74 +496,74 @@ def get_job_status(req: func.HttpRequest) -> func.HttpResponse:
 
 
 # Database Query Endpoints - Phase 2 Database Monitoring
-@app.route(route="admin/db/jobs", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="dbadmin/jobs", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
 def admin_query_jobs(req: func.HttpRequest) -> func.HttpResponse:
     """Query jobs with filtering: GET /api/admin/db/jobs?limit=10&status=processing&hours=24"""
     return admin_db_data_trigger.handle_request(req)
 
 
-@app.route(route="admin/db/jobs/{job_id}", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="dbadmin/jobs/{job_id}", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
 def admin_query_job_by_id(req: func.HttpRequest) -> func.HttpResponse:
     """Get specific job by ID: GET /api/admin/db/jobs/{job_id}"""
     return admin_db_data_trigger.handle_request(req)
 
 
-@app.route(route="admin/db/tasks", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="dbadmin/tasks", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
 def admin_query_tasks(req: func.HttpRequest) -> func.HttpResponse:
     """Query tasks with filtering: GET /api/admin/db/tasks?status=failed&limit=20"""
     return admin_db_data_trigger.handle_request(req)
 
 
-@app.route(route="admin/db/tasks/{job_id}", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="dbadmin/tasks/{job_id}", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
 def admin_query_tasks_for_job(req: func.HttpRequest) -> func.HttpResponse:
     """Get all tasks for a job: GET /api/admin/db/tasks/{job_id}"""
     return admin_db_data_trigger.handle_request(req)
 
 
 # Platform Layer Query Endpoints (29 OCT 2025 - Migrated to Admin API 10 NOV 2025)
-@app.route(route="admin/db/platform/requests", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="dbadmin/platform/requests", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
 def admin_query_api_requests(req: func.HttpRequest) -> func.HttpResponse:
     """Query API requests with filtering: GET /api/admin/db/platform/requests?limit=10&status=processing"""
     return admin_db_data_trigger.handle_request(req)
 
 
-@app.route(route="admin/db/platform/requests/{request_id}", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="dbadmin/platform/requests/{request_id}", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
 def admin_query_api_request_by_id(req: func.HttpRequest) -> func.HttpResponse:
     """Get specific API request by ID: GET /api/admin/db/platform/requests/{request_id}"""
     return admin_db_data_trigger.handle_request(req)
 
 
-@app.route(route="admin/db/platform/orchestration", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="dbadmin/platform/orchestration", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
 def admin_query_orchestration_jobs(req: func.HttpRequest) -> func.HttpResponse:
     """Query orchestration jobs with filtering: GET /api/admin/db/platform/orchestration?request_id={request_id}"""
     return admin_db_data_trigger.handle_request(req)
 
 
-@app.route(route="admin/db/platform/orchestration/{request_id}", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="dbadmin/platform/orchestration/{request_id}", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
 def admin_query_orchestration_jobs_for_request(req: func.HttpRequest) -> func.HttpResponse:
     """Get orchestration jobs for specific request: GET /api/admin/db/platform/orchestration/{request_id}"""
     return admin_db_data_trigger.handle_request(req)
 
 
-@app.route(route="admin/db/stats", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="dbadmin/stats", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
 def admin_database_stats(req: func.HttpRequest) -> func.HttpResponse:
     """Database statistics and health metrics: GET /api/admin/db/stats"""
     return admin_db_diagnostics_trigger.handle_request(req)
 
 
-@app.route(route="admin/db/diagnostics/enums", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="dbadmin/diagnostics/enums", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
 def admin_diagnose_enums(req: func.HttpRequest) -> func.HttpResponse:
     """Diagnose PostgreSQL enum types: GET /api/admin/db/diagnostics/enums"""
     return admin_db_diagnostics_trigger.handle_request(req)
 
 
-@app.route(route="admin/db/diagnostics/functions", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="dbadmin/diagnostics/functions", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
 def admin_test_functions(req: func.HttpRequest) -> func.HttpResponse:
     """Test PostgreSQL functions: GET /api/admin/db/diagnostics/functions"""
     return admin_db_diagnostics_trigger.handle_request(req)
 
 
-@app.route(route="admin/db/diagnostics/all", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="dbadmin/diagnostics/all", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
 def admin_all_diagnostics(req: func.HttpRequest) -> func.HttpResponse:
     """Get all diagnostics: GET /api/admin/db/diagnostics/all"""
     return admin_db_diagnostics_trigger.handle_request(req)

@@ -115,14 +115,14 @@ class AdminDbDiagnosticsTrigger:
         try:
             # Parse route to determine operation
             # Azure Functions provides URL without /api/ prefix in route
-            # URL format: admin/db/stats or admin/db/diagnostics/enums
+            # URL format: dbadmin/stats or dbadmin/diagnostics/enums
             url = req.url
 
-            # Extract path after admin/db/
-            if '/admin/db/' in url:
-                path = url.split('/admin/db/')[-1].strip('/')
-            elif 'admin/db/' in url:
-                path = url.split('admin/db/')[-1].strip('/')
+            # Extract path after dbadmin/
+            if '/dbadmin/' in url:
+                path = url.split('/dbadmin/')[-1].strip('/')
+            elif 'dbadmin/' in url:
+                path = url.split('dbadmin/')[-1].strip('/')
             else:
                 path = ''
 

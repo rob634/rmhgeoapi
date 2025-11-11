@@ -1660,9 +1660,12 @@ def debug_dump_all(req: func.HttpRequest) -> func.HttpResponse:
         )
 
     except Exception as e:
+        import traceback
         return func.HttpResponse(
             body=json.dumps({
                 "error": f"Debug dump failed: {str(e)}",
+                "error_type": type(e).__name__,
+                "traceback": traceback.format_exc(),
                 "timestamp": datetime.now(timezone.utc).isoformat()
             }),
             status_code=500,

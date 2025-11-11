@@ -31,8 +31,9 @@ class JobStatus(Enum):
     Valid status values for jobs.
 
     State transitions:
-    - QUEUED -> PROCESSING -> COMPLETED
-    - QUEUED -> PROCESSING -> FAILED
+    - QUEUED -> PROCESSING -> COMPLETED (normal flow)
+    - QUEUED -> PROCESSING -> FAILED (processing failure)
+    - QUEUED -> FAILED (early failure before processing starts - 11 NOV 2025)
     - QUEUED -> PROCESSING -> COMPLETED_WITH_ERRORS
     """
 

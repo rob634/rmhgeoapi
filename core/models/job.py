@@ -91,13 +91,16 @@ class JobRecord(JobData):
         Validate job status transitions for multi-stage workflow.
 
         Allowed transitions:
-        - QUEUED ⇄ PROCESSING (multi-stage cycling - jobs re-queue between stages)
+        - QUEUED → PROCESSING (normal startup)
+        - QUEUED → FAILED (early failure before processing starts - 11 NOV 2025)
+        - PROCESSING → QUEUED (stage advancement re-queuing)
         - PROCESSING → COMPLETED/FAILED/COMPLETED_WITH_ERRORS (terminal states)
         - COMPLETED/FAILED/COMPLETED_WITH_ERRORS → Any (error recovery/retry)
 
         This supports multi-stage jobs that cycle between QUEUED and PROCESSING
-        as they advance through stages. After all stages complete, jobs transition
-        to a terminal state.
+        as they advance through stages. Jobs can also fail early (before reaching
+        PROCESSING) due to task pickup failures, pre-processing validation errors,
+        or database issues. After all stages complete, jobs transition to a terminal state.
 
         Args:
             new_status: The proposed new status
@@ -106,8 +109,11 @@ class JobRecord(JobData):
             True if transition is valid, False otherwise
 
         Examples:
-            2-stage job lifecycle:
+            Normal 2-stage job lifecycle:
             QUEUED → PROCESSING (stage 1) → QUEUED (stage 2) → PROCESSING (stage 2) → COMPLETED
+
+            Early failure (task pickup fails):
+            QUEUED → FAILED
         """
         # Normalize current status to enum (handles string values from database)
         current = JobStatus(self.status) if isinstance(self.status, str) else self.status
@@ -117,6 +123,11 @@ class JobRecord(JobData):
             return True
         if current == JobStatus.PROCESSING and new_status == JobStatus.QUEUED:
             return True  # Stage advancement re-queuing
+
+        # Allow early failure before processing starts (11 NOV 2025)
+        # Handles cases where job fails during task pickup or pre-processing validation
+        if current == JobStatus.QUEUED and new_status == JobStatus.FAILED:
+            return True
 
         # Allow terminal transitions from PROCESSING
         if current == JobStatus.PROCESSING and new_status in [

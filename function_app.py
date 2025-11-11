@@ -1583,7 +1583,9 @@ def debug_dump_all(req: func.HttpRequest) -> func.HttpResponse:
         if isinstance(job_repo, PostgreSQLRepository):
             # FIX: _get_connection() is a context manager, use with statement
             with job_repo._get_connection() as conn:
-                with conn.cursor() as cursor:
+                # Use DictCursor for easier column access by name
+                from psycopg.rows import dict_row
+                with conn.cursor(row_factory=dict_row) as cursor:
                     # Get all jobs
                     cursor.execute(f"""
                         SELECT
@@ -1597,17 +1599,17 @@ def debug_dump_all(req: func.HttpRequest) -> func.HttpResponse:
 
                     for row in cursor.fetchall():
                         jobs.append({
-                            "job_id": row[0],
-                            "job_type": row[1],
-                            "status": row[2],
-                            "stage": row[3],
-                            "total_stages": row[4],
-                            "parameters": row[5],
-                            "stage_results": row[6],
-                            "result_data": row[7],
-                            "error_details": row[8],
-                            "created_at": row[9].isoformat() if row[9] else None,
-                            "updated_at": row[10].isoformat() if row[10] else None
+                            "job_id": row["job_id"],
+                            "job_type": row["job_type"],
+                            "status": row["status"],
+                            "stage": row["stage"],
+                            "total_stages": row["total_stages"],
+                            "parameters": row["parameters"],
+                            "stage_results": row["stage_results"],
+                            "result_data": row["result_data"],
+                            "error_details": row["error_details"],
+                            "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+                            "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None
                         })
 
                     # Get all tasks
@@ -1623,17 +1625,17 @@ def debug_dump_all(req: func.HttpRequest) -> func.HttpResponse:
 
                     for row in cursor.fetchall():
                         tasks.append({
-                            "task_id": row[0],
-                            "parent_job_id": row[1],
-                            "task_type": row[2],
-                            "status": row[3],
-                            "stage": row[4],
-                            "parameters": row[5],
-                            "result_data": row[6],
-                            "error_details": row[7],
-                            "retry_count": row[8],
-                            "created_at": row[9].isoformat() if row[9] else None,
-                            "updated_at": row[10].isoformat() if row[10] else None
+                            "task_id": row["task_id"],
+                            "parent_job_id": row["parent_job_id"],
+                            "task_type": row["task_type"],
+                            "status": row["status"],
+                            "stage": row["stage"],
+                            "parameters": row["parameters"],
+                            "result_data": row["result_data"],
+                            "error_details": row["error_details"],
+                            "retry_count": row["retry_count"],
+                            "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+                            "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None
                         })
         else:
             # If not PostgreSQL, return error explaining why

@@ -1,0 +1,621 @@
+# ============================================================================
+# CLAUDE CONTEXT - H3 REPOSITORY
+# ============================================================================
+# EPOCH: 4 - ACTIVE ✅
+# STATUS: Infrastructure - H3-specific PostgreSQL repository
+# PURPOSE: Safe SQL operations for h3 schema using psycopg.sql composition
+# LAST_REVIEWED: 10 NOV 2025
+# EXPORTS: H3Repository
+# INTERFACES: PostgreSQLRepository (inherits connection mgmt, transactions, error handling)
+# PYDANTIC_MODELS: None (uses dicts for H3 cell data)
+# DEPENDENCIES: psycopg, psycopg.sql, infrastructure.postgresql.PostgreSQLRepository
+# SOURCE: PostgreSQL database (h3 schema: grids, reference_filters, grid_metadata)
+# SCOPE: H3 grid operations for World Bank Agricultural Geography Platform
+# VALIDATION: SQL injection prevention via psycopg.sql.Identifier() composition
+# PATTERNS: Repository pattern, Safe SQL composition, Connection pooling
+# ENTRY_POINTS: repo = H3Repository(); repo.insert_h3_cells(cells, grid_id)
+# INDEX: H3Repository:45, insert_h3_cells:95, get_parent_ids:165, update_spatial_attributes:215
+# ============================================================================
+
+"""
+H3 Repository - Safe PostgreSQL operations for H3 hexagonal grids
+
+This module provides H3-specific repository implementation that inherits
+from PostgreSQLRepository base class. It ensures safe SQL composition
+using psycopg.sql.Identifier() to prevent SQL injection attacks.
+
+Architecture:
+    PostgreSQLRepository (base class - connection mgmt, transactions)
+        ↓
+    H3Repository (this class - H3-specific operations)
+
+Key Features:
+- Safe SQL composition using sql.Identifier() for schema/table/column names
+- Bulk insert operations using executemany() for performance
+- Spatial attribute updates via PostGIS ST_Intersects
+- Reference filter management (parent H3 indices for cascading children)
+- Grid metadata tracking for bootstrap progress monitoring
+- Idempotency support (grid_exists checks)
+
+Schema:
+    h3.grids - H3 hexagonal grid cells (resolutions 2-7, ~55.8M land cells)
+    h3.reference_filters - Parent ID sets for child generation
+    h3.grid_metadata - Bootstrap progress tracking
+
+Author: Robert and Geospatial Claude Legion
+Date: 10 NOV 2025
+"""
+
+import logging
+from typing import List, Dict, Any, Optional, Tuple
+from psycopg import sql
+
+from infrastructure.postgresql import PostgreSQLRepository
+
+# Logger setup
+logger = logging.getLogger(__name__)
+
+
+class H3Repository(PostgreSQLRepository):
+    """
+    H3-specific repository for h3.grids operations.
+
+    Inherits connection management, safe SQL composition, and transaction
+    support from PostgreSQLRepository. All queries use sql.Identifier() for
+    injection prevention.
+
+    Schema: h3 (dedicated schema for system-generated H3 grids)
+
+    Usage:
+        repo = H3Repository()
+        cells = [{'h3_index': 123, 'resolution': 2, 'geom_wkt': 'POLYGON(...)'}]
+        rows_inserted = repo.insert_h3_cells(cells, grid_id='land_res2')
+    """
+
+    def __init__(self):
+        """
+        Initialize H3Repository with h3 schema.
+
+        Uses parent PostgreSQLRepository for connection management,
+        error handling, and transaction support.
+        """
+        # Initialize with h3 schema (separate from geo schema for user data)
+        super().__init__(schema_name='h3')
+        logger.info("✅ H3Repository initialized (schema: h3)")
+
+    def insert_h3_cells(
+        self,
+        cells: List[Dict[str, Any]],
+        grid_id: str,
+        grid_type: str = 'land',
+        source_job_id: Optional[str] = None
+    ) -> int:
+        """
+        Bulk insert H3 cells using safe SQL composition.
+
+        Uses executemany() for batch insertion and sql.Identifier()
+        for schema/table names to prevent SQL injection.
+
+        Parameters:
+        ----------
+        cells : List[Dict[str, Any]]
+            List of H3 cell dictionaries with keys:
+            - h3_index: int (H3 cell index as 64-bit integer)
+            - resolution: int (H3 resolution level 0-15)
+            - geom_wkt: str (WKT POLYGON string)
+            - parent_res2: Optional[int] (top-level parent for partitioning)
+            - parent_h3_index: Optional[int] (immediate parent)
+
+        grid_id : str
+            Grid identifier (e.g., 'land_res2', 'land_res6')
+
+        grid_type : str, default='land'
+            Grid type classification ('global', 'land', 'ocean', 'custom')
+
+        source_job_id : Optional[str]
+            CoreMachine job ID that created this grid
+
+        Returns:
+        -------
+        int
+            Number of rows inserted (excludes conflicts)
+
+        Example:
+        -------
+        >>> cells = [
+        ...     {'h3_index': 585961714876129279, 'resolution': 2,
+        ...      'geom_wkt': 'POLYGON((...))', 'parent_res2': None}
+        ... ]
+        >>> rows = repo.insert_h3_cells(cells, grid_id='land_res2')
+        >>> print(f"Inserted {rows} cells")
+        """
+        if not cells:
+            logger.warning("⚠️ insert_h3_cells called with empty cells list")
+            return 0
+
+        # SAFE: sql.Identifier() prevents SQL injection on schema/table names
+        query = sql.SQL("""
+            INSERT INTO {schema}.{table}
+                (h3_index, resolution, geom, grid_id, grid_type,
+                 parent_res2, parent_h3_index, source_job_id)
+            VALUES
+                (%s, %s, ST_GeomFromText(%s, 4326), %s, %s, %s, %s, %s)
+            ON CONFLICT (h3_index, grid_id) DO NOTHING
+        """).format(
+            schema=sql.Identifier('h3'),
+            table=sql.Identifier('grids')
+        )
+
+        # Prepare batch data for executemany
+        data = [
+            (
+                cell['h3_index'],
+                cell['resolution'],
+                cell['geom_wkt'],
+                grid_id,
+                grid_type,
+                cell.get('parent_res2'),
+                cell.get('parent_h3_index'),
+                source_job_id
+            )
+            for cell in cells
+        ]
+
+        # Execute batch insert using parent's connection management
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.executemany(query, data)
+                rowcount = cur.rowcount
+                conn.commit()
+
+        logger.info(f"✅ Inserted {rowcount} H3 cells to h3.grids (grid_id={grid_id})")
+        return rowcount
+
+    def get_parent_ids(self, grid_id: str) -> List[Tuple[int, Optional[int]]]:
+        """
+        Load parent H3 indices for a grid.
+
+        Used by cascading children handlers to get parent IDs for
+        generating next resolution level.
+
+        Parameters:
+        ----------
+        grid_id : str
+            Parent grid ID (e.g., 'land_res2', 'land_res5')
+
+        Returns:
+        -------
+        List[Tuple[int, Optional[int]]]
+            List of (h3_index, parent_res2) tuples, sorted by h3_index
+
+        Example:
+        -------
+        >>> parent_ids = repo.get_parent_ids('land_res2')
+        >>> print(f"Found {len(parent_ids)} parents")
+        >>> # Use for generating children
+        >>> for h3_index, parent_res2 in parent_ids:
+        ...     children = h3.cell_to_children(h3_index, target_resolution)
+        """
+        query = sql.SQL("""
+            SELECT h3_index, parent_res2
+            FROM {schema}.{table}
+            WHERE grid_id = %s
+            ORDER BY h3_index
+        """).format(
+            schema=sql.Identifier('h3'),
+            table=sql.Identifier('grids')
+        )
+
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(query, (grid_id,))
+                results = cur.fetchall()
+
+        # Convert dict_row to tuples (h3_index, parent_res2)
+        parent_ids = [(row['h3_index'], row['parent_res2']) for row in results]
+
+        logger.info(f"📊 Loaded {len(parent_ids)} parent IDs from h3.grids (grid_id={grid_id})")
+        return parent_ids
+
+    def update_spatial_attributes(
+        self,
+        grid_id: str,
+        spatial_filter_table: str = 'geo.countries'
+    ) -> int:
+        """
+        Update country_code and is_land via spatial join.
+
+        Uses ST_Intersects to find which H3 cells intersect country
+        polygons, then updates country_code and is_land=TRUE.
+
+        This is the ONE-TIME spatial operation in the H3 bootstrap
+        process (only runs for resolution 2 reference grid).
+
+        Parameters:
+        ----------
+        grid_id : str
+            Grid ID to update (e.g., 'land_res2')
+
+        spatial_filter_table : str, default='geo.countries'
+            Fully-qualified table name for spatial filter source
+            (must be in format 'schema.table')
+
+        Returns:
+        -------
+        int
+            Number of cells updated with country attributes
+
+        Example:
+        -------
+        >>> rows_updated = repo.update_spatial_attributes('land_res2')
+        >>> print(f"Updated {rows_updated} cells with country_code")
+
+        Notes:
+        -----
+        - This is an expensive operation (spatial intersection)
+        - Only run once for reference grid (res 2)
+        - Children inherit parent_res2, no spatial ops needed
+        """
+        # Parse schema.table from spatial_filter_table
+        if '.' not in spatial_filter_table:
+            raise ValueError(
+                f"spatial_filter_table must be 'schema.table' format, "
+                f"got: {spatial_filter_table}"
+            )
+
+        filter_schema, filter_table = spatial_filter_table.split('.', 1)
+
+        # SAFE: sql.Identifier() for all schema/table/column names
+        query = sql.SQL("""
+            UPDATE {h3_schema}.{h3_table} h
+            SET
+                country_code = c.iso3,
+                is_land = TRUE,
+                updated_at = NOW()
+            FROM {filter_schema}.{filter_table} c
+            WHERE h.grid_id = %s
+              AND ST_Intersects(h.geom, c.geom)
+        """).format(
+            h3_schema=sql.Identifier('h3'),
+            h3_table=sql.Identifier('grids'),
+            filter_schema=sql.Identifier(filter_schema),
+            filter_table=sql.Identifier(filter_table)
+        )
+
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(query, (grid_id,))
+                rowcount = cur.rowcount
+                conn.commit()
+
+        logger.info(
+            f"✅ Updated {rowcount} cells with country_code via "
+            f"spatial join (grid_id={grid_id}, filter={spatial_filter_table})"
+        )
+        return rowcount
+
+    def get_cell_count(self, grid_id: str) -> int:
+        """
+        Count cells for a grid_id.
+
+        Parameters:
+        ----------
+        grid_id : str
+            Grid identifier (e.g., 'land_res2')
+
+        Returns:
+        -------
+        int
+            Number of cells in this grid
+
+        Example:
+        -------
+        >>> count = repo.get_cell_count('land_res6')
+        >>> print(f"Grid has {count:,} cells")
+        """
+        query = sql.SQL("""
+            SELECT COUNT(*) as count
+            FROM {schema}.{table}
+            WHERE grid_id = %s
+        """).format(
+            schema=sql.Identifier('h3'),
+            table=sql.Identifier('grids')
+        )
+
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(query, (grid_id,))
+                result = cur.fetchone()
+
+        count = result['count'] if result else 0
+        logger.debug(f"📊 Cell count for {grid_id}: {count:,}")
+        return count
+
+    def grid_exists(self, grid_id: str) -> bool:
+        """
+        Check if grid_id exists (for idempotency).
+
+        Parameters:
+        ----------
+        grid_id : str
+            Grid identifier to check
+
+        Returns:
+        -------
+        bool
+            True if grid exists, False otherwise
+
+        Example:
+        -------
+        >>> if repo.grid_exists('land_res2'):
+        ...     print("Grid already exists, skipping generation")
+        """
+        query = sql.SQL("""
+            SELECT EXISTS(
+                SELECT 1 FROM {schema}.{table}
+                WHERE grid_id = %s
+                LIMIT 1
+            ) as exists
+        """).format(
+            schema=sql.Identifier('h3'),
+            table=sql.Identifier('grids')
+        )
+
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(query, (grid_id,))
+                result = cur.fetchone()
+
+        exists = result['exists'] if result else False
+        logger.debug(f"🔍 Grid exists check: {grid_id} = {exists}")
+        return exists
+
+    def insert_reference_filter(
+        self,
+        filter_name: str,
+        resolution: int,
+        h3_indices: List[int],
+        spatial_filter_sql: Optional[str] = None
+    ) -> bool:
+        """
+        Insert to h3.reference_filters table.
+
+        Stores parent H3 indices as PostgreSQL BIGINT[] array.
+        Used for cascading children generation (e.g., land_res2 parents
+        for generating res 3-7).
+
+        Parameters:
+        ----------
+        filter_name : str
+            Unique filter identifier (e.g., 'land_res2')
+
+        resolution : int
+            Reference resolution level (0-4, typically 2)
+
+        h3_indices : List[int]
+            List of parent H3 indices to store
+
+        spatial_filter_sql : Optional[str]
+            SQL query used to generate filter (for reproducibility)
+
+        Returns:
+        -------
+        bool
+            True if inserted, False if already exists (conflict)
+
+        Example:
+        -------
+        >>> land_cells = [585961714876129279, 585961714876129280, ...]
+        >>> inserted = repo.insert_reference_filter(
+        ...     'land_res2', resolution=2, h3_indices=land_cells
+        ... )
+        """
+        query = sql.SQL("""
+            INSERT INTO {schema}.{table}
+                (filter_name, resolution, h3_indices_array, cell_count, spatial_filter_sql)
+            VALUES
+                (%s, %s, %s, %s, %s)
+            ON CONFLICT (filter_name) DO NOTHING
+        """).format(
+            schema=sql.Identifier('h3'),
+            table=sql.Identifier('reference_filters')
+        )
+
+        cell_count = len(h3_indices)
+
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    query,
+                    (filter_name, resolution, h3_indices, cell_count, spatial_filter_sql)
+                )
+                rowcount = cur.rowcount
+                conn.commit()
+
+        inserted = rowcount > 0
+        if inserted:
+            logger.info(
+                f"✅ Inserted reference filter: {filter_name} "
+                f"(resolution={resolution}, cells={cell_count:,})"
+            )
+        else:
+            logger.warning(f"⚠️ Reference filter already exists: {filter_name}")
+
+        return inserted
+
+    def get_reference_filter(self, filter_name: str) -> Optional[List[int]]:
+        """
+        Load h3_indices_array from h3.reference_filters.
+
+        Parameters:
+        ----------
+        filter_name : str
+            Filter identifier (e.g., 'land_res2')
+
+        Returns:
+        -------
+        Optional[List[int]]
+            List of parent H3 indices, or None if not found
+
+        Example:
+        -------
+        >>> parent_ids = repo.get_reference_filter('land_res2')
+        >>> if parent_ids:
+        ...     print(f"Found {len(parent_ids)} parent IDs")
+        ...     for parent_id in parent_ids:
+        ...         children = h3.cell_to_children(parent_id, target_res)
+        """
+        query = sql.SQL("""
+            SELECT h3_indices_array, cell_count
+            FROM {schema}.{table}
+            WHERE filter_name = %s
+        """).format(
+            schema=sql.Identifier('h3'),
+            table=sql.Identifier('reference_filters')
+        )
+
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(query, (filter_name,))
+                result = cur.fetchone()
+
+        if not result:
+            logger.warning(f"⚠️ Reference filter not found: {filter_name}")
+            return None
+
+        h3_indices = result['h3_indices_array']
+        cell_count = result['cell_count']
+
+        logger.info(f"📊 Loaded reference filter: {filter_name} ({cell_count:,} cells)")
+        return h3_indices
+
+    def update_grid_metadata(
+        self,
+        grid_id: str,
+        resolution: int,
+        cell_count: int,
+        status: str,
+        job_id: Optional[str] = None,
+        parent_grid_id: Optional[str] = None,
+        bbox: Optional[List[float]] = None
+    ) -> None:
+        """
+        Update h3.grid_metadata for bootstrap tracking.
+
+        Inserts or updates metadata for a grid, tracking bootstrap
+        progress and completion status.
+
+        Parameters:
+        ----------
+        grid_id : str
+            Grid identifier (e.g., 'land_res2')
+
+        resolution : int
+            H3 resolution level (2-7)
+
+        cell_count : int
+            Number of cells in this grid
+
+        status : str
+            Generation status ('complete', 'in_progress', 'failed')
+
+        job_id : Optional[str]
+            CoreMachine job ID that generated this grid
+
+        parent_grid_id : Optional[str]
+            Parent grid ID (e.g., 'land_res5' for 'land_res6')
+
+        bbox : Optional[List[float]]
+            Bounding box [minx, miny, maxx, maxy]
+
+        Example:
+        -------
+        >>> repo.update_grid_metadata(
+        ...     'land_res6', resolution=6, cell_count=6835647,
+        ...     status='complete', job_id='abc123'
+        ... )
+        """
+        # Convert bbox list to WKT POLYGON if provided
+        bbox_wkt = None
+        if bbox and len(bbox) == 4:
+            minx, miny, maxx, maxy = bbox
+            bbox_wkt = (
+                f"POLYGON(({minx} {miny}, {maxx} {miny}, "
+                f"{maxx} {maxy}, {minx} {maxy}, {minx} {miny}))"
+            )
+
+        query = sql.SQL("""
+            INSERT INTO {schema}.{table}
+                (grid_id, resolution, parent_grid_id, cell_count, bbox,
+                 generation_status, generation_job_id, updated_at)
+            VALUES
+                (%s, %s, %s, %s, ST_GeomFromText(%s, 4326), %s, %s, NOW())
+            ON CONFLICT (grid_id) DO UPDATE SET
+                cell_count = EXCLUDED.cell_count,
+                bbox = EXCLUDED.bbox,
+                generation_status = EXCLUDED.generation_status,
+                generation_job_id = EXCLUDED.generation_job_id,
+                updated_at = NOW()
+        """).format(
+            schema=sql.Identifier('h3'),
+            table=sql.Identifier('grid_metadata')
+        )
+
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    query,
+                    (grid_id, resolution, parent_grid_id, cell_count,
+                     bbox_wkt, status, job_id)
+                )
+                conn.commit()
+
+        logger.info(
+            f"✅ Updated grid metadata: {grid_id} "
+            f"(resolution={resolution}, cells={cell_count:,}, status={status})"
+        )
+
+    def get_grid_metadata(self, grid_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Get grid metadata for a grid_id.
+
+        Parameters:
+        ----------
+        grid_id : str
+            Grid identifier
+
+        Returns:
+        -------
+        Optional[Dict[str, Any]]
+            Grid metadata dict or None if not found
+
+        Example:
+        -------
+        >>> metadata = repo.get_grid_metadata('land_res6')
+        >>> if metadata:
+        ...     print(f"Status: {metadata['generation_status']}")
+        ...     print(f"Cells: {metadata['cell_count']:,}")
+        """
+        query = sql.SQL("""
+            SELECT
+                grid_id, resolution, parent_grid_id, cell_count,
+                generation_status, generation_job_id,
+                created_at, updated_at
+            FROM {schema}.{table}
+            WHERE grid_id = %s
+        """).format(
+            schema=sql.Identifier('h3'),
+            table=sql.Identifier('grid_metadata')
+        )
+
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(query, (grid_id,))
+                result = cur.fetchone()
+
+        if result:
+            logger.debug(f"📊 Grid metadata: {grid_id} - {result['generation_status']}")
+        else:
+            logger.debug(f"⚠️ Grid metadata not found: {grid_id}")
+
+        return dict(result) if result else None

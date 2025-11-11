@@ -171,9 +171,9 @@ class STACAPIService:
 
         response = get_collection(collection_id)
 
-        if 'error' not in response and 'collection' in response:
-            collection = response['collection']
-            collection['links'] = [
+        if 'error' not in response:
+            # infrastructure.stac.get_collection returns collection directly, not wrapped
+            response['links'] = [
                 {
                     "rel": "self",
                     "type": "application/json",
@@ -199,7 +199,6 @@ class STACAPIService:
                     "title": "Root catalog"
                 }
             ]
-            return collection
 
         return response
 
@@ -284,9 +283,9 @@ class STACAPIService:
 
         response = get_item_by_id(item_id, collection_id)
 
-        if 'error' not in response and 'item' in response:
-            item = response['item']
-            item['links'] = [
+        if 'error' not in response:
+            # infrastructure.stac.get_item_by_id returns item directly, not wrapped
+            response['links'] = [
                 {
                     "rel": "self",
                     "type": "application/geo+json",
@@ -312,6 +311,5 @@ class STACAPIService:
                     "title": "Root catalog"
                 }
             ]
-            return item
 
         return response

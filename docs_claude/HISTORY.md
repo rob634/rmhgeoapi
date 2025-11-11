@@ -1,9 +1,206 @@
 # Project History
 
-**Last Updated**: 8 NOV 2025 - Raster Pipeline Parameterization ✅
+**Last Updated**: 11 NOV 2025 - Job Status Transition Bug Fix ✅
 **Note**: For project history prior to September 11, 2025, see **OLDER_HISTORY.md**
 
 This document tracks completed architectural changes and improvements to the Azure Geospatial ETL Pipeline from September 11, 2025 onwards.
+
+---
+
+## 11 NOV 2025: Critical Job Status Bug Fix - QUEUED → FAILED Transition ✅
+
+**Status**: ✅ **COMPLETE** - Jobs can now fail gracefully during task pickup phase
+**Impact**: Fixes infinite retry loops, enables proper error handling
+**Timeline**: Identified, implemented, and committed in 20 minutes
+**Author**: Robert and Geospatial Claude Legion
+**Commit**: 7273bb5
+
+### 🎯 Problem Identified
+
+**Critical Bug**: Jobs stuck in QUEUED status when task pickup fails
+```python
+# ❌ BLOCKED: Schema validation rejected this transition
+Job(status=QUEUED) → FAILED
+# Error: "Invalid status transition: JobStatus.QUEUED → JobStatus.FAILED"
+```
+
+**Impact**:
+- Jobs stuck in infinite retry loops
+- Old Service Bus messages cause perpetual failures
+- CoreMachine cannot mark jobs as failed before PROCESSING state
+- No graceful error handling during task pickup phase
+
+**Error Chain Observed**:
+1. Old task message picked up from Service Bus (DeliveryCount: 3)
+2. Task record doesn't exist (deleted by schema redeploy)
+3. Task fails to update status to PROCESSING
+4. CoreMachine tries to mark job as FAILED from QUEUED
+5. Schema validation rejects transition → infinite retry loop
+
+### 🔧 Solution: Add Early Failure Transition
+
+**Root Cause**: `core/models/job.py` `can_transition_to()` method only allowed:
+- QUEUED → PROCESSING (normal startup)
+- PROCESSING → FAILED (processing failure)
+- Missing: QUEUED → FAILED (early failure)
+
+**Fix Implemented** (lines 127-130):
+```python
+# Allow early failure before processing starts (11 NOV 2025)
+# Handles cases where job fails during task pickup or pre-processing validation
+if current == JobStatus.QUEUED and new_status == JobStatus.FAILED:
+    return True
+```
+
+### Implementation Details
+
+**Files Modified**:
+- `core/models/job.py` - Added QUEUED → FAILED transition
+  - Lines 127-130: New transition check
+  - Lines 91-117: Updated docstring with early failure examples
+  - Added example: "Early failure (task pickup fails): QUEUED → FAILED"
+
+- `core/models/enums.py` - Updated JobStatus docstring
+  - Added QUEUED → FAILED to state transition diagram
+  - Documented as "early failure before processing starts"
+
+**State Transitions Now Supported**:
+```python
+# Normal flow
+QUEUED → PROCESSING → COMPLETED
+
+# Processing failure
+QUEUED → PROCESSING → FAILED
+
+# ✅ NEW: Early failure (task pickup, validation, DB errors)
+QUEUED → FAILED
+
+# Errors with partial completion
+QUEUED → PROCESSING → COMPLETED_WITH_ERRORS
+```
+
+### Benefits
+
+✅ **Graceful Error Handling**: Jobs can fail before reaching PROCESSING state
+✅ **No More Infinite Loops**: Service Bus messages won't retry forever
+✅ **Better Observability**: Failed jobs visible in database with proper status
+✅ **Defensive Coding**: Handles task pickup failures, validation errors, DB issues
+
+### Next Steps (Post-Deployment)
+
+1. ✅ Committed to git (commit 7273bb5)
+2. ⏳ Push to origin/dev
+3. ⏳ Deploy to Azure Functions
+4. ⏳ Test graceful failure handling
+5. ⏳ Optional: Purge Service Bus queues if old problematic messages exist
+
+---
+
+## 10 NOV 2025: TiTiler URL Generation Fix - Single COG Visualization Working ✅
+
+**Status**: ✅ **COMPLETE** - process_raster workflow now generates correct TiTiler URLs
+**Impact**: End-to-end raster ETL with browser-viewable visualization URLs
+**Timeline**: Identified issue, implemented fix, tested, and deployed in ~2 hours
+**Author**: Robert and Geospatial Claude Legion
+
+### 🎯 Problem Identified
+
+**Incorrect URL Format**: TiTiler URLs were using STAC API endpoint format which doesn't exist:
+```
+❌ WRONG: /collections/system-rasters/items/{item_id}/WebMercatorQuad/map.html
+```
+
+**Root Cause**: Misunderstanding of TiTiler deployment architecture
+- TiTiler is a **Direct COG Access** server, not a STAC API server
+- STAC API endpoints (`/collections/.../items/...`) would require separate STAC server deployment
+- Current TiTiler only supports `/cog/` endpoint with `/vsiaz/` paths
+
+### 🔧 Solution: Unified URL Generation Method
+
+**Created**: `config.generate_titiler_urls_unified()` with three modes:
+
+1. **`mode="cog"`** - Single COG via direct `/vsiaz/` access (IMPLEMENTED ✅)
+2. **`mode="mosaicjson"`** - MosaicJSON collections (PLACEHOLDER - next priority)
+3. **`mode="pgstac"`** - PgSTAC search results (FUTURE - documented inline)
+
+**Correct URL Format**:
+```
+✅ CORRECT: /cog/WebMercatorQuad/map.html?url=%2Fvsiaz%2Fsilver-cogs%2F{blob_path}
+```
+
+### Implementation Details
+
+**Files Created**:
+- `test_titiler_urls.py` - Local URL generation test script
+
+**Files Modified**:
+- `config.py` (lines 1049-1196) - Added `generate_titiler_urls_unified()` method
+- `jobs/process_raster.py` (lines 644-664) - Use unified method for Single COG URLs
+
+**URL Generation Logic**:
+```python
+# Construct /vsiaz/ path
+vsiaz_path = f"/vsiaz/{container}/{blob_name}"
+
+# URL-encode for query parameter
+encoded_vsiaz = urllib.parse.quote(vsiaz_path, safe='')
+
+# Generate URLs
+viewer_url = f"{base}/cog/WebMercatorQuad/map.html?url={encoded_vsiaz}"
+info_url = f"{base}/cog/info?url={encoded_vsiaz}"
+preview_url = f"{base}/cog/preview.png?url={encoded_vsiaz}&max_size=512"
+# ... 6 more URL types
+```
+
+### Test Results: End-to-End Success ✅
+
+**Test Job**: Namangan, Uzbekistan satellite imagery (66.6 MB)
+- ✅ Job completed: 14 seconds
+- ✅ COG created: `silver-cogs/nam_test_unified_v2/namangan14aug2019_R2C2cog_cog_analysis.tif`
+- ✅ STAC inserted: `system-rasters` collection
+- ✅ 9 TiTiler URLs generated (viewer, info, preview, tiles, etc.)
+- ✅ **Browser tested**: Interactive Leaflet map loads with satellite tiles visible!
+
+**Generated Viewer URL** (working):
+```
+https://rmhtitiler-ghcyd7g0bxdvc2hc.eastus-01.azurewebsites.net/cog/WebMercatorQuad/map.html?url=%2Fvsiaz%2Fsilver-cogs%2Fnam_test_unified_v2%2Fnamangan14aug2019_R2C2cog_cog_analysis.tif
+```
+
+### Architecture Decisions
+
+**No Backward Compatibility**: Old URL generation methods commented out for deletion after MosaicJSON implementation
+- `generate_titiler_urls()` - DEPRECATED (wrong STAC API format)
+- `generate_vanilla_titiler_urls()` - Replaced by `generate_titiler_urls_unified(mode="cog")`
+
+**Mode Design Pattern**:
+- `mode="cog"`: Single raster visualization (✅ WORKING)
+- `mode="mosaicjson"`: Multiple rasters as single layer (⏳ NEXT)
+- `mode="pgstac"`: Dynamic catalog searches (📝 DOCUMENTED for future)
+
+**NotImplementedError with Inline Documentation**: Placeholder modes include comprehensive inline comments documenting:
+- Expected URL patterns
+- Implementation requirements
+- Test strategies
+- Benefits and use cases
+
+### Benefits Delivered
+
+1. **Working Visualization**: process_raster now produces browser-viewable interactive maps
+2. **Proper URL Format**: `/cog/` endpoints work with current TiTiler deployment
+3. **Comprehensive URLs**: 9 different URL types for various use cases (viewer, info, preview, tiles, etc.)
+4. **Extensible Pattern**: Ready for MosaicJSON and PgSTAC modes when needed
+5. **Clear Documentation**: Future modes have inline implementation guides
+
+### Next Priorities
+
+1. **MosaicJSON URLs** (HIGH PRIORITY):
+   - Verify URL pattern: `/mosaicjson/WebMercatorQuad/map.html?url=/vsiaz/{container}/{mosaic}.json`
+   - Update `process_raster_collection.py` and `process_large_raster.py`
+   - Test with existing MosaicJSON files
+
+2. **STAC Collection Validation**: Add pre-flight check that collection_id exists in PgSTAC
+
+3. **File Not Found Errors**: Improve error messages when blob paths are incorrect
 
 ---
 

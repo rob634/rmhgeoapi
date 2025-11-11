@@ -1,7 +1,88 @@
 # Active Tasks
 
-**Last Updated**: 10 NOV 2025
+**Last Updated**: 11 NOV 2025 (02:05 UTC)
 **Author**: Robert and Geospatial Claude Legion
+
+---
+
+## ✅ COMPLETED: Job Status Transition Bug Fix (11 NOV 2025)
+
+### QUEUED → FAILED Transition Now Allowed
+
+**Status**: ✅ **COMPLETE** - Jobs can now fail gracefully during task pickup phase
+
+**What Was Fixed**:
+- Added `QUEUED → FAILED` transition to `core/models/job.py`
+- Updated `JobStatus` enum docstring in `core/models/enums.py`
+- Documented early failure examples in code comments
+
+**Problem Solved**:
+- Jobs were stuck in QUEUED when task pickup failed
+- Infinite retry loops from Service Bus
+- Error: "Invalid status transition: JobStatus.QUEUED → JobStatus.FAILED"
+- CoreMachine could not mark jobs as failed before PROCESSING state
+
+**Implementation** (commit 7273bb5):
+```python
+# core/models/job.py lines 127-130
+# Allow early failure before processing starts (11 NOV 2025)
+if current == JobStatus.QUEUED and new_status == JobStatus.FAILED:
+    return True
+```
+
+**Files Modified**:
+- `core/models/job.py` - Added QUEUED → FAILED transition (lines 127-130)
+- `core/models/enums.py` - Updated JobStatus docstring with early failure path
+
+**Next Steps** (Post-Deployment):
+1. ✅ Committed to git (commit 7273bb5)
+2. ⏳ Push to origin/dev
+3. ⏳ Deploy to Azure Functions
+4. ⏳ Test graceful failure handling
+5. ⏳ Optional: Purge Service Bus queues if old problematic messages exist
+
+---
+
+## ✅ COMPLETED: TiTiler URL Generation Fix (10 NOV 2025)
+
+**Status**: ✅ **COMPLETE** - Correct `/cog/` URLs now generated for single COG workflows
+
+### What Was Fixed
+
+**Problem**: TiTiler URLs were using wrong STAC API format (`/collections/.../items/.../map.html`) which doesn't exist in TiTiler deployment. These URLs returned 404 errors.
+
+**Root Cause**: Misunderstanding of TiTiler architecture - it's a Direct COG Access server, not a STAC API server.
+
+**Solution**: Created unified URL generation method with three modes:
+1. ✅ **`mode="cog"`** - Single COG via `/vsiaz/` (IMPLEMENTED & TESTED)
+2. ⏳ **`mode="mosaicjson"`** - MosaicJSON collections (NEXT - HIGH PRIORITY)
+3. ⏳ **`mode="pgstac"`** - PgSTAC search results (FUTURE)
+
+### Implementation Summary
+
+**Files Modified**:
+- `config.py` - Added `generate_titiler_urls_unified()` method (lines 1049-1196)
+- `jobs/process_raster.py` - Use unified method for Single COG URLs (lines 644-664)
+- `test_titiler_urls.py` - Local URL generation test script (NEW)
+
+**Correct URL Format** (verified working):
+```
+https://rmhtitiler-.../cog/WebMercatorQuad/map.html?url=%2Fvsiaz%2Fsilver-cogs%2F{blob_path}
+```
+
+**Test Results**:
+- ✅ Job completed in 14 seconds
+- ✅ COG created: `silver-cogs/nam_test_unified_v2/namangan14aug2019_R2C2cog_cog_analysis.tif`
+- ✅ STAC inserted: `system-rasters` collection
+- ✅ TiTiler URLs generated correctly
+- ✅ **Browser tested**: Interactive map loads with tiles visible!
+
+### Next Steps
+
+**High Priority**: Implement MosaicJSON URL generation for `process_raster_collection` workflow
+- Verify URL pattern: `/mosaicjson/WebMercatorQuad/map.html?url=/vsiaz/{container}/{mosaic}.json`
+- Update `process_raster_collection.py` and `process_large_raster.py`
+- Test with existing MosaicJSON files in `silver-tiles` container
 
 ---
 

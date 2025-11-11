@@ -68,13 +68,13 @@ Endpoints:
     POST /api/platform/submit - Submit Platform API request
     GET  /api/platform/status/{request_id} - Get Platform request status
 
-    STAC API (NEW 11 NOV 2025):
-    GET  /api/stac - STAC landing page
-    GET  /api/stac/conformance - STAC conformance classes
-    GET  /api/stac/collections - STAC collections list
-    GET  /api/stac/collections/{collection_id} - STAC collection detail
-    GET  /api/stac/collections/{collection_id}/items - STAC items (paginated)
-    GET  /api/stac/collections/{collection_id}/items/{item_id} - STAC item detail
+    STAC API v1.0.0 (NEW 11 NOV 2025):
+    GET  /api/stac_api - STAC landing page
+    GET  /api/stac_api/conformance - STAC conformance classes
+    GET  /api/stac_api/collections - STAC collections list
+    GET  /api/stac_api/collections/{collection_id} - STAC collection detail
+    GET  /api/stac_api/collections/{collection_id}/items - STAC items (paginated)
+    GET  /api/stac_api/collections/{collection_id}/items/{item_id} - STAC item detail
 
     Database Queries (DEV/TEST):
     GET  /api/db/jobs?status=failed&limit=10 - Query jobs
@@ -1447,12 +1447,12 @@ def ogc_features_feature(req: func.HttpRequest) -> func.HttpResponse:
 #   - All endpoints return STAC-compliant JSON with proper links
 #
 # Available Endpoints:
-#   GET  /api/stac                                      - Landing page (catalog root)
-#   GET  /api/stac/conformance                          - Conformance classes
-#   GET  /api/stac/collections                          - Collections list
-#   GET  /api/stac/collections/{collection_id}          - Collection detail
-#   GET  /api/stac/collections/{collection_id}/items    - Items list (paginated)
-#   GET  /api/stac/collections/{collection_id}/items/{item_id} - Item detail
+#   GET  /api/stac_api                                      - Landing page (catalog root)
+#   GET  /api/stac_api/conformance                          - Conformance classes
+#   GET  /api/stac_api/collections                          - Collections list
+#   GET  /api/stac_api/collections/{collection_id}          - Collection detail
+#   GET  /api/stac_api/collections/{collection_id}/items    - Items list (paginated)
+#   GET  /api/stac_api/collections/{collection_id}/items/{item_id} - Item detail
 #
 # Query Parameters:
 #   ?limit=N        - Max items per page (default: 10, max: 1000)
@@ -1469,39 +1469,39 @@ _stac_items = _stac_triggers[4]['handler']
 _stac_item = _stac_triggers[5]['handler']
 
 
-@app.route(route="stac", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
-def stac_landing(req: func.HttpRequest) -> func.HttpResponse:
-    """STAC API landing page: GET /api/stac"""
+@app.route(route="stac_api", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def stac_api_v1_landing(req: func.HttpRequest) -> func.HttpResponse:
+    """STAC API v1.0.0 landing page: GET /api/stac_api"""
     return _stac_landing(req)
 
 
-@app.route(route="stac/conformance", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
-def stac_conformance(req: func.HttpRequest) -> func.HttpResponse:
-    """STAC API conformance: GET /api/stac/conformance"""
+@app.route(route="stac_api/conformance", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def stac_api_v1_conformance(req: func.HttpRequest) -> func.HttpResponse:
+    """STAC API v1.0.0 conformance: GET /api/stac_api/conformance"""
     return _stac_conformance(req)
 
 
-@app.route(route="stac/collections", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
-def stac_collections(req: func.HttpRequest) -> func.HttpResponse:
-    """STAC API collections list: GET /api/stac/collections"""
+@app.route(route="stac_api/collections", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def stac_api_v1_collections(req: func.HttpRequest) -> func.HttpResponse:
+    """STAC API v1.0.0 collections list: GET /api/stac_api/collections"""
     return _stac_collections(req)
 
 
-@app.route(route="stac/collections/{collection_id}", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
-def stac_collection(req: func.HttpRequest) -> func.HttpResponse:
-    """STAC API collection detail: GET /api/stac/collections/{collection_id}"""
+@app.route(route="stac_api/collections/{collection_id}", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def stac_api_v1_collection(req: func.HttpRequest) -> func.HttpResponse:
+    """STAC API v1.0.0 collection detail: GET /api/stac_api/collections/{collection_id}"""
     return _stac_collection(req)
 
 
-@app.route(route="stac/collections/{collection_id}/items", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
-def stac_items(req: func.HttpRequest) -> func.HttpResponse:
-    """STAC API items list: GET /api/stac/collections/{collection_id}/items"""
+@app.route(route="stac_api/collections/{collection_id}/items", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def stac_api_v1_items(req: func.HttpRequest) -> func.HttpResponse:
+    """STAC API v1.0.0 items list: GET /api/stac_api/collections/{collection_id}/items"""
     return _stac_items(req)
 
 
-@app.route(route="stac/collections/{collection_id}/items/{item_id}", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
-def stac_item(req: func.HttpRequest) -> func.HttpResponse:
-    """STAC API item detail: GET /api/stac/collections/{collection_id}/items/{item_id}"""
+@app.route(route="stac_api/collections/{collection_id}/items/{item_id}", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def stac_api_v1_item(req: func.HttpRequest) -> func.HttpResponse:
+    """STAC API v1.0.0 item detail: GET /api/stac_api/collections/{collection_id}/items/{item_id}"""
     return _stac_item(req)
 
 

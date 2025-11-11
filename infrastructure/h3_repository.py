@@ -375,7 +375,9 @@ class H3Repository(PostgreSQLRepository):
         filter_name: str,
         resolution: int,
         h3_indices: List[int],
-        spatial_filter_sql: Optional[str] = None
+        source_grid_id: str,
+        source_job_id: Optional[str] = None,
+        description: Optional[str] = None
     ) -> bool:
         """
         Insert to h3.reference_filters table.
@@ -390,13 +392,19 @@ class H3Repository(PostgreSQLRepository):
             Unique filter identifier (e.g., 'land_res2')
 
         resolution : int
-            Reference resolution level (0-4, typically 2)
+            Reference resolution level (0-15, typically 2 for bootstrap)
 
         h3_indices : List[int]
             List of parent H3 indices to store
 
-        spatial_filter_sql : Optional[str]
-            SQL query used to generate filter (for reproducibility)
+        source_grid_id : str
+            Source grid_id from h3.grids (e.g., 'land_res2')
+
+        source_job_id : Optional[str]
+            CoreMachine job ID that created this filter
+
+        description : Optional[str]
+            Human-readable description of filter
 
         Returns:
         -------
@@ -407,14 +415,19 @@ class H3Repository(PostgreSQLRepository):
         -------
         >>> land_cells = [585961714876129279, 585961714876129280, ...]
         >>> inserted = repo.insert_reference_filter(
-        ...     'land_res2', resolution=2, h3_indices=land_cells
+        ...     filter_name='land_res2',
+        ...     resolution=2,
+        ...     h3_indices=land_cells,
+        ...     source_grid_id='land_res2',
+        ...     source_job_id='bootstrap_job_123'
         ... )
         """
         query = sql.SQL("""
             INSERT INTO {schema}.{table}
-                (filter_name, resolution, h3_indices_array, cell_count, spatial_filter_sql)
+                (filter_name, description, h3_indices, resolution, cell_count,
+                 source_grid_id, source_job_id)
             VALUES
-                (%s, %s, %s, %s, %s)
+                (%s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (filter_name) DO NOTHING
         """).format(
             schema=sql.Identifier('h3'),
@@ -427,7 +440,8 @@ class H3Repository(PostgreSQLRepository):
             with conn.cursor() as cur:
                 cur.execute(
                     query,
-                    (filter_name, resolution, h3_indices, cell_count, spatial_filter_sql)
+                    (filter_name, description, h3_indices, resolution, cell_count,
+                     source_grid_id, source_job_id)
                 )
                 rowcount = cur.rowcount
                 conn.commit()
@@ -445,7 +459,7 @@ class H3Repository(PostgreSQLRepository):
 
     def get_reference_filter(self, filter_name: str) -> Optional[List[int]]:
         """
-        Load h3_indices_array from h3.reference_filters.
+        Load h3_indices from h3.reference_filters.
 
         Parameters:
         ----------
@@ -466,7 +480,7 @@ class H3Repository(PostgreSQLRepository):
         ...         children = h3.cell_to_children(parent_id, target_res)
         """
         query = sql.SQL("""
-            SELECT h3_indices_array, cell_count
+            SELECT h3_indices, cell_count
             FROM {schema}.{table}
             WHERE filter_name = %s
         """).format(
@@ -483,7 +497,7 @@ class H3Repository(PostgreSQLRepository):
             logger.warning(f"⚠️ Reference filter not found: {filter_name}")
             return None
 
-        h3_indices = result['h3_indices_array']
+        h3_indices = result['h3_indices']
         cell_count = result['cell_count']
 
         logger.info(f"📊 Loaded reference filter: {filter_name} ({cell_count:,} cells)")
@@ -493,11 +507,11 @@ class H3Repository(PostgreSQLRepository):
         self,
         grid_id: str,
         resolution: int,
-        cell_count: int,
         status: str,
-        job_id: Optional[str] = None,
-        parent_grid_id: Optional[str] = None,
-        bbox: Optional[List[float]] = None
+        cell_count: int,
+        land_cell_count: Optional[int] = None,
+        source_job_id: Optional[str] = None,
+        parent_grid_id: Optional[str] = None
     ) -> None:
         """
         Update h3.grid_metadata for bootstrap tracking.
@@ -513,48 +527,45 @@ class H3Repository(PostgreSQLRepository):
         resolution : int
             H3 resolution level (2-7)
 
-        cell_count : int
-            Number of cells in this grid
-
         status : str
-            Generation status ('complete', 'in_progress', 'failed')
+            Bootstrap status ('pending', 'processing', 'completed', 'failed')
 
-        job_id : Optional[str]
+        cell_count : int
+            Total number of cells in this grid
+
+        land_cell_count : Optional[int]
+            Number of cells with is_land=true
+
+        source_job_id : Optional[str]
             CoreMachine job ID that generated this grid
 
         parent_grid_id : Optional[str]
-            Parent grid ID (e.g., 'land_res5' for 'land_res6')
-
-        bbox : Optional[List[float]]
-            Bounding box [minx, miny, maxx, maxy]
+            Parent grid ID (e.g., 'land_res2' for 'land_res3')
 
         Example:
         -------
         >>> repo.update_grid_metadata(
-        ...     'land_res6', resolution=6, cell_count=6835647,
-        ...     status='complete', job_id='abc123'
+        ...     grid_id='land_res2',
+        ...     resolution=2,
+        ...     status='completed',
+        ...     cell_count=5882,
+        ...     land_cell_count=2847,
+        ...     source_job_id='bootstrap_job_123'
         ... )
         """
-        # Convert bbox list to WKT POLYGON if provided
-        bbox_wkt = None
-        if bbox and len(bbox) == 4:
-            minx, miny, maxx, maxy = bbox
-            bbox_wkt = (
-                f"POLYGON(({minx} {miny}, {maxx} {miny}, "
-                f"{maxx} {maxy}, {minx} {maxy}, {minx} {miny}))"
-            )
-
         query = sql.SQL("""
             INSERT INTO {schema}.{table}
-                (grid_id, resolution, parent_grid_id, cell_count, bbox,
-                 generation_status, generation_job_id, updated_at)
+                (grid_id, resolution, status, cell_count, land_cell_count,
+                 source_job_id, parent_grid_id, updated_at)
             VALUES
-                (%s, %s, %s, %s, ST_GeomFromText(%s, 4326), %s, %s, NOW())
+                (%s, %s, %s, %s, %s, %s, %s, NOW())
             ON CONFLICT (grid_id) DO UPDATE SET
+                resolution = EXCLUDED.resolution,
+                status = EXCLUDED.status,
                 cell_count = EXCLUDED.cell_count,
-                bbox = EXCLUDED.bbox,
-                generation_status = EXCLUDED.generation_status,
-                generation_job_id = EXCLUDED.generation_job_id,
+                land_cell_count = EXCLUDED.land_cell_count,
+                source_job_id = EXCLUDED.source_job_id,
+                parent_grid_id = EXCLUDED.parent_grid_id,
                 updated_at = NOW()
         """).format(
             schema=sql.Identifier('h3'),
@@ -565,14 +576,14 @@ class H3Repository(PostgreSQLRepository):
             with conn.cursor() as cur:
                 cur.execute(
                     query,
-                    (grid_id, resolution, parent_grid_id, cell_count,
-                     bbox_wkt, status, job_id)
+                    (grid_id, resolution, status, cell_count, land_cell_count,
+                     source_job_id, parent_grid_id)
                 )
                 conn.commit()
 
         logger.info(
             f"✅ Updated grid metadata: {grid_id} "
-            f"(resolution={resolution}, cells={cell_count:,}, status={status})"
+            f"(resolution={resolution}, cells={cell_count:,}, land={land_cell_count}, status={status})"
         )
 
     def get_grid_metadata(self, grid_id: str) -> Optional[Dict[str, Any]]:

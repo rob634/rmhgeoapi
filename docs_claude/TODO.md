@@ -2336,6 +2336,16 @@ async function loadH3Grid(grid_id) {
 - [ ] Test generate_h3_level4 (land grid → PostGIS)
 
 **Future Enhancements** (Backlog):
+- [ ] **Service Bus Dead Letter Queue Purge Function** (11 NOV 2025)
+  - Create HTTP-triggered Azure Function to purge dead letter messages on demand
+  - Runs inside Azure network (bypasses corporate firewall restrictions)
+  - Endpoint: `POST /api/admin/servicebus/purge?queue={queue_name}&confirm=yes`
+  - Returns count of purged messages
+  - **Use Case**: Currently requires Azure Portal (corporate network blocks SDK access)
+  - **Status**: 162 dead letter messages identified (7 jobs, 155 tasks from 2 NOV schema redeploy)
+  - **Files**: Create `triggers/admin/servicebus_purge.py` with ServiceBusClient
+  - **Estimated Time**: 30 minutes
+
 - [ ] Install PostgreSQL H3 extension for native H3 functions
 - [ ] Add H3 neighbor queries (k-ring, hex-ring)
 - [ ] Add administrative attributes from Overture (country, state)

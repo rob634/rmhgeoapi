@@ -205,7 +205,7 @@ class AdminDbDiagnosticsTrigger:
                     table_stats_query = f"""
                         SELECT
                             schemaname,
-                            tablename,
+                            relname as tablename,
                             n_tup_ins as inserts,
                             n_tup_upd as updates,
                             n_tup_del as deletes,
@@ -213,7 +213,7 @@ class AdminDbDiagnosticsTrigger:
                             n_dead_tup as dead_rows
                         FROM pg_stat_user_tables
                         WHERE schemaname = %s
-                        ORDER BY tablename
+                        ORDER BY relname
                     """
                     cursor.execute(table_stats_query, (self.config.app_schema,))
                     table_rows = cursor.fetchall()
@@ -234,8 +234,8 @@ class AdminDbDiagnosticsTrigger:
                     index_stats_query = f"""
                         SELECT
                             schemaname,
-                            tablename,
-                            indexname,
+                            relname as tablename,
+                            indexrelname as indexname,
                             idx_scan as scans,
                             idx_tup_read as tuples_read,
                             idx_tup_fetch as tuples_fetched

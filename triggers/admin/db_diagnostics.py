@@ -126,6 +126,10 @@ class AdminDbDiagnosticsTrigger:
             else:
                 path = ''
 
+            # Strip query string if present
+            if '?' in path:
+                path = path.split('?')[0].strip('/')
+
             path_parts = path.split('/') if path else []
 
             logger.info(f"📥 Admin DB Diagnostics request: url={url}, path={path}, parts={path_parts}, method={req.method}")

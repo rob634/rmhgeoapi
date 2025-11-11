@@ -195,16 +195,13 @@ from triggers.submit_job import submit_job_trigger
 from triggers.get_job_status import get_job_status_trigger
 from triggers.poison_monitor import poison_monitor_trigger
 from triggers.schema_pydantic_deploy import pydantic_deploy_trigger
+# ⚠️ LEGACY IMPORTS - DEPRECATED (10 NOV 2025)
+# These imports are kept temporarily for backward compatibility
+# All functionality has been migrated to triggers/admin/
 from triggers.db_query import (
-    jobs_query_trigger,
-    tasks_query_trigger,
-    api_requests_query_trigger,
-    orchestration_jobs_query_trigger,
-    db_stats_trigger,
-    enum_diagnostic_trigger,
-    schema_nuke_trigger,
-    function_test_trigger
+    schema_nuke_trigger  # Still used temporarily by db_maintenance.py
 )
+
 from triggers.analyze_container import analyze_container_trigger
 from triggers.stac_setup import stac_setup_trigger
 from triggers.stac_collections import stac_collections_trigger
@@ -219,12 +216,14 @@ from stac_api import get_stac_triggers
 from triggers.ingest_vector import ingest_vector_trigger
 from triggers.test_raster_create import test_raster_create_trigger
 
-# Admin API triggers (04 NOV 2025) - Consolidated under /api/admin/*
+# Admin API triggers (10 NOV 2025) - Consolidated under /api/admin/*
 from triggers.admin.db_schemas import admin_db_schemas_trigger
 from triggers.admin.db_tables import admin_db_tables_trigger
 from triggers.admin.db_queries import admin_db_queries_trigger
 from triggers.admin.db_health import admin_db_health_trigger
 from triggers.admin.db_maintenance import admin_db_maintenance_trigger
+from triggers.admin.db_data import admin_db_data_trigger
+from triggers.admin.db_diagnostics import admin_db_diagnostics_trigger
 from triggers.admin.servicebus import servicebus_admin_trigger
 
 # Platform Service Layer triggers (25 OCT 2025)
@@ -497,234 +496,96 @@ def get_job_status(req: func.HttpRequest) -> func.HttpResponse:
 
 
 # Database Query Endpoints - Phase 2 Database Monitoring
-@app.route(route="db/jobs", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
-def query_jobs(req: func.HttpRequest) -> func.HttpResponse:
-    """Query jobs with filtering: GET /api/db/jobs?limit=10&status=processing&hours=24"""
-    return jobs_query_trigger.handle_request(req)
+@app.route(route="admin/db/jobs", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def admin_query_jobs(req: func.HttpRequest) -> func.HttpResponse:
+    """Query jobs with filtering: GET /api/admin/db/jobs?limit=10&status=processing&hours=24"""
+    return admin_db_data_trigger.handle_request(req)
 
 
-@app.route(route="db/jobs/{job_id}", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS) 
-def query_job_by_id(req: func.HttpRequest) -> func.HttpResponse:
-    """Get specific job by ID: GET /api/db/jobs/{job_id}"""
-    return jobs_query_trigger.handle_request(req)
+@app.route(route="admin/db/jobs/{job_id}", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def admin_query_job_by_id(req: func.HttpRequest) -> func.HttpResponse:
+    """Get specific job by ID: GET /api/admin/db/jobs/{job_id}"""
+    return admin_db_data_trigger.handle_request(req)
 
 
-@app.route(route="db/tasks", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
-def query_tasks(req: func.HttpRequest) -> func.HttpResponse:
-    """Query tasks with filtering: GET /api/db/tasks?status=failed&limit=20"""
-    return tasks_query_trigger.handle_request(req)
+@app.route(route="admin/db/tasks", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def admin_query_tasks(req: func.HttpRequest) -> func.HttpResponse:
+    """Query tasks with filtering: GET /api/admin/db/tasks?status=failed&limit=20"""
+    return admin_db_data_trigger.handle_request(req)
 
 
-@app.route(route="db/tasks/{job_id}", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
-def query_tasks_for_job(req: func.HttpRequest) -> func.HttpResponse:
-    """Get all tasks for a job: GET /api/db/tasks/{job_id}"""
-    return tasks_query_trigger.handle_request(req)
+@app.route(route="admin/db/tasks/{job_id}", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def admin_query_tasks_for_job(req: func.HttpRequest) -> func.HttpResponse:
+    """Get all tasks for a job: GET /api/admin/db/tasks/{job_id}"""
+    return admin_db_data_trigger.handle_request(req)
 
 
-# Platform Layer Query Endpoints (29 OCT 2025)
-@app.route(route="db/api_requests", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
-def query_api_requests(req: func.HttpRequest) -> func.HttpResponse:
-    """Query API requests with filtering: GET /api/db/api_requests?limit=10&status=processing"""
-    return api_requests_query_trigger.handle_request(req)
+# Platform Layer Query Endpoints (29 OCT 2025 - Migrated to Admin API 10 NOV 2025)
+@app.route(route="admin/db/platform/requests", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def admin_query_api_requests(req: func.HttpRequest) -> func.HttpResponse:
+    """Query API requests with filtering: GET /api/admin/db/platform/requests?limit=10&status=processing"""
+    return admin_db_data_trigger.handle_request(req)
 
 
-@app.route(route="db/api_requests/{request_id}", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
-def query_api_request_by_id(req: func.HttpRequest) -> func.HttpResponse:
-    """Get specific API request by ID: GET /api/db/api_requests/{request_id}"""
-    return api_requests_query_trigger.handle_request(req)
+@app.route(route="admin/db/platform/requests/{request_id}", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def admin_query_api_request_by_id(req: func.HttpRequest) -> func.HttpResponse:
+    """Get specific API request by ID: GET /api/admin/db/platform/requests/{request_id}"""
+    return admin_db_data_trigger.handle_request(req)
 
 
-@app.route(route="db/orchestration_jobs", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
-def query_orchestration_jobs(req: func.HttpRequest) -> func.HttpResponse:
-    """Query orchestration jobs with filtering: GET /api/db/orchestration_jobs?request_id={request_id}"""
-    return orchestration_jobs_query_trigger.handle_request(req)
+@app.route(route="admin/db/platform/orchestration", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def admin_query_orchestration_jobs(req: func.HttpRequest) -> func.HttpResponse:
+    """Query orchestration jobs with filtering: GET /api/admin/db/platform/orchestration?request_id={request_id}"""
+    return admin_db_data_trigger.handle_request(req)
 
 
-@app.route(route="db/orchestration_jobs/{request_id}", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
-def query_orchestration_jobs_for_request(req: func.HttpRequest) -> func.HttpResponse:
-    """Get orchestration jobs for specific request: GET /api/db/orchestration_jobs/{request_id}"""
-    return orchestration_jobs_query_trigger.handle_request(req)
+@app.route(route="admin/db/platform/orchestration/{request_id}", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def admin_query_orchestration_jobs_for_request(req: func.HttpRequest) -> func.HttpResponse:
+    """Get orchestration jobs for specific request: GET /api/admin/db/platform/orchestration/{request_id}"""
+    return admin_db_data_trigger.handle_request(req)
 
 
-@app.route(route="db/stats", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
-def database_stats(req: func.HttpRequest) -> func.HttpResponse:
-    """Database statistics and health metrics: GET /api/db/stats"""
-    return db_stats_trigger.handle_request(req)
+@app.route(route="admin/db/stats", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def admin_database_stats(req: func.HttpRequest) -> func.HttpResponse:
+    """Database statistics and health metrics: GET /api/admin/db/stats"""
+    return admin_db_diagnostics_trigger.handle_request(req)
 
 
-@app.route(route="db/enums/diagnostic", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
-def diagnose_enums(req: func.HttpRequest) -> func.HttpResponse:
-    """Diagnose PostgreSQL enum types: GET /api/db/enums/diagnostic"""
-    return enum_diagnostic_trigger.handle_request(req)
+@app.route(route="admin/db/diagnostics/enums", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def admin_diagnose_enums(req: func.HttpRequest) -> func.HttpResponse:
+    """Diagnose PostgreSQL enum types: GET /api/admin/db/diagnostics/enums"""
+    return admin_db_diagnostics_trigger.handle_request(req)
 
 
-# 🚨 NUCLEAR RED BUTTON - DEVELOPMENT ONLY
+@app.route(route="admin/db/diagnostics/functions", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def admin_test_functions(req: func.HttpRequest) -> func.HttpResponse:
+    """Test PostgreSQL functions: GET /api/admin/db/diagnostics/functions"""
+    return admin_db_diagnostics_trigger.handle_request(req)
+
+
+@app.route(route="admin/db/diagnostics/all", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def admin_all_diagnostics(req: func.HttpRequest) -> func.HttpResponse:
+    """Get all diagnostics: GET /api/admin/db/diagnostics/all"""
+    return admin_db_diagnostics_trigger.handle_request(req)
+
+
+# 🚨 NUCLEAR RED BUTTON - DEVELOPMENT ONLY (⚠️ DEPRECATED - Use /api/admin/db/maintenance/nuke)
 @app.route(route="db/schema/nuke", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
 def nuclear_schema_reset(req: func.HttpRequest) -> func.HttpResponse:
-    """🚨 NUCLEAR: Complete schema wipe and rebuild: POST /api/db/schema/nuke?confirm=yes"""
-    return schema_nuke_trigger.handle_request(req)
+    """⚠️ DEPRECATED: Use /api/admin/db/maintenance/nuke instead. POST /api/db/schema/nuke?confirm=yes"""
+    return admin_db_maintenance_trigger.handle_request(req)
 
 
-# 🔄 CONSOLIDATED REBUILD - DEVELOPMENT ONLY
-@app.route(route="db/schema/redeploy", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)  
+# 🔄 CONSOLIDATED REBUILD - DEVELOPMENT ONLY (⚠️ DEPRECATED - Use /api/admin/db/maintenance/redeploy)
+@app.route(route="db/schema/redeploy", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
 def redeploy_schema(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    🔄 REDEPLOY: Clean schema reset for development.
-    POST /api/db/schema/redeploy?confirm=yes
-    
-    Single unified endpoint that:
-    1. Drops ALL objects using Python discovery (no DO blocks)
-    2. Deploys fresh schema from Pydantic models
-    3. Uses psycopg.sql composition throughout
-    
-    Perfect for development deployments and testing.
-    """
-    # Imports moved to top of file
-    
-    # Check for confirmation
-    confirm = req.params.get('confirm')
-    if confirm != 'yes':
-        return func.HttpResponse(
-            body=json.dumps({
-                "error": "Schema redeploy requires explicit confirmation",
-                "usage": "POST /api/db/schema/redeploy?confirm=yes",
-                "warning": "This will DESTROY ALL DATA and rebuild the schema",
-                "implementation": "Clean Python-based discovery with psycopg.sql composition"
-            }),
-            status_code=400,
-            headers={'Content-Type': 'application/json'}
-        )
-    
-    results = {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "operation": "schema_redeploy",
-        "steps": []
-    }
-    
-    # Step 1: Nuke the schema (clean Python implementation)
-    nuke_response = schema_nuke_trigger.handle_request(req)
-    nuke_data = json.loads(nuke_response.get_body())
-    results["steps"].append({
-        "step": "nuke_schema",
-        "status": nuke_data.get("status", "failed"),
-        "objects_dropped": nuke_data.get("total_objects_dropped", 0),
-        "details": nuke_data.get("operations", [])
-    })
-    
-    # Only proceed with deploy if nuke succeeded
-    if nuke_response.status_code == 200:
-        # Step 2: Deploy fresh schema
-        # Import moved to top of file
-        deploy_response = pydantic_deploy_trigger.handle_request(req)
-        deploy_data = json.loads(deploy_response.get_body())
-        results["steps"].append({
-            "step": "deploy_schema",
-            "status": deploy_data.get("status", "failed"),
-            "objects_created": deploy_data.get("statistics", {}),
-            "verification": deploy_data.get("verification", {})
-        })
-
-        # Step 3: Create System STAC collections (18 OCT 2025 - System STAC Layer 1)
-        import logging
-        logging.info("=" * 80)
-        logging.info("🚀 REACHED STEP 3 CODE BLOCK")
-        logging.info(f"🔍 Step 3 check: deploy_response.status_code = {deploy_response.status_code}")
-        logging.info(f"📋 Current results steps count: {len(results.get('steps', []))}")
-        logging.info("=" * 80)
-
-        if deploy_response.status_code == 200:
-            logging.info("📦 Step 3: Creating System STAC collections")
-            stac_collections_result = {"collections_created": [], "collections_failed": []}
-            try:
-                from infrastructure.stac import PgStacInfrastructure
-                logging.info("✅ PgStacInfrastructure imported")
-                stac = PgStacInfrastructure()
-                logging.info("✅ PgStacInfrastructure initialized")
-
-                # Create system-vectors collection (database-level idempotency)
-                logging.info("🔄 Creating system-vectors collection...")
-                result = stac.create_production_collection('system-vectors')
-                logging.info(f"✅ system-vectors result: {result}")
-
-                if result.get('success'):
-                    # Success - collection created or already existed
-                    if result.get('existed'):
-                        stac_collections_result["collections_created"].append('system-vectors (already exists)')
-                        logging.info("ℹ️ system-vectors already exists (idempotent)")
-                    else:
-                        stac_collections_result["collections_created"].append('system-vectors')
-                        logging.info("✅ system-vectors created")
-                else:
-                    # Real failure
-                    stac_collections_result["collections_failed"].append({
-                        "collection": "system-vectors",
-                        "error": result.get('error', 'Unknown error')
-                    })
-
-                # Create system-rasters collection (database-level idempotency)
-                logging.info("🔄 Creating system-rasters collection...")
-                result = stac.create_production_collection('system-rasters')
-                logging.info(f"✅ system-rasters result: {result}")
-
-                if result.get('success'):
-                    # Success - collection created or already existed
-                    if result.get('existed'):
-                        stac_collections_result["collections_created"].append('system-rasters (already exists)')
-                        logging.info("ℹ️ system-rasters already exists (idempotent)")
-                    else:
-                        stac_collections_result["collections_created"].append('system-rasters')
-                        logging.info("✅ system-rasters created")
-                else:
-                    # Real failure
-                    stac_collections_result["collections_failed"].append({
-                        "collection": "system-rasters",
-                        "error": result.get('error', 'Unknown error')
-                    })
-
-                stac_collections_result["status"] = "success" if len(stac_collections_result["collections_created"]) == 2 else "partial"
-                logging.info(f"📊 STAC collections result: {stac_collections_result}")
-
-            except Exception as e:
-                logging.error(f"❌ Step 3 exception: {e}")
-                import traceback
-                logging.error(f"Traceback: {traceback.format_exc()}")
-                stac_collections_result["status"] = "failed"
-                stac_collections_result["error"] = str(e)
-
-            logging.info(f"📝 Appending Step 3 to results: {stac_collections_result}")
-            results["steps"].append({
-                "step": "create_system_stac_collections",
-                "status": stac_collections_result.get("status", "failed"),
-                "collections_created": stac_collections_result.get("collections_created", []),
-                "collections_failed": stac_collections_result.get("collections_failed", [])
-            })
-            logging.info(f"✅ Step 3 appended. Total steps: {len(results['steps'])}")
-
-        # Overall status
-        overall_success = deploy_response.status_code == 200
-        results["overall_status"] = "success" if overall_success else "partial_failure"
-        results["message"] = "Schema redeployed successfully" if overall_success else "Nuke succeeded but deploy failed"
-
-        return func.HttpResponse(
-            body=json.dumps(results),
-            status_code=200 if overall_success else 500,
-            headers={'Content-Type': 'application/json'}
-        )
-    else:
-        results["overall_status"] = "failed"
-        results["message"] = "Schema nuke failed - deploy not attempted"
-        
-        return func.HttpResponse(
-            body=json.dumps(results),
-            status_code=500,
-            headers={'Content-Type': 'application/json'}
-        )
+    """⚠️ DEPRECATED: Use /api/admin/db/maintenance/redeploy instead. POST /api/db/schema/redeploy?confirm=yes"""
+    return admin_db_maintenance_trigger.handle_request(req)
 
 
-@app.route(route="db/functions/test", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
-def test_database_functions(req: func.HttpRequest) -> func.HttpResponse:
-    """Test PostgreSQL functions: GET /api/db/functions/test"""
-    return function_test_trigger.handle_request(req)
+# Note: Legacy inline redeploy code (150+ lines) has been removed (10 NOV 2025)
+# It has been migrated to triggers/admin/db_maintenance.py AdminDbMaintenanceTrigger._redeploy_schema()
+# The old /api/db/schema/redeploy route now redirects to admin_db_maintenance_trigger
 
 
 # ============================================================================

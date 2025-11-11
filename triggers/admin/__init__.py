@@ -38,24 +38,37 @@ Author: Robert and Geospatial Claude Legion
 Date: 04 NOV 2025
 """
 
-# Phase 1: Database Admin API
-from triggers.admin.db_schemas import AdminDbSchemasTrigger
-from triggers.admin.db_tables import AdminDbTablesTrigger
-from triggers.admin.db_queries import AdminDbQueriesTrigger
-from triggers.admin.db_health import AdminDbHealthTrigger
-from triggers.admin.db_maintenance import AdminDbMaintenanceTrigger
+# Phase 1: Database Admin API ✅ COMPLETE (including legacy migration - 10 NOV 2025)
+from triggers.admin.db_schemas import AdminDbSchemasTrigger, admin_db_schemas_trigger
+from triggers.admin.db_tables import AdminDbTablesTrigger, admin_db_tables_trigger
+from triggers.admin.db_queries import AdminDbQueriesTrigger, admin_db_queries_trigger
+from triggers.admin.db_health import AdminDbHealthTrigger, admin_db_health_trigger
+from triggers.admin.db_maintenance import AdminDbMaintenanceTrigger, admin_db_maintenance_trigger
+from triggers.admin.db_data import AdminDbDataTrigger, admin_db_data_trigger
+from triggers.admin.db_diagnostics import AdminDbDiagnosticsTrigger, admin_db_diagnostics_trigger
 
-# Phase 2: Service Bus Admin API
-from triggers.admin.servicebus import ServiceBusAdminTrigger
+# Phase 2: Service Bus Admin API ✅ COMPLETE
+from triggers.admin.servicebus import ServiceBusAdminTrigger, servicebus_admin_trigger
 
 # Export all admin triggers
 __all__ = [
-    # Phase 1: Database Admin
+    # Phase 1: Database Admin - Classes
     'AdminDbSchemasTrigger',
     'AdminDbTablesTrigger',
     'AdminDbQueriesTrigger',
     'AdminDbHealthTrigger',
     'AdminDbMaintenanceTrigger',
-    # Phase 2: Service Bus Admin
+    'AdminDbDataTrigger',
+    'AdminDbDiagnosticsTrigger',
+    # Phase 1: Database Admin - Instances
+    'admin_db_schemas_trigger',
+    'admin_db_tables_trigger',
+    'admin_db_queries_trigger',
+    'admin_db_health_trigger',
+    'admin_db_maintenance_trigger',
+    'admin_db_data_trigger',
+    'admin_db_diagnostics_trigger',
+    # Phase 2: Service Bus Admin - Class & Instance
     'ServiceBusAdminTrigger',
+    'servicebus_admin_trigger',
 ]

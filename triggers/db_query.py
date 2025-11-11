@@ -1,10 +1,36 @@
 # ============================================================================
-# CLAUDE CONTEXT - HTTP TRIGGER
+# ⚠️⚠️⚠️ DEPRECATED - DO NOT USE ⚠️⚠️⚠️
 # ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: HTTP Trigger - Database monitoring and debugging endpoints
+# This file is DEPRECATED as of 10 NOV 2025.
+# All functionality has been migrated to triggers/admin/
+#
+# Migration Map:
+# - JobsQueryTrigger → triggers/admin/db_data.py (AdminDbDataTrigger)
+# - TasksQueryTrigger → triggers/admin/db_data.py (AdminDbDataTrigger)
+# - ApiRequestsQueryTrigger → triggers/admin/db_data.py (AdminDbDataTrigger)
+# - OrchestrationJobsQueryTrigger → triggers/admin/db_data.py (AdminDbDataTrigger)
+# - DatabaseStatsQueryTrigger → triggers/admin/db_diagnostics.py (AdminDbDiagnosticsTrigger)
+# - EnumDiagnosticTrigger → triggers/admin/db_diagnostics.py (AdminDbDiagnosticsTrigger)
+# - FunctionTestQueryTrigger → triggers/admin/db_diagnostics.py (AdminDbDiagnosticsTrigger)
+# - SchemaNukeQueryTrigger → triggers/admin/db_maintenance.py (AdminDbMaintenanceTrigger)
+#
+# New Routes:
+# - /api/admin/db/jobs, /api/admin/db/tasks - Data queries
+# - /api/admin/db/platform/requests, /api/admin/db/platform/orchestration - Platform queries
+# - /api/admin/db/stats, /api/admin/db/diagnostics/* - Diagnostics
+# - /api/admin/db/maintenance/nuke - Schema operations
+#
+# This file will be REMOVED in a future release.
+# Only schema_nuke_trigger is kept temporarily for backward compatibility.
+# ============================================================================
+#
+# ============================================================================
+# CLAUDE CONTEXT - HTTP TRIGGER (LEGACY)
+# ============================================================================
+# EPOCH: 4 - DEPRECATED ⚠️
+# STATUS: HTTP Trigger - Database monitoring and debugging endpoints (LEGACY)
 # PURPOSE: Database query HTTP triggers providing direct PostgreSQL access for monitoring and debugging
-# LAST_REVIEWED: 29 OCT 2025
+# LAST_REVIEWED: 10 NOV 2025 (Marked for deprecation)
 # EXPORTS: DatabaseQueryTrigger, JobsQueryTrigger, TasksQueryTrigger, ApiRequestsQueryTrigger, OrchestrationJobsQueryTrigger, DatabaseStatsQueryTrigger, EnumDiagnosticTrigger, SchemaNukeQueryTrigger
 # INTERFACES: BaseHttpTrigger (inherited from http_base)
 # PYDANTIC_MODELS: None directly - uses dict for query results
@@ -13,7 +39,7 @@
 # SCOPE: HTTP endpoints for database queries, statistics, diagnostics, schema management (DEV/TEST only - not for production)
 # VALIDATION: Query parameter validation, job ID validation, SQL injection prevention via psycopg.sql composition
 # PATTERNS: Template Method (base class), Query Object pattern, Factory (multiple trigger types)
-# ENTRY_POINTS: GET /api/db/jobs, GET /api/db/tasks, GET /api/db/stats, POST /api/db/schema/nuke
+# ENTRY_POINTS: GET /api/db/jobs, GET /api/db/tasks, GET /api/db/stats, POST /api/db/schema/nuke (ALL DEPRECATED)
 # INDEX: DatabaseQueryTrigger:60, JobsQueryTrigger:194, TasksQueryTrigger:280, ApiRequestsQueryTrigger:458, OrchestrationJobsQueryTrigger:609, DatabaseStatsQueryTrigger:747, SchemaNukeQueryTrigger:943
 # ============================================================================
 

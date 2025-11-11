@@ -111,9 +111,24 @@ class AdminDbMaintenanceTrigger:
         """
         try:
             # Determine operation from path
-            path = req.url.split('/api/db/maintenance/')[-1].strip('/')
+            # Handle both new routes (/api/db/maintenance/*) and deprecated routes (/api/db/schema/*)
+            url = req.url
 
-            logger.info(f"📥 Admin DB Maintenance request: {path}")
+            # Extract operation name
+            if '/db/maintenance/' in url:
+                path = url.split('/db/maintenance/')[-1].split('?')[0].strip('/')
+            elif 'db/maintenance/' in url:
+                path = url.split('db/maintenance/')[-1].split('?')[0].strip('/')
+            elif '/db/schema/' in url:
+                # Deprecated route format
+                path = url.split('/db/schema/')[-1].split('?')[0].strip('/')
+            elif 'db/schema/' in url:
+                # Deprecated route format
+                path = url.split('db/schema/')[-1].split('?')[0].strip('/')
+            else:
+                path = ''
+
+            logger.info(f"📥 Admin DB Maintenance request: url={url}, operation={path}")
 
             # Route to appropriate handler
             if path == 'nuke':
@@ -124,7 +139,7 @@ class AdminDbMaintenanceTrigger:
                 return self._cleanup_old_records(req)
             else:
                 return func.HttpResponse(
-                    body=json.dumps({'error': f'Unknown operation: {path}'}),
+                    body=json.dumps({'error': f'Unknown operation: {path}', 'url': url}),
                     status_code=404,
                     mimetype='application/json'
                 )
@@ -235,19 +250,129 @@ class AdminDbMaintenanceTrigger:
 
         logger.warning("🔄 REDEPLOY: Nuking and redeploying schema")
 
+        results = {
+            "operation": "schema_redeploy",
+            "steps": [],
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+
         try:
-            # The redeploy operation is currently handled in function_app.py
-            # We'll return a reference to use that endpoint for now
-            # TODO: Extract redeploy logic to a service module
+            # Step 1: Nuke existing schema (call internal nuke method)
+            logger.info("📥 Step 1: Nuking existing schema...")
+            nuke_response = self._nuke_schema(req)
+            nuke_data = json.loads(nuke_response.get_body().decode('utf-8'))
+
+            results["steps"].append({
+                "step": "nuke_schema",
+                "status": nuke_data.get("status", "failed"),
+                "objects_dropped": nuke_data.get("total_objects_dropped", 0),
+                "details": nuke_data.get("operations", [])[:5]  # Limit details to first 5
+            })
+
+            # Only proceed with deploy if nuke succeeded
+            if nuke_response.status_code != 200:
+                results["overall_status"] = "failed_at_nuke"
+                results["message"] = "Nuke operation failed"
+                return func.HttpResponse(
+                    body=json.dumps(results, indent=2),
+                    status_code=500,
+                    mimetype='application/json'
+                )
+
+            # Step 2: Deploy fresh schema
+            logger.info("📦 Step 2: Deploying fresh schema...")
+            from triggers.schema_pydantic_deploy import pydantic_deploy_trigger
+            deploy_response = pydantic_deploy_trigger.handle_request(req)
+            deploy_data = json.loads(deploy_response.get_body().decode('utf-8'))
+
+            results["steps"].append({
+                "step": "deploy_schema",
+                "status": deploy_data.get("status", "failed"),
+                "objects_created": deploy_data.get("statistics", {}),
+                "verification": deploy_data.get("verification", {})
+            })
+
+            if deploy_response.status_code != 200:
+                results["overall_status"] = "failed_at_deploy"
+                results["message"] = "Nuke succeeded but deploy failed"
+                return func.HttpResponse(
+                    body=json.dumps(results, indent=2),
+                    status_code=500,
+                    mimetype='application/json'
+                )
+
+            # Step 3: Create System STAC collections (18 OCT 2025 - System STAC Layer 1)
+            logger.info("🗺️ Step 3: Creating System STAC collections...")
+
+            stac_collections_result = {
+                "status": "pending",
+                "collections_created": [],
+                "collections_failed": []
+            }
+
+            try:
+                from triggers.stac_collections import stac_collections_trigger
+                from infrastructure.stac import get_system_stac_collections
+
+                system_collections = get_system_stac_collections()
+
+                for collection_data in system_collections:
+                    try:
+                        logger.info(f"📌 Creating STAC collection: {collection_data['id']}")
+
+                        # Create mock request with collection data as JSON body
+                        import io
+                        mock_request = func.HttpRequest(
+                            method='POST',
+                            url='/api/stac/create-collection',
+                            body=json.dumps(collection_data).encode('utf-8')
+                        )
+
+                        result_response = stac_collections_trigger.handle_request(mock_request)
+                        result = json.loads(result_response.get_body().decode('utf-8'))
+
+                        if result.get('success'):
+                            stac_collections_result["collections_created"].append({
+                                "id": collection_data['id'],
+                                "status": "created"
+                            })
+                        else:
+                            stac_collections_result["collections_failed"].append({
+                                "id": collection_data['id'],
+                                "error": result.get('error', 'Unknown error')
+                            })
+
+                    except Exception as col_e:
+                        logger.error(f"❌ Failed to create collection {collection_data['id']}: {col_e}")
+                        stac_collections_result["collections_failed"].append({
+                            "id": collection_data['id'],
+                            "error": str(col_e)
+                        })
+
+                stac_collections_result["status"] = "success" if len(stac_collections_result["collections_created"]) >= 1 else "partial"
+
+            except Exception as e:
+                logger.error(f"❌ Step 3 exception: {e}")
+                logger.error(traceback.format_exc())
+                stac_collections_result["status"] = "failed"
+                stac_collections_result["error"] = str(e)
+
+            results["steps"].append({
+                "step": "create_system_stac_collections",
+                "status": stac_collections_result.get("status", "failed"),
+                "collections_created": stac_collections_result.get("collections_created", []),
+                "collections_failed": stac_collections_result.get("collections_failed", [])
+            })
+
+            # Overall status
+            results["overall_status"] = "success"
+            results["message"] = "Schema redeployed successfully"
+
+            logger.info(f"✅ Schema redeploy complete: {len(results['steps'])} steps")
 
             return func.HttpResponse(
-                body=json.dumps({
-                    'message': 'Schema redeploy operation',
-                    'note': 'This endpoint is a placeholder - use existing /api/db/schema/redeploy for now',
-                    'migration_status': 'pending',
-                    'timestamp': datetime.now(timezone.utc).isoformat()
-                }),
-                status_code=501,  # Not Implemented
+                body=json.dumps(results, indent=2),
+                status_code=200,
                 mimetype='application/json'
             )
 

@@ -646,10 +646,44 @@ curl "https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/db/
 - `POST /api/platform/submit` - Submit platform request
 - `GET /api/platform/status/{request_id}` - Get status
 
-### 5. **Admin APIs** (Development/Operations)
-- Database: `/api/db/*` - Schema, tables, queries
-- Service Bus: `/api/servicebus/*` - Queue monitoring
-- Schema: `/api/db/schema/redeploy?confirm=yes` - Reset schema
+### 5. **Admin API** (Observability & Operations) - Third Layer
+
+**Architecture:** Admin API is **orthogonal** to the Platform/CoreMachine orchestration layers. It provides cross-layer inspection and maintenance capabilities.
+
+```
+┌─────────────────────────────────────────────┐
+│  CLIENT APPS → Platform API → CoreMachine  │  (Request flow - vertical)
+└──────────────┬──────────────────────────────┘
+               ↓
+         [PostgreSQL, Service Bus, Storage]
+               ↑
+    ═══════════════════════════════════════
+    Admin API (Horizontal inspection)
+    ═══════════════════════════════════════
+```
+
+**Purpose:** Read-only inspection + emergency maintenance across all system layers
+
+**Phase 1 - Database Admin:** ✅ Complete
+- Schema inspection: `/api/db/schemas`, `/api/db/tables/{schema}.{table}`
+- Query analysis: `/api/db/queries/running`, `/api/db/locks`, `/api/db/connections`
+- Health monitoring: `/api/db/health`, `/api/db/health/performance`
+- Maintenance: `/api/db/maintenance/nuke`, `/api/db/maintenance/cleanup`
+
+**Phase 2 - Service Bus Admin:** ✅ Complete
+- Queue monitoring: `/api/servicebus/queues`, `/api/servicebus/queues/{queue}`
+- Message inspection: `/api/servicebus/queues/{queue}/peek` (read-only)
+- Dead letters: `/api/servicebus/queues/{queue}/deadletter`
+- Emergency ops: `/api/servicebus/queues/{queue}/nuke?confirm=yes`
+
+**Phase 3-7 - Future:**
+- STAC Admin (pgstac inspection)
+- Storage Admin (blob containers)
+- Registry & Discovery (jobs/handlers metadata)
+- Traces & Analysis (Application Insights integration)
+- System-Wide Operations (cache, metrics)
+
+**Access:** Designed for AI agents, DevOps tools, monitoring dashboards (future APIM access control)
 
 ---
 

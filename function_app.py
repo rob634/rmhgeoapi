@@ -15,7 +15,7 @@
 # PATTERNS: Explicit Registration pattern (no decorators), Catalog pattern, Dependency Injection
 # ENTRY_POINTS: Azure Functions runtime calls app routes; main entry: /api/jobs/submit/{job_type}, /api/platform/submit
 # INDEX: Registration:170-200, HTTP routes:210-350, Queue processors:400-600, Database queries:278-332
-# LAST_UPDATED: 29 OCT 2025 - Added Platform database query endpoints
+# LAST_UPDATED: 11 NOV 2025 - Added STAC API v1.0.0 endpoints (6 routes)
 # ============================================================================
 
 """
@@ -67,6 +67,14 @@ Endpoints:
     Platform Layer:
     POST /api/platform/submit - Submit Platform API request
     GET  /api/platform/status/{request_id} - Get Platform request status
+
+    STAC API (NEW 11 NOV 2025):
+    GET  /api/stac - STAC landing page
+    GET  /api/stac/conformance - STAC conformance classes
+    GET  /api/stac/collections - STAC collections list
+    GET  /api/stac/collections/{collection_id} - STAC collection detail
+    GET  /api/stac/collections/{collection_id}/items - STAC items (paginated)
+    GET  /api/stac/collections/{collection_id}/items/{item_id} - STAC item detail
 
     Database Queries (DEV/TEST):
     GET  /api/db/jobs?status=failed&limit=10 - Query jobs
@@ -232,6 +240,9 @@ from triggers.trigger_platform_status import platform_request_status
 
 # OGC Features API - Standalone module (29 OCT 2025)
 from ogc_features import get_ogc_triggers
+
+# STAC API - Standalone module (11 NOV 2025)
+from stac_api import get_stac_triggers
 
 # ========================================================================
 # PHASE 2: EXPLICIT REGISTRATION PATTERN (Parallel with decorators)
@@ -1415,6 +1426,83 @@ def ogc_features_items(req: func.HttpRequest) -> func.HttpResponse:
 def ogc_features_feature(req: func.HttpRequest) -> func.HttpResponse:
     """OGC Features single feature: GET /api/features/collections/{collection_id}/items/{feature_id}"""
     return _ogc_feature(req)
+
+
+# ============================================================================
+# STAC API v1.0.0 ENDPOINTS (11 NOV 2025)
+# ============================================================================
+#
+# STAC (SpatioTemporal Asset Catalog) API for metadata search and discovery.
+# Fully compliant with STAC v1.0.0 specification.
+#
+# Standards Compliance:
+#   - STAC API Core: https://api.stacspec.org/v1.0.0/core
+#   - STAC API Collections: https://api.stacspec.org/v1.0.0/collections
+#   - STAC API Features: https://api.stacspec.org/v1.0.0/ogcapi-features
+#
+# Architecture:
+#   - Standalone stac_api/ module (zero dependencies on main app)
+#   - READ-ONLY: All writes handled by ETL pipeline
+#   - Uses infrastructure/stac.py for database operations
+#   - All endpoints return STAC-compliant JSON with proper links
+#
+# Available Endpoints:
+#   GET  /api/stac                                      - Landing page (catalog root)
+#   GET  /api/stac/conformance                          - Conformance classes
+#   GET  /api/stac/collections                          - Collections list
+#   GET  /api/stac/collections/{collection_id}          - Collection detail
+#   GET  /api/stac/collections/{collection_id}/items    - Items list (paginated)
+#   GET  /api/stac/collections/{collection_id}/items/{item_id} - Item detail
+#
+# Query Parameters:
+#   ?limit=N        - Max items per page (default: 10, max: 1000)
+#   ?offset=N       - Pagination offset (default: 0)
+#   ?bbox=minx,miny,maxx,maxy - Spatial filter (WGS84)
+
+# Get trigger configurations (contains handler references)
+_stac_triggers = get_stac_triggers()
+_stac_landing = _stac_triggers[0]['handler']
+_stac_conformance = _stac_triggers[1]['handler']
+_stac_collections = _stac_triggers[2]['handler']
+_stac_collection = _stac_triggers[3]['handler']
+_stac_items = _stac_triggers[4]['handler']
+_stac_item = _stac_triggers[5]['handler']
+
+
+@app.route(route="stac", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def stac_landing(req: func.HttpRequest) -> func.HttpResponse:
+    """STAC API landing page: GET /api/stac"""
+    return _stac_landing(req)
+
+
+@app.route(route="stac/conformance", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def stac_conformance(req: func.HttpRequest) -> func.HttpResponse:
+    """STAC API conformance: GET /api/stac/conformance"""
+    return _stac_conformance(req)
+
+
+@app.route(route="stac/collections", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def stac_collections(req: func.HttpRequest) -> func.HttpResponse:
+    """STAC API collections list: GET /api/stac/collections"""
+    return _stac_collections(req)
+
+
+@app.route(route="stac/collections/{collection_id}", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def stac_collection(req: func.HttpRequest) -> func.HttpResponse:
+    """STAC API collection detail: GET /api/stac/collections/{collection_id}"""
+    return _stac_collection(req)
+
+
+@app.route(route="stac/collections/{collection_id}/items", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def stac_items(req: func.HttpRequest) -> func.HttpResponse:
+    """STAC API items list: GET /api/stac/collections/{collection_id}/items"""
+    return _stac_items(req)
+
+
+@app.route(route="stac/collections/{collection_id}/items/{item_id}", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def stac_item(req: func.HttpRequest) -> func.HttpResponse:
+    """STAC API item detail: GET /api/stac/collections/{collection_id}/items/{item_id}"""
+    return _stac_item(req)
 
 
 @app.route(route="jobs/ingest_vector", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)

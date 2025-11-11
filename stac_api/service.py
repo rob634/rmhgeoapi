@@ -45,52 +45,32 @@ class STACAPIService:
                 {
                     "rel": "self",
                     "type": "application/json",
-                    "href": f"{base_url}/api/stac",
+                    "href": f"{base_url}/api/stac_api",
                     "title": "This catalog"
                 },
                 {
                     "rel": "root",
                     "type": "application/json",
-                    "href": f"{base_url}/api/stac",
+                    "href": f"{base_url}/api/stac_api",
                     "title": "Root catalog"
                 },
                 {
                     "rel": "conformance",
                     "type": "application/json",
-                    "href": f"{base_url}/api/stac/conformance",
+                    "href": f"{base_url}/api/stac_api/conformance",
                     "title": "STAC API conformance classes"
                 },
                 {
                     "rel": "data",
                     "type": "application/json",
-                    "href": f"{base_url}/api/stac/collections",
+                    "href": f"{base_url}/api/stac_api/collections",
                     "title": "Collections in this catalog"
-                },
-                {
-                    "rel": "search",
-                    "type": "application/geo+json",
-                    "href": f"{base_url}/api/stac/search",
-                    "method": "GET",
-                    "title": "STAC search endpoint (GET)"
-                },
-                {
-                    "rel": "search",
-                    "type": "application/geo+json",
-                    "href": f"{base_url}/api/stac/search",
-                    "method": "POST",
-                    "title": "STAC search endpoint (POST)"
                 },
                 {
                     "rel": "service-desc",
                     "type": "text/html",
                     "href": "https://stacspec.org/en/api/",
                     "title": "STAC API specification"
-                },
-                {
-                    "rel": "service-doc",
-                    "type": "text/html",
-                    "href": f"{base_url}/api/stac/collections/summary",
-                    "title": "Custom collections summary endpoint"
                 }
             ]
         }
@@ -133,13 +113,13 @@ class STACAPIService:
                 {
                     "rel": "self",
                     "type": "application/json",
-                    "href": f"{base_url}/api/stac/collections",
+                    "href": f"{base_url}/api/stac_api/collections",
                     "title": "This document"
                 },
                 {
                     "rel": "root",
                     "type": "application/json",
-                    "href": f"{base_url}/api/stac",
+                    "href": f"{base_url}/api/stac_api",
                     "title": "Root catalog"
                 }
             ]
@@ -151,25 +131,25 @@ class STACAPIService:
                     {
                         "rel": "self",
                         "type": "application/json",
-                        "href": f"{base_url}/api/stac/collections/{coll_id}",
+                        "href": f"{base_url}/api/stac_api/collections/{coll_id}",
                         "title": f"Collection {coll_id}"
                     },
                     {
                         "rel": "items",
                         "type": "application/geo+json",
-                        "href": f"{base_url}/api/stac/collections/{coll_id}/items",
+                        "href": f"{base_url}/api/stac_api/collections/{coll_id}/items",
                         "title": f"Items in {coll_id}"
                     },
                     {
                         "rel": "parent",
                         "type": "application/json",
-                        "href": f"{base_url}/api/stac",
+                        "href": f"{base_url}/api/stac_api",
                         "title": "Parent catalog"
                     },
                     {
                         "rel": "root",
                         "type": "application/json",
-                        "href": f"{base_url}/api/stac",
+                        "href": f"{base_url}/api/stac_api",
                         "title": "Root catalog"
                     }
                 ]
@@ -197,25 +177,25 @@ class STACAPIService:
                 {
                     "rel": "self",
                     "type": "application/json",
-                    "href": f"{base_url}/api/stac/collections/{collection_id}",
+                    "href": f"{base_url}/api/stac_api/collections/{collection_id}",
                     "title": f"Collection {collection_id}"
                 },
                 {
                     "rel": "items",
                     "type": "application/geo+json",
-                    "href": f"{base_url}/api/stac/collections/{collection_id}/items",
+                    "href": f"{base_url}/api/stac_api/collections/{collection_id}/items",
                     "title": f"Items in {collection_id}"
                 },
                 {
                     "rel": "parent",
                     "type": "application/json",
-                    "href": f"{base_url}/api/stac/collections",
+                    "href": f"{base_url}/api/stac_api/collections",
                     "title": "All collections"
                 },
                 {
                     "rel": "root",
                     "type": "application/json",
-                    "href": f"{base_url}/api/stac",
+                    "href": f"{base_url}/api/stac_api",
                     "title": "Root catalog"
                 }
             ]
@@ -246,62 +226,43 @@ class STACAPIService:
         """
         from infrastructure.stac import get_collection_items
 
+        # Note: infrastructure.stac.get_collection_items doesn't support offset pagination
+        # It returns all items up to limit
         response = get_collection_items(
             collection_id=collection_id,
             limit=limit,
-            offset=offset,
             bbox=bbox
         )
 
         if 'error' not in response:
-            # Build pagination links
+            # Build basic STAC-compliant links
+            # Note: pagination next/prev links not supported yet (infrastructure layer limitation)
             links = [
                 {
                     "rel": "self",
                     "type": "application/geo+json",
-                    "href": f"{base_url}/api/stac/collections/{collection_id}/items?limit={limit}&offset={offset}",
-                    "title": "This page"
+                    "href": f"{base_url}/api/stac_api/collections/{collection_id}/items?limit={limit}",
+                    "title": "This document"
                 },
                 {
                     "rel": "parent",
                     "type": "application/json",
-                    "href": f"{base_url}/api/stac/collections/{collection_id}",
+                    "href": f"{base_url}/api/stac_api/collections/{collection_id}",
                     "title": f"Collection {collection_id}"
                 },
                 {
                     "rel": "root",
                     "type": "application/json",
-                    "href": f"{base_url}/api/stac",
+                    "href": f"{base_url}/api/stac_api",
                     "title": "Root catalog"
                 },
                 {
                     "rel": "collection",
                     "type": "application/json",
-                    "href": f"{base_url}/api/stac/collections/{collection_id}",
+                    "href": f"{base_url}/api/stac_api/collections/{collection_id}",
                     "title": f"Collection {collection_id}"
                 }
             ]
-
-            # Add next/prev links if applicable
-            number_returned = response.get('numberReturned', 0)
-            number_matched = response.get('numberMatched', 0)
-
-            if offset + limit < number_matched:
-                links.append({
-                    "rel": "next",
-                    "type": "application/geo+json",
-                    "href": f"{base_url}/api/stac/collections/{collection_id}/items?limit={limit}&offset={offset + limit}",
-                    "title": "Next page"
-                })
-
-            if offset > 0:
-                prev_offset = max(0, offset - limit)
-                links.append({
-                    "rel": "prev",
-                    "type": "application/geo+json",
-                    "href": f"{base_url}/api/stac/collections/{collection_id}/items?limit={limit}&offset={prev_offset}",
-                    "title": "Previous page"
-                })
 
             response['links'] = links
 
@@ -329,25 +290,25 @@ class STACAPIService:
                 {
                     "rel": "self",
                     "type": "application/geo+json",
-                    "href": f"{base_url}/api/stac/collections/{collection_id}/items/{item_id}",
+                    "href": f"{base_url}/api/stac_api/collections/{collection_id}/items/{item_id}",
                     "title": f"Item {item_id}"
                 },
                 {
                     "rel": "parent",
                     "type": "application/json",
-                    "href": f"{base_url}/api/stac/collections/{collection_id}",
+                    "href": f"{base_url}/api/stac_api/collections/{collection_id}",
                     "title": f"Collection {collection_id}"
                 },
                 {
                     "rel": "collection",
                     "type": "application/json",
-                    "href": f"{base_url}/api/stac/collections/{collection_id}",
+                    "href": f"{base_url}/api/stac_api/collections/{collection_id}",
                     "title": f"Collection {collection_id}"
                 },
                 {
                     "rel": "root",
                     "type": "application/json",
-                    "href": f"{base_url}/api/stac",
+                    "href": f"{base_url}/api/stac_api",
                     "title": "Root catalog"
                 }
             ]

@@ -1,7 +1,152 @@
 # Active Tasks
 
-**Last Updated**: 11 NOV 2025 (02:05 UTC)
+**Last Updated**: 11 NOV 2025 (16:00 UTC)
 **Author**: Robert and Geospatial Claude Legion
+
+---
+
+## 🚨 QA ENVIRONMENT CHECKLIST - Corporate Azure Migration
+
+**Purpose**: Critical items that must be completed before migrating this application to corporate Azure environment.
+
+**Status**: 🔴 **BLOCKING ITEMS REMAIN** - STAC API broken, admin endpoints need testing
+
+---
+
+### 🔴 CRITICAL - STAC API Broken (Blocks Data Discovery)
+
+**Item**: Refactor STAC API as Portable Module
+**Status**: ⚠️ **CRITICAL** - Current implementation broken (500 errors)
+**Priority**: Highest - STAC is core functionality for data discovery
+**Estimated Time**: 30-45 minutes
+
+**Problem**:
+- Current STAC API triggers inherit from `BaseHttpTrigger`
+- Adds non-spec fields (`request_id`, `timestamp`) to responses
+- Breaks STAC v1.0.0 compliance
+- Returns 500 errors: `'HttpResponse' object is not a mapping`
+
+**Solution**: Create `stac_api/` portable module
+- Mirror `ogc_features/` architecture (2,600 lines, standalone, proven)
+- Zero dependencies on main app (BaseHttpTrigger removed)
+- Pure STAC-compliant JSON responses
+- Ready for APIM microservices split (future)
+
+**Files to Create**:
+```
+stac_api/
+├── __init__.py          # Export get_stac_triggers()
+├── triggers.py          # BaseSTACTrigger + endpoint handlers
+├── service.py           # STACAPIService (business logic)
+└── config.py            # STACAPIConfig (optional)
+```
+
+**Testing Checklist**:
+- [ ] GET /api/stac → Returns STAC landing page
+- [ ] GET /api/stac/conformance → Returns conformance classes
+- [ ] GET /api/stac/collections → Returns collection list
+- [ ] GET /api/stac/collections/{id} → Returns collection metadata
+- [ ] GET /api/stac/collections/{id}/items → Returns items (paginated)
+- [ ] Responses are pure STAC JSON (no extra fields)
+- [ ] Browser testing with STAC clients
+
+**Dependencies**: None (can be implemented immediately)
+
+---
+
+### ⚠️ HIGH PRIORITY - Admin API Testing
+
+**Item**: Verify Admin API Endpoints in QA
+**Status**: ⏳ **NEEDS TESTING** - Phase 1 complete, but not QA tested
+**Priority**: High - Required for operational monitoring
+**Estimated Time**: 1 hour
+
+**Completed** (11 NOV 2025):
+- ✅ Phase 1: Database Admin endpoints migrated to `/api/dbadmin/*`
+- ✅ Phase 2: Service Bus Admin endpoints working
+- ✅ SQL query fixes deployed
+- ✅ Query string handling fixed
+
+**QA Testing Checklist**:
+- [ ] GET /api/dbadmin/jobs?limit=10 → Returns job list
+- [ ] GET /api/dbadmin/tasks?status=failed → Returns filtered tasks
+- [ ] GET /api/dbadmin/stats → Returns database statistics
+- [ ] GET /api/dbadmin/diagnostics/functions → Function tests
+- [ ] GET /api/dbadmin/diagnostics/enums → Enum diagnostics
+- [ ] GET /api/dbadmin/platform/requests → API request logs
+- [ ] GET /api/servicebus/queues → Service Bus queue stats
+- [ ] POST /api/db/maintenance/redeploy?confirm=yes → Schema redeploy
+
+**Known Issues**: None (all fixed as of 11 NOV)
+
+---
+
+### ⚠️ MEDIUM PRIORITY - Error Handling & Observability
+
+**Item**: Verify Application Insights Logging
+**Status**: ⏳ **NEEDS VERIFICATION**
+**Priority**: Medium - Critical for production debugging
+**Estimated Time**: 30 minutes
+
+**Checklist**:
+- [ ] All job workflows log to Application Insights
+- [ ] ERROR level logs appear for failures
+- [ ] Correlation IDs work across distributed calls
+- [ ] Query patterns documented (see `docs_claude/APPLICATION_INSIGHTS_QUERY_PATTERNS.md`)
+- [ ] Debug logging can be enabled via `DEBUG_LOGGING=true`
+
+---
+
+### ⚠️ MEDIUM PRIORITY - Authentication & Authorization
+
+**Item**: Configure Azure AD Authentication
+**Status**: 📝 **PLANNED** - Function App uses ANONYMOUS auth currently
+**Priority**: Medium - Required for corporate security
+**Estimated Time**: 2-3 hours
+
+**Requirements** (Corporate Azure):
+- [ ] Enable Azure AD authentication on Function App
+- [ ] Configure Managed Identity for Function App
+- [ ] Update CORS settings for corporate domain
+- [ ] Configure App Registration for client apps
+- [ ] Test authentication flow end-to-end
+- [ ] Document authentication configuration
+
+**Current State**: All endpoints use `AuthLevel.ANONYMOUS` (development only)
+
+---
+
+### ℹ️ LOW PRIORITY - Documentation & Deployment
+
+**Item**: Update Deployment Documentation for Corporate Azure
+**Status**: 📝 **NEEDS UPDATE**
+**Priority**: Low - Can be done during migration
+**Estimated Time**: 1 hour
+
+**Checklist**:
+- [ ] Update resource group names
+- [ ] Update Function App naming convention
+- [ ] Update PostgreSQL connection strings
+- [ ] Update Service Bus namespace
+- [ ] Update Storage Account names
+- [ ] Document corporate-specific configurations
+- [ ] Update deployment scripts
+
+---
+
+## QA Environment Summary
+
+**Total Blocking Items**: 1 (STAC API refactor)
+**Total High Priority**: 2 (STAC API, Admin API testing)
+**Total Medium Priority**: 2 (Observability, Auth)
+**Total Low Priority**: 1 (Documentation)
+
+**Estimated Time to QA-Ready**: 5-7 hours
+- STAC API refactor: 30-45 min
+- Admin API testing: 1 hour
+- Observability verification: 30 min
+- Auth configuration: 2-3 hours
+- Documentation: 1 hour
 
 ---
 
@@ -86,10 +231,15 @@ https://rmhtitiler-.../cog/WebMercatorQuad/map.html?url=%2Fvsiaz%2Fsilver-cogs%2
 
 ---
 
-## 🔴 URGENT FIX: Refactor STAC API as Portable Module (10 NOV 2025)
+## 🔴 STAC API Refactor - MOVED TO QA CHECKLIST ⬆️
 
-**Status**: ⚠️ **CRITICAL** - Current implementation broken (BaseHttpTrigger adds non-spec fields)
-**Priority**: Highest - Blocks STAC API functionality
+**Status**: ⚠️ **CRITICAL** - See "QA Environment Checklist" section above
+**Note**: Implementation details preserved below for reference
+
+---
+
+## Implementation Details: Refactor STAC API as Portable Module
+
 **Pattern**: Mirror OGC Features portable module architecture
 **Estimated Time**: 30-45 minutes
 

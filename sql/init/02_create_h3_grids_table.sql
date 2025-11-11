@@ -3,13 +3,14 @@
 -- ============================================================================
 -- PURPOSE: Store H3 hexagonal grids with spatial indexing for geospatial queries
 -- CREATED: 9 NOV 2025
+-- UPDATED: 10 NOV 2025 - Moved to h3 schema, added parent tracking columns
 -- AUTHOR: Robert and Geospatial Claude Legion
--- SCHEMA: geo
--- DEPENDENCIES: PostGIS extension
+-- SCHEMA: h3 (system-generated grids, separate from user data in geo schema)
+-- DEPENDENCIES: PostGIS extension, h3 schema (created by 00_create_h3_schema.sql)
 -- ============================================================================
 
--- Create H3 grids table in geo schema
-CREATE TABLE IF NOT EXISTS geo.h3_grids (
+-- Create H3 grids table in h3 schema
+CREATE TABLE IF NOT EXISTS h3.grids (
     id SERIAL PRIMARY KEY,
 
     -- H3 Identification
@@ -22,6 +23,10 @@ CREATE TABLE IF NOT EXISTS geo.h3_grids (
     -- Grid Metadata
     grid_id VARCHAR(255) NOT NULL,               -- Grid identifier (e.g., "global_res4", "land_res4")
     grid_type VARCHAR(50) NOT NULL,              -- Type: "global", "land", "ocean", "custom"
+
+    -- Hierarchical Tracking (CRITICAL for GeoParquet partitioning)
+    parent_res2 BIGINT DEFAULT NULL,             -- Top-level parent H3 index at resolution 2 (for GeoParquet partitioning)
+    parent_h3_index BIGINT DEFAULT NULL,         -- Immediate parent H3 index (resolution n-1)
 
     -- Source Information
     source_job_id VARCHAR(255),                  -- Job that created this cell
@@ -47,63 +52,78 @@ CREATE TABLE IF NOT EXISTS geo.h3_grids (
 
 -- Spatial index (GIST) for fast spatial queries
 CREATE INDEX IF NOT EXISTS idx_h3_grids_geom
-ON geo.h3_grids USING GIST(geom);
+ON h3.grids USING GIST(geom);
 
 -- B-tree index for H3 index lookups
 CREATE INDEX IF NOT EXISTS idx_h3_grids_h3_index
-ON geo.h3_grids (h3_index);
+ON h3.grids (h3_index);
 
 -- Index for resolution filtering
 CREATE INDEX IF NOT EXISTS idx_h3_grids_resolution
-ON geo.h3_grids (resolution);
+ON h3.grids (resolution);
 
 -- Index for grid filtering
 CREATE INDEX IF NOT EXISTS idx_h3_grids_grid_id
-ON geo.h3_grids (grid_id);
+ON h3.grids (grid_id);
+
+-- Index for parent_res2 (CRITICAL for GeoParquet partition routing)
+CREATE INDEX IF NOT EXISTS idx_h3_grids_parent_res2
+ON h3.grids (parent_res2)
+WHERE parent_res2 IS NOT NULL;
+
+-- Index for parent lookups (cascading children)
+CREATE INDEX IF NOT EXISTS idx_h3_grids_parent_h3_index
+ON h3.grids (parent_h3_index)
+WHERE parent_h3_index IS NOT NULL;
 
 -- Partial index for land/ocean filtering (only index non-null values)
 CREATE INDEX IF NOT EXISTS idx_h3_grids_is_land
-ON geo.h3_grids (is_land)
+ON h3.grids (is_land)
 WHERE is_land IS NOT NULL;
 
 -- Partial index for country queries (only index non-null values)
 CREATE INDEX IF NOT EXISTS idx_h3_grids_country
-ON geo.h3_grids (country_code)
+ON h3.grids (country_code)
 WHERE country_code IS NOT NULL;
 
 -- Composite index for common query pattern (grid + resolution)
 CREATE INDEX IF NOT EXISTS idx_h3_grids_grid_resolution
-ON geo.h3_grids (grid_id, resolution);
+ON h3.grids (grid_id, resolution);
 
 -- Table comment
-COMMENT ON TABLE geo.h3_grids IS 'H3 hexagonal grid cells with spatial indexing for geospatial queries. Supports global grids, land-filtered grids, and custom AOI grids at resolutions 0-15.';
+COMMENT ON TABLE h3.grids IS 'System-generated H3 hexagonal grid cells (resolutions 2-7) for World Bank Agricultural Geography Platform. Bootstrap data created via cascading hierarchy (res 2→3→4→5→6→7). Read-only for users.';
 
 -- Column comments
-COMMENT ON COLUMN geo.h3_grids.h3_index IS 'H3 cell index (64-bit unsigned integer stored as signed bigint)';
-COMMENT ON COLUMN geo.h3_grids.resolution IS 'H3 resolution level (0=coarsest ~1100km, 15=finest ~0.5m)';
-COMMENT ON COLUMN geo.h3_grids.geom IS 'Hexagon boundary polygon in WGS84 (EPSG:4326)';
-COMMENT ON COLUMN geo.h3_grids.grid_id IS 'Grid identifier for grouping cells (e.g., global_res4, land_res4, user_aoi_res6)';
-COMMENT ON COLUMN geo.h3_grids.grid_type IS 'Grid type classification: global, land, ocean, or custom';
-COMMENT ON COLUMN geo.h3_grids.source_job_id IS 'CoreMachine job ID that created this cell';
-COMMENT ON COLUMN geo.h3_grids.source_blob_path IS 'Original GeoParquet file path in Azure blob storage';
-COMMENT ON COLUMN geo.h3_grids.is_land IS 'Land classification: true=land, false=ocean, null=unknown';
-COMMENT ON COLUMN geo.h3_grids.land_percentage IS 'Percentage of cell covered by land (for coastal cells)';
-COMMENT ON COLUMN geo.h3_grids.country_code IS 'ISO 3166-1 alpha-3 country code (from Overture Maps)';
-COMMENT ON COLUMN geo.h3_grids.admin_level_1 IS 'State/province name (from Overture Maps)';
+COMMENT ON COLUMN h3.grids.h3_index IS 'H3 cell index (64-bit unsigned integer stored as signed bigint)';
+COMMENT ON COLUMN h3.grids.resolution IS 'H3 resolution level (0=coarsest ~1100km, 15=finest ~0.5m). Bootstrap creates resolutions 2-7 only.';
+COMMENT ON COLUMN h3.grids.geom IS 'Hexagon boundary polygon in WGS84 (EPSG:4326)';
+COMMENT ON COLUMN h3.grids.grid_id IS 'Grid identifier (e.g., land_res2, land_res3, ..., land_res7)';
+COMMENT ON COLUMN h3.grids.grid_type IS 'Grid type classification: land (default for bootstrap grids)';
+COMMENT ON COLUMN h3.grids.parent_res2 IS 'Top-level parent H3 index at resolution 2 (CRITICAL for GeoParquet partitioning). Propagates down hierarchy for spatial locality in exports.';
+COMMENT ON COLUMN h3.grids.parent_h3_index IS 'Immediate parent H3 index (resolution n-1). Used for hierarchical queries and validation.';
+COMMENT ON COLUMN h3.grids.source_job_id IS 'CoreMachine job ID that created this cell (bootstrap_h3_land_grid_pyramid)';
+COMMENT ON COLUMN h3.grids.source_blob_path IS 'Original GeoParquet file path in Azure blob storage (for imported grids)';
+COMMENT ON COLUMN h3.grids.is_land IS 'Land classification: true=land (set at res 2 via spatial join with geo.countries), propagates to children';
+COMMENT ON COLUMN h3.grids.land_percentage IS 'Percentage of cell covered by land (for coastal cells, future enhancement)';
+COMMENT ON COLUMN h3.grids.country_code IS 'ISO 3166-1 alpha-3 country code (set at res 2 via ST_Intersects with geo.countries, propagates to children)';
+COMMENT ON COLUMN h3.grids.admin_level_1 IS 'State/province name (future enhancement from Overture Maps)';
 
--- Grant permissions (adjust user as needed for production)
-GRANT SELECT, INSERT, UPDATE, DELETE ON geo.h3_grids TO rob634;
-GRANT USAGE, SELECT ON SEQUENCE geo.h3_grids_id_seq TO rob634;
+-- Grant permissions (system user has full control, setup for future read-only users)
+GRANT SELECT, INSERT, UPDATE, DELETE ON h3.grids TO rob634;
+GRANT USAGE, SELECT ON SEQUENCE h3.grids_id_seq TO rob634;
+
+-- Future: Grant SELECT-only to read-only users
+-- GRANT SELECT ON h3.grids TO readonly_user;
 
 -- Verification queries
 SELECT
-    'geo.h3_grids table created successfully' AS status,
+    'h3.grids table created successfully' AS status,
     COUNT(*) AS row_count
-FROM geo.h3_grids;
+FROM h3.grids;
 
 SELECT
     indexname,
     indexdef
 FROM pg_indexes
-WHERE schemaname = 'geo' AND tablename = 'h3_grids'
+WHERE schemaname = 'h3' AND tablename = 'grids'
 ORDER BY indexname;

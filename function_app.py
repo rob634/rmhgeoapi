@@ -1566,20 +1566,20 @@ def debug_dump_all(req: func.HttpRequest) -> func.HttpResponse:
     """
     🔍 DEBUG: Dump all jobs and tasks for debugging.
     GET /api/db/debug/all?limit=100
-    
+
     Returns complete data from both jobs and tasks tables for debugging.
     Perfect for when you don't have DBeaver access.
     """
-    # Imports moved to top of file
-    
     limit = int(req.params.get('limit', '100'))
-    
+
+    # Initialize response variables
+    jobs = []
+    tasks = []
+
     try:
         repos = RepositoryFactory.create_repositories()
         job_repo = repos['job_repo']
-        
-        # Get connection from repository
-        # Import moved to top of file
+
         if isinstance(job_repo, PostgreSQLRepository):
             # FIX: _get_connection() is a context manager, use with statement
             with job_repo._get_connection() as conn:
@@ -1595,7 +1595,6 @@ def debug_dump_all(req: func.HttpRequest) -> func.HttpResponse:
                         LIMIT %s
                     """, (limit,))
 
-                    jobs = []
                     for row in cursor.fetchall():
                         jobs.append({
                             "job_id": row[0],
@@ -1622,7 +1621,6 @@ def debug_dump_all(req: func.HttpRequest) -> func.HttpResponse:
                         LIMIT %s
                     """, (limit,))
 
-                    tasks = []
                     for row in cursor.fetchall():
                         tasks.append({
                             "task_id": row[0],
@@ -1637,20 +1635,30 @@ def debug_dump_all(req: func.HttpRequest) -> func.HttpResponse:
                             "created_at": row[9].isoformat() if row[9] else None,
                             "updated_at": row[10].isoformat() if row[10] else None
                         })
-            # Context managers automatically close cursor and connection
-            
+        else:
+            # If not PostgreSQL, return error explaining why
             return func.HttpResponse(
                 body=json.dumps({
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                    "jobs_count": len(jobs),
-                    "tasks_count": len(tasks),
-                    "jobs": jobs,
-                    "tasks": tasks
-                }, default=str),
-                status_code=200,
+                    "error": f"Repository type {type(job_repo).__name__} not supported for debug dump",
+                    "timestamp": datetime.now(timezone.utc).isoformat()
+                }),
+                status_code=501,  # Not Implemented
                 headers={'Content-Type': 'application/json'}
             )
-            
+
+        # Return success response (moved outside if block)
+        return func.HttpResponse(
+            body=json.dumps({
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "jobs_count": len(jobs),
+                "tasks_count": len(tasks),
+                "jobs": jobs,
+                "tasks": tasks
+            }, default=str),
+            status_code=200,
+            headers={'Content-Type': 'application/json'}
+        )
+
     except Exception as e:
         return func.HttpResponse(
             body=json.dumps({

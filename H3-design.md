@@ -147,12 +147,174 @@ Building a cloud-native, multi-resolution geospatial data platform for agricultu
 
 ---
 
-### Phase 1: Database Schema Updates
+### Phase 1: Database Schema Updates & H3 Repository
 
-**Goal**: Add parent tracking columns and metadata tables in `h3` schema
-**Time**: 30 minutes
+**Goal**: Create database tables in `h3` schema and H3-specific repository using safe SQL composition
+**Time**: 1.5 hours (30 min schemas + 1 hour repository)
+
+#### Architecture Decision: Use PostgreSQLRepository Pattern
+
+**Why Repository Pattern?**
+- ✅ **Safe SQL Composition**: Use `psycopg.sql.SQL()` and `sql.Identifier()` for injection prevention
+- ✅ **Reuse Connection Management**: Leverage existing `PostgreSQLRepository` base class
+- ✅ **Transaction Support**: Atomic operations with built-in rollback
+- ✅ **Consistent Error Handling**: Logging and retry logic already implemented
+- ✅ **Schema-Aware**: Works seamlessly with `h3` schema
+- ✅ **Testable**: Can mock repository in unit tests
+
+**Pattern from Existing Code** (`infrastructure/postgresql.py`):
+```python
+from psycopg import sql
+
+# ✅ SAFE: sql.Identifier prevents SQL injection on schema/table/column names
+query = sql.SQL("""
+    INSERT INTO {schema}.{table} (h3_index, resolution, geom)
+    VALUES (%s, %s, ST_GeomFromText(%s, 4326))
+""").format(
+    schema=sql.Identifier('h3'),      # Quoted identifier (safe)
+    table=sql.Identifier('grids')     # Quoted identifier (safe)
+)
+
+# Execute with parameterized values (%s - psycopg handles escaping)
+cursor.execute(query, (h3_index, resolution, geom_wkt))
+```
+
+**New Repository**: `infrastructure/h3_repository.py`
+- Inherits: `PostgreSQLRepository` (connection mgmt, safe SQL, transactions)
+- Schema: `'h3'` (dedicated H3 schema)
+- Methods:
+  - `insert_h3_cells()` - Bulk insert with `executemany()` and safe SQL
+  - `get_parent_ids()` - Query parent H3 indices
+  - `update_spatial_attributes()` - Update country_code, is_land via spatial join
+  - `get_cell_count()` - Count cells by grid_id
+  - `grid_exists()` - Check if grid_id exists (idempotency)
+
+**Benefits for H3 Operations**:
+- All handlers use `H3Repository()` instead of raw psycopg connections
+- Consistent SQL composition across all H3 operations
+- Single source of truth for H3 database access
+- Easy to add caching, connection pooling, or other cross-cutting concerns
 
 #### Tasks
+
+- [ ] **Create `infrastructure/h3_repository.py`** (NEW - H3-specific repository)
+  - **Class**: `H3Repository(PostgreSQLRepository)`
+  - **Purpose**: Safe SQL operations for h3 schema using psycopg.sql composition
+  - **Inheritance**: Extends `PostgreSQLRepository` (connection mgmt, transactions, error handling)
+  - **Schema**: `'h3'` (passed to parent constructor)
+  - **Methods to implement**:
+    ```python
+    class H3Repository(PostgreSQLRepository):
+        """
+        H3-specific repository for h3.grids operations.
+
+        Inherits connection management and safe SQL composition from
+        PostgreSQLRepository. All queries use sql.Identifier() for
+        injection prevention.
+        """
+
+        def __init__(self):
+            # Initialize with h3 schema
+            super().__init__(schema_name='h3')
+
+        def insert_h3_cells(
+            self,
+            cells: List[Dict[str, Any]],
+            grid_id: str,
+            grid_type: str = 'land'
+        ) -> int:
+            """
+            Bulk insert H3 cells using safe SQL composition.
+
+            Uses executemany() for batch insertion and sql.Identifier()
+            for schema/table names to prevent SQL injection.
+            """
+            pass
+
+        def get_parent_ids(self, grid_id: str) -> List[Tuple[int, Optional[int]]]:
+            """
+            Load parent H3 indices for a grid.
+
+            Returns: List of (h3_index, parent_res2) tuples
+            """
+            pass
+
+        def update_spatial_attributes(
+            self,
+            grid_id: str,
+            spatial_filter_table: str = 'geo.countries'
+        ) -> int:
+            """
+            Update country_code and is_land via spatial join.
+
+            Uses ST_Intersects to find which cells intersect countries.
+            """
+            pass
+
+        def get_cell_count(self, grid_id: str) -> int:
+            """Count cells for a grid_id."""
+            pass
+
+        def grid_exists(self, grid_id: str) -> bool:
+            """Check if grid_id exists (for idempotency)."""
+            pass
+
+        def insert_reference_filter(
+            self,
+            filter_name: str,
+            resolution: int,
+            h3_indices: List[int]
+        ) -> bool:
+            """
+            Insert to h3.reference_filters table.
+
+            Stores parent H3 indices as BIGINT[] array.
+            """
+            pass
+
+        def get_reference_filter(self, filter_name: str) -> Optional[List[int]]:
+            """
+            Load h3_indices_array from h3.reference_filters.
+
+            Returns: List of parent H3 indices
+            """
+            pass
+
+        def update_grid_metadata(
+            self,
+            grid_id: str,
+            cell_count: int,
+            status: str,
+            job_id: str
+        ) -> None:
+            """Update h3.grid_metadata for bootstrap tracking."""
+            pass
+    ```
+  - **Key Implementation Details**:
+    - All SQL uses `sql.SQL()` and `sql.Identifier()` for safety
+    - Use `self._get_connection()` context manager from parent
+    - Use `self._execute_query()` helper from parent (if available)
+    - All methods log operations using inherited logger
+    - Handle PostgreSQL-specific types (BIGINT[], GEOMETRY)
+
+  - **Example Safe SQL Pattern**:
+    ```python
+    # SAFE: sql.Identifier() prevents injection
+    query = sql.SQL("""
+        INSERT INTO {schema}.{table}
+            (h3_index, resolution, geom, grid_id, grid_type,
+             parent_res2, parent_h3_index, source_job_id)
+        VALUES
+            (%s, %s, ST_GeomFromText(%s, 4326), %s, %s, %s, %s, %s)
+        ON CONFLICT (h3_index, grid_id) DO NOTHING
+    """).format(
+        schema=sql.Identifier('h3'),
+        table=sql.Identifier('grids')
+    )
+
+    # UNSAFE (DO NOT DO THIS):
+    # query = f"INSERT INTO {schema}.{table} ..."  # ❌ SQL injection risk!
+    ```
 
 - [ ] **Update `sql/init/02_create_h3_grids_table.sql`** (MODIFY to use `h3.grids`)
   ```sql

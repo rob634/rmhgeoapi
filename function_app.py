@@ -1614,7 +1614,7 @@ def debug_dump_all(req: func.HttpRequest) -> func.HttpResponse:
                     # Get all tasks
                     cursor.execute(f"""
                         SELECT
-                            task_id, job_id, task_type, status, stage,
+                            task_id, parent_job_id, task_type, status, stage,
                             parameters, result_data, error_details, retry_count,
                             created_at, updated_at
                         FROM {job_repo.schema_name}.tasks
@@ -1626,7 +1626,7 @@ def debug_dump_all(req: func.HttpRequest) -> func.HttpResponse:
                     for row in cursor.fetchall():
                         tasks.append({
                             "task_id": row[0],
-                            "job_id": row[1],
+                            "parent_job_id": row[1],
                             "task_type": row[2],
                             "status": row[3],
                             "stage": row[4],

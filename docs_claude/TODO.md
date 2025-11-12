@@ -81,6 +81,44 @@ stac_api/
 
 ---
 
+### ⚠️ MEDIUM PRIORITY - Vector Ingestion QA Hardening
+
+**Item**: Harden Vector Ingestion Workflow for QA Environment
+**Status**: 📋 **READY TO IMPLEMENT** - Plan complete, tasks defined
+**Priority**: Medium - Required before QA team uses vector ingestion
+**Estimated Time**: 2-3 hours
+**Documentation**: `VECTOR_QA_PREP.md` (detailed task tracker)
+
+**Overview**:
+Vector ingestion workflow is **functional** but needs defensive programming for multi-developer QA environment:
+- Exception handling in Stage 2 uploads (PostgreSQL errors)
+- Failed chunk diagnostics in job summary (data integrity)
+- Table existence check error handling (graceful degradation)
+- Geometry type validation (early failure detection)
+
+**Tasks** (see `VECTOR_QA_PREP.md` for implementation details):
+- [ ] Task 1: Exception handling in Stage 2 uploads (45 min)
+- [ ] Task 2: Failed chunk detail in job summary (30 min)
+- [ ] Task 3: Table existence check error handling (30 min)
+- [ ] Task 4: Unsupported geometry type validation (20 min)
+- [ ] Task 5: Run full test suite (30 min)
+- [ ] Task 6: Git commit & deploy (15 min)
+
+**Files to Modify**:
+- `services/vector/tasks.py` - Exception handling
+- `jobs/ingest_vector.py` - Failed chunk diagnostics + table check
+- `services/vector/postgis_handler.py` - Geometry validation
+
+**Benefits**:
+- ✅ Graceful degradation when infrastructure fails
+- ✅ Detailed error context for debugging
+- ✅ Data integrity protection (partial load detection)
+- ✅ Clear user-facing error messages
+
+**See Also**: `VECTOR_INGEST_QA_HARDENING_PLAN.md` (full technical specification)
+
+---
+
 ### ⚠️ MEDIUM PRIORITY - Error Handling & Observability
 
 **Item**: Verify Application Insights Logging
@@ -2495,6 +2533,40 @@ async function loadH3Grid(grid_id) {
   - **Status**: 162 dead letter messages identified (7 jobs, 155 tasks from 2 NOV schema redeploy)
   - **Files**: Create `triggers/admin/servicebus_purge.py` with ServiceBusClient
   - **Estimated Time**: 30 minutes
+
+- [ ] **Vector Pickle Cleanup Timer Function** (12 NOV 2025)
+  - Create Azure Functions timer trigger to clean up old pickle files from intermediate storage
+  - **Current State**: Pickles accumulate in `rmhazuregeoprocessing` container after vector ingestion
+  - **Target**: Delete pickles older than 24 hours (configurable retention period)
+  - **Schedule**: Run daily at 2 AM UTC
+  - **Container**: `config.vector_pickle_container` (typically `rmhazuregeoprocessing`)
+  - **Prefix**: `config.vector_pickle_prefix` (typically `vector_ingestion/pickles/`)
+  - **Files**: Create `triggers/cleanup_pickles.py` with timer trigger decorator
+  - **Logging**: Report count of deleted pickles and storage reclaimed
+  - **Estimated Time**: 45 minutes (timer trigger + blob listing + delete logic + testing)
+  - **Related**: Vector ingestion workflow leaves pickles for audit/retry purposes
+
+- [ ] **Job Progress Tracking Enhancement** (12 NOV 2025)
+  - Add real-time progress visibility for multi-stage jobs (especially vector ingestion with 20+ chunks)
+  - **Current State**: Job status shows "processing" with no detail on chunk upload progress
+  - **Enhancement**: Track and expose progress metrics:
+    - Current stage and stage description
+    - Completed tasks vs total tasks (e.g., "chunk 15 of 20")
+    - Percentage complete per stage
+    - Estimated time remaining (based on average task duration)
+  - **API Changes**:
+    - Enhance `GET /api/jobs/status/{job_id}` response with progress object
+    - Add task-level progress logging in upload handlers
+  - **UI Benefits**:
+    - Users can see "Uploading chunk 15 of 20 (75% complete)"
+    - Distinguish between "stuck" vs "slow but progressing"
+    - Better debugging for large file uploads (1M+ features)
+  - **Files to Modify**:
+    - `triggers/job_status.py` - Add progress calculation
+    - `services/vector/tasks.py` - Log chunk progress
+    - `jobs/ingest_vector.py` - Include progress in finalize_job
+  - **Estimated Time**: 2-3 hours (progress calculation + testing with large files)
+  - **Priority**: P2 - Developer experience, not blocking QA
 
 - [ ] Install PostgreSQL H3 extension for native H3 functions
 - [ ] Add H3 neighbor queries (k-ring, hex-ring)

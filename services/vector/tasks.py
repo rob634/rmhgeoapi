@@ -333,14 +333,66 @@ def upload_pickled_chunk(parameters: Dict[str, Any]) -> Dict[str, Any]:
     # 2. Insert data into PostGIS (table already created in Stage 1)
     # DEADLOCK FIX (17 OCT 2025): Use insert_features_only() to skip table creation
     # Table was created once in jobs/ingest_vector.py before Stage 2 task creation
+    # QA HARDENING (12 NOV 2025): Add exception handling for PostgreSQL errors
     from .postgis_handler import VectorToPostGISHandler
+    import psycopg
+    import traceback
+    from util_logger import LoggerFactory, ComponentType
+
+    logger = LoggerFactory.create_logger(ComponentType.SERVICE, "upload_pickled_chunk")
     handler = VectorToPostGISHandler()
-    handler.insert_features_only(chunk, table_name, schema)
+
+    try:
+        handler.insert_features_only(chunk, table_name, schema)
+
+    except psycopg.OperationalError as e:
+        # Database connectivity or timeout issues
+        error_msg = f"PostgreSQL connection error uploading chunk {chunk_index}: {e}"
+        logger.error(error_msg)
+        return {
+            "success": False,
+            "error": error_msg,
+            "error_type": "PostgreSQLConnectionError",
+            "chunk_index": chunk_index,
+            "chunk_path": chunk_path,
+            "table": f"{schema}.{table_name}",
+            "retryable": True  # Connection issues are often transient
+        }
+
+    except psycopg.DataError as e:
+        # Data validation errors (bad geometry, constraint violations)
+        error_msg = f"Data validation error in chunk {chunk_index}: {e}"
+        logger.error(f"{error_msg}\n{traceback.format_exc()}")
+        return {
+            "success": False,
+            "error": error_msg,
+            "error_type": "DataValidationError",
+            "chunk_index": chunk_index,
+            "chunk_path": chunk_path,
+            "table": f"{schema}.{table_name}",
+            "retryable": False  # Data errors require investigation
+        }
+
+    except Exception as e:
+        # Unexpected errors
+        error_msg = f"Unexpected error uploading chunk {chunk_index}: {e}"
+        logger.error(f"{error_msg}\n{traceback.format_exc()}")
+        return {
+            "success": False,
+            "error": error_msg,
+            "error_type": type(e).__name__,
+            "chunk_index": chunk_index,
+            "chunk_path": chunk_path,
+            "table": f"{schema}.{table_name}",
+            "traceback": traceback.format_exc(),
+            "retryable": False  # Unknown errors require investigation
+        }
 
     # 3. Note: Pickle cleanup handled by timer function
     # Pickles persist in {container}/{prefix}/{job_id}/ for audit/retry
     # Timer job will clean up old pickles (>24 hours)
 
+    # SUCCESS PATH (only reached if no exception)
     return {
         "success": True,
         "result": {

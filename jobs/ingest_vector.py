@@ -304,17 +304,43 @@ class IngestVectorJob(JobBase):
 
         # NEW: Phase 2A (9 NOV 2025) - Check if table already exists
         # Prevents silent data duplication by failing fast at validation time
+        # QA HARDENING (12 NOV 2025): Add exception handling for DB connectivity issues
         from infrastructure.postgis import check_table_exists
+        import psycopg
 
         schema = validated["schema"]
         table_name = validated["table_name"]
 
-        if check_table_exists(schema, table_name):
+        try:
+            table_exists = check_table_exists(schema, table_name)
+
+            if table_exists:
+                raise ValueError(
+                    f"Table {schema}.{table_name} already exists. "
+                    f"To replace it, drop the table first:\n"
+                    f"  DROP TABLE {schema}.{table_name} CASCADE;\n"
+                    f"Or choose a different table_name."
+                )
+
+        except ValueError:
+            # Re-raise table exists error (expected case)
+            raise
+
+        except psycopg.OperationalError as e:
+            # Database connection issue - log warning but allow job to proceed
+            # If table truly exists, Stage 2 will fail gracefully with clear error
+            logger.warning(
+                f"⚠️ Could not verify table existence for {schema}.{table_name}: {e}. "
+                f"Job will proceed - if table exists, Stage 2 will fail with clear error."
+            )
+            # Don't raise - allow job to be submitted
+
+        except Exception as e:
+            # Unexpected error during validation
+            logger.error(f"Unexpected error checking table existence: {e}")
             raise ValueError(
-                f"Table {schema}.{table_name} already exists. "
-                f"To replace it, manually drop the table first:\n"
-                f"  DROP TABLE {schema}.{table_name} CASCADE;\n"
-                f"Or choose a different table_name."
+                f"Unable to validate table name '{table_name}'. "
+                f"Check database connectivity. Error: {type(e).__name__}: {e}"
             )
 
         return validated
@@ -622,6 +648,31 @@ class IngestVectorJob(JobBase):
         successful_chunks = sum(1 for t in stage_2_tasks if t.status == TaskStatus.COMPLETED)
         failed_chunks = len(stage_2_tasks) - successful_chunks
 
+        # QA HARDENING (12 NOV 2025): Extract failed chunk details for debugging
+        failed_chunks_detail = None
+        if failed_chunks > 0:
+            failed_chunks_detail = []
+            for task in stage_2_tasks:
+                if task.status == TaskStatus.FAILED:
+                    result_data = task.result_data or {}
+
+                    # Extract error details from task result
+                    error_info = {
+                        'chunk_index': result_data.get('chunk_index'),
+                        'chunk_path': result_data.get('chunk_path'),
+                        'error': result_data.get('error', 'Unknown error'),
+                        'error_type': result_data.get('error_type', 'Unknown'),
+                        'retryable': result_data.get('retryable', False),
+                        'task_id': task.task_id
+                    }
+                    failed_chunks_detail.append(error_info)
+
+            # Log warning about partial data load
+            logger.warning(
+                f"⚠️ PARTIAL DATA LOAD: {failed_chunks}/{len(stage_2_tasks)} chunks failed for {table_name}. "
+                f"Table may have incomplete data. Failed chunks: {[c['chunk_index'] for c in failed_chunks_detail]}"
+            )
+
         total_rows_uploaded = sum(
             t.result_data.get("result", {}).get("rows_uploaded", 0)
             for t in stage_2_tasks
@@ -667,7 +718,10 @@ class IngestVectorJob(JobBase):
                 "chunks_failed": failed_chunks,
                 "total_rows_uploaded": total_rows_uploaded,
                 "success_rate": f"{(successful_chunks / len(stage_2_tasks) * 100):.1f}%" if stage_2_tasks else "0%",
-                "stage_1_metadata": chunk_metadata
+                "stage_1_metadata": chunk_metadata,
+                # QA HARDENING (12 NOV 2025): Failed chunk diagnostics
+                "failed_chunks_detail": failed_chunks_detail,
+                "data_complete": failed_chunks == 0  # Explicit flag for data integrity
             },
             "stac": stac_summary,
             "ogc_features_url": ogc_features_url,

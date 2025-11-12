@@ -202,6 +202,43 @@ class VectorToPostGISHandler:
         type_counts_after = gdf.geometry.geom_type.value_counts().to_dict()
         logger.info(f"Geometry types after normalization: {type_counts_after}")
 
+        # ========================================================================
+        # VALIDATE POSTGIS GEOMETRY TYPE SUPPORT (12 NOV 2025)
+        # ========================================================================
+        # PostGIS CREATE TABLE only supports specific geometry types.
+        # GEOMETRYCOLLECTION and other complex types must be filtered out.
+        # This validation prevents wasted processing and provides clear user guidance.
+        # ========================================================================
+        SUPPORTED_GEOM_TYPES = {
+            'MultiPoint', 'MultiLineString', 'MultiPolygon',
+            'Point', 'LineString', 'Polygon'  # Should be rare after normalization
+        }
+
+        unique_types = set(gdf.geometry.geom_type.unique())
+        unsupported = unique_types - SUPPORTED_GEOM_TYPES
+
+        if unsupported:
+            error_msg = (
+                f"❌ Unsupported geometry types detected: {', '.join(unsupported)}\n"
+                f"   PostGIS CREATE TABLE supports: {', '.join(sorted(SUPPORTED_GEOM_TYPES))}\n"
+                f"   \n"
+                f"   Common causes:\n"
+                f"   - GeometryCollection in source file (mixed geometry types)\n"
+                f"   - Complex KML with multiple geometry types per feature\n"
+                f"   - GeoJSON FeatureCollection with mixed types\n"
+                f"   \n"
+                f"   Solutions:\n"
+                f"   1. Explode GeometryCollections to single-type features in QGIS/ArcGIS\n"
+                f"   2. Filter source data to single geometry type (polygons only, lines only, etc.)\n"
+                f"   3. Split source file into multiple files by geometry type\n"
+                f"   \n"
+                f"   Affected features: {sum(gdf.geometry.geom_type.isin(unsupported))} of {len(gdf)}"
+            )
+            logger.error(error_msg)
+            raise ValueError(error_msg)
+
+        logger.info(f"✅ All geometry types supported by PostGIS: {unique_types}")
+
         # Reproject to EPSG:4326 if needed
         if gdf.crs and gdf.crs != "EPSG:4326":
             logger.info(f"Reprojecting from {gdf.crs} to EPSG:4326")

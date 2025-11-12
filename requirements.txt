@@ -38,7 +38,3 @@ h3>=4.0.0
 
 # AsyncPG - Async PostgreSQL driver for non-blocking database operations
 asyncpg>=0.29.0
-
-# CERTIFI - CA certificate bundle for TLS/SSL verification (CRITICAL for Azure Functions)
-# Required for Service Bus, Blob Storage, and all HTTPS connections
-certifi>=2023.7.22

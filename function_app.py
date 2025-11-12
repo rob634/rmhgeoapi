@@ -233,6 +233,7 @@ from triggers.admin.db_maintenance import admin_db_maintenance_trigger
 from triggers.admin.db_data import admin_db_data_trigger
 from triggers.admin.db_diagnostics import admin_db_diagnostics_trigger
 from triggers.admin.servicebus import servicebus_admin_trigger
+from triggers.admin.h3_debug import admin_h3_debug_trigger
 
 # Platform Service Layer triggers (25 OCT 2025)
 from triggers.trigger_platform import platform_request_submit
@@ -578,6 +579,24 @@ def admin_test_functions(req: func.HttpRequest) -> func.HttpResponse:
 def admin_all_diagnostics(req: func.HttpRequest) -> func.HttpResponse:
     """Get all diagnostics: GET /api/admin/db/diagnostics/all"""
     return admin_db_diagnostics_trigger.handle_request(req)
+
+
+# H3 Debug and Bootstrap Monitoring (12 NOV 2025)
+@app.route(route="admin/h3", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def admin_h3_debug(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    H3 debug operations: GET /api/admin/h3?operation={op}&{params}
+
+    Available operations:
+    - schema_status: Check h3 schema exists
+    - grid_summary: Grid metadata for all resolutions
+    - grid_details: Detailed stats for specific grid (requires grid_id)
+    - reference_filters: List all reference filters
+    - reference_filter_details: Details for specific filter (requires filter_name)
+    - sample_cells: Sample cells from grid (requires grid_id)
+    - parent_child_check: Validate hierarchy (requires parent_id)
+    """
+    return admin_h3_debug_trigger.handle_request(req)
 
 
 # 🚨 NUCLEAR RED BUTTON - DEVELOPMENT ONLY (⚠️ DEPRECATED - Use /api/admin/db/maintenance/nuke)

@@ -435,15 +435,26 @@ class CoreMachine:
 
         # Step 1.5: Update task status to PROCESSING before execution
         try:
+            # DIAGNOSTIC: Get current status before attempting update (11 NOV 2025)
+            current_status = self.state_manager.get_task_current_status(task_message.task_id)
+            self.logger.debug(
+                f"🔍 [STATUS-UPDATE] Task {task_message.task_id[:16]} current status: {current_status}, "
+                f"attempting update to PROCESSING..."
+            )
+
             success = self.state_manager.update_task_status_direct(
                 task_message.task_id,
                 TaskStatus.PROCESSING
             )
             if success:
-                self.logger.debug(f"✅ Task {task_message.task_id[:16]} → PROCESSING")
+                self.logger.debug(f"✅ Task {task_message.task_id[:16]} → PROCESSING (update successful)")
             else:
                 # FP2 FIX: Fail-fast if status update fails (don't execute handler)
-                error_msg = "Failed to update task status to PROCESSING (returned False) - possible database issue"
+                error_msg = (
+                    f"Failed to update task status to PROCESSING (returned False) - "
+                    f"current_status={current_status}, possible causes: task not found, "
+                    f"concurrent modification, or database constraint"
+                )
                 self.logger.error(f"❌ {error_msg}")
 
                 # Mark task and job as FAILED

@@ -964,17 +964,20 @@ class AppConfig(BaseModel):
     @property
     def resolved_intermediate_tiles_container(self) -> str:
         """
-        Get intermediate tiles container, defaulting to silver-tiles if not specified.
+        Get intermediate tiles container, defaulting to silver-mosaicjson if not specified.
 
-        Returns container name for intermediate raster tiles (Stage 2 output).
-        If intermediate_tiles_container is None, falls back to silver-tiles.
+        UPDATED (12 NOV 2025): Changed default from "silver-tiles" to "silver-mosaicjson"
+        to separate MosaicJSON files from other tile data.
+
+        Returns container name for MosaicJSON files (Stage 3 output).
+        If intermediate_tiles_container is None, falls back to silver-mosaicjson.
 
         Usage:
             config = get_config()
             container = config.resolved_intermediate_tiles_container
-            # Returns: "silver-tiles" (or custom value if env var set)
+            # Returns: "silver-mosaicjson" (or custom value if env var set)
         """
-        return self.intermediate_tiles_container or self.storage.silver.get_container('tiles')
+        return self.intermediate_tiles_container or "silver-mosaicjson"
 
     def generate_titiler_urls(self, collection_id: str, item_id: str) -> dict:
         """
@@ -1153,29 +1156,38 @@ class AppConfig(BaseModel):
             }
 
         # ========================================================================
-        # MODE 2: MosaicJSON (PLACEHOLDER - HIGH PRIORITY)
+        # MODE 2: MosaicJSON (IMPLEMENTED - 10 NOV 2025)
         # ========================================================================
         elif mode == "mosaicjson":
-            # TODO (HIGH PRIORITY): Verify URL pattern with TiTiler deployment
-            # Expected pattern based on TiTiler docs:
-            #   /mosaicjson/WebMercatorQuad/map.html?url=/vsiaz/{container}/{mosaic}.json
-            #
-            # Implementation requirements:
-            # 1. Validate container + blob_name (must be .json file)
-            # 2. Construct /vsiaz/ path to MosaicJSON file
-            # 3. URL-encode path
-            # 4. Generate URLs using /mosaicjson/ endpoint (NOT /cog/)
-            #
-            # Test with existing MosaicJSON from process_raster_collection workflow
-            # Container: silver-tiles (or silver-mosaicjson)
-            # Example blob: "collection_id.json" or "mosaics/collection_id.json"
-            #
-            # Reference: TITILER-VALIDATION-TASK.md lines 148-168
-            raise NotImplementedError(
-                "MosaicJSON URL generation not yet implemented. "
-                "Requires verification of TiTiler /mosaicjson/ endpoint pattern. "
-                "Expected: /mosaicjson/WebMercatorQuad/map.html?url=/vsiaz/{container}/{blob}.json"
-            )
+            # Validate required parameters
+            if not container or not blob_name:
+                raise ValueError(
+                    "mode='mosaicjson' requires container and blob_name parameters. "
+                    f"Got: container={container}, blob_name={blob_name}"
+                )
+
+            # Validate that blob_name is a JSON file
+            if not blob_name.endswith('.json'):
+                raise ValueError(
+                    f"mode='mosaicjson' requires blob_name to be a .json file. "
+                    f"Got: {blob_name}"
+                )
+
+            # Construct /vsiaz/ path to MosaicJSON file and URL-encode
+            vsiaz_path = f"/vsiaz/{container}/{blob_name}"
+            encoded_vsiaz = urllib.parse.quote(vsiaz_path, safe='')
+
+            # Generate URLs using /mosaicjson/ endpoint
+            # Reference: COG_MOSAIC.md lines 446-465
+            return {
+                "viewer_url": f"{base}/mosaicjson/WebMercatorQuad/map.html?url={encoded_vsiaz}",
+                "info_url": f"{base}/mosaicjson/info?url={encoded_vsiaz}",
+                "bounds_url": f"{base}/mosaicjson/bounds?url={encoded_vsiaz}",
+                "tilejson_url": f"{base}/mosaicjson/WebMercatorQuad/tilejson.json?url={encoded_vsiaz}",
+                "tiles_url_template": f"{base}/mosaicjson/tiles/WebMercatorQuad/{{z}}/{{x}}/{{y}}.png?url={encoded_vsiaz}",
+                "assets_url_template": f"{base}/mosaicjson/tiles/WebMercatorQuad/{{z}}/{{x}}/{{y}}/assets?url={encoded_vsiaz}",
+                "point_url_template": f"{base}/mosaicjson/point/{{lon}},{{lat}}?url={encoded_vsiaz}"
+            }
 
         # ========================================================================
         # MODE 3: PgSTAC Search (FUTURE ENHANCEMENT)

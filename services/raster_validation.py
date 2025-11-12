@@ -234,6 +234,64 @@ def validate_raster(params: dict) -> dict:
             "traceback": traceback.format_exc()
         }
 
+    # ================================================================
+    # NEW STEP 3a (Phase 2-3 - 11 NOV 2025): Pre-flight blob validation
+    # Validate container and blob exist before GDAL operation
+    # Uses Phase 3 error classification for retry logic
+    # ================================================================
+    try:
+        logger.info("🔄 STEP 3a: Pre-flight blob validation...")
+
+        from infrastructure.blob import BlobRepository
+        from core.errors import ErrorCode, create_error_response
+        blob_repo = BlobRepository.instance()
+
+        # Check container exists first
+        if not blob_repo.container_exists(container_name):
+            error_msg = (
+                f"Container '{container_name}' does not exist in storage account "
+                f"'{blob_repo.account_name}'"
+            )
+            logger.error(f"❌ STEP 3a FAILED: {error_msg}")
+            return create_error_response(
+                ErrorCode.CONTAINER_NOT_FOUND,
+                error_msg,
+                error_type="ResourceNotFoundError",
+                container_name=container_name,
+                storage_account=blob_repo.account_name,
+                blob_name=blob_name
+            )
+
+        # Check blob exists in container
+        if not blob_repo.blob_exists(container_name, blob_name):
+            error_msg = (
+                f"File '{blob_name}' not found in existing container '{container_name}' "
+                f"(storage account: '{blob_repo.account_name}')"
+            )
+            logger.error(f"❌ STEP 3a FAILED: {error_msg}")
+            return create_error_response(
+                ErrorCode.FILE_NOT_FOUND,
+                error_msg,
+                error_type="ResourceNotFoundError",
+                blob_name=blob_name,
+                container_name=container_name,
+                storage_account=blob_repo.account_name,
+                suggestion=f"Verify blob path spelling. Use /api/containers/{container_name}/blobs to list available files."
+            )
+
+        logger.info("✅ STEP 3a: Blob exists validation passed")
+
+    except Exception as e:
+        from core.errors import ErrorCode, create_error_response
+        logger.error(f"❌ STEP 3a FAILED: Validation error: {e}\n{traceback.format_exc()}")
+        return create_error_response(
+            ErrorCode.VALIDATION_ERROR,
+            f"Failed to validate blob existence: {e}",
+            blob_name=blob_name,
+            container_name=container_name,
+            traceback=traceback.format_exc()
+        )
+
     # STEP 3: Open raster file
     try:
         logger.info(f"🔄 STEP 3: Opening raster file via SAS URL...")

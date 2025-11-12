@@ -36,15 +36,17 @@ Date: 20 OCT 2025
 
 import os
 import json
+import traceback  # For fail-fast error reporting (11 NOV 2025)
 from typing import Dict, Any, List, Optional, Tuple
 from datetime import datetime, timezone
-from psycopg_pool import ConnectionPool
+import psycopg  # Simple connections - NO pooling for Azure Functions (11 NOV 2025)
 from azure.storage.blob import BlobServiceClient
 
 import pystac
 from pystac import Collection, Extent, SpatialExtent, TemporalExtent, Asset, Link
 
 from util_logger import LoggerFactory, ComponentType
+from config import get_config  # For PostgreSQL connection string (11 NOV 2025)
 
 
 # Logger
@@ -118,26 +120,70 @@ def create_stac_collection(
         logger.info(f"   Previous results count: {len(previous_results)}")
 
         # Get MosaicJSON result from Stage 3
+        # CRITICAL (11 NOV 2025): previous_results IS the result_data list already!
+        # CoreMachine extracts task.result_data, so previous_results[0] is the dict directly.
+        # DO NOT access .get("result_data") - that was the bug causing silent failures!
         if not previous_results:
+            logger.error("❌ [STAC-ERROR] No previous_results from Stage 3 MosaicJSON")
             return {
                 "success": False,
                 "error": "No MosaicJSON result from Stage 3",
                 "error_type": "ValueError"
             }
 
-        mosaic_result = previous_results[0].get("result_data", {})
+        logger.debug(f"🔍 [STAC-DEBUG] previous_results structure check:")
+        logger.debug(f"   Type: {type(previous_results)}")
+        logger.debug(f"   Length: {len(previous_results)}")
+        logger.debug(f"   First item type: {type(previous_results[0]) if previous_results else 'N/A'}")
+        logger.debug(f"   First item keys: {list(previous_results[0].keys()) if previous_results and isinstance(previous_results[0], dict) else 'N/A'}")
+
+        # BUG FIX (11 NOV 2025): Access previous_results[0] directly, NOT .get("result_data")
+        # previous_results IS already the list of result_data dicts from CoreMachine
+        mosaic_result = previous_results[0]
+
+        logger.debug(f"🔍 [STAC-DEBUG] mosaic_result structure:")
+        logger.debug(f"   Type: {type(mosaic_result)}")
+        logger.debug(f"   Keys: {list(mosaic_result.keys()) if isinstance(mosaic_result, dict) else 'N/A'}")
+        logger.debug(f"   success field: {mosaic_result.get('success') if isinstance(mosaic_result, dict) else 'N/A'}")
+
         if not mosaic_result.get("success"):
+            error_detail = mosaic_result.get("error", "Unknown error")
+            error_type = mosaic_result.get("error_type", "Unknown")
+            logger.error(f"❌ [STAC-ERROR] Stage 3 MosaicJSON creation failed:")
+            logger.error(f"   Error: {error_detail}")
+            logger.error(f"   Type: {error_type}")
             return {
                 "success": False,
-                "error": "Stage 3 MosaicJSON creation failed",
-                "error_type": "ValueError"
+                "error": f"Stage 3 MosaicJSON creation failed: {error_detail}",
+                "error_type": error_type
             }
+
+        logger.info(f"✅ [STAC-SUCCESS] Stage 3 MosaicJSON result validated")
 
         mosaicjson_blob = mosaic_result.get("mosaicjson_blob")
         spatial_extent = mosaic_result.get("bounds")
         tile_blobs = mosaic_result.get("cog_blobs", [])
+        cog_container = mosaic_result.get("cog_container")  # NEW (11 NOV 2025): COG container for STAC Items
+
+        logger.debug(f"🔍 [STAC-DEBUG] Extracted fields:")
+        logger.debug(f"   mosaicjson_blob: {mosaicjson_blob}")
+        logger.debug(f"   spatial_extent: {spatial_extent}")
+        logger.debug(f"   tile_blobs count: {len(tile_blobs)}")
+        logger.debug(f"   cog_container: {cog_container}")  # NEW (11 NOV 2025)
+
+        if not cog_container:
+            logger.error(f"❌ [STAC-ERROR] No cog_container in Stage 3 result")
+            logger.error(f"   This is required to create STAC Items for COG tiles")
+            logger.error(f"   Available keys: {list(mosaic_result.keys())}")
+            return {
+                "success": False,
+                "error": "No cog_container in Stage 3 MosaicJSON result - cannot create STAC Items",
+                "error_type": "ValueError"
+            }
 
         if not mosaicjson_blob:
+            logger.error(f"❌ [STAC-ERROR] No mosaicjson_blob in Stage 3 result")
+            logger.error(f"   Available keys: {list(mosaic_result.keys())}")
             return {
                 "success": False,
                 "error": "No mosaicjson_blob in Stage 3 result",
@@ -146,14 +192,16 @@ def create_stac_collection(
 
         logger.info(f"📊 Extracted MosaicJSON blob: {mosaicjson_blob}")
         logger.info(f"📊 Tile count: {len(tile_blobs)}")
+        logger.info(f"📊 COG container: {cog_container}")
 
-        # Call internal implementation
+        # Call internal implementation (11 NOV 2025: Added cog_container for orthodox STAC)
         result = _create_stac_collection_impl(
             collection_id=final_collection_id,  # Use final_collection_id (custom or default)
             mosaicjson_blob=mosaicjson_blob,
             description=description,
             tile_blobs=tile_blobs,
             container=container,
+            cog_container=cog_container,  # NEW (11 NOV 2025): For creating STAC Items
             license=license,
             spatial_extent=spatial_extent,
             temporal_extent=None
@@ -176,21 +224,28 @@ def _create_stac_collection_impl(
     description: str,
     tile_blobs: List[str],
     container: str,
+    cog_container: str,
     license: str,
     spatial_extent: Optional[List[float]],
     temporal_extent: Optional[List[str]]
 ) -> dict:
     """
-    Internal implementation: Create STAC collection.
+    Internal implementation: Create STAC collection with orthodox STAC Items.
 
     Separated from task handler for easier testing and reuse.
+
+    ORTHODOX STAC PATTERN (11 NOV 2025):
+    1. Create STAC Items for each COG tile (searchable, with geometry/datetime)
+    2. Create STAC Collection with MosaicJSON asset only
+    3. Items are linked to Collection via collection_id field
 
     Args:
         collection_id: Collection identifier
         mosaicjson_blob: MosaicJSON blob path
         description: Collection description
         tile_blobs: COG blob paths
-        container: Azure container
+        container: MosaicJSON container (silver-tiles)
+        cog_container: COG files container (silver-cogs)
         license: STAC license
         spatial_extent: Spatial bounds or None to calculate
         temporal_extent: Temporal range or None for current time
@@ -237,12 +292,14 @@ def _create_stac_collection_impl(
             }
         )
 
-        # Add MosaicJSON as primary asset
-        mosaicjson_url = f"https://{storage_account}.blob.core.windows.net/{container}/{mosaicjson_blob}"
+        # Add MosaicJSON as primary asset (11 NOV 2025: Use /vsiaz/ path for OAuth compatibility)
+        # Pattern matches service_stac_metadata.py lines 270-314 for OAuth-based TiTiler access
+        mosaicjson_vsiaz = f"/vsiaz/{container}/{mosaicjson_blob}"
+        mosaicjson_url = f"https://{storage_account}.blob.core.windows.net/{container}/{mosaicjson_blob}"  # For reference only
         collection.add_asset(
             "mosaicjson",
             Asset(
-                href=mosaicjson_url,
+                href=mosaicjson_vsiaz,  # OAuth-compatible /vsiaz/ path (not HTTPS)
                 media_type="application/json",
                 roles=["mosaic", "index"],
                 title="MosaicJSON Dynamic Tiling Index",
@@ -250,30 +307,91 @@ def _create_stac_collection_impl(
             )
         )
 
-        # Add individual COG tiles as assets (for reference)
-        for i, tile_blob in enumerate(tile_blobs):
-            tile_url = f"https://{storage_account}.blob.core.windows.net/{container}/{tile_blob}"
-            tile_name = tile_blob.split('/')[-1].replace('_cog.tif', '').replace('.tif', '')
-            collection.add_asset(
-                f"tile_{i}",
-                Asset(
-                    href=tile_url,
-                    media_type="image/tiff; application=geotiff; profile=cloud-optimized",
-                    roles=["data", "cog"],
-                    title=f"COG Tile: {tile_name}"
-                )
-            )
+        # CRITICAL (12 NOV 2025): CREATE COLLECTION FIRST before Items
+        # PgSTAC requires collections to exist before items because collections
+        # create table partitions that items use. Without collection, item insertion
+        # fails with: "no partition of relation 'items' found for row"
 
         # Validate STAC collection
         collection.validate()
-        logger.info(f"STAC collection validated: {collection.id}")
+        logger.info(f"✅ STAC collection validated: {collection.id}")
 
         # Convert to dict for PgSTAC
         collection_dict = collection.to_dict()
 
-        # Insert into PgSTAC collections table
+        # Insert collection into PgSTAC FIRST (creates partition for items)
         pgstac_id = _insert_into_pgstac_collections(collection_dict)
-        logger.info(f"Inserted into PgSTAC collections: {pgstac_id}")
+        logger.info(f"✅ Collection inserted into PgSTAC: {pgstac_id}")
+
+        # Import STAC metadata service for item creation
+        from services.service_stac_metadata import StacMetadataService
+        stac_service = StacMetadataService()
+
+        # Validate collection exists before creating Items (12 NOV 2025)
+        # This defensive check ensures PgSTAC partition is ready
+        if not stac_service.stac.collection_exists(collection_id):
+            raise RuntimeError(
+                f"Collection '{collection_id}' was not found in PgSTAC after insertion. "
+                f"Cannot create STAC Items without a collection partition. "
+                f"This indicates a PgSTAC insertion failure."
+            )
+        logger.info(f"✅ Collection '{collection_id}' verified in PgSTAC - ready for Items")
+
+        # ORTHODOX STAC (11 NOV 2025): Create STAC Items for each COG tile
+        # Items are searchable with geometry, datetime, and properties
+        # NOW collection partition exists, so Items can be inserted safely
+        logger.info(f"📝 Creating STAC Items for {len(tile_blobs)} COG tiles...")
+
+        created_items = []
+        failed_items = []
+
+        for i, tile_blob in enumerate(tile_blobs):
+            try:
+                logger.debug(f"   Creating STAC Item {i+1}/{len(tile_blobs)}: {tile_blob}")
+
+                # Generate semantic item ID from blob name
+                tile_name = tile_blob.split('/')[-1].replace('_cog.tif', '').replace('.tif', '')
+                item_id = f"{collection_id}_{tile_name}"
+
+                # Create STAC Item using existing service (reuses process_raster logic)
+                item = stac_service.extract_item_from_blob(
+                    container=cog_container,
+                    blob_name=tile_blob,
+                    collection_id=collection_id,
+                    item_id=item_id
+                )
+
+                # Insert Item into PgSTAC
+                # CRITICAL (12 NOV 2025): Use Pydantic model_dump() for proper JSON serialization
+                # stac-pydantic.Item is a Pydantic model - use model_dump(mode='json') pattern
+                # This properly serializes datetime objects to ISO strings
+                pgstac_id = stac_service.stac.insert_item(item, collection_id)
+                created_items.append(item_id)
+                logger.debug(f"   ✅ STAC Item created: {item_id} (pgstac_id: {pgstac_id})")
+
+            except Exception as e:
+                logger.error(f"   ❌ Failed to create STAC Item for {tile_blob}: {e}")
+                logger.error(f"      Traceback: {traceback.format_exc()}")
+                failed_items.append(tile_blob)
+                # CRITICAL (11 NOV 2025): Fail fast if Item creation fails
+                # Orthodox STAC requires Items - if they fail, the collection is incomplete
+                # Better to fail with clear error than succeed with broken/missing Items
+                raise RuntimeError(
+                    f"STAC Item creation failed for {tile_blob}. "
+                    f"Cannot create orthodox STAC collection without Items. "
+                    f"Created {len(created_items)} of {len(tile_blobs)} items before failure. "
+                    f"Error: {e}"
+                )
+
+        logger.info(f"✅ Created {len(created_items)} STAC Items successfully")
+        if len(created_items) != len(tile_blobs):
+            logger.warning(
+                f"   ⚠️  Only {len(created_items)} of {len(tile_blobs)} items created - "
+                f"this should not happen with fail-fast error handling!"
+            )
+
+        # Collection already validated and inserted above (12 NOV 2025)
+        # No need to duplicate - just return results
 
         return {
             "success": True,
@@ -281,6 +399,8 @@ def _create_stac_collection_impl(
             "stac_id": collection.id,
             "pgstac_id": pgstac_id,
             "tile_count": len(tile_blobs),
+            "items_created": len(created_items),  # NEW (11 NOV 2025): Orthodox STAC Items
+            "items_failed": len(failed_items),    # NEW (11 NOV 2025): Failed Item creation
             "spatial_extent": spatial_extent,
             "mosaicjson_url": mosaicjson_url
         }
@@ -389,20 +509,26 @@ def _insert_into_pgstac_collections(collection_dict: Dict[str, Any]) -> str:
     """
     logger.info(f"Inserting collection into PgSTAC: {collection_dict['id']}")
 
-    # Get database connection
-    db_host = os.environ.get("PGHOST")
-    db_name = os.environ.get("PGDATABASE")
-    db_user = os.environ.get("PGUSER")
-    db_password = os.environ.get("PGPASSWORD")
+    # Get database connection string from config (11 NOV 2025)
+    # CRITICAL: Use config.postgis_connection_string instead of environment variables
+    # to match infrastructure/stac.py and infrastructure/postgresql.py patterns
+    config = get_config()
+    conninfo = config.postgis_connection_string
 
-    conninfo = f"host={db_host} dbname={db_name} user={db_user} password={db_password} sslmode=require"
+    logger.debug(f"🔗 [STAC-DEBUG] Using connection string from config.postgis_connection_string")
 
+    # CRITICAL FIX (11 NOV 2025): Use simple connections for Azure Functions
+    # ConnectionPool creates new pool per task invocation, causing connection exhaustion.
+    # Azure Functions are short-lived - pooling defeats purpose and leaks connections.
+    # Pattern matches infrastructure/postgresql.py and infrastructure/stac.py
     try:
-        pool = ConnectionPool(conninfo, min_size=1, max_size=5)
+        logger.debug(f"🔗 [STAC-DEBUG] Connecting to PostgreSQL for collection insert...")
 
-        with pool.connection() as conn:
+        with psycopg.connect(conninfo) as conn:
             with conn.cursor() as cur:
-                # Use PgSTAC's upsert_collection function
+                logger.debug(f"🔗 [STAC-DEBUG] Connection established, executing pgstac.create_collection...")
+
+                # Use PgSTAC's create_collection function
                 cur.execute(
                     """
                     SELECT pgstac.create_collection(%s::jsonb)
@@ -414,11 +540,23 @@ def _insert_into_pgstac_collections(collection_dict: Dict[str, Any]) -> str:
                 conn.commit()
 
                 pgstac_id = result[0] if result else collection_dict['id']
-                logger.info(f"PgSTAC collection created: {pgstac_id}")
+                logger.info(f"✅ [STAC-SUCCESS] PgSTAC collection created: {pgstac_id}")
                 return pgstac_id
 
+    except psycopg.OperationalError as e:
+        # Connection-level errors (network, timeout, auth)
+        logger.error(f"❌ [STAC-ERROR] Database connection failed: {e}")
+        logger.error(f"   Error type: OperationalError (connection/network issue)")
+        logger.error(f"   Connection string length: {len(conninfo)} chars")
+        raise Exception(f"Database connection failed: {str(e)}") from e
+
+    except psycopg.DatabaseError as e:
+        # Database-level errors (SQL errors, constraint violations)
+        logger.error(f"❌ [STAC-ERROR] Database operation failed: {e}")
+        logger.error(f"   Error type: DatabaseError (SQL/constraint issue)")
+        raise Exception(f"Database operation failed: {str(e)}") from e
+
     except Exception as e:
-        logger.error(f"PgSTAC insertion failed: {e}", exc_info=True)
-        raise
-    finally:
-        pool.close()
+        logger.error(f"❌ [STAC-ERROR] Unexpected error during PgSTAC insertion: {e}", exc_info=True)
+        logger.error(f"   Exception type: {type(e).__name__}")
+        raise Exception(f"PgSTAC insertion failed: {str(e)}") from e

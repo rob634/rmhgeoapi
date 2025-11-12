@@ -311,8 +311,10 @@ class StacMetadataService:
             logger.error(f"❌ Step G.5 FAILED: Error converting asset URLs to /vsiaz/ paths")
             logger.error(f"   Error: {e}")
             logger.error(f"   Traceback:\n{traceback.format_exc()}")
-            # Don't raise - this is not critical enough to fail the entire operation
-            logger.warning(f"   ⚠️  Continuing with original URLs")
+            # CRITICAL (11 NOV 2025): /vsiaz/ paths required for OAuth-based TiTiler access
+            # Fail fast rather than creating Items that won't work with TiTiler
+            # If conversion fails, indicates URL format issue that needs to be fixed
+            raise RuntimeError(f"/vsiaz/ path conversion failed: {e}")
 
         # STEP H: Supplement with Azure-specific properties
         try:
@@ -380,8 +382,10 @@ class StacMetadataService:
             logger.error(f"❌ Step H.5 FAILED: Error adding TiTiler visualization links")
             logger.error(f"   Error: {e}")
             logger.error(f"   Traceback:\n{traceback.format_exc()}")
-            # Don't raise - this is not critical enough to fail the entire operation
-            logger.warning(f"   ⚠️  Continuing without TiTiler links")
+            # CRITICAL (11 NOV 2025): If TiTiler link generation fails, indicates config/URL issue
+            # Better to fail fast and fix the root cause than silently create incomplete Items
+            # TiTiler URLs are a core feature - if they fail, something is wrong with config
+            raise RuntimeError(f"TiTiler link generation failed: {e}")
 
         # STEP I: Validate with stac-pydantic
         try:

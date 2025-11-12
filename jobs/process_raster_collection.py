@@ -230,6 +230,7 @@ class ProcessRasterCollectionWorkflow(JobBase):
 
         Raises:
             ValueError: Validation failure
+            ResourceNotFoundError: If container or any blob doesn't exist
         """
         validated = {}
 
@@ -334,6 +335,17 @@ class ProcessRasterCollectionWorkflow(JobBase):
                 raise ValueError("mosaicjson_container must be a string")
             validated["mosaicjson_container"] = mosaicjson_container
 
+        # Validate cog_container (where COGs are stored for MosaicJSON) (12 NOV 2025)
+        # This is the container MosaicJSON will reference in its tile URLs
+        cog_container = params.get("cog_container")
+        if cog_container is None:
+            # Default to output_container (where COGs were just created)
+            validated["cog_container"] = validated["output_container"]
+        else:
+            if not isinstance(cog_container, str):
+                raise ValueError("cog_container must be a string")
+            validated["cog_container"] = cog_container
+
         # Validate target_crs (optional - defaults to config)
         target_crs = params.get("target_crs")
         if target_crs is None:
@@ -370,6 +382,54 @@ class ProcessRasterCollectionWorkflow(JobBase):
         if not isinstance(jpeg_quality, int) or not (1 <= jpeg_quality <= 100):
             raise ValueError("jpeg_quality must be an integer between 1 and 100")
         validated["jpeg_quality"] = jpeg_quality
+
+        # Validate in_memory (optional - 10 NOV 2025)
+        in_memory = params.get("in_memory")
+        if in_memory is not None:
+            if not isinstance(in_memory, bool):
+                raise ValueError("in_memory must be a boolean")
+            validated["in_memory"] = in_memory
+
+        # Validate maxzoom (optional - 10 NOV 2025)
+        maxzoom = params.get("maxzoom")
+        if maxzoom is not None:
+            if not isinstance(maxzoom, int) or not (0 <= maxzoom <= 24):
+                raise ValueError("maxzoom must be an integer between 0 and 24")
+            validated["maxzoom"] = maxzoom
+
+        # ================================================================
+        # NEW (11 NOV 2025): Validate container and all blobs exist
+        # Phase 1: Immediate validation with Azure ResourceNotFoundError
+        # ================================================================
+        from azure.core.exceptions import ResourceNotFoundError
+        from infrastructure.blob import BlobRepository
+
+        blob_repo = BlobRepository.instance()
+        container_name = validated["container_name"]
+        blob_list = validated["blob_list"]
+
+        # Validate container exists
+        if not blob_repo.container_exists(container_name):
+            raise ResourceNotFoundError(
+                f"Container '{container_name}' does not exist in storage account "
+                f"'{blob_repo.account_name}'. Verify container name spelling."
+            )
+
+        # Validate ALL blobs in collection exist (fail-fast, report all missing)
+        missing_blobs = []
+        for blob_name in blob_list:
+            if not blob_repo.blob_exists(container_name, blob_name):
+                missing_blobs.append(blob_name)
+
+        if missing_blobs:
+            # Report ALL missing blobs in error message
+            missing_list = "\n  - ".join(missing_blobs)
+            raise ResourceNotFoundError(
+                f"Collection validation failed: {len(missing_blobs)} file(s) not found in "
+                f"existing container '{container_name}' (storage account: '{blob_repo.account_name}'):\n"
+                f"  - {missing_list}\n\n"
+                f"Verify blob paths or use /api/containers/{container_name}/blobs to list available files."
+            )
 
         return validated
 
@@ -669,7 +729,8 @@ class ProcessRasterCollectionWorkflow(JobBase):
                     "compression": recommended_compression,
                     "jpeg_quality": job_params.get("jpeg_quality", 85),
                     "overview_resampling": recommended_resampling,
-                    "reproject_resampling": recommended_resampling
+                    "reproject_resampling": recommended_resampling,
+                    "in_memory": job_params.get("in_memory", True)  # Pass through in_memory setting (10 NOV 2025)
                 },
                 "metadata": {
                     "tile_index": i,
@@ -735,13 +796,25 @@ class ProcessRasterCollectionWorkflow(JobBase):
         mosaicjson_tasks = [t for t in task_results if t.task_type == "create_mosaicjson"]
         mosaicjson_summary = {}
         if mosaicjson_tasks and mosaicjson_tasks[0].result_data:
-            mosaicjson_result = mosaicjson_tasks[0].result_data.get("result", {})
+            # CRITICAL (11 NOV 2025): result_data IS the result dict already!
+            # CoreMachine stores raw handler return: {"success": True, "mosaicjson_blob": "...", ...}
+            # DO NOT access .get("result") - same bug pattern as STAC fix (line 140 in stac_collection.py)
+            mosaicjson_result = mosaicjson_tasks[0].result_data
+
+            # DIAGNOSTIC LOGGING (11 NOV 2025): Verify structure for debugging
+            logger.debug(f"🔍 [MOSAIC-RESULT] mosaicjson_result structure:")
+            logger.debug(f"   Type: {type(mosaicjson_result)}")
+            logger.debug(f"   Keys: {list(mosaicjson_result.keys()) if isinstance(mosaicjson_result, dict) else 'NOT A DICT'}")
+            logger.debug(f"   blob_path: {mosaicjson_result.get('mosaicjson_blob')}")
+
             mosaicjson_summary = {
                 "blob_path": mosaicjson_result.get("mosaicjson_blob"),
                 "url": mosaicjson_result.get("mosaicjson_url"),
                 "bounds": mosaicjson_result.get("bounds"),
                 "tile_count": mosaicjson_result.get("tile_count")
             }
+
+            logger.debug(f"✅ [MOSAIC-RESULT] mosaicjson_summary: {mosaicjson_summary}")
 
         # Extract STAC result (Stage 4 - fan-in)
         stac_tasks = [t for t in task_results if t.task_type == "create_stac_collection"]
@@ -763,30 +836,26 @@ class ProcessRasterCollectionWorkflow(JobBase):
                 "ready_for_titiler": True
             }
 
-        # Generate TiTiler URLs based on configured mode (8 NOV 2025)
-        titiler_pgstac_urls = None
-        vanilla_titiler_urls = None
+        # Generate TiTiler URLs using unified method (10 NOV 2025)
+        titiler_urls = None
+        share_url = None
 
-        if config.titiler_mode == "pgstac" and item_id:
-            # PgSTAC mode: Generate database-backed TiTiler URLs
-            titiler_pgstac_urls = config.generate_titiler_urls(
-                collection_id=collection_id,
-                item_id=item_id
-            )
-            share_url = titiler_pgstac_urls.get("viewer_url")
-        elif config.titiler_mode == "vanilla" and mosaicjson_summary.get("blob_path"):
-            # Vanilla mode: Generate MosaicJSON viewer URLs
-            mosaicjson_blob = mosaicjson_summary["blob_path"]
-            mosaic_container = config.resolved_intermediate_tiles_container  # "silver-tiles"
+        if mosaicjson_summary.get("blob_path"):
+            try:
+                # Generate MosaicJSON URLs using unified method
+                mosaicjson_blob = mosaicjson_summary["blob_path"]
+                mosaic_container = config.resolved_intermediate_tiles_container  # "silver-tiles"
 
-            vanilla_titiler_urls = config.generate_vanilla_titiler_urls(
-                container=mosaic_container,
-                blob_name=mosaicjson_blob
-            )
-            share_url = vanilla_titiler_urls.get("viewer_url")
-        else:
-            # xarray mode or missing data - no URLs generated
-            share_url = None
+                titiler_urls = config.generate_titiler_urls_unified(
+                    mode="mosaicjson",
+                    container=mosaic_container,
+                    blob_name=mosaicjson_blob
+                )
+                share_url = titiler_urls.get("viewer_url")
+            except Exception:
+                # Failed to generate URLs - job continues without them
+                titiler_urls = None
+                share_url = None
 
         logger.info(
             f"✅ Raster collection job {context.job_id[:16]} completed: "
@@ -800,10 +869,8 @@ class ProcessRasterCollectionWorkflow(JobBase):
             "cogs": cog_summary,
             "mosaicjson": mosaicjson_summary,
             "stac": stac_summary,
-            "titiler_pgstac": titiler_pgstac_urls,  # Database-backed URLs (if mode=pgstac)
-            "titiler_direct": vanilla_titiler_urls,  # Direct URLs (if mode=vanilla)
+            "titiler_urls": titiler_urls,  # All TiTiler endpoints (10 NOV 2025 - unified method)
             "share_url": share_url,  # PRIMARY URL - share this with end users!
-            "titiler_mode": config.titiler_mode,  # Which mode was used
             "stages_completed": context.current_stage,
             "total_tasks_executed": len(task_results),
             "tasks_by_status": {

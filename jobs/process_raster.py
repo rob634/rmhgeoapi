@@ -169,6 +169,7 @@ class ProcessRasterWorkflow(JobBase):
 
         Raises:
             ValueError: If parameters are invalid
+            ResourceNotFoundError: If container or blob doesn't exist
         """
         validated = {}
 
@@ -288,6 +289,41 @@ class ProcessRasterWorkflow(JobBase):
                 validated["output_folder"] = None
         else:
             validated["output_folder"] = None
+
+        # ================================================================
+        # NEW (11 NOV 2025): Validate container and blob exist (fail-fast)
+        # Phase 1: Immediate validation with Azure ResourceNotFoundError
+        # ================================================================
+        from azure.core.exceptions import ResourceNotFoundError
+        from infrastructure.blob import BlobRepository
+
+        blob_repo = BlobRepository.instance()
+
+        # Resolve container name (use config default if None)
+        container_name = validated.get("container_name")
+        if container_name is None:
+            from config import get_config
+            config = get_config()
+            container_name = config.storage.bronze.get_container('rasters')
+            validated["container_name"] = container_name
+
+        blob_name = validated["blob_name"]
+
+        # Validate container exists
+        if not blob_repo.container_exists(container_name):
+            raise ResourceNotFoundError(
+                f"Container '{container_name}' does not exist in storage account "
+                f"'{blob_repo.account_name}'. Verify container name spelling or create "
+                f"container before submitting job."
+            )
+
+        # Validate blob exists
+        if not blob_repo.blob_exists(container_name, blob_name):
+            raise ResourceNotFoundError(
+                f"File '{blob_name}' not found in existing container '{container_name}' "
+                f"(storage account: '{blob_repo.account_name}'). Verify blob path spelling. "
+                f"Available blobs can be listed via /api/containers/{container_name}/blobs endpoint."
+            )
 
         return validated
 
@@ -658,10 +694,8 @@ class ProcessRasterWorkflow(JobBase):
                         blob_name=cog_summary['cog_blob']
                     )
                     share_url = titiler_urls.get("viewer_url")
-                    logger.info(f"   Generated TiTiler URLs (mode=cog)")
-                    logger.info(f"   Viewer: {share_url}")
                 except Exception as e:
-                    logger.error(f"   Failed to generate TiTiler URLs: {e}")
+                    # Failed to generate URLs - job continues without them
                     titiler_urls = None
                     share_url = None
 

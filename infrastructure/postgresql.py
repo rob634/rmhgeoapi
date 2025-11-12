@@ -980,6 +980,19 @@ class PostgreSQLTaskRepository(PostgreSQLRepository, ITaskRepository):
             if not update_dict:
                 return False
 
+            # DIAGNOSTIC: Get current task state before update (11 NOV 2025)
+            current_task = self.get_task(task_id)
+            if current_task:
+                logger.debug(
+                    f"🔍 [PRE-UPDATE] Task {task_id[:16]} current state: "
+                    f"status={current_task.status}, "
+                    f"stage={current_task.stage}, "
+                    f"retry_count={current_task.retry_count}"
+                )
+                logger.debug(f"🔍 [PRE-UPDATE] Attempting to update fields: {list(update_dict.keys())}")
+            else:
+                logger.warning(f"⚠️ [PRE-UPDATE] Task {task_id} not found in database before update attempt")
+
             # Build UPDATE query dynamically
             set_clauses = []
             params = []
@@ -993,10 +1006,10 @@ class PostgreSQLTaskRepository(PostgreSQLRepository, ITaskRepository):
                 else:
                     # Pydantic has already converted enums to strings
                     params.append(value)
-            
+
             # Add task_id to params
             params.append(task_id)
-            
+
             query = sql.SQL("""
                 UPDATE {}.{}
                 SET {}, updated_at = NOW()
@@ -1006,15 +1019,26 @@ class PostgreSQLTaskRepository(PostgreSQLRepository, ITaskRepository):
                 sql.Identifier("tasks"),
                 sql.SQL(", ").join(set_clauses)
             )
-            
+
             rowcount = self._execute_query(query, tuple(params))
             success = rowcount > 0
-            
+
             if success:
-                logger.info(f"✅ Task updated: {task_id} fields={list(update_dict.keys())}")
+                logger.info(f"✅ Task updated: {task_id[:16]} fields={list(update_dict.keys())} (rowcount={rowcount})")
             else:
-                logger.warning(f"⚠️ Task not found for update: {task_id}")
-            
+                # DIAGNOSTIC: Enhanced error logging when update affects 0 rows (11 NOV 2025)
+                logger.error(
+                    f"❌ [UPDATE-FAILED] Task update affected 0 rows - task_id={task_id[:16]}, "
+                    f"fields_attempted={list(update_dict.keys())}"
+                )
+                if current_task:
+                    logger.error(
+                        f"❌ [UPDATE-FAILED] Task exists but UPDATE matched 0 rows - "
+                        f"possible cause: WHERE clause mismatch or concurrent modification"
+                    )
+                else:
+                    logger.error(f"❌ [UPDATE-FAILED] Task {task_id[:16]} does not exist in database")
+
             return success
     
     @enforce_contract(

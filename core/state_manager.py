@@ -302,6 +302,12 @@ class StateManager:
             success = task_repo.update_task(task_id, update)
             if success:
                 self.logger.info(f"Task {task_id} updated with model")
+            else:
+                # FIX: Log when update returns False (11 NOV 2025)
+                self.logger.warning(
+                    f"⚠️ Task {task_id[:16]} update returned False - "
+                    f"repository update_task() affected 0 rows"
+                )
             return success
 
         except Exception as e:
@@ -332,6 +338,27 @@ class StateManager:
             error_details=error_details
         )
         return self.update_task_with_model(task_id, update)
+
+    def get_task_current_status(self, task_id: str) -> Optional[TaskStatus]:
+        """
+        Get current task status for diagnostic purposes.
+
+        Args:
+            task_id: Task identifier
+
+        Returns:
+            Current TaskStatus or None if task not found
+        """
+        try:
+            repos = RepositoryFactory.create_repositories()
+            task_repo = repos['task_repo']
+
+            task = task_repo.get_task(task_id)
+            return task.status if task else None
+
+        except Exception as e:
+            self.logger.error(f"Failed to get task status for {task_id}: {e}")
+            return None
 
     def increment_task_retry_count(self, task_id: str) -> bool:
         """

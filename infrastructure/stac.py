@@ -868,6 +868,38 @@ class PgStacInfrastructure:
                 'collection': collection_id
             }
 
+    def collection_exists(self, collection_id: str) -> bool:
+        """
+        Check if a STAC collection exists in PgSTAC.
+
+        CRITICAL (12 NOV 2025): PgSTAC requires collections to exist BEFORE inserting items
+        because collections create partitions that items use. Without the collection,
+        item insertion fails with: "no partition of relation 'items' found for row"
+
+        Args:
+            collection_id: Collection ID to check
+
+        Returns:
+            True if collection exists in pgstac.collections, False otherwise
+
+        Example:
+            if not stac.collection_exists('my_collection'):
+                raise RuntimeError("Collection must exist before inserting items")
+        """
+        try:
+            with psycopg.connect(self.connection_string) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT EXISTS(SELECT 1 FROM pgstac.collections WHERE id = %s)",
+                        (collection_id,)
+                    )
+                    exists = cur.fetchone()[0]
+                    logger.debug(f"Collection '{collection_id}' exists: {exists}")
+                    return exists
+        except Exception as e:
+            logger.error(f"❌ Error checking collection existence for '{collection_id}': {e}")
+            return False
+
     def bulk_insert_items(self, items: list, collection_id: str) -> Dict[str, Any]:
         """
         Bulk insert STAC Items into PgSTAC.

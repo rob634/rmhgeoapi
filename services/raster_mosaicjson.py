@@ -116,56 +116,111 @@ def create_mosaicjson(
         if not collection_id:
             raise ValueError("collection_id is required parameter")
 
-        # Get output_container from job_parameters (passed by controller)
-        # Falls back to config default if not provided (7 NOV 2025)
-        output_container = job_parameters.get("output_container") or job_parameters.get("mosaicjson_container")
-        if not output_container:
+        # Get mosaicjson_container from job_parameters (12 NOV 2025)
+        # This is WHERE the MosaicJSON file will be WRITTEN
+        # Falls back to config default if not provided
+        mosaicjson_container = job_parameters.get("mosaicjson_container")
+        if not mosaicjson_container:
             # Use config default for MosaicJSON storage
             from config import get_config
             config = get_config()
-            output_container = config.resolved_intermediate_tiles_container
-            logger.info(f"   Using default container from config: {output_container}")
+            mosaicjson_container = config.resolved_intermediate_tiles_container
+            logger.info(f"   Using default mosaicjson_container from config: {mosaicjson_container}")
+
+        # Get cog_container from job_parameters (12 NOV 2025)
+        # This is WHERE the COG files are located (for SAS URL generation)
+        # MosaicJSON will REFERENCE these COGs in its tile URLs
+        cog_container = job_parameters.get("cog_container")
+        if not cog_container:
+            # Default to output_container if not specified
+            cog_container = job_parameters.get("output_container")
+            if not cog_container:
+                raise ValueError("cog_container must be specified or output_container must be provided")
+            logger.info(f"   Using output_container as cog_container: {cog_container}")
 
         # Optional output_folder (None = flat namespace, write to container root)
         output_folder = job_parameters.get("output_folder")
 
         logger.info(f"🔄 MosaicJSON task handler invoked (fan_in aggregation)")
         logger.info(f"   Collection: {collection_id}")
-        logger.info(f"   Output Container: {output_container}")
+        logger.info(f"   MosaicJSON Container (where JSON file is written): {mosaicjson_container}")
+        logger.info(f"   COG Container (where COG files are located): {cog_container}")
         logger.info(f"   Output Folder: {output_folder or '(root - flat namespace)'}")
         logger.info(f"   Previous results count: {len(previous_results)}")
 
+        # DIAGNOSTIC LOGGING (11 NOV 2025): Log structure of previous_results
+        logger.debug(f"🔍 [MOSAIC-DEBUG] previous_results structure check:")
+        logger.debug(f"   Type: {type(previous_results)}")
+        logger.debug(f"   Length: {len(previous_results)}")
+        if previous_results:
+            logger.debug(f"   First item type: {type(previous_results[0])}")
+            if isinstance(previous_results[0], dict):
+                logger.debug(f"   First item keys: {list(previous_results[0].keys())}")
+                logger.debug(f"   First item['success']: {previous_results[0].get('success')}")
+                if 'result' in previous_results[0]:
+                    logger.debug(f"   First item['result'] keys: {list(previous_results[0]['result'].keys()) if isinstance(previous_results[0]['result'], dict) else 'NOT A DICT'}")
+
         # Extract COG blobs from Stage 2 results
         # Note: previous_results is list of result_data dicts from completed tasks
-        # Structure: result_data = {"success": True, "result": {"cog_blob": "path/to/file.tif", ...}}
+        # Structure: result_data = {"success": True, "result": {"cog_blob": "path/to/file.tif", "cog_container": "silver-cogs", ...}}
         cog_blobs = []
-        for result_data in previous_results:
+        cog_container = None  # Extract from first successful result (11 NOV 2025)
+        failed_results = []
+        for idx, result_data in enumerate(previous_results):
+            logger.debug(f"🔍 [MOSAIC-DEBUG] Processing result {idx+1}/{len(previous_results)}")
+            logger.debug(f"   Type: {type(result_data)}")
+            logger.debug(f"   Keys: {list(result_data.keys()) if isinstance(result_data, dict) else 'NOT A DICT'}")
+
             if result_data.get("success"):
                 # Extract cog_blob from nested result dict
                 result = result_data.get("result", {})
                 cog_blob = result.get("cog_blob")
+                logger.debug(f"   success=True, cog_blob={cog_blob}")
                 if cog_blob:
                     cog_blobs.append(cog_blob)
+                    # Extract cog_container from first successful result (11 NOV 2025)
+                    if cog_container is None:
+                        cog_container = result.get("cog_container")
+                        logger.debug(f"   cog_container extracted: {cog_container}")
+                else:
+                    logger.warning(f"⚠️ [MOSAIC-WARNING] Result {idx+1} has success=True but no cog_blob!")
+                    logger.warning(f"   result dict: {result}")
+            else:
+                failed_results.append(idx + 1)
+                error_msg = result_data.get("error", "Unknown error")
+                logger.warning(f"⚠️ [MOSAIC-WARNING] Result {idx+1} has success=False: {error_msg}")
+
+        if failed_results:
+            logger.warning(f"⚠️ [MOSAIC-WARNING] {len(failed_results)} of {len(previous_results)} COG tasks failed: {failed_results}")
 
         if not cog_blobs:
+            logger.error(f"❌ [MOSAIC-ERROR] No COG blobs found in Stage 2 results")
+            logger.error(f"   Total results: {len(previous_results)}")
+            logger.error(f"   Failed results: {len(failed_results)}")
+            logger.error(f"   First result sample: {previous_results[0] if previous_results else 'EMPTY'}")
             return {
                 "success": False,
-                "error": "No COG blobs found in Stage 2 results",
+                "error": f"No COG blobs found in Stage 2 results ({len(failed_results)} tasks failed)",
                 "error_type": "ValueError"
             }
 
         logger.info(f"📊 Extracted {len(cog_blobs)} COG blobs from previous results")
+        logger.debug(f"🔍 [MOSAIC-DEBUG] COG blobs: {cog_blobs}")
 
         # Call internal implementation
         result = _create_mosaicjson_impl(
             cog_blobs=cog_blobs,
             collection_name=collection_id,
-            container=output_container,
-            output_folder=output_folder
+            mosaicjson_container=mosaicjson_container,
+            cog_container=cog_container,
+            output_folder=output_folder,
+            job_parameters=job_parameters
         )
 
-        # Add cog_blobs to result for Stage 4
+        # Add cog_blobs and cog_container to result for Stage 4 (11 NOV 2025)
+        # Stage 4 needs these to create STAC Items for each COG
         result["cog_blobs"] = cog_blobs
+        result["cog_container"] = cog_container
 
         return result
 
@@ -178,11 +233,71 @@ def create_mosaicjson(
         }
 
 
+def _convert_urls_to_vsiaz(mosaic_dict: dict, container: str) -> dict:
+    """
+    Convert HTTPS SAS URLs in MosaicJSON to /vsiaz/ paths for OAuth-based TiTiler access.
+
+    CRITICAL (12 NOV 2025): MosaicJSON creation uses SAS URLs temporarily so cogeo-mosaic
+    can READ the COGs to extract bounds. But the STORED MosaicJSON must use /vsiaz/ paths
+    for OAuth-based TiTiler access (not expiring SAS tokens).
+
+    Args:
+        mosaic_dict: MosaicJSON dict with HTTPS SAS URLs in tiles
+        container: Azure storage container name
+
+    Returns:
+        Modified mosaic_dict with /vsiaz/ paths
+
+    Example transformation:
+        Before: "https://account.blob.core.windows.net/container/path/file.tif?st=..."
+        After:  "/vsiaz/container/path/file.tif"
+    """
+    logger.debug(f"🔄 Converting MosaicJSON URLs to /vsiaz/ paths...")
+
+    tiles = mosaic_dict.get('tiles', {})
+    converted_count = 0
+
+    for quadkey, urls in tiles.items():
+        new_urls = []
+        for url in urls:
+            if url.startswith('https://') or url.startswith('http://'):
+                # Parse URL: https://account.blob.core.windows.net/container/blob/path.tif?sas...
+                # Extract: container/blob/path.tif
+                # Result: /vsiaz/container/blob/path.tif
+
+                # Remove SAS token (everything after ?)
+                url_without_sas = url.split('?')[0]
+
+                # Extract path after .blob.core.windows.net/
+                # Example: https://rmhazuregeo.blob.core.windows.net/silver-cogs/file.tif
+                #          → silver-cogs/file.tif
+                parts = url_without_sas.split('.blob.core.windows.net/')
+                if len(parts) == 2:
+                    blob_path = parts[1]  # e.g., "silver-cogs/file.tif"
+                    vsiaz_path = f"/vsiaz/{blob_path}"
+                    new_urls.append(vsiaz_path)
+                    converted_count += 1
+                else:
+                    # Fallback: couldn't parse, keep original
+                    logger.warning(f"   ⚠️  Could not parse URL for /vsiaz/ conversion: {url_without_sas}")
+                    new_urls.append(url)
+            else:
+                # Already /vsiaz/ or other format, keep as-is
+                new_urls.append(url)
+
+        tiles[quadkey] = new_urls
+
+    logger.info(f"✅ Converted {converted_count} URLs to /vsiaz/ paths")
+    return mosaic_dict
+
+
 def _create_mosaicjson_impl(
     cog_blobs: List[str],
     collection_name: str,
-    container: str,
-    output_folder: str
+    mosaicjson_container: str,
+    cog_container: str,
+    output_folder: str,
+    job_parameters: Dict[str, Any] = None
 ) -> dict:
     """
     Internal implementation: Create MosaicJSON from COG list.
@@ -193,8 +308,10 @@ def _create_mosaicjson_impl(
     Args:
         cog_blobs: List of COG blob paths
         collection_name: Collection name
-        container: Azure storage container
+        mosaicjson_container: Container where MosaicJSON file will be written (12 NOV 2025)
+        cog_container: Container where COG files are located (for SAS URL generation) (12 NOV 2025)
         output_folder: Output folder path
+        job_parameters: Optional job parameters (for maxzoom override)
 
     Returns:
         Dict with success=True and MosaicJSON details
@@ -204,8 +321,12 @@ def _create_mosaicjson_impl(
         ImportError: If cogeo-mosaic not installed
         Exception: If MosaicJSON creation or upload fails
     """
+    if job_parameters is None:
+        job_parameters = {}
     logger.info(f"🔄 Creating MosaicJSON from {len(cog_blobs)} COG files...")
     logger.info(f"   Collection: {collection_name}")
+    logger.info(f"   MosaicJSON Container: {mosaicjson_container}")
+    logger.info(f"   COG Container: {cog_container}")
     logger.info(f"   Output: {output_folder}/{collection_name}.json")
 
     if not cog_blobs:
@@ -224,12 +345,13 @@ def _create_mosaicjson_impl(
 
     # Convert blob paths to authenticated URLs with SAS tokens
     # MosaicJSON.from_urls() needs to read each COG to determine bounds
+    # CRITICAL (12 NOV 2025): Use cog_container (where COGs are stored), not mosaicjson_container
     blob_repo = BlobRepository.instance()
     cog_urls = []
-    logger.info(f"🔐 Generating SAS URLs for {len(cog_blobs)} COG blobs...")
+    logger.info(f"🔐 Generating SAS URLs for {len(cog_blobs)} COG blobs from container '{cog_container}'...")
     for blob in cog_blobs:
         url = blob_repo.get_blob_url_with_sas(
-            container_name=container,
+            container_name=cog_container,
             blob_name=blob,
             hours=1  # 1 hour validity for mosaic creation
         )
@@ -267,6 +389,10 @@ def _create_mosaicjson_impl(
         # Create mosaic definition
         # cogeo-mosaic will read each COG to determine tile bounds
         logger.info("🔍 Analyzing COG bounds and creating quadkey index...")
+        logger.debug(f"🔍 [MOSAIC-DEBUG] Calling MosaicJSON.from_urls with:")
+        logger.debug(f"   URL count: {len(cog_urls)}")
+        logger.debug(f"   maxzoom: {maxzoom}")
+        logger.debug(f"   max_threads: 10")
 
         mosaic = MosaicJSON.from_urls(
             cog_urls,
@@ -281,6 +407,8 @@ def _create_mosaicjson_impl(
         logger.info(f"   Zoom range: {mosaic.minzoom} - {mosaic.maxzoom}")
         logger.info(f"   Quadkeys: {len(mosaic.tiles)}")
         logger.info(f"   Center: {mosaic.center}")
+        logger.debug(f"🔍 [MOSAIC-DEBUG] Mosaic object type: {type(mosaic)}")
+        logger.debug(f"🔍 [MOSAIC-DEBUG] Mosaic tiles sample: {list(mosaic.tiles.keys())[:5] if mosaic.tiles else 'EMPTY'}")
 
         # Memory checkpoint 2 (DEBUG_MODE only)
         from util_logger import log_memory_checkpoint
@@ -289,7 +417,12 @@ def _create_mosaicjson_impl(
                               tile_count=len(cog_urls))
 
     except Exception as e:
-        logger.error(f"❌ MosaicJSON creation failed: {e}")
+        logger.error(f"❌ [MOSAIC-ERROR] MosaicJSON.from_urls failed: {e}")
+        logger.error(f"   Exception type: {type(e).__name__}")
+        logger.error(f"   COG URLs attempted: {len(cog_urls)}")
+        logger.error(f"   First URL: {cog_urls[0] if cog_urls else 'NONE'}")
+        import traceback
+        logger.error(f"   Traceback: {traceback.format_exc()}")
         raise Exception(f"Failed to create MosaicJSON: {e}")
 
     # Generate output path (flat namespace if no output_folder)
@@ -301,31 +434,53 @@ def _create_mosaicjson_impl(
     # Save to temporary file
     tmp_path = None
     try:
+        logger.debug(f"🔍 [MOSAIC-DEBUG] Creating temporary file for MosaicJSON...")
+
         with tempfile.NamedTemporaryFile(
             mode='w',
             suffix='.json',
             delete=False
         ) as tmp:
-            # Convert mosaic to dict and write JSON
+            # Convert mosaic to dict
+            logger.debug(f"🔍 [MOSAIC-DEBUG] Converting mosaic to dict...")
             mosaic_dict = mosaic.model_dump(mode='json')
+            logger.debug(f"🔍 [MOSAIC-DEBUG] Dict keys: {list(mosaic_dict.keys())}")
+
+            # CRITICAL (12 NOV 2025): Convert HTTPS SAS URLs to /vsiaz/ paths
+            # SAS URLs were used temporarily so cogeo-mosaic could READ the COGs
+            # Now replace with /vsiaz/ paths for OAuth-based TiTiler access
+            # Use cog_container (where COGs are stored) for path construction
+            mosaic_dict = _convert_urls_to_vsiaz(mosaic_dict, cog_container)
+
+            logger.debug(f"🔍 [MOSAIC-DEBUG] Writing JSON to temp file...")
             json.dump(mosaic_dict, tmp, indent=2)
             tmp_path = tmp.name
 
         logger.info(f"💾 MosaicJSON written to temp file: {tmp_path}")
+        logger.debug(f"🔍 [MOSAIC-DEBUG] Temp file size: {os.path.getsize(tmp_path)} bytes")
 
         # Upload to blob storage using BlobRepository
-        logger.info(f"☁️ Uploading to blob storage: {output_blob_name}")
+        # CRITICAL (12 NOV 2025): Use mosaicjson_container (where JSON file is written)
+        logger.info(f"☁️ Uploading MosaicJSON to blob storage: {output_blob_name}")
+        logger.debug(f"🔍 [MOSAIC-DEBUG] Upload details:")
+        logger.debug(f"   Container: {mosaicjson_container}")
+        logger.debug(f"   Blob path: {output_blob_name}")
+        logger.debug(f"   Content type: application/json")
 
         with open(tmp_path, 'rb') as f:
+            file_data = f.read()
+            logger.debug(f"🔍 [MOSAIC-DEBUG] Read {len(file_data)} bytes from temp file")
+
             upload_result = blob_repo.write_blob(
-                container=container,
+                container=mosaicjson_container,
                 blob_path=output_blob_name,
-                data=f.read(),
+                data=file_data,
                 content_type='application/json',
                 overwrite=True
             )
+            logger.debug(f"🔍 [MOSAIC-DEBUG] Upload result: {upload_result}")
 
-        logger.info(f"✅ MosaicJSON uploaded successfully")
+        logger.info(f"✅ MosaicJSON uploaded successfully to {mosaicjson_container}/{output_blob_name}")
 
         # Memory checkpoint 3 (DEBUG_MODE only)
         from util_logger import log_memory_checkpoint
@@ -333,7 +488,7 @@ def _create_mosaicjson_impl(
                               blob_path=output_blob_name)
 
         # Generate public URL for the uploaded MosaicJSON (repository layer responsibility)
-        mosaicjson_url = blob_repo.get_blob_url(container, output_blob_name)
+        mosaicjson_url = blob_repo.get_blob_url(mosaicjson_container, output_blob_name)
 
         return {
             "success": True,

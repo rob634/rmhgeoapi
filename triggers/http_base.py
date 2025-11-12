@@ -220,8 +220,20 @@ class BaseHttpTrigger(ABC):
                 status_code=404,
                 request_id=request_id
             )
-            
+
         except Exception as e:
+            # Check if it's Azure ResourceNotFoundError (Phase 1/2 validation)
+            # This is a client error (bad input), not a server error
+            if e.__class__.__name__ == 'ResourceNotFoundError':
+                self.logger.info(f"🔍 [{self.trigger_name}] Resource not found (client error): {e}")
+                return self._create_error_response(
+                    error="Not found",
+                    message=str(e),
+                    status_code=404,
+                    request_id=request_id
+                )
+
+            # All other exceptions are internal server errors
             # Internal server errors (500)
             self.logger.error(f"💥 [{self.trigger_name}] Internal error: {e}")
             import traceback

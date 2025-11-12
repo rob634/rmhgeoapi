@@ -9,6 +9,110 @@
 
 **Purpose**: Critical items that must be completed before migrating this application to corporate Azure environment.
 
+## 🎯 IN PROGRESS - pgSTAC Search-Based Mosaic Implementation (12 NOV 2025)
+
+**Purpose**: Replace MosaicJSON with pgSTAC searches for collection mosaics (OAuth-only security)
+
+**Status**: 🔄 **ACTIVE** - Phase 1 starting
+**Priority**: HIGH - Critical for Managed Identity-only authentication
+**Reference**: PGSTAC-MOSAIC-STRATEGY.md
+
+**Why**: MosaicJSON requires two-tier auth (HTTPS for JSON file + OAuth for COGs). pgSTAC searches use OAuth throughout.
+
+---
+
+### Phase 1: Fix STAC Item Generation (CRITICAL PREREQUISITE)
+
+**Status**: 🔄 **IN PROGRESS**
+**Estimated Time**: 2-3 hours
+**Files**: `services/service_stac_metadata.py`
+
+**Checklist**:
+- [ ] Add `generate_stac_item_id()` helper function (blob path → STAC item ID)
+- [ ] Add `bbox_to_geometry()` helper function (bbox → GeoJSON Polygon)
+- [ ] Update `extract_item_from_blob()` to set required fields:
+  - [ ] `id` field (via generate_stac_item_id)
+  - [ ] `type` = "Feature"
+  - [ ] `collection` field
+  - [ ] `geometry` field (ensure exists, derive from bbox if missing)
+  - [ ] `stac_version` = "1.1.0"
+- [ ] Test locally (syntax + imports)
+- [ ] Deploy to Azure
+- [ ] Verify with test COG upload
+
+**Why Critical**: pgSTAC searches query items. Missing geometry/collection fields = empty search results (world extent).
+
+---
+
+### Phase 2: Create PgStacRepository (Infrastructure Layer)
+
+**Status**: ⏳ **PENDING** (after Phase 1)
+**Estimated Time**: 3-4 hours
+**File**: `infrastructure/pgstac_repository.py` (NEW)
+
+**Checklist**:
+- [ ] Create PgStacRepository class
+- [ ] Implement insert_collection, update_collection_metadata, collection_exists
+- [ ] Implement insert_item, get_collection, list_collections
+- [ ] Add comprehensive error handling
+- [ ] Test locally (syntax + imports)
+
+**Purpose**: Encapsulate pgSTAC data operations (separate from PgStacInfrastructure schema setup)
+
+---
+
+### Phase 3: Create TiTilerSearchService (Service Layer)
+
+**Status**: ⏳ **PENDING** (after Phase 2)
+**Estimated Time**: 2-3 hours
+**File**: `services/titiler_search_service.py` (NEW)
+
+**Checklist**:
+- [ ] Create TiTilerSearchService class
+- [ ] Implement register_search, generate URLs, validate_search
+- [ ] Use httpx.AsyncClient for HTTP calls to TiTiler
+- [ ] Add TITILER_BASE_URL to config.py
+- [ ] Test locally (syntax + imports)
+
+**Purpose**: Encapsulate TiTiler search registration and URL generation
+
+---
+
+### Phase 4: Integrate Search Registration into Collection Creation
+
+**Status**: ⏳ **PENDING** (after Phase 3)
+**Estimated Time**: 2-3 hours
+**File**: `services/stac_collection.py`
+
+**Checklist**:
+- [ ] After collection insert, call register_search
+- [ ] Store search_id in collection summaries
+- [ ] Add preview/tilejson/tiles links
+- [ ] Update collection in pgSTAC with metadata
+- [ ] Handle failures gracefully
+
+**Purpose**: Automatically register pgSTAC search when creating collections
+
+---
+
+### Phase 5-7: Schema, Migration, Testing
+
+**Status**: ⏳ **PENDING**
+**Estimated Time**: 5 hours total
+
+See PGSTAC-MOSAIC-STRATEGY.md for full details
+
+---
+
+**Total Estimated Time**: 14-19 hours (development + testing)
+**Current Focus**: Phase 1 - STAC item generation fixes
+
+---
+
+## 🚨 QA ENVIRONMENT CHECKLIST - Corporate Azure Migration
+
+**Purpose**: Critical items that must be completed before migrating this application to corporate Azure environment.
+
 **Status**: 🔴 **BLOCKING ITEMS REMAIN** - STAC API broken, admin endpoints need testing
 
 ---

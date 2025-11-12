@@ -267,6 +267,66 @@ class StacMetadataService:
             logger.error(f"   Traceback:\n{traceback.format_exc()}")
             raise ValueError(f"Failed to convert STAC item to dict: {e}")
 
+        # STEP G.1: Add required STAC fields for pgSTAC search compatibility (12 NOV 2025)
+        try:
+            logger.debug("   Step G.1: Adding required STAC fields for pgSTAC compatibility...")
+
+            # 1. Ensure 'type' field = "Feature" (GeoJSON requirement)
+            if item_dict.get('type') != 'Feature':
+                item_dict['type'] = 'Feature'
+                logger.debug("      Set type='Feature' (GeoJSON requirement)")
+
+            # 2. Ensure 'id' field exists (should be set by rio-stac, but verify)
+            if not item_dict.get('id'):
+                # Fallback: use generate_stac_item_id if rio-stac didn't set it
+                fallback_id = self.generate_stac_item_id(blob_name)
+                item_dict['id'] = fallback_id
+                logger.warning(f"      rio-stac didn't set id - using generated: {fallback_id}")
+            else:
+                logger.debug(f"      id={item_dict['id']} (set by rio-stac)")
+
+            # 3. Ensure 'collection' field exists
+            if not item_dict.get('collection'):
+                item_dict['collection'] = collection_id
+                logger.debug(f"      Set collection='{collection_id}'")
+            else:
+                # Verify collection matches parameter
+                if item_dict['collection'] != collection_id:
+                    logger.warning(
+                        f"      Collection mismatch: item has '{item_dict['collection']}' "
+                        f"but parameter is '{collection_id}' - using parameter"
+                    )
+                    item_dict['collection'] = collection_id
+
+            # 4. Ensure 'stac_version' exists
+            if not item_dict.get('stac_version'):
+                item_dict['stac_version'] = '1.1.0'
+                logger.debug("      Set stac_version='1.1.0'")
+
+            # 5. CRITICAL: Ensure 'geometry' field exists (required for pgSTAC searches)
+            if not item_dict.get('geometry'):
+                logger.warning("      ⚠️  geometry field missing - deriving from bbox")
+                bbox = item_dict.get('bbox')
+                if bbox:
+                    item_dict['geometry'] = self.bbox_to_geometry(bbox)
+                    logger.debug(f"      ✅ Derived geometry from bbox: {bbox}")
+                else:
+                    # Critical error: no geometry and no bbox
+                    raise ValueError(
+                        "STAC item missing both 'geometry' and 'bbox' - cannot create valid item"
+                    )
+            else:
+                logger.debug(f"      geometry exists: {item_dict['geometry']['type']}")
+
+            logger.debug(f"   ✅ Step G.1: Required STAC fields validated/added")
+        except Exception as e:
+            logger.error(f"❌ Step G.1 FAILED: Error adding required STAC fields")
+            logger.error(f"   Error: {e}")
+            logger.error(f"   Traceback:\n{traceback.format_exc()}")
+            # CRITICAL (12 NOV 2025): Items without proper fields break pgSTAC searches
+            # Fail fast - these fields are mandatory for pgSTAC compatibility
+            raise RuntimeError(f"Failed to add required STAC fields: {e}")
+
         # STEP G.5: Convert asset URLs to /vsiaz/ paths for OAuth compatibility
         try:
             logger.debug("   Step G.5: Converting asset URLs to /vsiaz/ paths for OAuth...")
@@ -402,6 +462,94 @@ class StacMetadataService:
 
         logger.info(f"✅ STAC ITEM EXTRACTION COMPLETE: {item.id}")
         return item
+
+    def generate_stac_item_id(self, blob_name: str) -> str:
+        """
+        Generate STAC-compliant item ID from blob path.
+
+        CRITICAL (12 NOV 2025): Required for pgSTAC search compatibility.
+        Items MUST have unique IDs for pgSTAC queries to work correctly.
+
+        Strategy:
+            - Use filename stem (without extension) as base
+            - Prepend parent directory path (replace / with -)
+            - Result is unique and human-readable
+
+        Args:
+            blob_name: Blob path (e.g., "folder/subfolder/file.tif")
+
+        Returns:
+            STAC item ID (e.g., "folder-subfolder-file")
+
+        Examples:
+            "file.tif" → "file"
+            "folder/file.tif" → "folder-file"
+            "a/b/c/file.tif" → "a-b-c-file"
+            "namangan/R1C1.tif" → "namangan-R1C1"
+        """
+        from pathlib import Path
+
+        # Remove extension
+        stem = Path(blob_name).stem
+
+        # Get parent path
+        parent = str(Path(blob_name).parent)
+
+        # Build ID
+        if parent and parent != ".":
+            # Has subdirectory: folder/file.tif → folder-file
+            item_id = f"{parent}-{stem}".replace("/", "-").replace("\\", "-")
+        else:
+            # No subdirectory: file.tif → file
+            item_id = stem
+
+        logger.debug(f"   Generated STAC item ID: '{blob_name}' → '{item_id}'")
+        return item_id
+
+    def bbox_to_geometry(self, bbox: list) -> dict:
+        """
+        Convert bbox [minx, miny, maxx, maxy] to GeoJSON Polygon geometry.
+
+        CRITICAL (12 NOV 2025): Required for pgSTAC search compatibility.
+        pgSTAC searches query the geometry field. If missing, searches return
+        world extent bounds [-180, -85, 180, 85] instead of actual collection extent.
+
+        Args:
+            bbox: Bounding box [minx, miny, maxx, maxy] in EPSG:4326
+
+        Returns:
+            GeoJSON Polygon geometry dict
+
+        Example:
+            bbox_to_geometry([-70.7, -56.3, -70.6, -56.2])
+            → {
+                "type": "Polygon",
+                "coordinates": [[
+                    [-70.7, -56.3],
+                    [-70.6, -56.3],
+                    [-70.6, -56.2],
+                    [-70.7, -56.2],
+                    [-70.7, -56.3]
+                ]]
+            }
+        """
+        if not bbox or len(bbox) != 4:
+            raise ValueError(f"Invalid bbox: expected [minx, miny, maxx, maxy], got {bbox}")
+
+        minx, miny, maxx, maxy = bbox
+        geometry = {
+            "type": "Polygon",
+            "coordinates": [[
+                [minx, miny],
+                [maxx, miny],
+                [maxx, maxy],
+                [minx, maxy],
+                [minx, miny]  # Close the ring
+            ]]
+        }
+
+        logger.debug(f"   Converted bbox {bbox} to GeoJSON Polygon")
+        return geometry
 
     def _generate_item_id(self, container: str, blob_name: str, collection_id: str = None) -> str:
         """

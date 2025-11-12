@@ -117,7 +117,7 @@ class IngestVectorTrigger(JobManagementTrigger):
         blob_name = req_body["blob_name"]
         file_extension = req_body["file_extension"]
         table_name = req_body["table_name"]
-        container_name = req_body.get("container_name", "bronze")
+        container_name = req_body.get("container_name", "rmhazuregeobronze")  # Fixed: was "bronze" (12 NOV 2025)
         schema = req_body.get("schema", "geo")
         chunk_size = req_body.get("chunk_size")  # None = auto-calculate
         converter_params = req_body.get("converter_params", {})

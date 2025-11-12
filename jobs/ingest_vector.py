@@ -100,7 +100,7 @@ class IngestVectorJob(JobBase):
         "blob_name": {"type": "str", "required": True},
         "file_extension": {"type": "str", "required": True},
         "table_name": {"type": "str", "required": True},
-        "container_name": {"type": "str", "default": "rmhazuregeobronze"},  # TODO: Parameterize via env var
+        "container_name": {"type": "str", "default": "rmhazuregeobronze"},  # Fixed: was "bronze" (12 NOV 2025)
         "schema": {"type": "str", "default": "geo"},
         "chunk_size": {"type": "int", "default": None},  # Auto-calculate if None
         "converter_params": {"type": "dict", "default": {}},
@@ -341,6 +341,33 @@ class IngestVectorJob(JobBase):
             raise ValueError(
                 f"Unable to validate table name '{table_name}'. "
                 f"Check database connectivity. Error: {type(e).__name__}: {e}"
+            )
+
+        # ================================================================
+        # NEW (12 NOV 2025): Validate container and blob exist
+        # Matching raster workflow pattern for consistency
+        # Fast-fail at job submission to avoid wasted Service Bus messages
+        # ================================================================
+        from azure.core.exceptions import ResourceNotFoundError
+        from infrastructure.blob import BlobRepository
+
+        blob_repo = BlobRepository.instance()
+        container_name = validated["container_name"]
+        blob_name = validated["blob_name"]
+
+        # Validate container exists
+        if not blob_repo.container_exists(container_name):
+            raise ResourceNotFoundError(
+                f"Container '{container_name}' does not exist in storage account "
+                f"'{blob_repo.account_name}'. Verify container name spelling."
+            )
+
+        # Validate blob exists
+        if not blob_repo.blob_exists(container_name, blob_name):
+            raise ResourceNotFoundError(
+                f"File '{blob_name}' not found in container '{container_name}' "
+                f"(storage account: '{blob_repo.account_name}'). "
+                f"Verify file path or use /api/containers/{container_name}/blobs to list available files."
             )
 
         return validated

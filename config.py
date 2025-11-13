@@ -882,6 +882,19 @@ class AppConfig(BaseModel):
         description="Enable PostgreSQL connectivity checks in health endpoint"
     )
 
+    # VSI (Virtual File System) health check configuration
+    vsi_test_file: str = Field(
+        default="dctest.tif",
+        description="Test file name for VSI /vsicurl/ capability check in health endpoint. "
+                    "File must exist in vsi_test_container for health check to pass."
+    )
+
+    vsi_test_container: str = Field(
+        default="rmhazuregeobronze",
+        description="Container name for VSI test file. Default uses legacy flat container name. "
+                    "For trust zone pattern, use storage.bronze.get_container('rasters')."
+    )
+
     # ========================================================================
     # API Endpoint Configuration (NEW - 3 NOV 2025)
     # ========================================================================

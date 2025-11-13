@@ -1042,9 +1042,9 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                 # Get BlobRepository to generate SAS URL
                 blob_repo = RepositoryFactory.create_blob_repository()
 
-                # Test with dctest3_R1C2.tif from bronze container
-                test_blob = "dctest3_R1C2.tif"
-                test_container = config.storage.bronze.get_container('rasters')
+                # Use configured test file and container
+                test_blob = config.vsi_test_file
+                test_container = config.vsi_test_container
 
                 # Generate SAS URL (4 hour expiry for health check stability)
                 test_url = blob_repo.get_blob_url_with_sas(
@@ -1071,7 +1071,7 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                                 "gdal_version": rasterio.__gdal_version__,
                                 "rasterio_version": rasterio.__version__,
                                 "test_results": {
-                                    "test_file": f"dctest3_R1C2.tif (bronze container)",
+                                    "test_file": test_blob,
                                     "container": test_container,
                                     "file_size": f"{width}x{height}",
                                     "bands": bands,
@@ -1085,7 +1085,8 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                                     "azure_blob_sas_compatible": True
                                 },
                                 "big_raster_etl_ready": True,
-                                "note": f"/vsicurl/ works with Azure Blob Storage SAS URLs - tested with {test_container}/{test_blob}"
+                                "note": f"/vsicurl/ works with Azure Blob Storage SAS URLs - tested with {test_container}/{test_blob}",
+                                "config_source": "config.vsi_test_file, config.vsi_test_container"
                             }
                     except Exception as open_error:
                         # Failed to open file via /vsicurl/

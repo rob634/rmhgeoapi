@@ -906,8 +906,9 @@ class AppConfig(BaseModel):
     )
 
     ogc_features_base_url: str = Field(
-        default="https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/features",
+        default="https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/features",
         description="Base URL for OGC API - Features (vector data access). "
+                    "Updated for NEW rmhazuregeoapi function app (12 NOV 2025). "
                     "Placeholder until custom DNS (geospatial.rmh.org) is configured."
     )
 
@@ -1374,7 +1375,7 @@ class AppConfig(BaseModel):
 
             # API endpoint configuration
             titiler_base_url=os.environ.get('TITILER_BASE_URL', 'https://rmhtitiler-ghcyd7g0bxdvc2hc.eastus-01.azurewebsites.net'),
-            ogc_features_base_url=os.environ.get('OGC_FEATURES_BASE_URL', 'https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/features'),
+            ogc_features_base_url=os.environ.get('OGC_FEATURES_BASE_URL', 'https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/features'),
             titiler_mode=os.environ.get('TITILER_MODE', 'pgstac'),
         )
     

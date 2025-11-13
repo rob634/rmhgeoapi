@@ -472,58 +472,29 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                         stac_count = "unknown"
                     
                     # Ensure app tables exist and validate schema
+                    # NOTE: Schema manager uses its own connection - skip during health check
+                    # to avoid transaction context conflicts
                     app_tables_status = {}
                     table_management_results = {}
-                    
+
                     if app_schema_exists:
+                        # Simple table existence check (no schema manager - it creates its own connection)
                         try:
-                            # Use enhanced schema manager for complete table creation
-                            schema_manager = SchemaManagerFactory.create_schema_manager()
-                            validation_results = schema_manager.validate_and_initialize_schema()
-                            
-                            # Map schema manager results to health check format
-                            if validation_results.get('tables_created'):
-                                # Tables were created with complete schema
-                                created_tables = validation_results.get('tables_created', [])
-                                for table in ['jobs', 'tasks']:
-                                    if table in created_tables:
-                                        app_tables_status[table] = True
-                                        table_management_results[table] = "created_with_complete_schema"
-                                    else:
-                                        app_tables_status[table] = True
-                                        table_management_results[table] = "validated"
-                            elif validation_results.get('tables_exist', False):
-                                # Check for schema issues
-                                schema_issues = validation_results.get('schema_issues', {})
-                                for table in ['jobs', 'tasks']:
-                                    if table in schema_issues:
-                                        app_tables_status[table] = "schema_invalid"
-                                        issues = schema_issues[table]
-                                        table_management_results[table] = f"schema_issues: {', '.join(issues[:2])}"
-                                    else:
-                                        app_tables_status[table] = True
-                                        table_management_results[table] = "validated"
-                            else:
-                                # Handle missing tables or other issues
-                                missing_tables = validation_results.get('missing_tables', [])
-                                existing_tables = validation_results.get('existing_tables', [])
-                                
-                                for table in ['jobs', 'tasks']:
-                                    if table in missing_tables:
-                                        app_tables_status[table] = "missing"
-                                        table_management_results[table] = "table_missing_creation_failed"
-                                    elif table in existing_tables:
-                                        app_tables_status[table] = True
-                                        table_management_results[table] = "validated"
-                                    else:
-                                        app_tables_status[table] = "unknown"
-                                        table_management_results[table] = "status_unknown"
-                                        
-                        except Exception as schema_error:
-                            # Fallback error handling
-                            table_management_results['schema_manager_error'] = f"error: {str(schema_error)}"
-                            app_tables_status['jobs'] = "error"
-                            app_tables_status['tasks'] = "error"
+                            for table_name in ['jobs', 'tasks']:
+                                cur.execute("""
+                                    SELECT EXISTS (
+                                        SELECT FROM information_schema.tables
+                                        WHERE table_schema = %s
+                                        AND table_name = %s
+                                    )
+                                """, (config.app_schema, table_name))
+                                table_exists = cur.fetchone()[0]
+                                app_tables_status[table_name] = table_exists
+                                table_management_results[table_name] = "exists" if table_exists else "missing"
+                        except Exception as table_check_error:
+                            table_management_results['table_check_error'] = f"error: {str(table_check_error)}"
+                            app_tables_status['jobs'] = False
+                            app_tables_status['tasks'] = False
                     
                     # DETAILED SCHEMA INSPECTION - Added for debugging function signature mismatches
                     # NOTE: Each section wrapped in try-except to prevent transaction cascade failures

@@ -205,57 +205,57 @@ class AdminH3DebugTrigger:
         try:
             from psycopg import sql
 
-            conn = self.h3_repo._get_connection()
-            with conn.cursor() as cur:
-                # Check schema exists
-                cur.execute("""
-                    SELECT schema_name
-                    FROM information_schema.schemata
-                    WHERE schema_name = 'h3'
-                """)
-                schema_exists = cur.fetchone() is not None
+            with self.h3_repo._get_connection() as conn:
+                with conn.cursor() as cur:
+                    # Check schema exists
+                    cur.execute("""
+                        SELECT schema_name
+                        FROM information_schema.schemata
+                        WHERE schema_name = 'h3'
+                    """)
+                    schema_exists = cur.fetchone() is not None
 
-                if not schema_exists:
-                    return func.HttpResponse(
-                        json.dumps({
-                            "schema_exists": False,
-                            "error": "h3 schema does not exist - run sql/init/00_create_h3_schema.sql"
-                        }),
-                        status_code=404,
-                        mimetype="application/json"
-                    )
+                    if not schema_exists:
+                        return func.HttpResponse(
+                            json.dumps({
+                                "schema_exists": False,
+                                "error": "h3 schema does not exist - run sql/init/00_create_h3_schema.sql"
+                            }),
+                            status_code=404,
+                            mimetype="application/json"
+                        )
 
-                # Get tables in h3 schema
-                cur.execute("""
-                    SELECT table_name
-                    FROM information_schema.tables
-                    WHERE table_schema = 'h3'
-                    ORDER BY table_name
-                """)
-                tables = [row['table_name'] for row in cur.fetchall()]
+                    # Get tables in h3 schema
+                    cur.execute("""
+                        SELECT table_name
+                        FROM information_schema.tables
+                        WHERE table_schema = 'h3'
+                        ORDER BY table_name
+                    """)
+                    tables = [row['table_name'] for row in cur.fetchall()]
 
-                # Get row counts for each table
-                table_counts = {}
-                for table in tables:
-                    count_query = sql.SQL("SELECT COUNT(*) as count FROM {schema}.{table}").format(
-                        schema=sql.Identifier('h3'),
-                        table=sql.Identifier(table)
-                    )
-                    cur.execute(count_query)
-                    table_counts[table] = cur.fetchone()['count']
+                    # Get row counts for each table
+                    table_counts = {}
+                    for table in tables:
+                        count_query = sql.SQL("SELECT COUNT(*) as count FROM {schema}.{table}").format(
+                            schema=sql.Identifier('h3'),
+                            table=sql.Identifier(table)
+                        )
+                        cur.execute(count_query)
+                        table_counts[table] = cur.fetchone()['count']
 
-                # Get indexes
-                cur.execute("""
-                    SELECT
-                        schemaname,
-                        tablename,
-                        indexname,
-                        indexdef
-                    FROM pg_indexes
-                    WHERE schemaname = 'h3'
-                    ORDER BY tablename, indexname
-                """)
-                indexes = [dict(row) for row in cur.fetchall()]
+                    # Get indexes
+                    cur.execute("""
+                        SELECT
+                            schemaname,
+                            tablename,
+                            indexname,
+                            indexdef
+                        FROM pg_indexes
+                        WHERE schemaname = 'h3'
+                        ORDER BY tablename, indexname
+                    """)
+                    indexes = [dict(row) for row in cur.fetchall()]
 
             result = {
                 "schema_exists": True,
@@ -288,8 +288,8 @@ class AdminH3DebugTrigger:
         try:
             from psycopg import sql
 
-            conn = self.h3_repo._get_connection()
-            with conn.cursor() as cur:
+            with self.h3_repo._get_connection() as conn:
+                with conn.cursor() as cur:
                 cur.execute("""
                     SELECT
                         grid_id,
@@ -359,8 +359,8 @@ class AdminH3DebugTrigger:
 
             include_sample = req.params.get('include_sample', 'false').lower() == 'true'
 
-            conn = self.h3_repo._get_connection()
-            with conn.cursor() as cur:
+            with self.h3_repo._get_connection() as conn:
+                with conn.cursor() as cur:
                 # Get metadata
                 cur.execute("""
                     SELECT *
@@ -444,8 +444,8 @@ class AdminH3DebugTrigger:
         Returns parent ID array metadata (without full arrays).
         """
         try:
-            conn = self.h3_repo._get_connection()
-            with conn.cursor() as cur:
+            with self.h3_repo._get_connection() as conn:
+                with conn.cursor() as cur:
                 cur.execute("""
                     SELECT
                         filter_name,
@@ -517,8 +517,8 @@ class AdminH3DebugTrigger:
                 )
 
             # Get metadata
-            conn = self.h3_repo._get_connection()
-            with conn.cursor() as cur:
+            with self.h3_repo._get_connection() as conn:
+                with conn.cursor() as cur:
                 cur.execute("""
                     SELECT *
                     FROM h3.reference_filters
@@ -576,8 +576,8 @@ class AdminH3DebugTrigger:
 
             from psycopg import sql
 
-            conn = self.h3_repo._get_connection()
-            with conn.cursor() as cur:
+            with self.h3_repo._get_connection() as conn:
+                with conn.cursor() as cur:
                 query = """
                     SELECT
                         h3_index,
@@ -652,8 +652,8 @@ class AdminH3DebugTrigger:
 
             parent_id = int(parent_id)
 
-            conn = self.h3_repo._get_connection()
-            with conn.cursor() as cur:
+            with self.h3_repo._get_connection() as conn:
+                with conn.cursor() as cur:
                 # Get parent cell
                 cur.execute("""
                     SELECT

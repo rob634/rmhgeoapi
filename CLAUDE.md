@@ -20,11 +20,15 @@ docs_claude/
 ├── CLAUDE_CONTEXT.md                      # 🎯 START HERE - Primary context
 ├── TODO.md                                # ⚡ PRIMARY TASK LIST - Only active TODO file
 ├── COREMACHINE_PLATFORM_ARCHITECTURE.md   # 🏗️ Two-layer architecture (26 OCT 2025)
-├── SERVICE_BUS_HARMONIZATION.md           # 🔧 NEW - Three-layer config architecture (27 OCT 2025)
+├── SERVICE_BUS_HARMONIZATION.md           # 🔧 Three-layer config architecture (27 OCT 2025)
 ├── ARCHITECTURE_REFERENCE.md              # Deep technical specifications
 ├── FILE_CATALOG.md                        # Quick file lookup
 ├── DEPLOYMENT_GUIDE.md                    # Deployment procedures
 └── HISTORY.md                             # Completed work log
+
+Root Documentation:
+├── FUNCTION_REVIEW.md                     # 📋 NEW - Complete 80-function inventory (13 NOV 2025)
+│                                          #     Development monolith → Production microservices plan
 ```
 
 ### Quick Access Commands:

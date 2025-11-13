@@ -13,7 +13,7 @@
 
 ### Current Production Configuration (Working)
 ```
-Function App: rmhgeoapibeta
+Function App: rmhazuregeoapi
 Managed Identity Principal ID: 995badc6-9b03-481f-9544-9f5957dd893d
 Service Bus Namespace: rmhazure.servicebus.windows.net
 
@@ -335,7 +335,7 @@ Alternative (If managed identity not approved):
 
 **Current Production Configuration** (Working):
 - Role: **Azure Service Bus Data Owner**
-- Principal: rmhgeoapibeta Function App
+- Principal: rmhazuregeoapi Function App
 - Scope: rmhazure Service Bus Namespace
 
 **For Corporate Deployment**:

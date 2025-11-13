@@ -628,7 +628,7 @@ After implementing these changes:
 
 ### Test 1: Vector CREATE
 ```bash
-curl -X POST https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/platform/submit \
+curl -X POST https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/platform/submit \
   -H "Content-Type: application/json" \
   -d '{
     "dataset_id": "test-parcels",
@@ -653,7 +653,7 @@ curl -X POST https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/
 
 ### Test 2: Raster CREATE
 ```bash
-curl -X POST https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/platform/submit \
+curl -X POST https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/platform/submit \
   -H "Content-Type: application/json" \
   -d '{
     "dataset_id": "test-landsat",

@@ -8,27 +8,27 @@
 
 ### Primary Command
 ```bash
-func azure functionapp publish rmhgeoapibeta --build remote
+func azure functionapp publish rmhazuregeoapi --python --build remote
 ```
 
 ### Post-Deployment Verification
 ```bash
 # 1. Health Check (should return OK with component status)
-curl https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/health
+curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/health
 
 # 2. Redeploy Database Schema (REQUIRED after code changes!)
-curl -X POST https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/db/schema/redeploy?confirm=yes
+curl -X POST https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/db/schema/redeploy?confirm=yes
 
 # 3. Submit Test Job
-curl -X POST https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/jobs/submit/hello_world \
+curl -X POST https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/jobs/submit/hello_world \
   -H "Content-Type: application/json" \
   -d '{"message": "deployment test", "n": 3}'
 
 # 4. Check Job Status (use job_id from step 3)
-curl https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/jobs/status/{JOB_ID}
+curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/jobs/status/{JOB_ID}
 
 # 5. Verify Tasks Created
-curl https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/db/tasks/{JOB_ID}
+curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/db/tasks/{JOB_ID}
 ```
 
 ---
@@ -36,11 +36,13 @@ curl https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/db/t
 ## 📊 Azure Resources
 
 ### Function App
-- **Name**: rmhgeoapibeta
-- **URL**: https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net
+- **Name**: rmhazuregeoapi
+- **URL**: https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net
 - **Runtime**: Python 3.12
-- **Plan**: Premium (Elastic)
+- **Plan**: Basic B3 (App Service Plan: ASP-rmhazure)
+- **Tier**: Basic (4 vCPU, 7 GB RAM)
 - **Region**: East US
+- **Migrated**: 12 NOV 2025 from rmhgeoapibeta (EP1 Premium → B3 Basic)
 
 ### Database
 - **Server**: rmhpgflex.postgres.database.azure.com
@@ -104,10 +106,10 @@ az login
 az account set --subscription "your-subscription-id"
 
 # Stream live logs
-az webapp log tail --name rmhgeoapibeta --resource-group rmhazure_rg
+az webapp log tail --name rmhazuregeoapi --resource-group rmhazure_rg
 
 # Download logs
-az webapp log download --name rmhgeoapibeta --resource-group rmhazure_rg --log-file webapp_logs.zip
+az webapp log download --name rmhazuregeoapi --resource-group rmhazure_rg --log-file webapp_logs.zip
 ```
 
 ---
@@ -119,13 +121,13 @@ az webapp log download --name rmhgeoapibeta --resource-group rmhazure_rg --log-f
 #### Redeploy Schema (Recommended)
 ```bash
 # Drops and recreates all tables, enums, and functions
-curl -X POST https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/db/schema/redeploy?confirm=yes
+curl -X POST https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/db/schema/redeploy?confirm=yes
 ```
 
 #### Nuclear Option - Drop Everything
 ```bash
 # WARNING: Destroys all data!
-curl -X POST https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/db/schema/nuke?confirm=yes
+curl -X POST https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/db/schema/nuke?confirm=yes
 ```
 
 ### Database Query Endpoints
@@ -133,40 +135,40 @@ curl -X POST https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/
 #### Get All Jobs
 ```bash
 # Basic query
-curl https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/db/jobs
+curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/db/jobs
 
 # With filters
-curl "https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/db/jobs?status=failed&limit=10"
+curl "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/db/jobs?status=failed&limit=10"
 
 # Recent jobs (last 24 hours)
-curl "https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/db/jobs?hours=24"
+curl "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/db/jobs?hours=24"
 ```
 
 #### Get Tasks for Job
 ```bash
 # All tasks for a specific job
-curl https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/db/tasks/{JOB_ID}
+curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/db/tasks/{JOB_ID}
 
 # Failed tasks only
-curl "https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/db/tasks?status=failed"
+curl "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/db/tasks?status=failed"
 ```
 
 #### Database Statistics
 ```bash
 # Get counts and health metrics
-curl https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/db/stats
+curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/db/stats
 
 # Test PostgreSQL functions
-curl https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/db/functions/test
+curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/db/functions/test
 
 # Check enum types
-curl https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/db/enums/diagnostic
+curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/db/enums/diagnostic
 ```
 
 #### Comprehensive Debug Dump
 ```bash
 # Get all jobs and tasks in one call
-curl https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/db/debug/all?limit=100
+curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/db/debug/all?limit=100
 ```
 
 ---
@@ -226,7 +228,7 @@ curl http://localhost:7071/api/health
 **Check**: Queue connection and poison queue
 ```bash
 # Check poison queue
-curl https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/monitor/poison
+curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/monitor/poison
 
 # Check queue metrics
 az storage queue show --name geospatial-jobs --account-name rmhazuregeo
@@ -236,22 +238,22 @@ az storage queue show --name geospatial-jobs --account-name rmhazuregeo
 **Check**: Database transactions and logs
 ```bash
 # Get task details
-curl https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/db/tasks/{JOB_ID}
+curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/db/tasks/{JOB_ID}
 
 # Check Application Insights for errors
-az webapp log tail --name rmhgeoapibeta --resource-group rmhazure_rg
+az webapp log tail --name rmhazuregeoapi --resource-group rmhazure_rg
 ```
 
 #### 3. Schema Mismatch Errors
 **Solution**: Redeploy schema
 ```bash
-curl -X POST https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/db/schema/redeploy?confirm=yes
+curl -X POST https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/db/schema/redeploy?confirm=yes
 ```
 
 #### 4. Import Errors
 **Check**: Health endpoint for module status
 ```bash
-curl https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/health
+curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/health
 ```
 
 ---
@@ -264,7 +266,7 @@ curl https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/heal
 - [ ] Check resource group and subscription
 
 ### Deployment
-- [ ] Run deployment command: `func azure functionapp publish rmhgeoapibeta --build remote`
+- [ ] Run deployment command: `func azure functionapp publish rmhazuregeoapi --python --build remote`
 - [ ] Wait for "Deployment successful" message
 - [ ] Check deployment logs for errors
 
@@ -279,13 +281,13 @@ curl https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/heal
 ```bash
 # If deployment fails, restore previous version
 az functionapp deployment list-publishing-profiles \
-  --name rmhgeoapibeta \
+  --name rmhazuregeoapi \
   --resource-group rmhazure_rg
 
 # Redeploy specific version
 az functionapp deployment source config-zip \
   --resource-group rmhazure_rg \
-  --name rmhgeoapibeta \
+  --name rmhazuregeoapi \
   --src previous_deployment.zip
 ```
 
@@ -314,10 +316,11 @@ Key: [REDACTED - See Azure Portal or Key Vault for actual key]
 
 ## ⚠️ Critical Warnings
 
-1. **NEVER** deploy to deprecated apps (rmhazurefn, rmhgeoapi, rmhgeoapifn)
+1. **NEVER** deploy to deprecated apps (rmhazurefn, rmhgeoapi, rmhgeoapifn, rmhgeoapibeta)
 2. **ALWAYS** redeploy schema after code changes affecting models
 3. **NEVER** use production credentials in local development
 4. **ALWAYS** check poison queues after deployment
+5. **NOTE**: Migrated from EP1 Premium (rmhgeoapibeta) to B3 Basic (rmhazuregeoapi) on 12 NOV 2025
 
 ---
 

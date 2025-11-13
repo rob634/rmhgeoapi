@@ -269,30 +269,31 @@ Please refer to claude_log_access.md for instructions on accessing function app 
 - docs_claude/ARCHITECTURE_REFERENCE.md - Deep technical specs
 
 **Key URLs**:
-- Function App: https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net (**ONLY** active app)
+- Function App: https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net (**ONLY** active app)
 - Database: rmhpgflex.postgres.database.azure.com (geo schema)
 - Resource Group: `rmhazure_rg` (NOT rmhresourcegroup)
 
 **🚨 CRITICAL DEPLOYMENT INFO:**
-- **ACTIVE FUNCTION APP**: `rmhgeoapibeta` (ONLY this one!)
-- **DEPRECATED APPS**: `rmhazurefn`, `rmhgeoapi`, `rmhgeoapifn` (NEVER use these)
-- **DEPLOYMENT COMMAND**: `func azure functionapp publish rmhgeoapibeta --python --build remote`
+- **ACTIVE FUNCTION APP**: `rmhazuregeoapi` (B3 Basic - ONLY active app!)
+- **DEPRECATED APPS**: `rmhazurefn`, `rmhgeoapi`, `rmhgeoapifn`, `rmhgeoapibeta` (NEVER use these)
+- **DEPLOYMENT COMMAND**: `func azure functionapp publish rmhazuregeoapi --python --build remote`
+- **MIGRATION**: Migrated from EP1 Premium to B3 Basic (12 NOV 2025) - See docs_claude/EP1_TO_B3_MIGRATION_SUMMARY.md
 
 **📋 POST-DEPLOYMENT TESTING:**
 ```bash
 # 1. Health Check
-curl https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/health
+curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/health
 
 # 2. 🔄 REDEPLOY DATABASE SCHEMA (Required after deployment!)
-curl -X POST https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/db/schema/redeploy?confirm=yes
+curl -X POST https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/db/schema/redeploy?confirm=yes
 
 # 3. Submit Test Job
-curl -X POST https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/jobs/submit/hello_world \
+curl -X POST https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/jobs/submit/hello_world \
   -H "Content-Type: application/json" \
   -d '{"message": "deployment test"}'
 
 # 4. Check Job Status (use job_id from step 3)
-curl https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/jobs/status/{JOB_ID}
+curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/jobs/status/{JOB_ID}
 ```
 
 **🔄 SCHEMA MANAGEMENT ENDPOINTS:**
@@ -302,38 +303,38 @@ curl https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/jobs
 **🚨 STAC NUCLEAR BUTTON (DEV/TEST ONLY - ⭐ NEW 29 OCT 2025):**
 ```bash
 # Clear all STAC items and collections (preserves schema structure)
-curl -X POST "https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/stac/nuke?confirm=yes&mode=all"
+curl -X POST "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/stac/nuke?confirm=yes&mode=all"
 
 # Clear only items (keep collections)
-curl -X POST "https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/stac/nuke?confirm=yes&mode=items"
+curl -X POST "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/stac/nuke?confirm=yes&mode=items"
 
 # Clear collections (CASCADE deletes items)
-curl -X POST "https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/stac/nuke?confirm=yes&mode=collections"
+curl -X POST "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/stac/nuke?confirm=yes&mode=collections"
 ```
 **Note**: Much faster than full schema drop - preserves pgstac functions, indexes, and partitions
 
 **🌍 OGC FEATURES API (OGC API - Features Core 1.0 Compliant - ⭐ NEW 30 OCT 2025):**
 ```bash
 # Landing page (entry point)
-curl https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/features
+curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/features
 
 # List all vector collections (from PostGIS geometry_columns)
-curl https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/features/collections
+curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/features/collections
 
 # Get collection metadata (bbox, feature count, geometry type)
-curl https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/features/collections/fresh_test_stac
+curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/features/collections/fresh_test_stac
 
 # Query features with pagination
-curl "https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/features/collections/fresh_test_stac/items?limit=10&offset=0"
+curl "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/features/collections/fresh_test_stac/items?limit=10&offset=0"
 
 # Spatial query with bounding box (minx,miny,maxx,maxy in EPSG:4326)
-curl "https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/features/collections/fresh_test_stac/items?bbox=-70.7,-56.3,-70.6,-56.2&limit=5"
+curl "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/features/collections/fresh_test_stac/items?bbox=-70.7,-56.3,-70.6,-56.2&limit=5"
 
 # Get single feature by ID
-curl https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/features/collections/fresh_test_stac/items/1
+curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/features/collections/fresh_test_stac/items/1
 
 # OGC conformance classes
-curl https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/features/conformance
+curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/features/conformance
 ```
 
 **🗺️ INTERACTIVE WEB MAP (⭐ NEW 30 OCT 2025):**
@@ -370,42 +371,42 @@ Live URL: https://rmhazuregeo.z13.web.core.windows.net/
 ```bash
 # CoreMachine Layer (Jobs/Tasks):
 # Get all jobs and tasks (comprehensive dump)
-curl https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/db/debug/all?limit=100
+curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/db/debug/all?limit=100
 
 # Query specific job by ID
-curl https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/db/jobs/{JOB_ID}
+curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/db/jobs/{JOB_ID}
 
 # Query all jobs with filters
-curl https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/db/jobs?status=failed&limit=10
+curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/db/jobs?status=failed&limit=10
 
 # Get all tasks for a specific job
-curl https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/db/tasks/{JOB_ID}
+curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/db/tasks/{JOB_ID}
 
 # Query tasks with filters
-curl https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/db/tasks?status=failed&limit=20
+curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/db/tasks?status=failed&limit=20
 
 # Platform Layer (API Requests/Orchestration) - ⭐ NEW (29 OCT 2025):
 # Query API requests with filters
-curl https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/db/api_requests?status=processing&limit=10
+curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/db/api_requests?status=processing&limit=10
 
 # Get specific API request by ID
-curl https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/db/api_requests/{REQUEST_ID}
+curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/db/api_requests/{REQUEST_ID}
 
 # Query orchestration jobs (by request_id)
-curl https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/db/orchestration_jobs?request_id={REQUEST_ID}
+curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/db/orchestration_jobs?request_id={REQUEST_ID}
 
 # Get orchestration jobs for specific request
-curl https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/db/orchestration_jobs/{REQUEST_ID}
+curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/db/orchestration_jobs/{REQUEST_ID}
 
 # System:
 # Database statistics and health
-curl https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/db/stats
+curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/db/stats
 
 # Test PostgreSQL functions
-curl https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/db/functions/test
+curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/db/functions/test
 
 # Diagnose enum types
-curl https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/db/enums/diagnostic
+curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/db/enums/diagnostic
 ```
 
 **Query Parameters:**
@@ -461,7 +462,7 @@ union requests, traces | where timestamp >= ago(30m) | where operation_Name cont
 **Key Identifiers:**
 - **App ID**: `829adb94-5f5c-46ae-9f00-18e731529222`
 - **Resource Group**: `rmhazure_rg`
-- **Function App**: `rmhgeoapibeta`
+- **Function App**: `rmhazuregeoapi`
 
 **Important Notes:**
 - **Must run `az login` first** (opens browser for auth)
@@ -528,7 +529,7 @@ https://geospatial.rmh.org/api/jobs/*         → CoreMachine Function App (job 
 
 **Current (Monolith)**:
 ```
-Azure Function App: rmhgeoapibeta
+Azure Function App: rmhazuregeoapi (B3 Basic tier)
 ├── OGC Features (ogc_features/ - 2,600+ lines, standalone)
 ├── STAC API (pgstac/ + infrastructure/stac.py)
 ├── Platform Layer (platform schema + triggers)

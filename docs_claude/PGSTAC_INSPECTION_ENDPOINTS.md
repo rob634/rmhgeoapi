@@ -50,7 +50,7 @@ New deep inspection endpoints for pgstac schema health monitoring, statistics, a
 
 **Browser URL**:
 ```
-https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/stac/schema/info
+https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/stac/schema/info
 ```
 
 ---
@@ -82,7 +82,7 @@ https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/stac/sche
 
 **Browser URL**:
 ```
-https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/stac/health
+https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/stac/health
 ```
 
 ---
@@ -119,7 +119,7 @@ https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/stac/heal
 
 **Browser URL**:
 ```
-https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/stac/collections/summary
+https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/stac/collections/summary
 ```
 
 ---
@@ -185,7 +185,7 @@ https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/stac/coll
 
 **Browser URL**:
 ```
-https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/stac/collections/cogs/stats
+https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/stac/collections/cogs/stats
 ```
 
 ---
@@ -231,10 +231,10 @@ https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/stac/coll
 **Browser URL**:
 ```
 # Search all collections
-https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/stac/items/17apr2024wv2
+https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/stac/items/17apr2024wv2
 
 # Search specific collection
-https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/stac/items/17apr2024wv2?collection_id=cogs
+https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/stac/items/17apr2024wv2?collection_id=cogs
 ```
 
 ---
@@ -313,18 +313,18 @@ curl https://rmhgeoapibeta.../api/stac/items/17apr2024wv2
 
 ### Base URL
 ```
-https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api
+https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api
 ```
 
 ### Quick Links
 
 | Endpoint | URL |
 |----------|-----|
-| Health Check | [/stac/health](https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/stac/health) |
-| Collections Summary | [/stac/collections/summary](https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/stac/collections/summary) |
-| Schema Info | [/stac/schema/info](https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/stac/schema/info) |
-| COGs Collection Stats | [/stac/collections/cogs/stats](https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/stac/collections/cogs/stats) |
-| Vectors Collection Stats | [/stac/collections/vectors/stats](https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/stac/collections/vectors/stats) |
+| Health Check | [/stac/health](https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/stac/health) |
+| Collections Summary | [/stac/collections/summary](https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/stac/collections/summary) |
+| Schema Info | [/stac/schema/info](https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/stac/schema/info) |
+| COGs Collection Stats | [/stac/collections/cogs/stats](https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/stac/collections/cogs/stats) |
+| Vectors Collection Stats | [/stac/collections/vectors/stats](https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/stac/collections/vectors/stats) |
 
 ---
 

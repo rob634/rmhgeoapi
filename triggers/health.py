@@ -526,39 +526,44 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                             app_tables_status['tasks'] = "error"
                     
                     # DETAILED SCHEMA INSPECTION - Added for debugging function signature mismatches
+                    # NOTE: Each section wrapped in try-except to prevent transaction cascade failures
                     detailed_schema_info = {}
+
+                    # Inspect table columns (separate transaction to avoid contamination)
                     try:
-                        # Inspect actual table columns in the database
                         for table_name in ['jobs', 'tasks']:
                             cur.execute("""
                                 SELECT column_name, data_type, is_nullable, column_default
-                                FROM information_schema.columns 
+                                FROM information_schema.columns
                                 WHERE table_schema = %s AND table_name = %s
                                 ORDER BY ordinal_position
                             """, (config.app_schema, table_name))
-                            
+
                             columns = cur.fetchall()
                             detailed_schema_info[f"{table_name}_columns"] = [
                                 {
                                     "column_name": col[0],
-                                    "data_type": col[1], 
+                                    "data_type": col[1],
                                     "is_nullable": col[2],
                                     "column_default": col[3]
                                 } for col in columns
                             ]
-                        
-                        # Inspect PostgreSQL function signatures
+                    except Exception as col_error:
+                        detailed_schema_info['columns_inspection_error'] = f"Column inspection failed: {str(col_error)}"
+
+                    # Inspect PostgreSQL function signatures (separate transaction)
+                    try:
                         cur.execute("""
-                            SELECT 
+                            SELECT
                                 routine_name,
                                 data_type as return_type,
                                 routine_definition
-                            FROM information_schema.routines 
-                            WHERE routine_schema = %s 
+                            FROM information_schema.routines
+                            WHERE routine_schema = %s
                             AND routine_name IN ('check_job_completion', 'complete_task_and_check_stage', 'advance_job_stage')
                             ORDER BY routine_name
                         """, (config.app_schema,))
-                        
+
                         functions = cur.fetchall()
                         detailed_schema_info['postgresql_functions'] = [
                             {
@@ -567,20 +572,19 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                                 "definition_snippet": func[2][:200] + "..." if func[2] and len(func[2]) > 200 else func[2]
                             } for func in functions
                         ]
-                        
-                        # Test the problematic function call directly (isolated transaction)
-                        try:
-                            with conn.transaction():
-                                cur.execute(f"SELECT job_complete, final_stage, total_tasks, completed_tasks, task_results FROM {config.app_schema}.check_job_completion('test_job_id')")
-                                detailed_schema_info['function_test'] = "SUCCESS - Function signature matches query"
-                        except Exception as func_error:
-                            # Transaction auto-rolled back, cursor remains valid
-                            detailed_schema_info['function_test'] = f"ERROR: {str(func_error)}"
-                            detailed_schema_info['function_error_type'] = type(func_error).__name__
+                    except Exception as func_sig_error:
+                        detailed_schema_info['function_signature_error'] = f"Function signature inspection failed: {str(func_sig_error)}"
 
-                    except Exception as inspect_error:
-                        # Transaction auto-rolled back if it fails
-                        detailed_schema_info['inspection_error'] = f"Failed to inspect schema: {str(inspect_error)}"
+                    # Test function call (isolated transaction - failure won't affect subsequent queries)
+                    try:
+                        with conn.transaction():
+                            cur.execute(f"SELECT job_complete, final_stage, total_tasks, completed_tasks, task_results FROM {config.app_schema}.check_job_completion('test_job_id')")
+                            detailed_schema_info['function_test'] = "SUCCESS - Function signature matches query"
+                    except Exception as func_error:
+                        # Transaction auto-rolled back by context manager
+                        # Cursor remains valid for new queries
+                        detailed_schema_info['function_test'] = f"ERROR: {str(func_error)}"
+                        detailed_schema_info['function_error_type'] = type(func_error).__name__
                     
                     # NEW: Enhanced database query metrics for monitoring
                     query_metrics = {}

@@ -840,15 +840,37 @@ class PgStacInfrastructure:
         item_id = item_dict.get('id', 'unknown')
         logger.info(f"Inserting STAC Item '{item_id}' into collection '{collection_id}'")
 
+        # =========================================================================
+        # DEBUG LOGGING (13 NOV 2025): Investigate missing STAC fields in queries
+        # =========================================================================
+        logger.debug(f"🔍 DEBUG: STAC Item BEFORE pgSTAC insertion:")
+        logger.debug(f"   Item ID: {item_dict.get('id', '❌ MISSING')}")
+        logger.debug(f"   Type: {item_dict.get('type', '❌ MISSING')}")
+        logger.debug(f"   Collection: {item_dict.get('collection', '❌ MISSING')}")
+        logger.debug(f"   Geometry: {'✅ ' + item_dict['geometry']['type'] if item_dict.get('geometry') else '❌ MISSING'}")
+        logger.debug(f"   STAC Version: {item_dict.get('stac_version', '❌ MISSING')}")
+        logger.debug(f"   Bbox: {'✅ Present' if item_dict.get('bbox') else '❌ MISSING'}")
+        logger.debug(f"   Total keys in item_dict: {len(item_dict)}")
+        logger.debug(f"   Keys: {list(item_dict.keys())}")
+
+        # Log first 500 chars of JSON being sent to pgSTAC
+        item_json = json.dumps(item_dict)
+        logger.debug(f"   JSON length: {len(item_json)} chars")
+        logger.debug(f"   JSON preview (first 500 chars): {item_json[:500]}")
+        # =========================================================================
+
         try:
             with psycopg.connect(self.connection_string) as conn:
                 with conn.cursor() as cur:
                     cur.execute(
                         "SELECT * FROM pgstac.create_item(%s)",
-                        [json.dumps(item_dict)]
+                        [item_json]
                     )
                     result = cur.fetchone()
                     conn.commit()
+
+                    # DEBUG: Log what pgSTAC returned
+                    logger.debug(f"🔍 DEBUG: pgSTAC create_item() returned: {result}")
 
                     logger.info(f"✅ STAC Item inserted: {item_id} → {collection_id}")
                     return {
@@ -1070,15 +1092,17 @@ def get_collection(collection_id: str) -> Dict[str, Any]:
 
         with psycopg.connect(connection_string) as conn:
             with conn.cursor() as cur:
-                # PgSTAC function to get specific collection
+                # CRITICAL FIX (13 NOV 2025): pgSTAC 0.9.8 doesn't have get_collection() function
+                # Use direct table query instead - returns collection JSONB from content column
+                # Pattern matches pgSTAC 0.9.8 standard approach
                 cur.execute(
-                    "SELECT * FROM pgstac.get_collection(%s)",
+                    "SELECT content FROM pgstac.collections WHERE id = %s",
                     [collection_id]
                 )
                 result = cur.fetchone()
 
                 if result and result[0]:
-                    return result[0]  # Return collection JSON
+                    return result[0]  # Return collection JSONB content
                 else:
                     return {
                         'error': f"Collection '{collection_id}' not found",
@@ -1133,16 +1157,27 @@ def get_collection_items(
 
         with psycopg.connect(connection_string) as conn:
             with conn.cursor() as cur:
-                # Query items directly from pgstac.items table (simpler than search())
-                # NOTE: pgstac.search() requires 'searches' table which may not be set up
+                # Query items directly from pgstac.items table
+                # CRITICAL (13 NOV 2025): pgSTAC stores id, collection, geometry in separate columns
+                # We must reconstruct the full STAC item by merging columns with content JSONB
                 query = """
                     SELECT jsonb_build_object(
                         'type', 'FeatureCollection',
-                        'features', COALESCE(jsonb_agg(content), '[]'::jsonb),
+                        'features', COALESCE(jsonb_agg(
+                            -- Merge separate columns into content JSONB for complete STAC item
+                            content ||
+                            jsonb_build_object(
+                                'id', id,
+                                'collection', collection,
+                                'geometry', ST_AsGeoJSON(geometry)::jsonb,
+                                'type', 'Feature',
+                                'stac_version', COALESCE(content->>'stac_version', '1.0.0')
+                            )
+                        ), '[]'::jsonb),
                         'links', '[]'::jsonb
                     )
                     FROM (
-                        SELECT content
+                        SELECT id, collection, geometry, content
                         FROM pgstac.items
                         WHERE collection = %s
                         ORDER BY datetime DESC
@@ -1666,16 +1701,34 @@ def get_item_by_id(item_id: str, collection_id: Optional[str] = None) -> Dict[st
     try:
         with psycopg.connect(connection_string) as conn:
             with conn.cursor() as cur:
+                # CRITICAL (13 NOV 2025): Reconstruct full STAC item from separate columns + content
+                # pgSTAC stores id, collection, geometry separately from content JSONB
                 if collection_id:
                     # Search in specific collection
                     cur.execute(
-                        "SELECT content FROM pgstac.items WHERE id = %s AND collection = %s",
+                        """SELECT content ||
+                           jsonb_build_object(
+                               'id', id,
+                               'collection', collection,
+                               'geometry', ST_AsGeoJSON(geometry)::jsonb,
+                               'type', 'Feature',
+                               'stac_version', COALESCE(content->>'stac_version', '1.0.0')
+                           )
+                           FROM pgstac.items WHERE id = %s AND collection = %s""",
                         [item_id, collection_id]
                     )
                 else:
                     # Search across all collections
                     cur.execute(
-                        "SELECT content FROM pgstac.items WHERE id = %s",
+                        """SELECT content ||
+                           jsonb_build_object(
+                               'id', id,
+                               'collection', collection,
+                               'geometry', ST_AsGeoJSON(geometry)::jsonb,
+                               'type', 'Feature',
+                               'stac_version', COALESCE(content->>'stac_version', '1.0.0')
+                           )
+                           FROM pgstac.items WHERE id = %s""",
                         [item_id]
                     )
 
@@ -1683,7 +1736,7 @@ def get_item_by_id(item_id: str, collection_id: Optional[str] = None) -> Dict[st
 
                 if result:
                     logger.info(f"✅ Found item '{item_id}'")
-                    return result[0]  # Return STAC Item JSON directly
+                    return result[0]  # Return STAC Item JSON (now with all required fields)
                 else:
                     logger.warning(f"⚠️ Item '{item_id}' not found")
                     return {

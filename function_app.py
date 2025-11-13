@@ -582,10 +582,11 @@ def admin_all_diagnostics(req: func.HttpRequest) -> func.HttpResponse:
 
 
 # H3 Debug and Bootstrap Monitoring (12 NOV 2025)
-@app.route(route="admin/h3", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+# NOTE: Changed from /api/admin/h3 to /api/h3/debug because Azure Functions reserves /api/admin/* for built-in admin UI
+@app.route(route="h3/debug", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
 def admin_h3_debug(req: func.HttpRequest) -> func.HttpResponse:
     """
-    H3 debug operations: GET /api/admin/h3?operation={op}&{params}
+    H3 debug operations: GET /api/h3/debug?operation={op}&{params}
 
     Available operations:
     - schema_status: Check h3 schema exists

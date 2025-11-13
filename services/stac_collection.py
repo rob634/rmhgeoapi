@@ -37,6 +37,7 @@ Date: 20 OCT 2025
 import os
 import json
 import traceback  # For fail-fast error reporting (11 NOV 2025)
+import asyncio  # For async search registration (12 NOV 2025)
 from typing import Dict, Any, List, Optional, Tuple
 from datetime import datetime, timezone
 import psycopg  # Simple connections - NO pooling for Azure Functions (11 NOV 2025)
@@ -47,6 +48,8 @@ from pystac import Collection, Extent, SpatialExtent, TemporalExtent, Asset, Lin
 
 from util_logger import LoggerFactory, ComponentType
 from config import get_config  # For PostgreSQL connection string (11 NOV 2025)
+from infrastructure.pgstac_repository import PgStacRepository  # NEW (12 NOV 2025): For updating collection metadata
+from services.titiler_search_service import TiTilerSearchService  # NEW (12 NOV 2025): For pgSTAC search registration
 
 
 # Logger
@@ -390,8 +393,88 @@ def _create_stac_collection_impl(
                 f"this should not happen with fail-fast error handling!"
             )
 
+        # =========================================================================
+        # Phase 4: Register pgSTAC Search with TiTiler (12 NOV 2025)
+        # =========================================================================
+        # OAUTH-ONLY MOSAIC PATTERN: pgSTAC searches replace MosaicJSON
+        # - Searches use Managed Identity OAuth throughout (no SAS tokens)
+        # - Dynamic (always reflect current collection state)
+        # - search_id stored in collection metadata for reuse
+        # =========================================================================
+
+        search_id = None
+        viewer_url = None
+        tilejson_url = None
+        tiles_url = None
+
+        try:
+            logger.info(f"🔍 Registering pgSTAC search with TiTiler for collection: {collection_id}")
+
+            # Initialize TiTiler search service
+            search_service = TiTilerSearchService()
+
+            # Register search (async operation)
+            # Run async function in sync context (Azure Functions compatibility)
+            search_result = asyncio.run(search_service.register_search(collection_id))
+            search_id = search_result.get("id")
+
+            logger.info(f"✅ Search registered: {search_id}")
+
+            # Generate visualization URLs
+            viewer_url = search_service.generate_viewer_url(search_id)
+            tilejson_url = search_service.generate_tilejson_url(search_id)
+            tiles_url = search_service.generate_tiles_url(search_id)
+
+            logger.info(f"📊 Generated visualization URLs:")
+            logger.info(f"   Viewer: {viewer_url}")
+            logger.info(f"   TileJSON: {tilejson_url}")
+            logger.info(f"   Tiles: {tiles_url}")
+
+            # Update collection metadata with search info
+            logger.info(f"🔄 Updating collection with search metadata...")
+
+            # Add search_id to summaries and links to collection
+            metadata_update = {
+                "summaries": {
+                    "mosaic:search_id": [search_id]  # STAC summaries use arrays
+                },
+                "links": collection.links + [
+                    {
+                        "rel": "preview",
+                        "href": viewer_url,
+                        "type": "text/html",
+                        "title": "Interactive map preview (TiTiler-PgSTAC)"
+                    },
+                    {
+                        "rel": "tilejson",
+                        "href": tilejson_url,
+                        "type": "application/json",
+                        "title": "TileJSON specification for web maps"
+                    },
+                    {
+                        "rel": "tiles",
+                        "href": tiles_url,
+                        "type": "image/png",
+                        "title": "XYZ tile endpoint (templated)"
+                    }
+                ]
+            }
+
+            # Update collection in pgSTAC
+            pgstac_repo = PgStacRepository()
+            pgstac_repo.update_collection_metadata(collection_id, metadata_update)
+
+            logger.info(f"✅ Collection metadata updated with search_id: {search_id}")
+
+        except Exception as e:
+            # Graceful degradation: Collection creation succeeds even if search registration fails
+            logger.warning(f"⚠️  Search registration failed (non-fatal): {e}")
+            logger.warning(f"   Collection created successfully but without pgSTAC search visualization")
+            logger.debug(f"   Traceback: {traceback.format_exc()}")
+            # Continue - search registration is not critical for collection creation
+
         # Collection already validated and inserted above (12 NOV 2025)
-        # No need to duplicate - just return results
+        # search_id, URLs added if search registration succeeded
 
         return {
             "success": True,
@@ -402,7 +485,12 @@ def _create_stac_collection_impl(
             "items_created": len(created_items),  # NEW (11 NOV 2025): Orthodox STAC Items
             "items_failed": len(failed_items),    # NEW (11 NOV 2025): Failed Item creation
             "spatial_extent": spatial_extent,
-            "mosaicjson_url": mosaicjson_url
+            "mosaicjson_url": mosaicjson_url,
+            # NEW (12 NOV 2025): pgSTAC search visualization
+            "search_id": search_id,
+            "viewer_url": viewer_url,
+            "tilejson_url": tilejson_url,
+            "tiles_url": tiles_url
         }
 
     except Exception as e:

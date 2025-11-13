@@ -805,3 +805,298 @@ Benefits:
 **Status**: 📝 Ready for Implementation
 **Priority**: HIGH - Solves authentication and security requirements
 **Next Steps**: Start with Phase 1 (STAC item fixes) before creating new collections
+
+---
+
+## Phase 7: End-to-End Testing & Validation
+
+**Status**: ✅ **READY FOR TESTING**
+**Date**: 12 NOV 2025
+
+### Testing Strategy
+
+The pgSTAC search pattern is now fully implemented and deployed. Testing will validate that collections automatically get searchable mosaics with OAuth-only access.
+
+---
+
+### Test 1: Verify STAC Item Fields ✅ AUTOMATED
+
+**Purpose**: Ensure all STAC items have required fields for pgSTAC searches
+
+**API Endpoint**:
+```bash
+# Get items from a collection
+curl "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/collections/{collection_id}/items?limit=1" | python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+if 'features' in data and len(data['features']) > 0:
+    item = data['features'][0]
+    required = ['id', 'type', 'collection', 'geometry', 'bbox', 'properties', 'stac_version']
+    print('STAC Item Field Validation:')
+    for field in required:
+        status = '✅' if item.get(field) else '❌ MISSING'
+        value = item.get(field, 'N/A')
+        if field == 'geometry':
+            value = f\"{item[field]['type']}\" if item.get(field) else 'N/A'
+        print(f'  {status} {field:15} = {value}')
+else:
+    print('❌ No items found in collection')
+"
+```
+
+**Success Criteria**:
+- ✅ All 7 required fields present
+- ✅ `type` = "Feature"
+- ✅ `stac_version` = "1.1.0"
+- ✅ `geometry` is a valid GeoJSON Polygon
+- ✅ `collection` matches collection ID
+
+---
+
+### Test 2: Create Collection & Verify Search Registration ✅ AUTOMATED
+
+**Purpose**: Verify that new collections automatically get pgSTAC search registered
+
+**API Endpoint**:
+```bash
+# Submit process_raster_collection job
+curl -X POST "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/jobs/submit/process_raster_collection" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "collection_id": "test_pgstac_search_12nov2025",
+    "input_container": "rmhazuregeobronze",
+    "input_folder": "namangan",
+    "output_container": "silver-cogs",
+    "collection_description": "Test collection for pgSTAC search validation"
+  }'
+
+# Get job_id from response, then check status
+curl "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/jobs/status/{JOB_ID}"
+```
+
+**Success Criteria**:
+- ✅ Job completes successfully
+- ✅ Collection created in pgSTAC
+- ✅ STAC Items created for each COG
+- ✅ `search_id` returned in job result
+- ✅ `viewer_url`, `tilejson_url`, `tiles_url` returned
+
+---
+
+### Test 3: Verify Collection Metadata Contains Search Info ✅ AUTOMATED
+
+**Purpose**: Confirm collection metadata was updated with search_id and links
+
+**API Endpoint**:
+```bash
+# Get collection metadata
+curl "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/collections/{collection_id}" | python3 -c "
+import json, sys
+collection = json.load(sys.stdin)
+
+print('Collection Search Metadata Validation:')
+
+# Check summaries
+if 'summaries' in collection and 'mosaic:search_id' in collection['summaries']:
+    search_id = collection['summaries']['mosaic:search_id'][0]
+    print(f'  ✅ mosaic:search_id = {search_id}')
+else:
+    print('  ❌ mosaic:search_id NOT FOUND in summaries')
+
+# Check links
+preview = next((link for link in collection.get('links', []) if link['rel'] == 'preview'), None)
+tilejson = next((link for link in collection.get('links', []) if link['rel'] == 'tilejson'), None)
+tiles = next((link for link in collection.get('links', []) if link['rel'] == 'tiles'), None)
+
+print(f\"  {'✅' if preview else '❌'} preview link = {preview['href'] if preview else 'NOT FOUND'}\")
+print(f\"  {'✅' if tilejson else '❌'} tilejson link = {tilejson['href'] if tilejson else 'NOT FOUND'}\")
+print(f\"  {'✅' if tiles else '❌'} tiles link = {tiles['href'] if tiles else 'NOT FOUND'}\")
+"
+```
+
+**Success Criteria**:
+- ✅ `summaries["mosaic:search_id"]` exists with array value
+- ✅ `links` contains preview/tilejson/tiles entries
+- ✅ All URLs contain the search_id
+
+---
+
+### Test 4: Verify TileJSON Bounds (Not World Extent) ✅ MANUAL
+
+**Purpose**: Ensure pgSTAC search returns correct collection bounds
+
+**Manual Test**:
+```bash
+# Get TileJSON from collection links
+TILEJSON_URL="https://rmhtitiler-.../searches/{search_id}/WebMercatorQuad/tilejson.json"
+curl "$TILEJSON_URL" | python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+bounds = data.get('bounds', [])
+print(f'TileJSON Bounds: {bounds}')
+
+# World extent check
+world_extent = [-180, -85, 180, 85]
+if bounds == world_extent:
+    print('❌ FAIL: Bounds are world extent (items missing geometry?)')
+else:
+    print('✅ PASS: Bounds are specific to collection')
+"
+```
+
+**Success Criteria**:
+- ✅ Bounds are NOT `[-180, -85, 180, 85]` (world extent)
+- ✅ Bounds match collection's actual spatial extent
+- ✅ TileJSON contains `tiles` array with URL template
+
+---
+
+### Test 5: Verify Tiles Render in Browser ✅ MANUAL
+
+**Purpose**: Confirm TiTiler can render tiles with OAuth Managed Identity
+
+**Manual Test**:
+1. Open viewer URL in browser: `https://rmhtitiler-.../searches/{search_id}/viewer`
+2. Verify map loads with tiles visible
+3. Pan/zoom to different areas
+4. Check browser console for authentication errors
+
+**Success Criteria**:
+- ✅ Map loads successfully
+- ✅ Tiles render without errors
+- ✅ No 401/403 authentication errors in console
+- ✅ Tiles update when panning/zooming
+- ✅ No SAS token warnings/errors
+
+---
+
+### Test 6: Verify OAuth-Only Access (No SAS Tokens) ✅ MANUAL
+
+**Purpose**: Confirm no SAS tokens are used anywhere in the stack
+
+**Validation Steps**:
+
+1. **Check collection metadata**:
+```bash
+curl "https://rmhazuregeoapi-.../api/collections/{collection_id}" | grep -i "sig=" || echo "✅ No SAS tokens in collection"
+```
+
+2. **Check TileJSON**:
+```bash
+curl "$TILEJSON_URL" | grep -i "sig=" || echo "✅ No SAS tokens in TileJSON"
+```
+
+3. **Check browser network tab**:
+   - Open viewer URL in browser
+   - Open Developer Tools → Network tab
+   - Verify no requests contain `?sig=` or `?sv=` query parameters
+
+**Success Criteria**:
+- ✅ No SAS tokens in collection metadata
+- ✅ No SAS tokens in TileJSON
+- ✅ No SAS tokens in tile requests
+- ✅ All blob access uses Managed Identity (transparent to client)
+
+---
+
+### Test 7: Query Items via STAC API ✅ AUTOMATED
+
+**Purpose**: Verify STAC API can query collection items
+
+**API Endpoint**:
+```bash
+# Query items with spatial filter
+curl "https://rmhazuregeoapi-.../api/collections/{collection_id}/items?bbox=-180,-90,180,90&limit=10" | python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+features = data.get('features', [])
+print(f'Found {len(features)} items')
+print(f\"First item ID: {features[0]['id'] if features else 'N/A'}\")
+print(f\"First item geometry type: {features[0]['geometry']['type'] if features and features[0].get('geometry') else 'N/A'}\")
+"
+```
+
+**Success Criteria**:
+- ✅ Items returned for valid bbox query
+- ✅ All items have `geometry` field
+- ✅ All items have `collection` field matching collection_id
+- ✅ Items can be filtered by spatial extent
+
+---
+
+### Validation Checklist
+
+Use this checklist when testing a new collection:
+
+- [ ] **Test 1**: All STAC items have required fields (id, type, collection, geometry)
+- [ ] **Test 2**: Collection creation job completes successfully
+- [ ] **Test 3**: Collection metadata contains `mosaic:search_id` in summaries
+- [ ] **Test 4**: Collection metadata contains preview/tilejson/tiles links
+- [ ] **Test 5**: TileJSON bounds are NOT world extent `[-180, -85, 180, 85]`
+- [ ] **Test 6**: Tiles render in TiTiler viewer (browser test)
+- [ ] **Test 7**: No SAS tokens found in any URLs or requests
+- [ ] **Test 8**: STAC API can query items with spatial filters
+
+---
+
+### Expected Test Results
+
+**Job Result from `process_raster_collection`**:
+```json
+{
+  "success": true,
+  "collection_id": "test_pgstac_search_12nov2025",
+  "stac_id": "test_pgstac_search_12nov2025",
+  "pgstac_id": "test_pgstac_search_12nov2025",
+  "tile_count": 12,
+  "items_created": 12,
+  "items_failed": 0,
+  "spatial_extent": [-70.7, -56.3, -70.6, -56.2],
+  "mosaicjson_url": "https://rmhazuregeo.blob.core.windows.net/silver-mosaicjson/test_pgstac_search_12nov2025.json",
+  "search_id": "abc123def456",
+  "viewer_url": "https://rmhtitiler-.../searches/abc123def456/viewer",
+  "tilejson_url": "https://rmhtitiler-.../searches/abc123def456/WebMercatorQuad/tilejson.json",
+  "tiles_url": "https://rmhtitiler-.../searches/abc123def456/WebMercatorQuad/tiles/{z}/{x}/{y}"
+}
+```
+
+---
+
+### Troubleshooting
+
+**Problem**: `search_id` is `null` in job result
+
+**Possible Causes**:
+1. TiTiler search registration failed (check logs)
+2. TiTiler not accessible from Function App
+3. httpx not installed (dependency issue)
+
+**Solution**: Check Application Insights logs for search registration errors
+
+---
+
+**Problem**: TileJSON shows world extent bounds
+
+**Possible Causes**:
+1. STAC items missing `geometry` field
+2. Items missing `collection` field
+3. pgSTAC search query returning empty results
+
+**Solution**: Run Test 1 to validate item fields
+
+---
+
+**Problem**: Tiles don't render in viewer
+
+**Possible Causes**:
+1. TiTiler can't access COG files (OAuth issue)
+2. /vsiaz/ paths incorrect
+3. Azure Storage Managed Identity not configured
+
+**Solution**: Check TiTiler logs and Azure Storage RBAC permissions
+
+---
+
+**Status**: ✅ Documentation Complete - Ready for Testing
+**Next Action**: Run tests with a real collection to validate end-to-end workflow
+

@@ -235,47 +235,54 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                 health_data["errors"].extend(db_health.get("errors", []))
 
         # Check DuckDB analytical engine (optional component)
-        # DISABLED (13 NOV 2025): Commented out to improve health check response time on B3 tier
-        # B3 App Service (non-pre-warmed) experiences slower cold starts vs EP1 Premium
-        # TODO: Re-enable after optimizing health check or creating separate /api/ping endpoint
-        # duckdb_health = self._check_duckdb()
-        # health_data["components"]["duckdb"] = duckdb_health
-        # # Note: DuckDB is optional - don't fail overall health if unavailable
-        # if duckdb_health["status"] == "error":
-        #     health_data["errors"].append("DuckDB unavailable (optional analytical component)")
-        health_data["components"]["duckdb"] = {
-            "component": "duckdb",
-            "status": "disabled",
-            "details": {"message": "DuckDB check disabled for performance - module still available"},
-            "checked_at": datetime.now(timezone.utc).isoformat()
-        }
+        # Controlled by ENABLE_DUCKDB_HEALTH_CHECK environment variable (default: false)
+        config = get_config()
+        if config.enable_duckdb_health_check:
+            duckdb_health = self._check_duckdb()
+            health_data["components"]["duckdb"] = duckdb_health
+            # Note: DuckDB is optional - don't fail overall health if unavailable
+            if duckdb_health["status"] == "error":
+                health_data["errors"].append("DuckDB unavailable (optional analytical component)")
+        else:
+            health_data["components"]["duckdb"] = {
+                "component": "duckdb",
+                "status": "disabled",
+                "details": {
+                    "message": "DuckDB check disabled via config - module still available",
+                    "enable_with": "Set ENABLE_DUCKDB_HEALTH_CHECK=true"
+                },
+                "checked_at": datetime.now(timezone.utc).isoformat()
+            }
 
         # Check rasterio VSI (Virtual File System) support (optional but important for Big Raster ETL)
-        # DISABLED (13 NOV 2025): Commented out to improve health check response time on B3 tier
-        # VSI check requires SAS token generation and rasterio file open (~500-1000ms overhead)
-        # TODO: Re-enable after optimizing health check or creating separate /api/ping endpoint
-        # try:
-        #     self.logger.info("🔍 Starting VSI capability check...")
-        #     vsi_health = self._check_vsi_support()
-        #     self.logger.info(f"📊 VSI check result: {vsi_health.get('status', 'unknown')}")
-        #     health_data["components"]["vsi"] = vsi_health
-        #     # Note: VSI is optional but required for Big Raster ETL - don't fail overall health
-        #     if vsi_health["status"] == "error":
-        #         health_data["errors"].append("Rasterio VSI unavailable (impacts Big Raster ETL workflow)")
-        # except Exception as vsi_error:
-        #     self.logger.error(f"❌ VSI check failed with exception: {vsi_error}")
-        #     health_data["components"]["vsi"] = {
-        #         "component": "vsi_support",
-        #         "status": "error",
-        #         "details": {"exception": str(vsi_error), "error_type": type(vsi_error).__name__},
-        #         "checked_at": datetime.now(timezone.utc).isoformat()
-        #     }
-        health_data["components"]["vsi"] = {
-            "component": "vsi_support",
-            "status": "disabled",
-            "details": {"message": "VSI check disabled for performance - rasterio still available"},
-            "checked_at": datetime.now(timezone.utc).isoformat()
-        }
+        # Controlled by ENABLE_VSI_HEALTH_CHECK environment variable (default: false)
+        if config.enable_vsi_health_check:
+            try:
+                self.logger.info("🔍 Starting VSI capability check...")
+                vsi_health = self._check_vsi_support()
+                self.logger.info(f"📊 VSI check result: {vsi_health.get('status', 'unknown')}")
+                health_data["components"]["vsi"] = vsi_health
+                # Note: VSI is optional but required for Big Raster ETL - don't fail overall health
+                if vsi_health["status"] == "error":
+                    health_data["errors"].append("Rasterio VSI unavailable (impacts Big Raster ETL workflow)")
+            except Exception as vsi_error:
+                self.logger.error(f"❌ VSI check failed with exception: {vsi_error}")
+                health_data["components"]["vsi"] = {
+                    "component": "vsi_support",
+                    "status": "error",
+                    "details": {"exception": str(vsi_error), "error_type": type(vsi_error).__name__},
+                    "checked_at": datetime.now(timezone.utc).isoformat()
+                }
+        else:
+            health_data["components"]["vsi"] = {
+                "component": "vsi_support",
+                "status": "disabled",
+                "details": {
+                    "message": "VSI check disabled via config - rasterio still available",
+                    "enable_with": "Set ENABLE_VSI_HEALTH_CHECK=true"
+                },
+                "checked_at": datetime.now(timezone.utc).isoformat()
+            }
 
         # Check jobs registry (critical for job processing)
         jobs_health = self._check_jobs_registry()

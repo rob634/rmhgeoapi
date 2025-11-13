@@ -877,9 +877,22 @@ class AppConfig(BaseModel):
         description="Logging level for application diagnostics"
     )
     
+    # Health check toggles (13 NOV 2025)
     enable_database_health_check: bool = Field(
         default=True,
         description="Enable PostgreSQL connectivity checks in health endpoint"
+    )
+
+    enable_duckdb_health_check: bool = Field(
+        default=False,
+        description="Enable DuckDB analytical engine checks in health endpoint. "
+                    "Adds ~200-500ms overhead. Disable for faster health pings (B3 tier)."
+    )
+
+    enable_vsi_health_check: bool = Field(
+        default=False,
+        description="Enable VSI (Virtual File System) /vsicurl/ checks in health endpoint. "
+                    "Adds ~500-1000ms overhead (SAS token + file open). Disable for faster health pings (B3 tier)."
     )
 
     # VSI (Virtual File System) health check configuration

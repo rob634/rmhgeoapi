@@ -290,28 +290,28 @@ class AdminH3DebugTrigger:
 
             with self.h3_repo._get_connection() as conn:
                 with conn.cursor() as cur:
-                cur.execute("""
-                    SELECT
-                        grid_id,
-                        resolution,
-                        status,
-                        cell_count,
-                        land_cell_count,
-                        source_job_id,
-                        parent_grid_id,
-                        created_at,
-                        updated_at
-                    FROM h3.grid_metadata
-                    ORDER BY resolution
-                """)
-                grids = [dict(row) for row in cur.fetchall()]
+                    cur.execute("""
+                        SELECT
+                            grid_id,
+                            resolution,
+                            status,
+                            cell_count,
+                            land_cell_count,
+                            source_job_id,
+                            parent_grid_id,
+                            created_at,
+                            updated_at
+                        FROM h3.grid_metadata
+                        ORDER BY resolution
+                    """)
+                    grids = [dict(row) for row in cur.fetchall()]
 
-                # Convert timestamps to ISO format
-                for grid in grids:
-                    if grid.get('created_at'):
-                        grid['created_at'] = grid['created_at'].isoformat()
-                    if grid.get('updated_at'):
-                        grid['updated_at'] = grid['updated_at'].isoformat()
+                    # Convert timestamps to ISO format
+                    for grid in grids:
+                        if grid.get('created_at'):
+                            grid['created_at'] = grid['created_at'].isoformat()
+                        if grid.get('updated_at'):
+                            grid['updated_at'] = grid['updated_at'].isoformat()
 
             result = {
                 "total_grids": len(grids),
@@ -361,54 +361,54 @@ class AdminH3DebugTrigger:
 
             with self.h3_repo._get_connection() as conn:
                 with conn.cursor() as cur:
-                # Get metadata
-                cur.execute("""
-                    SELECT *
-                    FROM h3.grid_metadata
-                    WHERE grid_id = %s
-                """, (grid_id,))
-                metadata = dict(cur.fetchone()) if cur.rowcount > 0 else None
+                    # Get metadata
+                    cur.execute("""
+                        SELECT *
+                        FROM h3.grid_metadata
+                        WHERE grid_id = %s
+                    """, (grid_id,))
+                    metadata = dict(cur.fetchone()) if cur.rowcount > 0 else None
 
-                if not metadata:
-                    return func.HttpResponse(
-                        json.dumps({"error": f"Grid '{grid_id}' not found in grid_metadata"}),
-                        status_code=404,
-                        mimetype="application/json"
-                    )
+                    if not metadata:
+                        return func.HttpResponse(
+                            json.dumps({"error": f"Grid '{grid_id}' not found in grid_metadata"}),
+                            status_code=404,
+                            mimetype="application/json"
+                        )
 
-                # Get actual cell count from grids table
-                cur.execute("""
-                    SELECT
-                        COUNT(*) as actual_count,
-                        COUNT(*) FILTER (WHERE is_land = TRUE) as land_count,
-                        COUNT(DISTINCT country_code) as country_count,
-                        MIN(ST_XMin(geom)) as bbox_minx,
-                        MIN(ST_YMin(geom)) as bbox_miny,
-                        MAX(ST_XMax(geom)) as bbox_maxx,
-                        MAX(ST_YMax(geom)) as bbox_maxy
-                    FROM h3.grids
-                    WHERE grid_id = %s
-                """, (grid_id,))
-                stats = dict(cur.fetchone())
-
-                # Sample cells if requested
-                sample_cells = None
-                if include_sample:
+                    # Get actual cell count from grids table
                     cur.execute("""
                         SELECT
-                            h3_index,
-                            resolution,
-                            is_land,
-                            country_code,
-                            parent_res2,
-                            parent_h3_index,
-                            ST_AsText(geom) as geom_wkt
+                            COUNT(*) as actual_count,
+                            COUNT(*) FILTER (WHERE is_land = TRUE) as land_count,
+                            COUNT(DISTINCT country_code) as country_count,
+                            MIN(ST_XMin(geom)) as bbox_minx,
+                            MIN(ST_YMin(geom)) as bbox_miny,
+                            MAX(ST_XMax(geom)) as bbox_maxx,
+                            MAX(ST_YMax(geom)) as bbox_maxy
                         FROM h3.grids
                         WHERE grid_id = %s
-                        ORDER BY h3_index
-                        LIMIT 10
                     """, (grid_id,))
-                    sample_cells = [dict(row) for row in cur.fetchall()]
+                    stats = dict(cur.fetchone())
+
+                    # Sample cells if requested
+                    sample_cells = None
+                    if include_sample:
+                        cur.execute("""
+                            SELECT
+                                h3_index,
+                                resolution,
+                                is_land,
+                                country_code,
+                                parent_res2,
+                                parent_h3_index,
+                                ST_AsText(geom) as geom_wkt
+                            FROM h3.grids
+                            WHERE grid_id = %s
+                            ORDER BY h3_index
+                            LIMIT 10
+                        """, (grid_id,))
+                        sample_cells = [dict(row) for row in cur.fetchall()]
 
             # Convert timestamps
             if metadata.get('created_at'):
@@ -446,28 +446,28 @@ class AdminH3DebugTrigger:
         try:
             with self.h3_repo._get_connection() as conn:
                 with conn.cursor() as cur:
-                cur.execute("""
-                    SELECT
-                        filter_name,
-                        description,
-                        resolution,
-                        cell_count,
-                        source_grid_id,
-                        source_job_id,
-                        array_length(h3_indices, 1) as array_length,
-                        created_at,
-                        updated_at
-                    FROM h3.reference_filters
-                    ORDER BY resolution
-                """)
-                filters = [dict(row) for row in cur.fetchall()]
+                    cur.execute("""
+                        SELECT
+                            filter_name,
+                            description,
+                            resolution,
+                            cell_count,
+                            source_grid_id,
+                            source_job_id,
+                            array_length(h3_indices, 1) as array_length,
+                            created_at,
+                            updated_at
+                        FROM h3.reference_filters
+                        ORDER BY resolution
+                    """)
+                    filters = [dict(row) for row in cur.fetchall()]
 
-                # Convert timestamps
-                for f in filters:
-                    if f.get('created_at'):
-                        f['created_at'] = f['created_at'].isoformat()
-                    if f.get('updated_at'):
-                        f['updated_at'] = f['updated_at'].isoformat()
+                    # Convert timestamps
+                    for f in filters:
+                        if f.get('created_at'):
+                            f['created_at'] = f['created_at'].isoformat()
+                        if f.get('updated_at'):
+                            f['updated_at'] = f['updated_at'].isoformat()
 
             result = {
                 "total_filters": len(filters),
@@ -519,12 +519,12 @@ class AdminH3DebugTrigger:
             # Get metadata
             with self.h3_repo._get_connection() as conn:
                 with conn.cursor() as cur:
-                cur.execute("""
-                    SELECT *
-                    FROM h3.reference_filters
-                    WHERE filter_name = %s
-                """, (filter_name,))
-                metadata = dict(cur.fetchone())
+                    cur.execute("""
+                        SELECT *
+                        FROM h3.reference_filters
+                        WHERE filter_name = %s
+                    """, (filter_name,))
+                    metadata = dict(cur.fetchone())
 
             # Convert timestamps
             if metadata.get('created_at'):
@@ -578,39 +578,39 @@ class AdminH3DebugTrigger:
 
             with self.h3_repo._get_connection() as conn:
                 with conn.cursor() as cur:
-                query = """
-                    SELECT
-                        h3_index,
-                        resolution,
-                        is_land,
-                        country_code,
-                        parent_res2,
-                        parent_h3_index,
-                        grid_id,
-                        grid_type,
-                        ST_AsText(geom) as geom_wkt,
-                        created_at
-                    FROM h3.grids
-                    WHERE grid_id = %s
-                """
+                    query = """
+                        SELECT
+                            h3_index,
+                            resolution,
+                            is_land,
+                            country_code,
+                            parent_res2,
+                            parent_h3_index,
+                            grid_id,
+                            grid_type,
+                            ST_AsText(geom) as geom_wkt,
+                            created_at
+                        FROM h3.grids
+                        WHERE grid_id = %s
+                    """
 
-                params = [grid_id]
+                    params = [grid_id]
 
-                if is_land is not None:
-                    is_land_bool = is_land.lower() == 'true'
-                    query += " AND is_land = %s"
-                    params.append(is_land_bool)
+                    if is_land is not None:
+                        is_land_bool = is_land.lower() == 'true'
+                        query += " AND is_land = %s"
+                        params.append(is_land_bool)
 
-                query += " ORDER BY h3_index LIMIT %s"
-                params.append(limit)
+                    query += " ORDER BY h3_index LIMIT %s"
+                    params.append(limit)
 
-                cur.execute(query, params)
-                cells = [dict(row) for row in cur.fetchall()]
+                    cur.execute(query, params)
+                    cells = [dict(row) for row in cur.fetchall()]
 
-                # Convert timestamps
-                for cell in cells:
-                    if cell.get('created_at'):
-                        cell['created_at'] = cell['created_at'].isoformat()
+                    # Convert timestamps
+                    for cell in cells:
+                        if cell.get('created_at'):
+                            cell['created_at'] = cell['created_at'].isoformat()
 
             result = {
                 "grid_id": grid_id,
@@ -654,43 +654,43 @@ class AdminH3DebugTrigger:
 
             with self.h3_repo._get_connection() as conn:
                 with conn.cursor() as cur:
-                # Get parent cell
-                cur.execute("""
-                    SELECT
-                        h3_index,
-                        resolution,
-                        grid_id,
-                        is_land,
-                        country_code,
-                        parent_res2
-                    FROM h3.grids
-                    WHERE h3_index = %s
-                    LIMIT 1
-                """, (parent_id,))
-                parent = dict(cur.fetchone()) if cur.rowcount > 0 else None
+                    # Get parent cell
+                    cur.execute("""
+                        SELECT
+                            h3_index,
+                            resolution,
+                            grid_id,
+                            is_land,
+                            country_code,
+                            parent_res2
+                        FROM h3.grids
+                        WHERE h3_index = %s
+                        LIMIT 1
+                    """, (parent_id,))
+                    parent = dict(cur.fetchone()) if cur.rowcount > 0 else None
 
-                if not parent:
-                    return func.HttpResponse(
-                        json.dumps({"error": f"Parent cell {parent_id} not found"}),
-                        status_code=404,
-                        mimetype="application/json"
-                    )
+                    if not parent:
+                        return func.HttpResponse(
+                            json.dumps({"error": f"Parent cell {parent_id} not found"}),
+                            status_code=404,
+                            mimetype="application/json"
+                        )
 
-                # Get children
-                cur.execute("""
-                    SELECT
-                        h3_index,
-                        resolution,
-                        grid_id,
-                        is_land,
-                        country_code,
-                        parent_h3_index,
-                        parent_res2
-                    FROM h3.grids
-                    WHERE parent_h3_index = %s
-                    ORDER BY h3_index
-                """, (parent_id,))
-                children = [dict(row) for row in cur.fetchall()]
+                    # Get children
+                    cur.execute("""
+                        SELECT
+                            h3_index,
+                            resolution,
+                            grid_id,
+                            is_land,
+                            country_code,
+                            parent_h3_index,
+                            parent_res2
+                        FROM h3.grids
+                        WHERE parent_h3_index = %s
+                        ORDER BY h3_index
+                    """, (parent_id,))
+                    children = [dict(row) for row in cur.fetchall()]
 
             result = {
                 "parent": parent,

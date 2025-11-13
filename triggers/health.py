@@ -438,7 +438,8 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                 f"port={config.postgis_port}"
             )
             
-            with psycopg.connect(conn_str) as conn:
+            # Use autocommit mode to allow subtransactions for isolated tests
+            with psycopg.connect(conn_str, autocommit=True) as conn:
                 with conn.cursor() as cur:
                     # Track connection time
                     connection_time_ms = round((time.time() - start_time) * 1000, 2)

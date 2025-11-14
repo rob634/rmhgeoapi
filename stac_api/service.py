@@ -45,25 +45,25 @@ class STACAPIService:
                 {
                     "rel": "self",
                     "type": "application/json",
-                    "href": f"{base_url}/api/stac_api",
+                    "href": f"{base_url}/api/stac",
                     "title": "This catalog"
                 },
                 {
                     "rel": "root",
                     "type": "application/json",
-                    "href": f"{base_url}/api/stac_api",
+                    "href": f"{base_url}/api/stac",
                     "title": "Root catalog"
                 },
                 {
                     "rel": "conformance",
                     "type": "application/json",
-                    "href": f"{base_url}/api/stac_api/conformance",
+                    "href": f"{base_url}/api/stac/conformance",
                     "title": "STAC API conformance classes"
                 },
                 {
                     "rel": "data",
                     "type": "application/json",
-                    "href": f"{base_url}/api/stac_api/collections",
+                    "href": f"{base_url}/api/stac/collections",
                     "title": "Collections in this catalog"
                 },
                 {
@@ -113,13 +113,13 @@ class STACAPIService:
                 {
                     "rel": "self",
                     "type": "application/json",
-                    "href": f"{base_url}/api/stac_api/collections",
+                    "href": f"{base_url}/api/stac/collections",
                     "title": "This document"
                 },
                 {
                     "rel": "root",
                     "type": "application/json",
-                    "href": f"{base_url}/api/stac_api",
+                    "href": f"{base_url}/api/stac",
                     "title": "Root catalog"
                 }
             ]
@@ -131,25 +131,25 @@ class STACAPIService:
                     {
                         "rel": "self",
                         "type": "application/json",
-                        "href": f"{base_url}/api/stac_api/collections/{coll_id}",
+                        "href": f"{base_url}/api/stac/collections/{coll_id}",
                         "title": f"Collection {coll_id}"
                     },
                     {
                         "rel": "items",
                         "type": "application/geo+json",
-                        "href": f"{base_url}/api/stac_api/collections/{coll_id}/items",
+                        "href": f"{base_url}/api/stac/collections/{coll_id}/items",
                         "title": f"Items in {coll_id}"
                     },
                     {
                         "rel": "parent",
                         "type": "application/json",
-                        "href": f"{base_url}/api/stac_api",
+                        "href": f"{base_url}/api/stac",
                         "title": "Parent catalog"
                     },
                     {
                         "rel": "root",
                         "type": "application/json",
-                        "href": f"{base_url}/api/stac_api",
+                        "href": f"{base_url}/api/stac",
                         "title": "Root catalog"
                     }
                 ]
@@ -177,25 +177,25 @@ class STACAPIService:
                 {
                     "rel": "self",
                     "type": "application/json",
-                    "href": f"{base_url}/api/stac_api/collections/{collection_id}",
+                    "href": f"{base_url}/api/stac/collections/{collection_id}",
                     "title": f"Collection {collection_id}"
                 },
                 {
                     "rel": "items",
                     "type": "application/geo+json",
-                    "href": f"{base_url}/api/stac_api/collections/{collection_id}/items",
+                    "href": f"{base_url}/api/stac/collections/{collection_id}/items",
                     "title": f"Items in {collection_id}"
                 },
                 {
                     "rel": "parent",
                     "type": "application/json",
-                    "href": f"{base_url}/api/stac_api/collections",
+                    "href": f"{base_url}/api/stac/collections",
                     "title": "All collections"
                 },
                 {
                     "rel": "root",
                     "type": "application/json",
-                    "href": f"{base_url}/api/stac_api",
+                    "href": f"{base_url}/api/stac",
                     "title": "Root catalog"
                 }
             ]
@@ -240,25 +240,25 @@ class STACAPIService:
                 {
                     "rel": "self",
                     "type": "application/geo+json",
-                    "href": f"{base_url}/api/stac_api/collections/{collection_id}/items?limit={limit}",
+                    "href": f"{base_url}/api/stac/collections/{collection_id}/items?limit={limit}",
                     "title": "This document"
                 },
                 {
                     "rel": "parent",
                     "type": "application/json",
-                    "href": f"{base_url}/api/stac_api/collections/{collection_id}",
+                    "href": f"{base_url}/api/stac/collections/{collection_id}",
                     "title": f"Collection {collection_id}"
                 },
                 {
                     "rel": "root",
                     "type": "application/json",
-                    "href": f"{base_url}/api/stac_api",
+                    "href": f"{base_url}/api/stac",
                     "title": "Root catalog"
                 },
                 {
                     "rel": "collection",
                     "type": "application/json",
-                    "href": f"{base_url}/api/stac_api/collections/{collection_id}",
+                    "href": f"{base_url}/api/stac/collections/{collection_id}",
                     "title": f"Collection {collection_id}"
                 }
             ]
@@ -289,25 +289,25 @@ class STACAPIService:
                 {
                     "rel": "self",
                     "type": "application/geo+json",
-                    "href": f"{base_url}/api/stac_api/collections/{collection_id}/items/{item_id}",
+                    "href": f"{base_url}/api/stac/collections/{collection_id}/items/{item_id}",
                     "title": f"Item {item_id}"
                 },
                 {
                     "rel": "parent",
                     "type": "application/json",
-                    "href": f"{base_url}/api/stac_api/collections/{collection_id}",
+                    "href": f"{base_url}/api/stac/collections/{collection_id}",
                     "title": f"Collection {collection_id}"
                 },
                 {
                     "rel": "collection",
                     "type": "application/json",
-                    "href": f"{base_url}/api/stac_api/collections/{collection_id}",
+                    "href": f"{base_url}/api/stac/collections/{collection_id}",
                     "title": f"Collection {collection_id}"
                 },
                 {
                     "rel": "root",
                     "type": "application/json",
-                    "href": f"{base_url}/api/stac_api",
+                    "href": f"{base_url}/api/stac",
                     "title": "Root catalog"
                 }
             ]

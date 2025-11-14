@@ -717,24 +717,32 @@ _stac_triggers = get_stac_triggers()
 _stac_landing = _stac_triggers[0]['handler']
 _stac_conformance = _stac_triggers[1]['handler']
 _stac_collections = _stac_triggers[2]['handler']
+_stac_collection = _stac_triggers[3]['handler']
+_stac_items = _stac_triggers[4]['handler']
+_stac_item = _stac_triggers[5]['handler']
+
+# ============================================================================
+# DEPRECATED OLD STAC ENDPOINTS (13 NOV 2025) - Commented out, replaced by new stac_api module below
+# These were broken (404 errors) - new working endpoints start at line 1492 with /api/stac/ paths
+# TODO: Delete these after confirming new /api/stac/ endpoints work
+# ============================================================================
+
+# @app.route(route="stac", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+# def stac_api_landing_OLD_DEPRECATED(req: func.HttpRequest) -> func.HttpResponse:
+#     """STAC API landing page: GET /api/stac (DEPRECATED - broken, use new stac_api module)"""
+#     return _stac_landing(req)
 
 
-@app.route(route="stac", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
-def stac_api_landing(req: func.HttpRequest) -> func.HttpResponse:
-    """STAC API landing page: GET /api/stac"""
-    return _stac_landing(req)
+# @app.route(route="stac/conformance", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+# def stac_api_conformance_OLD_DEPRECATED(req: func.HttpRequest) -> func.HttpResponse:
+#     """STAC API conformance: GET /api/stac/conformance (DEPRECATED)"""
+#     return _stac_conformance(req)
 
 
-@app.route(route="stac/conformance", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
-def stac_api_conformance(req: func.HttpRequest) -> func.HttpResponse:
-    """STAC API conformance: GET /api/stac/conformance"""
-    return _stac_conformance(req)
-
-
-@app.route(route="stac/collections", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
-def stac_api_collections_list(req: func.HttpRequest) -> func.HttpResponse:
-    """STAC API collections list: GET /api/stac/collections"""
-    return _stac_collections(req)
+# @app.route(route="stac/collections", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+# def stac_api_collections_list_OLD_DEPRECATED(req: func.HttpRequest) -> func.HttpResponse:
+#     """STAC API collections list: GET /api/stac/collections (DEPRECATED)"""
+#     return _stac_collections(req)
 
 
 # ============================================================================
@@ -1489,39 +1497,39 @@ _stac_items = _stac_triggers[4]['handler']
 _stac_item = _stac_triggers[5]['handler']
 
 
-@app.route(route="stac_api", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="stac", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
 def stac_api_v1_landing(req: func.HttpRequest) -> func.HttpResponse:
-    """STAC API v1.0.0 landing page: GET /api/stac_api"""
+    """STAC API v1.0.0 landing page: GET /api/stac"""
     return _stac_landing(req)
 
 
-@app.route(route="stac_api/conformance", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="stac/conformance", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
 def stac_api_v1_conformance(req: func.HttpRequest) -> func.HttpResponse:
-    """STAC API v1.0.0 conformance: GET /api/stac_api/conformance"""
+    """STAC API v1.0.0 conformance: GET /api/stac/conformance"""
     return _stac_conformance(req)
 
 
-@app.route(route="stac_api/collections", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="stac/collections", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
 def stac_api_v1_collections(req: func.HttpRequest) -> func.HttpResponse:
-    """STAC API v1.0.0 collections list: GET /api/stac_api/collections"""
+    """STAC API v1.0.0 collections list: GET /api/stac/collections"""
     return _stac_collections(req)
 
 
-@app.route(route="stac_api/collections/{collection_id}", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="stac/collections/{collection_id}", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
 def stac_api_v1_collection(req: func.HttpRequest) -> func.HttpResponse:
-    """STAC API v1.0.0 collection detail: GET /api/stac_api/collections/{collection_id}"""
+    """STAC API v1.0.0 collection detail: GET /api/stac/collections/{collection_id}"""
     return _stac_collection(req)
 
 
-@app.route(route="stac_api/collections/{collection_id}/items", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="stac/collections/{collection_id}/items", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
 def stac_api_v1_items(req: func.HttpRequest) -> func.HttpResponse:
-    """STAC API v1.0.0 items list: GET /api/stac_api/collections/{collection_id}/items"""
+    """STAC API v1.0.0 items list: GET /api/stac/collections/{collection_id}/items"""
     return _stac_items(req)
 
 
-@app.route(route="stac_api/collections/{collection_id}/items/{item_id}", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="stac/collections/{collection_id}/items/{item_id}", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
 def stac_api_v1_item(req: func.HttpRequest) -> func.HttpResponse:
-    """STAC API v1.0.0 item detail: GET /api/stac_api/collections/{collection_id}/items/{item_id}"""
+    """STAC API v1.0.0 item detail: GET /api/stac/collections/{collection_id}/items/{item_id}"""
     return _stac_item(req)
 
 

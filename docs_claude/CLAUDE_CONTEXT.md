@@ -104,6 +104,17 @@ class ServiceBusHelloWorldController(CoreController):  # Only 400 lines inherite
 - ✅ **Idempotency** - SHA256 hash ensures duplicate submissions return same job_id
 - ✅ **Folder structure** - utils/ folder tested and working in Azure Functions
 
+### 🎉 MAJOR MILESTONE: PRODUCTION-SCALE VECTOR ETL (14 NOV 2025)
+- ✅ **2.5 MILLION ROW CSV** successfully processed end-to-end
+- ✅ **File size**: 1GB ACLED conflict event data (acled_export.csv)
+- ✅ **Chunking**: 129 chunks @ 20,000 rows each
+- ✅ **Parallel processing**: 20 concurrent PostGIS uploads (maxConcurrentCalls=20)
+- ✅ **Job stage advancement**: Stage 1→2→3 tracked correctly in database
+- ✅ **Zero failures**: All 129 chunks completed successfully
+- ✅ **Performance**: ~10-15 minutes total processing time
+- ✅ **Memory efficiency**: 20 concurrent 20K-row chunks handled without OOM
+- ✅ **Target table**: geo.acled_test_stage_fix (2,570,844 rows in PostGIS)
+
 ## 🚀 Quick Start
 
 ### Active Environment

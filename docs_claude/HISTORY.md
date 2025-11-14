@@ -1,9 +1,80 @@
 # Project History
 
-**Last Updated**: 12 NOV 2025 - pgSTAC Search-Based Mosaic Implementation ✅
+**Last Updated**: 14 NOV 2025 - Production-Scale Vector ETL Milestone + Stage Advancement Fix ✅
 **Note**: For project history prior to September 11, 2025, see **OLDER_HISTORY.md**
 
 This document tracks completed architectural changes and improvements to the Azure Geospatial ETL Pipeline from September 11, 2025 onwards.
+
+---
+
+## 14 NOV 2025: Production-Scale Vector ETL + Job Stage Advancement Fix 🎉
+
+**Status**: ✅ **MILESTONE ACHIEVED** - 2.5 Million Row ETL + CoreMachine Stage Tracking
+**Impact**: Proven production-scale vector processing capability + Fixed job monitoring
+**Timeline**: Single session - bug fix → deploy → test → 2.5M rows processed
+**Author**: Robert and Geospatial Claude Legion
+**Commits**: ee49006 (stage advancement fix)
+
+### 🎉 Major Milestone: Production-Scale Vector ETL
+
+**Achievement**: Successfully processed **1GB CSV with 2,570,844 rows** end-to-end
+
+**Test Details**:
+- **File**: acled_export.csv (ACLED conflict event data)
+- **Size**: 1GB CSV file
+- **Rows**: 2,570,844 total rows
+- **Chunking**: 129 chunks @ 20,000 rows per chunk
+- **Parallelism**: 20 concurrent PostGIS uploads (maxConcurrentCalls=20)
+- **Target**: PostGIS table `geo.acled_test_stage_fix`
+- **Result**: ✅ Zero failures, all 129 chunks completed successfully
+- **Performance**: ~10-15 minutes total processing time
+- **Memory**: 20 concurrent 20K-row chunks handled without OOM
+
+**Architecture Validation**:
+- ✅ Stage 1: Downloaded 1GB CSV, split into 129 pickled chunks
+- ✅ Stage 2: FAN-OUT - 129 parallel chunk uploads to PostGIS
+- ✅ Stage 3: STAC metadata creation
+- ✅ Job stage field advanced correctly through all 3 stages
+- ✅ Advisory locks prevented race conditions across 129 tasks
+- ✅ Service Bus queuing handled 129-message burst smoothly
+
+**Significance**:
+- **Production-Ready**: Proven capability for real-world datasets
+- **Memory Efficient**: chunk_size=20,000 optimal for parallel processing
+- **Scalable**: Can handle multi-million row datasets with appropriate chunking
+- **Reliable**: Zero silent failures, all tasks completed successfully
+
+### 🔧 Bug Fix: Job Stage Advancement Tracking
+
+**Problem**: Job record `stage` field stuck at 1 even when Stage 2+ tasks processing
+
+**Root Cause**: `core/machine.py:process_job_message()` updated job STATUS but not STAGE field
+
+**Fix Implemented**:
+1. Added `update_job_stage()` method to [core/state_manager.py:264-300](core/state_manager.py#L264-L300)
+2. Added stage synchronization in [core/machine.py:388-396](core/machine.py#L388-L396)
+3. Job record now updates when advancing to new stage
+
+**Verification**:
+- Direct PostgreSQL query confirmed: job stage field = 2 during Stage 2 processing
+- Database query: `SELECT stage FROM app.jobs WHERE job_id = 'ae275174...'` → Result: `2` ✅
+- 129 Stage 2 tasks with 19 processing simultaneously
+- Job stage advanced: 1 → 2 → 3 as expected
+
+**Impact**: Job monitoring now accurately reflects workflow progress
+
+### 📊 Performance Characteristics
+
+**Parallel Processing (maxConcurrentCalls=20)**:
+- 13-20 chunks processing simultaneously
+- ~10-15 minutes for 2.5M rows
+- Memory: Shared pool across 20 concurrent executions
+- CPU: Efficient utilization with parallelism
+
+**Next Test (Planned)**: Serial processing (maxConcurrentCalls=1) to compare:
+- Memory isolation (1 chunk at a time)
+- Performance impact (serial vs parallel)
+- Larger chunk sizes (50K-100K rows) without memory contention
 
 ---
 

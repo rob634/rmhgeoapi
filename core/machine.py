@@ -78,11 +78,34 @@ from util_logger import LoggerFactory, ComponentType
 # Error handling (13 NOV 2025 - Part 1 Task 1.3)
 from core.error_handler import CoreMachineErrorHandler
 
-# Exceptions
+# Exception categorization for retry decisions (13 NOV 2025 - Part 2 Task 2.4)
 from exceptions import (
-    ContractViolationError,
     BusinessLogicError,
+    ServiceBusError,
+    DatabaseError,
+    ResourceNotFoundError,
+    ContractViolationError,
     TaskExecutionError
+)
+
+# Exceptions worth retrying (transient failures)
+RETRYABLE_EXCEPTIONS = (
+    IOError,           # File system temporary issues
+    OSError,           # OS-level errors (often transient)
+    TimeoutError,      # Network/operation timeouts
+    ConnectionError,   # Database/API connection issues
+    ServiceBusError,   # Service Bus transient failures
+    DatabaseError,     # Database operation failures (connection, deadlock, etc.)
+)
+
+# Exceptions NOT worth retrying (permanent failures)
+PERMANENT_EXCEPTIONS = (
+    ValueError,        # Invalid parameters (won't fix on retry)
+    TypeError,         # Wrong type (programming bug)
+    KeyError,          # Missing expected key (programming bug)
+    AttributeError,    # Missing attribute (programming bug)
+    ContractViolationError,  # Programming bug
+    ResourceNotFoundError,   # Resource doesn't exist (won't appear on retry)
 )
 
 
@@ -361,6 +384,16 @@ class CoreMachine:
             JobStatus.PROCESSING
         )
         self.logger.info(f"✅ COREMACHINE STEP 4: Job status updated to PROCESSING")
+
+        # Step 3.1: Update job stage to match message stage (for monitoring/status queries)
+        # FIX: 14 NOV 2025 - Job stage field was not advancing even though Stage 2+ tasks were processing
+        # This keeps the job record stage field synchronized with actual processing stage
+        if job_record.stage != job_message.stage:
+            self.logger.debug(
+                f"📝 COREMACHINE STEP 4.1: Updating job stage {job_record.stage} → {job_message.stage}..."
+            )
+            self.state_manager.update_job_stage(job_message.job_id, job_message.stage)
+            self.logger.info(f"✅ COREMACHINE STEP 4.1: Job stage updated to {job_message.stage}")
 
         # Step 4: Fetch previous stage results (for fan-out pattern)
         previous_results = None
@@ -678,26 +711,73 @@ class CoreMachine:
         except ContractViolationError:
             # Contract violations bubble up (programming bugs)
             raise
+
+        # Exception categorization (13 NOV 2025 - Part 2 Task 2.4)
+        except RETRYABLE_EXCEPTIONS as e:
+            # Transient failures worth retrying (network, I/O, etc.)
+            self.logger.warning(f"⚠️ Retryable failure ({type(e).__name__}): {e}")
+            result = TaskResult(
+                task_id=task_message.task_id,
+                task_type=task_message.task_type,
+                status=TaskStatus.FAILED,
+                result_data={
+                    'error': str(e),
+                    'error_type': 'transient',
+                    'exception_class': type(e).__name__,
+                    'retryable': True
+                },
+                error_details=str(e),
+                timestamp=datetime.now(timezone.utc)
+            )
+
+        except PERMANENT_EXCEPTIONS as e:
+            # Permanent failures - retry won't help (bad params, programming bugs)
+            self.logger.error(f"❌ Permanent failure ({type(e).__name__}): {e}")
+            result = TaskResult(
+                task_id=task_message.task_id,
+                task_type=task_message.task_type,
+                status=TaskStatus.FAILED,
+                result_data={
+                    'error': str(e),
+                    'error_type': 'permanent',
+                    'exception_class': type(e).__name__,
+                    'retryable': False
+                },
+                error_details=str(e),
+                timestamp=datetime.now(timezone.utc)
+            )
+
         except TaskExecutionError as e:
-            # Business logic failure (expected)
+            # Business logic failure (expected, typically retryable)
             self.logger.warning(f"⚠️ Task execution failed (business logic): {e}")
             result = TaskResult(
                 task_id=task_message.task_id,
                 task_type=task_message.task_type,
                 status=TaskStatus.FAILED,
-                result_data={'error': str(e), 'error_type': 'business_logic'},
+                result_data={
+                    'error': str(e),
+                    'error_type': 'business_logic',
+                    'exception_class': 'TaskExecutionError',
+                    'retryable': True
+                },
                 error_details=str(e),
                 timestamp=datetime.now(timezone.utc)
             )
+
         except Exception as e:
-            # Unexpected error
-            self.logger.error(f"❌ Unexpected error executing task: {e}")
+            # Unknown exception - retry cautiously (err on side of retry)
+            self.logger.error(f"❌ Unknown exception ({type(e).__name__}): {e}")
             self.logger.error(f"Traceback: {traceback.format_exc()}")
             result = TaskResult(
                 task_id=task_message.task_id,
                 task_type=task_message.task_type,
                 status=TaskStatus.FAILED,
-                result_data={'error': str(e), 'error_type': 'unexpected'},
+                result_data={
+                    'error': str(e),
+                    'error_type': 'unknown',
+                    'exception_class': type(e).__name__,
+                    'retryable': True  # Err on side of retry for unknown exceptions
+                },
                 error_details=str(e),
                 timestamp=datetime.now(timezone.utc)
             )
@@ -828,7 +908,27 @@ class CoreMachine:
         else:
             # Task failed - check if retry needed
             self.logger.warning(f"⚠️ Task failed: {result.error_details}")
-            self.logger.warning(f"🔄 RETRY LOGIC STARTING for task {task_message.task_id[:16]}")
+
+            # Check if exception is retryable (13 NOV 2025 - Part 2 Task 2.4)
+            is_retryable = result.result_data.get('retryable', True) if result.result_data else True
+            error_type = result.result_data.get('error_type', 'unknown') if result.result_data else 'unknown'
+
+            if not is_retryable:
+                self.logger.error(
+                    f"❌ Task failed with permanent error ({error_type}) - NOT retrying: "
+                    f"{result.error_details}"
+                )
+                # Mark task as permanently failed (no retry)
+                return {
+                    'success': False,
+                    'error': result.error_details,
+                    'error_type': error_type,
+                    'retryable': False,
+                    'task_id': task_message.task_id,
+                    'permanent_failure': True
+                }
+
+            self.logger.warning(f"🔄 RETRY LOGIC STARTING for task {task_message.task_id[:16]} (error_type: {error_type})")
 
             # DEBUGGING: Update error_details to confirm we reached retry logic
             try:
@@ -1399,9 +1499,42 @@ class CoreMachine:
             self.logger.debug(f"✅ [JOB_COMPLETE] Found workflow: {workflow.__name__}")
 
             self.logger.info(f"📝 [JOB_COMPLETE] Step 6: Calling {workflow.__name__}.finalize_job()... (jobs/{job_type}.py:finalize_job)")
-            # Call finalize_job() - REQUIRED method (enforced by JobBase ABC)
-            final_result = workflow.finalize_job(context)
-            self.logger.debug(f"✅ [JOB_COMPLETE] finalize_job() returned {len(final_result)} keys: {list(final_result.keys())}")
+            # Call finalize_job() with fallback handling (13 NOV 2025 - Part 2 Task 2.5)
+            try:
+                final_result = workflow.finalize_job(context)
+                self.logger.debug(f"✅ [JOB_COMPLETE] finalize_job() returned {len(final_result)} keys: {list(final_result.keys())}")
+            except Exception as finalize_error:
+                # Finalization failed - create minimal fallback result to prevent zombie jobs
+                self.logger.error(
+                    f"❌ finalize_job() failed for {job_type}: {finalize_error}",
+                    extra={
+                        'job_id': job_id,
+                        'job_type': job_type,
+                        'finalization_error': str(finalize_error),
+                        'error_type': type(finalize_error).__name__,
+                        'task_count': len(task_results)
+                    }
+                )
+                self.logger.error(f"Traceback: {traceback.format_exc()}")
+
+                # Create fallback result with error details
+                final_result = {
+                    'job_type': job_type,
+                    'status': 'completed_with_errors',
+                    'finalization_error': str(finalize_error),
+                    'error_type': type(finalize_error).__name__,
+                    'task_count': len(task_results),
+                    'completed_tasks': sum(1 for tr in task_results if tr.status == TaskStatus.COMPLETED),
+                    'failed_tasks': sum(1 for tr in task_results if tr.status == TaskStatus.FAILED),
+                    'message': (
+                        f'Job completed but finalization failed: {finalize_error}. '
+                        f'Check task results manually.'
+                    )
+                }
+                self.logger.warning(
+                    f"⚠️ Using fallback result for job {job_id[:16]} - "
+                    f"job will be marked COMPLETED with errors"
+                )
 
             self.logger.debug(
                 f"📝 [JOB_COMPLETE] Step 7: Marking job as COMPLETED in database... (core/machine.py:_complete_job)",

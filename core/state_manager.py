@@ -261,6 +261,44 @@ class StateManager:
             self.logger.error(f"Failed to update job status: {e}")
             return False
 
+    def update_job_stage(self, job_id: str, new_stage: int) -> bool:
+        """
+        Update job stage field in database.
+
+        This ensures the job record's stage field stays synchronized with
+        the actual processing stage when advancing through the workflow.
+
+        Args:
+            job_id: Job identifier
+            new_stage: New stage number
+
+        Returns:
+            True if update successful
+
+        Added: 14 NOV 2025 - Fix job stage advancement bug
+        """
+        try:
+            # Create update model with just the stage field
+            from core.schema import JobUpdateModel
+            update = JobUpdateModel(stage=new_stage)
+
+            # Update via repository
+            success = self.repos['job_repo'].update_job(job_id, update)
+
+            if success:
+                self.logger.debug(f"✅ Job {job_id[:16]} stage updated to {new_stage}")
+            else:
+                self.logger.warning(
+                    f"⚠️ Job {job_id[:16]} stage update returned False - "
+                    f"repository update_job() affected 0 rows"
+                )
+
+            return success
+
+        except Exception as e:
+            self.logger.error(f"❌ Failed to update job stage: {e}")
+            return False
+
     def update_job_with_model(
         self,
         job_id: str,

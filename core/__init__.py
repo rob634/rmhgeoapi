@@ -38,7 +38,8 @@ _LAZY_IMPORTS = {
     'CoreController': '.core_controller',
     'StateManager': '.state_manager',
     'OrchestrationManager': '.orchestration_manager',
-    'CoreMachine': '.machine'
+    'CoreMachine': '.machine',
+    'CoreMachineErrorHandler': '.error_handler'
 }
 
 def __getattr__(name):
@@ -54,6 +55,7 @@ __all__ = [
     'StateManager',
     'OrchestrationManager',
     'CoreMachine',
+    'CoreMachineErrorHandler',
     'models',
     'logic',
     'schema'

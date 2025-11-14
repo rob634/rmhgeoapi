@@ -75,6 +75,9 @@ from config import AppConfig
 # Logging
 from util_logger import LoggerFactory, ComponentType
 
+# Error handling (13 NOV 2025 - Part 1 Task 1.3)
+from core.error_handler import CoreMachineErrorHandler
+
 # Exceptions
 from exceptions import (
     ContractViolationError,
@@ -146,6 +149,10 @@ class CoreMachine:
         # Completion callback (Platform layer integration - 30 OCT 2025)
         self.on_job_complete = on_job_complete
 
+        # Lazy-loaded repository caches (13 NOV 2025 - Part 1 Task 1.1)
+        self._repos = None
+        self._service_bus_repo = None
+
         # Logging
         self.logger = LoggerFactory.create_logger(
             ComponentType.CONTROLLER,
@@ -157,6 +164,126 @@ class CoreMachine:
         self.logger.debug(f"   Registered handlers: {list(all_handlers.keys())}")
         if on_job_complete:
             self.logger.info(f"   ✅ Job completion callback registered (Platform integration)")
+
+    # ========================================================================
+    # LAZY-LOADED REPOSITORY PROPERTIES (13 NOV 2025 - Part 1 Task 1.1)
+    # ========================================================================
+
+    @property
+    def repos(self) -> Dict[str, Any]:
+        """
+        Lazy-loaded repository bundle (job_repo, task_repo, etc.).
+
+        Reuses same repositories across function invocation for connection pooling.
+        Invalidates on Azure Functions cold start (instance recreation).
+
+        Returns:
+            Dict containing job_repo, task_repo, and other repositories
+
+        Usage:
+            job_record = self.repos['job_repo'].get_job(job_id)
+            self.repos['task_repo'].create_task(task_record)
+        """
+        if self._repos is None:
+            self._repos = RepositoryFactory.create_repositories()
+            self.logger.debug("✅ Repository bundle created (lazy load)")
+        return self._repos
+
+    @property
+    def service_bus(self):
+        """
+        Lazy-loaded Service Bus repository.
+
+        Reuses connection for better performance across multiple sends.
+
+        Returns:
+            ServiceBusRepository instance
+
+        Usage:
+            self.service_bus.send_message(queue_name, message)
+        """
+        if self._service_bus_repo is None:
+            self._service_bus_repo = RepositoryFactory.create_service_bus_repository()
+            self.logger.debug("✅ Service Bus repository created (lazy load)")
+        return self._service_bus_repo
+
+    # ========================================================================
+    # TASK CONVERSION HELPERS (13 NOV 2025 - Part 1 Task 1.2)
+    # ========================================================================
+
+    def _task_definition_to_record(
+        self,
+        task_def: TaskDefinition,
+        task_index: int
+    ) -> TaskRecord:
+        """
+        Convert TaskDefinition to TaskRecord for database persistence.
+
+        Single source of truth for TaskRecord creation. Ensures consistent
+        status, timestamps, and field mapping across batch and individual queueing.
+
+        Args:
+            task_def: TaskDefinition from job's create_tasks_for_stage()
+            task_index: Index in task list (for task_index field)
+
+        Returns:
+            TaskRecord ready for database insertion
+
+        Used by:
+            - _individual_queue_tasks() (individual task creation)
+            - _batch_queue_tasks() (batch task creation)
+
+        Example:
+            task_record = self._task_definition_to_record(task_def, 0)
+            self.repos['task_repo'].create_task(task_record)
+        """
+        return TaskRecord(
+            task_id=task_def.task_id,
+            parent_job_id=task_def.parent_job_id,
+            job_type=task_def.job_type,
+            task_type=task_def.task_type,
+            status=TaskStatus.QUEUED,  # Always QUEUED (not 'pending_queue')
+            stage=task_def.stage,
+            task_index=str(task_index),
+            parameters=task_def.parameters,
+            metadata=task_def.metadata or {},
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc)
+        )
+
+    def _task_definition_to_message(
+        self,
+        task_def: TaskDefinition
+    ) -> TaskQueueMessage:
+        """
+        Convert TaskDefinition to TaskQueueMessage for Service Bus.
+
+        Single source of truth for queue message creation. Generates fresh
+        correlation_id for tracing individual task execution.
+
+        Args:
+            task_def: TaskDefinition from job's create_tasks_for_stage()
+
+        Returns:
+            TaskQueueMessage ready for Service Bus
+
+        Used by:
+            - _individual_queue_tasks() (individual task queueing)
+            - _batch_queue_tasks() (batch task queueing - via to_queue_message())
+
+        Example:
+            queue_message = self._task_definition_to_message(task_def)
+            self.service_bus.send_message(queue_name, queue_message)
+        """
+        return TaskQueueMessage(
+            task_id=task_def.task_id,
+            parent_job_id=task_def.parent_job_id,
+            job_type=task_def.job_type,
+            task_type=task_def.task_type,
+            stage=task_def.stage,
+            parameters=task_def.parameters,
+            correlation_id=str(uuid.uuid4())[:8]  # Fresh correlation_id
+        )
 
     # ========================================================================
     # JOB PROCESSING - Entry point for job queue messages
@@ -214,16 +341,16 @@ class CoreMachine:
             raise
 
         # Step 2: Get job record from database
-        try:
-            self.logger.debug(f"💾 COREMACHINE STEP 3: Fetching job record from database...")
-            repos = RepositoryFactory.create_repositories()
-            job_record = repos['job_repo'].get_job(job_message.job_id)
+        self.logger.debug(f"💾 COREMACHINE STEP 3: Fetching job record from database...")
+        with CoreMachineErrorHandler.handle_operation(
+            self.logger,
+            "fetch job record from database",
+            job_id=job_message.job_id
+        ):
+            job_record = self.repos['job_repo'].get_job(job_message.job_id)
             if not job_record:
                 raise ValueError(f"Job {job_message.job_id} not found in database")
-            self.logger.info(f"✅ COREMACHINE STEP 3: Job record retrieved - parameters={list(job_record.parameters.keys())}")
-        except Exception as e:
-            self.logger.error(f"❌ COREMACHINE STEP 3 FAILED: Database error: {e}")
-            raise BusinessLogicError(f"Job record not found: {e}")
+        self.logger.info(f"✅ COREMACHINE STEP 3: Job record retrieved - parameters={list(job_record.parameters.keys())}")
 
         # Step 3: Update job status to PROCESSING
         # NOTE: This will raise exception if status transition is invalid (e.g., PROCESSING → PROCESSING)
@@ -716,14 +843,11 @@ class CoreMachine:
 
             # Get config for retry settings
             from config import get_config
-            from infrastructure import RepositoryFactory
             config = get_config()
             self.logger.debug(f"📋 Retry config: max_retries={config.task_max_retries}, base_delay={config.task_retry_base_delay}s")
 
             # Get current task to check retry count
-            repos = RepositoryFactory.create_repositories()
-            task_repo = repos['task_repo']
-            task_record = task_repo.get_task(task_message.task_id)
+            task_record = self.repos['task_repo'].get_task(task_message.task_id)
 
             if task_record is None:
                 self.logger.error(f"❌ CRITICAL: task_record is NONE for task_id={task_message.task_id}")
@@ -752,10 +876,7 @@ class CoreMachine:
                     self.logger.debug(f"✅ retry_count incremented successfully")
 
                     # Re-queue with delay using Service Bus scheduled delivery
-                    from infrastructure.service_bus import ServiceBusRepository
-                    service_bus_repo = ServiceBusRepository()
-
-                    message_id = service_bus_repo.send_message_with_delay(
+                    message_id = self.service_bus.send_message_with_delay(
                         config.service_bus_tasks_queue,
                         task_message,
                         delay_seconds
@@ -899,10 +1020,7 @@ class CoreMachine:
         successful_batches = []
         failed_batches = []
 
-        # Get repositories
-        repos = RepositoryFactory.create_repositories()
-        task_repo = repos['task_repo']
-        service_bus_repo = RepositoryFactory.create_service_bus_repository()
+        # Get queue name
         queue_name = self.config.task_processing_queue
 
         # Process in batches of 100
@@ -911,24 +1029,22 @@ class CoreMachine:
             batch_id = f"{job_id[:8]}-s{stage_number}-b{i//self.BATCH_SIZE:03d}"
 
             try:
-                # Create task records in DB
-                task_records = task_repo.batch_create_tasks(
-                    batch, batch_id=batch_id, initial_status='pending_queue'
-                )
+                # Create task records using helper (consistent status)
+                task_records = [
+                    self._task_definition_to_record(task_def, i + idx)
+                    for idx, task_def in enumerate(batch)
+                ]
+                self.repos['task_repo'].batch_create_tasks(task_records)
 
-                # Send to Service Bus
-                messages = [td.to_queue_message() for td in batch]
-                result = service_bus_repo.batch_send_messages(queue_name, messages)
+                # Send to Service Bus using helper (consistent message format)
+                messages = [
+                    self._task_definition_to_message(task_def)
+                    for task_def in batch
+                ]
+                result = self.service_bus.batch_send_messages(queue_name, messages)
 
                 if not result.success:
                     raise RuntimeError(f"Batch send failed: {result.errors}")
-
-                # Update status to queued
-                task_ids = [tr.task_id for tr in task_records]
-                task_repo.batch_update_status(
-                    task_ids, 'queued',
-                    {'queued_at': datetime.now(timezone.utc).isoformat()}
-                )
 
                 successful_batches.append({
                     'batch_id': batch_id,
@@ -971,42 +1087,18 @@ class CoreMachine:
         tasks_queued = 0
         tasks_failed = 0
 
-        # Get repositories
-        repos = RepositoryFactory.create_repositories()
-        task_repo = repos['task_repo']
-        service_bus_repo = RepositoryFactory.create_service_bus_repository()
+        # Get queue name
         queue_name = self.config.task_processing_queue
 
         for idx, task_def in enumerate(task_defs):
             try:
-                # Create task record (TaskDefinition → TaskRecord for database)
-                task_record = TaskRecord(
-                    task_id=task_def.task_id,
-                    parent_job_id=task_def.parent_job_id,  # Fixed: was task_def.job_id
-                    job_type=task_def.job_type,
-                    task_type=task_def.task_type,
-                    status=TaskStatus.QUEUED,
-                    stage=task_def.stage,  # Fixed: was task_def.stage_number
-                    task_index=str(idx),
-                    parameters=task_def.parameters,
-                    metadata=task_def.metadata or {},
-                    created_at=datetime.now(timezone.utc),
-                    updated_at=datetime.now(timezone.utc)
-                )
+                # Create task record using helper (single source of truth)
+                task_record = self._task_definition_to_record(task_def, idx)
+                self.repos['task_repo'].create_task(task_record)
 
-                task_repo.create_task(task_record)
-
-                # Send to Service Bus (TaskDefinition → TaskQueueMessage for Service Bus)
-                queue_message = TaskQueueMessage(
-                    task_id=task_def.task_id,
-                    parent_job_id=task_def.parent_job_id,
-                    job_type=task_def.job_type,
-                    task_type=task_def.task_type,
-                    stage=task_def.stage,
-                    parameters=task_def.parameters,
-                    correlation_id=str(uuid.uuid4())[:8]
-                )
-                service_bus_repo.send_message(queue_name, queue_message)
+                # Send to Service Bus using helper (single source of truth)
+                queue_message = self._task_definition_to_message(task_def)
+                self.service_bus.send_message(queue_name, queue_message)
 
                 tasks_queued += 1
 
@@ -1130,8 +1222,7 @@ class CoreMachine:
                 }
             )
             # Get job record for parameters
-            repos = RepositoryFactory.create_repositories()
-            job_record = repos['job_repo'].get_job(job_id)
+            job_record = self.repos['job_repo'].get_job(job_id)
             self.logger.debug(
                 f"✅ [STAGE_ADVANCE] Job record retrieved - has {len(job_record.parameters)} parameters",
                 extra={
@@ -1211,8 +1302,7 @@ class CoreMachine:
                 }
             )
             # Send to job queue
-            service_bus_repo = RepositoryFactory.create_service_bus_repository()
-            service_bus_repo.send_message(
+            self.service_bus.send_message(
                 self.config.job_processing_queue,
                 next_message
             )
@@ -1253,8 +1343,7 @@ class CoreMachine:
 
             self.logger.debug(f"📝 [JOB_COMPLETE] Step 1: Fetching all task records from database... (core/machine.py:_complete_job)")
             # Get all task records
-            repos = RepositoryFactory.create_repositories()
-            task_records = repos['task_repo'].get_tasks_for_job(job_id)
+            task_records = self.repos['task_repo'].get_tasks_for_job(job_id)
 
             if not task_records:
                 raise RuntimeError(f"No tasks found for job {job_id}")
@@ -1285,7 +1374,7 @@ class CoreMachine:
 
             self.logger.debug(f"📝 [JOB_COMPLETE] Step 3: Fetching job record from database... (core/machine.py:_complete_job)")
             # Get job record
-            job_record = repos['job_repo'].get_job(job_id)
+            job_record = self.repos['job_repo'].get_job(job_id)
 
             self.logger.debug(f"✅ [JOB_COMPLETE] Job record retrieved")
 
@@ -1417,13 +1506,8 @@ class CoreMachine:
         Raises:
             RuntimeError: If no completed tasks found for stage
         """
-        from infrastructure import RepositoryFactory
-
-        repos = RepositoryFactory.create_repositories()
-        task_repo = repos['task_repo']
-
         # Get all tasks for this job and stage
-        all_tasks = task_repo.get_tasks_for_job(job_id)
+        all_tasks = self.repos['task_repo'].get_tasks_for_job(job_id)
         stage_tasks = [t for t in all_tasks if t.stage == stage and t.status == TaskStatus.COMPLETED]
 
         if not stage_tasks:

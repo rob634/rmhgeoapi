@@ -26,6 +26,7 @@ psutil>=5.9.0
 # Upgraded to 0.9.8 (13 NOV 2025) - Matches database schema version
 pypgstac==0.9.8
 psycopg-pool>=3.1.0
+# Do not use psycopg-pool in code- dependency for pgstac only
 pystac>=1.13.0
 pystac-client>=0.7.0
 stac-pydantic>=3.4.0

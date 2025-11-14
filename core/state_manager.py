@@ -99,12 +99,35 @@ class StateManager:
             "StateManager"
         )
 
-        # Initialize repository for retry count operations
-        from infrastructure import RepositoryFactory
-        repos = RepositoryFactory.create_repositories()
-        self.task_repo = repos['task_repo']
+        # Lazy-loaded repository cache (13 NOV 2025 - Part 1 Task 1.1)
+        self._repos = None
 
-        self.logger.info("StateManager initialized with task repository")
+        self.logger.info("StateManager initialized with lazy repository loading")
+
+    # ========================================================================
+    # LAZY-LOADED REPOSITORY PROPERTY (13 NOV 2025 - Part 1 Task 1.1)
+    # ========================================================================
+
+    @property
+    def repos(self) -> Dict[str, Any]:
+        """
+        Lazy-loaded repository bundle (job_repo, task_repo, etc.).
+
+        Reuses same repositories across state manager operations.
+        Created on first access, then cached for subsequent calls.
+
+        Returns:
+            Dict containing job_repo, task_repo, and other repositories
+
+        Usage:
+            job_record = self.repos['job_repo'].get_job(job_id)
+            self.repos['task_repo'].update_task_status(task_id, status)
+        """
+        if self._repos is None:
+            from infrastructure import RepositoryFactory
+            self._repos = RepositoryFactory.create_repositories()
+            self.logger.debug("✅ Repository bundle created (lazy load)")
+        return self._repos
 
     # ========================================================================
     # JOB RECORD OPERATIONS
@@ -138,12 +161,8 @@ class StateManager:
         self.logger.debug(f"Creating job record for {job_id[:16]}...")
 
         try:
-            # Get repository
-            repos = RepositoryFactory.create_repositories()
-            job_repo = repos['job_repo']
-
             # Create job record
-            job_record = job_repo.create_job_from_params(
+            job_record = self.repos['job_repo'].create_job_from_params(
                 job_type=job_type,
                 parameters=parameters,
                 total_stages=total_stages
@@ -188,9 +207,7 @@ class StateManager:
 
         # BUSINESS LOGIC - Handle database errors gracefully
         try:
-            repos = RepositoryFactory.create_repositories()
-            job_repo = repos['job_repo']
-            job_repo.create_job(job_record)
+            self.repos['job_repo'].create_job(job_record)
             self.logger.info(f"Job record created: {job_record.job_id[:16]}...")
             return True
         except Exception as e:
@@ -208,9 +225,7 @@ class StateManager:
             JobRecord or None if not found
         """
         try:
-            repos = RepositoryFactory.create_repositories()
-            job_repo = repos['job_repo']
-            return job_repo.get_job(job_id)
+            return self.repos['job_repo'].get_job(job_id)
         except Exception as e:
             self.logger.error(f"Failed to get job record: {e}")
             return None
@@ -233,13 +248,11 @@ class StateManager:
             True if update successful
         """
         try:
-            repos = RepositoryFactory.create_repositories()
-            job_repo = repos['job_repo']
 
             if new_status == JobStatus.FAILED and error_details:
-                job_repo.mark_job_failed(job_id, error_details)
+                self.repos['job_repo'].mark_job_failed(job_id, error_details)
             else:
-                job_repo.update_job_status_with_validation(job_id, new_status)
+                self.repos['job_repo'].update_job_status_with_validation(job_id, new_status)
 
             self.logger.info(f"Job {job_id[:16]}... status updated to {new_status}")
             return True
@@ -266,10 +279,8 @@ class StateManager:
             True if update successful
         """
         try:
-            repos = RepositoryFactory.create_repositories()
-            job_repo = repos['job_repo']
 
-            success = job_repo.update_job(job_id, update)
+            success = self.repos['job_repo'].update_job(job_id, update)
             if success:
                 self.logger.info(f"Job {job_id[:16]}... updated with model")
             return success
@@ -296,10 +307,8 @@ class StateManager:
             True if update successful
         """
         try:
-            repos = RepositoryFactory.create_repositories()
-            task_repo = repos['task_repo']
 
-            success = task_repo.update_task(task_id, update)
+            success = self.repos['task_repo'].update_task(task_id, update)
             if success:
                 self.logger.info(f"Task {task_id} updated with model")
             else:
@@ -350,10 +359,8 @@ class StateManager:
             Current TaskStatus or None if task not found
         """
         try:
-            repos = RepositoryFactory.create_repositories()
-            task_repo = repos['task_repo']
 
-            task = task_repo.get_task(task_id)
+            task = self.repos['task_repo'].get_task(task_id)
             return task.status if task else None
 
         except Exception as e:
@@ -372,7 +379,7 @@ class StateManager:
         Returns:
             True if updated successfully
         """
-        return self.task_repo.increment_task_retry_count(task_id)
+        return self.self.repos['task_repo'].increment_task_retry_count(task_id)
 
     def update_task_result(
         self,
@@ -422,17 +429,15 @@ class StateManager:
         self.logger.info(f"Completing job {job_id[:16]}...")
 
         try:
-            repos = RepositoryFactory.create_repositories()
-            job_repo = repos['job_repo']
 
             # Get job record
-            job_record = job_repo.get_job(job_id)
+            job_record = self.repos['job_repo'].get_job(job_id)
             if not job_record:
                 raise ValueError(f"Job not found: {job_id}")
 
             # Pass the aggregated result directly to repository
             # (controller has already done the aggregation)
-            success = job_repo.complete_job(job_id, result_data)
+            success = self.repos['job_repo'].complete_job(job_id, result_data)
 
             if success:
                 self.logger.info(f"Job {job_id[:16]}... completed successfully")
@@ -471,9 +476,7 @@ class StateManager:
         self.logger.info(f"Handling stage {stage} completion for job {job_id[:16]}...")
 
         try:
-            repos = RepositoryFactory.create_repositories()
-            job_repo = repos['job_repo']
-            stage_completion_repo = repos['stage_completion_repo']
+            stage_completion_repo = self.repos['stage_completion_repo']
 
             # Check if this is the final stage
             if stage >= total_stages:
@@ -560,12 +563,10 @@ class StateManager:
 
         try:
             # Get repositories
-            repos = RepositoryFactory.create_repositories()
-            task_repo = repos['task_repo']
-            stage_completion_repo = repos['stage_completion_repo']
+            stage_completion_repo = self.repos['stage_completion_repo']
 
             # Verify task is in PROCESSING state
-            task = task_repo.get_task(task_id)
+            task = self.repos['task_repo'].get_task(task_id)
             if not task:
                 raise ValueError(f"Task not found: {task_id}")
 
@@ -635,11 +636,9 @@ class StateManager:
             Dictionary of stage results keyed by stage number
         """
         try:
-            repos = RepositoryFactory.create_repositories()
-            job_repo = repos['job_repo']
 
             # Get job record
-            job_record = job_repo.get_job(job_id)
+            job_record = self.repos['job_repo'].get_job(job_id)
             if not job_record:
                 return {}
 
@@ -679,12 +678,10 @@ class StateManager:
             True if storage successful
         """
         try:
-            repos = RepositoryFactory.create_repositories()
-            job_repo = repos['job_repo']
 
             # Update stage results in job record
             # Note: PostgreSQL will store with string key
-            success = job_repo.update_stage_results(job_id, stage_number, stage_results)
+            success = self.repos['job_repo'].update_stage_results(job_id, stage_number, stage_results)
 
             if success:
                 self.logger.info(f"Stored results for stage {stage_number} of job {job_id[:16]}...")
@@ -710,11 +707,9 @@ class StateManager:
             List of completed stage numbers
         """
         try:
-            repos = RepositoryFactory.create_repositories()
-            task_repo = repos['task_repo']
 
             # Query completed stages
-            completed = task_repo.get_completed_stages(job_id)
+            completed = self.repos['task_repo'].get_completed_stages(job_id)
             return sorted(completed)
 
         except Exception as e:
@@ -732,11 +727,9 @@ class StateManager:
             Dictionary mapping stage number to status
         """
         try:
-            repos = RepositoryFactory.create_repositories()
-            task_repo = repos['task_repo']
 
             # Query stage statuses
-            return task_repo.get_stage_statuses(job_id)
+            return self.repos['task_repo'].get_stage_statuses(job_id)
 
         except Exception as e:
             self.logger.error(f"Failed to get stage statuses: {e}")
@@ -764,10 +757,8 @@ class StateManager:
             True if marked successfully
         """
         try:
-            repos = RepositoryFactory.create_repositories()
-            job_repo = repos['job_repo']
 
-            job_repo.fail_job(job_id, error_msg)
+            self.repos['job_repo'].fail_job(job_id, error_msg)
             self.logger.info(f"Job {job_id[:16]}... marked as FAILED")
             return True
 
@@ -793,10 +784,8 @@ class StateManager:
             True if marked successfully
         """
         try:
-            repos = RepositoryFactory.create_repositories()
-            task_repo = repos['task_repo']
 
-            task_repo.mark_task_failed(task_id, error_msg)
+            self.repos['task_repo'].mark_task_failed(task_id, error_msg)
             self.logger.info(f"Task {task_id} marked as FAILED")
             return True
 

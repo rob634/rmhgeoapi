@@ -205,8 +205,8 @@ class IngestVectorJob(JobBase):
                     chunk_size = int(chunk_size)
                 except (ValueError, TypeError):
                     raise ValueError(f"chunk_size must be an integer, got {type(chunk_size).__name__}")
-            if chunk_size < 100 or chunk_size > 10000:
-                raise ValueError(f"chunk_size must be between 100 and 10000, got {chunk_size}")
+            if chunk_size < 100 or chunk_size > 500000:
+                raise ValueError(f"chunk_size must be between 100 and 500000, got {chunk_size}")
             validated["chunk_size"] = chunk_size
         else:
             validated["chunk_size"] = None  # Auto-calculate

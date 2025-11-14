@@ -133,6 +133,59 @@ Every collection created via `process_raster_collection` automatically:
 
 ---
 
+### ✅ Phase 6: PostgreSQL Backend Verification + Links Serialization Fix (13 NOV 2025)
+
+**Status**: ✅ **DEPLOYED** - 13 NOV 2025
+**Files**:
+- `services/stac_collection.py` (lines 436-448) - Links serialization fix
+- `PGSTAC-REGISTRATION.md` (updated - PostgreSQL-only documentation)
+
+**Git Commits**: TBD (deployed 13 NOV 2025)
+
+**Verification Checklist**:
+- ✅ Verified TiTiler-pgSTAC uses PostgreSQL backend (pgstac.searches table exists)
+- ✅ Confirmed 10 searches currently persisted in database (most recent: 13 NOV 2025)
+- ✅ Fixed pystac Link serialization bug (lines 436-448)
+- ✅ Updated PGSTAC-REGISTRATION.md to PostgreSQL-only (no fallback workarounds)
+- ✅ Tested locally in azgeo conda environment (Python 3.12.11)
+- ✅ Deployed to Azure (remote build successful)
+- ✅ Post-deployment health check: 100% healthy, all imports successful
+
+**Database Verification Results**:
+```sql
+-- pgstac.searches table structure confirmed:
+-- hash (TEXT PRIMARY KEY) - SHA256 of search + metadata
+-- search (JSONB) - CQL2 search query
+-- metadata (JSONB) - Search metadata
+-- lastused (TIMESTAMPTZ) - Last access timestamp
+-- usecount (BIGINT) - Usage counter
+
+-- Current searches: 10 collections with persistent search_id values
+-- Collections: namangan_pgstac_test, orthodox_stac_test_002, system-rasters
+```
+
+**Code Fixes**:
+1. **Links Serialization** (stac_collection.py:436-448):
+   - Problem: pystac Link objects weren't converting to dicts for pgSTAC
+   - Solution: Added proper serialization with .to_dict() + fallback handling
+   - Impact: Collection metadata updates now work correctly
+
+2. **Documentation** (PGSTAC-REGISTRATION.md):
+   - Removed all in-memory storage fallback sections (~500 lines)
+   - Emphasized PostgreSQL backend as ONLY supported configuration
+   - Simplified ETL implementation (no re-registration workarounds)
+   - Added verification steps and configuration guide
+
+**Production Confirmation**:
+- ✅ search_id values are permanent (persist in pgstac.searches table)
+- ✅ Viewer URLs are truly static (no restart-handling needed)
+- ✅ TiTiler can scale horizontally (shared database registry)
+- ✅ Zero downtime on restarts (searches survive deployments)
+
+**Result**: Production system validated with PostgreSQL-backed persistent search storage. All collection viewer URLs are permanent and static as documented.
+
+---
+
 ## 🚨 QA ENVIRONMENT CHECKLIST - Corporate Azure Migration
 
 **Purpose**: Critical items that must be completed before migrating this application to corporate Azure environment.

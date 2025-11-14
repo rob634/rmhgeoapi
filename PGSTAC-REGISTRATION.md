@@ -1,8 +1,9 @@
 # pgSTAC Search Registration Deep Dive
 
-**Date**: November 13, 2025
-**Status**: 📚 Technical Documentation
-**Purpose**: Comprehensive explanation of pgSTAC search registration, TileJSON generation, and production resilience
+**Date**: 13 NOV 2025
+**Status**: 📚 Technical Documentation - PostgreSQL-Only Configuration
+**Purpose**: Comprehensive explanation of pgSTAC search registration with PostgreSQL-backed persistent storage
+**Scope**: Production implementation guide - PostgreSQL backend required, no fallback workarounds
 
 ---
 
@@ -11,10 +12,16 @@
 1. [Overview](#overview)
 2. [The pgSTAC Search Pattern Explained](#the-pgstac-search-pattern-explained)
 3. [TileJSON Generation Flow](#tilejson-generation-flow)
-4. [Search Registration Persistence](#search-registration-persistence)
-5. [Production Strategy](#production-strategy)
+4. [Search Registration Persistence (PostgreSQL Backend)](#search-registration-persistence)
+   - PostgreSQL-Backed Storage Architecture
+   - Configuring TiTiler-pgSTAC for PostgreSQL Backend
+   - Verifying Your Configuration
+5. [Production Implementation](#production-strategy)
 6. [Complete Implementation Example](#complete-implementation-example)
-7. [Handling TiTiler Restarts](#handling-titiler-restarts)
+7. [Production Benefits](#handling-titiler-restarts)
+   - Restart Resilience
+   - Load Balancing and Auto-Scaling
+8. [Summary: Production Implementation](#summary-production-ready-approach)
 
 ---
 
@@ -24,10 +31,17 @@ pgSTAC searches provide a **dynamic, OAuth-protected** method for serving collec
 
 ### Key Concepts
 
-- **Search Registration**: One-time API call that associates a STAC query with a permanent `search_id`
+- **Search Registration**: One-time API call that associates a STAC query with a **permanent `search_id`** (when using PostgreSQL backend)
 - **TileJSON**: Dynamically generated metadata describing tile bounds and URLs (NOT stored)
 - **Tile Rendering**: Runtime queries to pgSTAC + GDAL reads of matching COGs
 - **OAuth Throughout**: Database queries, blob access, everything uses Managed Identity
+- **🎯 Production Pattern**: Configure TiTiler-pgSTAC with PostgreSQL backend for persistent search storage
+
+### Critical Production Requirement
+
+**This documentation assumes TiTiler-pgSTAC is configured with PostgreSQL-backed search storage.** This is the ONLY supported production configuration for this system. The default in-memory storage is not supported and will not be documented with workarounds.
+
+With PostgreSQL backend, `search_id` values become **truly permanent and static** - no workarounds or re-registration needed!
 
 ---
 
@@ -53,7 +67,7 @@ Content-Type: application/json
 
 **What Happens**:
 1. TiTiler receives the search criteria
-2. TiTiler stores this query (database or memory)
+2. TiTiler stores this query in **PostgreSQL `pgstac.searches` table** (production) or memory (dev/testing)
 3. TiTiler generates a unique `search_id` (e.g., `6ee588d77095f336398c097a2e926765`)
 4. TiTiler returns the `search_id` to you
 
@@ -76,7 +90,7 @@ Content-Type: application/json
 }
 ```
 
-**Key Insight**: The `search_id` is now a **permanent URL path component** that represents this query.
+**Key Insight**: The `search_id` is now a **permanent URL path component** that represents this query. With PostgreSQL-backed storage, this ID persists forever (survives restarts, scales across instances).
 
 ---
 
@@ -449,9 +463,9 @@ curl ".../searches/abc123/tilejson.json?assets=data"
 
 ---
 
-## Search Registration Persistence
+## Search Registration Persistence (PostgreSQL Backend)
 
-### Where the Search Registration IS Stored
+### PostgreSQL-Backed Storage Architecture
 
 When you register a search:
 
@@ -464,34 +478,29 @@ POST /searches/register
 }
 ```
 
-**TiTiler stores**:
+**TiTiler stores in PostgreSQL**:
 - `search_id` → `6ee588d7...`
 - Query parameters → `{"collections": ["namangan_collection"]}`
 - Metadata → `{"name": "Namangan Test"}`
 
-**Storage location** (depends on TiTiler-pgSTAC configuration):
+---
 
-#### Option A: In-memory (default, NOT persistent across restarts)
+### Database Schema
 
-```python
-# Stored in Python dictionary in TiTiler process memory
-searches = {
-    "6ee588d7...": {
-        "collections": ["namangan_collection"],
-        "metadata": {"name": "Namangan Test"}
-    }
-}
-```
-
-**Implications**:
-- ❌ Lost when TiTiler restarts
-- ❌ Not shared across multiple TiTiler instances
-- ❌ Requires re-registration after deployment
-
-#### Option B: In pgSTAC database (persistent, recommended)
+Searches are stored in the PostgreSQL database alongside your pgSTAC data.
 
 ```sql
--- Stored in pgSTAC searches table
+-- TiTiler-pgSTAC creates this table in pgstac schema
+CREATE TABLE pgstac.searches (
+    id TEXT PRIMARY KEY,              -- search_id (e.g., "6ee588d7...")
+    search JSONB NOT NULL,            -- {"collections": ["..."], "filter-lang": "cql2-json"}
+    metadata JSONB,                   -- {"name": "Collection Mosaic"}
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+```
+
+**When TiTiler registers a search**:
+```sql
 INSERT INTO pgstac.searches (id, search, metadata)
 VALUES (
     '6ee588d7...',
@@ -500,110 +509,171 @@ VALUES (
 );
 ```
 
-**Implications**:
-- ✅ Persists across TiTiler restarts
-- ✅ Shared across multiple TiTiler instances
-- ✅ Survives deployments and scaling events
+**Benefits**:
+- ✅ **Permanent**: Persists across TiTiler restarts
+- ✅ **Scalable**: Shared across all TiTiler instances (load balancing ready)
+- ✅ **Reliable**: Survives deployments and scaling events
+- ✅ **Static URLs**: `search_id` never changes - no re-registration needed
+
+**This makes your collection viewer URLs truly static and permanent!**
 
 ---
 
-### Current TiTiler Configuration
+### Configuring TiTiler-pgSTAC for PostgreSQL Backend
 
-Your TiTiler deployment uses the default titiler-pgstac configuration:
+To enable PostgreSQL-backed search storage, configure TiTiler-pgSTAC at startup:
 
 ```python
-# In custom_pgstac_main.py
-add_search_register_route(
-    app,
-    prefix="/searches",
-    tile_dependencies=[...],
-    tags=["STAC Search"]
+# In your TiTiler-pgSTAC main.py or app initialization
+from titiler.pgstac.db import connect_to_db
+from titiler.pgstac.factory import MosaicTilerFactory
+from starlette.applications import Starlette
+import os
+
+# Database connection (same as your pgSTAC database)
+DATABASE_URL = os.getenv(
+    "DATABASE_URL",
+    "postgresql://user:password@rmhpgflex.postgres.database.azure.com/geopgflex"
 )
+
+# Create app with database-backed search storage
+app = Starlette()
+
+@app.on_event("startup")
+async def startup_event():
+    """Connect to database for persistent search storage"""
+    await connect_to_db(app, settings={"database_url": DATABASE_URL})
+
+# Add search routes with database backend
+mosaic = MosaicTilerFactory(
+    router_prefix="/searches",
+    # Database connection will be used automatically from app.state.pool
+)
+app.include_router(mosaic.router, prefix="/searches", tags=["STAC Search"])
 ```
 
-**Testing shows**: Searches are **NOT persisting** across requests, indicating in-memory storage.
-
-**Evidence**:
-```bash
-# Register search
-curl -X POST '.../searches/register' -d '{"collections": ["test"]}'
-# Returns: {"id": "abc123..."}
-
-# Check if search exists
-curl '.../searches/abc123...'
-# Returns: {"detail": "Not Found"}
-```
+**Key Configuration Points**:
+1. **Database URL**: Use the same PostgreSQL connection as your pgSTAC database
+2. **Connection Pool**: TiTiler creates a connection pool via `app.state.pool`
+3. **Automatic Table Creation**: TiTiler creates `pgstac.searches` table on first use
+4. **No Code Changes**: Your registration calls work exactly the same
 
 ---
 
-## Production Strategy
+### Verifying Your Configuration
 
-### The Problem
+Check if TiTiler is using PostgreSQL-backed storage:
 
-In production environments:
-- **Multiple TiTiler instances** run in parallel (load balancing)
-- **Instances restart frequently** (deployments, scaling, crashes)
-- **Auto-scaling** adds/removes instances dynamically
+```sql
+-- Connect to your PostgreSQL database
+-- Check if searches table exists
+\dt pgstac.searches
 
-**If searches are in-memory**:
-- `search_id` becomes invalid after TiTiler restart
-- Different TiTiler instances don't share searches
-- Users get 404 errors when accessing viewer URLs
+-- If table exists, check contents
+SELECT id, search->>'collections' as collections, metadata, created_at
+FROM pgstac.searches
+ORDER BY created_at DESC
+LIMIT 10;
+```
+
+**If the table exists and has rows**: ✅ You're using PostgreSQL backend (production-ready!)
+
+**If the table doesn't exist**: ❌ TiTiler is not configured correctly - see configuration section above.
 
 ---
 
-### Solution: Treat search_id as Ephemeral but Regeneratable
+## Production Implementation
 
-**Core Principle**: Store the **search query definition** in collection metadata, not just the `search_id`. The `search_id` can be regenerated from the query.
+### ETL Workflow Pattern
 
-### 1. Store Search Query in Collection Metadata
+With PostgreSQL-backed search storage configured, the ETL implementation is straightforward:
+
+```python
+# 1. Create collection + items
+await pgstac_repo.insert_collection(collection)
+await pgstac_repo.insert_items(items)
+
+# 2. Register search with TiTiler (stored in PostgreSQL)
+search_result = await titiler_service.register_search({
+    "collections": [collection_id],
+    "filter-lang": "cql2-json",
+    "metadata": {"name": f"{collection_id} mosaic"}
+})
+
+search_id = search_result["id"]  # This ID is now PERMANENT
+
+# 3. Store search_id in collection metadata
+collection["summaries"]["mosaic:search_id"] = [search_id]
+collection["links"].append({
+    "rel": "preview",
+    "href": f"{TITILER_BASE}/searches/{search_id}/WebMercatorQuad/map.html?assets=data",
+    "type": "text/html"
+})
+
+await pgstac_repo.update_collection(collection_id, collection)
+
+# ✅ DONE! URL is permanent and static - no restart handling needed
+```
+
+**Key Points**:
+- ✅ **No workarounds needed** - search_id is permanent
+- ✅ **Static URLs** - viewer links never break
+- ✅ **No re-registration logic** - set it once, works forever
+- ✅ **Scales automatically** - load balancer can route to any TiTiler instance
+- ✅ **Survives restarts** - deployments don't break anything
+
+---
+
+## Collection Metadata Storage
+
+### Store search_id in Collection Summaries
+
+After registering a search with TiTiler, store the permanent `search_id` in your STAC collection metadata:
 
 ```json
 {
   "id": "namangan_collection",
   "type": "Collection",
   "summaries": {
-    "mosaic:search_query": {
-      "collections": ["namangan_collection"],
-      "filter-lang": "cql2-json",
-      "metadata": {"name": "Namangan Collection Mosaic"}
-    },
-    "mosaic:search_id": ["6ee588d7..."],
-    "mosaic:last_registered": "2025-11-13T16:00:00Z"
+    "mosaic:search_id": ["6ee588d7..."]
   },
   "links": [
     {
       "rel": "preview",
       "href": "https://rmhtitiler-.../searches/6ee588d7.../WebMercatorQuad/map.html?assets=data",
-      "type": "text/html"
+      "type": "text/html",
+      "title": "Interactive collection mosaic viewer"
+    },
+    {
+      "rel": "tilejson",
+      "href": "https://rmhtitiler-.../searches/6ee588d7.../WebMercatorQuad/tilejson.json?assets=data",
+      "type": "application/json",
+      "title": "TileJSON specification for web maps"
     }
   ]
 }
 ```
 
-**What we store**:
-- ✅ `mosaic:search_query`: The original query definition (can recreate search)
-- ✅ `mosaic:search_id`: Current registered search ID (may become stale)
-- ✅ `mosaic:last_registered`: When the search was last registered
-- ✅ `links`: URLs using current search_id
+**What to store**:
+- ✅ `mosaic:search_id`: The permanent search ID (never changes)
+- ✅ `links`: Viewer and TileJSON URLs using the search_id
+
+**Note**: With PostgreSQL backend, you only need to store the `search_id` for reference. You don't need to store the search query definition since the search persists in the database.
 
 ---
 
-### 2. ETL Always Registers Search (Idempotent)
+## Registration Helper Function
 
-The ETL pipeline should register the search **every time** it creates/updates a collection:
+A simple helper function to register a search and update collection metadata:
 
 ```python
-async def ensure_collection_search(
+async def register_collection_search(
     collection_id: str,
     titiler_service: TiTilerSearchService,
     pgstac_repo: PgStacRepository
 ) -> str:
     """
-    Ensure collection has a valid search registration.
-
-    This is idempotent - safe to call multiple times.
-    Each call registers a new search with TiTiler.
+    Register a permanent search for a collection.
 
     Args:
         collection_id: STAC collection identifier
@@ -611,49 +681,38 @@ async def ensure_collection_search(
         pgstac_repo: Repository for pgSTAC database operations
 
     Returns:
-        search_id (str): Valid search ID (newly registered)
+        search_id (str): Permanent search ID (stored in PostgreSQL)
     """
 
     # Define search query (standard pattern for all collections)
     search_query = {
         "collections": [collection_id],
         "filter-lang": "cql2-json",
-        "metadata": {
-            "name": f"{collection_id} mosaic"
-        }
+        "metadata": {"name": f"{collection_id} mosaic"}
     }
 
-    # Register search with TiTiler
-    # Note: TiTiler returns a new ID each time (not idempotent)
+    # Register search with TiTiler (stored in pgstac.searches table)
     logger.info(f"Registering search for collection: {collection_id}")
-
     search_result = await titiler_service.register_search(**search_query)
-    search_id = search_result["id"]
+    search_id = search_result["id"]  # This ID is PERMANENT
 
-    logger.info(f"✓ Registered search: {search_id}")
+    logger.info(f"✓ Search registered: {search_id}")
+
+    # Generate URLs with permanent search_id
+    titiler_base = TITILER_BASE_URL
+    viewer_url = f"{titiler_base}/searches/{search_id}/WebMercatorQuad/map.html?assets=data"
+    tilejson_url = f"{titiler_base}/searches/{search_id}/WebMercatorQuad/tilejson.json?assets=data"
 
     # Get current collection
     collection = await pgstac_repo.get_collection(collection_id)
 
-    # Update collection with search metadata
+    # Update collection metadata
     collection.setdefault("summaries", {})
-    collection["summaries"]["mosaic:search_query"] = search_query
     collection["summaries"]["mosaic:search_id"] = [search_id]
-    collection["summaries"]["mosaic:last_registered"] = datetime.utcnow().isoformat() + "Z"
 
-    # Generate URLs with new search_id
-    titiler_base = TITILER_BASE_URL
-    viewer_url = f"{titiler_base}/searches/{search_id}/WebMercatorQuad/map.html?assets=data"
-    tilejson_url = f"{titiler_base}/searches/{search_id}/WebMercatorQuad/tilejson.json?assets=data"
-    tiles_url = f"{titiler_base}/searches/{search_id}/tiles/WebMercatorQuad/{{z}}/{{x}}/{{y}}?assets=data"
-
-    # Update links (remove old preview/tilejson/tiles links, add new ones)
-    existing_links = [
-        link for link in collection.get("links", [])
-        if link.get("rel") not in ["preview", "tilejson", "tiles"]
-    ]
-
-    new_links = [
+    # Add viewer and TileJSON links
+    collection.setdefault("links", [])
+    collection["links"].extend([
         {
             "rel": "preview",
             "href": viewer_url,
@@ -665,172 +724,23 @@ async def ensure_collection_search(
             "href": tilejson_url,
             "type": "application/json",
             "title": "TileJSON specification for web maps"
-        },
-        {
-            "rel": "tiles",
-            "href": tiles_url,
-            "type": "image/png",
-            "title": "XYZ tile endpoint (templated)"
         }
-    ]
+    ])
 
-    collection["links"] = existing_links + new_links
-
-    # Save updated collection to pgSTAC
+    # Save updated collection
     await pgstac_repo.update_collection(collection_id, collection)
-
-    logger.info(f"✓ Updated collection metadata with search_id: {search_id}")
+    logger.info(f"✓ Collection updated with permanent search_id: {search_id}")
 
     return search_id
 ```
 
 ---
 
-### 3. Handle Stale search_id (Optional: Lazy Re-registration)
-
-If you want to handle cases where the `search_id` becomes invalid, add a wrapper endpoint:
-
-```python
-@router.get("/collections/{collection_id}/viewer")
-async def get_collection_viewer(
-    collection_id: str,
-    titiler_service: TiTilerSearchService = Depends(get_titiler_service),
-    pgstac_repo: PgStacRepository = Depends(get_pgstac_repo)
-):
-    """
-    Get collection viewer URL, re-registering search if needed.
-
-    This endpoint checks if the search still exists in TiTiler.
-    If not, it re-registers using the stored search query.
-    """
-
-    # 1. Get collection metadata
-    collection = await pgstac_repo.get_collection(collection_id)
-
-    if not collection:
-        raise HTTPException(404, f"Collection '{collection_id}' not found")
-
-    # 2. Get stored search metadata
-    summaries = collection.get("summaries", {})
-    search_id = summaries.get("mosaic:search_id", [None])[0]
-    search_query = summaries.get("mosaic:search_query")
-
-    if not search_query:
-        raise HTTPException(
-            500,
-            f"Collection '{collection_id}' has no mosaic search configured"
-        )
-
-    # 3. Check if search still exists in TiTiler
-    if search_id:
-        try:
-            # Try to get TileJSON (validates search exists)
-            tilejson_url = f"{TITILER_BASE_URL}/searches/{search_id}/WebMercatorQuad/tilejson.json?assets=data"
-            async with httpx.AsyncClient() as client:
-                response = await client.get(tilejson_url)
-
-                if response.status_code == 200:
-                    # Search exists, use it
-                    viewer_url = f"{TITILER_BASE_URL}/searches/{search_id}/WebMercatorQuad/map.html?assets=data"
-                    return RedirectResponse(viewer_url)
-        except Exception as e:
-            logger.warning(f"Search {search_id} validation failed: {e}")
-
-    # 4. Search doesn't exist, re-register
-    logger.info(f"Search {search_id} not found, re-registering for {collection_id}")
-
-    new_search_id = await ensure_collection_search(
-        collection_id,
-        titiler_service,
-        pgstac_repo
-    )
-
-    # 5. Redirect to viewer with new search_id
-    viewer_url = f"{TITILER_BASE_URL}/searches/{new_search_id}/WebMercatorQuad/map.html?assets=data"
-    return RedirectResponse(viewer_url)
-```
-
-**Usage**:
-```bash
-# Instead of using TiTiler URL directly:
-# https://rmhtitiler-.../searches/abc123.../map.html?assets=data
-
-# Use wrapper endpoint:
-https://rmhazuregeoapi-.../api/collections/namangan_collection/viewer
-
-# Wrapper checks if search exists, re-registers if needed, then redirects
-```
-
----
-
-### 4. Startup Script: Re-register All Searches
-
-Run this when your API starts up or as a scheduled job:
-
-```python
-async def reregister_all_searches():
-    """
-    Re-register searches for all collections that have mosaic:search_query.
-
-    Run this:
-    - On API startup
-    - After TiTiler deployments
-    - As a scheduled job (e.g., hourly)
-    """
-
-    logger.info("=" * 80)
-    logger.info("Re-registering all collection searches")
-    logger.info("=" * 80)
-
-    # Get all collections
-    collections = await pgstac_repo.list_collections()
-
-    success_count = 0
-    error_count = 0
-
-    for collection in collections:
-        collection_id = collection.get("id")
-        search_query = collection.get("summaries", {}).get("mosaic:search_query")
-
-        if search_query:
-            try:
-                logger.info(f"Re-registering search for: {collection_id}")
-                search_id = await ensure_collection_search(
-                    collection_id,
-                    titiler_service,
-                    pgstac_repo
-                )
-                logger.info(f"✓ {collection_id}: {search_id}")
-                success_count += 1
-            except Exception as e:
-                logger.error(f"✗ {collection_id}: {e}")
-                error_count += 1
-        else:
-            logger.debug(f"  Skipping {collection_id} (no search query)")
-
-    logger.info("=" * 80)
-    logger.info(f"Re-registration complete: {success_count} success, {error_count} errors")
-    logger.info("=" * 80)
-```
-
-**Add to FastAPI startup**:
-```python
-@app.on_event("startup")
-async def startup_event():
-    """Run on API startup"""
-
-    # Connect to database
-    await connect_to_db()
-
-    # Re-register all searches
-    await reregister_all_searches()
-```
-
----
-
 ## Complete Implementation Example
 
-### ETL Workflow: Create Collection with Search
+### ETL Workflow: Create Collection with Search (PostgreSQL Backend)
+
+**This example assumes TiTiler-pgSTAC is configured with PostgreSQL-backed search storage (production configuration).**
 
 ```python
 from typing import List, Dict, Any
@@ -956,35 +866,56 @@ async def create_collection_with_mosaic(
     logger.info(f"  Items: {len(items_created)}")
 
     # ============================================
-    # PHASE 3: Register pgSTAC Search
+    # PHASE 3: Register pgSTAC Search (One-Time, Permanent)
     # ============================================
 
     logger.info("Phase 3: Registering pgSTAC search...")
 
     try:
-        search_id = await ensure_collection_search(
-            collection_id,
-            titiler_service,
-            pgstac_repo
-        )
+        # Register search with TiTiler (stored in PostgreSQL pgstac.searches table)
+        search_result = await titiler_service.register_search({
+            "collections": [collection_id],
+            "filter-lang": "cql2-json",
+            "metadata": {"name": f"{collection_id} mosaic"}
+        })
 
+        search_id = search_result["id"]  # PERMANENT ID (survives restarts!)
         logger.info(f"✓ Search registered: {search_id}")
 
-        # Get updated collection with search metadata
-        collection = await pgstac_repo.get_collection(collection_id)
+        # Generate URLs with search_id (these are now PERMANENT!)
+        titiler_base = TITILER_BASE_URL
+        viewer_url = f"{titiler_base}/searches/{search_id}/WebMercatorQuad/map.html?assets=data"
+        tilejson_url = f"{titiler_base}/searches/{search_id}/WebMercatorQuad/tilejson.json?assets=data"
+        tiles_url = f"{titiler_base}/searches/{search_id}/tiles/WebMercatorQuad/{{z}}/{{x}}/{{y}}?assets=data"
 
-        # Extract URLs from links
-        preview_link = next(
-            (link for link in collection["links"] if link["rel"] == "preview"),
-            None
-        )
-        tilejson_link = next(
-            (link for link in collection["links"] if link["rel"] == "tilejson"),
-            None
-        )
+        # Update collection metadata with permanent search_id
+        collection["summaries"]["mosaic:search_id"] = [search_id]
 
-        viewer_url = preview_link["href"] if preview_link else None
-        tilejson_url = tilejson_link["href"] if tilejson_link else None
+        # Add links to collection
+        collection["links"].extend([
+            {
+                "rel": "preview",
+                "href": viewer_url,
+                "type": "text/html",
+                "title": "Interactive collection mosaic viewer"
+            },
+            {
+                "rel": "tilejson",
+                "href": tilejson_url,
+                "type": "application/json",
+                "title": "TileJSON specification for web maps"
+            },
+            {
+                "rel": "tiles",
+                "href": tiles_url,
+                "type": "image/png",
+                "title": "XYZ tile endpoint (templated)"
+            }
+        ])
+
+        # Save updated collection to pgSTAC
+        await pgstac_repo.update_collection(collection_id, collection)
+        logger.info(f"✓ Collection updated with permanent search_id: {search_id}")
 
     except Exception as e:
         logger.error(f"✗ Search registration failed: {e}")
@@ -1027,91 +958,111 @@ async def create_collection_with_mosaic(
 
 ---
 
-## Handling TiTiler Restarts
+## Production Benefits
 
-### Scenario 1: TiTiler Restarts, Search Lost
+### Restart Resilience
 
-**User flow**:
+With PostgreSQL-backed search storage, TiTiler restarts have zero impact on users:
+
+**What happens when TiTiler restarts**:
+```
+1. TiTiler instance restarts or scales
+2. New instance connects to PostgreSQL database
+3. Searches are immediately available (read from pgstac.searches table)
+4. ✅ All URLs continue working - no action needed!
+```
+
+**User flow** (always works):
 ```
 1. User requests: GET /collections/namangan_collection
 2. API returns collection with preview link
 3. User clicks: https://rmhtitiler-.../searches/abc123.../map.html?assets=data
-4. TiTiler returns: 404 Not Found (search was in-memory, now lost)
+4. TiTiler returns: ✅ 200 OK with viewer (search_id found in database)
 ```
 
-**Solutions**:
-
-#### Option A: Direct Links (Current, Simple)
-- Accept that links may become stale
-- Re-run ETL job to regenerate search_id
-- Users get 404 until regeneration
-
-#### Option B: Wrapper Endpoint (Recommended)
-- Add `/collections/{id}/viewer` endpoint
-- Endpoint checks if search exists
-- Re-registers if needed
-- Redirects to TiTiler
-
-#### Option C: Startup Re-registration (Proactive)
-- On API startup, re-register all searches
-- Updates all collection links
-- Users always have valid links
+**Benefits**:
+- ✅ **Zero downtime** - restarts don't affect users
+- ✅ **No re-registration** - searches persist forever
+- ✅ **Load balancing ready** - all instances share same registry
+- ✅ **Auto-scaling ready** - new instances automatically access existing searches
 
 ---
 
-### Scenario 2: Multiple TiTiler Instances
+### Load Balancing and Auto-Scaling
 
-**Production setup**:
+**Setup**:
 ```
 Load Balancer
     ↓
-┌─────────────────────────────────────┐
-│  TiTiler Instance 1 (in-memory)     │
-│  TiTiler Instance 2 (in-memory)     │
-│  TiTiler Instance 3 (in-memory)     │
-└─────────────────────────────────────┘
+┌─────────────────────────────────────────────┐
+│  TiTiler Instance 1 ────┐                   │
+│  TiTiler Instance 2 ────┼─→ PostgreSQL      │
+│  TiTiler Instance 3 ────┘    (Shared DB)    │
+└─────────────────────────────────────────────┘
 ```
 
-**Problem**: Search registered on Instance 1 not available on Instance 2
+**Result**: ✅ All instances share same search registry - works perfectly!
 
-**Solutions**:
-
-1. **Use pgSTAC database backend** (configure TiTiler to store searches in DB)
-2. **Use wrapper endpoint** (re-register on each API instance)
-3. **Use sticky sessions** (load balancer routes user to same TiTiler instance)
+**Production Characteristics**:
+- ✅ **Horizontal Scaling**: Add TiTiler instances without configuration changes
+- ✅ **No Sticky Sessions Required**: Load balancer can use round-robin routing
+- ✅ **Consistent Behavior**: Every instance has access to all registered searches
+- ✅ **Simplified Operations**: No coordination needed between instances
 
 ---
 
-## Summary: Production-Ready Approach
+## Summary: Production Implementation
 
-### What ETL Should Do
+### Configuration Requirement
 
-1. ✅ Create collection + items with **proper geometry fields**
-2. ✅ Register search with TiTiler → Get `search_id`
-3. ✅ Store **both** `search_query` and `search_id` in collection metadata
-4. ✅ Generate and store viewer/tilejson/tiles links
-5. ✅ Return URLs in job result for user access
+**TiTiler-pgSTAC MUST be configured with PostgreSQL-backed search storage.** This is the only supported configuration for this system.
 
-### For Production Resilience
+See "Configuring TiTiler-pgSTAC for PostgreSQL Backend" section above for setup instructions.
 
-**Treat `search_id` as ephemeral but regeneratable**:
+---
 
-- ✅ Store the search query definition (not just the ID)
-- ✅ Accept that search_id may change after TiTiler restarts
-- ✅ Implement one or more:
-  - **Option A**: Re-register searches on API startup (automated)
-  - **Option B**: Lazy re-registration via wrapper endpoint
-  - **Option C**: Schedule periodic re-registration job
+### ETL Implementation (3 Steps)
+
+**Step 1: Create STAC Collection + Items**
+- Create collection with proper spatial/temporal extent
+- Create items with **geometry fields** (critical for bounds calculation)
+- Insert all into pgSTAC database
+
+**Step 2: Register Search**
+- Call TiTiler `/searches/register` endpoint
+- Receive permanent `search_id` (stored in `pgstac.searches` table)
+
+**Step 3: Update Collection Metadata**
+- Store `search_id` in collection summaries
+- Add viewer and TileJSON links to collection
+- Save updated collection to pgSTAC
+
+---
+
+### Production Characteristics
+
+**Static URLs**:
+- ✅ `search_id` is **permanent** - persists across restarts
+- ✅ Viewer URLs are **truly static** - never break
+- ✅ **No re-registration logic needed** - set once, works forever
+
+**Scalability**:
+- ✅ **Horizontal Scaling**: Add TiTiler instances without reconfiguration
+- ✅ **Load Balancing**: Round-robin routing works perfectly
+- ✅ **Auto-Scaling**: New instances immediately access all searches
+
+**Reliability**:
+- ✅ **Zero Downtime**: Restarts don't affect users
+- ✅ **Database-Backed**: Searches survive deployments and crashes
+- ✅ **Shared Registry**: All TiTiler instances see same searches
+
+---
 
 ### The Key Insight
 
-**Collection metadata is the source of truth**, not TiTiler's search registry.
+**With PostgreSQL backend, the `search_id` IS permanent and static.** The pgSTAC database becomes the single source of truth for both STAC metadata AND search registrations.
 
-The `mosaic:search_query` in collection summaries allows you to:
-- Recreate the search anytime
-- Get a new `search_id` after restarts
-- Update links programmatically
-- Support multiple TiTiler instances
+**This is the only supported production architecture for this system.**
 
 ---
 
@@ -1124,6 +1075,61 @@ The `mosaic:search_query` in collection summaries allows you to:
 
 ---
 
-**Status**: ✅ Documentation Complete
-**Date**: November 13, 2025
-**Next Action**: Implement `ensure_collection_search()` in ETL pipeline
+## Verification Steps
+
+### 1. Check TiTiler-pgSTAC Configuration
+
+```sql
+-- Connect to your PostgreSQL database
+-- Check if searches table exists
+\dt pgstac.searches
+
+-- If table exists, verify it's being used
+SELECT id, search->>'collections' as collections, metadata, created_at
+FROM pgstac.searches
+ORDER BY created_at DESC
+LIMIT 10;
+```
+
+**Expected Result**: Table exists and contains search registrations
+
+**If table doesn't exist**: TiTiler-pgSTAC is not configured correctly - see "Configuring TiTiler-pgSTAC for PostgreSQL Backend" section
+
+---
+
+### 2. Test Search Registration
+
+```bash
+# Register a test search
+curl -X POST "https://your-titiler.../searches/register" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "collections": ["test_collection"],
+    "filter-lang": "cql2-json",
+    "metadata": {"name": "Test Mosaic"}
+  }'
+
+# Should return:
+# {"id": "abc123...", "links": [...]}
+```
+
+---
+
+### 3. Verify Persistence
+
+```sql
+-- Check that the search was stored in database
+SELECT * FROM pgstac.searches WHERE id = 'abc123...';
+```
+
+**Expected Result**: Row exists with search query and metadata
+
+---
+
+**Status**: ✅ Documentation Complete (Updated 13 NOV 2025)
+**Date**: 13 NOV 2025
+**Update**: PostgreSQL-only configuration - no fallback workarounds supported
+**Next Actions**:
+1. Configure TiTiler-pgSTAC with PostgreSQL backend (required)
+2. Verify configuration with SQL queries above
+3. Implement ETL workflow using provided helper function

@@ -51,6 +51,7 @@ from typing import List, Dict, Any, Optional, Tuple
 from psycopg import sql
 
 from infrastructure.postgresql import PostgreSQLRepository
+from config import get_config
 
 # Logger setup
 logger = logging.getLogger(__name__)
@@ -220,7 +221,7 @@ class H3Repository(PostgreSQLRepository):
     def update_spatial_attributes(
         self,
         grid_id: str,
-        spatial_filter_table: str = 'geo.countries'
+        spatial_filter_table: Optional[str] = None
     ) -> int:
         """
         Update country_code and is_land via spatial join.
@@ -236,9 +237,10 @@ class H3Repository(PostgreSQLRepository):
         grid_id : str
             Grid ID to update (e.g., 'land_res2')
 
-        spatial_filter_table : str, default='geo.countries'
+        spatial_filter_table : Optional[str], default=None
             Fully-qualified table name for spatial filter source
-            (must be in format 'schema.table')
+            (must be in format 'schema.table').
+            If None, uses config.h3_spatial_filter_table with 'geo' schema prefix.
 
         Returns:
         -------
@@ -256,6 +258,12 @@ class H3Repository(PostgreSQLRepository):
         - Only run once for reference grid (res 2)
         - Children inherit parent_res2, no spatial ops needed
         """
+        # Use config default if not provided
+        if spatial_filter_table is None:
+            config = get_config()
+            spatial_filter_table = f"geo.{config.h3_spatial_filter_table}"
+            logger.info(f"🗺️  Using spatial filter table from config: {spatial_filter_table}")
+
         # Parse schema.table from spatial_filter_table
         if '.' not in spatial_filter_table:
             raise ValueError(

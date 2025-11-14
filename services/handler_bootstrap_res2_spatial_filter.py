@@ -19,7 +19,7 @@
 #   - Lines 95-160: bootstrap_res2_with_spatial_filter() - main handler (15 min execution)
 #   - Lines 95-110: Idempotency check (skip if land_res2 already complete)
 #   - Lines 115-130: Generate and insert global res 2 cells (5,882 cells)
-#   - Lines 135-150: Spatial filtering via ST_Intersects with geo.countries
+#   - Lines 135-150: Spatial filtering via ST_Intersects with config.h3_spatial_filter_table
 #   - Lines 155-170: Extract land cell IDs and store in h3.reference_filters
 #   - Lines 175-185: Update h3.grid_metadata with completion status
 # ============================================================================
@@ -33,7 +33,8 @@ All subsequent resolutions (3-7) use H3 parent-child relationships.
 Workflow:
 1. Generate global res 2 grid (5,882 hexagons covering Earth)
 2. Insert all cells to h3.grids with grid_id='land_res2'
-3. Perform ONE-TIME spatial join: ST_Intersects(h3.geom, geo.countries.geom)
+3. Perform ONE-TIME spatial join: ST_Intersects(h3.geom, geo.<spatial_filter_table>.geom)
+   (spatial_filter_table from config.h3_spatial_filter_table, default: 'countries')
 4. Update country_code and is_land=TRUE for land cells (~2,847 cells)
 5. Extract land cell IDs into h3.reference_filters (parent IDs for res 3 cascade)
 6. Update h3.grid_metadata with completion status
@@ -52,6 +53,8 @@ Expected Results:
 import time
 import logging
 from typing import Dict, Any, Generator, Optional
+
+from config import get_config
 
 # Initialize logger
 logger = logging.getLogger(__name__)
@@ -136,7 +139,8 @@ def bootstrap_res2_with_spatial_filter(task_params: dict) -> dict:
             - resolution: int (must be 2)
             - grid_id: str (e.g., 'land_res2')
             - filter_name: str (e.g., 'land_res2')
-            - spatial_filter_table: str (e.g., 'geo.countries')
+            - spatial_filter_table: Optional[str] (e.g., 'geo.countries')
+              If None, uses config.h3_spatial_filter_table
             - job_id: str (source job ID)
 
     Returns:
@@ -147,7 +151,7 @@ def bootstrap_res2_with_spatial_filter(task_params: dict) -> dict:
 
     Raises:
         ValueError: If resolution != 2 or required params missing
-        RuntimeError: If h3 schema doesn't exist or geo.countries missing
+        RuntimeError: If h3 schema doesn't exist or spatial filter table missing
     """
     start_time = time.time()
 
@@ -165,7 +169,14 @@ def bootstrap_res2_with_spatial_filter(task_params: dict) -> dict:
     resolution = task_params.get('resolution')
     grid_id = task_params.get('grid_id', 'land_res2')
     filter_name = task_params.get('filter_name', 'land_res2')
-    spatial_filter_table = task_params.get('spatial_filter_table', 'geo.countries')
+
+    # Get spatial filter table from task params or config
+    spatial_filter_table = task_params.get('spatial_filter_table')
+    if spatial_filter_table is None:
+        config = get_config()
+        spatial_filter_table = f"geo.{config.h3_spatial_filter_table}"
+        logger.info(f"🗺️  Using spatial filter table from config: {spatial_filter_table}")
+
     job_id = task_params.get('job_id', 'unknown')
 
     if resolution != 2:
@@ -254,7 +265,7 @@ def bootstrap_res2_with_spatial_filter(task_params: dict) -> dict:
     logger.info(f"✅ All resolution 2 cells inserted to h3.grids (total: {total_inserted})")
 
     # ========================================================================
-    # STEP 3: Spatial filtering via ST_Intersects with geo.countries
+    # STEP 3: Spatial filtering via ST_Intersects with config spatial filter table
     # ========================================================================
     logger.info(f"🗺️ Performing spatial join with {spatial_filter_table}...")
     logger.info("   This is the ONE-TIME spatial operation (15 min expected)...")

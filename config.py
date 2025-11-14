@@ -727,6 +727,42 @@ class AppConfig(BaseModel):
         """
     )
 
+    h3_spatial_filter_table: str = Field(
+        default="countries",
+        description="""Table name (without schema) for H3 land filtering during bootstrap.
+
+        Purpose:
+            Used by H3 bootstrap process to perform ONE-TIME spatial filtering
+            at resolution 2 to identify land vs ocean hexagons via ST_Intersects.
+
+        Schema:
+            Table is always accessed as 'geo.{h3_spatial_filter_table}'
+            (geo schema is hardcoded for user vector data)
+
+        Table Requirements:
+            - Must exist in 'geo' schema before running H3 bootstrap
+            - Must have geometry column (any name - typically 'geom' or 'geometry')
+            - Must contain land/country boundaries in EPSG:4326
+            - Used ONLY during bootstrap - not required for normal operations
+
+        Default Value:
+            "countries" - Assumes geo.countries table exists
+            Can override via H3_SPATIAL_FILTER_TABLE environment variable
+
+        Usage in H3 code:
+            config = get_config()
+            spatial_filter_table = f"geo.{config.h3_spatial_filter_table}"
+            # Performs: ST_Intersects(h3.geom, geo.countries.geom)
+
+        Common Values:
+            - "countries" (default - simple country boundaries)
+            - "system_admin0_boundaries" (detailed admin0 with ISO codes)
+            - "land_polygons" (custom land mask dataset)
+
+        Note: Table doesn't need to exist until you run H3 bootstrap job
+        """
+    )
+
     # ========================================================================
     # Queue Processing Configuration
     # ========================================================================

@@ -245,6 +245,9 @@ from ogc_features import get_ogc_triggers
 # STAC API - Standalone module (11 NOV 2025)
 from stac_api import get_stac_triggers
 
+# Vector Viewer - Standalone module (13 NOV 2025) - OGC Features API
+from vector_viewer import get_vector_viewer_triggers
+
 # ========================================================================
 # PHASE 2: EXPLICIT REGISTRATION PATTERN (Parallel with decorators)
 # ========================================================================
@@ -1531,6 +1534,43 @@ def stac_api_v1_items(req: func.HttpRequest) -> func.HttpResponse:
 def stac_api_v1_item(req: func.HttpRequest) -> func.HttpResponse:
     """STAC API v1.0.0 item detail: GET /api/stac/collections/{collection_id}/items/{item_id}"""
     return _stac_item(req)
+
+
+# ============================================================================
+# VECTOR VIEWER - QA Preview for Data Curators (13 NOV 2025)
+# ============================================================================
+# Simple HTML viewer for visual validation of PostGIS vector collections
+# Uses OGC Features API for geometry and metadata
+# Provides minimal Leaflet map with load buttons for QA purposes
+# ============================================================================
+
+# Get trigger configuration
+_vector_viewer_triggers = get_vector_viewer_triggers()
+_vector_viewer_handler = _vector_viewer_triggers[0]['handler']
+
+
+@app.route(route="vector/viewer", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def vector_collection_viewer(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Vector collection preview viewer for data curators.
+
+    GET /api/vector/viewer?collection={collection_id}
+
+    Query Parameters:
+        collection (required): Collection ID (PostGIS table name)
+
+    Returns:
+        HTML page with Leaflet map showing vector features and metadata
+
+    Use Case:
+        Data curators can quickly validate vector ETL output by opening
+        this URL in a browser to see if geometry and metadata are correct.
+        Uses OGC Features API to fetch collection metadata and features.
+
+    Example:
+        https://rmhazuregeoapi-.../api/vector/viewer?collection=qa_test_chunk_5000
+    """
+    return _vector_viewer_handler(req)
 
 
 @app.route(route="jobs/ingest_vector", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)

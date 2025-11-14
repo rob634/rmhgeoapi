@@ -433,12 +433,26 @@ def _create_stac_collection_impl(
             # Update collection metadata with search info
             logger.info(f"🔄 Updating collection with search metadata...")
 
+            # Serialize existing links to dicts (pystac Link objects need conversion)
+            existing_links = []
+            for link in collection.links:
+                if hasattr(link, 'to_dict'):
+                    existing_links.append(link.to_dict())
+                elif isinstance(link, dict):
+                    existing_links.append(link)
+                else:
+                    # Fallback: convert to dict manually
+                    existing_links.append({
+                        "rel": getattr(link, 'rel', 'related'),
+                        "href": getattr(link, 'href', str(link))
+                    })
+
             # Add search_id to summaries and links to collection
             metadata_update = {
                 "summaries": {
                     "mosaic:search_id": [search_id]  # STAC summaries use arrays
                 },
-                "links": collection.links + [
+                "links": existing_links + [
                     {
                         "rel": "preview",
                         "href": viewer_url,

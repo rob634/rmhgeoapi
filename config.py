@@ -704,6 +704,32 @@ class AppConfig(BaseModel):
         description="PostgreSQL schema name for application tables (jobs, tasks, etc.)"
     )
 
+    # ========================================================================
+    # STAC Configuration
+    # ========================================================================
+
+    stac_default_collection: str = Field(
+        default="system-rasters",
+        description="""Default STAC collection for standalone raster processing.
+
+        Purpose:
+            System-managed collection for individual raster files processed via
+            process_raster job (as opposed to organized datasets in dedicated collections).
+
+        Behavior:
+            - Auto-created if missing when first raster is processed
+            - Used when collection_id parameter is not specified in process_raster
+            - Separate from user-defined collections for organized datasets
+
+        Usage:
+            - process_raster jobs default to this collection
+            - Users can override with collection_id parameter
+            - Collection is auto-created with warning if doesn't exist
+
+        Note: This separates "ad-hoc individual files" from "organized datasets"
+        """
+    )
+
     system_admin0_table: str = Field(
         default="geo.system_admin0_boundaries",
         description="""PostgreSQL table name for system admin0 (country) boundaries with ISO3 codes.
@@ -728,7 +754,7 @@ class AppConfig(BaseModel):
     )
 
     h3_spatial_filter_table: str = Field(
-        default="countries",
+        default="system_admin0",
         description="""Table name (without schema) for H3 land filtering during bootstrap.
 
         Purpose:
@@ -746,20 +772,21 @@ class AppConfig(BaseModel):
             - Used ONLY during bootstrap - not required for normal operations
 
         Default Value:
-            "countries" - Assumes geo.countries table exists
+            "system_admin0" - Matches actual countries polygon table name
             Can override via H3_SPATIAL_FILTER_TABLE environment variable
 
         Usage in H3 code:
             config = get_config()
             spatial_filter_table = f"geo.{config.h3_spatial_filter_table}"
-            # Performs: ST_Intersects(h3.geom, geo.countries.geom)
+            # Performs: ST_Intersects(h3.geom, geo.system_admin0.geom)
 
         Common Values:
-            - "countries" (default - simple country boundaries)
-            - "system_admin0_boundaries" (detailed admin0 with ISO codes)
+            - "system_admin0" (default - actual table name for country polygons)
+            - "system_admin0_boundaries" (alternative naming)
+            - "countries" (simple naming convention)
             - "land_polygons" (custom land mask dataset)
 
-        Note: Table doesn't need to exist until you run H3 bootstrap job
+        Note: Table must exist in geo schema before running H3 bootstrap job
         """
     )
 
@@ -1386,6 +1413,9 @@ class AppConfig(BaseModel):
             postgis_database=os.environ['POSTGIS_DATABASE'],
             postgis_schema=os.environ.get('POSTGIS_SCHEMA', 'geo'),
             app_schema=os.environ.get('APP_SCHEMA', 'app'),
+
+            # STAC
+            stac_default_collection=os.environ.get('STAC_DEFAULT_COLLECTION', 'system-rasters'),
 
             # Vector ETL
             vector_pickle_container=os.environ.get('VECTOR_PICKLE_CONTAINER', 'rmhazuregeotemp'),

@@ -133,9 +133,15 @@ class TiTilerSearchService:
             "filter-lang": "cql2-json"
         }
 
-        # Add metadata if provided (e.g., custom filters)
+        # Add metadata with default assets if not provided
+        # TiTiler-PgSTAC requires assets to be specified for rendering
         if metadata:
-            search_payload.update(metadata)
+            search_payload["metadata"] = metadata
+        else:
+            # Default: use "data" asset (standard for our STAC items)
+            search_payload["metadata"] = {
+                "assets": ["data"]  # Asset name from STAC items
+            }
 
         logger.debug(f"   Search payload: {search_payload}")
 

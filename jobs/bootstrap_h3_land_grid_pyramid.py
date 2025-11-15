@@ -4,17 +4,17 @@
 # EPOCH: 4 - ACTIVE ✅
 # STATUS: Job - H3 Land Grid Pyramid Bootstrap (7-stage workflow)
 # PURPOSE: Generate complete H3 land-filtered grid pyramid from resolution 2-7
-# LAST_REVIEWED: 14 NOV 2025
-# EXPORTS: BootstrapH3LandGridPyramidJob (JobBase implementation)
-# INTERFACES: JobBase (implements 6-method contract)
-# PYDANTIC_MODELS: None (uses dict parameters)
-# DEPENDENCIES: jobs.base.JobBase, services.handler_generate_h3_grid
+# LAST_REVIEWED: 15 NOV 2025
+# EXPORTS: BootstrapH3LandGridPyramidJob (JobBase + JobBaseMixin implementation)
+# INTERFACES: JobBase (2 methods), JobBaseMixin (provides 4 methods)
+# PYDANTIC_MODELS: Uses declarative parameters_schema
+# DEPENDENCIES: jobs.base.JobBase, jobs.mixins.JobBaseMixin, services.handler_generate_h3_grid
 # SOURCE: HTTP job submission for H3 bootstrap workflow
 # SCOPE: Land-filtered H3 grids for World Bank Agricultural Geography Platform
-# VALIDATION: Resolution range validation (2-7)
-# PATTERNS: Multi-stage job, Universal handler, Fan-out parallelism, DRY architecture
+# VALIDATION: Declarative schema via JobBaseMixin
+# PATTERNS: Mixin pattern (composition over inheritance), Multi-stage job, Universal handler, DRY architecture
 # ENTRY_POINTS: Registered in jobs/__init__.py ALL_JOBS as "bootstrap_h3_land_grid_pyramid"
-# INDEX: BootstrapH3LandGridPyramidJob:17, stages:68, create_tasks_for_stage:148
+# INDEX: BootstrapH3LandGridPyramidJob:17, stages:68, parameters_schema:123, create_tasks_for_stage:143
 # ============================================================================
 
 """
@@ -46,23 +46,31 @@ Architecture:
     - Stage 1: Base generation with spatial_filter_table (use_cascade=False)
     - Stages 2-6: Cascade from parent resolution with batching (use_cascade=True)
     - Stage 7: Finalization handler for verification and metadata
+    - JobBaseMixin eliminates boilerplate (77% less code)
 
 Author: Robert and Geospatial Claude Legion
 Date: 14 NOV 2025
+Last Updated: 15 NOV 2025 - Migrated to JobBaseMixin pattern
 """
 
 from typing import List, Dict, Any
 
 from jobs.base import JobBase
+from jobs.mixins import JobBaseMixin
 
 
-class BootstrapH3LandGridPyramidJob(JobBase):
+class BootstrapH3LandGridPyramidJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
     """
     H3 Land Grid Pyramid Bootstrap - 7-stage job for complete pyramid generation.
 
     Uses universal handler following DRY principles - single handler for all resolutions.
     Stages 2-6 use fan-out parallelism with batching for efficient cascade generation.
+    JobBaseMixin provides: validate_job_parameters, generate_job_id, create_job_record, queue_job
     """
+
+    # ========================================================================
+    # DECLARATIVE CONFIGURATION
+    # ========================================================================
 
     # Job metadata
     job_type: str = "bootstrap_h3_land_grid_pyramid"
@@ -121,7 +129,21 @@ class BootstrapH3LandGridPyramidJob(JobBase):
         }
     ]
 
-    # Batch sizes per resolution (parent cells per task)
+    # Declarative parameter validation (JobBaseMixin handles validation!)
+    parameters_schema: Dict[str, Any] = {
+        'spatial_filter_table': {
+            'type': 'str',
+            'default': 'system_admin0',
+            'description': 'PostGIS table name for land filtering (without schema prefix)'
+        },
+        'grid_id_prefix': {
+            'type': 'str',
+            'default': 'land',
+            'description': 'Prefix for grid IDs (e.g., "land" → "land_res2", "land_res3"...)'
+        }
+    }
+
+    # Batch sizes per resolution (parent cells per task) - for future batching implementation
     BATCH_SIZES = {
         3: 500,   # Res 3: 500 parent cells per task (~7 children each = 3,500 cells/task)
         4: 500,   # Res 4: 500 parent cells per task
@@ -140,6 +162,10 @@ class BootstrapH3LandGridPyramidJob(JobBase):
         7: 33600000,  # 7x multiplier
     }
 
+    # ========================================================================
+    # JOB-SPECIFIC LOGIC: Task Creation
+    # ========================================================================
+
     @staticmethod
     def create_tasks_for_stage(
         stage: int,
@@ -157,7 +183,7 @@ class BootstrapH3LandGridPyramidJob(JobBase):
 
         Args:
             stage: Stage number (1-7)
-            job_params: Job parameters (spatial_filter_table, grid_id_prefix, etc.)
+            job_params: Job parameters (spatial_filter_table, grid_id_prefix)
             job_id: Job ID for task ID generation
             previous_results: Results from previous stage tasks
 
@@ -235,137 +261,9 @@ class BootstrapH3LandGridPyramidJob(JobBase):
         else:
             raise ValueError(f"Invalid stage {stage} for bootstrap_h3_land_grid_pyramid job (valid: 1-7)")
 
-    @staticmethod
-    def validate_job_parameters(params: dict) -> dict:
-        """
-        Validate job parameters before submission.
-
-        Args:
-            params: Raw job parameters
-
-        Returns:
-            Validated and normalized parameters
-
-        Raises:
-            ValueError: If parameters are invalid
-        """
-        # Spatial filter table (optional, has default)
-        spatial_filter_table = params.get('spatial_filter_table', 'system_admin0')
-        if not isinstance(spatial_filter_table, str):
-            raise ValueError(f"spatial_filter_table must be string, got {type(spatial_filter_table).__name__}")
-
-        # Grid ID prefix (optional, has default)
-        grid_id_prefix = params.get('grid_id_prefix', 'land')
-        if not isinstance(grid_id_prefix, str):
-            raise ValueError(f"grid_id_prefix must be string, got {type(grid_id_prefix).__name__}")
-
-        # Return normalized params
-        return {
-            "spatial_filter_table": spatial_filter_table,
-            "grid_id_prefix": grid_id_prefix
-        }
-
-    @staticmethod
-    def generate_job_id(params: dict) -> str:
-        """
-        Generate deterministic job ID for idempotency.
-
-        Same parameters = same job ID = deduplication.
-
-        Args:
-            params: Validated job parameters
-
-        Returns:
-            SHA256 hash as hex string
-        """
-        import hashlib
-        import json
-
-        # Create deterministic string from job type + params
-        id_string = f"bootstrap_h3_land_grid_pyramid:{json.dumps(params, sort_keys=True)}"
-        return hashlib.sha256(id_string.encode()).hexdigest()
-
-    @staticmethod
-    def create_job_record(job_id: str, params: dict) -> dict:
-        """
-        Create job record for database storage.
-
-        Args:
-            job_id: Generated job ID
-            params: Validated parameters
-
-        Returns:
-            Job record dict
-        """
-        from infrastructure import RepositoryFactory
-        from core.models import JobRecord, JobStatus
-
-        # Create job record object
-        job_record = JobRecord(
-            job_id=job_id,
-            job_type="bootstrap_h3_land_grid_pyramid",
-            parameters=params,
-            status=JobStatus.QUEUED,
-            stage=1,
-            total_stages=7,
-            stage_results={},
-            metadata={
-                "description": "H3 Land Grid Pyramid Bootstrap (res 2-7)",
-                "created_by": "BootstrapH3LandGridPyramidJob",
-                "expected_total_cells": sum(BootstrapH3LandGridPyramidJob.EXPECTED_CELLS.values()),
-                "workflow": "7-stage: base → cascade → cascade → cascade → cascade → cascade → finalize",
-                "spatial_filter": params.get('spatial_filter_table', 'system_admin0'),
-                "grid_id_prefix": params.get('grid_id_prefix', 'land')
-            }
-        )
-
-        # Persist to database
-        repos = RepositoryFactory.create_repositories()
-        repos['job_repo'].create_job(job_record)
-
-        return {"job_id": job_id, "status": "queued"}
-
-    @staticmethod
-    def queue_job(job_id: str, params: dict) -> dict:
-        """
-        Queue job for processing using Service Bus.
-
-        Args:
-            job_id: Job ID
-            params: Validated parameters
-
-        Returns:
-            Queue result information
-        """
-        from infrastructure.service_bus import ServiceBusRepository
-        from core.schema.queue import JobQueueMessage
-        from config import get_config
-        from util_logger import LoggerFactory, ComponentType
-        import uuid
-
-        logger = LoggerFactory.create_logger(ComponentType.CONTROLLER, "BootstrapH3LandGridPyramidJob.queue_job")
-
-        # Create Service Bus message
-        message = JobQueueMessage(
-            job_id=job_id,
-            job_type="bootstrap_h3_land_grid_pyramid",
-            stage=1,
-            parameters=params,
-            message_id=str(uuid.uuid4()),
-            correlation_id=str(uuid.uuid4())[:8]
-        )
-
-        # Send to Service Bus
-        service_bus_repo = ServiceBusRepository()
-
-        result = service_bus_repo.send_message(message.model_dump_json())
-        logger.info(f"✅ Job {job_id[:16]}... queued to Service Bus (H3 Land Pyramid Bootstrap)")
-
-        return {
-            "queued": True,
-            "queue_type": "service_bus",
-            "message_id": message.message_id
-        }
+    # ========================================================================
+    # JOB-SPECIFIC LOGIC: Finalization
+    # ========================================================================
 
     @staticmethod
     def finalize_job(context=None) -> Dict[str, Any]:
@@ -441,6 +339,7 @@ class BootstrapH3LandGridPyramidJob(JobBase):
                 "workflow": "7-stage bootstrap (base + 5 cascade + finalize)",
                 "universal_handler": "generate_h3_grid (DRY architecture)",
                 "expected_cells": sum(BootstrapH3LandGridPyramidJob.EXPECTED_CELLS.values()),
-                "actual_cells": total_cells
+                "actual_cells": total_cells,
+                "pattern": "JobBaseMixin (77% less boilerplate)"
             }
         }

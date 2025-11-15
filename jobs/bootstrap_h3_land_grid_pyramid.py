@@ -356,13 +356,9 @@ class BootstrapH3LandGridPyramidJob(JobBase):
         )
 
         # Send to Service Bus
-        config = get_config()
-        service_bus = ServiceBusRepository(
-            connection_string=config.get_service_bus_connection(),
-            queue_name=config.jobs_queue_name
-        )
+        service_bus_repo = ServiceBusRepository()
 
-        result = service_bus.send_message(message.model_dump_json())
+        result = service_bus_repo.send_message(message.model_dump_json())
         logger.info(f"✅ Job {job_id[:16]}... queued to Service Bus (H3 Land Pyramid Bootstrap)")
 
         return {

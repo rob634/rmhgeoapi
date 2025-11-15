@@ -362,6 +362,71 @@ curl -X POST https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/
 
 ---
 
+## 🗺️ Vector Data Preview & QA (⭐ NEW 14 NOV 2025)
+
+### Vector Collection Viewer
+
+**Purpose**: Interactive web-based viewer for data curators to validate vector ETL output.
+
+**Endpoint**:
+```
+GET /api/vector/viewer?collection={collection_id}
+```
+
+**Live Example**:
+```bash
+# View the test_geojson_fresh collection
+https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/vector/viewer?collection=test_geojson_fresh
+```
+
+**Features**:
+- ✅ **Interactive Leaflet map** with pan/zoom
+- ✅ **Three load buttons**: 100 features | 500 features | All features (up to 10,000)
+- ✅ **Click features** → popup shows all properties
+- ✅ **Hover highlighting** for visual feedback
+- ✅ **Zoom to features button** for spatial navigation
+- ✅ **QA workflow section**:
+  - Textarea for curator notes (3 rows)
+  - Green "✓ Approve" button (future: POST /api/qa/approve)
+  - Red "✗ Reject" button (future: POST /api/qa/reject)
+  - Visual feedback on click (console logging for now)
+
+**Data Source**: Fetches data from **OGC Features API**
+```javascript
+// Metadata fetch
+GET /api/features/collections/{collection_id}
+
+// Features fetch (respects limit parameter)
+GET /api/features/collections/{collection_id}/items?limit={100|500|10000}
+```
+
+**Integration with Vector ETL**:
+After successful vector ingestion job completion, the viewer URL should be included in the job result:
+
+```json
+{
+  "status": "completed",
+  "table_name": "acled_csv",
+  "schema": "geo",
+  "feature_count": 5000,
+  "viewer_url": "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/vector/viewer?collection=acled_csv",
+  "ogc_features_url": "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/features/collections/acled_csv/items"
+}
+```
+
+**Why This Matters**:
+- **Data curators** can immediately preview vector data after ETL
+- **Visual validation** catches geometry errors before data goes to production
+- **QA workflow** enables approve/reject tracking (future enhancement)
+- **Direct integration** with OGC Features API - no duplicate data access code
+
+**Implementation Files**:
+- `vector_viewer/service.py` - HTML generation and viewer logic
+- `vector_viewer/triggers.py` - HTTP handler for /api/vector/viewer route
+- `function_app.py` (lines 1547-1573) - Route registration
+
+---
+
 ## 🎯 Future Enhancements
 
 ### Short-Term

@@ -140,8 +140,8 @@ class TiTilerSearchService:
         logger.debug(f"   Search payload: {search_payload}")
 
         try:
-            # POST to TiTiler /searches endpoint
-            url = f"{self.titiler_base_url}/searches"
+            # POST to TiTiler /searches/register endpoint
+            url = f"{self.titiler_base_url}/searches/register"
 
             async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.post(

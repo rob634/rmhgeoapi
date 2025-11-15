@@ -126,8 +126,8 @@ class ProcessRasterWorkflow(JobBase):
         "collection_id": {
             "type": "str",
             "required": False,
-            "default": "system-rasters",
-            "description": "STAC collection ID for metadata (default: system-rasters for operational tracking)"
+            "default": None,  # Uses config.stac_default_collection if None
+            "description": "STAC collection ID for metadata (defaults to config.stac_default_collection='system-rasters')"
         },
         "item_id": {
             "type": "str",

@@ -1352,6 +1352,45 @@ class AppConfig(BaseModel):
         """
         return f"{self.ogc_features_base_url.rstrip('/')}/collections/{collection_id}"
 
+    def generate_vector_viewer_url(self, collection_id: str) -> str:
+        """
+        Generate interactive vector viewer URL for PostGIS collection.
+
+        Use this for ALL vector workflows (ingest_vector) to provide data curators
+        with direct link to visual QA viewer with Leaflet map.
+
+        Args:
+            collection_id: Collection name (same as PostGIS table name)
+
+        Returns:
+            Vector viewer URL with collection parameter
+
+        Example:
+            >>> config = get_config()
+            >>> url = config.generate_vector_viewer_url("acled_csv")
+            >>> url
+            'https://rmhazuregeoapi-.../api/vector/viewer?collection=acled_csv'
+
+        Features:
+            - Interactive Leaflet map with pan/zoom
+            - Load 100, 500, or All features (up to 10,000)
+            - Click features to see properties popup
+            - QA workflow section (Approve/Reject buttons)
+            - Fetches data from OGC Features API
+
+        Notes:
+            - Base URL derived from ogc_features_base_url
+            - Viewer endpoint shares same host as OGC Features API
+            - Returns self-contained HTML page (no external dependencies beyond Leaflet CDN)
+        """
+        # Extract base URL from ogc_features_base_url (remove /api/features suffix)
+        base_url = self.ogc_features_base_url.rstrip('/')
+        # Remove /api/features to get host base
+        if base_url.endswith('/api/features'):
+            base_url = base_url[:-len('/api/features')]
+
+        return f"{base_url}/api/vector/viewer?collection={collection_id}"
+
     # ========================================================================
     # Validation
     # ========================================================================

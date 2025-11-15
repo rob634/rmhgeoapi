@@ -719,16 +719,17 @@ class IngestVectorJob(JobBase):
                 "bbox": stac_result.get("bbox")
             }
 
-        # Generate OGC Features URL for vector access
+        # Generate OGC Features URL and Vector Viewer URL for data access
         from config import get_config
         config = get_config()
         table_name = params.get("table_name")
         ogc_features_url = config.generate_ogc_features_url(table_name)
+        viewer_url = config.generate_vector_viewer_url(table_name)
 
         logger.info(
             f"✅ Vector ingest job {context.job_id[:16]} completed: "
             f"{total_rows_uploaded} rows uploaded to {params.get('schema')}.{table_name}, "
-            f"STAC cataloged, OGC Features URL generated"
+            f"STAC cataloged, OGC Features URL + Viewer URL generated"
         )
 
         # Build aggregated result
@@ -752,6 +753,7 @@ class IngestVectorJob(JobBase):
             },
             "stac": stac_summary,
             "ogc_features_url": ogc_features_url,
+            "viewer_url": viewer_url,
             "stages_completed": context.current_stage,
             "total_tasks_executed": len(task_results),
             "tasks_by_status": {

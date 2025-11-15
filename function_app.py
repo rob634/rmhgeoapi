@@ -334,16 +334,35 @@ def health(req: func.HttpRequest) -> func.HttpResponse:
 # ============================================================================
 # DATABASE ADMIN API ENDPOINTS - Phase 1 (03 NOV 2025)
 # ============================================================================
-# Database admin endpoints under /api/db/* (consolidated with existing db routes)
-# NOTE: Azure Functions reserves /api/admin/* for built-in admin UI
-# APIM can still restrict all /api/db/* endpoints with a single policy
-# Priority: PostgreSQL visibility (app, geo, pgstac schemas)
+# ⚠️ DEVELOPMENT ONLY - REMOVE BEFORE QA/PRODUCTION DEPLOYMENT
+#
+# Why these exist:
+# - Corporate network blocks direct PostgreSQL access (no DBeaver, no pgAdmin)
+# - Claude Code needs HTTP visibility into database state for development
+# - Rapid debugging without context switching to Azure Portal
+#
+# Production Replacement:
+# - Use Azure Log Analytics (KQL queries on app_jobs, app_tasks tables)
+# - Use Azure Portal: Database monitoring for health/performance metrics
+# - Use Application Insights: Query execution traces and errors
+#
+# Security Risk:
+# - These endpoints expose sensitive database internals (schema, tables, queries)
+# - Anonymous auth level (func.AuthLevel.ANONYMOUS) is intentional for dev
+# - MUST BE REMOVED before corporate/QA deployment to prevent data exposure
+#
+# Count: 31 endpoints total (17 schema/table, 4 query, 2 health, 3 maintenance, 5 diagnostics)
+# Reference: API_CONSOLIDATION_STATUS.md section "Database Admin (31 functions)"
 # ============================================================================
 
-# Schema-level operations
+# Schema-level operations (3 endpoints - REMOVE BEFORE QA)
 @app.route(route="db/schemas", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
 def db_schemas_list(req: func.HttpRequest) -> func.HttpResponse:
-    """List all schemas: GET /api/db/schemas"""
+    """
+    ⚠️ DEV ONLY - REMOVE BEFORE QA
+    List all schemas: GET /api/db/schemas
+    Production: Use Azure Portal → PostgreSQL → Schemas
+    """
     return admin_db_schemas_trigger.handle_request(req)
 
 
@@ -444,14 +463,35 @@ def db_maintenance_cleanup(req: func.HttpRequest) -> func.HttpResponse:
 # ============================================================================
 # SERVICE BUS ADMIN API ENDPOINTS - Phase 2 (04 NOV 2025)
 # ============================================================================
-# Service Bus queue monitoring and management under /api/servicebus/*
-# Read-only inspection + nuclear button for clearing queues
-# Priority: Production operations and debugging
+# ⚠️ DEVELOPMENT ONLY - REMOVE BEFORE QA/PRODUCTION DEPLOYMENT
+#
+# Why these exist:
+# - Corporate network restricts Azure Portal access during development
+# - Claude Code needs HTTP visibility into Service Bus queue state
+# - Quick queue inspection and troubleshooting without portal context switching
+#
+# Production Replacement:
+# - Use Azure Portal: Service Bus → Queues → [Queue Name] → Messages
+# - Use Azure Monitor: Queue metrics, dead-letter tracking, message counts
+# - Use Application Insights: Message processing traces and errors
+#
+# Security Risk:
+# - These endpoints expose queue internals (message contents, counts)
+# - Nuclear button can clear queues (data loss)
+# - Anonymous auth level (func.AuthLevel.ANONYMOUS) is intentional for dev
+# - MUST BE REMOVED before corporate/QA deployment
+#
+# Count: 6 endpoints total (5 inspection + 1 nuclear button)
+# Reference: API_CONSOLIDATION_STATUS.md section "Service Bus Admin (6 functions)"
 # ============================================================================
 
 @app.route(route="servicebus/queues", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
 def servicebus_admin_list_queues(req: func.HttpRequest) -> func.HttpResponse:
-    """List all Service Bus queues: GET /api/servicebus/queues"""
+    """
+    ⚠️ DEV ONLY - REMOVE BEFORE QA
+    List all Service Bus queues: GET /api/servicebus/queues
+    Production: Use Azure Portal → Service Bus → Queues
+    """
     return servicebus_admin_trigger.handle_request(req)
 
 
@@ -1571,6 +1611,43 @@ def vector_collection_viewer(req: func.HttpRequest) -> func.HttpResponse:
         https://rmhazuregeoapi-.../api/vector/viewer?collection=qa_test_chunk_5000
     """
     return _vector_viewer_handler(req)
+
+
+# ============================================================================
+# UNIFIED WEB INTERFACES (14 NOV 2025)
+# ============================================================================
+
+from web_interfaces import unified_interface_handler
+
+@app.route(route="interface/{name}", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def web_interface_unified(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Unified web interface handler - dynamic module loading.
+
+    GET /api/interface/{name}
+
+    Route Parameters:
+        name: Interface name (stac, vector, jobs, docs)
+
+    Examples:
+        /api/interface/stac - STAC collections dashboard
+        /api/interface/vector?collection=test_geojson_fresh - Vector viewer
+        /api/interface/jobs - Job monitor dashboard
+        /api/interface/docs - API explorer
+
+    How It Works:
+        1. InterfaceRegistry maintains map of name -> Interface class
+        2. Each interface registers itself with @InterfaceRegistry.register('name')
+        3. Unified handler looks up interface by name and calls .render(request)
+        4. Interface returns complete HTML page
+
+    Benefits:
+        - Single route handles all web interfaces
+        - Easy to add new interfaces (just register, no function_app.py changes)
+        - Shared navigation bar across all interfaces
+        - Auto-discovery of available interfaces
+    """
+    return unified_interface_handler(req)
 
 
 @app.route(route="jobs/ingest_vector", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)

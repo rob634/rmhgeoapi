@@ -191,11 +191,22 @@ def extract_stac_metadata(params: dict) -> dict[str, Any]:
     try:
         # STEP 1: Extract parameters
         try:
+            from config import get_config  # Import config for default collection
+            config = get_config()
+
             container_name = params["container_name"]
             blob_name = params["blob_name"]
-            collection_id = params.get("collection_id", "dev")
+
+            # Use config default if collection_id not specified
+            collection_id = params.get("collection_id") or config.stac_default_collection
             item_id = params.get("item_id")  # Optional custom item ID
-            logger.info(f"📋 STEP 1: Parameters extracted - container={container_name}, blob={blob_name[:50]}..., collection={collection_id}, custom_item_id={item_id}")
+
+            using_default = params.get("collection_id") is None
+            logger.info(
+                f"📋 STEP 1: Parameters extracted - container={container_name}, "
+                f"blob={blob_name[:50]}..., collection={collection_id}"
+                f"{' (default)' if using_default else ''}, custom_item_id={item_id}"
+            )
         except Exception as e:
             logger.error(f"❌ STEP 1 FAILED: Parameter extraction error: {e}")
             raise
@@ -238,6 +249,48 @@ def extract_stac_metadata(params: dict) -> dict[str, Any]:
             logger.info(f"✅ STEP 4: PgStacInfrastructure initialized")
         except Exception as e:
             logger.error(f"❌ STEP 4 FAILED: PgStacInfrastructure initialization error: {e}\n{traceback.format_exc()}")
+            raise
+
+        # STEP 4.5: Check collection exists, auto-create if missing
+        try:
+            logger.info(f"🔍 STEP 4.5: Checking if collection '{collection_id}' exists...")
+
+            if not stac_infra.collection_exists(collection_id):
+                logger.warning(f"⚠️ STEP 4.5: Collection '{collection_id}' does not exist! Auto-creating...")
+                logger.warning(f"⚠️ This is expected on first use of '{collection_id}' collection")
+
+                # Create minimal collection for standalone rasters
+                # Import at function level to avoid circular dependencies
+                from infrastructure.pgstac_repository import PgStacRepository
+                import pystac
+
+                pgstac_repo = PgStacRepository()
+
+                # Create pystac.Collection object (not just a dict!)
+                # SpatialExtent and TemporalExtent require proper pystac objects
+                spatial_extent = pystac.SpatialExtent(bboxes=[[-180, -90, 180, 90]])
+                temporal_extent = pystac.TemporalExtent(intervals=[[None, None]])
+                extent = pystac.Extent(spatial=spatial_extent, temporal=temporal_extent)
+
+                collection = pystac.Collection(
+                    id=collection_id,
+                    description=f"Auto-created collection for standalone raster processing (created: {datetime.utcnow().isoformat()}Z)",
+                    extent=extent,
+                    license="proprietary"
+                )
+
+                # Insert collection using PgStacRepository
+                collection_id_result = pgstac_repo.insert_collection(collection)
+
+                if not collection_id_result:
+                    raise Exception(f"Failed to auto-create collection '{collection_id}'")
+
+                logger.warning(f"✅ STEP 4.5: Collection '{collection_id}' auto-created successfully")
+            else:
+                logger.info(f"✅ STEP 4.5: Collection '{collection_id}' exists")
+
+        except Exception as e:
+            logger.error(f"❌ STEP 4.5 FAILED: Collection check/creation error: {e}\n{traceback.format_exc()}")
             raise
 
         # STEP 5: Insert into PgSTAC (with idempotency check)
@@ -294,7 +347,33 @@ def extract_stac_metadata(params: dict) -> dict[str, Any]:
             logger.error(f"❌ STEP 6 FAILED: Metadata extraction error: {e}\n{traceback.format_exc()}")
             raise
 
-        # SUCCESS - return STAC metadata
+        # CRITICAL: Check if pgSTAC insertion succeeded
+        # If insert failed, the entire operation is a FAILURE (no silent failures!)
+        insert_success = insert_result.get('success', False)
+        insert_skipped = insert_result.get('skipped', False)
+
+        if not insert_success and not insert_skipped:
+            # Insert failed - this is a FAILURE condition
+            error_msg = insert_result.get('error', 'Unknown pgSTAC insertion error')
+            logger.error(f"❌ STAC INSERTION FAILED: {error_msg}")
+            logger.error(f"💥 Operation cannot complete without successful pgSTAC insertion")
+
+            return {
+                "success": False,
+                "error": f"Failed to insert STAC item into pgSTAC: {error_msg}",
+                "error_type": "STACInsertionError",
+                "blob_name": blob_name,
+                "container_name": container_name,
+                "collection_id": collection_id,
+                "item_id": item.id,
+                "insert_result": insert_result,
+                "execution_time_seconds": round(duration, 2),
+                "extract_time_seconds": round(extract_duration, 2),
+                "insert_time_seconds": round(insert_duration, 2),
+                "stac_item": item_dict  # Include for debugging
+            }
+
+        # SUCCESS - STAC metadata extracted AND inserted (or skipped due to existing)
         logger.info(f"🎉 SUCCESS: STAC cataloging completed in {duration:.2f}s for {blob_name}")
         return {
             "success": True,
@@ -306,10 +385,9 @@ def extract_stac_metadata(params: dict) -> dict[str, Any]:
                 "geometry_type": geometry_type,
                 "bands_count": bands_count,
                 "epsg": epsg,
-                "inserted_to_pgstac": insert_result.get('success', False),
-                "item_skipped": insert_result.get('skipped', False),
-                "skip_reason": insert_result.get('reason') if insert_result.get('skipped') else None,
-                "insert_error": insert_result.get('error') if not insert_result.get('success') else None,
+                "inserted_to_pgstac": insert_success,
+                "item_skipped": insert_skipped,
+                "skip_reason": insert_result.get('reason') if insert_skipped else None,
                 "execution_time_seconds": round(duration, 2),
                 "extract_time_seconds": round(extract_duration, 2),
                 "insert_time_seconds": round(insert_duration, 2),

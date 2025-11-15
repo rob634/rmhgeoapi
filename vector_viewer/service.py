@@ -263,6 +263,78 @@ class VectorViewerService:
             margin-top: 5px;
             text-align: center;
         }}
+
+        .qa-section {{
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 1px solid #eee;
+        }}
+
+        .qa-input {{
+            width: 100%;
+            padding: 6px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            margin-bottom: 8px;
+            font-size: 12px;
+            font-family: inherit;
+        }}
+
+        .qa-buttons {{
+            display: flex;
+            gap: 5px;
+        }}
+
+        .approve-button {{
+            flex: 1;
+            padding: 8px;
+            background: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 13px;
+        }}
+
+        .approve-button:hover {{
+            background: #45a049;
+        }}
+
+        .reject-button {{
+            flex: 1;
+            padding: 8px;
+            background: #f44336;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 13px;
+        }}
+
+        .reject-button:hover {{
+            background: #da190b;
+        }}
+
+        .button-row {{
+            display: flex;
+            gap: 5px;
+            margin-top: 5px;
+        }}
+
+        .load-button-small {{
+            flex: 1;
+            padding: 8px;
+            background: #3388ff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+        }}
+
+        .load-button-small:hover {{
+            background: #2266dd;
+        }}
     </style>
 </head>
 <body>
@@ -296,12 +368,23 @@ class VectorViewerService:
             </div>
         </div>
 
-        <button class="load-button" onclick="loadFeatures(100)">Load 100 Features</button>
-        <button class="load-button" onclick="loadFeatures(500)">Load 500 Features</button>
+        <div class="button-row">
+            <button class="load-button-small" onclick="loadFeatures(100)">100</button>
+            <button class="load-button-small" onclick="loadFeatures(500)">500</button>
+            <button class="load-button-small" onclick="loadFeatures(10000)">All</button>
+        </div>
         <div class="status-text" id="status">Ready to load features</div>
 
-        <div class="metadata-row" style="margin-top: 10px;">
-            <span class="info-badge">Vector Data QA</span>
+        <!-- QA Section -->
+        <div class="qa-section">
+            <div class="metadata-row">
+                <span class="info-badge">Data Curator QA</span>
+            </div>
+            <textarea class="qa-input" id="qa-notes" placeholder="QA notes (optional)..." rows="3"></textarea>
+            <div class="qa-buttons">
+                <button class="approve-button" onclick="handleApprove()">✓ Approve</button>
+                <button class="reject-button" onclick="handleReject()">✗ Reject</button>
+            </div>
         </div>
     </div>
 
@@ -331,10 +414,12 @@ class VectorViewerService:
         // Load features from OGC Features API
         async function loadFeatures(limit) {{
             const statusDiv = document.getElementById('status');
-            statusDiv.textContent = `Loading ${{limit}} features...`;
+            const limitText = limit >= 10000 ? 'all' : limit;
+            statusDiv.textContent = `Loading ${{limitText}} features...`;
 
             try {{
-                const response = await fetch(`${{ITEMS_URL}}?limit=${{limit}}`);
+                const url = `${{ITEMS_URL}}?limit=${{limit}}`;
+                const response = await fetch(url);
                 if (!response.ok) {{
                     throw new Error(`HTTP ${{response.status}}: ${{response.statusText}}`);
                 }}
@@ -399,6 +484,44 @@ class VectorViewerService:
                 statusDiv.textContent = `Error: ${{error.message}}`;
                 console.error('Failed to load features:', error);
             }}
+        }}
+
+        // QA Approve Handler
+        function handleApprove() {{
+            const notes = document.getElementById('qa-notes').value;
+            const statusDiv = document.getElementById('status');
+
+            console.log('APPROVE clicked for collection:', COLLECTION_ID);
+            console.log('QA Notes:', notes);
+
+            statusDiv.textContent = '✓ Approved! (Feature coming soon...)';
+            statusDiv.style.color = '#4CAF50';
+
+            // Future: POST /api/qa/approve with collection and notes
+            // For now, just visual feedback
+            setTimeout(() => {{
+                statusDiv.textContent = 'Ready to load features';
+                statusDiv.style.color = '#666';
+            }}, 3000);
+        }}
+
+        // QA Reject Handler
+        function handleReject() {{
+            const notes = document.getElementById('qa-notes').value;
+            const statusDiv = document.getElementById('status');
+
+            console.log('REJECT clicked for collection:', COLLECTION_ID);
+            console.log('QA Notes:', notes);
+
+            statusDiv.textContent = '✗ Rejected! (Feature coming soon...)';
+            statusDiv.style.color = '#f44336';
+
+            // Future: POST /api/qa/reject with collection and notes
+            // For now, just visual feedback
+            setTimeout(() => {{
+                statusDiv.textContent = 'Ready to load features';
+                statusDiv.style.color = '#666';
+            }}, 3000);
         }}
 
         console.log('Vector Viewer initialized');

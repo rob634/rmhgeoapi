@@ -395,6 +395,13 @@ class JobBaseMixin(ABC):
             f"{cls.__name__}.validate_job_parameters"
         )
 
+        # Safety check: Ensure parameters_schema is defined
+        if not hasattr(cls, 'parameters_schema') or cls.parameters_schema is None:
+            raise AttributeError(
+                f"{cls.__name__} must define 'parameters_schema' class attribute. "
+                f"Example: parameters_schema = {{'param': {{'type': 'int', 'default': 10}}}}"
+            )
+
         validated = {}
 
         for param_name, schema in cls.parameters_schema.items():

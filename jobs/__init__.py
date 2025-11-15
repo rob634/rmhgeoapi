@@ -55,8 +55,7 @@ Last Updated: 29 OCT 2025
 """
 
 from .base import JobBase
-from .hello_world import HelloWorldJob
-from .hello_world_mixin import HelloWorldMixinJob  # TEST VERSION - JobBaseMixin pattern
+from .hello_world import HelloWorldJob  # ← Now uses JobBaseMixin pattern (14 NOV 2025)
 from .container_summary import ContainerSummaryWorkflow
 from .container_list import ListContainerContentsWorkflow
 from .container_list_diamond import ListContainerContentsDiamondWorkflow
@@ -98,7 +97,6 @@ ALL_JOBS = {
 
     # Test/Diagnostic Workflows
     "list_container_contents_diamond": ListContainerContentsDiamondWorkflow,  # TEST ONLY - Fan-in demo (16 OCT 2025)
-    "hello_world_mixin": HelloWorldMixinJob,  # TEST ONLY - JobBaseMixin pattern validation (14 NOV 2025)
 
     # Add new jobs here explicitly
 }

@@ -343,11 +343,13 @@ class JobBaseMixin(ABC):
         queue_job(job_id, params) -> dict
     """
 
-    # Subclasses MUST set these attributes
-    job_type: str
-    description: str
-    stages: list
-    parameters_schema: dict
+    # Subclasses MUST override these attributes
+    # NOTE: Set to None to allow proper hasattr() checks
+    # Subclasses MUST provide actual values or validation will fail
+    job_type: str = None
+    description: str = None
+    stages: list = None
+    parameters_schema: dict = None
 
     # ========================================================================
     # METHOD 1: validate_job_parameters() - Schema-based validation

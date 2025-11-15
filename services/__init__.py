@@ -86,6 +86,7 @@ from .handler_insert_h3_postgis import insert_h3_to_postgis
 from .handler_create_h3_stac import create_h3_stac
 from .handler_h3_native_streaming import h3_native_streaming_postgis
 from .handler_generate_h3_grid import generate_h3_grid  # Universal H3 handler (14 NOV 2025) - replaces bootstrap_res2
+from .handler_finalize_h3_pyramid import finalize_h3_pyramid  # H3 pyramid finalization (14 NOV 2025)
 from .vector.tasks import prepare_vector_chunks, upload_pickled_chunk
 from .raster_mosaicjson import create_mosaicjson
 from .stac_collection import create_stac_collection
@@ -123,6 +124,7 @@ ALL_HANDLERS = {
     "h3_native_streaming_postgis": h3_native_streaming_postgis,  # Stage 1: h3-py → async stream → PostGIS (3.5x faster)
     # H3 Universal Handler (14 NOV 2025 - DRY Architecture)
     "generate_h3_grid": generate_h3_grid,  # Universal handler for ALL resolutions (0-15), base OR cascade, flexible filtering (replaces bootstrap_res2)
+    "finalize_h3_pyramid": finalize_h3_pyramid,  # H3 pyramid finalization and verification (14 NOV 2025)
     # Vector ETL handlers (17 OCT 2025)
     "prepare_vector_chunks": prepare_vector_chunks,  # Stage 1: Load, validate, chunk, pickle
     "upload_pickled_chunk": upload_pickled_chunk,    # Stage 2: Load pickle and upload to PostGIS

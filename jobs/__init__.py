@@ -67,6 +67,7 @@ from .validate_raster_job import ValidateRasterJob
 from .process_raster import ProcessRasterWorkflow
 from .generate_h3_level4 import GenerateH3Level4Job
 from .create_h3_base import CreateH3BaseJob
+from .bootstrap_h3_land_grid_pyramid import BootstrapH3LandGridPyramidJob
 from .process_raster_collection import ProcessRasterCollectionWorkflow
 from .process_large_raster import ProcessLargeRasterWorkflow
 
@@ -93,6 +94,7 @@ ALL_JOBS = {
     "process_large_raster": ProcessLargeRasterWorkflow,  # Large raster tiling (1-30 GB) → COG mosaic (24 OCT 2025)
     "generate_h3_level4": GenerateH3Level4Job,
     "create_h3_base": CreateH3BaseJob,
+    "bootstrap_h3_land_grid_pyramid": BootstrapH3LandGridPyramidJob,  # H3 land pyramid bootstrap (res 2-7) - 14 NOV 2025
 
     # Test/Diagnostic Workflows
     "list_container_contents_diamond": ListContainerContentsDiamondWorkflow,  # TEST ONLY - Fan-in demo (16 OCT 2025)

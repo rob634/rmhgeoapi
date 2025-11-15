@@ -302,8 +302,11 @@ class BaseInterface(ABC):
                           transition: color 0.2s;"
                    onmouseover="this.style.color='#00A3DA'"
                    onmouseout="this.style.color='#0071BC'">
-                    Vector Viewer
+                    OGC Features
                 </a>
+                <span style="color: #626F86; font-weight: 600; cursor: not-allowed; opacity: 0.6;">
+                    Staging Container
+                </span>
                 <a href="/api/interface/jobs"
                    style="color: #0071BC; text-decoration: none; font-weight: 600;
                           transition: color 0.2s;"

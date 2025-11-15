@@ -623,12 +623,26 @@ class StacInterface(BaseInterface):
                     `);
                 }
 
-                // Links count
-                if (collection.links) {
+                // Links - formatted and clickable
+                if (collection.links && collection.links.length > 0) {
+                    const linksHtml = collection.links.map(link => {
+                        const icon = link.rel === 'self' ? '🔗' :
+                                    link.rel === 'items' ? '📄' :
+                                    link.rel === 'parent' ? '⬆️' :
+                                    link.rel === 'root' ? '🏠' : '🔗';
+                        return `
+                            <div style="margin: 4px 0;">
+                                ${icon} <a href="${link.href}" target="_blank" style="color: #0071BC; text-decoration: none;">
+                                    <strong>${link.rel}</strong>
+                                </a> - ${link.title || link.type || 'Link'}
+                            </div>
+                        `;
+                    }).join('');
+
                     metadataItems.push(`
-                        <div class="metadata-item">
-                            <div class="label">Links</div>
-                            <div class="value">${collection.links.length} available</div>
+                        <div class="metadata-item" style="grid-column: 1 / -1;">
+                            <div class="label">Links (${collection.links.length})</div>
+                            <div class="value" style="line-height: 1.8;">${linksHtml}</div>
                         </div>
                     `);
                 }

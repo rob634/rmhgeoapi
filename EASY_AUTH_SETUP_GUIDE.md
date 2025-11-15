@@ -583,7 +583,7 @@ az webapp auth update \
 
 ---
 
-## 🚀 Production Deployment (World Bank)
+## 🚀 Production Deployment (Corporate Tenant)
 
 ### Key Differences from Dev Setup
 
@@ -592,42 +592,327 @@ az webapp auth update \
 - Single-tenant: Your account only
 - Tenant: `086aef7e-db12-4161-8a9f-777deb499cfa`
 
-**Production (World Bank)**:
+**Production (Corporate)**:
 - Enterprise Azure subscription
-- Multi-tenant: All World Bank employees
-- Tenant: World Bank Azure AD tenant ID
-- Group-based restrictions available (Azure AD Premium)
+- Multi-user: All employees in tenant
+- Tenant: Corporate Azure AD tenant ID
+- **Security group restrictions** (controls WHO can access)
 
-### Production Setup Steps
+---
 
-**Same process, different values**:
+## 🔐 Security Groups + Easy Auth (Recommended Pattern)
 
-1. **Create App Registration** (World Bank tenant):
-   ```bash
-   az ad app create \
-     --display-name "geospatial-api-easyauth" \
-     --sign-in-audience AzureADMyOrg \
-     --web-redirect-uris "https://geospatial.worldbank.org/.auth/login/aad/callback"
-   ```
+### What This Is
 
-2. **Configure Easy Auth** (World Bank tenant):
-   ```bash
-   az webapp auth update \
-     --name geospatial-api \
-     --resource-group worldbank_geo_rg \
-     --enabled true \
-     --action LoginWithAzureActiveDirectory \
-     --aad-client-id "{WORLD_BANK_APP_ID}" \
-     --aad-token-issuer-url "https://sts.windows.net/{WORLD_BANK_TENANT_ID}/" \
-     --token-store true
-   ```
+**Azure AD App Permissions** - NOT Azure RBAC (much simpler!)
 
-3. **Restrict to Specific Groups** (Azure AD Premium):
-   - Azure Portal → Enterprise Applications
-   - Select: `geospatial-api-easyauth`
-   - Users and groups → Add user/group
-   - Select: "GeoAdmins", "DataCurators", etc.
-   - Only members of selected groups can access
+**How it works**:
+- Create Azure AD security group (e.g., `GeoAPI-Users`)
+- Add your data scientists to the group
+- Enable "Assignment required" on App Registration
+- Assign security group to app
+- **Result**: Only group members can login, everyone else denied
+
+**This is NOT RBAC**:
+- RBAC = Who can manage Azure resources (VMs, storage, etc.)
+- App Permissions = Who can login to your application
+- **You want App Permissions** (simpler, free with Azure AD Free)
+
+---
+
+### Step 1: Create Security Group
+
+**Azure Portal**:
+```
+Azure Active Directory
+→ Groups
+→ New group
+```
+
+**Settings**:
+- **Group type**: Security
+- **Group name**: `GeoAPI-Users` (or `DataScientists`, whatever you prefer)
+- **Membership type**: Assigned (or Dynamic if you want auto-assignment rules)
+- **Members**: Add your data scientists, curators, analysts
+
+**Click**: Create
+
+**Result**: You now have a security group with your team members
+
+---
+
+### Step 2: Enable "Assignment Required" on App Registration
+
+**Azure Portal**:
+```
+Azure Active Directory
+→ Enterprise applications
+→ Search: "rmhazuregeoapi-easyauth" (your app name)
+→ Click on it
+→ Properties (left menu)
+```
+
+**Key Setting**:
+- **Assignment required?**: Toggle to **Yes** ✅
+
+**Click**: Save
+
+**What this does**:
+- From now on, ONLY assigned users/groups can login
+- Everyone else gets: "You don't have permission to access this application"
+- Even if they're in your tenant, they're blocked
+
+---
+
+### Step 3: Assign Security Group to App
+
+**Still in Enterprise Applications**:
+```
+Azure Active Directory
+→ Enterprise applications
+→ rmhazuregeoapi-easyauth
+→ Users and groups (left menu)
+→ Add user/assignment
+```
+
+**Add assignment**:
+1. **Click**: "Users and groups"
+2. **Select**: Your security group
+   - Search for: `GeoAPI-Users`
+   - Click: Select
+
+3. **Select a role**:
+   - Usually: **User** (default role - just means "can access")
+   - Or create custom roles if needed (Azure AD Premium)
+
+4. **Click**: Assign
+
+**Result**:
+- ✅ All members of `GeoAPI-Users` can now login
+- ❌ Everyone else in your tenant is blocked
+- ✅ You can add/remove people from the group anytime (no app changes)
+
+---
+
+### How It Works in Practice
+
+#### User in Security Group (Sarah)
+
+**Data Scientist Sarah** (member of `GeoAPI-Users`):
+```
+1. Opens: https://geospatial.yourcompany.com/api/health
+2. Redirects to Microsoft login
+3. Enters: sarah.datascientist@yourcompany.com
+4. Microsoft checks: "Is Sarah in GeoAPI-Users group?"
+5. Answer: YES ✅
+6. Login succeeds → sees function app data
+```
+
+#### User NOT in Security Group (Bob)
+
+**Random Employee Bob** (not in `GeoAPI-Users`):
+```
+1. Opens: https://geospatial.yourcompany.com/api/health
+2. Redirects to Microsoft login
+3. Enters: bob.random@yourcompany.com
+4. Microsoft checks: "Is Bob in GeoAPI-Users group?"
+5. Answer: NO ❌
+6. Error: "You don't have permission to access this application"
+```
+
+---
+
+### Managing Access Over Time
+
+#### Add New User
+
+**Option A - Add to Security Group** (recommended):
+```
+Azure AD → Groups → GeoAPI-Users
+→ Members → Add members
+→ Search: new.datascientist@yourcompany.com
+→ Select → Add
+```
+**Result**: User can login immediately (no app changes needed)
+
+**Option B - Assign User Directly** (not recommended):
+```
+Azure AD → Enterprise applications → rmhazuregeoapi-easyauth
+→ Users and groups → Add user/assignment
+→ Select user → Assign
+```
+
+#### Remove User Access
+
+**Remove from group**:
+```
+Azure AD → Groups → GeoAPI-Users
+→ Members → Find user → Remove
+```
+**Result**: User can no longer login (existing sessions persist until timeout ~8 hours)
+
+#### View Who Has Access
+
+```
+Azure AD → Enterprise applications → rmhazuregeoapi-easyauth
+→ Users and groups
+```
+Shows all assigned users and groups
+
+---
+
+### Production Setup Steps (Complete)
+
+**Same Easy Auth process, plus security groups**:
+
+#### 1. Create App Registration
+```bash
+az ad app create \
+  --display-name "geospatial-api-prod" \
+  --sign-in-audience AzureADMyOrg \
+  --web-redirect-uris "https://geospatial.yourcompany.com/.auth/login/aad/callback" \
+  --enable-id-token-issuance true \
+  --enable-access-token-issuance true
+```
+
+#### 2. Set Identifier URI
+```bash
+# Get the App ID from step 1, then:
+az ad app update \
+  --id "{YOUR_APP_ID}" \
+  --identifier-uris "api://{YOUR_APP_ID}"
+```
+
+#### 3. Enable Easy Auth on Function App
+```bash
+az webapp auth update \
+  --name geospatial-api \
+  --resource-group yourcompany_geo_rg \
+  --enabled true \
+  --action LoginWithAzureActiveDirectory \
+  --aad-client-id "{YOUR_APP_ID}" \
+  --aad-token-issuer-url "https://sts.windows.net/{YOUR_TENANT_ID}/" \
+  --aad-allowed-token-audiences "https://geospatial.yourcompany.com/.auth/login/aad/callback" \
+  --token-store true
+```
+
+#### 4. Create Security Group (Azure Portal)
+```
+Azure AD → Groups → New group
+- Name: GeoAPI-Users
+- Type: Security
+- Members: Add your data scientists
+```
+
+#### 5. Enable "Assignment Required" (Azure Portal)
+```
+Azure AD → Enterprise applications → geospatial-api-prod
+→ Properties → Assignment required? → Yes → Save
+```
+
+#### 6. Assign Security Group (Azure Portal)
+```
+Azure AD → Enterprise applications → geospatial-api-prod
+→ Users and groups → Add user/assignment
+→ Select: GeoAPI-Users → Role: User → Assign
+```
+
+**Done!** Only `GeoAPI-Users` members can now access the app.
+
+---
+
+### Azure AD Free vs Premium
+
+**Security Group Assignment** works with **Azure AD Free**:
+- ✅ Can assign users to app
+- ✅ Can assign groups to app
+- ✅ Can check if user is assigned
+- ❌ **Cannot** get group membership in token claims (requires Premium P1)
+
+**What this means**:
+- Basic access control: **FREE** ✅
+- Group-based endpoints in code: Requires **Premium P1** ($6/user/month)
+
+**Most companies already have Azure AD Premium** (included in Microsoft 365 E3/E5).
+
+---
+
+### Advanced: Multiple Security Groups (Optional)
+
+**If you want different permissions within the app**:
+
+#### Create Multiple Groups
+- `GeoAPI-Admins` (can access admin endpoints)
+- `GeoAPI-Viewers` (can only access read-only endpoints)
+
+#### Assign Both Groups to App
+Follow Step 3 above for each group
+
+#### In Your Code (requires Azure AD Premium for group claims)
+```python
+# utils/auth.py
+def get_user_groups(req: func.HttpRequest) -> list:
+    """Extract user's security groups from Easy Auth headers."""
+    groups_claim = req.headers.get('X-MS-CLIENT-PRINCIPAL-GROUPS')
+    if groups_claim:
+        return json.loads(groups_claim)
+    return []
+
+def is_admin(req: func.HttpRequest) -> bool:
+    """Check if user is in GeoAPI-Admins group."""
+    groups = get_user_groups(req)
+    return 'GeoAPI-Admins' in groups
+
+@app.route(route="db/schemas", methods=["GET"])
+def admin_endpoint(req: func.HttpRequest) -> func.HttpResponse:
+    if not is_admin(req):
+        return func.HttpResponse(
+            json.dumps({'error': 'Admin access required'}),
+            status_code=403
+        )
+    # Admin logic...
+```
+
+---
+
+### Portal Path Quick Reference
+
+**For Assignment**:
+```
+Azure Portal
+└─ Azure Active Directory
+   └─ Enterprise applications
+      └─ [Your App Name]
+         ├─ Properties → Assignment required? YES
+         └─ Users and groups → Add user/assignment
+            └─ Select: [Security Group]
+```
+
+**What Each Setting Does**:
+
+| Setting | Effect |
+|---------|--------|
+| **Assignment required = No** | Anyone in tenant can login (default) |
+| **Assignment required = Yes** | Only assigned users/groups can login |
+| **Assign group "GeoAPI-Users"** | All group members can login |
+| **Remove user from group** | User loses access (after session expires ~8 hours) |
+
+---
+
+### Session Persistence Note
+
+**After removing user from group**:
+- Existing sessions last ~8 hours (default token lifetime)
+- User can still access until session expires
+- To force logout: User must visit `/.auth/logout` or wait for expiration
+
+**To force immediate logout for ALL users** (nuclear option):
+```bash
+# Restart function app (clears all sessions)
+az functionapp restart \
+  --name geospatial-api \
+  --resource-group yourcompany_geo_rg
+```
 
 ### Optional: Email Whitelist in Code
 
@@ -779,6 +1064,117 @@ X-MS-TOKEN-AAD-ID-TOKEN     # ID token (if needed)
 
 ---
 
-**Last Updated**: 14 NOV 2025
+## 🧹 Cleanup & Disable Authentication
+
+### Quick Disable (Keep Configuration)
+
+**Temporarily disable auth** (can re-enable anytime):
+```bash
+# Using v2 API (recommended)
+SUBSCRIPTION_ID=$(az account show --query id -o tsv)
+
+az rest \
+  --method PUT \
+  --uri "/subscriptions/$SUBSCRIPTION_ID/resourceGroups/rmhazure_rg/providers/Microsoft.Web/sites/rmhazuregeoapi/config/authsettingsV2?api-version=2022-03-01" \
+  --headers "Content-Type=application/json" \
+  --body '{
+    "properties": {
+      "platform": {
+        "enabled": false
+      }
+    }
+  }'
+```
+
+**Or using v1 API**:
+```bash
+az webapp auth update \
+  --name rmhazuregeoapi \
+  --resource-group rmhazure_rg \
+  --enabled false
+```
+
+**After disabling**:
+- ✅ All endpoints immediately anonymous (no login required)
+- ✅ Configuration preserved (app registration still exists)
+- ✅ Can re-enable with single command
+
+**Restart function app** (recommended after disabling):
+```bash
+az functionapp restart \
+  --name rmhazuregeoapi \
+  --resource-group rmhazure_rg
+```
+
+**Verify endpoints work**:
+```bash
+curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/health
+```
+
+**Expected**: HTTP 200 OK (not 401)
+
+---
+
+### Full Cleanup (Remove Everything)
+
+**Step 1: Disable Easy Auth**:
+```bash
+az webapp auth update \
+  --name rmhazuregeoapi \
+  --resource-group rmhazure_rg \
+  --enabled false
+```
+
+**Step 2: Delete App Registration**:
+```bash
+az ad app delete --id 8c0d412b-f7b1-4920-8a5f-22f8ae9903e9
+```
+
+**Step 3: Verify Cleanup**:
+```bash
+# Check auth is disabled
+az webapp auth show \
+  --name rmhazuregeoapi \
+  --resource-group rmhazure_rg \
+  --query "enabled" \
+  -o tsv
+
+# Expected: false
+
+# Verify app registration deleted
+az ad app show --id 8c0d412b-f7b1-4920-8a5f-22f8ae9903e9
+
+# Expected: "Resource 'xyz' does not exist..."
+```
+
+**Result**:
+- ✅ Easy Auth fully removed
+- ✅ App registration deleted from Azure AD
+- ✅ Function app back to anonymous access
+- ✅ No authentication artifacts remaining
+
+---
+
+### Re-enable Authentication
+
+**If you disabled and want to re-enable**:
+```bash
+# Just toggle enabled back to true
+az webapp auth update \
+  --name rmhazuregeoapi \
+  --resource-group rmhazure_rg \
+  --enabled true
+```
+
+**If you deleted everything and want to start over**:
+- Follow "Method 2: Azure CLI Setup" from the beginning
+- Create new app registration
+- Configure Easy Auth
+- ~5 minutes to full setup
+
+---
+
+**Last Updated**: 15 NOV 2025
 **Tested On**: rmhazuregeoapi (B3 Basic tier)
-**Status**: ✅ Working in production
+**Status**: ✅ Proof of concept completed successfully
+**Auth Status**: Currently disabled (anonymous access)

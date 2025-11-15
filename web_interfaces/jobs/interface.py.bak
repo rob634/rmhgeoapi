@@ -85,7 +85,7 @@ class JobsInterface(BaseInterface):
             <!-- Controls -->
             <div class="controls">
                 <button onclick="loadJobs()" class="refresh-button">
-                    🔄 Refresh
+                    = Refresh
                 </button>
                 <select id="status-filter" onchange="loadJobs()" class="filter-select">
                     <option value="">All Statuses</option>

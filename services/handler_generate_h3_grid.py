@@ -337,9 +337,9 @@ def _generate_from_base(resolution: int) -> List[Dict[str, Any]]:
             else:
                 h3_index_int = cell
 
-            # Get geometry as WKT
-            boundary = h3.cell_to_boundary(cell, geo_json=True)
-            coords = [(lon, lat) for lat, lon in boundary]
+            # Get geometry as WKT (cell_to_boundary returns [(lat, lng), ...])
+            boundary = h3.cell_to_boundary(cell)
+            coords = [(lng, lat) for lat, lng in boundary]  # Convert to (lng, lat) for WKT
             coords.append(coords[0])  # Close polygon
             polygon = Polygon(coords)
             geom_wkt = polygon.wkt
@@ -408,9 +408,9 @@ def _generate_from_cascade(
             else:
                 child_index_int = child_index
 
-            # Get geometry as WKT
-            boundary = h3.cell_to_boundary(child_index, geo_json=True)
-            coords = [(lon, lat) for lat, lon in boundary]
+            # Get geometry as WKT (cell_to_boundary returns [(lat, lng), ...])
+            boundary = h3.cell_to_boundary(child_index)
+            coords = [(lng, lat) for lat, lng in boundary]  # Convert to (lng, lat) for WKT
             coords.append(coords[0])  # Close polygon
             polygon = Polygon(coords)
             geom_wkt = polygon.wkt

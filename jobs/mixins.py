@@ -47,7 +47,7 @@ from typing import List, Dict, Any
 from jobs.base import JobBase
 from jobs.mixins import JobBaseMixin
 
-class FloodRiskCOGJob(JobBase, JobBaseMixin):
+class FloodRiskCOGJob(JobBaseMixin, JobBase):  # ← Mixin FIRST!
     '''
     Process flood risk raster into Cloud Optimized GeoTIFFs (COGs).
 
@@ -314,7 +314,7 @@ class JobBaseMixin(ABC):
     Inherit from this mixin to eliminate 185 lines of repetitive code per job.
 
     Usage:
-        class MyJob(JobBase, JobBaseMixin):
+        class MyJob(JobBaseMixin, JobBase):  # ← Mixin FIRST for correct MRO!
             job_type = "my_job"
             description = "What this job does"
             stages = [...]

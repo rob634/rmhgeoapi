@@ -37,7 +37,7 @@ from jobs.base import JobBase
 from jobs.mixins import JobBaseMixin
 
 
-class HelloWorldMixinJob(JobBase, JobBaseMixin):
+class HelloWorldMixinJob(JobBaseMixin, JobBase):
     """
     HelloWorld job using JobBaseMixin pattern.
 

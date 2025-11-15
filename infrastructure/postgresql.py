@@ -226,24 +226,36 @@ class PostgreSQLRepository(BaseRepository):
         use_managed_identity = self._should_use_managed_identity()
 
         if use_managed_identity:
-            logger.info("🔐 Using Azure Managed Identity for PostgreSQL authentication")
+            logger.info("🔐 Using Azure Managed Identity for PostgreSQL authentication (NO FALLBACK)")
             return self._build_managed_identity_connection_string()
         else:
-            # Use password-based authentication
-            logger.debug("📋 Building connection string from AppConfig (password-based)")
+            # Use password-based authentication (NO FALLBACK)
+            logger.info("🔑 Using password-based authentication (NO FALLBACK)")
+
+            # EXPLICIT FAILURE if password missing
+            if not self.config.postgis_password:
+                error_msg = (
+                    "❌ Password authentication selected but POSTGIS_PASSWORD not configured! "
+                    "Set POSTGIS_PASSWORD environment variable or set USE_MANAGED_IDENTITY=true"
+                )
+                logger.error(error_msg)
+                raise ValueError(error_msg)
+
             conn_str = self.config.postgis_connection_string
-            logger.debug(f"  Final connection string will be used for connection")
+            logger.debug(f"✅ Password-based connection string built successfully")
             return conn_str
 
     def _should_use_managed_identity(self) -> bool:
         """
         Determine if managed identity authentication should be used.
 
-        Decision Logic:
-        --------------
-        1. Explicit flag: USE_MANAGED_IDENTITY environment variable
-        2. Auto-detect: Running in Azure Functions without password configured
-        3. Fallback: Use password authentication
+        ONE PATTERN ONLY - NO FALLBACKS:
+        --------------------------------
+        Reads USE_MANAGED_IDENTITY environment variable.
+        - "true" → Use managed identity (fail if token acquisition fails)
+        - "false" or unset → Use password (fail if password missing)
+
+        No auto-detection. No fallbacks. Explicit configuration only.
 
         Returns:
         -------
@@ -252,28 +264,17 @@ class PostgreSQLRepository(BaseRepository):
 
         Environment Variables:
         ---------------------
-        USE_MANAGED_IDENTITY: "true" or "false" (case-insensitive)
-        WEBSITE_INSTANCE_ID: Present when running in Azure Functions
+        USE_MANAGED_IDENTITY: "true" or "false" (case-insensitive, default: false)
         """
-        # Check explicit flag
+        # ONE PATTERN ONLY - explicit configuration, no auto-detection
         use_mi_env = os.getenv("USE_MANAGED_IDENTITY", "false").lower()
+
         if use_mi_env == "true":
-            logger.debug("✅ USE_MANAGED_IDENTITY=true - managed identity enabled")
+            logger.info("🔐 USE_MANAGED_IDENTITY=true - using managed identity (NO FALLBACK)")
             return True
-        elif use_mi_env == "false":
-            logger.debug("❌ USE_MANAGED_IDENTITY=false - password authentication")
+        else:
+            logger.info("🔑 USE_MANAGED_IDENTITY=false - using password auth (NO FALLBACK)")
             return False
-
-        # Auto-detect Azure environment without password
-        in_azure = bool(os.getenv("WEBSITE_INSTANCE_ID"))
-        has_password = bool(self.config.postgis_password)
-
-        if in_azure and not has_password:
-            logger.info("🔍 Auto-detected Azure Functions without password - using managed identity")
-            return True
-
-        # Default to password authentication
-        return False
 
     def _build_managed_identity_connection_string(self) -> str:
         """

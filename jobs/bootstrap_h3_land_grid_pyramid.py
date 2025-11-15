@@ -74,9 +74,10 @@ class BootstrapH3LandGridPyramidJob(JobBaseMixin, JobBase):  # Mixin FIRST for c
 
     # Job metadata
     job_type: str = "bootstrap_h3_land_grid_pyramid"
-    description: str = "Generate complete H3 land-filtered grid pyramid (res 2-7)"
+    description: str = "Generate H3 land-filtered grid pyramid (res 2-5) - TESTING VERSION"
 
-    # 7-stage workflow using universal handler
+    # 5-stage workflow using universal handler (LIMITED TO RES 5 FOR TESTING)
+    # TODO: Add stages 6-7 (res6, res7) after testing res 2-5 completes successfully
     stages: List[Dict[str, Any]] = [
         {
             "number": 1,
@@ -108,24 +109,10 @@ class BootstrapH3LandGridPyramidJob(JobBaseMixin, JobBase):  # Mixin FIRST for c
         },
         {
             "number": 5,
-            "name": "generate_res6_cascade",
-            "task_type": "generate_h3_grid",
-            "parallelism": "single",
-            "description": "Generate res 6 from res 5 parents (batched cascade)"
-        },
-        {
-            "number": 6,
-            "name": "generate_res7_cascade",
-            "task_type": "generate_h3_grid",
-            "parallelism": "single",
-            "description": "Generate res 7 from res 6 parents (batched cascade)"
-        },
-        {
-            "number": 7,
             "name": "finalize_pyramid",
             "task_type": "finalize_h3_pyramid",
             "parallelism": "single",
-            "description": "Verify cell counts and update metadata"
+            "description": "Verify cell counts and update metadata (res 2-5 only)"
         }
     ]
 
@@ -215,9 +202,9 @@ class BootstrapH3LandGridPyramidJob(JobBaseMixin, JobBase):  # Mixin FIRST for c
                 }
             ]
 
-        elif stage in [2, 3, 4, 5, 6]:
-            # STAGES 2-6: Generate res N from res N-1 parents (cascade with batching)
-            resolution = stage  # Stage 2 = res 3, Stage 3 = res 4, etc.
+        elif stage in [2, 3, 4]:
+            # STAGES 2-4: Generate res N from res N-1 parents (cascade with batching)
+            resolution = stage  # Stage 2 = res 3, Stage 3 = res 4, Stage 4 = res 5
             parent_resolution = resolution - 1
             parent_grid_id = f"{grid_id_prefix}_res{parent_resolution}"
             grid_id = f"{grid_id_prefix}_res{resolution}"
@@ -240,26 +227,26 @@ class BootstrapH3LandGridPyramidJob(JobBaseMixin, JobBase):  # Mixin FIRST for c
                 }
             ]
 
-        elif stage == 7:
-            # STAGE 7: Finalize pyramid (verify counts, update metadata)
+        elif stage == 5:
+            # STAGE 5: Finalize pyramid (verify counts, update metadata) - RES 2-5 ONLY
             if not previous_results:
-                raise ValueError("Stage 7 requires Stage 6 results")
+                raise ValueError("Stage 5 requires Stage 4 results")
 
             return [
                 {
-                    "task_id": f"{job_id[:8]}-s7-finalize",
+                    "task_id": f"{job_id[:8]}-s5-finalize",
                     "task_type": "finalize_h3_pyramid",
                     "parameters": {
                         "grid_id_prefix": grid_id_prefix,
-                        "resolutions": [2, 3, 4, 5, 6, 7],
-                        "expected_cells": BootstrapH3LandGridPyramidJob.EXPECTED_CELLS,
+                        "resolutions": [2, 3, 4, 5],  # LIMITED TO RES 5 FOR TESTING
+                        "expected_cells": {k: v for k, v in BootstrapH3LandGridPyramidJob.EXPECTED_CELLS.items() if k <= 5},
                         "source_job_id": job_id
                     }
                 }
             ]
 
         else:
-            raise ValueError(f"Invalid stage {stage} for bootstrap_h3_land_grid_pyramid job (valid: 1-7)")
+            raise ValueError(f"Invalid stage {stage} for bootstrap_h3_land_grid_pyramid job (valid: 1-5 TESTING VERSION)")
 
     # ========================================================================
     # JOB-SPECIFIC LOGIC: Finalization
@@ -300,11 +287,11 @@ class BootstrapH3LandGridPyramidJob(JobBaseMixin, JobBase):  # Mixin FIRST for c
         # Extract results from all stages (7 stages total)
         task_results = context.task_results
 
-        # Build resolution stats from stages 1-6 (generation stages)
+        # Build resolution stats from stages 1-4 (generation stages for res 2-5)
         resolution_stats = {}
         total_cells = 0
 
-        for stage_num in range(1, 7):  # Stages 1-6 are generation stages
+        for stage_num in range(1, 5):  # Stages 1-4 are generation stages (res 2-5)
             if len(task_results) >= stage_num:
                 stage_result = task_results[stage_num - 1]
                 result_data = stage_result.result_data.get("result", {}) if stage_result.result_data else {}
@@ -319,12 +306,12 @@ class BootstrapH3LandGridPyramidJob(JobBaseMixin, JobBase):  # Mixin FIRST for c
                 }
                 total_cells += rows_inserted
 
-        # Extract finalization result (Stage 7)
+        # Extract finalization result (Stage 5)
         finalization_result = {}
-        if len(task_results) >= 7:
-            finalization_result = task_results[6].result_data.get("result", {}) if task_results[6].result_data else {}
+        if len(task_results) >= 5:
+            finalization_result = task_results[4].result_data.get("result", {}) if task_results[4].result_data else {}
 
-        logger.info(f"✅ Job {context.job_id} completed: H3 Land Pyramid ({total_cells:,} total cells across res 2-7)")
+        logger.info(f"✅ Job {context.job_id} completed: H3 Land Pyramid ({total_cells:,} total cells across res 2-5 TESTING)")
 
         return {
             "job_type": "bootstrap_h3_land_grid_pyramid",
@@ -336,10 +323,11 @@ class BootstrapH3LandGridPyramidJob(JobBaseMixin, JobBase):  # Mixin FIRST for c
             "resolution_stats": resolution_stats,
             "finalization": finalization_result,
             "metadata": {
-                "workflow": "7-stage bootstrap (base + 5 cascade + finalize)",
+                "workflow": "5-stage bootstrap (base + 3 cascade + finalize) - TESTING RES 2-5",
                 "universal_handler": "generate_h3_grid (DRY architecture)",
-                "expected_cells": sum(BootstrapH3LandGridPyramidJob.EXPECTED_CELLS.values()),
+                "expected_cells": sum(v for k, v in BootstrapH3LandGridPyramidJob.EXPECTED_CELLS.items() if k <= 5),
                 "actual_cells": total_cells,
-                "pattern": "JobBaseMixin (77% less boilerplate)"
+                "pattern": "JobBaseMixin (77% less boilerplate)",
+                "note": "Limited to res 2-5 for testing. Add res 6-7 after validation."
             }
         }

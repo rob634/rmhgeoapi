@@ -705,6 +705,74 @@ class AppConfig(BaseModel):
     )
 
     # ========================================================================
+    # PostgreSQL Managed Identity Configuration (15 NOV 2025)
+    # ========================================================================
+
+    use_managed_identity: bool = Field(
+        default=False,
+        description="""Enable Azure Managed Identity for passwordless PostgreSQL authentication.
+
+        Purpose:
+            Eliminates password management by using Azure AD tokens for database authentication.
+            Tokens are automatically acquired and refreshed by Azure SDK.
+
+        Behavior:
+            - When True: Uses DefaultAzureCredential to acquire PostgreSQL access tokens
+            - When False: Uses traditional password-based authentication
+            - Auto-detect: If running in Azure Functions without password, enables automatically
+
+        Environment Variable: USE_MANAGED_IDENTITY
+
+        Prerequisites:
+            1. Azure Function App has system-assigned or user-assigned managed identity enabled
+            2. PostgreSQL user created matching managed identity name (via pgaadauth_create_principal)
+            3. Managed identity granted necessary database permissions
+
+        Local Development:
+            - Requires `az login` to use AzureCliCredential
+            - Or set password fallback in local.settings.json
+
+        Security Benefits:
+            - No passwords in configuration or Key Vault
+            - Tokens expire after 1 hour (automatic rotation)
+            - All authentication logged in Azure AD audit logs
+            - Eliminates credential theft risk
+
+        See: docs_claude/MANAGED_IDENTITY_MIGRATION.md for setup guide
+        """
+    )
+
+    managed_identity_name: Optional[str] = Field(
+        default=None,
+        description="""Managed identity name for PostgreSQL authentication.
+
+        Purpose:
+            Specifies the PostgreSQL user name that matches the Azure managed identity.
+            This must exactly match the identity name created in PostgreSQL.
+
+        Behavior:
+            - If specified: Uses this exact name as PostgreSQL user
+            - If None: Auto-generates from Function App name (WEBSITE_SITE_NAME + '-identity')
+            - Example: 'rmhazuregeoapi-identity' for Function App 'rmhazuregeoapi'
+
+        Environment Variable: MANAGED_IDENTITY_NAME
+
+        PostgreSQL Setup:
+            The managed identity user must be created in PostgreSQL using:
+            SELECT * FROM pgaadauth_create_principal('rmhazuregeoapi-identity', false, false);
+
+        Important:
+            - Name must match EXACTLY (case-sensitive)
+            - Must be a valid PostgreSQL identifier
+            - Should follow naming convention: {function-app-name}-identity
+
+        Default Calculation:
+            - Azure Functions: {WEBSITE_SITE_NAME}-identity
+            - Local Dev: 'rmhazuregeoapi-identity' (fallback)
+        """
+    )
+
+    # ========================================================================
     # STAC Configuration
     # ========================================================================
 

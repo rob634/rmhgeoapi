@@ -303,6 +303,17 @@ class VectorInterface(BaseInterface):
             transform: translateY(-1px);
         }
 
+        .link-badge-primary {
+            background: #0071BC;
+            color: white;
+            border-color: #0071BC;
+        }
+
+        .link-badge-primary:hover {
+            background: #00A3DA;
+            border-color: #00A3DA;
+        }
+
         /* Empty State */
         .empty-state {
             text-align: center;
@@ -399,6 +410,7 @@ class VectorInterface(BaseInterface):
                 // Get links
                 const selfLink = c.links?.find(l => l.rel === 'self')?.href;
                 const itemsLink = c.links?.find(l => l.rel === 'items')?.href;
+                const viewerLink = `${API_BASE_URL}/api/vector/viewer?collection=${encodeURIComponent(c.id)}`;
 
                 return `
                     <div class="collection-card" onclick="openCollection('${selfLink}', event)">
@@ -417,6 +429,13 @@ class VectorInterface(BaseInterface):
                         </div>
 
                         <div class="links">
+                            <a href="${viewerLink}"
+                               class="link-badge link-badge-primary"
+                               onclick="event.stopPropagation()"
+                               target="_blank"
+                               title="Interactive map viewer">
+                                🗺️ View Map
+                            </a>
                             <a href="${selfLink}"
                                class="link-badge"
                                onclick="event.stopPropagation()"

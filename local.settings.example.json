@@ -18,11 +18,18 @@
     "POSTGIS_DATABASE": "your-database-name",
     "POSTGIS_SCHEMA": "geo",
     "APP_SCHEMA": "app",
-    
-    "_comment_security": "=== Security Configuration (Key Vault for password) ===",
+
+    "_comment_managed_identity": "=== Managed Identity Configuration (Passwordless Auth) ===",
+    "USE_MANAGED_IDENTITY": "false",
+    "MANAGED_IDENTITY_NAME": "your-function-app-name-identity",
+    "_comment_mi_notes": "For Azure: Set USE_MANAGED_IDENTITY=true and enable managed identity on Function App. For local dev: Use 'az login' or set POSTGIS_PASSWORD below.",
+
+    "_comment_security": "=== Security Configuration (Password Fallback) ===",
+    "POSTGIS_PASSWORD": "your-database-password",
+    "_comment_password_notes": "Optional: Only needed if USE_MANAGED_IDENTITY=false or for local development. In Azure with managed identity, this can be removed.",
     "KEY_VAULT_NAME": "your-key-vault-name",
     "KEY_VAULT_DATABASE_SECRET": "postgis-password",
-    "_comment_password": "Note: POSTGIS_PASSWORD not set - will be retrieved from Key Vault",
+    "_comment_keyvault_notes": "Legacy: Key Vault no longer required with managed identity. Can be deprecated after migration.",
     
     "_comment_queues": "=== Queue Configuration ===",
     "JOB_PROCESSING_QUEUE": "geospatial-jobs",

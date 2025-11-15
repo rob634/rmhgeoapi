@@ -173,7 +173,9 @@ def generate_h3_grid(task_params: dict) -> dict:
     logger.info(f"🔷 H3 Grid Generation - Resolution {resolution}")
     logger.info(f"   Grid ID: {grid_id}")
     logger.info(f"   Use Cascade: {use_cascade}")
+    logger.info(f"   Parent Grid: {parent_grid_id if parent_grid_id else 'N/A'}")
     logger.info(f"   Job ID: {job_id}")
+    logger.info(f"   Batch: start={batch_start}, size={batch_size if batch_size else 'ALL'}")
 
     # Initialize repository
     repo = H3Repository()
@@ -187,13 +189,17 @@ def generate_h3_grid(task_params: dict) -> dict:
         logger.info(f"📊 Cascade Mode: Generating from parent grid '{parent_grid_id}'")
 
         # Validate parent grid exists
+        logger.info(f"   Checking if parent grid exists...")
         if not repo.grid_exists(parent_grid_id):
+            logger.error(f"❌ Parent grid '{parent_grid_id}' does not exist!")
             return {
                 "success": False,
                 "error": f"Parent grid '{parent_grid_id}' does not exist. Cannot cascade."
             }
+        logger.info(f"   ✅ Parent grid exists, proceeding with cascade")
 
         # Generate from parent cascade
+        logger.info(f"   Loading parent cells and generating children...")
         cells, parents_processed = _generate_from_cascade(
             repo=repo,
             parent_grid_id=parent_grid_id,
@@ -202,15 +208,17 @@ def generate_h3_grid(task_params: dict) -> dict:
             batch_size=batch_size
         )
 
-        logger.info(f"   Generated {len(cells)} cells from {parents_processed} parents")
+        logger.info(f"   ✅ Generated {len(cells)} cells from {parents_processed} parents")
 
     else:  # base mode
         logger.info(f"🌍 Base Mode: Generating from res 0 base cells")
+        logger.info(f"   This will generate ALL H3 cells globally at res {resolution}")
 
         # Generate from base
+        logger.info(f"   Starting H3 generation...")
         cells = _generate_from_base(resolution=resolution)
 
-        logger.info(f"   Generated {len(cells)} cells globally")
+        logger.info(f"   ✅ Generated {len(cells)} cells globally")
 
     cells_generated = len(cells)
 
@@ -229,6 +237,7 @@ def generate_h3_grid(task_params: dict) -> dict:
     # Apply filters if any specified
     if any([spatial_filter_table, spatial_filter_geometry, spatial_filter_bbox]):
         logger.info(f"🗺️  Applying spatial filters...")
+        logger.info(f"   Cells before filtering: {cells_before_filter:,}")
 
         cells, filter_info = _apply_spatial_filters(
             cells=cells,
@@ -240,22 +249,29 @@ def generate_h3_grid(task_params: dict) -> dict:
         )
 
         filters_applied = filter_info['filters_applied']
-        logger.info(f"   Filters: {', '.join(filters_applied)}")
-        logger.info(f"   Before: {cells_before_filter}, After: {len(cells)}, Filtered: {cells_before_filter - len(cells)}")
+        logger.info(f"   Filters applied: {', '.join(filters_applied)}")
+        logger.info(f"   Cells after filtering: {len(cells):,}")
+        logger.info(f"   Cells removed: {cells_before_filter - len(cells):,}")
 
     # ========================================================================
     # STEP 4: Insert cells to h3.grids
     # ========================================================================
-    logger.info(f"💾 Inserting {len(cells)} cells to h3.grids...")
+    logger.info(f"💾 Inserting {len(cells):,} cells to h3.grids...")
+    logger.info(f"   Target: h3.grids (grid_id={grid_id}, resolution={resolution})")
+    logger.info(f"   Note: ON CONFLICT clause will skip duplicates automatically")
 
+    insert_start = time.time()
     rows_inserted = repo.insert_h3_cells(
         cells=cells,
         grid_id=grid_id,
         grid_type=grid_type,
         source_job_id=job_id
     )
+    insert_time = time.time() - insert_start
 
-    logger.info(f"✅ Inserted {rows_inserted} cells (grid_id={grid_id}, resolution={resolution})")
+    logger.info(f"✅ Insert complete in {insert_time:.2f}s")
+    logger.info(f"   Rows inserted: {rows_inserted:,}")
+    logger.info(f"   Duplicates skipped: {len(cells) - rows_inserted:,}")
 
     # ========================================================================
     # STEP 5: Return result

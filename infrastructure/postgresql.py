@@ -108,12 +108,12 @@ class PostgreSQLRepository(BaseRepository):
     in high-throughput scenarios, consider using psycopg_pool.
     """
     
-    def __init__(self, connection_string: Optional[str] = None, 
-                 schema_name: Optional[str] = None, 
+    def __init__(self, connection_string: Optional[str] = None,
+                 schema_name: Optional[str] = None,
                  config: Optional[AppConfig] = None):
         """
         Initialize PostgreSQL repository with configuration.
-        
+
         This constructor sets up the PostgreSQL connection parameters and
         validates that the target schema exists. It uses a priority system
         for configuration:
@@ -121,38 +121,78 @@ class PostgreSQLRepository(BaseRepository):
         2. Provided AppConfig object
         3. Global configuration from get_config()
         4. Environment variables as fallback
-        
+
+        IMPORTANT - Managed Identity Token Caching Behavior:
+        ----------------------------------------------------
+        When USE_MANAGED_IDENTITY=true, this constructor fetches an Azure AD
+        access token and caches it in self.conn_string for the lifetime of
+        this repository instance.
+
+        **Token Expiration**: Azure AD tokens expire after ~1 hour (3600 seconds).
+
+        **Current Architecture (Azure Functions)**:
+        - Function instances are short-lived (typically <10 minutes)
+        - Repository instances are recreated per-request
+        - Token expiration is NOT a problem in practice
+        - Fresh tokens acquired automatically on each function invocation
+
+        **Future Considerations (Container Apps, Long-Running Services)**:
+        If this application evolves into a long-running service (e.g., Container Apps,
+        Kubernetes pods, always-on App Service), the current token caching will cause
+        connection failures after 1 hour.
+
+        **Solutions for Long-Running Services**:
+        1. **Fetch token per connection** (simplest):
+           Move token acquisition from __init__ to _get_connection() so each
+           database connection gets a fresh token. Slight performance penalty
+           (~50ms per connection) but handles expiration automatically.
+
+        2. **Connection pool with token refresh** (complex but efficient):
+           Implement custom psycopg connection pool that detects token expiration
+           and refreshes automatically. See Microsoft sample:
+           https://github.com/Azure-Samples/azure-postgresql-python-managed-identity
+
+        3. **Periodic repository recreation** (current implicit behavior):
+           Recreate PostgreSQLRepository instances periodically (e.g., per-request).
+           This is what Azure Functions does automatically, so it "just works".
+
+        **Why Not Like Azure Storage SDK?**
+        Azure Storage SDK uses credential objects (not connection strings), allowing
+        the SDK to manage token lifecycle internally. PostgreSQL connection strings
+        require the token value upfront, forcing us to manage token refresh explicitly.
+
         Parameters:
         ----------
         connection_string : Optional[str]
             Explicit PostgreSQL connection string. If provided, this
             overrides all other configuration sources.
             Format: postgresql://user:pass@host:port/database?sslmode=require
-        
+
         schema_name : Optional[str]
             Database schema name. Defaults to config.app_schema or "app".
             This is where application tables (jobs, tasks) are stored.
-        
+
         config : Optional[AppConfig]
             Configuration object. If not provided, uses get_config().
             This allows for dependency injection in testing.
-        
+
         Raises:
         ------
         ValueError
             If connection configuration cannot be determined from any source.
-        
+
         Side Effects:
         ------------
         - Logs initialization status
         - Validates schema existence (warning if missing)
-        
+        - **Acquires and caches managed identity token** (if USE_MANAGED_IDENTITY=true)
+
         Example:
         -------
         ```python
         # Use global configuration
         repo = PostgreSQLRepository()
-        
+
         # Override with specific connection
         repo = PostgreSQLRepository(
             connection_string="postgresql://user:pass@host/db",
@@ -337,10 +377,10 @@ class PostgreSQLRepository(BaseRepository):
             logger.debug(f"✅ Token acquired successfully (expires in ~{token_response.expires_on - __import__('time').time():.0f}s)")
 
             # Get managed identity name (matches PostgreSQL user)
-            # Default: rmhazuregeoapi-identity (same as Function App name)
+            # Default: Same as Function App name (Azure AD displayName for system-assigned identity)
             managed_identity_name = os.getenv(
                 "MANAGED_IDENTITY_NAME",
-                f"{os.getenv('WEBSITE_SITE_NAME', 'rmhazuregeoapi')}-identity"
+                os.getenv('WEBSITE_SITE_NAME', 'rmhazuregeoapi')
             )
 
             logger.debug(f"👤 Using managed identity: {managed_identity_name}")

@@ -268,95 +268,97 @@ class PydanticSchemaDeployTrigger:
     def _deploy_schema(self, generator: PydanticToSQL) -> dict:
         """
         Deploy schema using ONLY psycopg.sql composed statements.
-        
+
         NO STRING CONCATENATION - This is the only deployment method.
         Ensures SQL injection safety and proper identifier escaping.
-        
+
+        ARCHITECTURE PRINCIPLE (16 NOV 2025):
+        Uses PostgreSQLRepository for all database connections.
+        NO direct psycopg.connect() calls - repository pattern only.
+
         Args:
             generator: The PydanticToSQL generator instance
-            
+
         Returns:
             Deployment result dictionary
         """
-        conn = None
         try:
-            # Connect to database
-            conn_string = (
-                f"host={self.config.postgis_host} "
-                f"port={self.config.postgis_port} "
-                f"dbname={self.config.postgis_database} "
-                f"user={self.config.postgis_user} "
-                f"password={self.config.postgis_password}"
-            )
-            
-            conn = psycopg.connect(conn_string)
-            
-            # Get composed statements
-            self.logger.info("📦 Generating composed SQL statements from Pydantic models")
-            composed_statements = generator.generate_composed_statements()
-            self.logger.info(f"📦 Generated {len(composed_statements)} composed statements")
-            
-            executed_statements = []
-            errors = []
-            enum_count = 0
-            table_count = 0
-            function_count = 0
-            index_count = 0
-            trigger_count = 0
-            
-            with conn.cursor() as cur:
-                for stmt in composed_statements:
-                    try:
-                        # Convert composed SQL to string for logging
-                        stmt_str = stmt.as_string(conn) if hasattr(stmt, 'as_string') else str(stmt)
-                        stmt_preview = stmt_str[:100].replace('\n', ' ')
-                        stmt_lower = stmt_str.lower()
-                        
-                        # Identify statement type
-                        if 'create type' in stmt_lower:
-                            stmt_type = "CREATE TYPE (ENUM)"
-                            enum_count += 1
-                        elif 'create table' in stmt_lower:
-                            stmt_type = "CREATE TABLE"
-                            table_count += 1
-                        elif 'create or replace function' in stmt_lower:
-                            stmt_type = "CREATE FUNCTION"
-                            function_count += 1
-                        elif 'create index' in stmt_lower:
-                            stmt_type = "CREATE INDEX"
-                            index_count += 1
-                        elif 'create trigger' in stmt_lower:
-                            stmt_type = "CREATE TRIGGER"
-                            trigger_count += 1
-                        elif 'drop trigger' in stmt_lower:
-                            stmt_type = "DROP TRIGGER"
-                        elif 'create schema' in stmt_lower:
-                            stmt_type = "CREATE SCHEMA"
-                        elif 'set search_path' in stmt_lower:
-                            stmt_type = "SET search_path"
-                        else:
-                            stmt_type = "SQL"
-                        
-                        self.logger.debug(f"Executing {stmt_type}: {stmt_preview}...")
-                        
-                        # Execute the composed statement directly
-                        cur.execute(stmt)
-                        executed_statements.append(f"{stmt_type}: {stmt_preview}")
-                        
-                    except Exception as stmt_error:
-                        error_msg = str(stmt_error)
-                        
-                        # Handle expected errors gracefully
-                        if "already exists" in error_msg.lower():
-                            self.logger.debug(f"✓ Object already exists (OK): {stmt_preview}")
-                            continue
-                        
-                        self.logger.warning(f"❌ Statement failed: {error_msg}")
-                        self.logger.debug(f"   Failed SQL: {stmt_str[:200]}")
-                        errors.append({
-                            "statement": stmt_preview,
-                            "error": error_msg
-                        })
+            # Use PostgreSQLRepository for connection management (16 NOV 2025)
+            from infrastructure.postgresql import PostgreSQLRepository
+            repo = PostgreSQLRepository()
+
+            with repo._get_connection() as conn:
+                # Get composed statements
+                self.logger.info("📦 Generating composed SQL statements from Pydantic models")
+                composed_statements = generator.generate_composed_statements()
+                self.logger.info(f"📦 Generated {len(composed_statements)} composed statements")
+
+                executed_statements = []
+                errors = []
+                enum_count = 0
+                table_count = 0
+                function_count = 0
+                index_count = 0
+                trigger_count = 0
+
+                with conn.cursor() as cur:
+                    for stmt in composed_statements:
+                        try:
+                            # Convert composed SQL to string for logging
+                            stmt_str = stmt.as_string(conn) if hasattr(stmt, 'as_string') else str(stmt)
+                            stmt_preview = stmt_str[:100].replace('\n', ' ')
+                            stmt_lower = stmt_str.lower()
+
+                            # Identify statement type
+                            if 'create type' in stmt_lower:
+                                stmt_type = "CREATE TYPE (ENUM)"
+                                enum_count += 1
+                            elif 'create table' in stmt_lower:
+                                stmt_type = "CREATE TABLE"
+                                table_count += 1
+                            elif 'create or replace function' in stmt_lower:
+                                stmt_type = "CREATE FUNCTION"
+                                function_count += 1
+                            elif 'create index' in stmt_lower:
+                                stmt_type = "CREATE INDEX"
+                                index_count += 1
+                            elif 'create trigger' in stmt_lower:
+                                stmt_type = "CREATE TRIGGER"
+                                trigger_count += 1
+                            elif 'drop trigger' in stmt_lower:
+                                stmt_type = "DROP TRIGGER"
+                            elif 'create schema' in stmt_lower:
+                                stmt_type = "CREATE SCHEMA"
+                            elif 'set search_path' in stmt_lower:
+                                stmt_type = "SET search_path"
+                            else:
+                                stmt_type = "SQL"
+
+                            self.logger.debug(f"Executing {stmt_type}: {stmt_preview}...")
+
+                            # Execute the composed statement directly
+                            cur.execute(stmt)
+                            executed_statements.append(f"{stmt_type}: {stmt_preview}")
+
+                        except Exception as stmt_error:
+                            error_msg = str(stmt_error)
+
+                            # Handle expected errors gracefully
+                            if "already exists" in error_msg.lower():
+                                self.logger.debug(f"✓ Object already exists (OK): {stmt_preview}")
+                                # Still count as executed since object exists
+                                executed_statements.append(f"{stmt_type} (exists): {stmt_preview}")
+                                continue
+
+                            self.logger.error(f"❌ Statement failed: {error_msg}")
+                            self.logger.error(f"   Statement type: {stmt_type}")
+                            self.logger.error(f"   Failed SQL (first 500 chars): {stmt_str[:500]}")
+                            errors.append({
+                                "statement_type": stmt_type,
+                                "statement": stmt_preview,
+                                "error": error_msg,
+                                "full_error": str(stmt_error)
+                            })
 
                 # ================================================================
                 # PLATFORM TABLES - NOW AUTO-GENERATED (29 OCT 2025)
@@ -387,10 +389,10 @@ class PydanticSchemaDeployTrigger:
 
                 # Commit all changes (app schema with Platform tables auto-generated)
                 conn.commit()
-                
+
                 # Verify deployment
                 verification = self._verify_deployment(conn)
-                
+
                 result = {
                     "status": "success" if len(errors) == 0 else "partial",
                     "message": "Schema deployed using ONLY psycopg.sql composed statements",
@@ -408,12 +410,12 @@ class PydanticSchemaDeployTrigger:
                     "verification": verification,
                     "timestamp": datetime.now(timezone.utc).isoformat()
                 }
-                
+
                 if errors:
                     result["errors"] = errors[:5]  # First 5 errors
-                    
+
                 return result
-                
+
         except Exception as e:
             self.logger.error(f"Database deployment failed: {e}")
             return {
@@ -422,9 +424,7 @@ class PydanticSchemaDeployTrigger:
                 "message": "Failed to deploy schema with composed statements",
                 "timestamp": datetime.now(timezone.utc).isoformat()
             }
-        finally:
-            if conn:
-                conn.close()
+        # Connection automatically closed by context manager - no finally block needed
     
     def _error_response(self, message: str, status_code: int) -> func.HttpResponse:
         """

@@ -178,7 +178,11 @@ class StacVectorService:
         """
         logger.debug(f"Querying metadata for {schema}.{table_name}")
 
-        with psycopg.connect(self.config.postgis_connection_string) as conn:
+        from config import get_postgres_connection_string
+
+        connection_string = get_postgres_connection_string()
+
+        with psycopg.connect(connection_string) as conn:
             with conn.cursor() as cur:
                 # Check table exists
                 cur.execute(

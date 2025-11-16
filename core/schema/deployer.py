@@ -72,10 +72,10 @@ class SchemaManager:
     def __init__(self):
         """Initialize schema manager with database configuration."""
         logger.debug("🔧 Initializing SchemaManager")
-        
+
         self.config = get_config()
         self.app_schema = self.config.app_schema
-        
+
         logger.debug(f"🔧 Schema configuration loaded:")
         logger.debug(f"   app_schema: {self.app_schema}")
         logger.debug(f"   postgis_host: {self.config.postgis_host}")
@@ -83,57 +83,16 @@ class SchemaManager:
         logger.debug(f"   postgis_database: {self.config.postgis_database}")
         logger.debug(f"   postgis_user: {self.config.postgis_user}")
         # logger.debug(f"   key_vault_name: {self.config.key_vault_name}")  # Key Vault disabled
-        
-        self.connection_string = self._build_connection_string()
+
+        # Use repository pattern (16 NOV 2025)
+        # PostgreSQLRepository is the ONLY place with connection logic
+        from infrastructure.postgresql import PostgreSQLRepository
+        self.repository = PostgreSQLRepository()
+
         logger.info(f"🏗️ SchemaManager initialized for schema: {self.app_schema}")
-        logger.debug(f"🔧 Connection string built (password masked)")
-    
-    def _build_connection_string(self) -> str:
-        """Build secure connection string using environment variable by default."""
-        logger.debug("🔐 Building database connection string")
-        
-        # Debug configuration
-        logger.debug(f"🔍 config.postgis_password: {'SET' if self.config.postgis_password else 'NOT SET'}")
-        
-        # Use environment variable only (Key Vault causing DNS issues)
-        password = self.config.postgis_password
-        if not password:
-            logger.error("❌ POSTGIS_PASSWORD environment variable not set")
-            raise SchemaManagementError("POSTGIS_PASSWORD environment variable is required")
-        
-        logger.info("🔐 Using password from environment variable (POSTGIS_PASSWORD)")
-        logger.debug("🔐 Environment password retrieval successful")
-        
-        # Build connection string (mask password in logs)
-        logger.debug(f"🔍 Building connection with host: {self.config.postgis_host}")
-        logger.debug(f"🔍 Building connection with port: {self.config.postgis_port}")
-        logger.debug(f"🔍 Building connection with user: {self.config.postgis_user}")
-        logger.debug(f"🔍 Building connection with database: {self.config.postgis_database}")
-        
-        connection_parts = {
-            'host': self.config.postgis_host,
-            'port': self.config.postgis_port,
-            'database': self.config.postgis_database,
-            'user': self.config.postgis_user
-        }
-        
-        logger.debug(f"🔐 Connection parameters: {connection_parts}")
-        
-        # Build connection string in same format as health endpoint
-        conn_str = (
-            f"host={self.config.postgis_host} "
-            f"dbname={self.config.postgis_database} "
-            f"user={self.config.postgis_user} "
-            f"password={password} "
-            f"port={self.config.postgis_port}"
-        )
-        
-        # Log masked connection string  
-        masked_conn_str = conn_str.replace(password, "***MASKED***")
-        logger.debug(f"🔗 Connection string: {masked_conn_str}")
-        
-        return conn_str
-    
+        logger.debug(f"🔧 Repository initialized with managed identity support")
+
+
     def validate_and_initialize_schema(self) -> Dict[str, Any]:
         """
         Main entry point: Validate schema exists and initialize if needed.
@@ -163,7 +122,7 @@ class SchemaManager:
         
         try:
             logger.debug(f"🔗 Attempting database connection to: {self.config.postgis_host}:{self.config.postgis_port}")
-            with psycopg.connect(self.connection_string) as conn:
+            with self.repository._get_connection() as conn:
                 logger.debug("🔗 Database connection established successfully")
                 
                 # Step 1: Check if schema exists
@@ -406,9 +365,9 @@ class SchemaManager:
             InsufficientPrivilegesError: If user lacks required privileges
         """
         logger.info(f"🏗️ Initializing schema tables for: {self.app_schema}")
-        
+
         try:
-            with psycopg.connect(self.connection_string) as conn:
+            with self.repository._get_connection() as conn:
                 return self._execute_schema_file(conn)
                     
         except psycopg.errors.InsufficientPrivilege as e:

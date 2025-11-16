@@ -132,15 +132,21 @@ class OGCFeaturesConfig(BaseModel):
         return v
 
     def get_connection_string(self) -> str:
-        """Build PostgreSQL connection string."""
-        return (
-            f"host={self.postgis_host} "
-            f"port={self.postgis_port} "
-            f"dbname={self.postgis_database} "
-            f"user={self.postgis_user} "
-            f"password={self.postgis_password} "
-            f"sslmode=require"
-        )
+        """
+        Build PostgreSQL connection string with managed identity support.
+
+        ARCHITECTURE PRINCIPLE (16 NOV 2025):
+        All database connections must support managed identity authentication.
+        This method now uses the main config's helper function which respects
+        USE_MANAGED_IDENTITY environment variable.
+
+        Returns:
+            PostgreSQL connection string (managed identity or password-based)
+        """
+        # Use the main application's helper function for managed identity support
+        # This ensures OGC Features respects USE_MANAGED_IDENTITY=true
+        from config import get_postgres_connection_string
+        return get_postgres_connection_string()
 
     def get_base_url(self, request_url: Optional[str] = None) -> str:
         """

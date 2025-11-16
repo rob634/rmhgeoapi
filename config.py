@@ -1662,3 +1662,86 @@ def debug_config() -> dict:
     except Exception as e:
         return {'error': f'Configuration validation failed: {e}'}
 
+
+def get_postgres_connection_string(config: Optional[AppConfig] = None) -> str:
+    """
+    Get PostgreSQL connection string with managed identity support.
+
+    This function provides a centralized way to get database connection strings
+    that respects the USE_MANAGED_IDENTITY environment variable.
+
+    **IMPORTANT**: Use this function instead of config.postgis_connection_string
+    for all database connections to ensure managed identity authentication works.
+
+    How it works:
+    -------------
+    1. Creates a PostgreSQLRepository instance (handles managed identity)
+    2. Returns the connection string from the repository
+    3. The repository automatically uses managed identity if USE_MANAGED_IDENTITY=true
+
+    Parameters:
+    ----------
+    config : Optional[AppConfig]
+        Configuration object. If not provided, uses get_config().
+
+    Returns:
+    -------
+    str
+        PostgreSQL connection string with managed identity token (if enabled)
+        or password-based connection string (if managed identity disabled).
+
+    Raises:
+    ------
+    RuntimeError
+        If connection string cannot be built (e.g., managed identity fails
+        and no password available).
+
+    Example:
+    -------
+    ```python
+    from config import get_postgres_connection_string
+    import psycopg
+
+    # Get connection string (respects managed identity)
+    conn_str = get_postgres_connection_string()
+
+    # Use with psycopg
+    with psycopg.connect(conn_str) as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT 1")
+    ```
+
+    Migration Guide:
+    ---------------
+    **OLD PATTERN (broken with managed identity)**:
+    ```python
+    config = get_config()
+    connection_string = config.postgis_connection_string  # ❌ Doesn't support managed identity
+    with psycopg.connect(connection_string) as conn:
+        ...
+    ```
+
+    **NEW PATTERN (works with managed identity)**:
+    ```python
+    from config import get_postgres_connection_string
+    connection_string = get_postgres_connection_string()  # ✅ Supports managed identity
+    with psycopg.connect(connection_string) as conn:
+        ...
+    ```
+
+    See Also:
+    --------
+    - infrastructure/postgresql.py: PostgreSQLRepository class
+    - docs_claude/MANAGED_IDENTITY_MIGRATION.md: Full migration guide
+    """
+    from infrastructure.postgresql import PostgreSQLRepository
+
+    if config is None:
+        config = get_config()
+
+    try:
+        repo = PostgreSQLRepository(config=config)
+        return repo.conn_string
+    except Exception as e:
+        raise RuntimeError(f"Failed to get PostgreSQL connection string: {str(e)}") from e
+

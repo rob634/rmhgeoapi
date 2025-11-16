@@ -39,21 +39,22 @@ logger = LoggerFactory.create_logger(ComponentType.SERVICE, __name__)
 
 def get_connection_string(as_admin: bool = False) -> str:
     """
-    Get PostgreSQL connection string.
+    Get PostgreSQL connection string with managed identity support.
+
+    ARCHITECTURE PRINCIPLE (16 NOV 2025):
+    All database connections must support managed identity authentication.
+    Uses the centralized helper function which respects USE_MANAGED_IDENTITY.
 
     Args:
         as_admin: If True, use admin credentials (for schema operations)
+                  Note: With managed identity, this parameter is ignored
 
     Returns:
-        PostgreSQL connection string
+        PostgreSQL connection string (managed identity or password-based)
     """
-    # In production, use Key Vault or managed identity
-    # For now, using environment variables
-    config = get_config()
-    return (
-        f"postgresql://{config.postgis_user}:{config.postgis_password}@"
-        f"{config.postgis_host}:{config.postgis_port}/{config.postgis_database}"
-    )
+    # Use centralized helper for managed identity support (16 NOV 2025)
+    from config import get_postgres_connection_string
+    return get_postgres_connection_string()
 
 
 # ============================================================================

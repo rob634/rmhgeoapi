@@ -85,8 +85,11 @@ class VectorToPostGISHandler:
     def __init__(self):
         """Initialize with PostgreSQL connection string and error tracking."""
         try:
+            from config import get_postgres_connection_string
+
             config = get_config()
-            self.conn_string = config.postgis_connection_string
+            # Use helper function for managed identity support (16 NOV 2025)
+            self.conn_string = get_postgres_connection_string()
             logger.info("✅ PostGIS handler initialized successfully")
 
             # Track errors for reporting

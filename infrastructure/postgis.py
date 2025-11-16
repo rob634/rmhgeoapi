@@ -36,6 +36,10 @@ def check_table_exists(schema: str, table_name: str) -> bool:
     """
     Check if a PostGIS table exists in the specified schema.
 
+    ARCHITECTURE PRINCIPLE (16 NOV 2025):
+    PostgreSQLRepository is the ONLY place with connection/authentication logic.
+    All other code uses repository methods. NO direct database connections allowed.
+
     Uses information_schema.tables to check for table existence.
     Does not require any special permissions beyond SELECT on information_schema.
 
@@ -54,9 +58,11 @@ def check_table_exists(schema: str, table_name: str) -> bool:
     Raises:
         psycopg.Error: If database connection or query fails
     """
-    config = get_config()
+    from infrastructure.postgresql import PostgreSQLRepository
 
-    with psycopg.connect(config.postgis_connection_string) as conn:
+    repo = PostgreSQLRepository()
+
+    with repo._get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute("""
                 SELECT EXISTS (

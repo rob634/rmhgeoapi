@@ -52,8 +52,11 @@ class VectorToPostGISHandler:
 
     def __init__(self):
         """Initialize with PostgreSQL connection string."""
+        from config import get_postgres_connection_string
+
         config = get_config()
-        self.conn_string = config.postgis_connection_string
+        # Use helper function for managed identity support (16 NOV 2025)
+        self.conn_string = get_postgres_connection_string()
 
     def prepare_gdf(self, gdf: gpd.GeoDataFrame, geometry_params: dict = None) -> gpd.GeoDataFrame:
         """

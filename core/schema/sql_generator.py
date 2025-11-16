@@ -355,19 +355,19 @@ class PydanticToSQL:
     def generate_indexes_composed(self, table_name: str, model: Type[BaseModel]) -> List[sql.Composed]:
         """
         Generate index statements using psycopg.sql composition.
-        
+
         NO STRING CONCATENATION - Full SQL composition for safety.
-        
+
         Args:
             table_name: Name of the table
             model: Pydantic model class
-            
+
         Returns:
             List of composed CREATE INDEX statements
         """
         self.logger.debug(f"🔧 Generating indexes for table {table_name}")
         indexes = []
-        
+
         if table_name == "jobs":
             # Status index
             indexes.append(
@@ -405,7 +405,7 @@ class PydanticToSQL:
                     sql.Identifier("updated_at")
                 )
             )
-            
+
         elif table_name == "tasks":
             # Parent job ID index
             indexes.append(
@@ -466,7 +466,58 @@ class PydanticToSQL:
                     sql.Identifier("retry_count")
                 )
             )
-        
+
+        elif table_name == "api_requests":
+            # Platform Layer indexes (added 16 NOV 2025)
+            # Status index for filtering by request status
+            indexes.append(
+                sql.SQL("CREATE INDEX IF NOT EXISTS {} ON {}.{} ({})").format(
+                    sql.Identifier("idx_api_requests_status"),
+                    sql.Identifier(self.schema_name),
+                    sql.Identifier("api_requests"),
+                    sql.Identifier("status")
+                )
+            )
+            # Dataset ID index for filtering by dataset
+            indexes.append(
+                sql.SQL("CREATE INDEX IF NOT EXISTS {} ON {}.{} ({})").format(
+                    sql.Identifier("idx_api_requests_dataset_id"),
+                    sql.Identifier(self.schema_name),
+                    sql.Identifier("api_requests"),
+                    sql.Identifier("dataset_id")
+                )
+            )
+            # Created at index for time-based queries
+            indexes.append(
+                sql.SQL("CREATE INDEX IF NOT EXISTS {} ON {}.{} ({})").format(
+                    sql.Identifier("idx_api_requests_created_at"),
+                    sql.Identifier(self.schema_name),
+                    sql.Identifier("api_requests"),
+                    sql.Identifier("created_at")
+                )
+            )
+
+        elif table_name == "orchestration_jobs":
+            # Platform Layer indexes (added 16 NOV 2025)
+            # Request ID index for querying jobs by request
+            indexes.append(
+                sql.SQL("CREATE INDEX IF NOT EXISTS {} ON {}.{} ({})").format(
+                    sql.Identifier("idx_orchestration_jobs_request_id"),
+                    sql.Identifier(self.schema_name),
+                    sql.Identifier("orchestration_jobs"),
+                    sql.Identifier("request_id")
+                )
+            )
+            # Job ID index for querying requests by job
+            indexes.append(
+                sql.SQL("CREATE INDEX IF NOT EXISTS {} ON {}.{} ({})").format(
+                    sql.Identifier("idx_orchestration_jobs_job_id"),
+                    sql.Identifier(self.schema_name),
+                    sql.Identifier("orchestration_jobs"),
+                    sql.Identifier("job_id")
+                )
+            )
+
         self.logger.debug(f"✅ Generated {len(indexes)} indexes for table {table_name}")
         return indexes
     

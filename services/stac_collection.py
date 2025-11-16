@@ -611,13 +611,17 @@ def _insert_into_pgstac_collections(collection_dict: Dict[str, Any]) -> str:
     """
     logger.info(f"Inserting collection into PgSTAC: {collection_dict['id']}")
 
-    # Get database connection string from config (11 NOV 2025)
-    # CRITICAL: Use config.postgis_connection_string instead of environment variables
-    # to match infrastructure/stac.py and infrastructure/postgresql.py patterns
-    config = get_config()
-    conninfo = config.postgis_connection_string
+    # Get database connection string with managed identity support (16 NOV 2025)
+    # CRITICAL: Use get_postgres_connection_string() helper which respects USE_MANAGED_IDENTITY
+    # This replaces direct use of config.postgis_connection_string which doesn't support managed identity
+    from config import get_postgres_connection_string
 
-    logger.debug(f"🔗 [STAC-DEBUG] Using connection string from config.postgis_connection_string")
+    try:
+        conninfo = get_postgres_connection_string()
+        logger.debug(f"🔗 [STAC-DEBUG] Using connection string from get_postgres_connection_string() (supports managed identity)")
+    except Exception as conn_error:
+        logger.error(f"❌ [STAC-ERROR] Failed to get database connection string: {conn_error}")
+        raise Exception(f"Failed to get database connection string: {str(conn_error)}") from conn_error
 
     # CRITICAL FIX (11 NOV 2025): Use simple connections for Azure Functions
     # ConnectionPool creates new pool per task invocation, causing connection exhaustion.

@@ -155,6 +155,33 @@ class JobsInterface(BaseInterface):
                     <span class="stat-value" id="total-failed">0</span>
                 </div>
             </div>
+
+            <!-- Job Detail View (hidden by default) -->
+            <div id="job-detail-view" class="hidden">
+                <button class="back-button" onclick="showJobsList()">
+                    ← Back to Jobs
+                </button>
+
+                <div class="detail-header" id="detail-header">
+                    <!-- Job header will be inserted here -->
+                </div>
+
+                <div class="detail-actions" id="detail-actions">
+                    <!-- Action buttons will be inserted here -->
+                </div>
+
+                <div class="detail-parameters" id="detail-parameters">
+                    <!-- Parameters will be inserted here -->
+                </div>
+
+                <div class="detail-results" id="detail-results">
+                    <!-- Results will be inserted here -->
+                </div>
+
+                <div class="detail-tasks" id="detail-tasks">
+                    <!-- Tasks will be inserted here -->
+                </div>
+            </div>
         </div>
         """
 
@@ -395,6 +422,303 @@ class JobsInterface(BaseInterface):
             color: #053657;
             margin-bottom: 10px;
         }
+
+        /* Job Detail View */
+        #job-detail-view {
+            margin-top: 20px;
+        }
+
+        .back-button {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 20px;
+            background: white;
+            border: 1px solid #e9ecef;
+            color: #0071BC;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 20px;
+            transition: all 0.2s;
+        }
+
+        .back-button:hover {
+            background: #f8f9fa;
+            border-color: #0071BC;
+            color: #00A3DA;
+        }
+
+        .detail-header {
+            background: white;
+            border: 1px solid #e9ecef;
+            border-left: 4px solid #0071BC;
+            padding: 30px;
+            border-radius: 3px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        }
+
+        .detail-header h2 {
+            font-size: 20px;
+            color: #053657;
+            font-weight: 700;
+            margin-bottom: 15px;
+        }
+
+        .detail-meta {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-top: 20px;
+        }
+
+        .meta-item {
+            background: #f8f9fa;
+            border: 1px solid #e9ecef;
+            padding: 12px;
+            border-radius: 3px;
+        }
+
+        .meta-item .label {
+            font-size: 11px;
+            color: #626F86;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 5px;
+        }
+
+        .meta-item .value {
+            font-size: 14px;
+            color: #053657;
+            font-weight: 600;
+        }
+
+        .detail-actions {
+            background: white;
+            padding: 20px;
+            border-radius: 3px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .action-button {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 20px;
+            background: #0071BC;
+            color: white;
+            border: none;
+            border-radius: 3px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-decoration: none;
+            font-size: 14px;
+        }
+
+        .action-button:hover {
+            background: #00A3DA;
+            transform: translateY(-1px);
+            box-shadow: 0 2px 8px rgba(0,113,188,0.3);
+        }
+
+        .action-button-secondary {
+            background: white;
+            color: #0071BC;
+            border: 1px solid #e9ecef;
+        }
+
+        .action-button-secondary:hover {
+            background: #f8f9fa;
+            border-color: #0071BC;
+        }
+
+        .detail-parameters,
+        .detail-results,
+        .detail-tasks {
+            background: white;
+            padding: 25px;
+            border-radius: 3px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+
+        .section-title {
+            font-size: 16px;
+            font-weight: 700;
+            color: #053657;
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #e9ecef;
+        }
+
+        .params-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 15px;
+        }
+
+        .param-item {
+            padding: 12px;
+            background: #f8f9fa;
+            border-radius: 3px;
+            border: 1px solid #e9ecef;
+        }
+
+        .param-label {
+            font-size: 12px;
+            font-weight: 600;
+            color: #626F86;
+            margin-bottom: 5px;
+        }
+
+        .param-value {
+            font-size: 13px;
+            color: #053657;
+            font-family: 'Courier New', monospace;
+            word-break: break-word;
+        }
+
+        .result-card {
+            background: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-left: 4px solid #0071BC;
+            padding: 20px;
+            border-radius: 3px;
+            margin-bottom: 15px;
+        }
+
+        .result-card h4 {
+            font-size: 14px;
+            font-weight: 700;
+            color: #053657;
+            margin-bottom: 12px;
+        }
+
+        .result-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 10px;
+        }
+
+        .result-item {
+            font-size: 13px;
+            color: #626F86;
+        }
+
+        .result-item strong {
+            color: #0071BC;
+            font-weight: 600;
+        }
+
+        .stage-group {
+            background: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 3px;
+            padding: 15px;
+            margin-bottom: 15px;
+        }
+
+        .stage-group-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            cursor: pointer;
+            padding: 5px 0;
+        }
+
+        .stage-group-header h4 {
+            font-size: 14px;
+            font-weight: 700;
+            color: #053657;
+        }
+
+        .stage-tasks {
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 1px solid #e9ecef;
+        }
+
+        .task-item {
+            background: white;
+            border: 1px solid #e9ecef;
+            padding: 12px;
+            border-radius: 3px;
+            margin-bottom: 8px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .task-item .task-info {
+            flex: 1;
+        }
+
+        .task-item .task-id {
+            font-size: 12px;
+            font-family: 'Courier New', monospace;
+            color: #626F86;
+        }
+
+        .task-item .task-type {
+            font-size: 13px;
+            font-weight: 600;
+            color: #053657;
+            margin: 3px 0;
+        }
+
+        .error-banner {
+            background: #FEE2E2;
+            border: 1px solid #DC2626;
+            border-left: 4px solid #DC2626;
+            padding: 20px;
+            border-radius: 3px;
+            margin-bottom: 20px;
+        }
+
+        .error-banner h3 {
+            color: #DC2626;
+            font-size: 16px;
+            font-weight: 700;
+            margin-bottom: 10px;
+        }
+
+        .error-banner p {
+            color: #991B1B;
+            font-size: 14px;
+            line-height: 1.6;
+        }
+
+        .expandable-json {
+            margin-top: 15px;
+        }
+
+        .expandable-json summary {
+            cursor: pointer;
+            font-weight: 600;
+            color: #0071BC;
+            padding: 10px;
+            background: #f8f9fa;
+            border-radius: 3px;
+            user-select: none;
+        }
+
+        .expandable-json pre {
+            background: #053657;
+            color: #f8f9fa;
+            padding: 15px;
+            border-radius: 3px;
+            overflow-x: auto;
+            font-size: 12px;
+            margin-top: 10px;
+        }
         """
 
     def _generate_custom_js(self) -> str:
@@ -548,8 +872,422 @@ class JobsInterface(BaseInterface):
             document.getElementById('total-failed').textContent = stats.failed || 0;
         }
 
-        // Show job detail (placeholder for now)
-        function showJobDetail(jobId) {
-            alert(`Job detail view for ${jobId}\\n\\nThis will show full job details and tasks in a future update.`);
+        // Show job detail view
+        async function showJobDetail(jobId) {
+            // Hide jobs list, show detail view
+            document.getElementById('jobs-container').classList.add('hidden');
+            document.getElementById('stats-banner').classList.add('hidden');
+            document.getElementById('controls').classList.add('hidden');
+            document.getElementById('job-detail-view').classList.remove('hidden');
+
+            // Show loading state
+            document.getElementById('detail-header').innerHTML = '<div class="spinner"></div>';
+            document.getElementById('detail-actions').innerHTML = '';
+            document.getElementById('detail-parameters').innerHTML = '';
+            document.getElementById('detail-results').innerHTML = '';
+            document.getElementById('detail-tasks').innerHTML = '';
+
+            try {
+                // Fetch job + tasks in parallel
+                const [job, tasksData] = await Promise.all([
+                    fetchJSON(`${API_BASE_URL}/api/dbadmin/jobs/${jobId}`),
+                    fetchJSON(`${API_BASE_URL}/api/dbadmin/tasks/${jobId}`)
+                ]);
+
+                // Render detail view
+                renderJobDetail(job, tasksData.tasks || []);
+
+            } catch (error) {
+                console.error('Error loading job detail:', error);
+                document.getElementById('detail-header').innerHTML = `
+                    <div class="error-banner">
+                        <div class="error-header">Failed to Load Job Details</div>
+                        <div class="error-message">${error.message || 'Unknown error occurred'}</div>
+                    </div>
+                `;
+            }
+        }
+
+        // Render job detail view
+        function renderJobDetail(job, tasks) {
+            // Render header with metadata
+            renderDetailHeader(job, tasks);
+
+            // Render action buttons
+            renderDetailActions(job);
+
+            // Render parameters
+            renderDetailParameters(job);
+
+            // Render job-specific results
+            renderDetailResults(job);
+
+            // Render tasks grouped by stage
+            renderDetailTasks(job, tasks);
+        }
+
+        // Render detail header
+        function renderDetailHeader(job, tasks) {
+            const failedTasks = tasks.filter(t => t.status === 'failed').length;
+            const completedTasks = tasks.filter(t => t.status === 'completed').length;
+            const processingTasks = tasks.filter(t => t.status === 'processing').length;
+            const queuedTasks = tasks.filter(t => t.status === 'queued').length;
+
+            const stageProgress = job.total_stages > 0 ? `${job.stage || 0}/${job.total_stages}` : 'N/A';
+
+            let statusHTML = '';
+            if (job.status === 'failed') {
+                statusHTML = `
+                    <div class="error-banner" style="margin-bottom: 20px;">
+                        <div class="error-header">Job Failed</div>
+                        <div class="error-message">${job.error_details || 'No error details available'}</div>
+                    </div>
+                `;
+            }
+
+            document.getElementById('detail-header').innerHTML = `
+                ${statusHTML}
+                <h2>${job.job_type}</h2>
+                <div class="meta-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-top: 20px;">
+                    <div class="meta-item">
+                        <span class="meta-label">Job ID</span>
+                        <span class="meta-value" style="font-family: 'Courier New', monospace; font-size: 12px;">${job.job_id.substring(0, 8)}...${job.job_id.substring(job.job_id.length - 8)}</span>
+                    </div>
+                    <div class="meta-item">
+                        <span class="meta-label">Status</span>
+                        <span class="status-badge status-${job.status}">${job.status}</span>
+                    </div>
+                    <div class="meta-item">
+                        <span class="meta-label">Stage Progress</span>
+                        <span class="meta-value">${stageProgress}</span>
+                    </div>
+                    <div class="meta-item">
+                        <span class="meta-label">Tasks</span>
+                        <span class="meta-value">
+                            <span style="color: #626F86;">Q:</span> ${queuedTasks}
+                            <span style="color: #F59E0B; margin-left: 8px;">P:</span> ${processingTasks}
+                            <span style="color: #10B981; margin-left: 8px;">C:</span> ${completedTasks}
+                            <span style="color: #DC2626; margin-left: 8px;">F:</span> ${failedTasks}
+                        </span>
+                    </div>
+                    <div class="meta-item">
+                        <span class="meta-label">Created</span>
+                        <span class="meta-value">${new Date(job.created_at).toLocaleString()}</span>
+                    </div>
+                    <div class="meta-item">
+                        <span class="meta-label">Updated</span>
+                        <span class="meta-value">${new Date(job.updated_at).toLocaleString()}</span>
+                    </div>
+                </div>
+            `;
+        }
+
+        // Render action buttons
+        function renderDetailActions(job) {
+            let actionsHTML = '<div style="display: flex; gap: 10px; flex-wrap: wrap;">';
+
+            // Copy Job ID button (always available)
+            actionsHTML += `
+                <button class="action-button" onclick="copyToClipboard('${job.job_id}', 'Job ID copied!')">
+                    📋 Copy Job ID
+                </button>
+            `;
+
+            // TiTiler link (for raster jobs with MosaicJSON)
+            if (job.job_type.includes('raster') && job.result_data?.mosaic_json_url) {
+                const titilerUrl = job.result_data.titiler_url || `${API_BASE_URL}/api/titiler/mosaicjson?url=${encodeURIComponent(job.result_data.mosaic_json_url)}`;
+                actionsHTML += `
+                    <a href="${titilerUrl}" target="_blank" class="action-button" style="text-decoration: none;">
+                        🗺️ View in TiTiler
+                    </a>
+                `;
+            }
+
+            // Raw JSON viewer button
+            actionsHTML += `
+                <button class="action-button action-button-secondary" onclick="toggleJSON('job-raw-json')">
+                    📄 View Raw JSON
+                </button>
+            `;
+
+            actionsHTML += '</div>';
+
+            // Add expandable JSON section
+            actionsHTML += `
+                <div id="job-raw-json" class="expandable-json hidden" style="margin-top: 15px;">
+                    <pre>${JSON.stringify(job, null, 2)}</pre>
+                </div>
+            `;
+
+            document.getElementById('detail-actions').innerHTML = actionsHTML;
+        }
+
+        // Render parameters section
+        function renderDetailParameters(job) {
+            if (!job.parameters || Object.keys(job.parameters).length === 0) {
+                document.getElementById('detail-parameters').innerHTML = '';
+                return;
+            }
+
+            let paramsHTML = `
+                <div class="detail-section">
+                    <h3>Input Parameters</h3>
+                    <div class="param-grid" style="display: grid; gap: 10px;">
+            `;
+
+            for (const [key, value] of Object.entries(job.parameters)) {
+                paramsHTML += `
+                    <div class="param-item" style="background: #f8f9fa; padding: 12px; border-radius: 3px;">
+                        <span style="font-weight: 600; color: #053657; display: block; margin-bottom: 5px;">${key}</span>
+                        <span style="color: #626F86; font-family: 'Courier New', monospace; font-size: 13px;">${JSON.stringify(value)}</span>
+                    </div>
+                `;
+            }
+
+            paramsHTML += `
+                    </div>
+                </div>
+            `;
+
+            document.getElementById('detail-parameters').innerHTML = paramsHTML;
+        }
+
+        // Render job-specific results
+        function renderDetailResults(job) {
+            if (!job.result_data || Object.keys(job.result_data).length === 0) {
+                document.getElementById('detail-results').innerHTML = '';
+                return;
+            }
+
+            let resultsHTML = `
+                <div class="detail-section">
+                    <h3>Job Results</h3>
+                    <div class="results-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 15px;">
+            `;
+
+            const rd = job.result_data;
+
+            // COG statistics (for process_raster jobs)
+            if (rd.cog_stats) {
+                resultsHTML += `
+                    <div class="result-card">
+                        <h4>📊 COG Statistics</h4>
+                        <div class="result-content">
+                            <div><strong>Files Created:</strong> ${rd.cog_stats.files_created || 0}</div>
+                            <div><strong>Total Size:</strong> ${(rd.cog_stats.total_size_mb || 0).toFixed(2)} MB</div>
+                            ${rd.cog_stats.compression ? `<div><strong>Compression:</strong> ${rd.cog_stats.compression}</div>` : ''}
+                        </div>
+                    </div>
+                `;
+            }
+
+            // MosaicJSON (for collection jobs)
+            if (rd.mosaic_json_url) {
+                resultsHTML += `
+                    <div class="result-card">
+                        <h4>🗺️ MosaicJSON</h4>
+                        <div class="result-content">
+                            <a href="${rd.mosaic_json_url}" target="_blank" style="color: #0071BC; text-decoration: none; word-break: break-all;">
+                                ${rd.mosaic_json_url}
+                            </a>
+                        </div>
+                    </div>
+                `;
+            }
+
+            // TiTiler URL (for raster jobs)
+            if (rd.titiler_url) {
+                resultsHTML += `
+                    <div class="result-card">
+                        <h4>🌐 TiTiler Endpoint</h4>
+                        <div class="result-content">
+                            <a href="${rd.titiler_url}" target="_blank" style="color: #0071BC; text-decoration: none; word-break: break-all;">
+                                ${rd.titiler_url}
+                            </a>
+                        </div>
+                    </div>
+                `;
+            }
+
+            // STAC collection ID (for jobs that create STAC items)
+            if (rd.stac_collection_id) {
+                resultsHTML += `
+                    <div class="result-card">
+                        <h4>📦 STAC Collection</h4>
+                        <div class="result-content">
+                            <a href="${API_BASE_URL}/api/stac/collections/${rd.stac_collection_id}" target="_blank" style="color: #0071BC; text-decoration: none;">
+                                ${rd.stac_collection_id}
+                            </a>
+                        </div>
+                    </div>
+                `;
+            }
+
+            // Items processed count
+            if (rd.items_processed !== undefined) {
+                resultsHTML += `
+                    <div class="result-card">
+                        <h4>✅ Items Processed</h4>
+                        <div class="result-content">
+                            <span style="font-size: 24px; color: #10B981; font-weight: 700;">${rd.items_processed}</span>
+                        </div>
+                    </div>
+                `;
+            }
+
+            // Generic key-value display for other result data
+            const displayedKeys = ['cog_stats', 'mosaic_json_url', 'titiler_url', 'stac_collection_id', 'items_processed', 'tasks_by_status'];
+            for (const [key, value] of Object.entries(rd)) {
+                if (!displayedKeys.includes(key) && value !== null && value !== undefined) {
+                    resultsHTML += `
+                        <div class="result-card">
+                            <h4>${key.replace(/_/g, ' ').replace(/\\b\\w/g, l => l.toUpperCase())}</h4>
+                            <div class="result-content">
+                                <pre style="margin: 0; white-space: pre-wrap; word-wrap: break-word;">${JSON.stringify(value, null, 2)}</pre>
+                            </div>
+                        </div>
+                    `;
+                }
+            }
+
+            resultsHTML += `
+                    </div>
+                </div>
+            `;
+
+            document.getElementById('detail-results').innerHTML = resultsHTML;
+        }
+
+        // Render tasks grouped by stage
+        function renderDetailTasks(job, tasks) {
+            if (!tasks || tasks.length === 0) {
+                document.getElementById('detail-tasks').innerHTML = `
+                    <div class="detail-section">
+                        <h3>Tasks</h3>
+                        <p style="color: #626F86; text-align: center; padding: 40px;">No tasks found for this job</p>
+                    </div>
+                `;
+                return;
+            }
+
+            // Group tasks by stage
+            const tasksByStage = {};
+            tasks.forEach(task => {
+                const stage = task.stage || 0;
+                if (!tasksByStage[stage]) {
+                    tasksByStage[stage] = [];
+                }
+                tasksByStage[stage].push(task);
+            });
+
+            let tasksHTML = `
+                <div class="detail-section">
+                    <h3>Tasks (${tasks.length} total)</h3>
+            `;
+
+            // Render each stage
+            const stages = Object.keys(tasksByStage).sort((a, b) => parseInt(a) - parseInt(b));
+            stages.forEach(stage => {
+                const stageTasks = tasksByStage[stage];
+                const failed = stageTasks.filter(t => t.status === 'failed').length;
+                const completed = stageTasks.filter(t => t.status === 'completed').length;
+                const processing = stageTasks.filter(t => t.status === 'processing').length;
+                const queued = stageTasks.filter(t => t.status === 'queued').length;
+
+                tasksHTML += `
+                    <div class="stage-group">
+                        <div class="stage-header" onclick="toggleStage('stage-${stage}')" style="cursor: pointer;">
+                            <div style="display: flex; justify-content: space-between; align-items: center;">
+                                <h4 style="margin: 0;">Stage ${stage} (${stageTasks.length} tasks)</h4>
+                                <div>
+                                    <span style="color: #626F86;">Q:</span> ${queued}
+                                    <span style="color: #F59E0B; margin-left: 8px;">P:</span> ${processing}
+                                    <span style="color: #10B981; margin-left: 8px;">C:</span> ${completed}
+                                    <span style="color: #DC2626; margin-left: 8px;">F:</span> ${failed}
+                                    <span style="margin-left: 10px;">▼</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div id="stage-${stage}" class="stage-tasks hidden" style="margin-top: 15px;">
+                `;
+
+                // Render tasks in this stage
+                stageTasks.forEach(task => {
+                    const errorHTML = task.status === 'failed' && task.error_details ? `
+                        <div style="margin-top: 10px; padding: 10px; background: #FEE2E2; border-left: 3px solid #DC2626; border-radius: 3px;">
+                            <strong style="color: #DC2626;">Error:</strong>
+                            <div style="color: #DC2626; font-size: 13px; margin-top: 5px;">${task.error_details}</div>
+                        </div>
+                    ` : '';
+
+                    tasksHTML += `
+                        <div class="task-item" style="background: white; padding: 15px; border: 1px solid #e9ecef; border-radius: 3px; margin-bottom: 10px;">
+                            <div style="display: flex; justify-content: space-between; align-items: start;">
+                                <div>
+                                    <div style="font-weight: 600; color: #053657;">${task.task_type}</div>
+                                    <div style="font-size: 12px; color: #626F86; font-family: 'Courier New', monospace; margin-top: 5px;">
+                                        ${task.task_id.substring(0, 8)}...${task.task_id.substring(task.task_id.length - 8)}
+                                    </div>
+                                </div>
+                                <span class="status-badge status-${task.status}">${task.status}</span>
+                            </div>
+                            ${errorHTML}
+                            ${task.result_data ? `
+                                <button class="action-button action-button-secondary" onclick="toggleJSON('task-${task.task_id}')" style="margin-top: 10px; font-size: 12px; padding: 6px 12px;">
+                                    View Result Data
+                                </button>
+                                <div id="task-${task.task_id}" class="expandable-json hidden" style="margin-top: 10px;">
+                                    <pre>${JSON.stringify(task.result_data, null, 2)}</pre>
+                                </div>
+                            ` : ''}
+                        </div>
+                    `;
+                });
+
+                tasksHTML += `
+                        </div>
+                    </div>
+                `;
+            });
+
+            tasksHTML += `
+                </div>
+            `;
+
+            document.getElementById('detail-tasks').innerHTML = tasksHTML;
+        }
+
+        // Show jobs list (back button)
+        function showJobsList() {
+            document.getElementById('job-detail-view').classList.add('hidden');
+            document.getElementById('jobs-container').classList.remove('hidden');
+            document.getElementById('stats-banner').classList.remove('hidden');
+            document.getElementById('controls').classList.remove('hidden');
+        }
+
+        // Toggle stage visibility
+        function toggleStage(stageId) {
+            const stageEl = document.getElementById(stageId);
+            if (stageEl) {
+                stageEl.classList.toggle('hidden');
+            }
+        }
+
+        // Toggle JSON visibility
+        function toggleJSON(jsonId) {
+            const jsonEl = document.getElementById(jsonId);
+            if (jsonEl) {
+                jsonEl.classList.toggle('hidden');
+            }
+        }
+
+        // Copy to clipboard utility
+        function copyToClipboard(text, message) {
+            navigator.clipboard.writeText(text).then(() => {
+                alert(message || 'Copied to clipboard!');
+            }).catch(err => {
+                console.error('Failed to copy:', err);
+                alert('Failed to copy to clipboard');
+            });
         }
         """

@@ -395,3 +395,146 @@ def extract_and_insert_stac_item(params: dict) -> dict[str, Any]:
 - **Our code** → Azure metadata, Workflow orchestration, Custom properties
 
 **Result**: Minimal custom code, maximum reliability, easy maintenance.
+
+---
+
+## 🗺️ IMPORTANT: TiTiler-pgSTAC Visualization Requirements
+
+**Date Added**: November 15, 2025
+
+### Critical Metadata for Map Viewers
+
+When creating STAC items for use with TiTiler-pgSTAC, **ensure proper geographic extent metadata** is included. This is essential for map viewers to automatically zoom to the correct location.
+
+#### ⚠️ Known Limitation
+
+TiTiler-pgSTAC's search registration endpoint **does NOT compute or cache geographic bounds** from search results. The TileJSON endpoint returns global bounds (`-180, -85, 180, 85`) instead of actual data extent, causing map viewers to default to a global view.
+
+#### ✅ Solution: Proper STAC Item Metadata
+
+Ensure every STAC item has accurate `bbox` and `geometry`:
+
+```python
+def create_stac_item_from_cog(cog_path, item_id, collection_id):
+    """Create STAC item with proper bounds for TiTiler visualization"""
+
+    with rasterio.open(cog_path) as src:
+        bounds = src.bounds  # (minx, miny, maxx, maxy)
+
+        # Reproject to WGS84 if needed
+        if src.crs != 'EPSG:4326':
+            from rasterio.warp import transform_bounds
+            bbox_wgs84 = transform_bounds(src.crs, 'EPSG:4326', *bounds)
+        else:
+            bbox_wgs84 = bounds
+
+        # Create proper geometry
+        from shapely.geometry import box, mapping
+        geometry = mapping(box(*bbox_wgs84))
+
+    item = {
+        "type": "Feature",
+        "stac_version": "1.0.0",
+        "id": item_id,
+        "collection": collection_id,
+        "bbox": list(bbox_wgs84),  # ✅ CRITICAL: Accurate bbox in WGS84
+        "geometry": geometry,       # ✅ CRITICAL: Accurate geometry
+        "properties": {
+            "datetime": "2019-08-14T00:00:00Z",
+            # ... other properties
+        },
+        "assets": {
+            "data": {
+                "href": f"/vsiaz/container/{item_id}.tif",
+                "type": "image/tiff; application=geotiff",
+                "roles": ["data"]
+            }
+        }
+    }
+
+    return item
+```
+
+#### 📊 Collection-Level Extent
+
+Also ensure collections have proper spatial extent calculated from all items:
+
+```python
+def update_collection_extent(collection_id):
+    """
+    Calculate and update collection extent from all items.
+    Essential for client applications to know data coverage.
+    """
+
+    query = """
+    SELECT
+        ST_XMin(ST_Extent(geometry)) as minx,
+        ST_YMin(ST_Extent(geometry)) as miny,
+        ST_XMax(ST_Extent(geometry)) as maxx,
+        ST_YMax(ST_Extent(geometry)) as maxy,
+        MIN(datetime) as min_datetime,
+        MAX(datetime) as max_datetime
+    FROM pgstac.items
+    WHERE collection = %s
+    """
+
+    result = cursor.execute(query, (collection_id,))
+    extent = result.fetchone()
+
+    collection_extent = {
+        "spatial": {
+            "bbox": [[
+                extent['minx'],
+                extent['miny'],
+                extent['maxx'],
+                extent['maxy']
+            ]]
+        },
+        "temporal": {
+            "interval": [[
+                extent['min_datetime'],
+                extent['max_datetime']
+            ]]
+        }
+    }
+
+    # Update collection
+    update_query = """
+    UPDATE pgstac.collections
+    SET content = jsonb_set(content, '{extent}', %s::jsonb)
+    WHERE id = %s
+    """
+
+    cursor.execute(update_query, (json.dumps(collection_extent), collection_id))
+```
+
+#### 🎯 Why This Matters
+
+**Without proper bounds:**
+- Map viewers start at global extent (0°, 0° - off the coast of Africa)
+- Users must manually search/pan to find imagery
+- Poor user experience for tile visualization
+
+**With proper bounds:**
+- Clients can query collection extent
+- Map applications can zoom to data automatically
+- Better integration with GIS tools
+- Proper spatial indexing in pgSTAC
+
+#### 📝 ETL Checklist
+
+When implementing STAC extraction in your ETL pipeline:
+
+- [ ] ✅ Extract accurate `bbox` from each COG using `rasterio`
+- [ ] ✅ Reproject bounds to WGS84 (EPSG:4326) if source CRS differs
+- [ ] ✅ Create proper GeoJSON `geometry` from bounds
+- [ ] ✅ Use `rio-stac.create_stac_item()` which handles this automatically
+- [ ] ✅ After ingesting all items, calculate and update collection `extent`
+- [ ] ✅ Verify items have valid geometries: `SELECT COUNT(*) FROM pgstac.items WHERE geometry IS NULL`
+- [ ] ✅ Test visualization in TiTiler-pgSTAC map viewer
+
+#### 🔗 Related Documentation
+
+- TiTiler-pgSTAC Search API: Limited to search query parameters, doesn't compute bounds
+- STAC Specification: `bbox` is required when `geometry` is non-null
+- pgSTAC: Uses PostGIS for spatial indexing, requires valid geometries

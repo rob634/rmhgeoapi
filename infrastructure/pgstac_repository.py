@@ -80,8 +80,21 @@ class PgStacRepository:
         Args:
             connection_string: PostgreSQL connection string (uses config if not provided)
         """
+        from infrastructure.postgresql import PostgreSQLRepository
+
         self.config = get_config()
-        self.connection_string = connection_string or self.config.postgis_connection_string
+
+        # Use PostgreSQLRepository for managed identity support (16 NOV 2025)
+        if connection_string:
+            self._pg_repo = PostgreSQLRepository(
+                connection_string=connection_string,
+                schema_name='pgstac'
+            )
+        else:
+            self._pg_repo = PostgreSQLRepository(schema_name='pgstac')
+
+        # Keep connection_string attribute for backward compatibility
+        self.connection_string = self._pg_repo.conn_string
 
     # =========================================================================
     # COLLECTION OPERATIONS

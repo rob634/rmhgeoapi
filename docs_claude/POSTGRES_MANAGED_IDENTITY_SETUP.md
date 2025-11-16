@@ -26,11 +26,21 @@ Your Function App `rmhazuregeoapi` already has system-assigned managed identity 
 
 ## 🔐 Identity Details
 
-**Identity Name for PostgreSQL**: `rmhazuregeoapi-identity`
+**Identity Name for PostgreSQL**: `rmhazuregeoapi`
 
-This is the default naming convention used by the code:
-- Format: `{FUNCTION_APP_NAME}-identity`
+This is configured via environment variables:
+- `MANAGED_IDENTITY_NAME=rmhazuregeoapi` (explicitly set in Azure)
+- Fallback: `WEBSITE_SITE_NAME` (Function App name)
 - Matches PostgreSQL user that will be created below
+
+**Managed Identity Type**: System-Assigned (default)
+- No client ID needed
+- Uses `ManagedIdentityCredential()` without parameters
+
+**User-Assigned Identities** (for production multi-identity scenarios):
+- Set `MANAGED_IDENTITY_CLIENT_ID` to the client ID of the user-assigned identity
+- Allows different identities with different privileges
+- Example: Read-only identity, admin identity, ETL identity
 
 ---
 
@@ -91,22 +101,22 @@ Copy and paste the following SQL commands into your PostgreSQL client:
 -- CREATE MANAGED IDENTITY USER
 -- ============================================================================
 -- This creates a PostgreSQL role for the Function App's managed identity.
--- The name MUST be exactly: rmhazuregeoapi-identity
+-- The name MUST be exactly: rmhazuregeoapi (NO -identity suffix)
 -- ============================================================================
 
-SELECT pgaadauth_create_principal('rmhazuregeoapi-identity', false, false);
+SELECT pgaadauth_create_principal('rmhazuregeoapi', false, false);
 
 -- Expected output:
 -- pgaadauth_create_principal
 -- ----------------------------
--- Created role for "rmhazuregeoapi-identity"
+-- Created role for "rmhazuregeoapi"
 
 
 -- ============================================================================
 -- GRANT DATABASE CONNECTION
 -- ============================================================================
 
-GRANT CONNECT ON DATABASE geopgflex TO "rmhazuregeoapi-identity";
+GRANT CONNECT ON DATABASE geopgflex TO "rmhazuregeoapi";
 
 
 -- ============================================================================
@@ -114,11 +124,11 @@ GRANT CONNECT ON DATABASE geopgflex TO "rmhazuregeoapi-identity";
 -- ============================================================================
 -- Allows the identity to use and create objects in these schemas
 
-GRANT USAGE, CREATE ON SCHEMA app TO "rmhazuregeoapi-identity";
-GRANT USAGE, CREATE ON SCHEMA geo TO "rmhazuregeoapi-identity";
-GRANT USAGE, CREATE ON SCHEMA pgstac TO "rmhazuregeoapi-identity";
-GRANT USAGE, CREATE ON SCHEMA h3 TO "rmhazuregeoapi-identity";
-GRANT USAGE ON SCHEMA platform TO "rmhazuregeoapi-identity";
+GRANT USAGE, CREATE ON SCHEMA app TO "rmhazuregeoapi";
+GRANT USAGE, CREATE ON SCHEMA geo TO "rmhazuregeoapi";
+GRANT USAGE, CREATE ON SCHEMA pgstac TO "rmhazuregeoapi";
+GRANT USAGE, CREATE ON SCHEMA h3 TO "rmhazuregeoapi";
+GRANT USAGE ON SCHEMA platform TO "rmhazuregeoapi";
 
 
 -- ============================================================================
@@ -126,11 +136,11 @@ GRANT USAGE ON SCHEMA platform TO "rmhazuregeoapi-identity";
 -- ============================================================================
 -- Allows SELECT, INSERT, UPDATE, DELETE on all current tables
 
-GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA app TO "rmhazuregeoapi-identity";
-GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA geo TO "rmhazuregeoapi-identity";
-GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA pgstac TO "rmhazuregeoapi-identity";
-GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA h3 TO "rmhazuregeoapi-identity";
-GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA platform TO "rmhazuregeoapi-identity";
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA app TO "rmhazuregeoapi";
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA geo TO "rmhazuregeoapi";
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA pgstac TO "rmhazuregeoapi";
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA h3 TO "rmhazuregeoapi";
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA platform TO "rmhazuregeoapi";
 
 
 -- ============================================================================
@@ -138,11 +148,11 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA platform TO "rmhazu
 -- ============================================================================
 -- Required for INSERT operations on tables with SERIAL/BIGSERIAL columns
 
-GRANT USAGE ON ALL SEQUENCES IN SCHEMA app TO "rmhazuregeoapi-identity";
-GRANT USAGE ON ALL SEQUENCES IN SCHEMA geo TO "rmhazuregeoapi-identity";
-GRANT USAGE ON ALL SEQUENCES IN SCHEMA pgstac TO "rmhazuregeoapi-identity";
-GRANT USAGE ON ALL SEQUENCES IN SCHEMA h3 TO "rmhazuregeoapi-identity";
-GRANT USAGE ON ALL SEQUENCES IN SCHEMA platform TO "rmhazuregeoapi-identity";
+GRANT USAGE ON ALL SEQUENCES IN SCHEMA app TO "rmhazuregeoapi";
+GRANT USAGE ON ALL SEQUENCES IN SCHEMA geo TO "rmhazuregeoapi";
+GRANT USAGE ON ALL SEQUENCES IN SCHEMA pgstac TO "rmhazuregeoapi";
+GRANT USAGE ON ALL SEQUENCES IN SCHEMA h3 TO "rmhazuregeoapi";
+GRANT USAGE ON ALL SEQUENCES IN SCHEMA platform TO "rmhazuregeoapi";
 
 
 -- ============================================================================
@@ -151,10 +161,10 @@ GRANT USAGE ON ALL SEQUENCES IN SCHEMA platform TO "rmhazuregeoapi-identity";
 -- CRITICAL: Allows execution of PostgreSQL functions used by the application
 -- Examples: complete_task_and_check_stage, advance_job_stage, pgstac functions
 
-GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA app TO "rmhazuregeoapi-identity";
-GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA pgstac TO "rmhazuregeoapi-identity";
-GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA h3 TO "rmhazuregeoapi-identity";
-GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA platform TO "rmhazuregeoapi-identity";
+GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA app TO "rmhazuregeoapi";
+GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA pgstac TO "rmhazuregeoapi";
+GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA h3 TO "rmhazuregeoapi";
+GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA platform TO "rmhazuregeoapi";
 
 
 -- ============================================================================
@@ -164,37 +174,37 @@ GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA platform TO "rmhazuregeoapi-identity";
 
 -- Future tables
 ALTER DEFAULT PRIVILEGES IN SCHEMA app
-    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO "rmhazuregeoapi-identity";
+    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO "rmhazuregeoapi";
 ALTER DEFAULT PRIVILEGES IN SCHEMA geo
-    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO "rmhazuregeoapi-identity";
+    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO "rmhazuregeoapi";
 ALTER DEFAULT PRIVILEGES IN SCHEMA pgstac
-    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO "rmhazuregeoapi-identity";
+    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO "rmhazuregeoapi";
 ALTER DEFAULT PRIVILEGES IN SCHEMA h3
-    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO "rmhazuregeoapi-identity";
+    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO "rmhazuregeoapi";
 ALTER DEFAULT PRIVILEGES IN SCHEMA platform
-    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO "rmhazuregeoapi-identity";
+    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO "rmhazuregeoapi";
 
 -- Future sequences
 ALTER DEFAULT PRIVILEGES IN SCHEMA app
-    GRANT USAGE ON SEQUENCES TO "rmhazuregeoapi-identity";
+    GRANT USAGE ON SEQUENCES TO "rmhazuregeoapi";
 ALTER DEFAULT PRIVILEGES IN SCHEMA geo
-    GRANT USAGE ON SEQUENCES TO "rmhazuregeoapi-identity";
+    GRANT USAGE ON SEQUENCES TO "rmhazuregeoapi";
 ALTER DEFAULT PRIVILEGES IN SCHEMA pgstac
-    GRANT USAGE ON SEQUENCES TO "rmhazuregeoapi-identity";
+    GRANT USAGE ON SEQUENCES TO "rmhazuregeoapi";
 ALTER DEFAULT PRIVILEGES IN SCHEMA h3
-    GRANT USAGE ON SEQUENCES TO "rmhazuregeoapi-identity";
+    GRANT USAGE ON SEQUENCES TO "rmhazuregeoapi";
 ALTER DEFAULT PRIVILEGES IN SCHEMA platform
-    GRANT USAGE ON SEQUENCES TO "rmhazuregeoapi-identity";
+    GRANT USAGE ON SEQUENCES TO "rmhazuregeoapi";
 
 -- Future functions
 ALTER DEFAULT PRIVILEGES IN SCHEMA app
-    GRANT EXECUTE ON FUNCTIONS TO "rmhazuregeoapi-identity";
+    GRANT EXECUTE ON FUNCTIONS TO "rmhazuregeoapi";
 ALTER DEFAULT PRIVILEGES IN SCHEMA pgstac
-    GRANT EXECUTE ON FUNCTIONS TO "rmhazuregeoapi-identity";
+    GRANT EXECUTE ON FUNCTIONS TO "rmhazuregeoapi";
 ALTER DEFAULT PRIVILEGES IN SCHEMA h3
-    GRANT EXECUTE ON FUNCTIONS TO "rmhazuregeoapi-identity";
+    GRANT EXECUTE ON FUNCTIONS TO "rmhazuregeoapi";
 ALTER DEFAULT PRIVILEGES IN SCHEMA platform
-    GRANT EXECUTE ON FUNCTIONS TO "rmhazuregeoapi-identity";
+    GRANT EXECUTE ON FUNCTIONS TO "rmhazuregeoapi";
 ```
 
 ---
@@ -207,19 +217,19 @@ After executing the SQL commands above, run these verification queries:
 -- Check that user exists
 SELECT rolname, rolcanlogin
 FROM pg_roles
-WHERE rolname = 'rmhazuregeoapi-identity';
+WHERE rolname = 'rmhazuregeoapi';
 
 -- Expected output:
 --        rolname          | rolcanlogin
 -- ------------------------+-------------
--- rmhazuregeoapi-identity | t
+-- rmhazuregeoapi | t
 
 
 -- Check schema privileges
 SELECT
     nspname AS schema,
-    has_schema_privilege('rmhazuregeoapi-identity', nspname, 'USAGE') AS has_usage,
-    has_schema_privilege('rmhazuregeoapi-identity', nspname, 'CREATE') AS has_create
+    has_schema_privilege('rmhazuregeoapi', nspname, 'USAGE') AS has_usage,
+    has_schema_privilege('rmhazuregeoapi', nspname, 'CREATE') AS has_create
 FROM pg_namespace
 WHERE nspname IN ('app', 'geo', 'pgstac', 'h3', 'platform')
 ORDER BY nspname;
@@ -232,7 +242,7 @@ SELECT
     table_schema,
     COUNT(*) AS tables_with_privileges
 FROM information_schema.role_table_grants
-WHERE grantee = 'rmhazuregeoapi-identity'
+WHERE grantee = 'rmhazuregeoapi'
     AND table_schema IN ('app', 'geo', 'pgstac', 'h3', 'platform')
 GROUP BY table_schema
 ORDER BY table_schema;
@@ -245,7 +255,7 @@ SELECT
     routine_schema,
     COUNT(*) AS functions_with_execute
 FROM information_schema.routine_privileges
-WHERE grantee = 'rmhazuregeoapi-identity'
+WHERE grantee = 'rmhazuregeoapi'
     AND routine_schema IN ('app', 'pgstac', 'h3', 'platform')
 GROUP BY routine_schema
 ORDER BY routine_schema;
@@ -267,7 +277,7 @@ az functionapp config appsettings set \
   --resource-group rmhazure_rg \
   --settings \
     USE_MANAGED_IDENTITY=true \
-    MANAGED_IDENTITY_NAME=rmhazuregeoapi-identity
+    MANAGED_IDENTITY_NAME=rmhazuregeoapi
 ```
 
 ### Step 2: Deploy Code
@@ -314,7 +324,7 @@ Look for:
 
 ## 🚨 Troubleshooting
 
-### Issue: "role 'rmhazuregeoapi-identity' already exists"
+### Issue: "role 'rmhazuregeoapi' already exists"
 
 **Cause**: User already created (safe to ignore)
 
@@ -340,7 +350,7 @@ Look for:
 - **Type**: System-Assigned (lifetime tied to Function App)
 - **Principal ID**: `b929d8df-8e4a-43a0-aa1f-6b8743d4ca32`
 - **Tenant ID**: `086aef7e-db12-4161-8a9f-777deb499cfa`
-- **PostgreSQL User Name**: `rmhazuregeoapi-identity`
+- **PostgreSQL User Name**: `rmhazuregeoapi`
 
 **Connection Details**:
 - **Host**: `rmhpgflex.postgres.database.azure.com`

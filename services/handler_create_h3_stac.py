@@ -114,7 +114,11 @@ def create_h3_stac(task_params: dict) -> dict:
         logger.info("📊 STEP 1: Querying PostGIS for grid metadata...")
         config = get_config()
 
-        with psycopg.connect(config.postgis_connection_string) as conn:
+        from config import get_postgres_connection_string
+
+        connection_string = get_postgres_connection_string()
+
+        with psycopg.connect(connection_string) as conn:
             with conn.cursor() as cur:
                 # Query grid statistics
                 query = sql.SQL("""

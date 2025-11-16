@@ -165,8 +165,12 @@ async def stream_to_postgis_async(
     logger.info(f"Starting async stream to PostGIS (grid_id={grid_id}, batch_size={batch_size})")
 
     # Create async connection pool (2-4 connections)
+    from config import get_postgres_connection_string
+
+    connection_string = get_postgres_connection_string()
+
     pool = await asyncpg.create_pool(
-        config.postgis_connection_string,
+        connection_string,
         min_size=2,
         max_size=4,
         command_timeout=60
@@ -313,7 +317,11 @@ def h3_native_streaming_postgis(task_params: dict) -> dict:
         from config import get_config
         config = get_config()
 
-        with psycopg.connect(config.postgis_connection_string) as conn:
+        from config import get_postgres_connection_string
+
+        connection_string = get_postgres_connection_string()
+
+        with psycopg.connect(connection_string) as conn:
             with conn.cursor() as cur:
                 cur.execute("""
                     SELECT

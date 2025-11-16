@@ -238,14 +238,14 @@ class BootstrapH3LandGridPyramidJob(JobBaseMixin, JobBase):  # Mixin FIRST for c
 
             # Extract parent count from Stage 1 result
             stage1_result = previous_results[0].get('result', {})
-            rows_inserted = stage1_result.get('rows_inserted', 0)
+            cells_inserted = stage1_result.get('cells_inserted', 0)
 
-            if rows_inserted == 0:
+            if cells_inserted == 0:
                 raise ValueError("Stage 1 inserted 0 cells - cannot cascade")
 
             # Calculate number of batches
             from math import ceil
-            num_batches = ceil(rows_inserted / cascade_batch_size)
+            num_batches = ceil(cells_inserted / cascade_batch_size)
 
             # Create fan-out tasks (one per batch)
             tasks = []

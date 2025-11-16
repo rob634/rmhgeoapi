@@ -365,7 +365,7 @@ class JobBaseMixin(ABC):
         Schema format:
             {
                 'param_name': {
-                    'type': 'int'|'str'|'float'|'bool',
+                    'type': 'int'|'str'|'float'|'bool'|'list',
                     'required': True|False,
                     'default': <value>,
                     'min': <number>,  # For int/float
@@ -428,6 +428,8 @@ class JobBaseMixin(ABC):
                 value = cls._validate_str(param_name, value, schema)
             elif param_type == 'bool':
                 value = cls._validate_bool(param_name, value)
+            elif param_type == 'list':
+                value = cls._validate_list(param_name, value, schema)
             else:
                 raise ValueError(f"Unknown type '{param_type}' for parameter '{param_name}'")
 
@@ -499,6 +501,15 @@ class JobBaseMixin(ABC):
         if not isinstance(value, bool):
             raise ValueError(
                 f"Parameter '{param_name}' must be a boolean, got {type(value).__name__}"
+            )
+        return value
+
+    @staticmethod
+    def _validate_list(param_name: str, value: Any, schema: dict) -> list:
+        """Validate list parameter."""
+        if not isinstance(value, list):
+            raise ValueError(
+                f"Parameter '{param_name}' must be a list, got {type(value).__name__}"
             )
         return value
 

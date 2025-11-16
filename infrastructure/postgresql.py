@@ -326,12 +326,19 @@ class PostgreSQLRepository(BaseRepository):
 
         Token Acquisition:
         -----------------
-        Uses DefaultAzureCredential which tries in order:
-        1. EnvironmentCredential (service principal via env vars)
-        2. ManagedIdentityCredential (Azure Functions, VMs, etc.)
-        3. AzureCliCredential (local development with `az login`)
-        4. Visual Studio Code credential
-        5. Interactive browser login
+        Uses ManagedIdentityCredential explicitly to acquire tokens for the
+        configured managed identity. Supports both system-assigned and user-assigned
+        managed identities via MANAGED_IDENTITY_CLIENT_ID environment variable.
+
+        System-Assigned Identity (default):
+            - Uses the Function App's system-assigned managed identity
+            - No client_id needed
+            - Identity name matches WEBSITE_SITE_NAME
+
+        User-Assigned Identity (production):
+            - Set MANAGED_IDENTITY_CLIENT_ID to the client ID of the user-assigned identity
+            - Allows using specific identities with different privileges
+            - Identity name set via MANAGED_IDENTITY_NAME environment variable
 
         Connection String Format:
         ------------------------
@@ -345,27 +352,42 @@ class PostgreSQLRepository(BaseRepository):
         Raises:
         ------
         RuntimeError
-            If token acquisition fails and no password fallback available.
+            If token acquisition fails (NO fallbacks).
 
         Environment Variables:
         ---------------------
-        MANAGED_IDENTITY_NAME: Override default identity name (optional)
-        POSTGIS_PASSWORD: Fallback password if token acquisition fails (optional)
+        MANAGED_IDENTITY_NAME: PostgreSQL user name (defaults to WEBSITE_SITE_NAME)
+        MANAGED_IDENTITY_CLIENT_ID: Client ID for user-assigned identity (optional)
 
         Security Notes:
         --------------
         - Tokens are short-lived (1 hour) and automatically refreshed
         - Token is logged in masked form for debugging
-        - No passwords stored in configuration or Key Vault
+        - NO password fallbacks - managed identity or fail
         """
-        from azure.identity import DefaultAzureCredential
+        from azure.identity import ManagedIdentityCredential
         from azure.core.exceptions import ClientAuthenticationError
 
         try:
-            logger.debug("🔑 Acquiring Azure Managed Identity token...")
+            # Get managed identity name (matches PostgreSQL user)
+            # Default: Same as Function App name (Azure AD displayName for system-assigned identity)
+            managed_identity_name = os.getenv(
+                "MANAGED_IDENTITY_NAME",
+                os.getenv('WEBSITE_SITE_NAME', 'rmhazuregeoapi')
+            )
 
-            # Create credential (cached internally by Azure SDK)
-            credential = DefaultAzureCredential()
+            # Get client ID for user-assigned identity (optional)
+            # If not set, uses system-assigned identity
+            client_id = os.getenv("MANAGED_IDENTITY_CLIENT_ID")
+
+            if client_id:
+                logger.debug(f"🔑 Acquiring token for user-assigned managed identity: {client_id}")
+                credential = ManagedIdentityCredential(client_id=client_id)
+            else:
+                logger.debug(f"🔑 Acquiring token for system-assigned managed identity")
+                credential = ManagedIdentityCredential()
+
+            logger.debug(f"👤 PostgreSQL user: {managed_identity_name}")
 
             # Get access token for PostgreSQL
             # Scope is fixed for all Azure PostgreSQL Flexible Servers
@@ -375,15 +397,6 @@ class PostgreSQLRepository(BaseRepository):
             token = token_response.token
 
             logger.debug(f"✅ Token acquired successfully (expires in ~{token_response.expires_on - __import__('time').time():.0f}s)")
-
-            # Get managed identity name (matches PostgreSQL user)
-            # Default: Same as Function App name (Azure AD displayName for system-assigned identity)
-            managed_identity_name = os.getenv(
-                "MANAGED_IDENTITY_NAME",
-                os.getenv('WEBSITE_SITE_NAME', 'rmhazuregeoapi')
-            )
-
-            logger.debug(f"👤 Using managed identity: {managed_identity_name}")
 
             # Build connection string with token as password
             # Use psycopg3 format (key=value pairs)
@@ -410,34 +423,26 @@ class PostgreSQLRepository(BaseRepository):
             return conn_str
 
         except ClientAuthenticationError as e:
-            logger.error(f"❌ Failed to acquire managed identity token: {e}")
+            # NO FALLBACKS - fail immediately if managed identity configured
+            error_msg = (
+                f"Managed identity token acquisition failed: {e}\n"
+                f"Function App has managed identity enabled but token acquisition failed.\n"
+                f"Ensure managed identity is assigned to PostgreSQL and user exists in database."
+            )
+            logger.error(f"❌ {error_msg}")
             logger.error(f"   Error type: {type(e).__name__}")
             logger.error(f"   Error details: {str(e)}")
-
-            # Check if password fallback is available
-            if self.config.postgis_password:
-                logger.warning("⚠️ Falling back to password authentication")
-                return self.config.postgis_connection_string
-            else:
-                error_msg = (
-                    "Managed identity token acquisition failed and no password available. "
-                    "Ensure Function App has managed identity enabled and assigned to PostgreSQL."
-                )
-                logger.error(f"❌ {error_msg}")
-                raise RuntimeError(error_msg) from e
+            raise RuntimeError(error_msg) from e
 
         except Exception as e:
-            logger.error(f"❌ Unexpected error acquiring managed identity token: {e}")
+            # NO FALLBACKS - fail immediately on any error
+            error_msg = (
+                f"Unexpected error during managed identity token acquisition: {e}\n"
+                f"Check Azure AD configuration and network connectivity."
+            )
+            logger.error(f"❌ {error_msg}")
             logger.error(f"   Error type: {type(e).__name__}")
-
-            # Check if password fallback is available
-            if self.config.postgis_password:
-                logger.warning("⚠️ Falling back to password authentication")
-                return self.config.postgis_connection_string
-            else:
-                error_msg = f"Unexpected error during token acquisition: {e}"
-                logger.error(f"❌ {error_msg}")
-                raise RuntimeError(error_msg) from e
+            raise RuntimeError(error_msg) from e
     
     @contextmanager
     def _get_connection(self):

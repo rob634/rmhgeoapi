@@ -77,19 +77,20 @@ Endpoints:
     GET  /api/stac_api/collections/{collection_id}/items/{item_id} - STAC item detail
 
     Database Queries (DEV/TEST):
-    GET  /api/db/jobs?status=failed&limit=10 - Query jobs
-    GET  /api/db/tasks/{job_id} - Query tasks for job
-    GET  /api/db/api_requests?limit=10 - Query Platform API requests (NEW 29 OCT 2025)
-    GET  /api/db/orchestration_jobs/{request_id} - Query Platform orchestration (NEW 29 OCT 2025)
-    GET  /api/db/stats - Database statistics
+    GET  /api/dbadmin/jobs?status=failed&limit=10 - Query jobs
+    GET  /api/dbadmin/tasks/{job_id} - Query tasks for job
+    GET  /api/dbadmin/stats - Database statistics
+    GET  /api/dbadmin/diagnostics/enums - Enum diagnostics
+    GET  /api/dbadmin/diagnostics/functions - Function tests
+    GET  /api/dbadmin/diagnostics/all - All diagnostics
 
     Monitoring:
     GET  /api/monitor/poison - Check poison queue status
     POST /api/monitor/poison - Process poison messages
 
     Schema Management (DEV ONLY):
-    POST /api/db/schema/nuke - Drop all schema objects (dev only)
-    POST /api/db/schema/redeploy - Nuke and redeploy schema (dev only)
+    POST /api/dbadmin/maintenance/nuke?confirm=yes - Drop all schema objects (dev only)
+    POST /api/dbadmin/maintenance/redeploy?confirm=yes - Nuke and redeploy schema (dev only)
 
 Supported Operations:
     Pydantic Workflow Definition Pattern (Job→Task Architecture):
@@ -203,12 +204,13 @@ from triggers.submit_job import submit_job_trigger
 from triggers.get_job_status import get_job_status_trigger
 from triggers.poison_monitor import poison_monitor_trigger
 from triggers.schema_pydantic_deploy import pydantic_deploy_trigger
-# ⚠️ LEGACY IMPORTS - DEPRECATED (10 NOV 2025)
+# ⚠️ LEGACY IMPORTS - DEPRECATED (10 NOV 2025) - COMMENTED OUT 16 NOV 2025
 # These imports are kept temporarily for backward compatibility
 # All functionality has been migrated to triggers/admin/
-from triggers.db_query import (
-    schema_nuke_trigger  # Still used temporarily by db_maintenance.py
-)
+# File triggers/db_query.py has been deleted - routes no longer needed
+# from triggers.db_query import (
+#     schema_nuke_trigger  # Still used temporarily by db_maintenance.py
+# )
 
 from triggers.analyze_container import analyze_container_trigger
 from triggers.stac_setup import stac_setup_trigger
@@ -643,23 +645,25 @@ def admin_h3_debug(req: func.HttpRequest) -> func.HttpResponse:
     return admin_h3_debug_trigger.handle_request(req)
 
 
-# 🚨 NUCLEAR RED BUTTON - DEVELOPMENT ONLY (⚠️ DEPRECATED - Use /api/admin/db/maintenance/nuke)
-@app.route(route="db/schema/nuke", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
-def nuclear_schema_reset(req: func.HttpRequest) -> func.HttpResponse:
-    """⚠️ DEPRECATED: Use /api/admin/db/maintenance/nuke instead. POST /api/db/schema/nuke?confirm=yes"""
-    return admin_db_maintenance_trigger.handle_request(req)
+# 🚨 NUCLEAR RED BUTTON - DEVELOPMENT ONLY (⚠️ DEPRECATED - COMMENTED OUT 16 NOV 2025)
+# Use /api/dbadmin/maintenance/nuke instead
+# @app.route(route="db/schema/nuke", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
+# def nuclear_schema_reset(req: func.HttpRequest) -> func.HttpResponse:
+#     """⚠️ DEPRECATED: Use /api/dbadmin/maintenance/nuke instead. POST /api/db/schema/nuke?confirm=yes"""
+#     return admin_db_maintenance_trigger.handle_request(req)
 
 
-# 🔄 CONSOLIDATED REBUILD - DEVELOPMENT ONLY (⚠️ DEPRECATED - Use /api/admin/db/maintenance/redeploy)
-@app.route(route="db/schema/redeploy", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
-def redeploy_schema(req: func.HttpRequest) -> func.HttpResponse:
-    """⚠️ DEPRECATED: Use /api/admin/db/maintenance/redeploy instead. POST /api/db/schema/redeploy?confirm=yes"""
-    return admin_db_maintenance_trigger.handle_request(req)
+# 🔄 CONSOLIDATED REBUILD - DEVELOPMENT ONLY (⚠️ DEPRECATED - COMMENTED OUT 16 NOV 2025)
+# Use /api/dbadmin/maintenance/redeploy instead
+# @app.route(route="db/schema/redeploy", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
+# def redeploy_schema(req: func.HttpRequest) -> func.HttpResponse:
+#     """⚠️ DEPRECATED: Use /api/dbadmin/maintenance/redeploy instead. POST /api/db/schema/redeploy?confirm=yes"""
+#     return admin_db_maintenance_trigger.handle_request(req)
 
 
 # Note: Legacy inline redeploy code (150+ lines) has been removed (10 NOV 2025)
 # It has been migrated to triggers/admin/db_maintenance.py AdminDbMaintenanceTrigger._redeploy_schema()
-# The old /api/db/schema/redeploy route now redirects to admin_db_maintenance_trigger
+# Old routes /api/db/schema/nuke and /api/db/schema/redeploy commented out (16 NOV 2025)
 
 
 # ============================================================================

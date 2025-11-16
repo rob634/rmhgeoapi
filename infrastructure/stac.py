@@ -141,12 +141,28 @@ class PgStacInfrastructure:
         """
         Initialize STAC infrastructure manager.
 
+        ARCHITECTURE PRINCIPLE (16 NOV 2025):
+        All database access must go through PostgreSQLRepository to ensure
+        managed identity authentication works correctly.
+
         Args:
             connection_string: PostgreSQL connection string (uses config if not provided)
+                              DEPRECATED: Use PostgreSQLRepository instead
         """
+        from infrastructure.postgresql import PostgreSQLRepository
+
         self.config = get_config()
-        # Use the SAME connection string as core machine (single source of truth)
-        self.connection_string = connection_string or self.config.postgis_connection_string
+
+        # Use PostgreSQLRepository for all database connections (managed identity support)
+        # If explicit connection string provided, use it (for backward compatibility)
+        # Otherwise, let PostgreSQLRepository handle managed identity
+        if connection_string:
+            self._pg_repo = PostgreSQLRepository(
+                connection_string=connection_string,
+                schema_name='pgstac'
+            )
+        else:
+            self._pg_repo = PostgreSQLRepository(schema_name='pgstac')
 
     # =========================================================================
     # SCHEMA DETECTION - Fast idempotent checks
@@ -173,7 +189,7 @@ class PgStacInfrastructure:
         logger.info("🔍 Checking PgSTAC installation status...")
 
         try:
-            with psycopg.connect(self.connection_string) as conn:
+            with self._pg_repo._get_connection() as conn:
                 with conn.cursor() as cur:
                     # Check schema existence
                     cur.execute(
@@ -321,7 +337,7 @@ class PgStacInfrastructure:
         """Drop pgstac schema (DESTRUCTIVE - development only!)."""
         logger.warning("💣 Dropping pgstac schema...")
 
-        with psycopg.connect(self.connection_string) as conn:
+        with self._pg_repo._get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(sql.SQL("DROP SCHEMA IF EXISTS {} CASCADE").format(
                     sql.Identifier(self.PGSTAC_SCHEMA)
@@ -446,7 +462,7 @@ class PgStacInfrastructure:
         }
 
         try:
-            with psycopg.connect(self.connection_string) as conn:
+            with self._pg_repo._get_connection() as conn:
                 with conn.cursor() as cur:
                     # 1. Schema exists
                     cur.execute(
@@ -607,7 +623,7 @@ class PgStacInfrastructure:
         }
 
         try:
-            with psycopg.connect(self.connection_string) as conn:
+            with self._pg_repo._get_connection() as conn:
                 with conn.cursor() as cur:
                     # Insert collection using pgstac function
                     cur.execute(
@@ -700,7 +716,7 @@ class PgStacInfrastructure:
         }
 
         try:
-            with psycopg.connect(self.connection_string) as conn:
+            with self._pg_repo._get_connection() as conn:
                 with conn.cursor() as cur:
                     # Database-level idempotency check (18 OCT 2025)
                     # Check if collection already exists before attempting creation
@@ -799,7 +815,7 @@ class PgStacInfrastructure:
             collection fails with "no partition of relation items found for row" error.
         """
         try:
-            with psycopg.connect(self.connection_string) as conn:
+            with self._pg_repo._get_connection() as conn:
                 with conn.cursor() as cur:
                     # Query pgstac.collections table
                     cur.execute(
@@ -829,7 +845,7 @@ class PgStacInfrastructure:
             True if item exists, False otherwise
         """
         try:
-            with psycopg.connect(self.connection_string) as conn:
+            with self._pg_repo._get_connection() as conn:
                 with conn.cursor() as cur:
                     # Query pgstac.items table for existing item
                     cur.execute(
@@ -894,7 +910,7 @@ class PgStacInfrastructure:
         # =========================================================================
 
         try:
-            with psycopg.connect(self.connection_string) as conn:
+            with self._pg_repo._get_connection() as conn:
                 with conn.cursor() as cur:
                     cur.execute(
                         "SELECT * FROM pgstac.create_item(%s)",
@@ -943,7 +959,7 @@ class PgStacInfrastructure:
                 raise RuntimeError("Collection must exist before inserting items")
         """
         try:
-            with psycopg.connect(self.connection_string) as conn:
+            with self._pg_repo._get_connection() as conn:
                 with conn.cursor() as cur:
                     cur.execute(
                         "SELECT EXISTS(SELECT 1 FROM pgstac.collections WHERE id = %s)",
@@ -976,7 +992,7 @@ class PgStacInfrastructure:
         inserted = []
         failed = []
 
-        with psycopg.connect(self.connection_string) as conn:
+        with self._pg_repo._get_connection() as conn:
             with conn.cursor() as cur:
                 for item in items:
                     # Convert to dict if needed
@@ -1048,65 +1064,7 @@ def install_stac(drop_existing: bool = False) -> Dict[str, Any]:
 # These follow STAC API specification for interoperability
 # ============================================================================
 
-def get_all_collections() -> Dict[str, Any]:
-    """
-    Get all STAC collections (STAC API standard endpoint).
-
-    Implements: GET /collections
-
-    Returns STAC-compliant FeatureCollection of all collections.
-    Uses pgstac.all_collections() function.
-
-    Returns:
-        Dict with 'collections' array and metadata
-    """
-    logger = LoggerFactory.create_logger(ComponentType.SERVICE, "StacAPI")
-
-    try:
-        config = get_config()
-        connection_string = config.postgis_connection_string
-
-        with psycopg.connect(connection_string) as conn:
-            with conn.cursor() as cur:
-                # PgSTAC function to get all collections
-                cur.execute("SELECT * FROM pgstac.all_collections()")
-                result = cur.fetchone()
-
-                if result and result[0]:
-                    collections_data = result[0]
-
-                    # STAC API standard response format
-                    return {
-                        'collections': collections_data if isinstance(collections_data, list) else [collections_data],
-                        'links': [
-                            {
-                                'rel': 'self',
-                                'type': 'application/json',
-                                'href': '/collections'
-                            }
-                        ]
-                    }
-                else:
-                    return {
-                        'collections': [],
-                        'links': [
-                            {
-                                'rel': 'self',
-                                'type': 'application/json',
-                                'href': '/collections'
-                            }
-                        ]
-                    }
-
-    except Exception as e:
-        logger.error(f"Failed to get collections: {e}")
-        return {
-            'error': str(e),
-            'error_type': type(e).__name__
-        }
-
-
-def get_collection(collection_id: str) -> Dict[str, Any]:
+def get_collection(collection_id: str, repo: Optional['PostgreSQLRepository'] = None) -> Dict[str, Any]:
     """
     Get single STAC collection by ID (STAC API standard endpoint).
 
@@ -1114,6 +1072,7 @@ def get_collection(collection_id: str) -> Dict[str, Any]:
 
     Args:
         collection_id: Collection identifier
+        repo: Optional PostgreSQLRepository instance (creates new if not provided)
 
     Returns:
         STAC Collection object or error dict
@@ -1121,10 +1080,12 @@ def get_collection(collection_id: str) -> Dict[str, Any]:
     logger = LoggerFactory.create_logger(ComponentType.SERVICE, "StacAPI")
 
     try:
-        config = get_config()
-        connection_string = config.postgis_connection_string
+        # Use repository pattern (16 NOV 2025 - managed identity support)
+        if repo is None:
+            from infrastructure.postgresql import PostgreSQLRepository
+            repo = PostgreSQLRepository()
 
-        with psycopg.connect(connection_string) as conn:
+        with repo._get_connection() as conn:
             with conn.cursor() as cur:
                 # CRITICAL FIX (13 NOV 2025): pgSTAC 0.9.8 doesn't have get_collection() function
                 # Use direct table query instead - returns collection JSONB from content column
@@ -1155,7 +1116,8 @@ def get_collection_items(
     collection_id: str,
     limit: int = 100,
     bbox: Optional[List[float]] = None,
-    datetime_str: Optional[str] = None
+    datetime_str: Optional[str] = None,
+    repo: Optional['PostgreSQLRepository'] = None
 ) -> Dict[str, Any]:
     """
     Get items in a collection (STAC API standard endpoint).
@@ -1167,6 +1129,7 @@ def get_collection_items(
         limit: Maximum number of items to return (default 100)
         bbox: Bounding box filter [minx, miny, maxx, maxy]
         datetime_str: Datetime filter (RFC 3339 or interval)
+        repo: Optional PostgreSQLRepository instance (creates new if not provided)
 
     Returns:
         STAC ItemCollection (GeoJSON FeatureCollection)
@@ -1174,8 +1137,10 @@ def get_collection_items(
     logger = LoggerFactory.create_logger(ComponentType.SERVICE, "StacAPI")
 
     try:
-        config = get_config()
-        connection_string = config.postgis_connection_string
+        # Use repository pattern (16 NOV 2025 - managed identity support)
+        if repo is None:
+            from infrastructure.postgresql import PostgreSQLRepository
+            repo = PostgreSQLRepository()
 
         # Build search parameters (STAC search syntax)
         search_params = {
@@ -1189,7 +1154,7 @@ def get_collection_items(
         if datetime_str:
             search_params['datetime'] = datetime_str
 
-        with psycopg.connect(connection_string) as conn:
+        with repo._get_connection() as conn:
             with conn.cursor() as cur:
                 # Query items directly from pgstac.items table
                 # CRITICAL (13 NOV 2025): pgSTAC stores id, collection, geometry in separate columns
@@ -1244,7 +1209,8 @@ def search_items(
     bbox: Optional[List[float]] = None,
     datetime_str: Optional[str] = None,
     limit: int = 100,
-    query: Optional[Dict[str, Any]] = None
+    query: Optional[Dict[str, Any]] = None,
+    repo: Optional['PostgreSQLRepository'] = None
 ) -> Dict[str, Any]:
     """
     Search items across collections (STAC API standard endpoint).
@@ -1257,6 +1223,7 @@ def search_items(
         datetime_str: Datetime filter (RFC 3339 or interval)
         limit: Maximum items to return (default 100)
         query: Additional query parameters (STAC query extension)
+        repo: Optional PostgreSQLRepository instance (creates new if not provided)
 
     Returns:
         STAC ItemCollection (GeoJSON FeatureCollection)
@@ -1264,8 +1231,10 @@ def search_items(
     logger = LoggerFactory.create_logger(ComponentType.SERVICE, "StacAPI")
 
     try:
-        config = get_config()
-        connection_string = config.postgis_connection_string
+        # Use repository pattern (16 NOV 2025 - managed identity support)
+        if repo is None:
+            from infrastructure.postgresql import PostgreSQLRepository
+            repo = PostgreSQLRepository()
 
         # Build search parameters
         search_params = {'limit': limit}
@@ -1282,7 +1251,7 @@ def search_items(
         if query:
             search_params['query'] = query
 
-        with psycopg.connect(connection_string) as conn:
+        with repo._get_connection() as conn:
             with conn.cursor() as cur:
                 # Query items directly from pgstac.items table (simpler than search())
                 # NOTE: pgstac.search() requires 'searches' table which may not be set up
@@ -1463,7 +1432,7 @@ def clear_stac_data(mode: str = 'all') -> Dict[str, Any]:
 # Deep inspection endpoints for pgstac schema health and statistics
 # ============================================================================
 
-def get_schema_info() -> Dict[str, Any]:
+def get_schema_info(repo: Optional['PostgreSQLRepository'] = None) -> Dict[str, Any]:
     """
     Get detailed information about pgstac schema structure.
 
@@ -1474,18 +1443,21 @@ def get_schema_info() -> Dict[str, Any]:
     - Partitions
     - Roles
 
+    Args:
+        repo: Optional PostgreSQLRepository instance (creates new if not provided)
+
     Returns:
         Dict with comprehensive schema information
     """
-    from config import get_config
-
-    config = get_config()
-    connection_string = config.postgis_connection_string
-
     logger.info("🔍 Inspecting pgstac schema structure...")
 
     try:
-        with psycopg.connect(connection_string) as conn:
+        # Use repository pattern (16 NOV 2025 - managed identity support)
+        if repo is None:
+            from infrastructure.postgresql import PostgreSQLRepository
+            repo = PostgreSQLRepository()
+
+        with repo._get_connection() as conn:
             with conn.cursor() as cur:
                 # Get PgSTAC version
                 version = None
@@ -1583,12 +1555,13 @@ def get_schema_info() -> Dict[str, Any]:
         }
 
 
-def get_collection_stats(collection_id: str) -> Dict[str, Any]:
+def get_collection_stats(collection_id: str, repo: Optional['PostgreSQLRepository'] = None) -> Dict[str, Any]:
     """
     Get detailed statistics for a specific STAC collection.
 
     Args:
         collection_id: Collection ID to analyze
+        repo: Optional PostgreSQLRepository instance (creates new if not provided)
 
     Returns:
         Dict with collection statistics including:
@@ -1599,15 +1572,15 @@ def get_collection_stats(collection_id: str) -> Dict[str, Any]:
         - Asset types and counts
         - Recent items
     """
-    from config import get_config
-
-    config = get_config()
-    connection_string = config.postgis_connection_string
-
     logger.info(f"📊 Getting statistics for collection '{collection_id}'...")
 
     try:
-        with psycopg.connect(connection_string) as conn:
+        # Use repository pattern (16 NOV 2025 - managed identity support)
+        if repo is None:
+            from infrastructure.postgresql import PostgreSQLRepository
+            repo = PostgreSQLRepository()
+
+        with repo._get_connection() as conn:
             with conn.cursor() as cur:
                 # Check if collection exists
                 cur.execute(
@@ -1714,26 +1687,27 @@ def get_collection_stats(collection_id: str) -> Dict[str, Any]:
         }
 
 
-def get_item_by_id(item_id: str, collection_id: Optional[str] = None) -> Dict[str, Any]:
+def get_item_by_id(item_id: str, collection_id: Optional[str] = None, repo: Optional['PostgreSQLRepository'] = None) -> Dict[str, Any]:
     """
     Get a single STAC item by ID.
 
     Args:
         item_id: STAC item ID
         collection_id: Optional collection ID to narrow search
+        repo: Optional PostgreSQLRepository instance (creates new if not provided)
 
     Returns:
         STAC Item JSON or error dict
     """
-    from config import get_config
-
-    config = get_config()
-    connection_string = config.postgis_connection_string
-
     logger.info(f"🔍 Looking up item '{item_id}'" + (f" in collection '{collection_id}'" if collection_id else ""))
 
     try:
-        with psycopg.connect(connection_string) as conn:
+        # Use repository pattern (16 NOV 2025 - managed identity support)
+        if repo is None:
+            from infrastructure.postgresql import PostgreSQLRepository
+            repo = PostgreSQLRepository()
+
+        with repo._get_connection() as conn:
             with conn.cursor() as cur:
                 # CRITICAL (13 NOV 2025): Reconstruct full STAC item from separate columns + content
                 # pgSTAC stores id, collection, geometry separately from content JSONB
@@ -1788,22 +1762,25 @@ def get_item_by_id(item_id: str, collection_id: Optional[str] = None) -> Dict[st
         }
 
 
-def get_health_metrics() -> Dict[str, Any]:
+def get_health_metrics(repo: Optional['PostgreSQLRepository'] = None) -> Dict[str, Any]:
     """
     Get overall pgstac health metrics.
+
+    Args:
+        repo: Optional PostgreSQLRepository instance (creates new if not provided)
 
     Returns:
         Dict with health status, counts, and performance indicators
     """
-    from config import get_config
-
-    config = get_config()
-    connection_string = config.postgis_connection_string
-
     logger.info("🏥 Checking pgstac health...")
 
     try:
-        with psycopg.connect(connection_string) as conn:
+        # Use repository pattern (16 NOV 2025 - managed identity support)
+        if repo is None:
+            from infrastructure.postgresql import PostgreSQLRepository
+            repo = PostgreSQLRepository()
+
+        with repo._get_connection() as conn:
             with conn.cursor() as cur:
                 # Check schema exists
                 cur.execute(
@@ -1870,22 +1847,25 @@ def get_health_metrics() -> Dict[str, Any]:
         }
 
 
-def get_collections_summary() -> Dict[str, Any]:
+def get_collections_summary(repo: Optional['PostgreSQLRepository'] = None) -> Dict[str, Any]:
     """
     Get quick summary of all collections with key statistics.
+
+    Args:
+        repo: Optional PostgreSQLRepository instance (creates new if not provided)
 
     Returns:
         Dict with summary statistics for all collections
     """
-    from config import get_config
-
-    config = get_config()
-    connection_string = config.postgis_connection_string
-
     logger.info("📋 Getting collections summary...")
 
     try:
-        with psycopg.connect(connection_string) as conn:
+        # Use repository pattern (16 NOV 2025 - managed identity support)
+        if repo is None:
+            from infrastructure.postgresql import PostgreSQLRepository
+            repo = PostgreSQLRepository()
+
+        with repo._get_connection() as conn:
             with conn.cursor() as cur:
                 # Get all collections with item counts
                 cur.execute("""
@@ -1932,12 +1912,15 @@ def get_collections_summary() -> Dict[str, Any]:
         }
 
 
-def get_all_collections() -> Dict[str, Any]:
+def get_all_collections(repo: Optional['PostgreSQLRepository'] = None) -> Dict[str, Any]:
     """
     Get all collections in STAC API v1.0.0 compliant format.
 
     Returns collections with full STAC-spec metadata including spatial/temporal extents
     and navigation links. Used by GET /collections endpoint.
+
+    Args:
+        repo: Optional PostgreSQLRepository instance (creates new if not provided)
 
     Returns:
         Dict with 'collections' array and 'links' array
@@ -1966,7 +1949,10 @@ def get_all_collections() -> Dict[str, Any]:
         }
     """
     try:
-        config = get_config()
+        # Use repository pattern (16 NOV 2025 - managed identity support)
+        if repo is None:
+            from infrastructure.postgresql import PostgreSQLRepository
+            repo = PostgreSQLRepository()
 
         # Base URL for STAC API
         base_url = "https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/stac"
@@ -1980,8 +1966,7 @@ def get_all_collections() -> Dict[str, Any]:
             ORDER BY c.id;
         """
 
-        # Execute query using psycopg pattern
-        with psycopg.connect(config.postgis_connection_string) as conn:
+        with repo._get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(query)
                 rows = cur.fetchall()

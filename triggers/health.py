@@ -443,26 +443,35 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
         return self.check_component_health("service_bus", check_service_bus)
 
     def _check_database(self) -> Dict[str, Any]:
-        """Enhanced PostgreSQL database health check with query metrics."""
+        """Enhanced PostgreSQL database health check with query metrics.
+
+        IMPORTANT: Uses PostgreSQLRepository which respects USE_MANAGED_IDENTITY setting.
+        This ensures health check uses the same authentication method as the application.
+        """
         def check_pg():
             import psycopg
             import time
             from config import get_config
-            
+            from infrastructure.postgresql import PostgreSQLRepository
+
             config = get_config()
             start_time = time.time()
-            
-            # Build connection string
-            # NOTE: Using config.postgis_password here (vs direct env var used by PostgreSQL adapter)
-            # Both access the same POSTGIS_PASSWORD env var. See config.py postgis_password field documentation.
-            conn_str = (
-                f"host={config.postgis_host} "
-                f"dbname={config.postgis_database} "
-                f"user={config.postgis_user} "
-                f"password={config.postgis_password} "
-                f"port={config.postgis_port}"
-            )
-            
+
+            # Use PostgreSQLRepository to get connection string (respects managed identity)
+            # This ensures health check uses same auth method as application
+            try:
+                repo = PostgreSQLRepository(config=config)
+                conn_str = repo.conn_string
+            except Exception as repo_error:
+                # If repository initialization fails, return error immediately
+                return {
+                    "component": "database",
+                    "status": "unhealthy",
+                    "error": f"Failed to initialize PostgreSQL repository: {str(repo_error)}",
+                    "error_type": type(repo_error).__name__,
+                    "checked_at": time.time()
+                }
+
             # Use autocommit mode to allow subtransactions for isolated tests
             with psycopg.connect(conn_str, autocommit=True) as conn:
                 with conn.cursor() as cur:

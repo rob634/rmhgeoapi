@@ -828,38 +828,52 @@ class ProcessRasterCollectionWorkflow(JobBase):
             collection_id = stac_result.get("collection_id", "cogs")
             item_id = stac_result.get("stac_id") or stac_result.get("pgstac_id")
 
+            # Extract pgSTAC search URLs (16 NOV 2025 - Option B: pgSTAC search for visualization)
+            search_id = stac_result.get("search_id")
+            viewer_url = stac_result.get("viewer_url")
+            tilejson_url = stac_result.get("tilejson_url")
+            tiles_url = stac_result.get("tiles_url")
+
             stac_summary = {
                 "collection_id": collection_id,
                 "stac_id": item_id,
                 "pgstac_id": stac_result.get("pgstac_id"),
                 "inserted_to_pgstac": stac_result.get("inserted_to_pgstac", True),
-                "ready_for_titiler": True
+                "ready_for_titiler": True,
+                "search_id": search_id,  # pgSTAC search ID (16 NOV 2025)
+                "items_created": stac_result.get("items_created", 0),
+                "items_failed": stac_result.get("items_failed", 0)
             }
 
-        # Generate TiTiler URLs using unified method (10 NOV 2025)
+        # Use pgSTAC search URLs for visualization (16 NOV 2025 - Option B)
+        # MosaicJSON file is created and stored as STAC asset (archival/metadata)
+        # BUT pgSTAC search is the primary visualization method (OAuth-only)
         titiler_urls = None
         share_url = None
 
-        if mosaicjson_summary.get("blob_path"):
-            try:
-                # Generate MosaicJSON URLs using unified method
-                mosaicjson_blob = mosaicjson_summary["blob_path"]
-                mosaic_container = config.resolved_intermediate_tiles_container  # "silver-tiles"
+        if stac_tasks and stac_tasks[0].result_data:
+            stac_result = stac_tasks[0].result_data.get("result", {})
+            search_id = stac_result.get("search_id")
 
-                titiler_urls = config.generate_titiler_urls_unified(
-                    mode="mosaicjson",
-                    container=mosaic_container,
-                    blob_name=mosaicjson_blob
-                )
-                share_url = titiler_urls.get("viewer_url")
-            except Exception:
-                # Failed to generate URLs - job continues without them
+            if search_id:
+                # Use pgSTAC search URLs (OAuth-only, no SAS tokens)
+                titiler_urls = {
+                    "viewer_url": stac_result.get("viewer_url"),
+                    "tilejson_url": stac_result.get("tilejson_url"),
+                    "tiles_url": stac_result.get("tiles_url"),
+                    "search_id": search_id
+                }
+                share_url = stac_result.get("viewer_url")
+                logger.info(f"✅ Using pgSTAC search for visualization: {search_id}")
+            else:
+                # Fallback: pgSTAC search registration failed (non-fatal)
+                logger.warning("⚠️  pgSTAC search not registered - no visualization URLs available")
                 titiler_urls = None
                 share_url = None
 
         logger.info(
             f"✅ Raster collection job {context.job_id[:16]} completed: "
-            f"{len(successful_cogs)} COGs, MosaicJSON created, STAC published"
+            f"{len(successful_cogs)} COGs, MosaicJSON created (archival), pgSTAC search registered"
         )
 
         return {

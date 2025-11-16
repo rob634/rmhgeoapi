@@ -218,6 +218,80 @@ class H3Repository(PostgreSQLRepository):
         logger.info(f"📊 Loaded {len(parent_ids)} parent IDs from h3.grids (grid_id={grid_id})")
         return parent_ids
 
+    def get_parent_cells(
+        self,
+        parent_grid_id: str,
+        batch_start: int = 0,
+        batch_size: Optional[int] = None
+    ) -> List[Tuple[int, Optional[int]]]:
+        """
+        Load parent H3 indices with batching support for parallel processing.
+
+        Used by cascade handlers to split parent processing across multiple tasks.
+        Supports LIMIT/OFFSET for batching large parent sets.
+
+        Parameters:
+        ----------
+        parent_grid_id : str
+            Parent grid ID (e.g., 'test_albania_res2', 'land_res2')
+        batch_start : int, optional
+            Starting offset for batch (default: 0)
+        batch_size : int, optional
+            Number of parents to return (default: None = all remaining)
+
+        Returns:
+        -------
+        List[Tuple[int, Optional[int]]]
+            List of (h3_index, parent_res2) tuples for the requested batch
+
+        Example:
+        -------
+        >>> # Get first 10 parents
+        >>> batch1 = repo.get_parent_cells('land_res2', batch_start=0, batch_size=10)
+        >>> # Get next 10 parents
+        >>> batch2 = repo.get_parent_cells('land_res2', batch_start=10, batch_size=10)
+        >>> # Get all remaining parents
+        >>> all_parents = repo.get_parent_cells('land_res2')
+        """
+        if batch_size is not None:
+            query = sql.SQL("""
+                SELECT h3_index, parent_res2
+                FROM {schema}.{table}
+                WHERE grid_id = %s
+                ORDER BY h3_index
+                LIMIT %s OFFSET %s
+            """).format(
+                schema=sql.Identifier('h3'),
+                table=sql.Identifier('grids')
+            )
+            params = (parent_grid_id, batch_size, batch_start)
+        else:
+            query = sql.SQL("""
+                SELECT h3_index, parent_res2
+                FROM {schema}.{table}
+                WHERE grid_id = %s
+                ORDER BY h3_index
+                OFFSET %s
+            """).format(
+                schema=sql.Identifier('h3'),
+                table=sql.Identifier('grids')
+            )
+            params = (parent_grid_id, batch_start)
+
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(query, params)
+                results = cur.fetchall()
+
+        # Convert dict_row to tuples (h3_index, parent_res2)
+        parent_cells = [(row['h3_index'], row['parent_res2']) for row in results]
+
+        logger.info(
+            f"📊 Loaded {len(parent_cells)} parent cells from h3.grids "
+            f"(grid_id={parent_grid_id}, batch={batch_start}:{batch_start + len(parent_cells)})"
+        )
+        return parent_cells
+
     def update_spatial_attributes(
         self,
         grid_id: str,

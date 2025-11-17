@@ -103,9 +103,9 @@ class AdminDbMaintenanceTrigger:
         Route admin database maintenance requests.
 
         Routes:
-            POST /api/db/maintenance/nuke
-            POST /api/db/maintenance/redeploy
-            POST /api/db/maintenance/cleanup
+            POST /api/dbadmin/maintenance/nuke
+            POST /api/dbadmin/maintenance/redeploy
+            POST /api/dbadmin/maintenance/cleanup
 
         Args:
             req: Azure Function HTTP request
@@ -115,19 +115,27 @@ class AdminDbMaintenanceTrigger:
         """
         try:
             # Determine operation from path
-            # Handle both new routes (/api/db/maintenance/*) and deprecated routes (/api/db/schema/*)
+            # Handle current routes (/api/dbadmin/maintenance/*) and deprecated routes (/api/db/*)
             url = req.url
 
             # Extract operation name
-            if '/db/maintenance/' in url:
+            if '/dbadmin/maintenance/' in url:
+                # Current route pattern (16 NOV 2025)
+                path = url.split('/dbadmin/maintenance/')[-1].split('?')[0].strip('/')
+            elif 'dbadmin/maintenance/' in url:
+                # Current route pattern (no leading slash)
+                path = url.split('dbadmin/maintenance/')[-1].split('?')[0].strip('/')
+            elif '/db/maintenance/' in url:
+                # Deprecated route pattern
                 path = url.split('/db/maintenance/')[-1].split('?')[0].strip('/')
             elif 'db/maintenance/' in url:
+                # Deprecated route pattern (no leading slash)
                 path = url.split('db/maintenance/')[-1].split('?')[0].strip('/')
             elif '/db/schema/' in url:
-                # Deprecated route format
+                # Deprecated route pattern (old)
                 path = url.split('/db/schema/')[-1].split('?')[0].strip('/')
             elif 'db/schema/' in url:
-                # Deprecated route format
+                # Deprecated route pattern (old, no leading slash)
                 path = url.split('db/schema/')[-1].split('?')[0].strip('/')
             else:
                 path = ''

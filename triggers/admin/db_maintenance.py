@@ -200,17 +200,14 @@ class AdminDbMaintenanceTrigger:
             with self.db_repo._get_connection() as conn:
                 with conn.cursor() as cur:
                     # 1. DISCOVER & DROP FUNCTIONS
-                    # Using sql.SQL composition for consistency with DDL statements
-                    cur.execute(
-                        sql.SQL("""
-                            SELECT
-                                p.proname AS function_name,
-                                pg_catalog.pg_get_function_identity_arguments(p.oid) AS arguments
-                            FROM pg_catalog.pg_proc p
-                            JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
-                            WHERE n.nspname = {} AND p.prokind = 'f'
-                        """).format(sql.Literal(app_schema))
-                    )
+                    cur.execute("""
+                        SELECT
+                            p.proname AS function_name,
+                            pg_catalog.pg_get_function_identity_arguments(p.oid) AS arguments
+                        FROM pg_catalog.pg_proc p
+                        JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
+                        WHERE n.nspname = %s AND p.prokind = 'f'
+                    """, (app_schema,))
 
                     functions = cur.fetchall()
                     for func_name, args in functions:
@@ -229,11 +226,9 @@ class AdminDbMaintenanceTrigger:
                     })
 
                     # 2. DISCOVER & DROP TABLES
-                    cur.execute(
-                        sql.SQL("SELECT tablename FROM pg_tables WHERE schemaname = {}").format(
-                            sql.Literal(app_schema)
-                        )
-                    )
+                    cur.execute("""
+                        SELECT tablename FROM pg_tables WHERE schemaname = %s
+                    """, (app_schema,))
 
                     tables = cur.fetchall()
                     for (table_name,) in tables:
@@ -251,14 +246,12 @@ class AdminDbMaintenanceTrigger:
                     })
 
                     # 3. DISCOVER & DROP ENUMS
-                    cur.execute(
-                        sql.SQL("""
-                            SELECT t.typname
-                            FROM pg_type t
-                            JOIN pg_namespace n ON t.typnamespace = n.oid
-                            WHERE n.nspname = {} AND t.typtype = 'e'
-                        """).format(sql.Literal(app_schema))
-                    )
+                    cur.execute("""
+                        SELECT t.typname
+                        FROM pg_type t
+                        JOIN pg_namespace n ON t.typnamespace = n.oid
+                        WHERE n.nspname = %s AND t.typtype = 'e'
+                    """, (app_schema,))
 
                     enums = cur.fetchall()
                     for (enum_name,) in enums:
@@ -276,13 +269,11 @@ class AdminDbMaintenanceTrigger:
                     })
 
                     # 4. DISCOVER & DROP SEQUENCES
-                    cur.execute(
-                        sql.SQL("""
-                            SELECT sequence_name
-                            FROM information_schema.sequences
-                            WHERE sequence_schema = {}
-                        """).format(sql.Literal(app_schema))
-                    )
+                    cur.execute("""
+                        SELECT sequence_name
+                        FROM information_schema.sequences
+                        WHERE sequence_schema = %s
+                    """, (app_schema,))
 
                     sequences = cur.fetchall()
                     for (seq_name,) in sequences:
@@ -300,13 +291,11 @@ class AdminDbMaintenanceTrigger:
                     })
 
                     # 5. DISCOVER & DROP VIEWS
-                    cur.execute(
-                        sql.SQL("""
-                            SELECT table_name
-                            FROM information_schema.views
-                            WHERE table_schema = {}
-                        """).format(sql.Literal(app_schema))
-                    )
+                    cur.execute("""
+                        SELECT table_name
+                        FROM information_schema.views
+                        WHERE table_schema = %s
+                    """, (app_schema,))
 
                     views = cur.fetchall()
                     for (view_name,) in views:

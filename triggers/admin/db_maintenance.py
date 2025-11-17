@@ -48,6 +48,9 @@ from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, List, Optional
 import traceback
 
+import psycopg
+from psycopg import sql
+
 from infrastructure import RepositoryFactory, PostgreSQLRepository
 from util_logger import LoggerFactory, ComponentType
 
@@ -173,7 +176,7 @@ class AdminDbMaintenanceTrigger:
                 "timestamp": "2025-11-03T..."
             }
 
-        Note: This migrates the existing /api/db/schema/nuke endpoint
+        Note: Uses repository pattern for managed identity authentication (16 NOV 2025)
         """
         confirm = req.params.get('confirm')
 
@@ -190,24 +193,157 @@ class AdminDbMaintenanceTrigger:
 
         logger.warning("🚨 NUCLEAR: Nuking schema (all objects will be dropped)")
 
+        nuke_results = []
+        app_schema = self.db_repo.schema_name  # From repository configuration
+
         try:
-            # Import existing trigger for nuke operation
-            from triggers.db_query import schema_nuke_trigger
+            with self.db_repo._get_connection() as conn:
+                with conn.cursor() as cur:
+                    # 1. DISCOVER & DROP FUNCTIONS
+                    cur.execute(sql.SQL("""
+                        SELECT
+                            p.proname AS function_name,
+                            pg_catalog.pg_get_function_identity_arguments(p.oid) AS arguments
+                        FROM pg_catalog.pg_proc p
+                        JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
+                        WHERE n.nspname = %s AND p.prokind = 'f'
+                    """), [app_schema])
 
-            # Delegate to existing implementation
-            result = schema_nuke_trigger.handle_request(req)
+                    functions = cur.fetchall()
+                    for func_name, args in functions:
+                        # args is already properly formatted by pg_get_function_identity_arguments
+                        drop_stmt = sql.SQL("DROP FUNCTION IF EXISTS {}.{} CASCADE").format(
+                            sql.Identifier(app_schema),
+                            sql.SQL(f"{func_name}({args})")
+                        )
+                        cur.execute(drop_stmt)
+                        logger.debug(f"Dropped function: {func_name}({args})")
 
-            logger.info("✅ Schema nuke completed")
-            return result
+                    nuke_results.append({
+                        "step": "drop_functions",
+                        "count": len(functions),
+                        "dropped": [f"{f[0]}({f[1]})" for f in functions[:5]]  # First 5 for visibility
+                    })
+
+                    # 2. DISCOVER & DROP TABLES
+                    cur.execute(sql.SQL("""
+                        SELECT tablename FROM pg_tables WHERE schemaname = %s
+                    """), [app_schema])
+
+                    tables = cur.fetchall()
+                    for (table_name,) in tables:
+                        drop_stmt = sql.SQL("DROP TABLE IF EXISTS {}.{} CASCADE").format(
+                            sql.Identifier(app_schema),
+                            sql.Identifier(table_name)
+                        )
+                        cur.execute(drop_stmt)
+                        logger.debug(f"Dropped table: {table_name}")
+
+                    nuke_results.append({
+                        "step": "drop_tables",
+                        "count": len(tables),
+                        "dropped": [t[0] for t in tables]
+                    })
+
+                    # 3. DISCOVER & DROP ENUMS
+                    cur.execute(sql.SQL("""
+                        SELECT t.typname
+                        FROM pg_type t
+                        JOIN pg_namespace n ON t.typnamespace = n.oid
+                        WHERE n.nspname = %s AND t.typtype = 'e'
+                    """), [app_schema])
+
+                    enums = cur.fetchall()
+                    for (enum_name,) in enums:
+                        drop_stmt = sql.SQL("DROP TYPE IF EXISTS {}.{} CASCADE").format(
+                            sql.Identifier(app_schema),
+                            sql.Identifier(enum_name)
+                        )
+                        cur.execute(drop_stmt)
+                        logger.debug(f"Dropped enum: {enum_name}")
+
+                    nuke_results.append({
+                        "step": "drop_enums",
+                        "count": len(enums),
+                        "dropped": [e[0] for e in enums]
+                    })
+
+                    # 4. DISCOVER & DROP SEQUENCES
+                    cur.execute(sql.SQL("""
+                        SELECT sequence_name
+                        FROM information_schema.sequences
+                        WHERE sequence_schema = %s
+                    """), [app_schema])
+
+                    sequences = cur.fetchall()
+                    for (seq_name,) in sequences:
+                        drop_stmt = sql.SQL("DROP SEQUENCE IF EXISTS {}.{} CASCADE").format(
+                            sql.Identifier(app_schema),
+                            sql.Identifier(seq_name)
+                        )
+                        cur.execute(drop_stmt)
+                        logger.debug(f"Dropped sequence: {seq_name}")
+
+                    nuke_results.append({
+                        "step": "drop_sequences",
+                        "count": len(sequences),
+                        "dropped": [s[0] for s in sequences]
+                    })
+
+                    # 5. DISCOVER & DROP VIEWS
+                    cur.execute(sql.SQL("""
+                        SELECT table_name
+                        FROM information_schema.views
+                        WHERE table_schema = %s
+                    """), [app_schema])
+
+                    views = cur.fetchall()
+                    for (view_name,) in views:
+                        drop_stmt = sql.SQL("DROP VIEW IF EXISTS {}.{} CASCADE").format(
+                            sql.Identifier(app_schema),
+                            sql.Identifier(view_name)
+                        )
+                        cur.execute(drop_stmt)
+                        logger.debug(f"Dropped view: {view_name}")
+
+                    nuke_results.append({
+                        "step": "drop_views",
+                        "count": len(views),
+                        "dropped": [v[0] for v in views]
+                    })
+
+                    # Commit all drops
+                    conn.commit()
+
+                    # Calculate total objects dropped
+                    total_dropped = sum(r['count'] for r in nuke_results)
+
+                    logger.info(f"✅ Schema nuke completed: {total_dropped} objects dropped")
+
+                    return func.HttpResponse(
+                        body=json.dumps({
+                            "status": "success",
+                            "message": f"🚨 NUCLEAR: Schema {app_schema} completely reset",
+                            "implementation": "Repository pattern with managed identity (16 NOV 2025)",
+                            "total_objects_dropped": total_dropped,
+                            "operations": nuke_results,
+                            "timestamp": datetime.now(timezone.utc).isoformat()
+                        }, indent=2),
+                        status_code=200,
+                        mimetype='application/json'
+                    )
 
         except Exception as e:
-            logger.error(f"❌ Error during schema nuke: {e}")
+            logger.error(f"❌ Nuke operation failed: {e}")
             logger.error(traceback.format_exc())
+
             return func.HttpResponse(
                 body=json.dumps({
-                    'error': str(e),
-                    'timestamp': datetime.now(timezone.utc).isoformat()
-                }),
+                    "status": "error",
+                    "error": str(e),
+                    "operations_completed": nuke_results,
+                    "timestamp": datetime.now(timezone.utc).isoformat()
+                }, indent=2),
                 status_code=500,
                 mimetype='application/json'
             )

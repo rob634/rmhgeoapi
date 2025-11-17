@@ -334,34 +334,39 @@ def health(req: func.HttpRequest) -> func.HttpResponse:
 
 
 # ============================================================================
-# DATABASE ADMIN API ENDPOINTS - Phase 1 (03 NOV 2025)
+# DATABASE ADMIN API ENDPOINTS (FCO - For Claude Only) - 29 endpoints
 # ============================================================================
-# ⚠️ DEVELOPMENT ONLY - REMOVE BEFORE QA/PRODUCTION DEPLOYMENT
+# 🔧 ENDPOINT LIFECYCLE (16 NOV 2025):
+# - ✅ DEV: Active - Claude needs HTTP access for debugging
+# - ✅ QA: Active - Useful for testing and validation
+# - ⚠️ UAT: REMOVE - No admin endpoints in user testing
+# - 🚫 PRODUCTION: REMOVE - Security risk, use Azure Portal/Log Analytics instead
 #
 # Why these exist:
 # - Corporate network blocks direct PostgreSQL access (no DBeaver, no pgAdmin)
 # - Claude Code needs HTTP visibility into database state for development
 # - Rapid debugging without context switching to Azure Portal
 #
-# Production Replacement:
+# Production Replacement (UAT and beyond):
 # - Use Azure Log Analytics (KQL queries on app_jobs, app_tasks tables)
 # - Use Azure Portal: Database monitoring for health/performance metrics
 # - Use Application Insights: Query execution traces and errors
+# - External apps (DDH) will use separate /api/jobs/* endpoints with APIM security
 #
 # Security Risk:
 # - These endpoints expose sensitive database internals (schema, tables, queries)
-# - Anonymous auth level (func.AuthLevel.ANONYMOUS) is intentional for dev
-# - MUST BE REMOVED before corporate/QA deployment to prevent data exposure
+# - Anonymous auth level (func.AuthLevel.ANONYMOUS) is intentional for dev/QA only
+# - MUST BE REMOVED before UAT deployment to prevent data exposure
 #
-# Count: 31 endpoints total (17 schema/table, 4 query, 2 health, 3 maintenance, 5 diagnostics)
-# Reference: API_CONSOLIDATION_STATUS.md section "Database Admin (31 functions)"
+# Count: 29 endpoints total (17 schema/table, 4 query, 2 health, 3 maintenance, 3 diagnostics)
+# All routes use /api/dbadmin/* prefix for clarity (standardized 16 NOV 2025)
 # ============================================================================
 
-# Schema-level operations (3 endpoints - REMOVE BEFORE QA)
+# Schema-level operations (3 endpoints - Keep for QA, remove for UAT/PROD)
 @app.route(route="dbadmin/schemas", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
 def db_schemas_list(req: func.HttpRequest) -> func.HttpResponse:
     """
-    ⚠️ DEV ONLY - REMOVE BEFORE QA
+    ⚠️ FCO (For Claude Only) - Keep for QA, remove before UAT
     List all schemas: GET /api/dbadmin/schemas
     Production: Use Azure Portal → PostgreSQL → Schemas
     """
@@ -370,13 +375,13 @@ def db_schemas_list(req: func.HttpRequest) -> func.HttpResponse:
 
 @app.route(route="dbadmin/schemas/{schema_name}", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
 def db_schema_details(req: func.HttpRequest) -> func.HttpResponse:
-    """Get schema details: GET /api/dbadmin/schemas/{schema_name}"""
+    """⚠️ FCO - Keep for QA, remove before UAT. GET /api/dbadmin/schemas/{schema_name}"""
     return admin_db_schemas_trigger.handle_request(req)
 
 
 @app.route(route="dbadmin/schemas/{schema_name}/tables", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
 def db_schema_tables(req: func.HttpRequest) -> func.HttpResponse:
-    """List schema tables: GET /api/dbadmin/schemas/{schema_name}/tables"""
+    """⚠️ FCO - Keep for QA, remove before UAT. GET /api/dbadmin/schemas/{schema_name}/tables"""
     return admin_db_schemas_trigger.handle_request(req)
 
 
@@ -443,22 +448,22 @@ def db_health_performance(req: func.HttpRequest) -> func.HttpResponse:
     return admin_db_health_trigger.handle_request(req)
 
 
-# Maintenance operations
+# Maintenance operations (Keep for QA, remove for UAT/PROD)
 @app.route(route="dbadmin/maintenance/nuke", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
 def db_maintenance_nuke(req: func.HttpRequest) -> func.HttpResponse:
-    """Nuke schema: POST /api/dbadmin/maintenance/nuke?confirm=yes"""
+    """⚠️ FCO - Keep for QA, remove before UAT. POST /api/dbadmin/maintenance/nuke?confirm=yes"""
     return admin_db_maintenance_trigger.handle_request(req)
 
 
 @app.route(route="dbadmin/maintenance/redeploy", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
 def db_maintenance_redeploy(req: func.HttpRequest) -> func.HttpResponse:
-    """Redeploy schema: POST /api/dbadmin/maintenance/redeploy?confirm=yes"""
+    """⚠️ FCO - Keep for QA, remove before UAT. POST /api/dbadmin/maintenance/redeploy?confirm=yes"""
     return admin_db_maintenance_trigger.handle_request(req)
 
 
 @app.route(route="dbadmin/maintenance/cleanup", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
 def db_maintenance_cleanup(req: func.HttpRequest) -> func.HttpResponse:
-    """Cleanup old records: POST /api/dbadmin/maintenance/cleanup?confirm=yes&days=30"""
+    """⚠️ FCO - Keep for QA, remove before UAT. POST /api/dbadmin/maintenance/cleanup?confirm=yes&days=30"""
     return admin_db_maintenance_trigger.handle_request(req)
 
 

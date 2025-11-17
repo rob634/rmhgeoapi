@@ -4,14 +4,15 @@
 # EPOCH: 4 - ACTIVE ✅
 # STATUS: Admin API - PostgreSQL maintenance operations
 # PURPOSE: HTTP trigger for database maintenance operations (vacuum, reindex, cleanup)
-# LAST_REVIEWED: 03 NOV 2025
+# LAST_REVIEWED: 16 NOV 2025 (SQL injection prevention hardening)
 # EXPORTS: AdminDbMaintenanceTrigger - Singleton trigger for maintenance operations
 # INTERFACES: Azure Functions HTTP trigger
 # PYDANTIC_MODELS: None - uses dict responses
-# DEPENDENCIES: azure.functions, psycopg, infrastructure.postgresql, util_logger
+# DEPENDENCIES: azure.functions, psycopg, psycopg.sql, infrastructure.postgresql, util_logger
 # SOURCE: PostgreSQL database for direct maintenance operations
 # SCOPE: Write operations for database maintenance (requires confirmation)
 # VALIDATION: Requires confirmation parameters for all destructive operations
+# SECURITY: SQL injection prevention via psycopg.sql composition (16 NOV 2025)
 # PATTERNS: Singleton trigger, RESTful admin API, Confirmation-required operations
 # ENTRY_POINTS: AdminDbMaintenanceTrigger.instance().handle_request(req)
 # INDEX: AdminDbMaintenanceTrigger:50, nuke_schema:150, redeploy_schema:250, cleanup:350
@@ -212,9 +213,12 @@ class AdminDbMaintenanceTrigger:
                     functions = cur.fetchall()
                     for func_name, args in functions:
                         # args is already properly formatted by pg_get_function_identity_arguments
+                        # Build function signature: schema.function_name(args)
+                        # Note: func_name and args come from pg_catalog (trusted source)
+                        # Schema uses Identifier, function signature uses SQL composition (16 NOV 2025)
                         drop_stmt = sql.SQL("DROP FUNCTION IF EXISTS {}.{} CASCADE").format(
                             sql.Identifier(app_schema),
-                            sql.SQL(f"{func_name}({args})")
+                            sql.SQL(f"{func_name}({args})")  # Trusted: from pg_catalog
                         )
                         cur.execute(drop_stmt)
                         logger.debug(f"Dropped function: {func_name}({args})")
@@ -222,7 +226,7 @@ class AdminDbMaintenanceTrigger:
                     nuke_results.append({
                         "step": "drop_functions",
                         "count": len(functions),
-                        "dropped": [f"{f[0]}({f[1]})" for f in functions[:5]]  # First 5 for visibility
+                        "dropped": [f"{fn}({fargs})" for fn, fargs in functions[:5]]
                     })
 
                     # 2. DISCOVER & DROP TABLES
@@ -242,7 +246,7 @@ class AdminDbMaintenanceTrigger:
                     nuke_results.append({
                         "step": "drop_tables",
                         "count": len(tables),
-                        "dropped": [t[0] for t in tables]
+                        "dropped": [tbl[0] for tbl in tables]
                     })
 
                     # 3. DISCOVER & DROP ENUMS
@@ -265,7 +269,7 @@ class AdminDbMaintenanceTrigger:
                     nuke_results.append({
                         "step": "drop_enums",
                         "count": len(enums),
-                        "dropped": [e[0] for e in enums]
+                        "dropped": [enum[0] for enum in enums]
                     })
 
                     # 4. DISCOVER & DROP SEQUENCES
@@ -287,7 +291,7 @@ class AdminDbMaintenanceTrigger:
                     nuke_results.append({
                         "step": "drop_sequences",
                         "count": len(sequences),
-                        "dropped": [s[0] for s in sequences]
+                        "dropped": [seq[0] for seq in sequences]
                     })
 
                     # 5. DISCOVER & DROP VIEWS
@@ -309,7 +313,7 @@ class AdminDbMaintenanceTrigger:
                     nuke_results.append({
                         "step": "drop_views",
                         "count": len(views),
-                        "dropped": [v[0] for v in views]
+                        "dropped": [view[0] for view in views]
                     })
 
                     # Commit all drops
@@ -334,13 +338,17 @@ class AdminDbMaintenanceTrigger:
                     )
 
         except Exception as e:
-            logger.error(f"❌ Nuke operation failed: {e}")
+            error_msg = str(e) if str(e) else repr(e)
+            error_type = type(e).__name__
+            logger.error(f"❌ Nuke operation failed: {error_type}: {error_msg}")
             logger.error(traceback.format_exc())
 
             return func.HttpResponse(
                 body=json.dumps({
                     "status": "error",
-                    "error": str(e),
+                    "error": error_msg,
+                    "error_type": error_type,
+                    "traceback": traceback.format_exc(),
                     "operations_completed": nuke_results,
                     "timestamp": datetime.now(timezone.utc).isoformat()
                 }, indent=2),
@@ -569,32 +577,38 @@ class AdminDbMaintenanceTrigger:
 
             with self.db_repo._get_connection() as conn:
                 with conn.cursor() as cursor:
-                    # Delete old completed jobs
-                    cursor.execute(f"""
-                        DELETE FROM {self.db_repo.schema_name}.jobs
+                    # Delete old completed jobs (SQL injection safe - 16 NOV 2025)
+                    delete_jobs_query = sql.SQL("""
+                        DELETE FROM {schema}.jobs
                         WHERE status = 'completed'
                         AND updated_at < %s
                         RETURNING job_id;
-                    """, (cutoff_date,))
+                    """).format(schema=sql.Identifier(self.db_repo.schema_name))
+
+                    cursor.execute(delete_jobs_query, (cutoff_date,))
                     deleted_jobs = cursor.rowcount
 
                     # Delete orphaned tasks (tasks whose jobs were deleted)
-                    cursor.execute(f"""
-                        DELETE FROM {self.db_repo.schema_name}.tasks
-                        WHERE job_id NOT IN (
-                            SELECT job_id FROM {self.db_repo.schema_name}.jobs
+                    delete_orphaned_query = sql.SQL("""
+                        DELETE FROM {schema}.tasks
+                        WHERE parent_job_id NOT IN (
+                            SELECT job_id FROM {schema}.jobs
                         )
                         RETURNING task_id;
-                    """)
+                    """).format(schema=sql.Identifier(self.db_repo.schema_name))
+
+                    cursor.execute(delete_orphaned_query)
                     deleted_tasks = cursor.rowcount
 
                     # Also delete old completed tasks for existing jobs
-                    cursor.execute(f"""
-                        DELETE FROM {self.db_repo.schema_name}.tasks t
+                    delete_old_tasks_query = sql.SQL("""
+                        DELETE FROM {schema}.tasks t
                         WHERE t.status = 'completed'
                         AND t.updated_at < %s
                         RETURNING task_id;
-                    """, (cutoff_date,))
+                    """).format(schema=sql.Identifier(self.db_repo.schema_name))
+
+                    cursor.execute(delete_old_tasks_query, (cutoff_date,))
                     deleted_tasks += cursor.rowcount
 
                     conn.commit()

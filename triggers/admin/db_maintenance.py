@@ -211,7 +211,9 @@ class AdminDbMaintenanceTrigger:
                     """, (app_schema,))
 
                     functions = cur.fetchall()
-                    for func_name, args in functions:
+                    for row in functions:
+                        func_name = row['function_name']
+                        args = row['arguments']
                         # args is already properly formatted by pg_get_function_identity_arguments
                         # Build function signature: schema.function_name(args)
                         # Note: func_name and args come from pg_catalog (trusted source)
@@ -226,7 +228,7 @@ class AdminDbMaintenanceTrigger:
                     nuke_results.append({
                         "step": "drop_functions",
                         "count": len(functions),
-                        "dropped": [f"{fn}({fargs})" for fn, fargs in functions[:5]]
+                        "dropped": [f"{row['function_name']}({row['arguments']})" for row in functions[:5]]
                     })
 
                     # 2. DISCOVER & DROP TABLES
@@ -235,7 +237,8 @@ class AdminDbMaintenanceTrigger:
                     """, (app_schema,))
 
                     tables = cur.fetchall()
-                    for (table_name,) in tables:
+                    for row in tables:
+                        table_name = row['tablename']
                         drop_stmt = sql.SQL("DROP TABLE IF EXISTS {}.{} CASCADE").format(
                             sql.Identifier(app_schema),
                             sql.Identifier(table_name)
@@ -246,7 +249,7 @@ class AdminDbMaintenanceTrigger:
                     nuke_results.append({
                         "step": "drop_tables",
                         "count": len(tables),
-                        "dropped": [tbl[0] for tbl in tables]
+                        "dropped": [row['tablename'] for row in tables]
                     })
 
                     # 3. DISCOVER & DROP ENUMS
@@ -258,7 +261,8 @@ class AdminDbMaintenanceTrigger:
                     """, (app_schema,))
 
                     enums = cur.fetchall()
-                    for (enum_name,) in enums:
+                    for row in enums:
+                        enum_name = row['typname']
                         drop_stmt = sql.SQL("DROP TYPE IF EXISTS {}.{} CASCADE").format(
                             sql.Identifier(app_schema),
                             sql.Identifier(enum_name)
@@ -269,7 +273,7 @@ class AdminDbMaintenanceTrigger:
                     nuke_results.append({
                         "step": "drop_enums",
                         "count": len(enums),
-                        "dropped": [enum[0] for enum in enums]
+                        "dropped": [row['typname'] for row in enums]
                     })
 
                     # 4. DISCOVER & DROP SEQUENCES
@@ -280,7 +284,8 @@ class AdminDbMaintenanceTrigger:
                     """, (app_schema,))
 
                     sequences = cur.fetchall()
-                    for (seq_name,) in sequences:
+                    for row in sequences:
+                        seq_name = row['sequence_name']
                         drop_stmt = sql.SQL("DROP SEQUENCE IF EXISTS {}.{} CASCADE").format(
                             sql.Identifier(app_schema),
                             sql.Identifier(seq_name)
@@ -291,7 +296,7 @@ class AdminDbMaintenanceTrigger:
                     nuke_results.append({
                         "step": "drop_sequences",
                         "count": len(sequences),
-                        "dropped": [seq[0] for seq in sequences]
+                        "dropped": [row['sequence_name'] for row in sequences]
                     })
 
                     # 5. DISCOVER & DROP VIEWS
@@ -302,7 +307,8 @@ class AdminDbMaintenanceTrigger:
                     """, (app_schema,))
 
                     views = cur.fetchall()
-                    for (view_name,) in views:
+                    for row in views:
+                        view_name = row['table_name']
                         drop_stmt = sql.SQL("DROP VIEW IF EXISTS {}.{} CASCADE").format(
                             sql.Identifier(app_schema),
                             sql.Identifier(view_name)
@@ -313,7 +319,7 @@ class AdminDbMaintenanceTrigger:
                     nuke_results.append({
                         "step": "drop_views",
                         "count": len(views),
-                        "dropped": [view[0] for view in views]
+                        "dropped": [row['table_name'] for row in views]
                     })
 
                     # Commit all drops

@@ -395,7 +395,7 @@ Please refer to claude_log_access.md for instructions on accessing function app 
 curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/health
 
 # 2. 🔄 REDEPLOY DATABASE SCHEMA (Required after deployment!)
-curl -X POST https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/db/schema/redeploy?confirm=yes
+curl -X POST https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/dbadmin/maintenance/redeploy?confirm=yes
 
 # 3. Submit Test Job
 curl -X POST https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/jobs/submit/hello_world \
@@ -406,9 +406,10 @@ curl -X POST https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net
 curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/jobs/status/{JOB_ID}
 ```
 
-**🔄 SCHEMA MANAGEMENT ENDPOINTS:**
-- **Redeploy (Recommended)**: `POST /api/db/schema/redeploy?confirm=yes` - Nuke and redeploy in one operation
-- **Nuke Only**: `POST /api/db/schema/nuke?confirm=yes` - Just drop everything (use with caution)
+**🔄 SCHEMA MANAGEMENT ENDPOINTS (FCO - For Claude Only):**
+- **Redeploy (Recommended)**: `POST /api/dbadmin/maintenance/redeploy?confirm=yes` - Nuke and redeploy in one operation
+- **Nuke Only**: `POST /api/dbadmin/maintenance/nuke?confirm=yes` - Just drop everything (use with caution)
+- **Cleanup Old Records**: `POST /api/dbadmin/maintenance/cleanup?confirm=yes&days=30` - Delete completed jobs/tasks older than N days
 
 **🚨 STAC NUCLEAR BUTTON (DEV/TEST ONLY - ⭐ NEW 29 OCT 2025):**
 ```bash

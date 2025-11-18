@@ -37,7 +37,7 @@ Date: 20 OCT 2025
 import os
 import json
 import traceback  # For fail-fast error reporting (11 NOV 2025)
-import asyncio  # For async search registration (12 NOV 2025)
+# asyncio removed (17 NOV 2025) - direct database writes are synchronous
 from typing import Dict, Any, List, Optional, Tuple
 from datetime import datetime, timezone
 import psycopg  # Simple connections - NO pooling for Azure Functions (11 NOV 2025)
@@ -47,9 +47,9 @@ import pystac
 from pystac import Collection, Extent, SpatialExtent, TemporalExtent, Asset, Link
 
 from util_logger import LoggerFactory, ComponentType
-from config import get_config  # For PostgreSQL connection string (11 NOV 2025)
-from infrastructure.pgstac_repository import PgStacRepository  # NEW (12 NOV 2025): For updating collection metadata
-from services.titiler_search_service import TiTilerSearchService  # NEW (12 NOV 2025): For pgSTAC search registration
+from config import get_config  # For TiTiler base URL and other config (17 NOV 2025)
+from infrastructure.pgstac_repository import PgStacRepository  # For collection/item operations (Phase 2B: 17 NOV 2025)
+from services.pgstac_search_registration import PgSTACSearchRegistration  # NEW (17 NOV 2025): Direct database registration (Option A)
 
 
 # Logger
@@ -394,12 +394,14 @@ def _create_stac_collection_impl(
             )
 
         # =========================================================================
-        # Phase 4: Register pgSTAC Search with TiTiler (12 NOV 2025)
+        # Phase 4: Register pgSTAC Search (Direct Database - 17 NOV 2025)
         # =========================================================================
-        # OAUTH-ONLY MOSAIC PATTERN: pgSTAC searches replace MosaicJSON
-        # - Searches use Managed Identity OAuth throughout (no SAS tokens)
-        # - Dynamic (always reflect current collection state)
-        # - search_id stored in collection metadata for reuse
+        # OPTION A ARCHITECTURE (Production Security):
+        # - ETL pipeline writes directly to pgstac.searches table
+        # - TiTiler has read-only database access (better security)
+        # - No APIM needed to protect /searches/register endpoint
+        # - Atomic operations (collection + search in same workflow)
+        # - search_id computed as SHA256 hash (deterministic, permanent)
         # =========================================================================
 
         search_id = None
@@ -408,22 +410,29 @@ def _create_stac_collection_impl(
         tiles_url = None
 
         try:
-            logger.info(f"🔍 Registering pgSTAC search with TiTiler for collection: {collection_id}")
+            logger.info(f"🔍 Registering pgSTAC search (direct database write) for collection: {collection_id}")
 
-            # Initialize TiTiler search service
-            search_service = TiTilerSearchService()
+            # Initialize search registration service (17 NOV 2025 - Option A: Direct database writes)
+            search_registrar = PgSTACSearchRegistration()
 
-            # Register search (async operation)
-            # Run async function in sync context (Azure Functions compatibility)
-            search_result = asyncio.run(search_service.register_search(collection_id))
-            search_id = search_result.get("id")
+            # Register search directly in database (NO TiTiler API call)
+            search_id = search_registrar.register_collection_search(
+                collection_id=collection_id,
+                metadata={"name": f"{collection_id} mosaic"}
+            )
 
             logger.info(f"✅ Search registered: {search_id}")
 
             # Generate visualization URLs
-            viewer_url = search_service.generate_viewer_url(search_id)
-            tilejson_url = search_service.generate_tilejson_url(search_id)
-            tiles_url = search_service.generate_tiles_url(search_id)
+            config = get_config()
+            urls = search_registrar.get_search_urls(
+                search_id=search_id,
+                titiler_base_url=config.titiler_base_url,
+                assets=["data"]
+            )
+            viewer_url = urls["viewer"]
+            tilejson_url = urls["tilejson"]
+            tiles_url = urls["tiles"]
 
             logger.info(f"📊 Generated visualization URLs:")
             logger.info(f"   Viewer: {viewer_url}")
@@ -597,8 +606,8 @@ def _insert_into_pgstac_collections(collection_dict: Dict[str, Any]) -> str:
     """
     Insert STAC collection into PgSTAC collections table.
 
-    Uses the pgstac.create_collection() PostgreSQL function to insert
-    the collection with proper indexing and validation.
+    Uses PgStacRepository which handles managed identity authentication
+    and connection management properly.
 
     Args:
         collection_dict: STAC collection as dictionary
@@ -608,61 +617,28 @@ def _insert_into_pgstac_collections(collection_dict: Dict[str, Any]) -> str:
 
     Raises:
         Exception: PgSTAC insertion failure
+
+    Migration: Phase 2B (17 NOV 2025)
+        - Refactored to use PgStacRepository instead of direct connections
+        - Eliminates get_postgres_connection_string() usage
+        - Proper managed identity authentication via repository pattern
     """
     logger.info(f"Inserting collection into PgSTAC: {collection_dict['id']}")
 
-    # Get database connection string with managed identity support (16 NOV 2025)
-    # CRITICAL: Use get_postgres_connection_string() helper which respects USE_MANAGED_IDENTITY
-    # This replaces direct use of config.postgis_connection_string which doesn't support managed identity
-    from config import get_postgres_connection_string
-
     try:
-        conninfo = get_postgres_connection_string()
-        logger.debug(f"🔗 [STAC-DEBUG] Using connection string from get_postgres_connection_string() (supports managed identity)")
-    except Exception as conn_error:
-        logger.error(f"❌ [STAC-ERROR] Failed to get database connection string: {conn_error}")
-        raise Exception(f"Failed to get database connection string: {str(conn_error)}") from conn_error
+        # Convert dict to pystac.Collection object
+        # PgStacRepository.insert_collection() requires pystac.Collection
+        collection = Collection.from_dict(collection_dict)
 
-    # CRITICAL FIX (11 NOV 2025): Use simple connections for Azure Functions
-    # ConnectionPool creates new pool per task invocation, causing connection exhaustion.
-    # Azure Functions are short-lived - pooling defeats purpose and leaks connections.
-    # Pattern matches infrastructure/postgresql.py and infrastructure/stac.py
-    try:
-        logger.debug(f"🔗 [STAC-DEBUG] Connecting to PostgreSQL for collection insert...")
+        # Use repository pattern for managed identity authentication (17 NOV 2025)
+        repo = PgStacRepository()
+        pgstac_id = repo.insert_collection(collection)
 
-        with psycopg.connect(conninfo) as conn:
-            with conn.cursor() as cur:
-                logger.debug(f"🔗 [STAC-DEBUG] Connection established, executing pgstac.create_collection...")
-
-                # Use PgSTAC's create_collection function
-                cur.execute(
-                    """
-                    SELECT pgstac.create_collection(%s::jsonb)
-                    """,
-                    (json.dumps(collection_dict),)
-                )
-
-                result = cur.fetchone()
-                conn.commit()
-
-                pgstac_id = result[0] if result else collection_dict['id']
-                logger.info(f"✅ [STAC-SUCCESS] PgSTAC collection created: {pgstac_id}")
-                return pgstac_id
-
-    except psycopg.OperationalError as e:
-        # Connection-level errors (network, timeout, auth)
-        logger.error(f"❌ [STAC-ERROR] Database connection failed: {e}")
-        logger.error(f"   Error type: OperationalError (connection/network issue)")
-        logger.error(f"   Connection string length: {len(conninfo)} chars")
-        raise Exception(f"Database connection failed: {str(e)}") from e
-
-    except psycopg.DatabaseError as e:
-        # Database-level errors (SQL errors, constraint violations)
-        logger.error(f"❌ [STAC-ERROR] Database operation failed: {e}")
-        logger.error(f"   Error type: DatabaseError (SQL/constraint issue)")
-        raise Exception(f"Database operation failed: {str(e)}") from e
+        logger.info(f"✅ [STAC-SUCCESS] PgSTAC collection created via repository: {pgstac_id}")
+        return pgstac_id
 
     except Exception as e:
-        logger.error(f"❌ [STAC-ERROR] Unexpected error during PgSTAC insertion: {e}", exc_info=True)
+        logger.error(f"❌ [STAC-ERROR] Failed to insert collection via repository: {e}", exc_info=True)
         logger.error(f"   Exception type: {type(e).__name__}")
+        logger.error(f"   Collection ID: {collection_dict.get('id', 'UNKNOWN')}")
         raise Exception(f"PgSTAC insertion failed: {str(e)}") from e

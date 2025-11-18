@@ -139,15 +139,16 @@ class PgStacRepository:
             collection_dict = collection.to_dict()
             collection_json = json.dumps(collection_dict)
 
-            with psycopg.connect(self.connection_string) as conn:
+            with self._pg_repo._get_connection() as conn:
                 with conn.cursor() as cur:
                     # Use PgSTAC's insert_collection function
-                    # Returns the collection ID
+                    # Returns the collection ID (pgstac.create_collection returns jsonb)
                     cur.execute(
                         "SELECT pgstac.create_collection(%s::jsonb)",
                         (collection_json,)
                     )
-                    result = cur.fetchone()[0]
+                    result = cur.fetchone()
+                    # Result is dict thanks to dict_row, pgstac function returns jsonb
                     conn.commit()
 
                     logger.info(f"✅ Collection inserted: {collection_id}")
@@ -183,7 +184,7 @@ class PgStacRepository:
         logger.debug(f"   Metadata keys: {list(metadata.keys())}")
 
         try:
-            with psycopg.connect(self.connection_string) as conn:
+            with self._pg_repo._get_connection() as conn:
                 with conn.cursor() as cur:
                     # First, get existing collection
                     cur.execute(
@@ -195,7 +196,7 @@ class PgStacRepository:
                     if not result:
                         raise ValueError(f"Collection '{collection_id}' not found")
 
-                    existing_content = result[0]
+                    existing_content = result['content']
 
                     # Merge metadata into existing content
                     for key, value in metadata.items():
@@ -231,13 +232,14 @@ class PgStacRepository:
             because collections create partitions that items use.
         """
         try:
-            with psycopg.connect(self.connection_string) as conn:
+            with self._pg_repo._get_connection() as conn:
                 with conn.cursor() as cur:
                     cur.execute(
                         "SELECT EXISTS(SELECT 1 FROM pgstac.collections WHERE id = %s)",
                         (collection_id,)
                     )
-                    exists = cur.fetchone()[0]
+                    result = cur.fetchone()
+                    exists = result['exists']
                     logger.debug(f"   Collection '{collection_id}' exists: {exists}")
                     return exists
 
@@ -306,7 +308,7 @@ class PgStacRepository:
 
             item_json = json.dumps(item_dict)
 
-            with psycopg.connect(self.connection_string) as conn:
+            with self._pg_repo._get_connection() as conn:
                 with conn.cursor() as cur:
                     # Use PgSTAC's create_item function (singular - single item)
                     # 18 NOV 2025: Fixed - was create_items (plural) which expects array
@@ -340,7 +342,7 @@ class PgStacRepository:
         logger.debug(f"🔍 Fetching collection: {collection_id}")
 
         try:
-            with psycopg.connect(self.connection_string) as conn:
+            with self._pg_repo._get_connection() as conn:
                 with conn.cursor() as cur:
                     cur.execute(
                         "SELECT content FROM pgstac.collections WHERE id = %s",
@@ -350,7 +352,7 @@ class PgStacRepository:
 
                     if result:
                         logger.debug(f"   ✅ Collection found: {collection_id}")
-                        return result[0]  # content is JSONB, returns dict
+                        return result['content']  # content is JSONB, returns dict
                     else:
                         logger.debug(f"   ❌ Collection not found: {collection_id}")
                         return None
@@ -373,7 +375,7 @@ class PgStacRepository:
         logger.debug(f"🔍 Listing collections (limit={limit}, offset={offset})")
 
         try:
-            with psycopg.connect(self.connection_string) as conn:
+            with self._pg_repo._get_connection() as conn:
                 with conn.cursor() as cur:
                     cur.execute(
                         """
@@ -386,7 +388,7 @@ class PgStacRepository:
                     )
                     results = cur.fetchall()
 
-                    collections = [row[0] for row in results]
+                    collections = [row['content'] for row in results]
                     logger.debug(f"   ✅ Found {len(collections)} collections")
                     return collections
 

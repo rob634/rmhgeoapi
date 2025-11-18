@@ -319,26 +319,31 @@ def _create_stac_collection_impl(
         collection.validate()
         logger.info(f"✅ STAC collection validated: {collection.id}")
 
-        # Convert to dict for PgSTAC
-        collection_dict = collection.to_dict()
+        # CRITICAL FIX (18 NOV 2025): Use SINGLE repository instance
+        # Problem: _insert_into_pgstac_collections() creates PgStacRepository instance A,
+        #          StacMetadataService.stac creates PgStacInfrastructure instance B
+        #          Two instances = two connections = READ AFTER WRITE consistency issue
+        # Solution: Create repository once, use for both insert and verification
+        from infrastructure.pgstac_repository import PgStacRepository
+        pgstac_repo = PgStacRepository()
 
         # Insert collection into PgSTAC FIRST (creates partition for items)
-        pgstac_id = _insert_into_pgstac_collections(collection_dict)
+        pgstac_id = pgstac_repo.insert_collection(collection)
         logger.info(f"✅ Collection inserted into PgSTAC: {pgstac_id}")
 
-        # Import STAC metadata service for item creation
-        from services.service_stac_metadata import StacMetadataService
-        stac_service = StacMetadataService()
-
-        # Validate collection exists before creating Items (12 NOV 2025)
+        # Validate collection exists before creating Items (18 NOV 2025: Use SAME repository!)
         # This defensive check ensures PgSTAC partition is ready
-        if not stac_service.stac.collection_exists(collection_id):
+        if not pgstac_repo.collection_exists(collection_id):
             raise RuntimeError(
                 f"Collection '{collection_id}' was not found in PgSTAC after insertion. "
                 f"Cannot create STAC Items without a collection partition. "
                 f"This indicates a PgSTAC insertion failure."
             )
         logger.info(f"✅ Collection '{collection_id}' verified in PgSTAC - ready for Items")
+
+        # Import STAC metadata service for item creation
+        from services.service_stac_metadata import StacMetadataService
+        stac_service = StacMetadataService()
 
         # ORTHODOX STAC (11 NOV 2025): Create STAC Items for each COG tile
         # Items are searchable with geometry, datetime, and properties
@@ -604,6 +609,11 @@ def _calculate_spatial_extent_from_tiles(
 
 def _insert_into_pgstac_collections(collection_dict: Dict[str, Any]) -> str:
     """
+    DEPRECATED (18 NOV 2025): Use PgStacRepository().insert_collection() directly.
+
+    This function creates a new repository instance which causes READ AFTER WRITE
+    consistency issues. Use single repository instance pattern instead.
+
     Insert STAC collection into PgSTAC collections table.
 
     Uses PgStacRepository which handles managed identity authentication
@@ -618,10 +628,9 @@ def _insert_into_pgstac_collections(collection_dict: Dict[str, Any]) -> str:
     Raises:
         Exception: PgSTAC insertion failure
 
-    Migration: Phase 2B (17 NOV 2025)
-        - Refactored to use PgStacRepository instead of direct connections
-        - Eliminates get_postgres_connection_string() usage
-        - Proper managed identity authentication via repository pattern
+    Migration History:
+        - Phase 2B (17 NOV 2025): Refactored to use PgStacRepository
+        - Phase 2B Fix (18 NOV 2025): DEPRECATED - causes connection consistency issues
     """
     logger.info(f"Inserting collection into PgSTAC: {collection_dict['id']}")
 

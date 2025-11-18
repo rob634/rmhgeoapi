@@ -45,10 +45,10 @@ from psycopg import sql
 from util_logger import LoggerFactory, ComponentType
 from config import get_config
 
-logger = LoggerFactory.create_logger(ComponentType.SERVICE, "PgStacInfrastructure")
+logger = LoggerFactory.create_logger(ComponentType.SERVICE, "PgStacBootstrap")
 
 
-class PgStacInfrastructure:
+class PgStacBootstrap:
     """
     PgSTAC Infrastructure Management (PostgreSQL STAC Extension).
 
@@ -66,7 +66,7 @@ class PgStacInfrastructure:
           For general STAC metadata generation, see services/service_stac_metadata.py
 
     Author: Robert and Geospatial Claude Legion
-    Date: 5 OCT 2025 (Renamed to PgStacInfrastructure: 8 NOV 2025)
+    Date: 5 OCT 2025 (Renamed to PgStacBootstrap: 18 NOV 2025)
     """
 
     # PgSTAC schema constants (controlled by library)
@@ -1096,8 +1096,8 @@ def get_collection(collection_id: str, repo: Optional['PostgreSQLRepository'] = 
                 )
                 result = cur.fetchone()
 
-                if result and result[0]:
-                    return result[0]  # Return collection JSONB content
+                if result and result['content']:
+                    return result['content']  # Return collection JSONB content
                 else:
                     return {
                         'error': f"Collection '{collection_id}' not found",
@@ -1885,7 +1885,11 @@ def get_collections_summary(repo: Optional['PostgreSQLRepository'] = None) -> Di
                 total_items = 0
 
                 for row in cur.fetchall():
-                    coll_id, title, description, item_count, last_updated = row
+                    coll_id = row['id']
+                    title = row['title']
+                    description = row['description']
+                    item_count = row['item_count']
+                    last_updated = row['last_updated']
                     total_items += item_count
 
                     collections.append({
@@ -1957,12 +1961,15 @@ def get_all_collections(repo: Optional['PostgreSQLRepository'] = None) -> Dict[s
         # Base URL for STAC API
         base_url = "https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/stac"
 
-        # Query all collections with full content
+        # Query all collections with full content AND item counts
         query = """
             SELECT
                 c.id,
-                c.content
+                c.content,
+                COUNT(i.id) as item_count
             FROM pgstac.collections c
+            LEFT JOIN pgstac.items i ON i.collection = c.id
+            GROUP BY c.id, c.content
             ORDER BY c.id;
         """
 
@@ -1973,8 +1980,14 @@ def get_all_collections(repo: Optional['PostgreSQLRepository'] = None) -> Dict[s
 
         collections = []
         for row in rows:
-            collection_id = row[0]
-            content = row[1]
+            collection_id = row['id']
+            content = row['content']
+            item_count = row['item_count']
+
+            # Inject item count into summaries field
+            if 'summaries' not in content:
+                content['summaries'] = {}
+            content['summaries']['total_items'] = item_count
 
             # Add self and root links to each collection
             if 'links' not in content:

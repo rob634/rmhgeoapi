@@ -79,7 +79,7 @@ import json
 import azure.functions as func
 
 from triggers.http_base import BaseHttpTrigger
-from infrastructure.stac import clear_stac_data
+from infrastructure.pgstac_bootstrap import clear_stac_data
 from util_logger import LoggerFactory, ComponentType
 
 logger = LoggerFactory.create_logger(ComponentType.CONTROLLER, "StacNuke")

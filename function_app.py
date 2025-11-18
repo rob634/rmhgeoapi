@@ -995,7 +995,7 @@ def stac_vector(req: func.HttpRequest) -> func.HttpResponse:
 # All read-only operations for monitoring and troubleshooting
 # ============================================================================
 
-from infrastructure.stac import (
+from infrastructure.pgstac_bootstrap import (
     get_schema_info,
     get_collection_stats,
     get_item_by_id,
@@ -1193,7 +1193,7 @@ def collections_list(req: func.HttpRequest) -> func.HttpResponse:
     Returns:
         JSON with 'collections' array containing all STAC collections
     """
-    from infrastructure.stac import get_all_collections
+    from infrastructure.pgstac_bootstrap import get_all_collections
 
     try:
         result = get_all_collections()
@@ -1233,7 +1233,7 @@ def collection_detail(req: func.HttpRequest) -> func.HttpResponse:
     Returns:
         STAC Collection object
     """
-    from infrastructure.stac import get_collection
+    from infrastructure.pgstac_bootstrap import get_collection
 
     try:
         collection_id = req.route_params.get('collection_id')
@@ -1288,7 +1288,7 @@ def collection_items(req: func.HttpRequest) -> func.HttpResponse:
     Returns:
         STAC ItemCollection (GeoJSON FeatureCollection)
     """
-    from infrastructure.stac import get_collection_items
+    from infrastructure.pgstac_bootstrap import get_collection_items
 
     try:
         collection_id = req.route_params.get('collection_id')
@@ -1364,7 +1364,7 @@ def stac_search(req: func.HttpRequest) -> func.HttpResponse:
     Returns:
         STAC ItemCollection (GeoJSON FeatureCollection)
     """
-    from infrastructure.stac import search_items
+    from infrastructure.pgstac_bootstrap import search_items
 
     try:
         # Handle GET and POST differently

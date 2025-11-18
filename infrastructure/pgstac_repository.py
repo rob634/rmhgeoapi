@@ -10,7 +10,7 @@
 # PYDANTIC_MODELS: pystac.Collection, pystac.Item (consumed)
 # DEPENDENCIES: psycopg (3.2+), pystac (1.13+), typing, config
 # SOURCE: PostgreSQL pgstac schema (collections, items tables)
-# SCOPE: PgSTAC data operations (separate from PgStacInfrastructure setup)
+# SCOPE: PgSTAC data operations (separate from PgStacBootstrap setup)
 # VALIDATION: Pydantic models for STAC validation
 # PATTERNS: Repository pattern, Separation of Concerns
 # ENTRY_POINTS: PgStacRepository().insert_collection(), insert_item(), etc.
@@ -28,7 +28,7 @@
 PgSTAC Repository - Data Operations for Collections and Items
 
 Encapsulates all PgSTAC data operations (CRUD) following Repository pattern.
-Separated from PgStacInfrastructure (which handles schema setup/installation).
+Separated from PgStacBootstrap (which handles schema setup/installation).
 
 Key Responsibilities:
 - Insert/update/delete collections
@@ -64,7 +64,7 @@ class PgStacRepository:
     (no pooling) suitable for Azure Functions serverless environment.
 
     Separation of Concerns:
-    - PgStacInfrastructure: Schema setup, installation, version management
+    - PgStacBootstrap: Schema setup, installation, version management
     - PgStacRepository: Data CRUD operations (this class)
 
     Author: Robert and Geospatial Claude Legion

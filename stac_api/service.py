@@ -103,7 +103,7 @@ class STACAPIService:
             Collections object with collections array and links
         """
         # Import here to avoid circular dependency
-        from infrastructure.stac import get_all_collections
+        from infrastructure.pgstac_bootstrap import get_all_collections
 
         response = get_all_collections()
 
@@ -167,7 +167,7 @@ class STACAPIService:
         Returns:
             Collection object with links
         """
-        from infrastructure.stac import get_collection
+        from infrastructure.pgstac_bootstrap import get_collection
 
         response = get_collection(collection_id)
 
@@ -223,7 +223,7 @@ class STACAPIService:
         Returns:
             FeatureCollection with items and pagination links
         """
-        from infrastructure.stac import get_collection_items
+        from infrastructure.pgstac_bootstrap import get_collection_items
 
         # Note: infrastructure.stac.get_collection_items doesn't support offset pagination
         # It returns all items up to limit
@@ -279,7 +279,7 @@ class STACAPIService:
         Returns:
             Item object with links
         """
-        from infrastructure.stac import get_item_by_id
+        from infrastructure.pgstac_bootstrap import get_item_by_id
 
         response = get_item_by_id(item_id, collection_id)
 

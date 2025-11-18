@@ -36,7 +36,7 @@ import json
 import azure.functions as func
 
 from triggers.http_base import BaseHttpTrigger
-from infrastructure.stac import PgStacInfrastructure
+from infrastructure.pgstac_bootstrap import PgStacBootstrap
 from util_logger import LoggerFactory, ComponentType
 
 logger = LoggerFactory.create_logger(ComponentType.TRIGGER, "StacCollectionsTrigger")
@@ -56,10 +56,10 @@ class StacCollectionsTrigger(BaseHttpTrigger):
         self._stac = None  # Lazy-loaded to avoid config issues at import time
 
     @property
-    def stac(self) -> PgStacInfrastructure:
+    def stac(self) -> PgStacBootstrap:
         """Lazy-load STAC infrastructure (avoids config loading at import time)."""
         if self._stac is None:
-            self._stac = PgStacInfrastructure()
+            self._stac = PgStacBootstrap()
         return self._stac
 
     def get_allowed_methods(self) -> List[str]:

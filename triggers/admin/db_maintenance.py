@@ -470,7 +470,7 @@ class AdminDbMaintenanceTrigger:
 
             try:
                 from triggers.stac_collections import stac_collections_trigger
-                from infrastructure.stac import get_system_stac_collections
+                from infrastructure.pgstac_bootstrap import get_system_stac_collections
 
                 system_collections = get_system_stac_collections()
 

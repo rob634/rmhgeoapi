@@ -1,16 +1,127 @@
 # Active Tasks - CRITICAL ETL Repository Pattern Migration
 
-**Last Updated**: 16 NOV 2025 (20:10 UTC)
+**Last Updated**: 18 NOV 2025 (03:50 UTC)
 **Author**: Robert and Geospatial Claude Legion
+
+---
+
+## 🚨 CRITICAL BLOCKING ISSUE - PgSTAC Collection Insertion Failure (18 NOV 2025)
+
+**Problem**: Collections insert successfully but verification fails immediately after
+**Error**: "Collection 'X' was not found in PgSTAC after insertion"
+**Root Cause**: READ AFTER WRITE consistency issue - two separate repository instances
+**Impact**: Phase 2B deployed but STAC collection creation still fails at Stage 4
+
+### Analysis (18 NOV 2025 03:50 UTC)
+
+**The Sequence**:
+1. `stac_collection.py:326` → `PgStacRepository().insert_collection()` ✅ Succeeds
+2. `stac_collection.py:335` → `PgStacInfrastructure().collection_exists()` ❌ Returns False
+3. Code raises: "Collection not found in PgSTAC after insertion"
+
+**The Problem**:
+- `PgStacRepository` and `PgStacInfrastructure` both create **separate** `PostgreSQLRepository` instances
+- Each instance = separate connection context
+- INSERT commits on Connection A, SELECT queries on Connection B
+- Possible transaction isolation or connection pooling visibility issue
+
+### Immediate Fix Required
+
+**Quick Fix** (services/stac_collection.py lines 325-341):
+```python
+# BEFORE (current broken pattern):
+pgstac_id = _insert_into_pgstac_collections(collection_dict)  # Creates PgStacRepository
+stac_service = StacMetadataService()  # Creates PgStacInfrastructure
+if not stac_service.stac.collection_exists(collection_id):  # Different connection!
+    raise RuntimeError("Collection not found...")
+
+# AFTER (single repository instance):
+repo = PgStacRepository()  # Create ONCE
+collection = Collection.from_dict(collection_dict)
+pgstac_id = repo.insert_collection(collection)  # Use it for insert
+if not repo.collection_exists(collection_id):  # Use SAME instance for verification
+    raise RuntimeError("Collection not found...")
+```
+
+### Long-Term Architectural Fix - Consolidate PgSTAC Classes
+
+**Current Duplication** (18 NOV 2025 analysis):
+
+| Class | Lines | Purpose | Issues |
+|-------|-------|---------|--------|
+| **PgStacRepository** | 390 | Collections/Items CRUD | ✅ Clean, focused, newer (12 NOV) |
+| **PgStacInfrastructure** | 2,060 | Setup + Operations + Queries | ❌ Bloated, duplicates PgStacRepository methods |
+
+**Duplicate Methods Found**:
+- `collection_exists()` - **THREE copies** (PgStacRepository:214, PgStacInfrastructure:802, PgStacInfrastructure:943)
+- `insert_item()` - **TWO copies** (PgStacRepository:247, PgStacInfrastructure:880)
+
+**Root Cause**: PgStacInfrastructure was created first (4 OCT), PgStacRepository added later (12 NOV) but old methods never removed
+
+### Refactoring Plan - Rename & Consolidate
+
+**Step 1: Rename PgStacInfrastructure → PgStacBootstrap**
+- Clarifies purpose: schema setup, installation, verification
+- Filename: `infrastructure/stac.py` → `infrastructure/pgstac_bootstrap.py`
+- Class: `PgStacInfrastructure` → `PgStacBootstrap`
+
+**Step 2: Move ALL Data Operations to PgStacRepository**
+
+**PgStacBootstrap** (setup/installation ONLY):
+- ✅ Keep: `check_installation()`, `install_pgstac()`, `verify_installation()`, `_drop_pgstac_schema()`, `_run_pypgstac_migrate()`
+- ✅ Keep: Standalone query functions for admin/diagnostics (`get_collection()`, `get_collection_items()`, `search_items()`, etc.)
+- ❌ Remove: `collection_exists()` (duplicate)
+- ❌ Remove: `item_exists()` (duplicate)
+- ❌ Remove: `insert_item()` (duplicate)
+- ❌ Remove: `create_collection()` (data operation, not setup)
+
+**PgStacRepository** (ALL data operations):
+- ✅ Keep: All existing methods (`insert_collection()`, `update_collection_metadata()`, `collection_exists()`, `insert_item()`, `get_collection()`, `list_collections()`)
+- ➕ Add: `bulk_insert_items()` (move from PgStacBootstrap)
+- ➕ Add: `item_exists()` (if not already present)
+
+**Step 3: Update All Imports**
+- Search codebase for `from infrastructure.stac import PgStacInfrastructure`
+- Replace with `from infrastructure.pgstac_repository import PgStacRepository` where data operations are used
+- Replace with `from infrastructure.pgstac_bootstrap import PgStacBootstrap` where setup/admin functions are used
+
+**Step 4: Fix StacMetadataService**
+- Change `self.stac = PgStacInfrastructure()` to `self.stac = PgStacRepository()`
+- This ensures single repository pattern throughout
+
+### Task Breakdown
+
+- [ ] **CRITICAL**: Implement quick fix in stac_collection.py (single repository instance)
+- [ ] Test quick fix with new job submission
+- [ ] Rename infrastructure/stac.py → infrastructure/pgstac_bootstrap.py
+- [ ] Rename class PgStacInfrastructure → PgStacBootstrap
+- [ ] Remove duplicate methods from PgStacBootstrap (collection_exists, insert_item, item_exists, create_collection)
+- [ ] Add bulk_insert_items to PgStacRepository (if needed)
+- [ ] Update all imports (search for PgStacInfrastructure, replace appropriately)
+- [ ] Fix StacMetadataService to use PgStacRepository
+- [ ] Test end-to-end STAC collection creation
+- [ ] Update documentation (FILE_CATALOG.md, ARCHITECTURE_REFERENCE.md)
+- [ ] Commit: "Consolidate PgSTAC: Rename to Bootstrap, eliminate duplication"
+
+### Expected Benefits
+
+1. ✅ **Fixes "Collection not found" error** - single repository instance eliminates READ AFTER WRITE issue
+2. ✅ **Eliminates duplication** - removes 3 duplicate method implementations
+3. ✅ **Clearer architecture** - PgStacBootstrap = setup, PgStacRepository = data operations
+4. ✅ **Easier maintenance** - no more confusion about which class to use
+5. ✅ **Better testability** - single repository pattern easier to mock
 
 ---
 
 ## 🚨 CRITICAL NEXT WORK - Repository Pattern Enforcement (16 NOV 2025)
 
 **Purpose**: Eliminate all direct database connections, enforce repository pattern
-**Status**: 🔴 **URGENT** - Architecture violation preventing managed identity
-**Priority**: **BLOCKING** - Schema redeploy failing, managed identity broken
-**Root Cause**: 10+ files bypass PostgreSQLRepository, directly manage connections
+**Status**: 🟡 **IN PROGRESS** - Managed identity operational, service files remain
+**Priority**: **HIGH** - Complete repository pattern migration for maintainability
+**Root Cause**: 5+ service files bypass PostgreSQLRepository, directly manage connections
+
+**✅ Managed Identity Status**: Operational in production (15 NOV 2025)
+**📘 Documentation**: See [QA_DEPLOYMENT.md](../QA_DEPLOYMENT.md) lines 361-438 for setup guide
 
 ### Architecture Violation
 
@@ -125,12 +236,12 @@ with repo._get_connection() as conn:
 
 ## IMPLEMENTATION STEPS
 
-### Step 1: Fix PostgreSQLRepository (COMPLETED - 16 NOV 2025)
+### Step 1: Fix PostgreSQLRepository (✅ COMPLETED - 16 NOV 2025)
 - [x] Remove fallback logic (no password fallback) - DONE
 - [x] Use environment variable `MANAGED_IDENTITY_NAME` with fallback to `WEBSITE_SITE_NAME`
 - [x] Environment variable set in Azure: `MANAGED_IDENTITY_NAME=rmhazuregeoapi`
 - [x] NO fallbacks - fails immediately if token acquisition fails
-- [ ] **BLOCKING**: PostgreSQL user `rmhazuregeoapi` must be created (see bottom of file)
+- [x] **PostgreSQL user `rmhazuregeoapi` created** - Operational in production (15 NOV 2025)
 
 ### Step 2: Create PgSTACRepository Class (NEW)
 **File**: `infrastructure/pgstac_repository.py` (refactor existing)
@@ -238,39 +349,40 @@ curl "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/fe
 
 ---
 
-## BLOCKING ISSUE - Must Create Managed Identity User First
+## ✅ MANAGED IDENTITY - OPERATIONAL (15 NOV 2025)
 
-Before ANY of this works, you must execute PostgreSQL commands:
+**Status**: ✅ Managed identity authentication working in production
+**Documentation**: See [QA_DEPLOYMENT.md](../QA_DEPLOYMENT.md) lines 361-438 for complete setup guide
 
+**Production Setup Completed**:
+- ✅ PostgreSQL user `rmhazuregeoapi` created with pgaadauth
+- ✅ All schema permissions granted (app, geo, pgstac, h3)
+- ✅ Function App managed identity enabled
+- ✅ Environment variable `USE_MANAGED_IDENTITY=true` configured
+- ✅ PostgreSQLRepository using ManagedIdentityCredential
+- ✅ Token refresh working (automatic hourly rotation)
+
+**For New Environments** (QA/Production):
+
+See [QA_DEPLOYMENT.md](../QA_DEPLOYMENT.md) section "Managed Identity for Database Connections" for complete setup instructions including:
+- Azure CLI commands to enable managed identity
+- PostgreSQL user creation script
+- Environment variable configuration
+- Verification steps
+
+**Quick Setup** (for reference):
 ```bash
-# Connect as Azure AD admin
-psql "host=rmhpgflex.postgres.database.azure.com port=5432 dbname=geopgflex user=YOUR_AZURE_AD_ADMIN_EMAIL sslmode=require"
+# 1. Enable managed identity on Function App
+az functionapp identity assign --name <app-name> --resource-group <rg>
 
-# Create managed identity user (EXACT NAME: rmhazuregeoapi)
-SELECT pgaadauth_create_principal('rmhazuregeoapi', false, false);
+# 2. Create PostgreSQL user (as Entra admin)
+psql "host=<server>.postgres.database.azure.com dbname=<db> sslmode=require"
+SELECT pgaadauth_create_principal('<app-name>', false, false);
+# ... grant permissions (see QA_DEPLOYMENT.md)
 
-# Grant all permissions
-GRANT CONNECT ON DATABASE geopgflex TO "rmhazuregeoapi";
-GRANT USAGE, CREATE ON SCHEMA app TO "rmhazuregeoapi";
-GRANT USAGE, CREATE ON SCHEMA geo TO "rmhazuregeoapi";
-GRANT USAGE, CREATE ON SCHEMA pgstac TO "rmhazuregeoapi";
-GRANT USAGE, CREATE ON SCHEMA h3 TO "rmhazuregeoapi";
-GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA app TO "rmhazuregeoapi";
-GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA geo TO "rmhazuregeoapi";
-GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA pgstac TO "rmhazuregeoapi";
-GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA h3 TO "rmhazuregeoapi";
-GRANT USAGE ON ALL SEQUENCES IN SCHEMA app TO "rmhazuregeoapi";
-GRANT USAGE ON ALL SEQUENCES IN SCHEMA geo TO "rmhazuregeoapi";
-GRANT USAGE ON ALL SEQUENCES IN SCHEMA pgstac TO "rmhazuregeoapi";
-GRANT USAGE ON ALL SEQUENCES IN SCHEMA h3 TO "rmhazuregeoapi";
-GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA app TO "rmhazuregeoapi";
-GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA pgstac TO "rmhazuregeoapi";
-GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA h3 TO "rmhazuregeoapi";
-```
-
-**Without this, ALL connections will fail with**:
-```
-password authentication failed for user "rmhazuregeoapi"
+# 3. Configure Function App
+az functionapp config appsettings set --name <app-name> \
+  --settings USE_MANAGED_IDENTITY=true
 ```
 
 ---

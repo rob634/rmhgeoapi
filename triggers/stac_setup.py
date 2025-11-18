@@ -63,7 +63,7 @@ from typing import Dict, Any, List
 
 from triggers.http_base import BaseHttpTrigger
 from util_logger import LoggerFactory, ComponentType
-from infrastructure.stac import PgStacInfrastructure, check_stac_installation, install_stac
+from infrastructure.pgstac_bootstrap import PgStacBootstrap, check_stac_installation, install_stac
 
 logger = LoggerFactory.create_logger(ComponentType.TRIGGER, "StacSetupTrigger")
 
@@ -82,10 +82,10 @@ class StacSetupTrigger(BaseHttpTrigger):
         self._stac = None  # Lazy-loaded to avoid config issues at import time
 
     @property
-    def stac(self) -> PgStacInfrastructure:
+    def stac(self) -> PgStacBootstrap:
         """Lazy-load STAC infrastructure (avoids config loading at import time)."""
         if self._stac is None:
-            self._stac = PgStacInfrastructure()
+            self._stac = PgStacBootstrap()
         return self._stac
 
     def get_allowed_methods(self) -> List[str]:

@@ -98,7 +98,7 @@ def handle_request(req: func.HttpRequest) -> func.HttpResponse:
     # STEP 2: Import StacInfrastructure
     try:
         logger.info("🔄 STEP 2: Starting StacInfrastructure import...")
-        from infrastructure.stac import PgStacInfrastructure
+        from infrastructure.pgstac_bootstrap import PgStacBootstrap
         logger.info("✅ STEP 2: StacInfrastructure imported successfully")
     except ImportError as e:
         logger.error(f"❌ STEP 2 FAILED: ImportError importing StacInfrastructure")
@@ -267,7 +267,7 @@ def handle_request(req: func.HttpRequest) -> func.HttpResponse:
     if should_insert:
         try:
             logger.info("🔄 STEP 8: Inserting STAC Item into PgSTAC...")
-            stac = PgStacInfrastructure()
+            stac = PgStacBootstrap()
             insert_result = stac.insert_item(item, collection_id)
             logger.info(f"✅ STEP 8: Item inserted into PgSTAC - Result: {insert_result}")
         except Exception as e:

@@ -321,7 +321,7 @@ def _create_stac_collection_impl(
 
         # CRITICAL FIX (18 NOV 2025): Use SINGLE repository instance
         # Problem: _insert_into_pgstac_collections() creates PgStacRepository instance A,
-        #          StacMetadataService.stac creates PgStacInfrastructure instance B
+        #          StacMetadataService.stac creates PgStacBootstrap instance B
         #          Two instances = two connections = READ AFTER WRITE consistency issue
         # Solution: Create repository once, use for both insert and verification
         from infrastructure.pgstac_repository import PgStacRepository

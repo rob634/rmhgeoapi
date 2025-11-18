@@ -74,7 +74,7 @@ except Exception as e:
     raise
 
 from infrastructure.blob import BlobRepository
-from infrastructure.stac import PgStacInfrastructure
+from infrastructure.pgstac_repository import PgStacRepository
 
 # Component-specific logger for structured logging (Application Insights)
 logger = LoggerFactory.create_logger(
@@ -94,7 +94,7 @@ class StacMetadataService:
     def __init__(self):
         """Initialize STAC metadata service."""
         self.blob_repo = BlobRepository.instance()
-        self.stac = PgStacInfrastructure()
+        self.stac = PgStacRepository()  # 18 NOV 2025: Use PgStacRepository for data operations
 
     def extract_item_from_blob(
         self,

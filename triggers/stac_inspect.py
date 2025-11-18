@@ -46,7 +46,7 @@ from typing import Dict, Any, List
 
 from triggers.http_base import BaseHttpTrigger
 from util_logger import LoggerFactory, ComponentType
-from infrastructure.stac import (
+from infrastructure.pgstac_bootstrap import (
     get_schema_info,
     get_collection_stats,
     get_item_by_id,

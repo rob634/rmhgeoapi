@@ -39,7 +39,7 @@ from datetime import datetime, timezone
 import psycopg
 from psycopg import sql
 
-from infrastructure.stac import PgStacInfrastructure
+from infrastructure.pgstac_bootstrap import PgStacBootstrap
 from config import get_config
 from util_logger import LoggerFactory, ComponentType
 
@@ -221,7 +221,7 @@ def create_h3_stac(task_params: dict) -> dict:
 
         # STEP 3: Insert into pgstac (with idempotency check)
         logger.info(f"💾 STEP 3: Inserting STAC Item into pgstac collection '{collection_id}'...")
-        stac_infra = PgStacInfrastructure()
+        stac_infra = PgStacBootstrap()
 
         # Check if item already exists (idempotency)
         if stac_infra.item_exists(item_id, collection_id):
@@ -236,7 +236,7 @@ def create_h3_stac(task_params: dict) -> dict:
             item_skipped = True
         else:
             # Item doesn't exist - insert it
-            # Note: PgStacInfrastructure.insert_item expects pystac Item or dict
+            # Note: PgStacBootstrap.insert_item expects pystac Item or dict
             insert_result = stac_infra.insert_item_dict(stac_item, collection_id)
             logger.info(f"✅ STEP 3: pgstac insert completed - success={insert_result.get('success')}")
             item_skipped = False

@@ -57,7 +57,7 @@ def create_vector_stac(params: dict) -> dict[str, Any]:
     """
     import traceback
     from services.service_stac_vector import StacVectorService
-    from infrastructure.stac import PgStacInfrastructure
+    from infrastructure.pgstac_bootstrap import PgStacBootstrap
 
     logger.info(f"🗺️ STAC Stage 3: Creating STAC Item for {params.get('schema')}.{params.get('table_name')}")
 
@@ -112,7 +112,7 @@ def create_vector_stac(params: dict) -> dict[str, Any]:
 
         # STEP 2: Insert into PgSTAC (with idempotency check)
         logger.info(f"💾 STEP 2: Inserting STAC Item into PgSTAC collection '{collection_id}'...")
-        stac_infra = PgStacInfrastructure()
+        stac_infra = PgStacBootstrap()
 
         # Check if item already exists (idempotency)
         if stac_infra.item_exists(item.id, collection_id):
@@ -211,7 +211,7 @@ def extract_vector_stac_metadata(params: dict) -> dict[str, Any]:
     """
     import traceback
     from services.service_stac_vector import StacVectorService
-    from infrastructure.stac import PgStacInfrastructure
+    from infrastructure.pgstac_bootstrap import PgStacBootstrap
 
     logger.info(f"🚀 HANDLER ENTRY: extract_vector_stac_metadata called with params: {list(params.keys())}")
     logger.info(f"🚀 HANDLER ENTRY: table={params.get('schema')}.{params.get('table_name')}")
@@ -255,10 +255,10 @@ def extract_vector_stac_metadata(params: dict) -> dict[str, Any]:
         logger.info(f"✅ STEP 2: STAC extraction completed in {extract_duration:.2f}s - item_id={item.id}")
 
         # STEP 3: Initialize PgSTAC infrastructure
-        logger.info(f"🗄️ STEP 3: Initializing PgStacInfrastructure...")
-        from infrastructure.stac import PgStacInfrastructure
-        stac_infra = PgStacInfrastructure()
-        logger.info(f"✅ STEP 3: PgStacInfrastructure initialized")
+        logger.info(f"🗄️ STEP 3: Initializing PgStacBootstrap...")
+        from infrastructure.pgstac_bootstrap import PgStacBootstrap
+        stac_infra = PgStacBootstrap()
+        logger.info(f"✅ STEP 3: PgStacBootstrap initialized")
 
         # STEP 4: Insert into PgSTAC (with idempotency check)
         insert_start = datetime.utcnow()

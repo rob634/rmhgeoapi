@@ -155,7 +155,7 @@ def extract_stac_metadata(params: dict) -> dict[str, Any]:
 
         print(f"📦 STEP 0C: Importing StacInfrastructure...", file=sys.stderr, flush=True)
         logger.info("📦 STEP 0C: Importing StacInfrastructure...")
-        from infrastructure.stac import PgStacInfrastructure
+        from infrastructure.pgstac_bootstrap import PgStacBootstrap
         logger.info("✅ STEP 0C: StacInfrastructure imported successfully")
         print(f"✅ STEP 0C: All imports successful!", file=sys.stderr, flush=True)
 
@@ -244,11 +244,11 @@ def extract_stac_metadata(params: dict) -> dict[str, Any]:
 
         # STEP 4: Initialize PgSTAC infrastructure
         try:
-            logger.debug(f"🗄️ STEP 4: Initializing PgStacInfrastructure...")
-            stac_infra = PgStacInfrastructure()
-            logger.info(f"✅ STEP 4: PgStacInfrastructure initialized")
+            logger.debug(f"🗄️ STEP 4: Initializing PgStacBootstrap...")
+            stac_infra = PgStacBootstrap()
+            logger.info(f"✅ STEP 4: PgStacBootstrap initialized")
         except Exception as e:
-            logger.error(f"❌ STEP 4 FAILED: PgStacInfrastructure initialization error: {e}\n{traceback.format_exc()}")
+            logger.error(f"❌ STEP 4 FAILED: PgStacBootstrap initialization error: {e}\n{traceback.format_exc()}")
             raise
 
         # STEP 4.5: Check collection exists, auto-create if missing

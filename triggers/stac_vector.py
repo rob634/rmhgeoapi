@@ -33,7 +33,7 @@ import json
 import logging
 
 from services.service_stac_vector import StacVectorService
-from infrastructure.stac import PgStacInfrastructure
+from infrastructure.pgstac_bootstrap import PgStacBootstrap
 
 logger = logging.getLogger(__name__)
 
@@ -109,7 +109,7 @@ def handle_request(req: func.HttpRequest) -> func.HttpResponse:
         # Optionally insert into PgSTAC
         insert_result = None
         if should_insert:
-            stac = PgStacInfrastructure()
+            stac = PgStacBootstrap()
             insert_result = stac.insert_item(item, collection_id)
 
         # Build response

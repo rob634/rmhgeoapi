@@ -291,6 +291,15 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
             health_data["status"] = "unhealthy"
             health_data["errors"].extend(jobs_health.get("errors", []))
 
+        # Check PgSTAC (optional but important for STAC workflows)
+        # Controlled by ENABLE_DATABASE_HEALTH_CHECK environment variable
+        if self._should_check_database():
+            pgstac_health = self._check_pgstac()
+            health_data["components"]["pgstac"] = pgstac_health
+            # Note: PgSTAC is optional - don't fail overall health if unavailable
+            if pgstac_health["status"] == "error":
+                health_data["errors"].append("PgSTAC unavailable (impacts STAC collection/item workflows)")
+
         return health_data
     
     def handle_request(self, req: func.HttpRequest) -> func.HttpResponse:
@@ -1189,6 +1198,124 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
             }
 
         return self.check_component_health("jobs", check_jobs)
+
+    def _check_pgstac(self) -> Dict[str, Any]:
+        """
+        Check PgSTAC (PostgreSQL STAC extension) health.
+
+        This provides visibility into PgSTAC installation status and critical table availability,
+        particularly the pgstac.searches table which is required for TiTiler integration.
+
+        Returns:
+            Dict with PgSTAC health status including:
+            - pgstac_version: Version string from pgstac.get_version()
+            - schema_exists: Whether pgstac schema exists
+            - critical_tables: Status of collections, items, searches tables
+            - searches_table_exists: Specific check for searches table (required for search registration)
+            - table_counts: Row counts for collections and items
+        """
+        def check_pgstac():
+            from infrastructure.postgresql import PostgreSQLRepository
+            from config import get_config
+
+            config = get_config()
+            repo = PostgreSQLRepository(schema_name='pgstac')
+
+            try:
+                with repo._get_connection() as conn:
+                    with conn.cursor() as cur:
+                        # Check if pgstac schema exists
+                        cur.execute(
+                            "SELECT EXISTS(SELECT 1 FROM pg_namespace WHERE nspname = 'pgstac')"
+                        )
+                        schema_exists = cur.fetchone()[0]
+
+                        if not schema_exists:
+                            return {
+                                "schema_exists": False,
+                                "installed": False,
+                                "error": "PgSTAC schema not found - run /api/stac/setup to install",
+                                "impact": "STAC collections and items cannot be created"
+                            }
+
+                        # Get PgSTAC version
+                        pgstac_version = None
+                        try:
+                            cur.execute("SELECT pgstac.get_version()")
+                            pgstac_version = cur.fetchone()[0]
+                        except Exception as ver_error:
+                            pgstac_version = f"error: {str(ver_error)[:100]}"
+
+                        # Check critical tables existence
+                        critical_tables = {}
+                        for table_name in ['collections', 'items', 'searches']:
+                            cur.execute("""
+                                SELECT EXISTS (
+                                    SELECT FROM information_schema.tables
+                                    WHERE table_schema = 'pgstac'
+                                    AND table_name = %s
+                                )
+                            """, (table_name,))
+                            table_exists = cur.fetchone()[0]
+                            critical_tables[table_name] = table_exists
+
+                        # Get row counts for collections and items
+                        table_counts = {}
+
+                        if critical_tables.get('collections', False):
+                            try:
+                                cur.execute("SELECT COUNT(*) FROM pgstac.collections")
+                                table_counts['collections'] = cur.fetchone()[0]
+                            except Exception:
+                                table_counts['collections'] = "error"
+                        else:
+                            table_counts['collections'] = "table_missing"
+
+                        if critical_tables.get('items', False):
+                            try:
+                                cur.execute("SELECT COUNT(*) FROM pgstac.items")
+                                table_counts['items'] = cur.fetchone()[0]
+                            except Exception:
+                                table_counts['items'] = "error"
+                        else:
+                            table_counts['items'] = "table_missing"
+
+                        # Specific check for searches table (critical for TiTiler integration)
+                        searches_table_exists = critical_tables.get('searches', False)
+
+                        # Determine overall health status
+                        all_tables_exist = all(critical_tables.values())
+
+                        result = {
+                            "schema_exists": True,
+                            "installed": True,
+                            "pgstac_version": pgstac_version,
+                            "critical_tables": critical_tables,
+                            "searches_table_exists": searches_table_exists,
+                            "table_counts": table_counts,
+                            "all_critical_tables_present": all_tables_exist
+                        }
+
+                        # Add warnings if searches table is missing
+                        if not searches_table_exists:
+                            result["warning"] = "pgstac.searches table missing - search registration will fail"
+                            result["impact"] = "Cannot register pgSTAC searches for TiTiler visualization"
+                            result["fix"] = "Upgrade pypgstac or create searches table manually"
+
+                        return result
+
+            except Exception as e:
+                import traceback
+                return {
+                    "schema_exists": False,
+                    "installed": False,
+                    "error": str(e)[:200],
+                    "error_type": type(e).__name__,
+                    "traceback": traceback.format_exc()[:500],
+                    "impact": "PgSTAC health check failed - STAC operations may be impacted"
+                }
+
+        return self.check_component_health("pgstac", check_pgstac)
 
 
 # Create singleton instance for use in function_app.py

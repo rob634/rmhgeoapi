@@ -50,6 +50,11 @@ try:
 except ImportError:
     pystac = None
 
+try:
+    from stac_pydantic import Item as StacPydanticItem
+except ImportError:
+    StacPydanticItem = None
+
 from util_logger import LoggerFactory, ComponentType
 from config import get_config
 
@@ -263,11 +268,15 @@ class PgStacRepository:
             Collection MUST exist before inserting items (PgSTAC requirement).
             Uses PgSTAC's insert_item() which handles partitioning.
         """
-        if not pystac:
-            raise ImportError("pystac library required for item operations")
+        # Accept both pystac.Item and stac_pydantic.Item (18 NOV 2025)
+        # StacMetadataService returns stac_pydantic.Item, but both are valid STAC items
+        is_pystac_item = pystac and isinstance(item, pystac.Item)
+        is_pydantic_item = StacPydanticItem and isinstance(item, StacPydanticItem)
 
-        if not isinstance(item, pystac.Item):
-            raise ValueError(f"Expected pystac.Item, got {type(item).__name__}")
+        if not (is_pystac_item or is_pydantic_item):
+            raise ValueError(
+                f"Expected pystac.Item or stac_pydantic.Item, got {type(item).__name__}"
+            )
 
         item_id = item.id
         logger.info(f"🔄 Inserting item into PgSTAC: {item_id} (collection: {collection_id})")

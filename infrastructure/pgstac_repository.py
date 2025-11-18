@@ -308,10 +308,10 @@ class PgStacRepository:
 
             with psycopg.connect(self.connection_string) as conn:
                 with conn.cursor() as cur:
-                    # Use PgSTAC's upsert_items function (handles insert/update)
-                    # Returns array of item IDs
+                    # Use PgSTAC's create_item function (singular - single item)
+                    # 18 NOV 2025: Fixed - was create_items (plural) which expects array
                     cur.execute(
-                        "SELECT pgstac.create_items(%s::jsonb)",
+                        "SELECT * FROM pgstac.create_item(%s)",
                         (item_json,)
                     )
                     conn.commit()

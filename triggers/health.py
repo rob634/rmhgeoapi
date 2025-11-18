@@ -1226,9 +1226,9 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                     with conn.cursor() as cur:
                         # Check if pgstac schema exists
                         cur.execute(
-                            "SELECT EXISTS(SELECT 1 FROM pg_namespace WHERE nspname = 'pgstac')"
+                            "SELECT EXISTS(SELECT 1 FROM pg_namespace WHERE nspname = 'pgstac') as schema_exists"
                         )
-                        schema_exists = cur.fetchone()[0]
+                        schema_exists = cur.fetchone()['schema_exists']
 
                         if not schema_exists:
                             return {
@@ -1241,8 +1241,8 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                         # Get PgSTAC version
                         pgstac_version = None
                         try:
-                            cur.execute("SELECT pgstac.get_version()")
-                            pgstac_version = cur.fetchone()[0]
+                            cur.execute("SELECT pgstac.get_version() as version")
+                            pgstac_version = cur.fetchone()['version']
                         except Exception as ver_error:
                             pgstac_version = f"error: {str(ver_error)[:100]}"
 
@@ -1254,9 +1254,9 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                                     SELECT FROM information_schema.tables
                                     WHERE table_schema = 'pgstac'
                                     AND table_name = %s
-                                )
+                                ) as table_exists
                             """, (table_name,))
-                            table_exists = cur.fetchone()[0]
+                            table_exists = cur.fetchone()['table_exists']
                             critical_tables[table_name] = table_exists
 
                         # Get row counts for collections and items
@@ -1264,8 +1264,8 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
 
                         if critical_tables.get('collections', False):
                             try:
-                                cur.execute("SELECT COUNT(*) FROM pgstac.collections")
-                                table_counts['collections'] = cur.fetchone()[0]
+                                cur.execute("SELECT COUNT(*) as count FROM pgstac.collections")
+                                table_counts['collections'] = cur.fetchone()['count']
                             except Exception:
                                 table_counts['collections'] = "error"
                         else:
@@ -1273,8 +1273,8 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
 
                         if critical_tables.get('items', False):
                             try:
-                                cur.execute("SELECT COUNT(*) FROM pgstac.items")
-                                table_counts['items'] = cur.fetchone()[0]
+                                cur.execute("SELECT COUNT(*) as count FROM pgstac.items")
+                                table_counts['items'] = cur.fetchone()['count']
                             except Exception:
                                 table_counts['items'] = "error"
                         else:

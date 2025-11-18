@@ -317,11 +317,11 @@ def h3_native_streaming_postgis(task_params: dict) -> dict:
         from config import get_config
         config = get_config()
 
-        from config import get_postgres_connection_string
+        # Use PostgreSQLRepository for managed identity support (18 NOV 2025)
+        from infrastructure.postgresql import PostgreSQLRepository
+        repo = PostgreSQLRepository()
 
-        connection_string = get_postgres_connection_string()
-
-        with psycopg.connect(connection_string) as conn:
+        with repo._get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute("""
                     SELECT
@@ -336,7 +336,7 @@ def h3_native_streaming_postgis(task_params: dict) -> dict:
                     ) AS bbox_calc
                 """, (grid_id,))
                 bbox_row = cur.fetchone()
-                bbox = list(bbox_row) if bbox_row else [-180, -90, 180, 90]
+                bbox = [bbox_row['minx'], bbox_row['miny'], bbox_row['maxx'], bbox_row['maxy']] if bbox_row else [-180, -90, 180, 90]
 
         end_memory = process.memory_info().rss / 1024 / 1024
         processing_time = time.time() - start_time

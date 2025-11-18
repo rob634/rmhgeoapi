@@ -182,7 +182,11 @@ class StacVectorService:
 
         connection_string = get_postgres_connection_string()
 
-        with psycopg.connect(connection_string) as conn:
+        # Use PostgreSQLRepository for managed identity support (18 NOV 2025)
+        from infrastructure.postgresql import PostgreSQLRepository
+        repo = PostgreSQLRepository()
+
+        with repo._get_connection() as conn:
             with conn.cursor() as cur:
                 # Check table exists
                 cur.execute(
@@ -194,7 +198,8 @@ class StacVectorService:
                     """),
                     [schema, table_name]
                 )
-                exists = cur.fetchone()[0]
+                result = cur.fetchone()
+                exists = result['exists']
 
                 if not exists:
                     raise ValueError(f"Table {schema}.{table_name} does not exist")
@@ -214,8 +219,8 @@ class StacVectorService:
                 if not geom_info:
                     raise ValueError(f"No geometry column found in {schema}.{table_name}")
 
-                geom_column = geom_info[0]
-                srid = geom_info[1]
+                geom_column = geom_info['f_geometry_column']
+                srid = geom_info['srid']
 
                 # Get table extent (bbox) using ST_Extent
                 cur.execute(
@@ -236,7 +241,7 @@ class StacVectorService:
                     )
                 )
                 extent = cur.fetchone()
-                bbox = [extent[0], extent[1], extent[2], extent[3]]
+                bbox = [extent['min_x'], extent['min_y'], extent['max_x'], extent['max_y']]
 
                 # Get row count
                 cur.execute(
@@ -245,7 +250,8 @@ class StacVectorService:
                         table=sql.Identifier(table_name)
                     )
                 )
-                row_count = cur.fetchone()[0]
+                result = cur.fetchone()
+                row_count = result['count']
 
                 # Get distinct geometry types
                 cur.execute(
@@ -259,7 +265,7 @@ class StacVectorService:
                         table=sql.Identifier(table_name)
                     )
                 )
-                geometry_types = [row[0] for row in cur.fetchall()]
+                geometry_types = [row['st_geometrytype'] for row in cur.fetchall()]
 
                 # Get table creation time (if available)
                 created_at = None

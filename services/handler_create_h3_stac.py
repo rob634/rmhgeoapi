@@ -118,7 +118,11 @@ def create_h3_stac(task_params: dict) -> dict:
 
         connection_string = get_postgres_connection_string()
 
-        with psycopg.connect(connection_string) as conn:
+        # Use PostgreSQLRepository for managed identity support (18 NOV 2025)
+        from infrastructure.postgresql import PostgreSQLRepository
+        repo = PostgreSQLRepository()
+
+        with repo._get_connection() as conn:
             with conn.cursor() as cur:
                 # Query grid statistics
                 query = sql.SQL("""
@@ -138,10 +142,10 @@ def create_h3_stac(task_params: dict) -> dict:
                 if not result:
                     raise ValueError(f"No H3 cells found for grid_id: {grid_id}")
 
-                row_count = result[0]
-                grid_type = result[1]
-                created_at = result[2] or datetime.now(timezone.utc)
-                land_classifications = result[3]
+                row_count = result['row_count']
+                grid_type = result['grid_type']
+                created_at = result['created_at'] or datetime.now(timezone.utc)
+                land_classifications = result['land_classifications']
 
         logger.info(f"   ✅ Found {row_count:,} H3 cells")
         logger.info(f"   ✅ Grid type: {grid_type}")

@@ -51,12 +51,14 @@ class VectorToPostGISHandler:
     """Handles GeoDataFrame → PostGIS operations."""
 
     def __init__(self):
-        """Initialize with PostgreSQL connection string."""
-        from config import get_postgres_connection_string
+        """Initialize with PostgreSQL repository for managed identity support."""
+        from infrastructure.postgresql import PostgreSQLRepository
 
         config = get_config()
-        # Use helper function for managed identity support (16 NOV 2025)
-        self.conn_string = get_postgres_connection_string()
+        # Use PostgreSQLRepository for managed identity support (18 NOV 2025)
+        self._pg_repo = PostgreSQLRepository()
+        # Keep conn_string for backward compatibility (deprecated)
+        self.conn_string = self._pg_repo.conn_string
 
     def prepare_gdf(self, gdf: gpd.GeoDataFrame, geometry_params: dict = None) -> gpd.GeoDataFrame:
         """
@@ -456,7 +458,7 @@ class VectorToPostGISHandler:
         Raises:
             psycopg.Error: If database operation fails
         """
-        with psycopg.connect(self.conn_string) as conn:
+        with self._pg_repo._get_connection() as conn:
             with conn.cursor() as cur:
                 # Create table if not exists
                 self._create_table_if_not_exists(cur, chunk, table_name, schema)
@@ -486,7 +488,7 @@ class VectorToPostGISHandler:
         Raises:
             psycopg.Error: If table creation fails
         """
-        with psycopg.connect(self.conn_string) as conn:
+        with self._pg_repo._get_connection() as conn:
             with conn.cursor() as cur:
                 self._create_table_if_not_exists(cur, chunk, table_name, schema, indexes)
                 conn.commit()
@@ -507,7 +509,7 @@ class VectorToPostGISHandler:
         Raises:
             psycopg.Error: If insert fails or table doesn't exist
         """
-        with psycopg.connect(self.conn_string) as conn:
+        with self._pg_repo._get_connection() as conn:
             with conn.cursor() as cur:
                 self._insert_features(cur, chunk, table_name, schema)
                 conn.commit()

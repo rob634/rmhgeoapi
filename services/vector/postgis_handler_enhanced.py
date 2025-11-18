@@ -83,13 +83,15 @@ class VectorToPostGISHandler:
     """Enhanced handler for vector data ingestion into PostGIS with comprehensive error handling."""
 
     def __init__(self):
-        """Initialize with PostgreSQL connection string and error tracking."""
+        """Initialize with PostgreSQL repository for managed identity support."""
         try:
-            from config import get_postgres_connection_string
+            from infrastructure.postgresql import PostgreSQLRepository
 
             config = get_config()
-            # Use helper function for managed identity support (16 NOV 2025)
-            self.conn_string = get_postgres_connection_string()
+            # Use PostgreSQLRepository for managed identity support (18 NOV 2025)
+            self._pg_repo = PostgreSQLRepository()
+            # Keep conn_string for backward compatibility (deprecated)
+            self.conn_string = self._pg_repo.conn_string
             logger.info("✅ PostGIS handler initialized successfully")
 
             # Track errors for reporting
@@ -295,21 +297,10 @@ class VectorToPostGISHandler:
         rows_inserted = 0
 
         try:
-            # Attempt connection with retry logic
-            max_retries = 3
-            for attempt in range(max_retries):
-                try:
-                    logger.debug(f"Connection attempt {attempt + 1}/{max_retries}")
-                    conn = psycopg.connect(self.conn_string)
-                    logger.info("✅ Database connection established")
-                    break
-                except psycopg.OperationalError as e:
-                    if attempt < max_retries - 1:
-                        logger.warning(f"⚠️ Connection attempt {attempt + 1} failed, retrying...")
-                        continue
-                    else:
-                        logger.error(f"❌ All connection attempts failed: {e}")
-                        raise ConnectionError(f"Cannot connect to database after {max_retries} attempts: {e}")
+            # Use repository connection (includes managed identity support)
+            logger.debug("Acquiring database connection from repository")
+            conn = self._pg_repo._get_connection().__enter__()
+            logger.info("✅ Database connection established")
 
             # Create cursor
             cur = conn.cursor()

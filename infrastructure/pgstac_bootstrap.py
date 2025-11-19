@@ -468,10 +468,11 @@ class PgStacBootstrap:
                 with conn.cursor() as cur:
                     # 1. Schema exists
                     cur.execute(
-                        sql.SQL("SELECT EXISTS(SELECT 1 FROM pg_namespace WHERE nspname = %s)"),
+                        sql.SQL("SELECT EXISTS(SELECT 1 FROM pg_namespace WHERE nspname = %s) as exists"),
                         [self.PGSTAC_SCHEMA]
                     )
-                    checks['schema_exists'] = cur.fetchone()[0]
+                    row = cur.fetchone()
+                    checks['schema_exists'] = row['exists']
 
                     if not checks['schema_exists']:
                         checks['errors'].append("pgstac schema does not exist")
@@ -480,8 +481,9 @@ class PgStacBootstrap:
 
                     # 2. Version query
                     try:
-                        cur.execute("SELECT pgstac.get_version()")
-                        checks['version'] = cur.fetchone()[0]
+                        cur.execute("SELECT pgstac.get_version() as version")
+                        row = cur.fetchone()
+                        checks['version'] = row['version']
                         checks['version_query'] = True
                     except psycopg.Error as e:
                         checks['errors'].append(f"Version query failed: {e}")
@@ -489,12 +491,13 @@ class PgStacBootstrap:
                     # 3. Tables exist
                     cur.execute(
                         sql.SQL(
-                            "SELECT COUNT(*) FROM information_schema.tables "
+                            "SELECT COUNT(*) as count FROM information_schema.tables "
                             "WHERE table_schema = %s"
                         ),
                         [self.PGSTAC_SCHEMA]
                     )
-                    checks['tables_count'] = cur.fetchone()[0]
+                    row = cur.fetchone()
+                    checks['tables_count'] = row['count']
                     checks['tables_exist'] = checks['tables_count'] > 0
 
                     if not checks['tables_exist']:
@@ -504,7 +507,7 @@ class PgStacBootstrap:
                     cur.execute(
                         "SELECT rolname FROM pg_roles WHERE rolname LIKE 'pgstac_%'"
                     )
-                    checks['roles'] = [row[0] for row in cur.fetchall()]
+                    checks['roles'] = [row['rolname'] for row in cur.fetchall()]
                     checks['roles_configured'] = len(checks['roles']) >= 3
 
                     if not checks['roles_configured']:
@@ -523,12 +526,13 @@ class PgStacBootstrap:
                     try:
                         # Check both functions exist
                         cur.execute("""
-                            SELECT COUNT(*) FROM pg_proc p
+                            SELECT COUNT(*) as count FROM pg_proc p
                             JOIN pg_namespace n ON p.pronamespace = n.oid
                             WHERE n.nspname = 'pgstac'
                             AND p.proname IN ('search_tohash', 'search_hash')
                         """)
-                        func_count = cur.fetchone()[0]
+                        row = cur.fetchone()
+                        func_count = row['count']
                         checks['search_hash_functions'] = (func_count == 2)
 
                         if not checks['search_hash_functions']:

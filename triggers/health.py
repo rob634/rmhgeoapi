@@ -1283,8 +1283,56 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                         # Specific check for searches table (critical for TiTiler integration)
                         searches_table_exists = critical_tables.get('searches', False)
 
+                        # Check critical functions for search registration (18 NOV 2025)
+                        critical_functions = {}
+                        function_warnings = []
+
+                        try:
+                            # Check for search_tohash and search_hash functions
+                            cur.execute("""
+                                SELECT p.proname
+                                FROM pg_proc p
+                                JOIN pg_namespace n ON p.pronamespace = n.oid
+                                WHERE n.nspname = 'pgstac'
+                                AND p.proname IN ('search_tohash', 'search_hash')
+                            """)
+                            functions_found = [row['proname'] for row in cur.fetchall()]
+
+                            critical_functions['search_tohash'] = 'search_tohash' in functions_found
+                            critical_functions['search_hash'] = 'search_hash' in functions_found
+
+                            # Check if searches table has GENERATED hash column
+                            if searches_table_exists:
+                                try:
+                                    cur.execute("""
+                                        SELECT column_name, is_generated
+                                        FROM information_schema.columns
+                                        WHERE table_schema = 'pgstac'
+                                        AND table_name = 'searches'
+                                        AND column_name = 'hash'
+                                    """)
+                                    hash_column = cur.fetchone()
+
+                                    if hash_column and hash_column.get('is_generated') == 'ALWAYS':
+                                        critical_functions['searches_hash_column_generated'] = True
+                                    else:
+                                        critical_functions['searches_hash_column_generated'] = False
+                                        function_warnings.append("searches.hash is not a GENERATED column")
+                                except Exception:
+                                    critical_functions['searches_hash_column_generated'] = None
+
+                            # Generate warnings for missing functions
+                            if not critical_functions['search_tohash']:
+                                function_warnings.append("Missing function: pgstac.search_tohash()")
+                            if not critical_functions['search_hash']:
+                                function_warnings.append("Missing function: pgstac.search_hash()")
+
+                        except Exception as func_error:
+                            critical_functions['error'] = str(func_error)[:100]
+
                         # Determine overall health status
                         all_tables_exist = all(critical_tables.values())
+                        all_functions_exist = critical_functions.get('search_tohash', False) and critical_functions.get('search_hash', False)
 
                         result = {
                             "schema_exists": True,
@@ -1292,15 +1340,26 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                             "pgstac_version": pgstac_version,
                             "critical_tables": critical_tables,
                             "searches_table_exists": searches_table_exists,
+                            "critical_functions": critical_functions,
                             "table_counts": table_counts,
-                            "all_critical_tables_present": all_tables_exist
+                            "all_critical_tables_present": all_tables_exist,
+                            "all_critical_functions_present": all_functions_exist
                         }
 
-                        # Add warnings if searches table is missing
+                        # Add warnings if issues detected
+                        warnings = []
+
                         if not searches_table_exists:
-                            result["warning"] = "pgstac.searches table missing - search registration will fail"
+                            warnings.append("pgstac.searches table missing - search registration will fail")
+
+                        if not all_functions_exist:
+                            warnings.extend(function_warnings)
+                            warnings.append("Search registration will fail - run /api/dbadmin/maintenance/pgstac/redeploy?confirm=yes")
+
+                        if warnings:
+                            result["warnings"] = warnings
                             result["impact"] = "Cannot register pgSTAC searches for TiTiler visualization"
-                            result["fix"] = "Upgrade pypgstac or create searches table manually"
+                            result["fix"] = "Run /api/dbadmin/maintenance/pgstac/redeploy?confirm=yes to reinstall pgSTAC"
 
                         return result
 

@@ -443,6 +443,7 @@ class PgStacBootstrap:
         - Tables exist
         - Roles configured
         - Search function available
+        - Search hash functions available (search_tohash, search_hash)
 
         Returns:
             Dict with verification results
@@ -455,6 +456,7 @@ class PgStacBootstrap:
             'tables_exist': False,
             'roles_configured': False,
             'search_available': False,
+            'search_hash_functions': False,
             'version': None,
             'tables_count': 0,
             'roles': [],
@@ -516,13 +518,35 @@ class PgStacBootstrap:
                     except psycopg.Error as e:
                         checks['errors'].append(f"Search function failed: {e}")
 
+                    # 6. Search hash functions available (18 NOV 2025)
+                    # Required for pgstac.searches table GENERATED hash column
+                    try:
+                        # Check both functions exist
+                        cur.execute("""
+                            SELECT COUNT(*) FROM pg_proc p
+                            JOIN pg_namespace n ON p.pronamespace = n.oid
+                            WHERE n.nspname = 'pgstac'
+                            AND p.proname IN ('search_tohash', 'search_hash')
+                        """)
+                        func_count = cur.fetchone()[0]
+                        checks['search_hash_functions'] = (func_count == 2)
+
+                        if not checks['search_hash_functions']:
+                            checks['errors'].append(
+                                f"Missing search hash functions (found {func_count}/2). "
+                                "Run /api/dbadmin/maintenance/pgstac/redeploy?confirm=yes to reinstall pgSTAC."
+                            )
+                    except psycopg.Error as e:
+                        checks['errors'].append(f"Search hash function check failed: {e}")
+
                     # Overall validation
                     checks['valid'] = (
                         checks['schema_exists'] and
                         checks['version_query'] and
                         checks['tables_exist'] and
                         checks['roles_configured'] and
-                        checks['search_available']
+                        checks['search_available'] and
+                        checks['search_hash_functions']
                     )
 
                     if checks['valid']:

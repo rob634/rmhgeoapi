@@ -22,14 +22,16 @@
 Database Maintenance Admin Trigger
 
 Provides database maintenance operations:
-- Schema nuke (drop all objects)
-- Schema redeploy (nuke + redeploy)
+- App schema nuke (drop all objects)
+- App schema redeploy (nuke + redeploy)
+- pgSTAC schema redeploy (nuke + pypgstac migrate)
 - Cleanup old records (completed jobs >30 days)
 
 Endpoints:
-    POST /api/admin/db/maintenance/nuke
-    POST /api/admin/db/maintenance/redeploy
-    POST /api/admin/db/maintenance/cleanup
+    POST /api/dbadmin/maintenance/nuke
+    POST /api/dbadmin/maintenance/redeploy
+    POST /api/dbadmin/maintenance/pgstac/redeploy
+    POST /api/dbadmin/maintenance/cleanup
 
 All operations require explicit confirmation parameters.
 
@@ -37,9 +39,10 @@ Critical for:
 - Development/test environment resets
 - Production data cleanup
 - Emergency schema recovery
+- pgSTAC function installation (search_tohash, search_hash)
 
 Author: Robert and Geospatial Claude Legion
-Date: 03 NOV 2025
+Date: 03 NOV 2025 (pgSTAC redeploy: 18 NOV 2025)
 """
 
 import azure.functions as func
@@ -147,6 +150,8 @@ class AdminDbMaintenanceTrigger:
                 return self._nuke_schema(req)
             elif path == 'redeploy':
                 return self._redeploy_schema(req)
+            elif path == 'pgstac/redeploy' or path == 'redeploy-pgstac':
+                return self._redeploy_pgstac_schema(req)
             elif path == 'cleanup':
                 return self._cleanup_old_records(req)
             else:
@@ -542,6 +547,207 @@ class AdminDbMaintenanceTrigger:
                     'error': str(e),
                     'timestamp': datetime.now(timezone.utc).isoformat()
                 }),
+                status_code=500,
+                mimetype='application/json'
+            )
+
+    def _redeploy_pgstac_schema(self, req: func.HttpRequest) -> func.HttpResponse:
+        """
+        Nuke and redeploy pgSTAC schema using pypgstac migrate (DESTRUCTIVE).
+
+        POST /api/dbadmin/maintenance/pgstac/redeploy?confirm=yes
+
+        Query Parameters:
+            confirm: Must be "yes" (required)
+
+        Returns:
+            {
+                "status": "success",
+                "steps": [
+                    {"step": "drop_pgstac_schema", "status": "success"},
+                    {"step": "run_pypgstac_migrate", "status": "success", "version": "0.9.8"},
+                    {"step": "verify_installation", "status": "success", ...}
+                ],
+                "overall_status": "success",
+                "timestamp": "2025-11-18T..."
+            }
+
+        Note: This is separate from app schema redeploy - allows independent
+              pgSTAC maintenance without affecting job/task tables.
+
+        Author: Robert and Geospatial Claude Legion
+        Date: 18 NOV 2025
+        """
+        confirm = req.params.get('confirm')
+
+        if confirm != 'yes':
+            return func.HttpResponse(
+                body=json.dumps({
+                    'error': 'pgSTAC schema redeploy requires explicit confirmation',
+                    'usage': 'POST /api/dbadmin/maintenance/pgstac/redeploy?confirm=yes',
+                    'warning': 'This will DESTROY ALL STAC DATA (collections, items, searches) and rebuild the pgstac schema'
+                }),
+                status_code=400,
+                mimetype='application/json'
+            )
+
+        logger.warning("🔄 PGSTAC REDEPLOY: Nuking and redeploying pgstac schema")
+
+        results = {
+            "operation": "pgstac_schema_redeploy",
+            "steps": [],
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+
+        try:
+            # Step 1: Drop pgstac schema
+            logger.info("💣 Step 1: Dropping pgstac schema...")
+            drop_result = {"step": "drop_pgstac_schema", "status": "pending"}
+
+            try:
+                from infrastructure.postgresql import PostgreSQLRepository
+                pgstac_repo = PostgreSQLRepository(schema_name='pgstac')
+
+                with pgstac_repo._get_connection() as conn:
+                    with conn.cursor() as cur:
+                        # Drop pgstac schema (CASCADE removes all objects)
+                        cur.execute(sql.SQL("DROP SCHEMA IF EXISTS {} CASCADE").format(
+                            sql.Identifier('pgstac')
+                        ))
+                        conn.commit()
+                        logger.info("✅ pgstac schema dropped")
+
+                drop_result["status"] = "success"
+                drop_result["message"] = "pgstac schema and all objects dropped"
+
+            except Exception as e:
+                logger.error(f"❌ Failed to drop pgstac schema: {e}")
+                drop_result["status"] = "failed"
+                drop_result["error"] = str(e)
+                results["steps"].append(drop_result)
+                results["overall_status"] = "failed_at_drop"
+                return func.HttpResponse(
+                    body=json.dumps(results, indent=2),
+                    status_code=500,
+                    mimetype='application/json'
+                )
+
+            results["steps"].append(drop_result)
+
+            # Step 2: Run pypgstac migrate
+            logger.info("📦 Step 2: Running pypgstac migrate...")
+            migrate_result = {"step": "run_pypgstac_migrate", "status": "pending"}
+
+            try:
+                from infrastructure.pgstac_bootstrap import PgStacBootstrap
+                bootstrap = PgStacBootstrap()
+
+                # Run pypgstac migrate (creates fresh schema with all functions)
+                migration_output = bootstrap.install_pgstac(
+                    drop_existing=False,  # Already dropped in Step 1
+                    run_migrations=True
+                )
+
+                if migration_output.get('success'):
+                    migrate_result["status"] = "success"
+                    migrate_result["version"] = migration_output.get('version')
+                    migrate_result["tables_created"] = migration_output.get('tables_created', 0)
+                    migrate_result["roles_created"] = migration_output.get('roles_created', [])
+                    logger.info(f"✅ pypgstac migrate completed: version {migrate_result['version']}")
+                else:
+                    migrate_result["status"] = "failed"
+                    migrate_result["error"] = migration_output.get('error', 'Unknown migration error')
+                    logger.error(f"❌ pypgstac migrate failed: {migrate_result['error']}")
+                    results["steps"].append(migrate_result)
+                    results["overall_status"] = "failed_at_migrate"
+                    return func.HttpResponse(
+                        body=json.dumps(results, indent=2),
+                        status_code=500,
+                        mimetype='application/json'
+                    )
+
+            except Exception as e:
+                logger.error(f"❌ Exception during pypgstac migrate: {e}")
+                logger.error(traceback.format_exc())
+                migrate_result["status"] = "failed"
+                migrate_result["error"] = str(e)
+                migrate_result["traceback"] = traceback.format_exc()[:500]
+                results["steps"].append(migrate_result)
+                results["overall_status"] = "failed_at_migrate"
+                return func.HttpResponse(
+                    body=json.dumps(results, indent=2),
+                    status_code=500,
+                    mimetype='application/json'
+                )
+
+            results["steps"].append(migrate_result)
+
+            # Step 3: Verify installation (comprehensive checks)
+            logger.info("🔍 Step 3: Verifying pgSTAC installation...")
+            verify_result = {"step": "verify_installation", "status": "pending"}
+
+            try:
+                from infrastructure.pgstac_bootstrap import PgStacBootstrap
+                bootstrap = PgStacBootstrap()
+
+                verification = bootstrap.verify_installation()
+
+                if verification.get('valid'):
+                    verify_result["status"] = "success"
+                    verify_result["checks_passed"] = {
+                        "schema_exists": verification.get('schema_exists'),
+                        "version_query": verification.get('version_query'),
+                        "tables_exist": verification.get('tables_exist'),
+                        "roles_configured": verification.get('roles_configured'),
+                        "search_available": verification.get('search_available'),
+                        "search_hash_functions": verification.get('search_hash_functions')
+                    }
+                    verify_result["version"] = verification.get('version')
+                    verify_result["tables_count"] = verification.get('tables_count')
+                    logger.info(f"✅ pgSTAC verification passed: {verify_result['version']}")
+                else:
+                    verify_result["status"] = "partial"
+                    verify_result["errors"] = verification.get('errors', [])
+                    verify_result["warning"] = "Installation succeeded but verification found issues"
+                    logger.warning(f"⚠️ pgSTAC verification had issues: {verify_result['errors']}")
+
+            except Exception as e:
+                logger.error(f"❌ Exception during verification: {e}")
+                verify_result["status"] = "failed"
+                verify_result["error"] = str(e)
+
+            results["steps"].append(verify_result)
+
+            # Overall status
+            if verify_result["status"] == "success":
+                results["overall_status"] = "success"
+                results["message"] = "pgSTAC schema redeployed successfully with all functions"
+            elif verify_result["status"] == "partial":
+                results["overall_status"] = "partial_success"
+                results["message"] = "pgSTAC schema redeployed but verification found issues"
+            else:
+                results["overall_status"] = "success_with_verification_failure"
+                results["message"] = "pgSTAC migration succeeded but verification failed"
+
+            logger.info(f"✅ pgSTAC redeploy complete: {results['overall_status']}")
+
+            return func.HttpResponse(
+                body=json.dumps(results, indent=2),
+                status_code=200,
+                mimetype='application/json'
+            )
+
+        except Exception as e:
+            logger.error(f"❌ Unexpected error during pgSTAC redeploy: {e}")
+            logger.error(traceback.format_exc())
+            return func.HttpResponse(
+                body=json.dumps({
+                    'error': str(e),
+                    'error_type': type(e).__name__,
+                    'traceback': traceback.format_exc(),
+                    'steps_completed': results.get("steps", []),
+                    'timestamp': datetime.now(timezone.utc).isoformat()
+                }, indent=2),
                 status_code=500,
                 mimetype='application/json'
             )

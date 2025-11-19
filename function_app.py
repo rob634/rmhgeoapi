@@ -467,6 +467,12 @@ def db_maintenance_cleanup(req: func.HttpRequest) -> func.HttpResponse:
     return admin_db_maintenance_trigger.handle_request(req)
 
 
+@app.route(route="dbadmin/maintenance/pgstac/redeploy", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
+def db_maintenance_pgstac_redeploy(req: func.HttpRequest) -> func.HttpResponse:
+    """⚠️ FCO - Keep for QA, remove before UAT. POST /api/dbadmin/maintenance/pgstac/redeploy?confirm=yes"""
+    return admin_db_maintenance_trigger.handle_request(req)
+
+
 # ============================================================================
 # SERVICE BUS ADMIN API ENDPOINTS - Phase 2 (04 NOV 2025)
 # ============================================================================

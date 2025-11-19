@@ -495,11 +495,33 @@ def _create_stac_collection_impl(
             logger.info(f"✅ Collection metadata updated with search_id: {search_id}")
 
         except Exception as e:
-            # Graceful degradation: Collection creation succeeds even if search registration fails
-            logger.warning(f"⚠️  Search registration failed (non-fatal): {e}")
-            logger.warning(f"   Collection created successfully but without pgSTAC search visualization")
-            logger.debug(f"   Traceback: {traceback.format_exc()}")
-            # Continue - search registration is not critical for collection creation
+            # CRITICAL FIX (18 NOV 2025): Eliminate silent errors - propagate exception to task record
+            # Search registration failures should fail the entire collection creation task
+            # This ensures we know WHY visualization URLs are missing (not silent nulls)
+            logger.error(f"❌ Search registration failed - failing task to expose root cause")
+            logger.error(f"   Collection: {collection_id}")
+            logger.error(f"   Error: {e}")
+            logger.error(f"   Error type: {type(e).__name__}")
+            logger.error(f"   Traceback: {traceback.format_exc()}")
+
+            # Clean up: Remove collection from PgSTAC since we can't provide visualization
+            try:
+                logger.info(f"🧹 Cleaning up collection '{collection_id}' due to search registration failure...")
+                pgstac_repo = PgStacRepository()
+                with pgstac_repo._pg_repo._get_connection() as conn:
+                    with conn.cursor() as cur:
+                        # Delete collection (CASCADE will delete items)
+                        cur.execute("DELETE FROM pgstac.collections WHERE id = %s", (collection_id,))
+                        conn.commit()
+                logger.info(f"✅ Collection cleanup complete")
+            except Exception as cleanup_error:
+                logger.error(f"⚠️  Failed to cleanup collection: {cleanup_error}")
+                # Don't mask original error with cleanup failure
+
+            # Propagate original exception to task record (fail task)
+            raise RuntimeError(
+                f"Search registration failed for collection '{collection_id}': {e}"
+            ) from e
 
         # Collection already validated and inserted above (12 NOV 2025)
         # search_id, URLs added if search registration succeeded

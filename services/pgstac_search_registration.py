@@ -148,12 +148,14 @@ class PgSTACSearchRegistration:
 
         # Insert into pgstac.searches table
         # ON CONFLICT: If search already exists, update lastused and increment usecount
+        # SCHEMA FIX (18 NOV 2025): pgstac.searches has NO created_at column
+        # Actual columns: hash (generated), search, metadata, lastused, usecount
         with self.repo._get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    INSERT INTO pgstac.searches (hash, search, metadata, created_at, lastused, usecount)
-                    VALUES (%s, %s, %s, NOW(), NOW(), 1)
+                    INSERT INTO pgstac.searches (hash, search, metadata, lastused, usecount)
+                    VALUES (%s, %s, %s, NOW(), 1)
                     ON CONFLICT (hash)
                     DO UPDATE SET
                         lastused = NOW(),

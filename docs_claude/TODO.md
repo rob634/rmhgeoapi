@@ -1,16 +1,642 @@
-# Active Tasks - CRITICAL ETL Repository Pattern Migration
+# Active Tasks - process_raster_collection Implementation
 
-**Last Updated**: 18 NOV 2025 (03:50 UTC)
+**Last Updated**: 20 NOV 2025 (00:40 UTC)
 **Author**: Robert and Geospatial Claude Legion
 
 ---
 
-## 🚨 CRITICAL BLOCKING ISSUE - PgSTAC Collection Insertion Failure (18 NOV 2025)
+## ✅ STAC API Fixed & Validated (19 NOV 2025)
 
-**Problem**: Collections insert successfully but verification fails immediately after
-**Error**: "Collection 'X' was not found in PgSTAC after insertion"
-**Root Cause**: READ AFTER WRITE consistency issue - two separate repository instances
-**Impact**: Phase 2B deployed but STAC collection creation still fails at Stage 4
+**Status**: **RESOLVED** - STAC API fully operational with live data
+**Achievement**: Complete end-to-end validation from raster upload to browser visualization
+**Completion**: 20 NOV 2025 00:40 UTC
+
+### What Was Fixed
+
+**Root Cause**: Tuple/dict confusion in pgSTAC query functions
+- `infrastructure/pgstac_bootstrap.py:1191` - `get_collection_items()` using `result[0]` instead of `result['jsonb_build_object']`
+- `infrastructure/pgstac_bootstrap.py:1291` - `search_items()` using same incorrect pattern
+
+**Fix Applied**: Changed from tuple indexing to dictionary key access with RealDictCursor
+
+**Validation Results**:
+- ✅ Deployed to Azure Functions (20 NOV 2025 00:08:28 UTC)
+- ✅ Schema redeployment: app + pgSTAC 0.9.8
+- ✅ Live test: process_raster job with dctest.tif (27 MB → 127.6 MB COG)
+- ✅ STAC API endpoints working: `/api/stac/collections` and `/api/stac/collections/{id}/items`
+- ✅ TiTiler URLs present in STAC items using `/vsiaz/silver-cogs/` pattern
+- ✅ **USER CONFIRMED**: TiTiler interactive map working in browser
+
+### Database State
+
+**pgSTAC** (pgstac schema):
+- Version: 0.9.8 with 22 tables
+- Collections: 1 (`dctest_validation_19nov2025`)
+- Items: 1 (`dctest_validation_19nov2025-dctest_cog_analysis-tif`)
+- Search hash functions: `search_tohash`, `search_hash`, `search_fromhash` all present
+- GENERATED hash column: Working correctly
+
+**CoreMachine** (app schema):
+- Jobs: process_raster job completed in 25 seconds
+- Tasks: All 3 stages completed successfully
+
+---
+
+## 🔧 HIGH PRIORITY - Refactor config.py God Object (18 NOV 2025)
+
+**Status**: Planned - Incremental migration with parallel operation
+**Purpose**: Split 1,747-line config.py into domain-specific modules
+**Priority**: HIGH (maintainability + testing + merge conflicts)
+**Strategy**: Create new modules alongside old code, migrate incrementally, delete old code last
+**Effort**: 6-8 hours over 2-3 sessions
+**Documentation**: See [GOD_OBJECTS_EXPLAINED.md](GOD_OBJECTS_EXPLAINED.md) for detailed analysis
+
+### The Problem
+
+**Current State**: config.py is 1,747 lines with 6 different configuration domains:
+- Lines 496-1586: AppConfig class (1,090 lines!)
+  - 63+ fields covering Storage + Database + Raster + Vector + Queues + STAC + H3 + Application settings
+  - 10+ computed properties
+  - 5+ validation methods
+  - 200+ lines of documentation strings
+
+**Pain Points**:
+1. ❌ **Hard to find settings**: "What's the COG compression default?" = search 1,747 lines
+2. ❌ **Unclear dependencies**: Does raster code need database config? (AppConfig has both - can't tell!)
+3. ❌ **Testing complexity**: Test COG creation = mock 63+ fields (only need 15 raster fields!)
+4. ❌ **Merge conflicts**: Two developers changing different configs = editing same AppConfig class
+
+**Analysis**: See [GOD_OBJECTS_EXPLAINED.md](GOD_OBJECTS_EXPLAINED.md) section "2. config.py - The Configuration Monster"
+
+---
+
+### Incremental Migration Strategy (Safe, Testable)
+
+**Core Principle**: Create new structure alongside old code, migrate piece by piece, delete old code last
+
+#### Phase 1: Create New Config Modules (2 hours)
+
+**Step 1.1: Create config/ folder structure**
+```bash
+mkdir -p config
+touch config/__init__.py
+touch config/app_config.py        # Core application settings
+touch config/storage_config.py    # COG tiers, multi-account storage
+touch config/database_config.py   # PostgreSQL/PostGIS
+touch config/raster_config.py     # Raster pipeline settings
+touch config/vector_config.py     # Vector pipeline settings
+touch config/queue_config.py      # Service Bus queues
+```
+
+**Step 1.2: Implement new config modules**
+
+Create each module with clean, focused configuration classes:
+
+**config/storage_config.py** (400 lines):
+```python
+"""Azure Storage configuration - COG tiers, multi-account trust zones."""
+
+from enum import Enum
+from typing import List, Optional
+from pydantic import BaseModel, Field
+
+# Copy from config.py lines 59-254 (COG tier enums/profiles)
+class CogTier(str, Enum):
+    VISUALIZATION = "visualization"
+    ANALYSIS = "analysis"
+    ARCHIVE = "archive"
+
+class CogTierProfile(BaseModel):
+    # ... copy from config.py
+
+# Copy from config.py lines 255-299 (utility function)
+def determine_applicable_tiers(band_count: int, data_type: str) -> List[CogTier]:
+    # ... copy from config.py
+
+# Copy from config.py lines 300-364
+class StorageAccountConfig(BaseModel):
+    # ... copy from config.py
+
+# Copy from config.py lines 365-495
+class MultiAccountStorageConfig(BaseModel):
+    # ... copy from config.py
+
+# NEW: Clean wrapper
+class StorageConfig(BaseModel):
+    """Azure Storage configuration."""
+    storage: MultiAccountStorageConfig
+
+    @classmethod
+    def from_environment(cls):
+        """Load from environment variables."""
+        return cls(storage=MultiAccountStorageConfig.from_environment())
+```
+
+**config/database_config.py** (300 lines):
+```python
+"""PostgreSQL/PostGIS database configuration."""
+
+from typing import Optional
+from pydantic import BaseModel, Field
+
+class DatabaseConfig(BaseModel):
+    """PostgreSQL/PostGIS configuration."""
+
+    # Extract from AppConfig lines ~620-710
+    host: str = Field(...)
+    port: int = Field(default=5432)
+    user: str = Field(...)
+    password: Optional[str] = Field(default=None, repr=False)
+    database: str = Field(...)
+    postgis_schema: str = Field(default="geo")
+    app_schema: str = Field(default="app")
+    platform_schema: str = Field(default="platform")
+
+    # Extract managed identity fields
+    use_managed_identity: bool = Field(default=True)
+    managed_identity_name: Optional[str] = Field(default=None)
+
+    # Connection pooling (extract from AppConfig if present)
+    min_connections: int = Field(default=1)
+    max_connections: int = Field(default=20)
+    connection_timeout_seconds: int = Field(default=30)
+
+    @property
+    def connection_string(self) -> str:
+        """Build PostgreSQL connection string."""
+        if self.use_managed_identity:
+            return f"host={self.host} port={self.port} dbname={self.database} user={self.user}"
+        else:
+            return f"host={self.host} port={self.port} dbname={self.database} user={self.user} password={self.password}"
+
+    def debug_dict(self) -> dict:
+        """Debug output with masked password."""
+        return {
+            "host": self.host,
+            "database": self.database,
+            "password": "***MASKED***" if self.password else None,
+            "managed_identity": self.use_managed_identity
+        }
+
+    @classmethod
+    def from_environment(cls):
+        """Load from environment variables."""
+        import os
+        return cls(
+            host=os.environ["POSTGIS_HOST"],
+            port=int(os.environ.get("POSTGIS_PORT", "5432")),
+            user=os.environ["POSTGIS_USER"],
+            password=os.environ.get("POSTGIS_PASSWORD"),
+            database=os.environ["POSTGIS_DATABASE"],
+            # ... all fields from env
+        )
+
+def get_postgres_connection_string(config: Optional[DatabaseConfig] = None) -> str:
+    """Legacy compatibility function."""
+    if config is None:
+        from infrastructure.postgresql import PostgreSQLRepository
+        repo = PostgreSQLRepository()
+        return repo.conn_string
+    return config.connection_string
+```
+
+**config/raster_config.py** (250 lines):
+```python
+"""Raster processing pipeline configuration."""
+
+from typing import Optional
+from pydantic import BaseModel, Field
+
+class RasterConfig(BaseModel):
+    """Raster processing configuration."""
+
+    # Extract from AppConfig lines ~560-642
+    size_threshold_mb: int = Field(default=1000)
+    cog_compression: str = Field(default="deflate")
+    cog_jpeg_quality: int = Field(default=85)
+    cog_tile_size: int = Field(default=512)
+    cog_in_memory: bool = Field(default=True)
+    overview_resampling: str = Field(default="average")
+    target_crs: str = Field(default="EPSG:4326")
+    reproject_resampling: str = Field(default="bilinear")
+    strict_validation: bool = Field(default=True)
+    mosaicjson_maxzoom: int = Field(default=24)
+    intermediate_tiles_container: Optional[str] = Field(default=None)
+    intermediate_prefix: str = Field(default="temp/raster_etl")
+
+    @classmethod
+    def from_environment(cls):
+        """Load from environment variables."""
+        import os
+        return cls(
+            cog_compression=os.environ.get("RASTER_COG_COMPRESSION", "deflate"),
+            cog_jpeg_quality=int(os.environ.get("RASTER_COG_JPEG_QUALITY", "85")),
+            # ... all fields
+        )
+```
+
+**config/vector_config.py** (150 lines):
+```python
+"""Vector processing pipeline configuration."""
+
+from pydantic import BaseModel, Field
+
+class VectorConfig(BaseModel):
+    """Vector processing configuration."""
+
+    # Extract from AppConfig lines ~545-558
+    pickle_container: str = Field(default="rmhazuregeotemp")
+    pickle_prefix: str = Field(default="temp/vector_etl")
+    default_chunk_size: int = Field(default=1000)
+    auto_chunk_sizing: bool = Field(default=True)
+    target_schema: str = Field(default="geo")
+    create_spatial_indexes: bool = Field(default=True)
+
+    @classmethod
+    def from_environment(cls):
+        """Load from environment variables."""
+        import os
+        return cls(
+            pickle_container=os.environ.get("VECTOR_PICKLE_CONTAINER", "rmhazuregeotemp"),
+            # ... all fields
+        )
+```
+
+**config/queue_config.py** (200 lines):
+```python
+"""Azure Service Bus queue configuration."""
+
+from pydantic import BaseModel, Field
+
+class QueueNames:
+    """Queue name constants (copied from config.py lines 1622-1626)."""
+    JOBS = "geospatial-jobs"
+    TASKS = "geospatial-tasks"
+
+class QueueConfig(BaseModel):
+    """Service Bus queue configuration."""
+
+    # Extract from AppConfig if present
+    connection_string: str = Field(..., repr=False)
+    jobs_queue: str = Field(default=QueueNames.JOBS)
+    tasks_queue: str = Field(default=QueueNames.TASKS)
+    batch_size: int = Field(default=100)
+    batch_threshold: int = Field(default=50)
+
+    @classmethod
+    def from_environment(cls):
+        """Load from environment variables."""
+        import os
+        return cls(
+            connection_string=os.environ["ServiceBusConnection"],
+            # ... all fields
+        )
+```
+
+**config/app_config.py** (150 lines):
+```python
+"""Main application configuration - composes domain configs."""
+
+from pydantic import BaseModel, Field
+from .storage_config import StorageConfig
+from .database_config import DatabaseConfig
+from .raster_config import RasterConfig
+from .vector_config import VectorConfig
+from .queue_config import QueueConfig
+
+class AppConfig(BaseModel):
+    """
+    Application configuration - composition of domain configs.
+
+    NEW PATTERN: Instead of 63+ fields in one class, compose smaller configs.
+    Each domain config manages its own validation and defaults.
+    """
+
+    # Core application settings (extract from old AppConfig)
+    debug_mode: bool = Field(default=False)
+    environment: str = Field(default="dev")
+    timeout_seconds: int = Field(default=300)
+    max_retries: int = Field(default=3)
+    log_level: str = Field(default="INFO")
+
+    # Domain configurations (composition, not inheritance)
+    storage: StorageConfig
+    database: DatabaseConfig
+    raster: RasterConfig
+    vector: VectorConfig
+    queues: QueueConfig
+
+    # Legacy fields for backward compatibility during migration
+    # These delegate to domain configs
+    @property
+    def postgis_host(self) -> str:
+        """Legacy compatibility - use database.host instead."""
+        return self.database.host
+
+    @property
+    def raster_cog_compression(self) -> str:
+        """Legacy compatibility - use raster.cog_compression instead."""
+        return self.raster.cog_compression
+
+    # ... add more legacy properties as needed during migration
+
+    @classmethod
+    def from_environment(cls):
+        """Load all configs from environment."""
+        return cls(
+            storage=StorageConfig.from_environment(),
+            database=DatabaseConfig.from_environment(),
+            raster=RasterConfig.from_environment(),
+            vector=VectorConfig.from_environment(),
+            queues=QueueConfig.from_environment()
+        )
+```
+
+**config/__init__.py** (100 lines):
+```python
+"""Configuration management - exports for backward compatibility."""
+
+# Export domain configs
+from .storage_config import (
+    CogTier,
+    CogTierProfile,
+    StorageConfig,
+    determine_applicable_tiers
+)
+from .database_config import DatabaseConfig, get_postgres_connection_string
+from .raster_config import RasterConfig
+from .vector_config import VectorConfig
+from .queue_config import QueueConfig, QueueNames
+from .app_config import AppConfig
+
+# Singleton pattern
+_config_instance: Optional[AppConfig] = None
+
+def get_config() -> AppConfig:
+    """Get global configuration - backward compatible."""
+    global _config_instance
+    if _config_instance is None:
+        _config_instance = AppConfig.from_environment()
+    return _config_instance
+
+def debug_config() -> dict:
+    """Debug output with masked passwords."""
+    config = get_config()
+    return {
+        "storage": config.storage.dict(),
+        "database": config.database.debug_dict(),
+        "raster": config.raster.dict(),
+        "vector": config.vector.dict(),
+        "queues": {"connection": "***MASKED***"}
+    }
+
+__all__ = [
+    'AppConfig', 'get_config', 'debug_config',
+    'CogTier', 'CogTierProfile', 'StorageConfig', 'determine_applicable_tiers',
+    'DatabaseConfig', 'get_postgres_connection_string',
+    'RasterConfig', 'VectorConfig',
+    'QueueConfig', 'QueueNames'
+]
+```
+
+**Step 1.3: Test new config modules**
+```python
+# test_new_config.py
+from config import get_config, CogTier, QueueNames
+
+config = get_config()
+
+# Test composition
+assert config.database.host is not None
+assert config.raster.cog_compression == "deflate"
+assert config.storage.storage is not None
+
+# Test backward compatibility properties
+assert config.postgis_host == config.database.host
+assert config.raster_cog_compression == config.raster.cog_compression
+
+print("✅ New config modules working!")
+```
+
+---
+
+#### Phase 2: Parallel Operation & Testing (2 hours)
+
+**Step 2.1: Both configs operational**
+
+At this point, BOTH import patterns work:
+```python
+# OLD PATTERN (still works via backward compatibility)
+from config import get_config
+config = get_config()
+host = config.postgis_host  # Legacy property
+
+# NEW PATTERN (preferred)
+from config import get_config
+config = get_config()
+host = config.database.host  # Direct domain access
+```
+
+**Step 2.2: Test with existing code**
+
+Run full test suite to ensure nothing breaks:
+```bash
+# Deploy to Azure
+func azure functionapp publish rmhazuregeoapi --python --build remote
+
+# Test health endpoint
+curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/health
+
+# Test job submission (uses config extensively)
+curl -X POST https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/jobs/submit/hello_world \
+  -H "Content-Type: application/json" \
+  -d '{"message": "test"}'
+
+# Verify: Check logs for config access patterns
+```
+
+---
+
+#### Phase 3: Migrate Code to New Pattern (2-3 hours)
+
+**Step 3.1: Prioritize files by domain**
+
+**Raster pipeline files** (migrate to `config.raster`):
+- services/raster_cog.py
+- services/raster_validation.py
+- services/handler_create_cog.py
+- jobs/process_raster.py
+
+**Vector pipeline files** (migrate to `config.vector`):
+- services/vector/postgis_handler.py
+- jobs/ingest_vector.py
+
+**Database files** (migrate to `config.database`):
+- infrastructure/postgresql.py
+- triggers/db_query.py
+
+**Step 3.2: Migrate one domain at a time**
+
+Example: Migrate raster pipeline first
+```python
+# BEFORE (services/raster_cog.py)
+from config import get_config
+config = get_config()
+compression = config.raster_cog_compression  # Legacy property
+
+# AFTER
+from config import get_config
+config = get_config()
+compression = config.raster.cog_compression  # Direct domain access
+```
+
+**Step 3.3: Test after each domain migration**
+- Migrate raster files → test raster job → commit
+- Migrate vector files → test vector job → commit
+- Migrate database files → test schema operations → commit
+
+---
+
+#### Phase 4: Remove Legacy Code (1 hour)
+
+**Step 4.1: Remove backward compatibility properties**
+
+Once all code migrated, remove from config/app_config.py:
+```python
+# DELETE these legacy properties
+@property
+def postgis_host(self) -> str:
+    return self.database.host
+
+@property
+def raster_cog_compression(self) -> str:
+    return self.raster.cog_compression
+```
+
+**Step 4.2: Delete old config.py**
+
+```bash
+# Backup first (just in case)
+cp config.py config.py.old
+
+# Delete old monolithic config
+git rm config.py
+
+# config/ folder is now the only config source
+```
+
+**Step 4.3: Update imports across codebase**
+
+```bash
+# Find any remaining old-style imports
+grep -r "from config import" --include="*.py" .
+
+# Should only find:
+# - from config import get_config
+# - from config import CogTier, QueueNames, etc.
+
+# All using new config/ package
+```
+
+**Step 4.4: Final deployment & testing**
+
+```bash
+func azure functionapp publish rmhazuregeoapi --python --build remote
+
+# Run full test suite
+curl .../api/health
+curl .../api/jobs/submit/hello_world
+curl .../api/jobs/submit/ingest_vector
+curl .../api/jobs/submit/process_raster
+```
+
+---
+
+### Task Checklist
+
+#### Phase 1: Create New Config Modules
+- [ ] Create config/ folder structure (7 files)
+- [ ] Implement config/storage_config.py (copy COG tiers, storage classes)
+- [ ] Implement config/database_config.py (extract database fields)
+- [ ] Implement config/raster_config.py (extract raster fields)
+- [ ] Implement config/vector_config.py (extract vector fields)
+- [ ] Implement config/queue_config.py (extract queue fields)
+- [ ] Implement config/app_config.py (composition with legacy properties)
+- [ ] Implement config/__init__.py (exports for backward compatibility)
+- [ ] Write test_new_config.py (verify new modules work)
+- [ ] Test: Both old and new import patterns work
+- [ ] Commit: "Add new config/ package (parallel to old config.py)"
+
+#### Phase 2: Parallel Operation & Testing
+- [ ] Deploy to Azure with both configs active
+- [ ] Test health endpoint (uses config extensively)
+- [ ] Test hello_world job (validates config access)
+- [ ] Test process_raster job (validates raster config)
+- [ ] Test ingest_vector job (validates vector config)
+- [ ] Verify Application Insights logs (no config errors)
+- [ ] Commit: "Verify parallel config operation in production"
+
+#### Phase 3: Migrate Code to New Pattern
+- [ ] Migrate raster pipeline files (5-7 files)
+  - [ ] services/raster_cog.py
+  - [ ] services/raster_validation.py
+  - [ ] jobs/process_raster.py
+  - [ ] Test: process_raster job still works
+  - [ ] Commit: "Migrate raster pipeline to config.raster"
+- [ ] Migrate vector pipeline files (3-5 files)
+  - [ ] services/vector/postgis_handler.py
+  - [ ] jobs/ingest_vector.py
+  - [ ] Test: ingest_vector job still works
+  - [ ] Commit: "Migrate vector pipeline to config.vector"
+- [ ] Migrate database files (3-4 files)
+  - [ ] infrastructure/postgresql.py
+  - [ ] triggers/db_query.py
+  - [ ] Test: Schema redeploy still works
+  - [ ] Commit: "Migrate database code to config.database"
+- [ ] Migrate remaining files (grep for legacy properties)
+- [ ] Commit: "Complete migration to new config/ package"
+
+#### Phase 4: Remove Legacy Code
+- [ ] Remove legacy @property methods from config/app_config.py
+- [ ] Test: Ensure no code still uses legacy properties
+- [ ] Delete old config.py (backup first!)
+- [ ] Update all remaining imports (should be minimal)
+- [ ] Final deployment to Azure
+- [ ] Full regression testing (all jobs, all endpoints)
+- [ ] Update documentation (FILE_CATALOG.md, ARCHITECTURE_REFERENCE.md)
+- [ ] Commit: "Remove old config.py - migration complete"
+
+---
+
+### Expected Benefits
+
+| Metric | Before | After |
+|--------|--------|-------|
+| **AppConfig size** | 1,090 lines (63+ fields) | 150 lines (5 composed configs) |
+| **Find raster setting** | Search 1,747 lines | Look in config/raster_config.py (250 lines) |
+| **Test raster code** | Mock all 63+ fields | Only mock RasterConfig (15 fields) |
+| **Merge conflicts** | High (everyone edits AppConfig) | Low (different files per domain) |
+| **Clear dependencies** | Unclear (everything in one class) | Obvious (import only what you need) |
+
+### Risk Mitigation
+
+**Low Risk Strategy**:
+1. ✅ New code runs alongside old code (both operational)
+2. ✅ Backward compatibility via legacy properties (nothing breaks)
+3. ✅ Incremental migration (one domain at a time, tested)
+4. ✅ Old config.py deleted LAST (after everything migrated)
+
+**Rollback Plan**:
+- If issues discovered: Keep using legacy properties while debugging
+- If critical failure: Revert to old config.py (single file)
+- Git history preserves all migration steps for analysis
+
+---
+
+## 🎯 CURRENT PRIORITY - process_raster_collection Job
+
+**Status**: Ready to implement
+**Purpose**: Multi-raster collection processing with TiTiler search URLs
 
 ### Analysis (18 NOV 2025 03:50 UTC)
 

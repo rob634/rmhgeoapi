@@ -123,7 +123,8 @@ class QueueConfig(BaseModel):
         """Load from environment variables."""
         return cls(
             connection_string=os.environ.get("ServiceBusConnection"),
-            namespace=os.environ.get("SERVICE_BUS_NAMESPACE"),
+            # Check both SERVICE_BUS_NAMESPACE and Azure Functions binding variable
+            namespace=os.environ.get("SERVICE_BUS_NAMESPACE") or os.environ.get("ServiceBusConnection__fullyQualifiedNamespace"),
             jobs_queue=os.environ.get("SERVICE_BUS_JOBS_QUEUE", QueueNames.JOBS),
             tasks_queue=os.environ.get("SERVICE_BUS_TASKS_QUEUE", QueueNames.TASKS),
             max_batch_size=int(os.environ.get("SERVICE_BUS_MAX_BATCH_SIZE", "100")),

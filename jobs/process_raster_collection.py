@@ -824,7 +824,11 @@ class ProcessRasterCollectionWorkflow(JobBase):
         share_url = None
 
         if stac_tasks and stac_tasks[0].result_data:
-            stac_result = stac_tasks[0].result_data.get("result", {})
+            # CRITICAL FIX (20 NOV 2025): result_data IS the result dict already (not wrapped in "result" key)
+            # Same bug pattern as MosaicJSON fix on line 802 (11 NOV 2025)
+            # OLD BUG: stac_result = stac_tasks[0].result_data.get("result", {})  # Returns {} because no "result" key!
+            # CORRECT: result_data IS the result
+            stac_result = stac_tasks[0].result_data
             collection_id = stac_result.get("collection_id", "cogs")
             item_id = stac_result.get("stac_id") or stac_result.get("pgstac_id")
 
@@ -852,7 +856,8 @@ class ProcessRasterCollectionWorkflow(JobBase):
         share_url = None
 
         if stac_tasks and stac_tasks[0].result_data:
-            stac_result = stac_tasks[0].result_data.get("result", {})
+            # CRITICAL FIX (20 NOV 2025): Same bug as above - result_data IS the result (not wrapped)
+            stac_result = stac_tasks[0].result_data
             search_id = stac_result.get("search_id")
 
             if search_id:

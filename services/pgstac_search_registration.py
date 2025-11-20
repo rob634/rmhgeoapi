@@ -172,7 +172,12 @@ class PgSTACSearchRegistration:
                 conn.commit()
 
                 if result:
-                    returned_hash, use_count = result
+                    # CRITICAL FIX (20 NOV 2025): result is a DictRow, not tuple
+                    # Unpacking a dict iterates over KEYS not VALUES
+                    # OLD BUG: returned_hash, use_count = result  # returned_hash='hash', use_count='usecount' (WRONG!)
+                    # CORRECT: Extract values by key name
+                    returned_hash = result['hash']
+                    use_count = result['usecount']
                     if use_count == 1:
                         logger.info(f"✅ Search registered (new): {returned_hash}")
                     else:

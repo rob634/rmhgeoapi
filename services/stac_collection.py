@@ -427,6 +427,7 @@ def _create_stac_collection_impl(
             )
 
             logger.info(f"✅ Search registered: {search_id}")
+            logger.info(f"🔍 DEBUG: search_id type={type(search_id)}, value='{search_id}', len={len(search_id) if isinstance(search_id, str) else 'N/A'}")
 
             # Generate visualization URLs
             config = get_config()

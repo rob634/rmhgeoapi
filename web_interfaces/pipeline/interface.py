@@ -680,7 +680,8 @@ class PipelineInterface(BaseInterface):
             try {
                 // Fetch detailed metadata
                 const container = document.getElementById('container-select').value;
-                const url = `${API_BASE_URL}/api/containers/${container}/blobs/${encodeURIComponent(blob.name)}`;
+                // Use query param for blob path (Azure Functions v4 doesn't support :path constraint)
+                const url = `${API_BASE_URL}/api/containers/${container}/blob?path=${encodeURIComponent(blob.name)}`;
                 const metadata = await fetchJSON(url);
 
                 // Render details

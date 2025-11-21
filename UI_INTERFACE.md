@@ -166,9 +166,13 @@ GET /api/containers/{container_name}/blobs
 
     Returns: {"blobs": [...], "count": N}
 
-GET /api/containers/{container_name}/blobs/{blob_path}
+GET /api/containers/{container_name}/blob
+    ?path={blob_path}         # Required: full path to blob
 
     Returns: Single blob metadata object
+
+    Note: Uses query param for path because Azure Functions v4
+    doesn't support the ':path' route constraint for nested paths.
 ```
 
 ### Architecture

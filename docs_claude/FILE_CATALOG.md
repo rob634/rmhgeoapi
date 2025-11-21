@@ -124,7 +124,7 @@
 | `core/state_manager.py` | Database operations with advisory locks using composition pattern |
 | `core/orchestration_manager.py` | Dynamic task creation for Service Bus batch optimization |
 
-### Core Models (core/models/ - 6 files)
+### Core Models (core/models/ - 7 files)
 | File | Purpose |
 |------|---------|
 | `core/models/enums.py` | JobStatus, TaskStatus enums - single source of truth |
@@ -132,6 +132,7 @@
 | `core/models/task.py` | TaskRecord, TaskDefinition - task data structures |
 | `core/models/results.py` | TaskResult, StageResultContract - execution results |
 | `core/models/context.py` | StageExecutionContext, StageAdvancementResult - execution context |
+| `core/models/janitor.py` | JanitorRun, JanitorRunType, JanitorRunStatus - audit models - NEW 21 NOV |
 | `core/models/__init__.py` | Exports all models for `from core.models import *` |
 
 ### Core Logic (core/logic/ - 3 files)
@@ -203,10 +204,11 @@
 | `infrastructure/queue.py` | Queue Storage operations with singleton pattern |
 | `infrastructure/service_bus.py` | Service Bus implementation with batch support |
 | `infrastructure/vault.py` | Azure Key Vault integration |
+| `infrastructure/janitor_repository.py` | Janitor maintenance queries (stale tasks, failed jobs, orphans) - NEW 21 NOV |
 
-## ⚙️ Services (services/ folder) ⭐ UPDATED 29 OCT
+## ⚙️ Services (services/ folder) ⭐ UPDATED 21 NOV
 
-### Core Services (5 files - Root Level)
+### Core Services (6 files - Root Level)
 | File | Purpose |
 |------|---------|
 | `services/service_hello_world.py` | Hello World task processing logic |
@@ -214,6 +216,7 @@
 | `services/service_stac_setup.py` | STAC setup service |
 | `services/container_summary.py` | Container aggregate statistics handler |
 | `services/container_list.py` | Container blob listing and analysis handlers |
+| `services/janitor_service.py` | Janitor maintenance business logic (stale tasks, job health, orphans) - NEW 21 NOV |
 
 ### Raster Services (services/ - Root Level)
 | File | Purpose |
@@ -389,6 +392,14 @@
 | `triggers/stac_nuke.py` | STAC catalog cleanup endpoint |
 | `triggers/stac_setup.py` | STAC setup and configuration |
 | `triggers/stac_vector.py` | STAC vector catalog operations |
+
+### Janitor Timer Triggers (4 files in triggers/janitor/) - NEW 21 NOV 2025
+| File | Purpose |
+|------|---------|
+| `triggers/janitor/__init__.py` | Janitor triggers package exports |
+| `triggers/janitor/task_watchdog.py` | Timer: Detect stale PROCESSING tasks (>30 min) |
+| `triggers/janitor/job_health.py` | Timer: Detect jobs with failed tasks, propagate failure |
+| `triggers/janitor/orphan_detector.py` | Timer: Detect orphaned tasks, zombie jobs, stuck queued |
 
 ### Test Triggers (1 file)
 | File | Purpose |

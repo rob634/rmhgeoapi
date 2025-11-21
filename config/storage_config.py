@@ -311,12 +311,6 @@ class StorageAccountConfig(BaseModel):
     misc: str = Field(description="Miscellaneous files (logs, reports)")
     temp: str = Field(description="Temporary processing files (auto-cleanup)")
 
-    # Optional: Connection override (for airgapped external)
-    connection_string: Optional[str] = Field(
-        default=None,
-        description="Override connection string for isolated networks"
-    )
-
     def get_container(self, purpose: str) -> str:
         """
         Get fully qualified container name.
@@ -347,95 +341,139 @@ class MultiAccountStorageConfig(BaseModel):
     """
     Multi-account storage configuration for trust zones.
 
-    Current State (20 NOV 2025):
-    - All four "accounts" use rmhazuregeo storage account
-    - Containers are prefixed to simulate account separation:
-      - bronze-vectors, bronze-rasters (Bronze: raw uploads)
-      - silver-cogs, silver-vectors (Silver: processed data)
-      - silverext-cogs, silverext-vectors (SilverExternal: airgapped replica)
-      - gold-geoparquet, gold-h3-grids (Gold: analytics-ready exports)
+    Environment Variable Pattern (21 NOV 2025):
+    Each container can be overridden via environment variable, falling back to defaults.
+    Each zone can have its own storage account.
+
+    Environment Variables:
+    ----------------------
+    Storage Accounts (one per zone):
+        BRONZE_STORAGE_ACCOUNT    - Bronze zone account (default: STORAGE_ACCOUNT_NAME or "rmhazuregeo")
+        SILVER_STORAGE_ACCOUNT    - Silver zone account (default: STORAGE_ACCOUNT_NAME or "rmhazuregeo")
+        SILVEREXT_STORAGE_ACCOUNT - SilverExt zone account (default: STORAGE_ACCOUNT_NAME or "rmhazuregeo")
+        GOLD_STORAGE_ACCOUNT      - Gold zone account (default: STORAGE_ACCOUNT_NAME or "rmhazuregeo")
+
+    Bronze Containers (input/staging):
+        BRONZE_VECTORS_CONTAINER  - Vector uploads (default: "bronze-vectors")
+        BRONZE_RASTERS_CONTAINER  - Raster uploads (default: "bronze-rasters")
+        BRONZE_MISC_CONTAINER     - Misc files (default: "bronze-misc")
+        BRONZE_TEMP_CONTAINER     - Temp processing (default: "bronze-temp")
+
+    Silver Containers (processed/internal):
+        SILVER_VECTORS_CONTAINER  - Processed vectors (default: "silver-vectors")
+        SILVER_RASTERS_CONTAINER  - Processed rasters (default: "silver-rasters")
+        SILVER_COGS_CONTAINER     - Cloud Optimized GeoTIFFs (default: "silver-cogs")
+        SILVER_TILES_CONTAINER    - Raster tiles (default: "silver-tiles")
+        SILVER_MOSAICJSON_CONTAINER - MosaicJSON files (default: "silver-mosaicjson")
+        SILVER_STAC_ASSETS_CONTAINER - STAC assets (default: "silver-stac-assets")
+        SILVER_MISC_CONTAINER     - Misc files (default: "silver-misc")
+        SILVER_TEMP_CONTAINER     - Temp processing (default: "silver-temp")
+
+    SilverExt Containers (airgapped external):
+        SILVEREXT_VECTORS_CONTAINER, SILVEREXT_COGS_CONTAINER, etc.
+
+    Gold Containers (analytics exports):
+        GOLD_GEOPARQUET_CONTAINER - GeoParquet exports (default: "gold-geoparquet")
+        GOLD_H3_GRIDS_CONTAINER   - H3 grid files (default: "gold-h3-grids")
+        GOLD_TEMP_CONTAINER       - Temp analytics (default: "gold-temp")
 
     Trust Zone Pattern:
-    - Bronze: Untrusted raw data (user uploads)
-    - Silver: Trusted processed data (COGs, vectors in PostGIS)
-    - SilverExternal: Airgapped secure replica
-    - Gold: Analytics-ready exports (GeoParquet, H3 grids, DuckDB-optimized)
+    - Bronze: Untrusted raw data (user uploads) - INPUT
+    - Silver: Trusted processed data (COGs, vectors) - INTERNAL
+    - SilverExternal: Airgapped secure replica - EXTERNAL
+    - Gold: Analytics-ready exports (GeoParquet, H3) - ANALYTICS
 
-    Future State (When Ready for Production):
-    - Bronze: Separate storage account (rmhgeo-bronze) in untrusted VNET
-    - Silver: Separate storage account (rmhgeo-silver) in trusted VNET
-    - SilverExternal: Separate storage account in airgapped VNET
-    - Gold: Separate storage account (rmhgeo-gold) for analytics
+    Example Deployment Scenarios:
+    ----------------------------
+    1. Development (single account, all containers):
+       STORAGE_ACCOUNT_NAME=rmhazuregeo
+       # All zones use same account, default container names
 
-    Migration Path:
-    - Change account_name per tier → zero code changes
-    - Container names stay the same (bronze-vectors, gold-geoparquet, etc.)
+    2. Production (3 accounts):
+       BRONZE_STORAGE_ACCOUNT=rmhgeo-bronze
+       SILVER_STORAGE_ACCOUNT=rmhgeo-silver
+       SILVEREXT_STORAGE_ACCOUNT=rmhgeo-external
+
+    3. Custom container names (legacy compatibility):
+       BRONZE_RASTERS_CONTAINER=rmhazuregeobronze
+       BRONZE_VECTORS_CONTAINER=rmhazuregeobronze
+       # Both rasters and vectors in same container
     """
 
-    # BRONZE: Untrusted raw data zone
+    # BRONZE: Untrusted raw data zone (INPUT)
     bronze: StorageAccountConfig = Field(
         default_factory=lambda: StorageAccountConfig(
-            account_name=os.getenv("STORAGE_ACCOUNT_NAME", "rmhazuregeo"),
+            account_name=os.getenv(
+                "BRONZE_STORAGE_ACCOUNT",
+                os.getenv("STORAGE_ACCOUNT_NAME", "rmhazuregeo")
+            ),
             container_prefix="bronze",
-            vectors="bronze-vectors",
-            rasters="bronze-rasters",
-            misc="bronze-misc",
-            temp="bronze-temp",
+            vectors=os.getenv("BRONZE_VECTORS_CONTAINER", "bronze-vectors"),
+            rasters=os.getenv("BRONZE_RASTERS_CONTAINER", "bronze-rasters"),
+            misc=os.getenv("BRONZE_MISC_CONTAINER", "bronze-misc"),
+            temp=os.getenv("BRONZE_TEMP_CONTAINER", "bronze-temp"),
             # Not used in Bronze (no processed outputs):
-            cogs="bronze-notused",
-            tiles="bronze-notused",
-            mosaicjson="bronze-notused",
-            stac_assets="bronze-notused"
+            cogs=os.getenv("BRONZE_COGS_CONTAINER", "bronze-notused"),
+            tiles=os.getenv("BRONZE_TILES_CONTAINER", "bronze-notused"),
+            mosaicjson=os.getenv("BRONZE_MOSAICJSON_CONTAINER", "bronze-notused"),
+            stac_assets=os.getenv("BRONZE_STAC_ASSETS_CONTAINER", "bronze-notused")
         )
     )
 
-    # SILVER: Trusted processed data + REST API serving
+    # SILVER: Trusted processed data + REST API serving (INTERNAL)
     silver: StorageAccountConfig = Field(
         default_factory=lambda: StorageAccountConfig(
-            account_name=os.getenv("STORAGE_ACCOUNT_NAME", "rmhazuregeo"),
+            account_name=os.getenv(
+                "SILVER_STORAGE_ACCOUNT",
+                os.getenv("STORAGE_ACCOUNT_NAME", "rmhazuregeo")
+            ),
             container_prefix="silver",
-            vectors="silver-vectors",
-            rasters="silver-rasters",
-            cogs="silver-cogs",
-            tiles="silver-tiles",
-            mosaicjson="silver-mosaicjson",
-            stac_assets="silver-stac-assets",
-            misc="silver-misc",
-            temp="silver-temp"
+            vectors=os.getenv("SILVER_VECTORS_CONTAINER", "silver-vectors"),
+            rasters=os.getenv("SILVER_RASTERS_CONTAINER", "silver-rasters"),
+            cogs=os.getenv("SILVER_COGS_CONTAINER", "silver-cogs"),
+            tiles=os.getenv("SILVER_TILES_CONTAINER", "silver-tiles"),
+            mosaicjson=os.getenv("SILVER_MOSAICJSON_CONTAINER", "silver-mosaicjson"),
+            stac_assets=os.getenv("SILVER_STAC_ASSETS_CONTAINER", "silver-stac-assets"),
+            misc=os.getenv("SILVER_MISC_CONTAINER", "silver-misc"),
+            temp=os.getenv("SILVER_TEMP_CONTAINER", "silver-temp")
         )
     )
 
-    # SILVER EXTERNAL: Airgapped secure environment replica
+    # SILVER EXTERNAL: Airgapped secure environment replica (EXTERNAL)
     silverext: StorageAccountConfig = Field(
         default_factory=lambda: StorageAccountConfig(
-            account_name=os.getenv("STORAGE_ACCOUNT_NAME", "rmhazuregeo"),
+            account_name=os.getenv(
+                "SILVEREXT_STORAGE_ACCOUNT",
+                os.getenv("STORAGE_ACCOUNT_NAME", "rmhazuregeo")
+            ),
             container_prefix="silverext",
-            vectors="silverext-vectors",
-            rasters="silverext-rasters",
-            cogs="silverext-cogs",
-            tiles="silverext-tiles",
-            mosaicjson="silverext-mosaicjson",
-            stac_assets="silverext-stac-assets",
-            misc="silverext-misc",
-            temp="silverext-temp",
-            # Optional: Connection string for airgapped network
-            connection_string=os.getenv("SILVEREXT_CONNECTION_STRING")
+            vectors=os.getenv("SILVEREXT_VECTORS_CONTAINER", "silverext-vectors"),
+            rasters=os.getenv("SILVEREXT_RASTERS_CONTAINER", "silverext-rasters"),
+            cogs=os.getenv("SILVEREXT_COGS_CONTAINER", "silverext-cogs"),
+            tiles=os.getenv("SILVEREXT_TILES_CONTAINER", "silverext-tiles"),
+            mosaicjson=os.getenv("SILVEREXT_MOSAICJSON_CONTAINER", "silverext-mosaicjson"),
+            stac_assets=os.getenv("SILVEREXT_STAC_ASSETS_CONTAINER", "silverext-stac-assets"),
+            misc=os.getenv("SILVEREXT_MISC_CONTAINER", "silverext-misc"),
+            temp=os.getenv("SILVEREXT_TEMP_CONTAINER", "silverext-temp")
         )
     )
 
     # GOLD: Analytics-ready exports (GeoParquet, H3 grids, DuckDB-optimized)
     gold: StorageAccountConfig = Field(
         default_factory=lambda: StorageAccountConfig(
-            account_name=os.getenv("STORAGE_ACCOUNT_NAME", "rmhazuregeo"),
+            account_name=os.getenv(
+                "GOLD_STORAGE_ACCOUNT",
+                os.getenv("STORAGE_ACCOUNT_NAME", "rmhazuregeo")
+            ),
             container_prefix="gold",
-            vectors="gold-geoparquet",     # GeoParquet vector exports
-            rasters="gold-notused",        # Not used (COGs in silver)
-            cogs="gold-notused",           # Not used (COGs in silver)
-            tiles="gold-notused",          # Not used (tiles in silver)
-            mosaicjson="gold-notused",     # Not used (MosaicJSON in silver)
-            stac_assets="gold-notused",    # Not used (STAC in silver)
-            misc="gold-h3-grids",          # H3 hexagonal grid GeoParquet files
-            temp="gold-temp"               # Temporary analytics processing
+            vectors=os.getenv("GOLD_GEOPARQUET_CONTAINER", "gold-geoparquet"),
+            rasters=os.getenv("GOLD_RASTERS_CONTAINER", "gold-notused"),
+            cogs=os.getenv("GOLD_COGS_CONTAINER", "gold-notused"),
+            tiles=os.getenv("GOLD_TILES_CONTAINER", "gold-notused"),
+            mosaicjson=os.getenv("GOLD_MOSAICJSON_CONTAINER", "gold-notused"),
+            stac_assets=os.getenv("GOLD_STAC_ASSETS_CONTAINER", "gold-notused"),
+            misc=os.getenv("GOLD_H3_GRIDS_CONTAINER", "gold-h3-grids"),
+            temp=os.getenv("GOLD_TEMP_CONTAINER", "gold-temp")
         )
     )
 
@@ -451,10 +489,10 @@ class MultiAccountStorageConfig(BaseModel):
 
         Example:
             storage.get_account("bronze").get_container("vectors")
-            → "bronze-vectors"
+            → value of BRONZE_VECTORS_CONTAINER or "bronze-vectors"
 
             storage.get_account("gold").get_container("misc")
-            → "gold-h3-grids"
+            → value of GOLD_H3_GRIDS_CONTAINER or "gold-h3-grids"
 
         Raises:
             ValueError: If zone is unknown
@@ -477,6 +515,31 @@ class MultiAccountStorageConfig(BaseModel):
     def from_environment(cls):
         """Load storage configuration from environment variables."""
         return cls()  # Uses default_factory for each field
+
+    def debug_dict(self) -> dict:
+        """Return debug-friendly configuration showing resolved values."""
+        return {
+            "bronze": {
+                "account": self.bronze.account_name,
+                "vectors": self.bronze.vectors,
+                "rasters": self.bronze.rasters
+            },
+            "silver": {
+                "account": self.silver.account_name,
+                "vectors": self.silver.vectors,
+                "cogs": self.silver.cogs
+            },
+            "silverext": {
+                "account": self.silverext.account_name,
+                "vectors": self.silverext.vectors,
+                "cogs": self.silverext.cogs
+            },
+            "gold": {
+                "account": self.gold.account_name,
+                "geoparquet": self.gold.vectors,
+                "h3_grids": self.gold.misc
+            }
+        }
 
 
 class StorageConfig(MultiAccountStorageConfig):

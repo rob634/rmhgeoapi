@@ -44,7 +44,10 @@ from ..models import (
     ApiRequest,
     OrchestrationJob,
     PlatformRequestStatus,
-    DataType
+    DataType,
+    JanitorRun,
+    JanitorRunType,
+    JanitorRunStatus
 )
 
 
@@ -333,7 +336,12 @@ class PydanticToSQL:
                     sql.Identifier("request_id")
                 )
             )
-        
+        elif table_name == "janitor_runs":
+            # Janitor audit table (21 NOV 2025)
+            constraints.append(
+                sql.SQL("PRIMARY KEY ({})").format(sql.Identifier("run_id"))
+            )
+
         # Combine columns and constraints
         all_parts = columns + constraints
         
@@ -515,6 +523,27 @@ class PydanticToSQL:
                     sql.Identifier(self.schema_name),
                     sql.Identifier("orchestration_jobs"),
                     sql.Identifier("job_id")
+                )
+            )
+
+        elif table_name == "janitor_runs":
+            # Janitor audit table indexes (21 NOV 2025)
+            # Started at index for querying recent runs
+            indexes.append(
+                sql.SQL("CREATE INDEX IF NOT EXISTS {} ON {}.{} ({} DESC)").format(
+                    sql.Identifier("idx_janitor_runs_started_at"),
+                    sql.Identifier(self.schema_name),
+                    sql.Identifier("janitor_runs"),
+                    sql.Identifier("started_at")
+                )
+            )
+            # Run type index for filtering by operation type
+            indexes.append(
+                sql.SQL("CREATE INDEX IF NOT EXISTS {} ON {}.{} ({})").format(
+                    sql.Identifier("idx_janitor_runs_type"),
+                    sql.Identifier(self.schema_name),
+                    sql.Identifier("janitor_runs"),
+                    sql.Identifier("run_type")
                 )
             )
 
@@ -891,6 +920,8 @@ $$""").format(
         composed.extend(self.generate_enum("task_status", TaskStatus))
         composed.extend(self.generate_enum("platform_request_status", PlatformRequestStatus))
         composed.extend(self.generate_enum("data_type", DataType))
+        composed.extend(self.generate_enum("janitor_run_type", JanitorRunType))
+        composed.extend(self.generate_enum("janitor_run_status", JanitorRunStatus))
 
         # For tables, indexes, functions, and triggers, we still need string format
         # because they are complex multi-line statements
@@ -901,12 +932,14 @@ $$""").format(
         composed.append(self.generate_table_composed(TaskRecord, "tasks"))
         composed.append(self.generate_table_composed(ApiRequest, "api_requests"))
         composed.append(self.generate_table_composed(OrchestrationJob, "orchestration_jobs"))
+        composed.append(self.generate_table_composed(JanitorRun, "janitor_runs"))
 
         # Indexes - now using composed SQL
         composed.extend(self.generate_indexes_composed("jobs", JobRecord))
         composed.extend(self.generate_indexes_composed("tasks", TaskRecord))
         composed.extend(self.generate_indexes_composed("api_requests", ApiRequest))
         composed.extend(self.generate_indexes_composed("orchestration_jobs", OrchestrationJob))
+        composed.extend(self.generate_indexes_composed("janitor_runs", JanitorRun))
             
         # Functions - already sql.Composed objects
         composed.extend(self.generate_static_functions())

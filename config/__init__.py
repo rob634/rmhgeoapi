@@ -114,12 +114,7 @@ def debug_config() -> dict:
         return {
             # Storage
             'storage_account_name': config.storage_account_name,
-            'storage': {
-                'bronze': config.storage.bronze.container_prefix,
-                'silver': config.storage.silver.container_prefix,
-                'silverext': config.storage.silverext.container_prefix,
-                'gold': config.storage.gold.container_prefix,
-            },
+            'storage': config.storage.debug_dict(),
 
             # Database
             'database': config.database.debug_dict(),

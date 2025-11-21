@@ -65,6 +65,13 @@ from .platform import (
     PlatformRequest
 )
 
+# Janitor models (21 NOV 2025)
+from .janitor import (
+    JanitorRun,
+    JanitorRunType,
+    JanitorRunStatus
+)
+
 __all__ = [
     # Enums
     'JobStatus',
@@ -98,5 +105,10 @@ __all__ = [
     'PlatformRequestStatus',
     'DataType',
     'OperationType',
-    'PlatformRequest'
+    'PlatformRequest',
+
+    # Janitor models (21 NOV 2025)
+    'JanitorRun',
+    'JanitorRunType',
+    'JanitorRunStatus'
 ]

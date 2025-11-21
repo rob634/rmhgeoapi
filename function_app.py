@@ -253,6 +253,13 @@ from vector_viewer import get_vector_viewer_triggers
 from triggers.list_container_blobs import list_container_blobs_handler
 from triggers.get_blob_metadata import get_blob_metadata_handler
 
+# Janitor Timer Triggers (21 NOV 2025) - System maintenance
+from triggers.janitor import (
+    task_watchdog_handler,
+    job_health_handler,
+    orphan_detector_handler
+)
+
 # ========================================================================
 # PHASE 2: EXPLICIT REGISTRATION PATTERN (Parallel with decorators)
 # ========================================================================
@@ -358,7 +365,7 @@ def health(req: func.HttpRequest) -> func.HttpResponse:
 #
 # Security Risk:
 # - These endpoints expose sensitive database internals (schema, tables, queries)
-# - Anonymous auth level (func.AuthLevel.ANONYMOUS) is intentional for dev/QA only
+# - App uses RBAC + Managed Identity (no function keys), auth_level set at app level
 # - MUST BE REMOVED before UAT deployment to prevent data exposure
 #
 # Count: 29 endpoints total (17 schema/table, 4 query, 2 health, 3 maintenance, 3 diagnostics)
@@ -366,7 +373,7 @@ def health(req: func.HttpRequest) -> func.HttpResponse:
 # ============================================================================
 
 # Schema-level operations (3 endpoints - Keep for QA, remove for UAT/PROD)
-@app.route(route="dbadmin/schemas", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="dbadmin/schemas", methods=["GET"])
 def db_schemas_list(req: func.HttpRequest) -> func.HttpResponse:
     """
     ⚠️ FCO (For Claude Only) - Keep for QA, remove before UAT
@@ -376,101 +383,101 @@ def db_schemas_list(req: func.HttpRequest) -> func.HttpResponse:
     return admin_db_schemas_trigger.handle_request(req)
 
 
-@app.route(route="dbadmin/schemas/{schema_name}", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="dbadmin/schemas/{schema_name}", methods=["GET"])
 def db_schema_details(req: func.HttpRequest) -> func.HttpResponse:
     """⚠️ FCO - Keep for QA, remove before UAT. GET /api/dbadmin/schemas/{schema_name}"""
     return admin_db_schemas_trigger.handle_request(req)
 
 
-@app.route(route="dbadmin/schemas/{schema_name}/tables", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="dbadmin/schemas/{schema_name}/tables", methods=["GET"])
 def db_schema_tables(req: func.HttpRequest) -> func.HttpResponse:
     """⚠️ FCO - Keep for QA, remove before UAT. GET /api/dbadmin/schemas/{schema_name}/tables"""
     return admin_db_schemas_trigger.handle_request(req)
 
 
 # Table-level operations
-@app.route(route="dbadmin/tables/{table_identifier}", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="dbadmin/tables/{table_identifier}", methods=["GET"])
 def db_table_details(req: func.HttpRequest) -> func.HttpResponse:
     """Get table details: GET /api/dbadmin/tables/{schema}.{table}"""
     return admin_db_tables_trigger.handle_request(req)
 
 
-@app.route(route="dbadmin/tables/{table_identifier}/sample", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="dbadmin/tables/{table_identifier}/sample", methods=["GET"])
 def db_table_sample(req: func.HttpRequest) -> func.HttpResponse:
     """Sample table rows: GET /api/dbadmin/tables/{schema}.{table}/sample"""
     return admin_db_tables_trigger.handle_request(req)
 
 
-@app.route(route="dbadmin/tables/{table_identifier}/columns", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="dbadmin/tables/{table_identifier}/columns", methods=["GET"])
 def db_table_columns(req: func.HttpRequest) -> func.HttpResponse:
     """Get table columns: GET /api/dbadmin/tables/{schema}.{table}/columns"""
     return admin_db_tables_trigger.handle_request(req)
 
 
-@app.route(route="dbadmin/tables/{table_identifier}/indexes", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="dbadmin/tables/{table_identifier}/indexes", methods=["GET"])
 def db_table_indexes(req: func.HttpRequest) -> func.HttpResponse:
     """Get table indexes: GET /api/dbadmin/tables/{schema}.{table}/indexes"""
     return admin_db_tables_trigger.handle_request(req)
 
 
 # Query analysis
-@app.route(route="dbadmin/queries/running", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="dbadmin/queries/running", methods=["GET"])
 def db_queries_running(req: func.HttpRequest) -> func.HttpResponse:
     """Get running queries: GET /api/dbadmin/queries/running"""
     return admin_db_queries_trigger.handle_request(req)
 
 
-@app.route(route="dbadmin/queries/slow", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="dbadmin/queries/slow", methods=["GET"])
 def db_queries_slow(req: func.HttpRequest) -> func.HttpResponse:
     """Get slow queries: GET /api/dbadmin/queries/slow"""
     return admin_db_queries_trigger.handle_request(req)
 
 
-@app.route(route="dbadmin/locks", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="dbadmin/locks", methods=["GET"])
 def db_locks(req: func.HttpRequest) -> func.HttpResponse:
     """Get database locks: GET /api/dbadmin/locks"""
     return admin_db_queries_trigger.handle_request(req)
 
 
-@app.route(route="dbadmin/connections", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="dbadmin/connections", methods=["GET"])
 def db_connections(req: func.HttpRequest) -> func.HttpResponse:
     """Get connection stats: GET /api/dbadmin/connections"""
     return admin_db_queries_trigger.handle_request(req)
 
 
 # Health and performance
-@app.route(route="dbadmin/health", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="dbadmin/health", methods=["GET"])
 def db_health(req: func.HttpRequest) -> func.HttpResponse:
     """Get database health: GET /api/dbadmin/health"""
     return admin_db_health_trigger.handle_request(req)
 
 
-@app.route(route="dbadmin/health/performance", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="dbadmin/health/performance", methods=["GET"])
 def db_health_performance(req: func.HttpRequest) -> func.HttpResponse:
     """Get performance metrics: GET /api/dbadmin/health/performance"""
     return admin_db_health_trigger.handle_request(req)
 
 
 # Maintenance operations (Keep for QA, remove for UAT/PROD)
-@app.route(route="dbadmin/maintenance/nuke", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="dbadmin/maintenance/nuke", methods=["POST"])
 def db_maintenance_nuke(req: func.HttpRequest) -> func.HttpResponse:
     """⚠️ FCO - Keep for QA, remove before UAT. POST /api/dbadmin/maintenance/nuke?confirm=yes"""
     return admin_db_maintenance_trigger.handle_request(req)
 
 
-@app.route(route="dbadmin/maintenance/redeploy", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="dbadmin/maintenance/redeploy", methods=["POST"])
 def db_maintenance_redeploy(req: func.HttpRequest) -> func.HttpResponse:
     """⚠️ FCO - Keep for QA, remove before UAT. POST /api/dbadmin/maintenance/redeploy?confirm=yes"""
     return admin_db_maintenance_trigger.handle_request(req)
 
 
-@app.route(route="dbadmin/maintenance/cleanup", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="dbadmin/maintenance/cleanup", methods=["POST"])
 def db_maintenance_cleanup(req: func.HttpRequest) -> func.HttpResponse:
     """⚠️ FCO - Keep for QA, remove before UAT. POST /api/dbadmin/maintenance/cleanup?confirm=yes&days=30"""
     return admin_db_maintenance_trigger.handle_request(req)
 
 
-@app.route(route="dbadmin/maintenance/pgstac/redeploy", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="dbadmin/maintenance/pgstac/redeploy", methods=["POST"])
 def db_maintenance_pgstac_redeploy(req: func.HttpRequest) -> func.HttpResponse:
     """⚠️ FCO - Keep for QA, remove before UAT. POST /api/dbadmin/maintenance/pgstac/redeploy?confirm=yes"""
     return admin_db_maintenance_trigger.handle_request(req)
@@ -501,7 +508,7 @@ def db_maintenance_pgstac_redeploy(req: func.HttpRequest) -> func.HttpResponse:
 # Reference: API_CONSOLIDATION_STATUS.md section "Service Bus Admin (6 functions)"
 # ============================================================================
 
-@app.route(route="servicebus/queues", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="servicebus/queues", methods=["GET"])
 def servicebus_admin_list_queues(req: func.HttpRequest) -> func.HttpResponse:
     """
     ⚠️ DEV ONLY - REMOVE BEFORE QA
@@ -511,31 +518,31 @@ def servicebus_admin_list_queues(req: func.HttpRequest) -> func.HttpResponse:
     return servicebus_admin_trigger.handle_request(req)
 
 
-@app.route(route="servicebus/queues/{queue_name}", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="servicebus/queues/{queue_name}", methods=["GET"])
 def servicebus_admin_queue_details(req: func.HttpRequest) -> func.HttpResponse:
     """Get queue details: GET /api/servicebus/queues/{queue_name}"""
     return servicebus_admin_trigger.handle_request(req)
 
 
-@app.route(route="servicebus/queues/{queue_name}/peek", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="servicebus/queues/{queue_name}/peek", methods=["GET"])
 def servicebus_admin_peek_messages(req: func.HttpRequest) -> func.HttpResponse:
     """Peek active messages: GET /api/servicebus/queues/{queue_name}/peek?limit=10"""
     return servicebus_admin_trigger.handle_request(req)
 
 
-@app.route(route="servicebus/queues/{queue_name}/deadletter", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="servicebus/queues/{queue_name}/deadletter", methods=["GET"])
 def servicebus_admin_peek_deadletter(req: func.HttpRequest) -> func.HttpResponse:
     """Peek dead letter messages: GET /api/servicebus/queues/{queue_name}/deadletter?limit=10"""
     return servicebus_admin_trigger.handle_request(req)
 
 
-@app.route(route="servicebus/health", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="servicebus/health", methods=["GET"])
 def servicebus_admin_health(req: func.HttpRequest) -> func.HttpResponse:
     """Get Service Bus health: GET /api/servicebus/health"""
     return servicebus_admin_trigger.handle_request(req)
 
 
-@app.route(route="servicebus/queues/{queue_name}/nuke", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="servicebus/queues/{queue_name}/nuke", methods=["POST"])
 def servicebus_admin_nuke_queue(req: func.HttpRequest) -> func.HttpResponse:
     """🚨 NUCLEAR: Clear queue messages: POST /api/servicebus/queues/{queue_name}/nuke?confirm=yes&target=all"""
     return servicebus_admin_trigger.handle_request(req)
@@ -551,14 +558,14 @@ def servicebus_admin_nuke_queue(req: func.HttpRequest) -> func.HttpResponse:
 # ============================================================================
 
 
-@app.route(route="jobs/submit/{job_type}", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="jobs/submit/{job_type}", methods=["POST"])
 def submit_job(req: func.HttpRequest) -> func.HttpResponse:
     """Job submission endpoint using HTTP trigger base class."""
     return submit_job_trigger.handle_request(req)
 
 
 
-@app.route(route="jobs/status/{job_id}", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="jobs/status/{job_id}", methods=["GET"])
 def get_job_status(req: func.HttpRequest) -> func.HttpResponse:
     """Job status retrieval endpoint using HTTP trigger base class."""
     return get_job_status_trigger.handle_request(req)
@@ -567,74 +574,74 @@ def get_job_status(req: func.HttpRequest) -> func.HttpResponse:
 
 
 # Database Query Endpoints - Phase 2 Database Monitoring
-@app.route(route="dbadmin/jobs", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="dbadmin/jobs", methods=["GET"])
 def admin_query_jobs(req: func.HttpRequest) -> func.HttpResponse:
     """Query jobs with filtering: GET /api/admin/db/jobs?limit=10&status=processing&hours=24"""
     return admin_db_data_trigger.handle_request(req)
 
 
-@app.route(route="dbadmin/jobs/{job_id}", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="dbadmin/jobs/{job_id}", methods=["GET"])
 def admin_query_job_by_id(req: func.HttpRequest) -> func.HttpResponse:
     """Get specific job by ID: GET /api/admin/db/jobs/{job_id}"""
     return admin_db_data_trigger.handle_request(req)
 
 
-@app.route(route="dbadmin/tasks", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="dbadmin/tasks", methods=["GET"])
 def admin_query_tasks(req: func.HttpRequest) -> func.HttpResponse:
     """Query tasks with filtering: GET /api/admin/db/tasks?status=failed&limit=20"""
     return admin_db_data_trigger.handle_request(req)
 
 
-@app.route(route="dbadmin/tasks/{job_id}", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="dbadmin/tasks/{job_id}", methods=["GET"])
 def admin_query_tasks_for_job(req: func.HttpRequest) -> func.HttpResponse:
     """Get all tasks for a job: GET /api/admin/db/tasks/{job_id}"""
     return admin_db_data_trigger.handle_request(req)
 
 
 # Platform Layer Query Endpoints (29 OCT 2025 - Migrated to Admin API 10 NOV 2025)
-@app.route(route="dbadmin/platform/requests", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="dbadmin/platform/requests", methods=["GET"])
 def admin_query_api_requests(req: func.HttpRequest) -> func.HttpResponse:
     """Query API requests with filtering: GET /api/admin/db/platform/requests?limit=10&status=processing"""
     return admin_db_data_trigger.handle_request(req)
 
 
-@app.route(route="dbadmin/platform/requests/{request_id}", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="dbadmin/platform/requests/{request_id}", methods=["GET"])
 def admin_query_api_request_by_id(req: func.HttpRequest) -> func.HttpResponse:
     """Get specific API request by ID: GET /api/admin/db/platform/requests/{request_id}"""
     return admin_db_data_trigger.handle_request(req)
 
 
-@app.route(route="dbadmin/platform/orchestration", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="dbadmin/platform/orchestration", methods=["GET"])
 def admin_query_orchestration_jobs(req: func.HttpRequest) -> func.HttpResponse:
     """Query orchestration jobs with filtering: GET /api/admin/db/platform/orchestration?request_id={request_id}"""
     return admin_db_data_trigger.handle_request(req)
 
 
-@app.route(route="dbadmin/platform/orchestration/{request_id}", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="dbadmin/platform/orchestration/{request_id}", methods=["GET"])
 def admin_query_orchestration_jobs_for_request(req: func.HttpRequest) -> func.HttpResponse:
     """Get orchestration jobs for specific request: GET /api/admin/db/platform/orchestration/{request_id}"""
     return admin_db_data_trigger.handle_request(req)
 
 
-@app.route(route="dbadmin/stats", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="dbadmin/stats", methods=["GET"])
 def admin_database_stats(req: func.HttpRequest) -> func.HttpResponse:
     """Database statistics and health metrics: GET /api/admin/db/stats"""
     return admin_db_diagnostics_trigger.handle_request(req)
 
 
-@app.route(route="dbadmin/diagnostics/enums", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="dbadmin/diagnostics/enums", methods=["GET"])
 def admin_diagnose_enums(req: func.HttpRequest) -> func.HttpResponse:
     """Diagnose PostgreSQL enum types: GET /api/admin/db/diagnostics/enums"""
     return admin_db_diagnostics_trigger.handle_request(req)
 
 
-@app.route(route="dbadmin/diagnostics/functions", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="dbadmin/diagnostics/functions", methods=["GET"])
 def admin_test_functions(req: func.HttpRequest) -> func.HttpResponse:
     """Test PostgreSQL functions: GET /api/admin/db/diagnostics/functions"""
     return admin_db_diagnostics_trigger.handle_request(req)
 
 
-@app.route(route="dbadmin/diagnostics/all", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="dbadmin/diagnostics/all", methods=["GET"])
 def admin_all_diagnostics(req: func.HttpRequest) -> func.HttpResponse:
     """Get all diagnostics: GET /api/admin/db/diagnostics/all"""
     return admin_db_diagnostics_trigger.handle_request(req)
@@ -642,7 +649,7 @@ def admin_all_diagnostics(req: func.HttpRequest) -> func.HttpResponse:
 
 # H3 Debug and Bootstrap Monitoring (12 NOV 2025)
 # NOTE: Changed from /api/admin/h3 to /api/h3/debug because Azure Functions reserves /api/admin/* for built-in admin UI
-@app.route(route="h3/debug", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="h3/debug", methods=["GET"])
 def admin_h3_debug(req: func.HttpRequest) -> func.HttpResponse:
     """
     H3 debug operations: GET /api/h3/debug?operation={op}&{params}
@@ -661,7 +668,7 @@ def admin_h3_debug(req: func.HttpRequest) -> func.HttpResponse:
 
 # 🚨 NUCLEAR RED BUTTON - DEVELOPMENT ONLY (⚠️ DEPRECATED - COMMENTED OUT 16 NOV 2025)
 # Use /api/dbadmin/maintenance/nuke instead
-# @app.route(route="db/schema/nuke", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
+# @app.route(route="db/schema/nuke", methods=["POST"])
 # def nuclear_schema_reset(req: func.HttpRequest) -> func.HttpResponse:
 #     """⚠️ DEPRECATED: Use /api/dbadmin/maintenance/nuke instead. POST /api/db/schema/nuke?confirm=yes"""
 #     return admin_db_maintenance_trigger.handle_request(req)
@@ -669,7 +676,7 @@ def admin_h3_debug(req: func.HttpRequest) -> func.HttpResponse:
 
 # 🔄 CONSOLIDATED REBUILD - DEVELOPMENT ONLY (⚠️ DEPRECATED - COMMENTED OUT 16 NOV 2025)
 # Use /api/dbadmin/maintenance/redeploy instead
-# @app.route(route="db/schema/redeploy", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
+# @app.route(route="db/schema/redeploy", methods=["POST"])
 # def redeploy_schema(req: func.HttpRequest) -> func.HttpResponse:
 #     """⚠️ DEPRECATED: Use /api/dbadmin/maintenance/redeploy instead. POST /api/db/schema/redeploy?confirm=yes"""
 #     return admin_db_maintenance_trigger.handle_request(req)
@@ -684,7 +691,7 @@ def admin_h3_debug(req: func.HttpRequest) -> func.HttpResponse:
 # CONTAINER ANALYSIS ENDPOINT - Post-processing for list_container_contents jobs
 # ============================================================================
 
-@app.route(route="analysis/container/{job_id}", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="analysis/container/{job_id}", methods=["GET"])
 def analyze_container(req: func.HttpRequest) -> func.HttpResponse:
     """
     Analyze a list_container_contents job: GET /api/analysis/container/{job_id}?save=true
@@ -702,7 +709,7 @@ def analyze_container(req: func.HttpRequest) -> func.HttpResponse:
     return analyze_container_trigger.handle_request(req)
 
 
-@app.route(route="analysis/delivery", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="analysis/delivery", methods=["POST"])
 def discover_delivery_structure(req: func.HttpRequest) -> func.HttpResponse:
     """
     Discover vendor delivery structure: POST /api/analysis/delivery
@@ -788,19 +795,19 @@ _stac_item = _stac_triggers[5]['handler']
 # TODO: Delete these after confirming new /api/stac/ endpoints work
 # ============================================================================
 
-# @app.route(route="stac", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+# @app.route(route="stac", methods=["GET"])
 # def stac_api_landing_OLD_DEPRECATED(req: func.HttpRequest) -> func.HttpResponse:
 #     """STAC API landing page: GET /api/stac (DEPRECATED - broken, use new stac_api module)"""
 #     return _stac_landing(req)
 
 
-# @app.route(route="stac/conformance", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+# @app.route(route="stac/conformance", methods=["GET"])
 # def stac_api_conformance_OLD_DEPRECATED(req: func.HttpRequest) -> func.HttpResponse:
 #     """STAC API conformance: GET /api/stac/conformance (DEPRECATED)"""
 #     return _stac_conformance(req)
 
 
-# @app.route(route="stac/collections", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+# @app.route(route="stac/collections", methods=["GET"])
 # def stac_api_collections_list_OLD_DEPRECATED(req: func.HttpRequest) -> func.HttpResponse:
 #     """STAC API collections list: GET /api/stac/collections (DEPRECATED)"""
 #     return _stac_collections(req)
@@ -810,7 +817,7 @@ _stac_item = _stac_triggers[5]['handler']
 # STAC SETUP ENDPOINT - PgSTAC installation and management
 # ============================================================================
 
-@app.route(route="stac/setup", methods=["GET", "POST"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="stac/setup", methods=["GET", "POST"])
 def stac_setup(req: func.HttpRequest) -> func.HttpResponse:
     """
     STAC infrastructure setup and status: /api/stac/setup
@@ -829,7 +836,7 @@ def stac_setup(req: func.HttpRequest) -> func.HttpResponse:
 
 
 # 🚨 STAC NUCLEAR BUTTON - DEVELOPMENT ONLY (29 OCT 2025)
-@app.route(route="stac/nuke", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="stac/nuke", methods=["POST"])
 def nuke_stac_data(req: func.HttpRequest) -> func.HttpResponse:
     """
     🚨 NUCLEAR: Clear STAC items/collections (DEV/TEST ONLY)
@@ -852,7 +859,7 @@ def nuke_stac_data(req: func.HttpRequest) -> func.HttpResponse:
     return stac_nuke_trigger.handle_request(req)
 
 
-@app.route(route="stac/collections/{tier}", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="stac/collections/{tier}", methods=["POST"])
 def stac_collections(req: func.HttpRequest) -> func.HttpResponse:
     """
     STAC collection management for Bronze/Silver/Gold tiers.
@@ -873,7 +880,7 @@ def stac_collections(req: func.HttpRequest) -> func.HttpResponse:
     return stac_collections_trigger.handle_request(req)
 
 
-@app.route(route="stac/init", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="stac/init", methods=["POST"])
 def stac_init(req: func.HttpRequest) -> func.HttpResponse:
     """
     Initialize STAC production collections.
@@ -891,7 +898,7 @@ def stac_init(req: func.HttpRequest) -> func.HttpResponse:
     return stac_init_trigger.handle_request(req)
 
 
-@app.route(route="stac/extract", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="stac/extract", methods=["POST"])
 def stac_extract(req: func.HttpRequest) -> func.HttpResponse:
     """
     Extract STAC metadata from raster blob and insert into PgSTAC.
@@ -918,8 +925,8 @@ def stac_extract(req: func.HttpRequest) -> func.HttpResponse:
 # Platform orchestration layer above CoreMachine for external applications (DDH)
 # Follows same patterns as Job→Task: PlatformRequest→Jobs→Tasks
 
-@app.route(route="platform/submit", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
-async def platform_submit(req: func.HttpRequest) -> func.HttpResponse:
+@app.route(route="platform/submit", methods=["POST"])
+def platform_submit(req: func.HttpRequest) -> func.HttpResponse:
     """
     Submit a platform request from external application (DDH).
 
@@ -945,11 +952,11 @@ async def platform_submit(req: func.HttpRequest) -> func.HttpResponse:
             "monitor_url": "/api/platform/status/abc123"
         }
     """
-    return await platform_request_submit(req)
+    return platform_request_submit(req)
 
 
-@app.route(route="platform/status/{request_id}", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
-async def platform_status_by_id(req: func.HttpRequest) -> func.HttpResponse:
+@app.route(route="platform/status/{request_id}", methods=["GET"])
+def platform_status_by_id(req: func.HttpRequest) -> func.HttpResponse:
     """
     Get status of a platform request.
 
@@ -957,11 +964,11 @@ async def platform_status_by_id(req: func.HttpRequest) -> func.HttpResponse:
 
     Returns detailed status including all CoreMachine jobs.
     """
-    return await platform_request_status(req)
+    return platform_request_status(req)
 
 
-@app.route(route="platform/status", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
-async def platform_status_list(req: func.HttpRequest) -> func.HttpResponse:
+@app.route(route="platform/status", methods=["GET"])
+def platform_status_list(req: func.HttpRequest) -> func.HttpResponse:
     """
     List all platform requests.
 
@@ -969,10 +976,10 @@ async def platform_status_list(req: func.HttpRequest) -> func.HttpResponse:
 
     Returns list of all platform requests with optional filtering.
     """
-    return await platform_request_status(req)
+    return platform_request_status(req)
 
 
-@app.route(route="stac/vector", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="stac/vector", methods=["POST"])
 def stac_vector(req: func.HttpRequest) -> func.HttpResponse:
     """
     Catalog PostGIS vector table in STAC.
@@ -1012,7 +1019,7 @@ from infrastructure.pgstac_bootstrap import (
     get_collections_summary
 )
 
-@app.route(route="stac/schema/info", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="stac/schema/info", methods=["GET"])
 def stac_schema_info(req: func.HttpRequest) -> func.HttpResponse:
     """
     Deep inspection of pgstac schema structure.
@@ -1042,7 +1049,7 @@ def stac_schema_info(req: func.HttpRequest) -> func.HttpResponse:
         )
 
 
-@app.route(route="stac/collections/summary", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="stac/collections/summary", methods=["GET"])
 def stac_collections_summary(req: func.HttpRequest) -> func.HttpResponse:
     """
     Quick summary of all collections with statistics.
@@ -1068,7 +1075,7 @@ def stac_collections_summary(req: func.HttpRequest) -> func.HttpResponse:
         )
 
 
-@app.route(route="stac/collections/{collection_id}/stats", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="stac/collections/{collection_id}/stats", methods=["GET"])
 def stac_collection_stats(req: func.HttpRequest) -> func.HttpResponse:
     """
     Detailed statistics for a specific collection.
@@ -1110,7 +1117,7 @@ def stac_collection_stats(req: func.HttpRequest) -> func.HttpResponse:
         )
 
 
-@app.route(route="stac/items/{item_id}", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="stac/items/{item_id}", methods=["GET"])
 def stac_item_lookup(req: func.HttpRequest) -> func.HttpResponse:
     """
     Look up a single STAC item by ID.
@@ -1152,7 +1159,7 @@ def stac_item_lookup(req: func.HttpRequest) -> func.HttpResponse:
         )
 
 
-@app.route(route="stac/health", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="stac/health", methods=["GET"])
 def stac_health(req: func.HttpRequest) -> func.HttpResponse:
     """
     Overall pgstac health check with metrics.
@@ -1190,7 +1197,7 @@ def stac_health(req: func.HttpRequest) -> func.HttpResponse:
 # Interoperable with STAC clients (QGIS, pystac-client, etc.)
 # ============================================================================
 
-@app.route(route="collections", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="collections", methods=["GET"])
 def collections_list(req: func.HttpRequest) -> func.HttpResponse:
     """
     List all STAC collections (STAC API standard).
@@ -1229,7 +1236,7 @@ def collections_list(req: func.HttpRequest) -> func.HttpResponse:
         )
 
 
-@app.route(route="collections/{collection_id}", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="collections/{collection_id}", methods=["GET"])
 def collection_detail(req: func.HttpRequest) -> func.HttpResponse:
     """
     Get single STAC collection (STAC API standard).
@@ -1279,7 +1286,7 @@ def collection_detail(req: func.HttpRequest) -> func.HttpResponse:
         )
 
 
-@app.route(route="collections/{collection_id}/items", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="collections/{collection_id}/items", methods=["GET"])
 def collection_items(req: func.HttpRequest) -> func.HttpResponse:
     """
     Get items in a collection (STAC API standard).
@@ -1356,7 +1363,7 @@ def collection_items(req: func.HttpRequest) -> func.HttpResponse:
         )
 
 
-@app.route(route="search", methods=["GET", "POST"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="search", methods=["GET", "POST"])
 def stac_search(req: func.HttpRequest) -> func.HttpResponse:
     """
     Search STAC items across collections (STAC API standard).
@@ -1481,37 +1488,37 @@ _ogc_items = _ogc_triggers[4]['handler']
 _ogc_feature = _ogc_triggers[5]['handler']
 
 
-@app.route(route="features", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="features", methods=["GET"])
 def ogc_features_landing(req: func.HttpRequest) -> func.HttpResponse:
     """OGC Features API landing page: GET /api/features"""
     return _ogc_landing(req)
 
 
-@app.route(route="features/conformance", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="features/conformance", methods=["GET"])
 def ogc_features_conformance(req: func.HttpRequest) -> func.HttpResponse:
     """OGC Features conformance: GET /api/features/conformance"""
     return _ogc_conformance(req)
 
 
-@app.route(route="features/collections", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="features/collections", methods=["GET"])
 def ogc_features_collections(req: func.HttpRequest) -> func.HttpResponse:
     """OGC Features collections list: GET /api/features/collections"""
     return _ogc_collections(req)
 
 
-@app.route(route="features/collections/{collection_id}", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="features/collections/{collection_id}", methods=["GET"])
 def ogc_features_collection(req: func.HttpRequest) -> func.HttpResponse:
     """OGC Features collection metadata: GET /api/features/collections/{collection_id}"""
     return _ogc_collection(req)
 
 
-@app.route(route="features/collections/{collection_id}/items", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="features/collections/{collection_id}/items", methods=["GET"])
 def ogc_features_items(req: func.HttpRequest) -> func.HttpResponse:
     """OGC Features items query: GET /api/features/collections/{collection_id}/items"""
     return _ogc_items(req)
 
 
-@app.route(route="features/collections/{collection_id}/items/{feature_id}", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="features/collections/{collection_id}/items/{feature_id}", methods=["GET"])
 def ogc_features_feature(req: func.HttpRequest) -> func.HttpResponse:
     """OGC Features single feature: GET /api/features/collections/{collection_id}/items/{feature_id}"""
     return _ogc_feature(req)
@@ -1558,37 +1565,37 @@ _stac_items = _stac_triggers[4]['handler']
 _stac_item = _stac_triggers[5]['handler']
 
 
-@app.route(route="stac", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="stac", methods=["GET"])
 def stac_api_v1_landing(req: func.HttpRequest) -> func.HttpResponse:
     """STAC API v1.0.0 landing page: GET /api/stac"""
     return _stac_landing(req)
 
 
-@app.route(route="stac/conformance", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="stac/conformance", methods=["GET"])
 def stac_api_v1_conformance(req: func.HttpRequest) -> func.HttpResponse:
     """STAC API v1.0.0 conformance: GET /api/stac/conformance"""
     return _stac_conformance(req)
 
 
-@app.route(route="stac/collections", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="stac/collections", methods=["GET"])
 def stac_api_v1_collections(req: func.HttpRequest) -> func.HttpResponse:
     """STAC API v1.0.0 collections list: GET /api/stac/collections"""
     return _stac_collections(req)
 
 
-@app.route(route="stac/collections/{collection_id}", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="stac/collections/{collection_id}", methods=["GET"])
 def stac_api_v1_collection(req: func.HttpRequest) -> func.HttpResponse:
     """STAC API v1.0.0 collection detail: GET /api/stac/collections/{collection_id}"""
     return _stac_collection(req)
 
 
-@app.route(route="stac/collections/{collection_id}/items", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="stac/collections/{collection_id}/items", methods=["GET"])
 def stac_api_v1_items(req: func.HttpRequest) -> func.HttpResponse:
     """STAC API v1.0.0 items list: GET /api/stac/collections/{collection_id}/items"""
     return _stac_items(req)
 
 
-@app.route(route="stac/collections/{collection_id}/items/{item_id}", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="stac/collections/{collection_id}/items/{item_id}", methods=["GET"])
 def stac_api_v1_item(req: func.HttpRequest) -> func.HttpResponse:
     """STAC API v1.0.0 item detail: GET /api/stac/collections/{collection_id}/items/{item_id}"""
     return _stac_item(req)
@@ -1607,7 +1614,7 @@ _vector_viewer_triggers = get_vector_viewer_triggers()
 _vector_viewer_handler = _vector_viewer_triggers[0]['handler']
 
 
-@app.route(route="vector/viewer", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="vector/viewer", methods=["GET"])
 def vector_collection_viewer(req: func.HttpRequest) -> func.HttpResponse:
     """
     Vector collection preview viewer for data curators.
@@ -1637,7 +1644,7 @@ def vector_collection_viewer(req: func.HttpRequest) -> func.HttpResponse:
 # Read-only UI operations - NO JOBS, NO TASKS, NO SERVICE BUS
 # Direct Azure Blob Storage queries for Pipeline Dashboard interface
 
-@app.route(route="containers/{container_name}/blobs", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="containers/{container_name}/blobs", methods=["GET"])
 def list_container_blobs(req: func.HttpRequest) -> func.HttpResponse:
     """
     List blobs in a container (read-only UI operation).
@@ -1659,21 +1666,24 @@ def list_container_blobs(req: func.HttpRequest) -> func.HttpResponse:
     return list_container_blobs_handler(req)
 
 
-@app.route(route="containers/{container_name}/blobs/{blob_path:path}", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="containers/{container_name}/blob", methods=["GET"])
 def get_blob_metadata(req: func.HttpRequest) -> func.HttpResponse:
     """
     Get metadata for a single blob (read-only UI operation).
 
-    GET /api/containers/{container_name}/blobs/{blob_path}
+    GET /api/containers/{container_name}/blob?path=maxar/tile_001.tif
 
     Path Parameters:
         container_name: Azure Blob Storage container (e.g., 'bronze-rasters')
-        blob_path: Full path to blob (e.g., 'maxar/tile_001.tif')
+
+    Query Parameters:
+        path: Full path to blob (e.g., 'maxar/tile_001.tif')
 
     Returns:
         JSON blob metadata (name, size, last_modified, content_type, etag, etc.)
 
     Note: This is a lightweight UI endpoint, NOT a job submission endpoint.
+          Uses singular 'blob' route (vs plural 'blobs' for listing).
     """
     return get_blob_metadata_handler(req)
 
@@ -1684,7 +1694,7 @@ def get_blob_metadata(req: func.HttpRequest) -> func.HttpResponse:
 
 from web_interfaces import unified_interface_handler
 
-@app.route(route="interface/{name}", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="interface/{name}", methods=["GET"])
 def web_interface_unified(req: func.HttpRequest) -> func.HttpResponse:
     """
     Unified web interface handler - dynamic module loading.
@@ -1715,7 +1725,7 @@ def web_interface_unified(req: func.HttpRequest) -> func.HttpResponse:
     return unified_interface_handler(req)
 
 
-@app.route(route="jobs/ingest_vector", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="jobs/ingest_vector", methods=["POST"])
 def ingest_vector(req: func.HttpRequest) -> func.HttpResponse:
     """
     Submit vector file for ETL to PostGIS.
@@ -1748,7 +1758,7 @@ def ingest_vector(req: func.HttpRequest) -> func.HttpResponse:
 # TEST UTILITIES - DEVELOPMENT ONLY
 # ============================================================================
 
-@app.route(route="test/create-rasters", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="test/create-rasters", methods=["POST"])
 def test_create_rasters(req: func.HttpRequest) -> func.HttpResponse:
     """
     Create test raster files in Azure Blob Storage for pipeline testing.
@@ -1771,7 +1781,7 @@ def test_create_rasters(req: func.HttpRequest) -> func.HttpResponse:
 
 
 
-@app.route(route="dbadmin/debug/all", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="dbadmin/debug/all", methods=["GET"])
 def debug_dump_all(req: func.HttpRequest) -> func.HttpResponse:
     """
     🔍 DEBUG: Dump all jobs and tasks for debugging.
@@ -2256,3 +2266,75 @@ def _mark_task_failed_from_queue_error(task_id: str, parent_job_id: Optional[str
             logger.error(f"[{correlation_id}] ❌ Task {task_id} not found in database")
     except Exception as e:
         logger.error(f"[{correlation_id}] ❌ Failed to mark task {task_id} as failed: {e}")
+
+
+# ============================================================================
+# JANITOR TIMER TRIGGERS - System Maintenance (21 NOV 2025)
+# ============================================================================
+# Janitor is a standalone maintenance subsystem (NOT a CoreMachine job).
+# This avoids circular dependency - janitor can't clean itself if stuck.
+#
+# Three timers for different maintenance operations:
+# 1. Task Watchdog (5 min): Detect stale PROCESSING tasks (Azure Functions timeout)
+# 2. Job Health (10 min): Detect jobs with failed tasks, propagate failure
+# 3. Orphan Detector (15 min): Find orphaned tasks, zombie jobs, stuck queued jobs
+#
+# Configuration via environment variables:
+# - JANITOR_ENABLED: true/false (default: true)
+# - JANITOR_TASK_TIMEOUT_MINUTES: 30 (Azure Functions max timeout)
+# - JANITOR_JOB_STALE_HOURS: 24 (max reasonable job duration)
+# - JANITOR_QUEUED_TIMEOUT_HOURS: 1 (max time in QUEUED state)
+# ============================================================================
+
+@app.timer_trigger(
+    schedule="0 */5 * * * *",  # Every 5 minutes
+    arg_name="timer",
+    run_on_startup=False
+)
+def janitor_task_watchdog(timer: func.TimerRequest) -> None:
+    """
+    Detect and mark stale PROCESSING tasks as FAILED.
+
+    Tasks stuck in PROCESSING for > 30 minutes have silently failed
+    (Azure Functions max execution time is 10-30 minutes).
+
+    Schedule: Every 5 minutes (0 */5 * * * *)
+    """
+    task_watchdog_handler(timer)
+
+
+@app.timer_trigger(
+    schedule="0 */10 * * * *",  # Every 10 minutes
+    arg_name="timer",
+    run_on_startup=False
+)
+def janitor_job_health(timer: func.TimerRequest) -> None:
+    """
+    Check job health and propagate task failures.
+
+    Finds PROCESSING jobs with failed tasks and marks them as FAILED.
+    Captures partial results from completed tasks for debugging.
+
+    Schedule: Every 10 minutes (0 */10 * * * *)
+    """
+    job_health_handler(timer)
+
+
+@app.timer_trigger(
+    schedule="0 */15 * * * *",  # Every 15 minutes
+    arg_name="timer",
+    run_on_startup=False
+)
+def janitor_orphan_detector(timer: func.TimerRequest) -> None:
+    """
+    Detect and handle orphaned tasks and zombie jobs.
+
+    Detects:
+    1. Orphaned tasks (parent job doesn't exist)
+    2. Zombie jobs (PROCESSING but all tasks terminal)
+    3. Stuck QUEUED jobs (no tasks created after timeout)
+    4. Ancient stale jobs (PROCESSING > 24 hours)
+
+    Schedule: Every 15 minutes (0 */15 * * * *)
+    """
+    orphan_detector_handler(timer)

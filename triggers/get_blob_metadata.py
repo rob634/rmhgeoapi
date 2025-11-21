@@ -9,12 +9,14 @@
 # INTERFACES: Azure Functions HTTP handler
 # PYDANTIC_MODELS: None (simple JSON response)
 # DEPENDENCIES: infrastructure.blob.BlobRepository
-# SOURCE: HTTP GET requests to /api/containers/{container_name}/blobs/{blob_path}
+# SOURCE: HTTP GET requests to /api/containers/{container_name}/blob?path={blob_path}
 # SCOPE: Read-only blob metadata (NO JOBS, NO TASKS - UI operation only)
 # VALIDATION: Container/blob existence validation
 # PATTERNS: Direct repository access, read-only
-# ENTRY_POINTS: GET /api/containers/{container_name}/blobs/{blob_path}
+# ENTRY_POINTS: GET /api/containers/{container_name}/blob?path={blob_path}
 # INDEX: get_blob_metadata_handler:50
+# NOTE: Changed from route param to query param because Azure Functions v4
+#       does not support the ':path' route constraint (21 NOV 2025)
 # ============================================================================
 
 """
@@ -25,11 +27,13 @@ This is a READ-ONLY operation that directly queries Azure Blob Storage.
 Does NOT create jobs, tasks, or any database records.
 
 API Endpoint:
-    GET /api/containers/{container_name}/blobs/{blob_path}
+    GET /api/containers/{container_name}/blob?path=maxar/tile_001.tif
 
 Path Parameters:
     container_name: Azure Blob Storage container name (e.g., 'bronze-rasters')
-    blob_path: Full path to blob within container (e.g., 'maxar/tile_001.tif')
+
+Query Parameters:
+    path: Full path to blob within container (e.g., 'maxar/tile_001.tif')
 
 Returns:
     {
@@ -66,7 +70,8 @@ def get_blob_metadata_handler(req: func.HttpRequest) -> func.HttpResponse:
 
     Args:
         req: Azure Functions HTTP request
-             Route params: container_name, blob_path
+             Route params: container_name
+             Query params: path (blob path within container)
 
     Returns:
         JSON response with blob metadata
@@ -74,13 +79,15 @@ def get_blob_metadata_handler(req: func.HttpRequest) -> func.HttpResponse:
     try:
         # Get container name from route
         container_name = req.route_params.get('container_name')
-        blob_path = req.route_params.get('blob_path')
+        # Get blob path from query parameter (not route, because Azure Functions v4
+        # doesn't support the ':path' constraint for nested paths with slashes)
+        blob_path = req.params.get('path')
 
         if not container_name:
             return func.HttpResponse(
                 json.dumps({
                     "error": "Missing container_name parameter",
-                    "usage": "/api/containers/{container_name}/blobs/{blob_path}"
+                    "usage": "/api/containers/{container_name}/blobs?path={blob_path}"
                 }),
                 status_code=400,
                 mimetype="application/json"
@@ -89,8 +96,8 @@ def get_blob_metadata_handler(req: func.HttpRequest) -> func.HttpResponse:
         if not blob_path:
             return func.HttpResponse(
                 json.dumps({
-                    "error": "Missing blob_path parameter",
-                    "usage": "/api/containers/{container_name}/blobs/{blob_path}"
+                    "error": "Missing 'path' query parameter",
+                    "usage": "/api/containers/{container_name}/blobs?path=folder/file.tif"
                 }),
                 status_code=400,
                 mimetype="application/json"

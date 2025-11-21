@@ -479,18 +479,15 @@ class MultiAccountStorageConfig(BaseModel):
         return cls()  # Uses default_factory for each field
 
 
-class StorageConfig(BaseModel):
+class StorageConfig(MultiAccountStorageConfig):
     """
-    Azure Storage configuration wrapper.
+    Azure Storage configuration for multi-account trust zones.
 
-    Provides clean interface for multi-account storage configuration.
+    Inherits from MultiAccountStorageConfig to provide direct access to storage zones:
+    - config.storage.bronze.get_container('vectors')
+    - config.storage.silver.get_container('cogs')
+    - config.storage.gold.get_container('misc')
+
+    This eliminates the nested .storage.storage pattern.
     """
-    storage: MultiAccountStorageConfig = Field(
-        default_factory=MultiAccountStorageConfig,
-        description="Multi-account storage configuration for trust zones (Bronze/Silver/SilverExternal/Gold)"
-    )
-
-    @classmethod
-    def from_environment(cls):
-        """Load from environment variables."""
-        return cls(storage=MultiAccountStorageConfig.from_environment())
+    pass

@@ -115,7 +115,6 @@ Usage Examples:
     # Automated monitoring (typically called by timer trigger)
     curl -X GET https://app.azurewebsites.net/api/monitor/poison
 
-Author: Azure Geospatial ETL Team
 """
 
 from typing import Dict, Any, List

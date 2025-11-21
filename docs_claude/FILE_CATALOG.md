@@ -1,20 +1,26 @@
 # File Catalog
 
-**Date**: 31 OCT 2025 (Process Large Raster Execution Trace Added)
-**Total Python Files**: 140 (actual count)
+**Date**: 20 NOV 2025 (Professional Documentation Cleanup)
+**Total Python Files**: 203 (actual count)
+**Total Code Lines**: 79,713
 **Purpose**: Quick file lookup with one-line descriptions
-**Author**: Robert and Geospatial Claude Legion
-**Status**: ✅ Updated - Added PROCESS_LARGE_RASTER_EXECUTION_TRACE.md documentation
+**Status**: Updated with complete file inventory
 
-## 📊 Quick Stats (Updated 29 OCT 2025)
+## 📊 Quick Stats
 - **Root Python files**: 6
-- **Root documentation**: 26 markdown files (25 + CODE_QUALITY_REVIEW)
-- **Platform documentation**: 4 new files (hello_world, enum patterns, fixes, boundary analysis)
-- **Core directories**: 12 folders
-- **Infrastructure**: 13 files (added decorators_blob.py)
-- **Services**: 30+ files (added vector/postgis_handler_enhanced.py, vector/tasks_enhanced.py)
-- **Triggers**: 11 files (added Platform layer: trigger_platform.py, trigger_platform_status.py)
-- **Jobs**: 12 files (all using JobBase ABC)
+- **Config module**: 7 files (modular configuration)
+- **Core module**: 17 files (orchestration, models, state management)
+- **Infrastructure**: 16 files (repositories, blob, database, service bus)
+- **Jobs**: 18 files (workflow definitions using JobBase ABC)
+- **Services**: 43 files (business logic and handlers)
+- **Triggers**: 21 files (HTTP/Service Bus endpoints)
+- **Vector module**: 12 files (format converters and handlers)
+- **Web interfaces**: 12 files (HTML UI for jobs, STAC, vectors)
+- **OGC Features**: 6 files (OGC API - Features implementation)
+- **STAC API**: 4 files (STAC specification endpoints)
+- **Models**: 2 files (Pydantic model definitions)
+- **Utils**: 4 files (utilities and validators)
+- **Tests**: 13 files (unit and integration tests)
 
 ## 🎯 Root Level Files (32 files)
 
@@ -73,32 +79,50 @@
 | `vector_api.md` | Vector API endpoint documentation | API reference |
 | `robertnotes.md` | Robert's personal development notes | Notes |
 
-## 📁 Directory Structure (12 folders)
+## 📁 Directory Structure (18 folders)
 
 | Directory | Purpose | Key Contents |
 |-----------|---------|--------------|
+| `config/` | Modular configuration system | 7 files - app, database, queue, raster, storage, vector config |
 | `core/` | Clean architecture implementation (CoreMachine) | 17 files - orchestration, models, state management |
 | `docs/` | Archived documentation | Legacy docs moved from root |
-| `docs_claude/` | ⭐ PRIMARY documentation for Claude | TODO.md, HISTORY.md, context docs |
-| `infrastructure/` | Repository pattern implementations | 12 files - blob, postgresql, service bus, duckdb |
-| `jobs/` | Job workflow definitions | 12 files - all inherit from JobBase ABC |
-| `models/` | Additional Pydantic models | Supporting data models |
-| `services/` | Business logic and handlers | 30+ files - raster, vector, STAC, container ops |
+| `docs_claude/` | PRIMARY documentation for Claude | TODO.md, HISTORY.md, context docs |
+| `infrastructure/` | Repository pattern implementations | 16 files - blob, postgresql, service bus, duckdb |
+| `jobs/` | Job workflow definitions | 18 files - all inherit from JobBase ABC |
+| `models/` | Additional Pydantic models | 2 files - band_mapping, h3_base |
+| `ogc_features/` | OGC API - Features Core 1.0 | 6 files - standalone vector features API |
+| `services/` | Business logic and handlers | 43 files - raster, vector, STAC, container ops |
 | `sql/` | SQL scripts and migrations | Database schema definitions |
-| `test/` | Test files and fixtures | Unit and integration tests |
-| `triggers/` | Azure Function HTTP triggers | 7+ files - API endpoints |
-| `utils/` | Utility modules | Contract validator (moved from root) |
-| `vector/` | Vector processing utilities | Vector-specific operations |
+| `stac_api/` | STAC API specification | 4 files - STAC catalog endpoints |
+| `test/` | Test files and fixtures | 13 files - unit and integration tests |
+| `tests/` | Additional test files | 1 file - managed identity tests |
+| `triggers/` | Azure Function HTTP/Service Bus triggers | 21 files - API endpoints and processors |
+| `utils/` | Utility modules | 4 files - contract validator, import validator |
+| `vector/` | Vector processing utilities | 12 files - format converters |
+| `vector_viewer/` | Vector visualization interface | 3 files - web UI for vector data |
+| `web_interfaces/` | HTML interfaces for system components | 12 files - jobs, STAC, tasks, vectors UIs |
 
-## 🏗️ Core Architecture (core/ folder, 17 files) ⭐ UPDATED 4 OCT
+## ⚙️ Configuration System (config/ folder, 7 files)
+
+| File | Purpose |
+|------|---------|
+| `config/__init__.py` | Configuration module exports and initialization |
+| `config/app_config.py` | Application-wide configuration settings |
+| `config/database_config.py` | PostgreSQL, PostGIS, pgSTAC database settings |
+| `config/queue_config.py` | Azure Service Bus and Queue Storage configuration |
+| `config/raster_config.py` | Raster processing, COG generation, tiling parameters |
+| `config/storage_config.py` | Azure Blob Storage container and tier configuration |
+| `config/vector_config.py` | Vector ingestion and PostGIS table settings |
+
+## 🏗️ Core Architecture (core/ folder, 17 files)
 
 ### Core Controllers & Managers (4 files)
 | File | Purpose |
 |------|---------|
-| `core/machine.py` | CoreMachine orchestration - job/task processing with fan-out support |
-| `core/task_id.py` | ⭐ NEW - Deterministic task ID generation for lineage tracking |
-| `core/state_manager.py` | Database operations with advisory locks - composition over inheritance (540 lines) |
-| `core/orchestration_manager.py` | Simplified dynamic task creation for Service Bus batch optimization (400 lines) |
+| `core/machine.py` | CoreMachine orchestration for job and task processing with fan-out support |
+| `core/task_id.py` | Deterministic task ID generation for lineage tracking |
+| `core/state_manager.py` | Database operations with advisory locks using composition pattern |
+| `core/orchestration_manager.py` | Dynamic task creation for Service Bus batch optimization |
 
 ### Core Models (core/models/ - 6 files)
 | File | Purpose |
@@ -156,23 +180,29 @@
 |------|---------|
 | `interfaces/repository.py` | IQueueRepository and other repository interfaces |
 
-## 💾 Infrastructure Layer (13 files in infrastructure/ folder) ⭐ UPDATED 29 OCT
+## 💾 Infrastructure Layer (16 files in infrastructure/ folder)
 
-| File | Purpose | Status |
-|------|---------|--------|
-| `infrastructure/base.py` | Common repository patterns and validation | ✅ Working |
-| `infrastructure/factory.py` | Central factory for all repository instances (includes DuckDB) | ✅ Updated 10 OCT |
-| `infrastructure/jobs_tasks.py` | Business logic for job and task management + batch operations | ✅ Working |
-| `infrastructure/postgresql.py` | PostgreSQL-specific implementation with psycopg | ✅ Working |
-| `infrastructure/blob.py` | Azure Blob Storage operations with managed identity + decorator validation | ✅ Updated 29 OCT |
-| `infrastructure/decorators_blob.py` | ⭐ NEW - Fail-fast validation decorators for blob operations (@validate_container, @validate_blob) | ✅ NEW 28 OCT |
-| `infrastructure/queue.py` | Queue Storage operations with singleton pattern | ✅ Working |
-| `infrastructure/service_bus.py` | Service Bus implementation with batch support | ✅ Working |
-| `infrastructure/vault.py` | Azure Key Vault integration (currently disabled) | ⚠️ Disabled |
-| `infrastructure/stac.py` | pgSTAC operations for STAC catalog | ✅ Working |
-| `infrastructure/duckdb.py` | DuckDB analytical query engine with spatial+azure extensions | ✅ Working 10 OCT |
-| `infrastructure/interface_repository.py` | Repository interfaces (IJobRepository, ITaskRepository, IDuckDBRepository) | ✅ Updated 10 OCT |
-| `infrastructure/__init__.py` | Infrastructure module exports | ✅ Working |
+| File | Purpose |
+|------|---------|
+| `infrastructure/__init__.py` | Infrastructure module exports |
+| `infrastructure/base.py` | Common repository patterns and validation |
+| `infrastructure/blob.py` | Azure Blob Storage operations with managed identity |
+| `infrastructure/database_utils.py` | Database utility functions and helpers |
+| `infrastructure/decorators_blob.py` | Fail-fast validation decorators for blob operations |
+| `infrastructure/duckdb.py` | DuckDB analytical query engine with spatial extensions |
+| `infrastructure/duckdb_query.py` | DuckDB query execution and result handling |
+| `infrastructure/factory.py` | Central factory for all repository instances |
+| `infrastructure/h3_repository.py` | H3 grid system database operations |
+| `infrastructure/interface_repository.py` | Repository interface definitions |
+| `infrastructure/jobs_tasks.py` | Job and task management with batch operations |
+| `infrastructure/pgstac_bootstrap.py` | pgSTAC schema bootstrap and installation |
+| `infrastructure/pgstac_repository.py` | pgSTAC catalog operations and queries |
+| `infrastructure/platform.py` | Platform layer database operations |
+| `infrastructure/postgis.py` | PostGIS vector data operations |
+| `infrastructure/postgresql.py` | PostgreSQL connection and query execution |
+| `infrastructure/queue.py` | Queue Storage operations with singleton pattern |
+| `infrastructure/service_bus.py` | Service Bus implementation with batch support |
+| `infrastructure/vault.py` | Azure Key Vault integration |
 
 ## ⚙️ Services (services/ folder) ⭐ UPDATED 29 OCT
 
@@ -200,33 +230,34 @@
 | `services/vector/tasks_enhanced.py` | ⭐ NEW - Enhanced vector ETL task handlers with granular error tracking | ✅ NEW 26 OCT |
 | `services/vector/converters.py` | Format-specific converters (CSV, GeoJSON, Shapefile, KML, etc.) | ✅ Working |
 
-## 📋 Job Workflows (12 files in jobs/ folder) ⭐ UPDATED 15 OCT 2025
+## 📋 Job Workflows (18 files in jobs/ folder)
 
 ### Core Infrastructure (2 files)
-| File | Purpose | Status |
+| File | Purpose |
+|------|---------|
+| `jobs/base.py` | JobBase ABC enforcing 5 required methods |
+| `jobs/__init__.py` | Job registry (ALL_JOBS dict) and validation |
+| `jobs/mixins.py` | JobBaseMixin for declarative job creation (77% code reduction) |
+
+### Job Implementations (All inherit from JobBase)
+| File | Purpose | Stages |
 |------|---------|--------|
-| `jobs/base.py` | ⭐ NEW - JobBase ABC enforcing 5 required methods (Phase 2) | ✅ Active 15 OCT |
-| `jobs/__init__.py` | Job registry (ALL_JOBS dict) + validation | ✅ Updated 15 OCT |
-
-### Job Implementations (10 files) - All inherit from JobBase
-| File | Purpose | Stages | Status |
-|------|---------|--------|--------|
-| `jobs/hello_world.py` | Hello World testing workflow | 2-stage | ✅ Updated 15 OCT |
-| `jobs/create_h3_base.py` | ⭐ H3 base grid generation (resolutions 0-4) | 1-stage | ✅ Updated 15 OCT |
-| `jobs/generate_h3_level4.py` | ⭐ H3 level 4 hierarchical expansion | 1-stage | ✅ Updated 15 OCT |
-| `jobs/ingest_vector.py` | Vector file ingestion to PostGIS | Multi-stage | ✅ Updated 15 OCT |
-| `jobs/validate_raster_job.py` | Raster validation workflow | Multi-stage | ✅ Updated 15 OCT |
-| `jobs/container_summary.py` | Container summary analysis | 1-stage | ✅ Updated 15 OCT |
-| `jobs/container_list.py` | Container listing with fan-out | 2-stage | ✅ Updated 15 OCT |
-| `jobs/stac_catalog_container.py` | STAC catalog from container contents | Multi-stage | ✅ Updated 15 OCT |
-| `jobs/stac_catalog_vectors.py` | STAC catalog from vector tables | Multi-stage | ✅ Updated 15 OCT |
-| `jobs/process_raster.py` | Raster processing workflow | Multi-stage | ✅ Updated 15 OCT |
-
-**⭐ Phase 2 Migration Complete (15 OCT 2025)**:
-- All 10 jobs now inherit from `JobBase` ABC
-- ABC enforces 5 required methods at class definition time
-- Removed deprecated files: `jobs/workflow.py`, `jobs/registry.py`
-- Zero behavior changes - only interface enforcement added
+| `jobs/bootstrap_h3_land_grid_pyramid.py` | H3 land grid pyramid generation | Multi-stage |
+| `jobs/container_list.py` | Container blob listing with fan-out | 2-stage |
+| `jobs/container_list_diamond.py` | Container list with diamond pattern | Multi-stage |
+| `jobs/container_summary.py` | Container summary analysis | 1-stage |
+| `jobs/create_h3_base.py` | H3 base grid generation (resolutions 0-4) | 1-stage |
+| `jobs/generate_h3_level4.py` | H3 level 4 hierarchical expansion | 1-stage |
+| `jobs/hello_world.py` | Hello World testing workflow | 2-stage |
+| `jobs/hello_world_mixin.py` | Hello World using JobBaseMixin (test implementation) | 2-stage |
+| `jobs/hello_world_original_backup.py` | Original hello_world backup | 2-stage |
+| `jobs/ingest_vector.py` | Vector file ingestion to PostGIS | Multi-stage |
+| `jobs/process_large_raster.py` | Large raster tiling and COG generation | Multi-stage |
+| `jobs/process_raster.py` | Standard raster processing workflow | Multi-stage |
+| `jobs/process_raster_collection.py` | Batch raster collection processing | Multi-stage |
+| `jobs/stac_catalog_container.py` | STAC catalog from container contents | Multi-stage |
+| `jobs/stac_catalog_vectors.py` | STAC catalog from vector tables | Multi-stage |
+| `jobs/validate_raster_job.py` | Raster validation workflow | Multi-stage |
 
 ## 📊 Schemas (10 files - Root Level) ⚠️ LEGACY
 
@@ -248,56 +279,121 @@
 - **LEGACY CODE**: Root schema files marked with warnings, still work for old controllers
 - **MIGRATION**: See CORE_SCHEMA_MIGRATION.md for details (30 SEP 2025)
 
-## 🔧 Utilities (3 files in utils/ folder)
+## 🔧 Utilities (4 files in utils/ folder)
 
 | File | Purpose |
 |------|---------|
+| `utils/__init__.py` | Utilities module exports |
 | `utils/contract_validator.py` | Runtime type enforcement decorator |
-| `util_logger.py` | Centralized logging with component types |
-| `util_azure_sql.py` | Azure SQL utilities |
+| `utils/import_validator.py` | Module import validation and health checks |
+| `utils/test_raster_generator.py` | Test raster file generation utilities |
 
-## 🚀 Task Processing (2 files)
+## 🗺️ OGC Features API (6 files in ogc_features/ folder)
 
 | File | Purpose |
 |------|---------|
-| `task_factory.py` | TaskHandlerFactory for task routing |
-| `task_handlers.py` | Task processor implementations |
+| `ogc_features/__init__.py` | OGC Features module exports |
+| `ogc_features/config.py` | OGC API configuration and settings |
+| `ogc_features/models.py` | Pydantic models for OGC Features responses |
+| `ogc_features/repository.py` | PostGIS queries for vector features |
+| `ogc_features/service.py` | Business logic for OGC Features operations |
+| `ogc_features/triggers.py` | HTTP triggers for OGC Features endpoints |
 
-## ⚙️ Trigger Handlers (triggers/ folder) ⭐ UPDATED 29 OCT
+## 📦 STAC API (4 files in stac_api/ folder)
 
-### HTTP Triggers - CoreMachine (7 files)
-| File | Purpose | Status |
-|------|---------|--------|
-| `triggers/health.py` | Health check endpoint with import validation | ✅ Active |
-| `triggers/submit_job.py` | CoreMachine job submission HTTP trigger | ✅ Active |
-| `triggers/list_jobs.py` | Job listing endpoint | ✅ Active |
-| `triggers/job_status.py` | Job status query endpoint | ✅ Active |
-| `triggers/db_admin.py` | Database administration endpoints (schema deployment, nuke) | ✅ Active |
-| `triggers/db_query.py` | ⭐ Database query endpoints - CoreMachine (jobs, tasks) + Platform (api_requests, orchestration_jobs) | ✅ Updated 29 OCT |
-| `triggers/container.py` | Container operation triggers | ✅ Active |
-
-### HTTP Triggers - Platform Layer ⭐ NEW 25-29 OCT
-| File | Purpose | Status |
-|------|---------|--------|
-| `triggers/trigger_platform.py` | ⭐ NEW - Platform request submission (DDH orchestration above CoreMachine) | ✅ NEW 25 OCT |
-| `triggers/trigger_platform_status.py` | ⭐ NEW - Platform request status monitoring with job aggregation | ✅ NEW 25 OCT |
-
-**Platform Layer Pattern**:
-- External applications (DDH) submit requests to Platform layer
-- Platform orchestrator determines which CoreMachine jobs to create
-- "Turtle above CoreMachine" - business logic orchestration
-- Single Platform request → Multiple CoreMachine jobs
-- Status endpoint aggregates all job results
-
-### Service Bus Triggers (1 file)
 | File | Purpose |
 |------|---------|
-| `triggers/trigger_job_processor.py` | Service Bus job queue processor - CoreMachine orchestration |
+| `stac_api/__init__.py` | STAC API module exports |
+| `stac_api/config.py` | STAC API configuration settings |
+| `stac_api/service.py` | pgSTAC query execution and response formatting |
+| `stac_api/triggers.py` | HTTP triggers for STAC specification endpoints |
 
-### Schema Deployment (1 file)
+## 🌐 Web Interfaces (12 files in web_interfaces/ folder)
+
 | File | Purpose |
 |------|---------|
-| `triggers/schema_pydantic_deploy.py` | Pydantic-driven schema deployment with Platform schema support |
+| `web_interfaces/__init__.py` | Web interfaces module exports |
+| `web_interfaces/base.py` | Base HTML interface generation |
+| `web_interfaces/docs/__init__.py` | Documentation UI module |
+| `web_interfaces/jobs/__init__.py` | Jobs UI module |
+| `web_interfaces/jobs/interface.py` | HTML interface for job management |
+| `web_interfaces/stac/__init__.py` | STAC UI module |
+| `web_interfaces/stac/interface.py` | HTML interface for STAC browsing |
+| `web_interfaces/tasks/__init__.py` | Tasks UI module |
+| `web_interfaces/tasks/interface.py` | HTML interface for task monitoring |
+| `web_interfaces/vector/__init__.py` | Vector UI module |
+| `web_interfaces/vector/interface.py` | HTML interface for vector data browsing |
+
+## 📐 Vector Processing (12 files in vector/ folder)
+
+| File | Purpose |
+|------|---------|
+| `vector/converter_base.py` | Abstract base class for format converters |
+| `vector/converter_helpers.py` | Helper functions for vector conversion |
+| `vector/converter_registry.py` | Registry for vector format converters |
+| `vector/converters_init.py` | Converter initialization and registration |
+| `vector/csv_converter.py` | CSV to PostGIS converter |
+| `vector/geojson_converter.py` | GeoJSON to PostGIS converter |
+| `vector/geopackage_converter.py` | GeoPackage to PostGIS converter |
+| `vector/kml_converter.py` | KML to PostGIS converter |
+| `vector/kmz_converter.py` | KMZ to PostGIS converter |
+| `vector/load_vector_task.py` | Vector loading task orchestration |
+| `vector/shapefile_converter.py` | Shapefile to PostGIS converter |
+
+## 🎨 Vector Viewer (3 files in vector_viewer/ folder)
+
+| File | Purpose |
+|------|---------|
+| `vector_viewer/__init__.py` | Vector viewer module exports |
+| `vector_viewer/service.py` | Vector data retrieval and formatting |
+| `vector_viewer/triggers.py` | HTTP triggers for vector visualization |
+
+## 🚀 Trigger Handlers (21 files in triggers/ folder)
+
+### Core Triggers (11 files)
+| File | Purpose |
+|------|---------|
+| `triggers/__init__.py` | Triggers module exports |
+| `triggers/analyze_container.py` | Container analysis HTTP trigger |
+| `triggers/get_job_status.py` | Job status query endpoint |
+| `triggers/health.py` | System health check endpoint |
+| `triggers/http_base.py` | Base class for HTTP triggers |
+| `triggers/ingest_vector.py` | Vector ingestion HTTP trigger |
+| `triggers/poison_monitor.py` | Poison queue monitoring timer trigger |
+| `triggers/schema_pydantic_deploy.py` | Pydantic-driven schema deployment |
+| `triggers/submit_job.py` | CoreMachine job submission endpoint |
+| `triggers/trigger_platform.py` | Platform layer request submission |
+| `triggers/trigger_platform_status.py` | Platform request status monitoring |
+
+### Admin Triggers (9 files in triggers/admin/)
+| File | Purpose |
+|------|---------|
+| `triggers/admin/__init__.py` | Admin triggers module exports |
+| `triggers/admin/db_data.py` | Database data inspection endpoints |
+| `triggers/admin/db_diagnostics.py` | Database diagnostics and health checks |
+| `triggers/admin/db_health.py` | Database connection health monitoring |
+| `triggers/admin/db_maintenance.py` | Database maintenance operations (nuke, redeploy) |
+| `triggers/admin/db_queries.py` | Database query endpoints for jobs and tasks |
+| `triggers/admin/db_schemas.py` | Database schema inspection |
+| `triggers/admin/db_tables.py` | Database table management |
+| `triggers/admin/h3_debug.py` | H3 grid debugging endpoints |
+| `triggers/admin/servicebus.py` | Service Bus administration |
+
+### STAC Triggers (7 files)
+| File | Purpose |
+|------|---------|
+| `triggers/stac_collections.py` | STAC collections listing endpoint |
+| `triggers/stac_extract.py` | STAC metadata extraction trigger |
+| `triggers/stac_init.py` | pgSTAC initialization endpoint |
+| `triggers/stac_inspect.py` | STAC catalog inspection tools |
+| `triggers/stac_nuke.py` | STAC catalog cleanup endpoint |
+| `triggers/stac_setup.py` | STAC setup and configuration |
+| `triggers/stac_vector.py` | STAC vector catalog operations |
+
+### Test Triggers (1 file)
+| File | Purpose |
+|------|---------|
+| `triggers/test_raster_create.py` | Test raster generation endpoint |
 
 ## 📝 Documentation (Root Level) ✅ CLEANED UP 30 SEP
 

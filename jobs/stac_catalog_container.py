@@ -26,8 +26,6 @@ This file declares a two-stage job that:
 
 Leverages existing StacMetadataService for metadata extraction.
 
-Author: Robert and Geospatial Claude Legion
-Date: 6 OCT 2025
 Last Updated: 29 OCT 2025
 """
 

@@ -88,8 +88,6 @@ a gap between when Python starts importing modules and when the Functions
 host has fully initialized the environment. Our lazy loading pattern
 elegantly bridges this gap!
 
-Author: Robert and Geospatial Claude Legion
-Date: 23 SEP 2025
 Updated: 27 SEP 2025 - Added Azure Functions runtime explanation
 """
 

@@ -35,8 +35,6 @@ Safety:
 - Values via parameterized queries (%s placeholders)
 - SQL injection prevention guaranteed
 
-Author: Robert and Geospatial Claude Legion
-Date: 29 OCT 2025
 """
 
 import logging

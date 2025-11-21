@@ -23,8 +23,6 @@ Container Summary Job Declaration
 Single-stage job that generates aggregate statistics about a blob container.
 Fast, lightweight operation suitable for dashboards and monitoring.
 
-Author: Robert and Geospatial Claude Legion
-Date: 3 OCT 2025
 Last Updated: 29 OCT 2025
 """
 

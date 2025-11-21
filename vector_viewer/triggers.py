@@ -37,8 +37,6 @@ Integration:
             auth_level=func.AuthLevel.ANONYMOUS
         )(trigger['handler'])
 
-Author: Robert and Geospatial Claude Legion
-Date: 13 NOV 2025
 """
 
 import logging

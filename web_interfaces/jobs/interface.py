@@ -28,8 +28,6 @@ Web interface for monitoring jobs and tasks from app.jobs table. Provides:
 
 Route: /api/interface/jobs
 
-Author: Robert and Geospatial Claude Legion
-Date: 15 NOV 2025
 """
 
 import azure.functions as func
@@ -767,7 +765,7 @@ class JobsInterface(BaseInterface):
                     const stageProgress = `${job.stage}/${job.total_stages || '?'}`;
 
                     return `
-                        <tr onclick="showJobDetail('${job.job_id}')">
+                        <tr onclick="window.location.href='/api/interface/tasks?job_id=${job.job_id}'" style="cursor: pointer;" onmouseover="this.style.backgroundColor='#f8f9fa'" onmouseout="this.style.backgroundColor='white'">
                             <td>
                                 <div class="job-id">${truncateId(job.job_id)}</div>
                             </td>

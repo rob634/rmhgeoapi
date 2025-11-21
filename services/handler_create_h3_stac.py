@@ -28,8 +28,6 @@ Workflow:
     Stage 2 → Load GeoParquet → Insert to PostGIS
     Stage 3 (THIS HANDLER) → Create STAC item → Catalog in pgstac
 
-Author: Robert and Geospatial Claude Legion
-Date: 9 NOV 2025
 """
 
 import time

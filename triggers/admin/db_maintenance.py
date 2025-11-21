@@ -41,8 +41,6 @@ Critical for:
 - Emergency schema recovery
 - pgSTAC function installation (search_tohash, search_hash)
 
-Author: Robert and Geospatial Claude Legion
-Date: 03 NOV 2025 (pgSTAC redeploy: 18 NOV 2025)
 """
 
 import azure.functions as func
@@ -575,7 +573,7 @@ class AdminDbMaintenanceTrigger:
         Note: This is separate from app schema redeploy - allows independent
               pgSTAC maintenance without affecting job/task tables.
 
-        Author: Robert and Geospatial Claude Legion
+        
         Date: 18 NOV 2025
         """
         confirm = req.params.get('confirm')

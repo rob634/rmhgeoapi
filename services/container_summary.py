@@ -31,8 +31,6 @@ Features:
 - Largest/smallest file tracking
 - Flexible filtering (extension, size, date range, prefix)
 
-Author: Robert and Geospatial Claude Legion
-Date: 4 OCT 2025
 Last Updated: 29 OCT 2025
 """
 

@@ -44,7 +44,6 @@ Usage:
     # Health check integration  
     health_status = validator.get_health_status()  # Returns detailed status dict
 
-Author: Azure Geospatial ETL Team
 Version: 1.0.0
 Last Updated: September 2025
 """

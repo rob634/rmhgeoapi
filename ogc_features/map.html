@@ -183,6 +183,11 @@
             <option value="1000">1000 features</option>
         </select>
 
+        <label for="simplify-input">Simplification (meters):</label>
+        <input type="number" id="simplify-input" min="0" step="0.1" value="0"
+               placeholder="0 = no simplification"
+               style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; margin-bottom: 10px; font-size: 13px;">
+
         <button id="load-btn" onclick="loadFeatures()">Load Features</button>
         <button id="zoom-btn" onclick="zoomToFeatures()" disabled>Zoom to Features</button>
         <button id="clear-btn" onclick="clearFeatures()">Clear Map</button>
@@ -286,6 +291,7 @@
         async function loadFeatures() {
             const collectionId = document.getElementById('collection-select').value;
             const limit = document.getElementById('limit-select').value;
+            const simplify = document.getElementById('simplify-input').value;
 
             if (!collectionId) {
                 setStatus('Please select a collection', true);
@@ -297,7 +303,12 @@
                 setStatus('Loading features...');
                 document.getElementById('load-btn').disabled = true;
 
-                const url = `${API_BASE_URL}/api/features/collections/${collectionId}/items?limit=${limit}`;
+                // Build URL with optional simplification parameter
+                let url = `${API_BASE_URL}/api/features/collections/${collectionId}/items?limit=${limit}`;
+                if (simplify && parseFloat(simplify) > 0) {
+                    url += `&simplify=${simplify}`;
+                    setStatus(`Loading features (simplified: ${simplify}m)...`);
+                }
                 console.log('Fetching:', url);
 
                 const response = await fetch(url);
@@ -369,9 +380,10 @@
                 // Update status
                 const featureCount = geojson.features.length;
                 const totalCount = geojson.numberMatched || featureCount;
+                const simplifyNote = (simplify && parseFloat(simplify) > 0) ? ` (simplified: ${simplify}m)` : '';
                 setStatus('✅ Features loaded successfully');
                 document.getElementById('feature-count').textContent =
-                    `Showing ${featureCount} of ${totalCount} features`;
+                    `Showing ${featureCount} of ${totalCount} features${simplifyNote}`;
 
                 // Enable zoom button
                 document.getElementById('zoom-btn').disabled = false;

@@ -41,8 +41,6 @@ Usage:
         # Method implementation
         return results
 
-Author: Robert and Geospatial Claude Legion
-Date: 20 September 2025
 """
 
 import os

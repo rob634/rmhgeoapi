@@ -4,8 +4,6 @@ STAC API Configuration
 Minimal configuration for STAC API module.
 Auto-detects base URL from requests if not explicitly set.
 
-Author: Robert and Geospatial Claude Legion
-Date: 10 NOV 2025
 """
 
 from typing import Optional

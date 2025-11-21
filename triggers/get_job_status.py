@@ -148,8 +148,6 @@ Field Name Transformation:
 - API (JavaScript): camelCase (jobId, createdAt, stageResults)
 - Preserves Python conventions internally while supporting frontend standards
 
-Author: Robert and Geospatial Claude Legion
-Date: Original implementation 2025
 Last Updated: 29 OCT 2025
 """
 

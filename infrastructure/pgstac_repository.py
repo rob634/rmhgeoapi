@@ -36,8 +36,6 @@ Key Responsibilities:
 - Query collections and items
 - Update collection metadata (for search_id storage)
 
-Author: Robert and Geospatial Claude Legion
-Date: 12 NOV 2025
 """
 
 from typing import Dict, Any, Optional, List
@@ -72,7 +70,7 @@ class PgStacRepository:
     - PgStacBootstrap: Schema setup, installation, version management
     - PgStacRepository: Data CRUD operations (this class)
 
-    Author: Robert and Geospatial Claude Legion
+    
     Date: 12 NOV 2025
     """
 
@@ -141,10 +139,11 @@ class PgStacRepository:
 
             with self._pg_repo._get_connection() as conn:
                 with conn.cursor() as cur:
-                    # Use PgSTAC's insert_collection function
-                    # Returns the collection ID (pgstac.create_collection returns jsonb)
+                    # Use PgSTAC's upsert function for process_raster (19 NOV 2025)
+                    # upsert_collection handles duplicates gracefully (updates if exists)
+                    # create_collection fails with unique constraint error on duplicate
                     cur.execute(
-                        "SELECT pgstac.create_collection(%s::jsonb)",
+                        "SELECT * FROM pgstac.upsert_collection(%s::jsonb)",
                         (collection_json,)
                     )
                     result = cur.fetchone()

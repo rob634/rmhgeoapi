@@ -38,8 +38,6 @@ Key Properties:
     - Batch processing support (process N parent cells per task)
     - Multi-resolution in single operation (res 2 → res 7 direct)
 
-Author: Robert and Geospatial Claude Legion
-Date: 15 NOV 2025
 """
 
 import time

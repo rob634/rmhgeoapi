@@ -21,8 +21,6 @@ Integration (in function_app.py):
             auth_level=func.AuthLevel.ANONYMOUS
         )(trigger['handler'])
 
-Author: Robert and Geospatial Claude Legion
-Date: 10 NOV 2025
 Updated: 11 NOV 2025 - Added all STAC v1.0.0 endpoints
 """
 

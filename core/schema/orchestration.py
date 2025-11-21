@@ -33,8 +33,6 @@ Supports both pipelines:
 - Storage Queue: controller_container.py uses full orchestration
 - Service Bus: controller_service_bus_container.py uses FileOrchestrationItem
 
-Author: Robert and Geospatial Claude Legion
-Date: 30 SEP 2025 (Copied to core/schema/)
 """
 
 from typing import Dict, List, Any, Optional, Union, Literal

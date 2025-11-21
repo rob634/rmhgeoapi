@@ -51,6 +51,8 @@ from .database_config import DatabaseConfig
 from .raster_config import RasterConfig
 from .vector_config import VectorConfig
 from .queue_config import QueueConfig
+from .analytics_config import AnalyticsConfig
+from .h3_config import H3Config
 
 
 # ============================================================================
@@ -256,6 +258,16 @@ class AppConfig(BaseModel):
         description="Azure Service Bus queue configuration"
     )
 
+    analytics: AnalyticsConfig = Field(
+        default_factory=AnalyticsConfig.from_environment,
+        description="DuckDB and columnar analytics configuration (GeoParquet exports)"
+    )
+
+    h3: H3Config = Field(
+        default_factory=H3Config.from_environment,
+        description="H3 spatial indexing system configuration"
+    )
+
     # ========================================================================
     # Legacy Compatibility Properties (During Migration)
     # ========================================================================
@@ -377,6 +389,120 @@ class AppConfig(BaseModel):
         """Legacy compatibility - use database.connection_string instead."""
         return self.database.connection_string
 
+    # H3 legacy properties
+    @property
+    def system_admin0_table(self) -> str:
+        """Legacy compatibility - use h3.system_admin0_table instead."""
+        return self.h3.system_admin0_table
+
+    @property
+    def h3_spatial_filter_table(self) -> str:
+        """Legacy compatibility - use h3.spatial_filter_table instead."""
+        return self.h3.spatial_filter_table
+
+    # DuckDB/Analytics legacy properties
+    @property
+    def duckdb_connection_type(self) -> str:
+        """Legacy compatibility - use analytics.connection_type instead."""
+        return self.analytics.connection_type.value
+
+    @property
+    def duckdb_database_path(self) -> Optional[str]:
+        """Legacy compatibility - use analytics.database_path instead."""
+        return self.analytics.database_path
+
+    @property
+    def duckdb_enable_spatial(self) -> bool:
+        """Legacy compatibility - use analytics.enable_spatial instead."""
+        return self.analytics.enable_spatial
+
+    @property
+    def duckdb_enable_azure(self) -> bool:
+        """Legacy compatibility - use analytics.enable_azure instead."""
+        return self.analytics.enable_azure
+
+    @property
+    def duckdb_enable_httpfs(self) -> bool:
+        """Legacy compatibility - use analytics.enable_httpfs instead."""
+        return self.analytics.enable_httpfs
+
+    @property
+    def duckdb_memory_limit(self) -> str:
+        """Legacy compatibility - use analytics.memory_limit instead."""
+        return self.analytics.memory_limit
+
+    @property
+    def duckdb_threads(self) -> int:
+        """Legacy compatibility - use analytics.threads instead."""
+        return self.analytics.threads
+
+    # ========================================================================
+    # URL Generation Methods (Legacy Compatibility)
+    # ========================================================================
+
+    def generate_ogc_features_url(self, collection_id: str) -> str:
+        """
+        Generate OGC API - Features collection URL for vector data.
+
+        Legacy compatibility method - delegates to ogc_features_base_url field.
+
+        Args:
+            collection_id: Collection name (same as PostGIS table name)
+
+        Returns:
+            OGC Features collection URL for querying vector features
+
+        Example:
+            >>> config = get_config()
+            >>> url = config.generate_ogc_features_url("config_test_vector")
+            >>> url
+            'https://rmhazuregeoapi-.../api/features/collections/config_test_vector'
+        """
+        return f"{self.ogc_features_base_url.rstrip('/')}/collections/{collection_id}"
+
+    def generate_vector_viewer_url(self, collection_id: str) -> str:
+        """
+        Generate interactive vector viewer URL for PostGIS collection.
+
+        Legacy compatibility method - derives from ogc_features_base_url.
+
+        Args:
+            collection_id: Collection name (same as PostGIS table name)
+
+        Returns:
+            Vector viewer URL for interactive map visualization
+        """
+        # Extract base URL from ogc_features_base_url (remove /api/features suffix)
+        base_url = self.ogc_features_base_url.rstrip('/')
+        if base_url.endswith('/api/features'):
+            base_url = base_url[:-len('/api/features')]
+        return f"{base_url}/api/vector/viewer?collection={collection_id}"
+
+    def generate_titiler_urls(self, collection_id: str, item_id: str) -> dict:
+        """
+        Generate TiTiler-PgSTAC URLs for raster visualization.
+
+        Legacy compatibility method - uses titiler_pgstac_base_url field.
+
+        Args:
+            collection_id: STAC collection ID
+            item_id: STAC item ID
+
+        Returns:
+            Dictionary with TiTiler endpoint URLs
+        """
+        base = self.titiler_pgstac_base_url.rstrip('/')
+        return {
+            "info": f"{base}/info?collection={collection_id}&item={item_id}",
+            "tilejson": f"{base}/tilejson.json?collection={collection_id}&item={item_id}",
+            "viewer": f"{base}/viewer?collection={collection_id}&item={item_id}",
+            "preview": f"{base}/preview.png?collection={collection_id}&item={item_id}"
+        }
+
+    # ========================================================================
+    # Factory Methods
+    # ========================================================================
+
     @classmethod
     def from_environment(cls):
         """Load all configs from environment."""
@@ -396,5 +522,7 @@ class AppConfig(BaseModel):
             database=DatabaseConfig.from_environment(),
             raster=RasterConfig.from_environment(),
             vector=VectorConfig.from_environment(),
-            queues=QueueConfig.from_environment()
+            queues=QueueConfig.from_environment(),
+            analytics=AnalyticsConfig.from_environment(),
+            h3=H3Config.from_environment()
         )

@@ -54,8 +54,6 @@ Safety Measures:
 - Schema comparison before deployment
 - Verification after deployment
 
-Author: Robert and Geospatial Claude Legion
-Date: Original implementation 2025
 Last Updated: 29 OCT 2025
 """
 
@@ -368,7 +366,7 @@ class PydanticSchemaDeployTrigger:
                 #   - core/schema/sql_generator.py: Added to generate_composed_statements()
                 #
                 # Previously: 70 lines of manual DDL here
-                # Now: 0 lines - Infrastructure-as-Code pattern!
+                # Now: 0 lines - Infrastructure-as-Code pattern.
                 #
                 # Tables created (renamed 29 OCT 2025):
                 #   - app.api_requests (from ApiRequest, previously PlatformRecord)

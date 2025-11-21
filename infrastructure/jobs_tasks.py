@@ -38,8 +38,6 @@ extending the PostgreSQL base implementations with validation and orchestration:
 These repositories handle all job and task persistence operations,
 including idempotency checks, status transitions, and completion detection.
 
-Author: Robert and Geospatial Claude Legion
-Date: 10 September 2025
 """
 
 # Imports at top for fast failure

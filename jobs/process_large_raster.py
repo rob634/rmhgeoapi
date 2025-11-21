@@ -65,8 +65,6 @@ Storage Cleanup:
 - NOT part of ETL workflow stages
 - Allows debugging of failed jobs (artifacts retained)
 
-Author: Robert and Geospatial Claude Legion
-Date: 27 OCT 2025
 """
 
 from typing import List, Dict, Any

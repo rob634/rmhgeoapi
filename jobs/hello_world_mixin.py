@@ -28,8 +28,6 @@ Demonstrates 77% line reduction:
 - After (this file): 125 lines
 - Eliminated: 4 boilerplate methods (validate, generate_id, create_record, queue)
 
-Author: Robert and Geospatial Claude Legion
-Date: 14 NOV 2025
 """
 
 from typing import List, Dict, Any

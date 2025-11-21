@@ -23,8 +23,6 @@ Create H3 Base Grid Job Declaration
 Generates complete H3 hexagonal grids at resolutions 0-4 without any filtering.
 Pure hierarchical generation using H3's deterministic structure.
 
-Author: Robert and Geospatial Claude Legion
-Date: 15 OCT 2025
 Updated: 15 OCT 2025 - Phase 2: Migrated to JobBase ABC
 Last Updated: 29 OCT 2025
 """

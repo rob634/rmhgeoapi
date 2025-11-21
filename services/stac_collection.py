@@ -30,8 +30,6 @@ Key Features:
 - PgSTAC collections table integration
 - Azure Blob Storage URL generation for assets
 
-Author: Robert and Geospatial Claude Legion
-Date: 20 OCT 2025
 """
 
 import os
@@ -123,9 +121,9 @@ def create_stac_collection(
         logger.info(f"   Previous results count: {len(previous_results)}")
 
         # Get MosaicJSON result from Stage 3
-        # CRITICAL (11 NOV 2025): previous_results IS the result_data list already!
+        # CRITICAL (11 NOV 2025): previous_results IS the result_data list already.
         # CoreMachine extracts task.result_data, so previous_results[0] is the dict directly.
-        # DO NOT access .get("result_data") - that was the bug causing silent failures!
+        # DO NOT access .get("result_data") - that was the bug causing silent failures.
         if not previous_results:
             logger.error("❌ [STAC-ERROR] No previous_results from Stage 3 MosaicJSON")
             return {

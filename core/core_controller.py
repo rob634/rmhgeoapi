@@ -19,7 +19,7 @@
 """
 Core Controller - Minimal Abstract Base
 
-This is the CLEAN abstraction extracted from BaseController, containing only
+This is the clean abstraction extracted from BaseController, containing only
 the methods that should be inherited. This enables parallel implementation
 of Service Bus controllers without the Queue Storage baggage.
 
@@ -27,7 +27,7 @@ Architecture:
 - 5 abstract methods (core contract)
 - 2 ID generation methods (use controller's job_type)
 - 2 validation methods (controller-specific)
-- Total: ~400 lines vs BaseController's 2,290 lines
+- Total: approximately 400 lines vs BaseController's 2,290 lines
 
 Usage:
     from controller_core import CoreController
@@ -36,10 +36,7 @@ Usage:
     class ServiceBusController(CoreController):
         def __init__(self):
             super().__init__()
-            self.state_manager = StateManager()  # Composition!
-
-Author: Robert and Geospatial Claude Legion
-Date: 26 SEP 2025
+            self.state_manager = StateManager()  # Composition
 """
 
 from abc import ABC, abstractmethod

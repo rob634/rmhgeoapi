@@ -59,8 +59,6 @@ Usage:
     # Export to GeoParquet
     duckdb_repo.export_geoparquet(df, 'output.parquet')
 
-Author: Robert and Geospatial Claude Legion
-Date: 10 OCT 2025
 """
 
 # ============================================================================

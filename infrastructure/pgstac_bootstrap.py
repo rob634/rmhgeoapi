@@ -30,8 +30,6 @@ Key Design Principles:
 - Separate from app schema (app.jobs, app.tasks)
 - Production-safe: preserves data, only updates functions
 
-Author: Robert and Geospatial Claude Legion
-Date: 4 OCT 2025
 """
 
 from typing import Dict, Any, Optional, List
@@ -65,7 +63,7 @@ class PgStacBootstrap:
     Note: This class specifically manages PgSTAC (PostgreSQL extension), not generic STAC.
           For general STAC metadata generation, see services/service_stac_metadata.py
 
-    Author: Robert and Geospatial Claude Legion
+    
     Date: 5 OCT 2025 (Renamed to PgStacBootstrap: 18 NOV 2025)
     """
 
@@ -1069,7 +1067,7 @@ def check_stac_installation() -> Dict[str, Any]:
     Returns:
         Installation status dict
     """
-    return StacInfrastructure().check_installation()
+    return PgStacBootstrap().check_installation()
 
 
 def install_stac(drop_existing: bool = False) -> Dict[str, Any]:
@@ -1082,7 +1080,7 @@ def install_stac(drop_existing: bool = False) -> Dict[str, Any]:
     Returns:
         Installation results dict
     """
-    return StacInfrastructure().install_pgstac(drop_existing=drop_existing)
+    return PgStacBootstrap().install_pgstac(drop_existing=drop_existing)
 
 
 # ============================================================================
@@ -1214,8 +1212,10 @@ def get_collection_items(
                 cur.execute(query, [collection_id, limit])
                 result = cur.fetchone()
 
-                if result and result[0]:
-                    return result[0]  # Returns GeoJSON FeatureCollection
+                # CRITICAL (19 NOV 2025): fetchone() with RealDictCursor returns dict, not tuple
+                # The jsonb_build_object() result is in the 'jsonb_build_object' column
+                if result and 'jsonb_build_object' in result:
+                    return result['jsonb_build_object']  # Returns GeoJSON FeatureCollection
                 else:
                     # Empty FeatureCollection
                     return {
@@ -1314,8 +1314,10 @@ def search_items(
                 cur.execute(query, params)
                 result = cur.fetchone()
 
-                if result and result[0]:
-                    return result[0]  # Returns GeoJSON FeatureCollection
+                # CRITICAL (19 NOV 2025): fetchone() with RealDictCursor returns dict, not tuple
+                # The jsonb_build_object() result is in the 'jsonb_build_object' column
+                if result and 'jsonb_build_object' in result:
+                    return result['jsonb_build_object']  # Returns GeoJSON FeatureCollection
                 else:
                     # Empty FeatureCollection
                     return {
@@ -1366,7 +1368,7 @@ def clear_stac_data(mode: str = 'all') -> Dict[str, Any]:
         - Much faster than full schema drop/recreate
         - CASCADE automatically handles foreign key relationships
 
-    Author: Robert and Geospatial Claude Legion
+    
     Date: 29 OCT 2025
     """
     import time
@@ -1376,13 +1378,12 @@ def clear_stac_data(mode: str = 'all') -> Dict[str, Any]:
 
     try:
         # Get counts before deletion
-        with psycopg.connect(
-            host=config.postgis_host,
-            dbname=config.postgis_database,
-            user=config.postgis_user,
-            password=config.postgis_password,
-            port=config.postgis_port
-        ) as conn:
+        # ARCHITECTURE PRINCIPLE (20 NOV 2025): Use managed identity connection helper
+        # Supports both managed identity tokens and password-based auth via USE_MANAGED_IDENTITY env var
+        from config import get_postgres_connection_string
+        conn_str = get_postgres_connection_string()
+
+        with psycopg.connect(conn_str) as conn:
             with conn.cursor() as cur:
                 # Get pre-deletion counts
                 cur.execute("SELECT COUNT(*) FROM pgstac.items")

@@ -41,8 +41,6 @@ Usage:
     handler = get_task("greet")
     result = handler(params)
 
-Author: Robert and Geospatial Claude Legion
-Date: 30 SEP 2025
 """
 
 from typing import Dict, Callable, Any, Union, Type

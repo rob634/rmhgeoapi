@@ -23,8 +23,6 @@ PostGIS Utility Functions
 Standalone helper functions for PostGIS database operations.
 Used by jobs and validation logic to check database state.
 
-Author: Robert and Geospatial Claude Legion
-Date: 9 NOV 2025
 """
 
 import psycopg
@@ -68,8 +66,9 @@ def check_table_exists(schema: str, table_name: str) -> bool:
                 SELECT EXISTS (
                     SELECT FROM information_schema.tables
                     WHERE table_schema = %s AND table_name = %s
-                )
+                ) as exists
             """, (schema, table_name))
 
             result = cur.fetchone()
-            return result[0] if result else False
+            # PostgreSQLRepository uses dict_row factory - access as dictionary, not tuple
+            return result['exists'] if result else False

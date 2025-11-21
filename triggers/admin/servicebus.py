@@ -50,8 +50,6 @@ Safety Features:
 - Returns deleted message counts
 - Timeout protection (60 seconds max)
 
-Author: Robert and Geospatial Claude Legion
-Date: 04 NOV 2025
 Phase: 2 - Service Bus Admin API
 """
 

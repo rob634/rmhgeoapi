@@ -42,8 +42,6 @@ Features:
 - JSON result formatting
 - Error handling with detailed logging
 
-Author: Robert and Geospatial Claude Legion
-Date: 10 NOV 2025
 """
 
 import azure.functions as func

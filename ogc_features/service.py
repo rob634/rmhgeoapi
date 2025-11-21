@@ -31,8 +31,6 @@ and the PostGIS repository layer. Handles:
 This layer is responsible for implementing OGC API - Features specification
 requirements while delegating database operations to the repository layer.
 
-Author: Robert and Geospatial Claude Legion
-Date: 29 OCT 2025
 """
 
 import logging

@@ -37,8 +37,6 @@ This enables:
 5. create_tasks_for_stage(stage: int, job_params: dict, job_id: str, previous_results: list) -> List[dict]
 6. finalize_job(context=None) -> Dict[str, Any]
 
-Author: Robert and Geospatial Claude Legion
-Date: 15 OCT 2025
 Last Updated: 29 OCT 2025
 """
 

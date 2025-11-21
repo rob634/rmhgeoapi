@@ -27,8 +27,6 @@ References:
 - OGC API - Features Core 1.0: https://docs.ogc.org/is/17-069r4/17-069r4.html
 - GeoJSON RFC 7946: https://tools.ietf.org/html/rfc7946
 
-Author: Robert and Geospatial Claude Legion
-Date: 29 OCT 2025
 """
 
 from typing import List, Dict, Any, Optional, Literal

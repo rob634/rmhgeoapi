@@ -29,7 +29,7 @@
 #      - Abstract method: execute(params) -> result
 #      - Concrete implementations: ValidateRasterTask, GreetTask, etc.
 #
-#   These are NOT combined via inheritance (no God class)!
+#   These are NOT combined via inheritance (no God class).
 #   They collaborate via composition in TaskExecutionService:
 #
 #   ```python
@@ -68,8 +68,6 @@ Philosophy: "Favor composition over inheritance"
 - They meet in the middle via composition (TaskExecutionService)
 - The conceptual entity emerges from their collaboration
 
-Author: Robert and Geospatial Claude Legion
-Date: 1 OCT 2025
 """
 
 from datetime import datetime

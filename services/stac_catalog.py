@@ -4,8 +4,6 @@ STAC Catalog Services - Two-Stage Pattern for Bulk STAC Extraction
 Stage 1: list_raster_files - Returns list of raster file names
 Stage 2: extract_stac_metadata - Extracts STAC metadata and inserts into PgSTAC
 
-Author: Robert and Geospatial Claude Legion
-Date: 6 OCT 2025
 """
 
 from typing import Any

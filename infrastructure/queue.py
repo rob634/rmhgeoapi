@@ -44,7 +44,6 @@ Usage:
     # Or through factory
     queue_repo = RepositoryFactory.create_queue_repository()
 
-Author: Azure Geospatial ETL Team
 Version: 1.0.0
 """
 

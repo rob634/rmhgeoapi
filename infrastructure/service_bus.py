@@ -36,8 +36,6 @@ Performance:
 - Queue Storage: 50ms per message × 1000 = 50 seconds (times out)
 - Service Bus: 100 messages in ~200ms × 10 = 2 seconds total
 
-Author: Robert and Geospatial Claude Legion
-Date: 25 SEP 2025
 """
 
 from azure.servicebus import ServiceBusClient, ServiceBusMessage, ServiceBusSender, ServiceBusReceiver

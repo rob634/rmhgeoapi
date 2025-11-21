@@ -29,8 +29,6 @@ Two-Stage Workflow:
 1. Stage 1 (greeting): Creates N parallel tasks with greetings (N from params)
 2. Stage 2 (reply): Creates N parallel tasks with replies (matches stage 1 count)
 
-Author: Robert and Geospatial Claude Legion
-Date: 1 OCT 2025
 Updated: 15 OCT 2025 - Phase 2: Migrated to JobBase ABC
 Last Updated: 14 NOV 2025 - Migrated to JobBaseMixin pattern
 """

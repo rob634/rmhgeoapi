@@ -34,8 +34,6 @@ Example:
     - Each tile: 5000×5000 pixels with 512px overlap
     - Results in 204 tasks for Stage 2 (parallel extraction)
 
-Author: Robert and Geospatial Claude Legion
-Date: 24 OCT 2025
 """
 
 import json

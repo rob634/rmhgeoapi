@@ -67,6 +67,8 @@ from .database_config import DatabaseConfig, get_postgres_connection_string
 from .raster_config import RasterConfig
 from .vector_config import VectorConfig
 from .queue_config import QueueConfig, QueueNames
+from .analytics_config import AnalyticsConfig, DuckDBConnectionType
+from .h3_config import H3Config
 from .app_config import AppConfig
 
 
@@ -113,10 +115,10 @@ def debug_config() -> dict:
             # Storage
             'storage_account_name': config.storage_account_name,
             'storage': {
-                'bronze': config.storage.storage.bronze.container_prefix,
-                'silver': config.storage.storage.silver.container_prefix,
-                'silverext': config.storage.storage.silverext.container_prefix,
-                'gold': config.storage.storage.gold.container_prefix,
+                'bronze': config.storage.bronze.container_prefix,
+                'silver': config.storage.silver.container_prefix,
+                'silverext': config.storage.silverext.container_prefix,
+                'gold': config.storage.gold.container_prefix,
             },
 
             # Database
@@ -142,6 +144,12 @@ def debug_config() -> dict:
                 'tasks_queue': config.queues.tasks_queue,
                 'connection': '***MASKED***' if config.queues.connection_string else None,
             },
+
+            # Analytics
+            'analytics': config.analytics.debug_dict(),
+
+            # H3
+            'h3': config.h3.debug_dict(),
 
             # Application
             'debug_mode': config.debug_mode,
@@ -186,4 +194,11 @@ __all__ = [
     # Queues
     'QueueConfig',
     'QueueNames',
+
+    # Analytics
+    'AnalyticsConfig',
+    'DuckDBConnectionType',
+
+    # H3
+    'H3Config',
 ]

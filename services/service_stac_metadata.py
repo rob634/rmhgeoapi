@@ -20,8 +20,6 @@ Strategy: DRY - Leverage libraries for heavy lifting
 - stac-pydantic: Validation and type safety
 - Our code: Azure metadata, collection determination, custom properties
 
-Author: Robert and Geospatial Claude Legion
-Date: 5 OCT 2025
 """
 
 from typing import Dict, Any, Optional

@@ -31,8 +31,6 @@ These models ensure:
 Critical for the clean architecture that replaces BaseController's
 accidental type protection with intentional contract enforcement.
 
-Author: Robert and Geospatial Claude Legion
-Date: 30 SEP 2025 (Copied to core/schema/)
 """
 
 from typing import Dict, Any, Optional

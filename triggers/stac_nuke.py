@@ -69,8 +69,6 @@ Comparison to Full Schema Drop:
 - Nuclear Button: DELETE data, keep schema (fast, preserves structure)
 - Schema Drop: DROP schema, reinstall pgstac (slow, full reset)
 
-Author: Robert and Geospatial Claude Legion
-Date: 29 OCT 2025
 """
 
 from typing import Dict, Any, List

@@ -44,8 +44,6 @@ Usage:
         rows = [(1, 4, 'POLYGON(...)'), ...]
         total = await batched_executemany_async(conn, stmt, iter(rows), 1000)
 
-Author: Robert and Geospatial Claude Legion
-Date: 9 NOV 2025
 """
 
 from typing import Iterator, Tuple, Any, Optional

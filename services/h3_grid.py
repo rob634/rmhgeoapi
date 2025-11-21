@@ -42,8 +42,6 @@ Example:
     l6_df = service.generate_children(land_l4_df, target_resolution=6)
     service.save_to_gold(l6_df, "land_h3_level6.parquet")
 
-Author: Robert and Geospatial Claude Legion
-Date: 14 OCT 2025 - Refactored for safe SQL composition and verbose logging
 """
 
 import pandas as pd

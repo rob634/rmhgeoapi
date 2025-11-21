@@ -35,8 +35,6 @@ Supported Formats (6 total):
 - KMZ (zipped KML)
 - Shapefile (zipped)
 
-Author: Robert and Geospatial Claude Legion
-Date: 7 OCT 2025
 Updated: 15 OCT 2025 - Phase 2: Migrated to JobBase ABC
 Last Updated: 29 OCT 2025
 """

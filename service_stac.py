@@ -30,8 +30,6 @@ without runtime computation.
 STAC Extensions Used:
 - raster: https://github.com/stac-extensions/raster (band statistics)
 
-Author: Robert and Geospatial Claude Legion
-Date: 23 OCT 2025
 """
 
 from datetime import datetime, timezone

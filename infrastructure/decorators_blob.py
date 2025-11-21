@@ -46,8 +46,6 @@ Usage:
             # No validation boilerplate needed
             pass
 
-Author: Robert and Geospatial Claude Legion
-Date: 28 OCT 2025
 """
 
 # ============================================================================

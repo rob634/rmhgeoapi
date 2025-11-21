@@ -42,8 +42,6 @@ Schema:
     h3.reference_filters - Parent ID sets for child generation
     h3.grid_metadata - Bootstrap progress tracking
 
-Author: Robert and Geospatial Claude Legion
-Date: 10 NOV 2025
 """
 
 import logging

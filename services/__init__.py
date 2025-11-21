@@ -68,8 +68,6 @@ Handler Function Contract (ENFORCED BY CoreMachine):
         # Your handler logic here
         return {"success": True, "result": {"foo": "bar"}}
 
-Author: Robert and Geospatial Claude Legion
-Date: 1 OCT 2025
 """
 
 from .service_hello_world import handle_greeting, handle_reply
@@ -184,7 +182,7 @@ def get_handler(task_type: str):
     return ALL_HANDLERS[task_type]
 
 
-# Validate on import - fail fast if something's wrong!
+# Validate on import - fail fast if something's wrong.
 validate_handler_registry()
 
 __all__ = [

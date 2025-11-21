@@ -1,9 +1,180 @@
 # Project History
 
-**Last Updated**: 14 NOV 2025 - Production-Scale Vector ETL Milestone + Stage Advancement Fix ✅
+**Last Updated**: 20 NOV 2025 - STAC API Fix & End-to-End Validation ✅
 **Note**: For project history prior to September 11, 2025, see **OLDER_HISTORY.md**
 
 This document tracks completed architectural changes and improvements to the Azure Geospatial ETL Pipeline from September 11, 2025 onwards.
+
+---
+
+## 20 NOV 2025: STAC API Fix & Complete End-to-End Validation 🎉
+
+**Status**: ✅ **COMPLETE** - STAC API fully operational with browser-verified TiTiler visualization
+**Impact**: Fixed critical STAC API errors, validated complete raster processing pipeline
+**Timeline**: Single session - diagnosis → fix → deploy → test → browser validation
+**Author**: Robert and Geospatial Claude Legion
+**Files Modified**: `infrastructure/pgstac_bootstrap.py` (lines 1191, 1291)
+
+### 🎯 Achievement: Complete End-to-End Validation
+
+**User Confirmation**: "omg we have STAC json in the browser! this is fucking fantastic!"
+
+Successfully validated complete workflow from raster upload to browser visualization:
+```
+Upload TIF → process_raster job → Create COG → Generate STAC metadata →
+Insert to pgSTAC → STAC API serves data → TiTiler visualizes → User views in browser ✅
+```
+
+### 🔧 Bug Fix: STAC API Tuple/Dict Confusion
+
+**Problem**: STAC API endpoints `/api/stac/search` and `/api/stac/collections/{id}/items` returning `{"error": "0"}` or KeyError
+
+**Root Cause**: Two functions using tuple indexing `result[0]` on dictionary objects returned by psycopg RealDictCursor
+
+**Affected Functions**:
+1. `get_collection_items()` - [infrastructure/pgstac_bootstrap.py:1191](infrastructure/pgstac_bootstrap.py#L1191)
+2. `search_items()` - [infrastructure/pgstac_bootstrap.py:1291](infrastructure/pgstac_bootstrap.py#L1291)
+
+**Fix Applied**:
+```python
+# BEFORE (incorrect - tuple indexing on dict):
+if result and result[0]:
+    return result[0]
+
+# AFTER (correct - dictionary key access):
+# CRITICAL (19 NOV 2025): fetchone() with RealDictCursor returns dict, not tuple
+# The jsonb_build_object() result is in the 'jsonb_build_object' column
+if result and 'jsonb_build_object' in result:
+    return result['jsonb_build_object']  # Returns GeoJSON FeatureCollection
+else:
+    # Empty FeatureCollection
+    return {
+        'type': 'FeatureCollection',
+        'features': [],
+        'links': []
+    }
+```
+
+**Pattern Recognition**: Same issue previously fixed in other pgSTAC functions - consolidated fix across all query patterns
+
+### 📊 Live Data Testing Results
+
+**Test Job**: process_raster with dctest.tif
+- **Source**: 27 MB TIF from `rmhazuregeobronze` container
+- **Output**: 127.6 MB COG in `silver-cogs` container
+- **Performance**: 25 seconds total (3 stages)
+- **Collection**: `dctest_validation_19nov2025`
+- **Item ID**: `dctest_validation_19nov2025-dctest_cog_analysis-tif`
+- **Bbox**: Washington DC area `[-77.028, 38.908, -77.012, 38.932]`
+
+### ✅ STAC API Endpoints Verified
+
+**1. Collections Endpoint** `/api/stac/collections`:
+- ✅ Returns proper GeoJSON structure
+- ✅ Includes 1 collection with links (self, items, parent, root)
+- ✅ No more KeyError or `{"error": "0"}` responses
+
+**2. Items Endpoint** `/api/stac/collections/{id}/items`:
+- ✅ Returns GeoJSON FeatureCollection
+- ✅ Item contains 2 assets: `data` and `thumbnail`
+- ✅ TiTiler URLs present and working:
+  - `preview` link: Interactive TiTiler map viewer
+  - `thumbnail` asset: PNG preview via TiTiler
+  - `tilejson` link: XYZ tile metadata
+  - `data` asset: `/vsiaz/silver-cogs/dctest_cog_analysis.tif` GDAL path
+
+**3. Browser Validation**:
+- ✅ User confirmed TiTiler interactive map working
+- ✅ STAC JSON rendering correctly
+- ✅ Complete visualization pipeline operational
+
+### 📦 Database State After Testing
+
+**pgSTAC Schema (pgstac)**:
+- Version: 0.9.8
+- Tables: 22 (all pgSTAC tables present)
+- Collections: 1
+- Items: 1
+- Search functions: `search_tohash`, `search_hash`, `search_fromhash` all present
+- GENERATED hash column: Working correctly
+
+**App Schema (app)**:
+- Jobs: 1 (process_raster completed)
+- Tasks: 3 (all stages completed successfully)
+- Functions: `complete_task_and_check_stage`, `advance_job_stage`, `check_job_completion`
+
+### 🎁 TiTiler URL Implementation Confirmed
+
+**Discovered**: TiTiler URLs were ALREADY correctly implemented in `services/service_stac_metadata.py` Step H.5 (lines 399-448)
+
+**Pattern Confirmed**:
+```python
+titiler_base = config.titiler_base_url.rstrip('/')
+vsiaz_path = f"/vsiaz/{container}/{blob_name}"
+encoded_vsiaz = urllib.parse.quote(vsiaz_path, safe='')
+
+# Thumbnail asset
+item_dict['assets']['thumbnail'] = {
+    'href': f"{titiler_base}/cog/preview.png?url={encoded_vsiaz}&max_size=256",
+    'type': 'image/png',
+    'roles': ['thumbnail']
+}
+
+# Preview and TileJSON links
+titiler_links = [
+    {
+        'rel': 'preview',
+        'href': f"{titiler_base}/cog/WebMercatorQuad/map.html?url={encoded_vsiaz}",
+        'type': 'text/html'
+    },
+    {
+        'rel': 'tilejson',
+        'href': f"{titiler_base}/cog/WebMercatorQuad/tilejson.json?url={encoded_vsiaz}",
+        'type': 'application/json'
+    }
+]
+```
+
+**Why It Works Now**: STAC API fix enabled proper retrieval of items containing these URLs
+
+### 🚀 Deployment
+
+**Deployed**: 20 NOV 2025 00:08:28 UTC
+- Function App: `rmhazuregeoapi` (B3 Basic tier)
+- Build: Remote Python build
+- Status: All tests passing
+
+**Schema Redeployment**:
+- App schema: Successfully redeployed with 38 statements
+- pgSTAC schema: Successfully redeployed with pgSTAC 0.9.8 via pypgstac migrate
+
+### 📝 Lessons Learned
+
+**psycopg RealDictCursor Behavior**:
+- `fetchone()` returns dictionary, not tuple
+- Column names become dictionary keys
+- PostgreSQL function results (like `jsonb_build_object()`) use function name as key
+- Must use `result['column_name']` not `result[0]`
+
+**Testing Pattern**:
+- Direct database queries validated schema state
+- Live job execution populated real data
+- STAC API endpoints tested with actual collections/items
+- Browser validation confirmed complete pipeline
+
+### 🎯 Impact
+
+**Before**: STAC API broken - returning errors or empty responses
+**After**: Complete operational pipeline from upload to browser visualization
+
+**Capabilities Now Available**:
+- ✅ Raster upload and COG conversion
+- ✅ STAC metadata generation and insertion
+- ✅ STAC API serving collections and items
+- ✅ TiTiler visualization with interactive maps
+- ✅ Browser-based raster viewing
+
+**Next Steps**: Implement process_raster_collection for multi-raster workflows with TiTiler search URLs
 
 ---
 

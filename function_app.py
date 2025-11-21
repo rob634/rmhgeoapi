@@ -121,7 +121,6 @@ Environment Variables:
     POSTGIS_USER: PostgreSQL username
     POSTGIS_PASSWORD: PostgreSQL password
 
-Author: Azure Geospatial ETL Team
 Version: 2.1.0
 Last Updated: January 2025
 """
@@ -250,6 +249,10 @@ from stac_api import get_stac_triggers
 # Vector Viewer - Standalone module (13 NOV 2025) - OGC Features API
 from vector_viewer import get_vector_viewer_triggers
 
+# Pipeline Dashboard - Container blob browser (21 NOV 2025) - Read-only UI operations
+from triggers.list_container_blobs import list_container_blobs_handler
+from triggers.get_blob_metadata import get_blob_metadata_handler
+
 # ========================================================================
 # PHASE 2: EXPLICIT REGISTRATION PATTERN (Parallel with decorators)
 # ========================================================================
@@ -278,7 +281,7 @@ from vector_viewer import get_vector_viewer_triggers
 # EPOCH 4: INITIALIZE COREMACHINE (Universal Orchestrator with Explicit Registries)
 # ========================================================================
 # CoreMachine replaces the God Class pattern with composition-based coordination
-# It works with ALL jobs via EXPLICIT registries (no decorator magic!)
+# It works with ALL jobs via EXPLICIT registries (no decorator magic)
 #
 # CRITICAL: We pass ALL_JOBS and ALL_HANDLERS explicitly to avoid import timing issues
 # Previous decorator-based approach failed because modules weren't imported (10 SEP 2025)
@@ -1626,6 +1629,53 @@ def vector_collection_viewer(req: func.HttpRequest) -> func.HttpResponse:
         https://rmhazuregeoapi-.../api/vector/viewer?collection=qa_test_chunk_5000
     """
     return _vector_viewer_handler(req)
+
+
+# ============================================================================
+# PIPELINE DASHBOARD - CONTAINER BLOB BROWSER (21 NOV 2025)
+# ============================================================================
+# Read-only UI operations - NO JOBS, NO TASKS, NO SERVICE BUS
+# Direct Azure Blob Storage queries for Pipeline Dashboard interface
+
+@app.route(route="containers/{container_name}/blobs", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def list_container_blobs(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    List blobs in a container (read-only UI operation).
+
+    GET /api/containers/{container_name}/blobs?prefix={prefix}&limit={limit}
+
+    Path Parameters:
+        container_name: Azure Blob Storage container (e.g., 'bronze-rasters')
+
+    Query Parameters:
+        prefix: Optional folder filter (e.g., 'maxar/', 'data/2025/')
+        limit: Max results (default: 50, max: 1000)
+
+    Returns:
+        JSON list of blob metadata (name, size, last_modified, content_type)
+
+    Note: This is a lightweight UI endpoint, NOT a job submission endpoint.
+    """
+    return list_container_blobs_handler(req)
+
+
+@app.route(route="containers/{container_name}/blobs/{blob_path:path}", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def get_blob_metadata(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Get metadata for a single blob (read-only UI operation).
+
+    GET /api/containers/{container_name}/blobs/{blob_path}
+
+    Path Parameters:
+        container_name: Azure Blob Storage container (e.g., 'bronze-rasters')
+        blob_path: Full path to blob (e.g., 'maxar/tile_001.tif')
+
+    Returns:
+        JSON blob metadata (name, size, last_modified, content_type, etag, etc.)
+
+    Note: This is a lightweight UI endpoint, NOT a job submission endpoint.
+    """
+    return get_blob_metadata_handler(req)
 
 
 # ============================================================================

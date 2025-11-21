@@ -6,7 +6,7 @@
 # PURPOSE: Pydantic Stage model (planned but not used by production jobs)
 # ACTUAL USAGE: Jobs use List[Dict[str, Any]] for stages, not List[Stage]
 #
-# THIS PYDANTIC MODEL EXISTS BUT IS NOT USED BY JOBS!
+# THIS PYDANTIC MODEL EXISTS BUT IS NOT USED BY JOBS.
 # Production jobs use plain dicts for stages. CoreMachine reads these dicts
 # directly without Pydantic validation (could be added in future).
 #
@@ -21,7 +21,7 @@
 #
 # ACTUAL ARCHITECTURE (Pattern B - used by all 10 jobs):
 #   class HelloWorldJob:
-#       stages: List[Dict[str, Any]] = [  # ← Plain dicts!
+#       stages: List[Dict[str, Any]] = [  # ← Plain dicts.
 #           {
 #               "number": 1,
 #               "name": "greeting",
@@ -55,7 +55,7 @@
 # This would give Pydantic validation without requiring jobs to import Stage.
 # Jobs stay simple (plain dicts), CoreMachine ensures type safety.
 #
-# Author: Robert and Geospatial Claude Legion
+# 
 # Date: 30 SEP 2025 (created), 15 OCT 2025 (documented as unused by jobs)
 # ============================================================================
 

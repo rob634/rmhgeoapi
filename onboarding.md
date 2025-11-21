@@ -17,7 +17,7 @@
 - Parallel processing for large datasets (millions of features, multi-GB files)
 - Automatic STAC metadata catalog generation
 
-**Output**: Standards-based REST APIs (no custom client code needed!)
+**Output**: Standards-based REST APIs (no custom client code required)
 - **OGC API - Features** for vector data (GeoJSON responses)
 - **TiTiler** for raster tiles (XYZ tile endpoints)
 - **STAC API** for catalog search (spatiotemporal queries)
@@ -49,7 +49,7 @@
                         ↓
 ┌─────────────────────────────────────────────────────────────┐
 │ COREMACHINE LAYER (Job Orchestration Engine)               │
-│ • Job→Stage→Task orchestration (450 lines, not 2,290!)     │
+│ • Job→Stage→Task orchestration (450 lines)                 │
 │ • Service Bus queue management (jobs + tasks)              │
 │ • PostgreSQL state tracking + advisory locks               │
 │ • Composition over inheritance (dependencies injected)      │
@@ -72,9 +72,9 @@ CoreMachine is a lightweight orchestration engine (450 lines) that coordinates w
 - **RepositoryFactory**: Connection management (PostgreSQL, Service Bus, Blob Storage)
 
 **Architecture Pattern**: Dependency injection - all components are passed in, not created internally. Benefits:
-- ✅ Easy to test (mock dependencies)
-- ✅ Easy to swap implementations (e.g., different database backends)
-- ✅ Clear separation of concerns (each component has one responsibility)
+- Easy to test (mock dependencies)
+- Easy to swap implementations (e.g., different database backends)
+- Clear separation of concerns (each component has one responsibility)
 
 ---
 
@@ -90,11 +90,11 @@ JOB (Complete workflow, e.g., "ingest vector data")
  ├── STAGE 2: Create PostGIS table (sequential - waits for Stage 1)
  │   └── Task B: Generate schema, create indices
  │
- ├── STAGE 3: Upload chunks to PostGIS (parallel - fan-out!)
+ ├── STAGE 3: Upload chunks to PostGIS (parallel - fan-out)
  │   ├── Task C: Upload chunk 1 (10,000 rows)
  │   ├── Task D: Upload chunk 2 (10,000 rows)
  │   └── Task E: Upload chunk 3 (10,000 rows)
- │       ↓ Last task completes → Stage advances
+ │       ↓ Last task completes, stage advances
  │
  └── STAGE 4: Create STAC record and validate API (sequential)
      └── Task F: Insert STAC item, test OGC Features endpoint
@@ -110,7 +110,7 @@ JOB (Complete workflow, e.g., "ingest vector data")
 ```sql
 -- Jobs Table (app schema)
 CREATE TABLE jobs (
-    job_id VARCHAR PRIMARY KEY,      -- SHA256 hash of parameters (idempotency!)
+    job_id VARCHAR PRIMARY KEY,      -- SHA256 hash of parameters (idempotency)
     job_type VARCHAR,                -- 'ingest_vector', 'process_raster', etc.
     status VARCHAR,                  -- 'Queued', 'Processing', 'Completed', 'Failed'
     stage INTEGER,                   -- Current stage (1 to n)
@@ -161,7 +161,7 @@ CREATE TABLE tasks (
    ├─> Call PostgreSQL function: complete_task_and_check_stage()
    │   ├─> Acquires advisory lock (prevents race conditions)
    │   ├─> Counts remaining incomplete tasks for this stage
-   │   ├─> If count = 0: Returns TRUE (I'm the last task!)
+   │   ├─> If count = 0: Returns TRUE (last task indicator)
    │   └─> Releases lock automatically
    ├─> If TRUE returned:
    │   ├─> Update Job Record (advance stage or mark complete)
@@ -187,7 +187,7 @@ CREATE TABLE tasks (
 3. If TRUE returned, CoreMachine advances job to next stage
 
 
-**SQL Implementation** (in schema - you never write this):
+**SQL Implementation** (in schema - developers do not write this):
 ```sql
 CREATE OR REPLACE FUNCTION complete_task_and_check_stage(
     p_job_id VARCHAR,
@@ -197,14 +197,14 @@ CREATE OR REPLACE FUNCTION complete_task_and_check_stage(
 DECLARE
     v_remaining INTEGER;
 BEGIN
-    -- Single serialization point per job-stage (O(1) complexity!)
+    -- Single serialization point per job-stage (O(1) complexity)
     PERFORM pg_advisory_xact_lock(hashtext(p_job_id || ':stage:' || p_stage::text));
 
     -- Update task status
     UPDATE tasks SET status = 'Completed', updated_at = NOW()
     WHERE task_id = p_task_id;
 
-    -- Count remaining tasks (no row-level locks needed!)
+    -- Count remaining tasks (no row-level locks needed)
     SELECT COUNT(*) INTO v_remaining
     FROM tasks
     WHERE job_id = p_job_id AND stage = p_stage AND status != 'Completed';
@@ -246,7 +246,7 @@ Why deterministic?
 
 **Inputs**: File path in Azure Blob Storage workspace container
 **Outputs**: GeoDataFrame metadata (row count, CRS, geometry types, bounds, validation status)
-**Parallelism**: Single task (file must be analyzed as a whole)
+**Parallelism**: Single task (file is analyzed as a whole)
 
 ```python
 import geopandas as gpd
@@ -330,7 +330,7 @@ async def stage2_prepare_and_chunk(file_path: str, metadata: dict, params: dict)
         schema=gdf.dtypes.to_dict(),
         geometry_type=main_type,
         srid=gdf.crs.to_epsg(),
-        indices=['geometry'] + indices  # GIST on geometry always
+        indices=['geometry'] + indices  # GIST on geometry column
     )
 
     # Serialize chunks to workspace storage for Stage 3
@@ -482,7 +482,7 @@ async def stage1_create_cog(input_path: str, output_path: str, params: dict):
     Convert source raster to Cloud-Optimized GeoTIFF.
 
     COG Optimizations:
-    - Internal tiling (512x512 blocks recommended for web)
+    - Internal tiling (512x512 blocks for web serving)
     - Compression: JPEG (RGB imagery), DEFLATE (DEMs), LZW (general)
     - Overviews: Automatically generated pyramids for zoom performance
     - Reprojection: Web Mercator (EPSG:3857) for web maps
@@ -553,7 +553,7 @@ async def stage2_stac_and_validate(cog_path: str, metadata: dict):
     # Build TiTiler URL (dynamic tile generation)
     titiler_url = f"https://functionapurl.eastus-01.azurewebsites.net/tiles/cog/tiles/{{z}}/{{x}}/{{y}}?url={cog_path}"
 
-    # Validate: Fetch tile 0/0/0 (should always exist for global rasters)
+    # Validate: Fetch tile 0/0/0 (exists for global rasters)
     test_tile = titiler_url.format(z=0, x=0, y=0)
     response = await httpx.get(test_tile, timeout=30.0)
     if response.status_code != 200:
@@ -790,10 +790,10 @@ L.tileLayer(tileUrl, {
 ```
 
 **TiTiler**
-- ✅ No pre-generated tile pyramid (saves storage costs)
-- ✅ Dynamic rendering (change color ramps, bands, processing on-the-fly)
-- ✅ COG partial reads (only fetches needed blocks, not entire file)
-- ✅ Industry standard (used by NASA, USGS, Planet, Maxar)
+- No pre-generated tile pyramid (saves storage costs)
+- Dynamic rendering (change color ramps, bands, processing on-the-fly)
+- COG partial reads (only fetches needed blocks, not entire file)
+- Industry standard (used by NASA, USGS, Planet, Maxar)
 
 ### 3. All Data → STAC Catalog (Metadata Search)
 
@@ -880,12 +880,12 @@ for item in search.items():
 Purpose: preview map for approval workflows
 
 **Features**:
-- ✅ Collection selector dropdown (all PostGIS collections auto-discovered)
-- ✅ Load 50-1000 features with loading spinner
-- ✅ Click polygons → popup shows feature properties
-- ✅ Hover highlighting
-- ✅ Zoom to features button
-- ✅ Feature count display ("Showing X of Y features")
+- Collection selector dropdown (all PostGIS collections auto-discovered)
+- Load 50-1000 features with loading spinner
+- Click polygons → popup shows feature properties
+- Hover highlighting
+- Zoom to features button
+- Feature count display ("Showing X of Y features")
 
 **Technology Stack**:
 - Single HTML file (ogc_features/map.html)
@@ -903,11 +903,11 @@ Purpose: preview map for approval workflows
 
 JobBaseMixin provides a declarative approach to job creation, eliminating common boilerplate:
 
-**Manual Implementation** (not recommended):
+**Manual Implementation**:
 - ~350 lines: validation, ID generation, database ops, queue management
 - Development time: 2+ hours per job
 
-**JobBaseMixin Pattern** (recommended):
+**JobBaseMixin Pattern**:
 - ~80 lines: declarative configuration only
 - Automatic handling: validation, IDs, database, queues
 - Development time: 30 minutes per job
@@ -939,7 +939,7 @@ from jobs.base import JobBase
 from jobs.mixins import JobBaseMixin
 
 
-class MyVectorIngestionJob(JobBaseMixin, JobBase):  # ← Mixin FIRST for correct MRO!
+class MyVectorIngestionJob(JobBaseMixin, JobBase):  # Mixin first for correct method resolution order
     """
     Vector data ingestion to PostGIS with automatic STAC cataloging.
 
@@ -958,7 +958,7 @@ class MyVectorIngestionJob(JobBaseMixin, JobBase):  # ← Mixin FIRST for correc
             "number": 1,
             "name": "validate",
             "task_type": "validate_vector_file",
-            "parallelism": "single"  # Single task (must analyze file as whole)
+            "parallelism": "single"  # Single task (analyzes file as whole)
         },
         {
             "number": 2,
@@ -980,7 +980,7 @@ class MyVectorIngestionJob(JobBaseMixin, JobBase):  # ← Mixin FIRST for correc
         }
     ]
 
-    # Declarative parameter validation (JobBaseMixin handles all validation!)
+    # Declarative parameter validation (JobBaseMixin handles validation)
     parameters_schema = {
         'file_path': {
             'type': 'str',
@@ -1210,7 +1210,7 @@ parameters_schema = {
     # String parameter
     'name': {
         'type': 'str',
-        'required': True,           # Must be provided by user
+        'required': True,           # Provided by user
         'default': 'default_value',  # Default if not provided
         'allowed': ['opt1', 'opt2']  # Enum-like validation (optional)
     },
@@ -1246,7 +1246,7 @@ parameters_schema = {
 ```
 
 **Validation Rules**:
-- `required`: If True, parameter must be provided (no default needed)
+- `required`: If True, parameter is required (no default needed)
 - `default`: Value used if parameter not provided by user
 - `min/max`: For int/float types, enforces range
 - `allowed`: For str type, enforces enum-like values (whitelist)
@@ -1295,7 +1295,7 @@ az login
 npm install -g azure-functions-core-tools@4
 
 # Verify installation
-func --version  # Should show 4.x.x
+func --version  # Verify version 4.x.x
 ```
 
 ### Local Database Setup
@@ -1371,7 +1371,7 @@ pydantic==2.5.0
 
 ### Local Configuration
 
-**CRITICAL**: Use the example file as template (NEVER commit `local.settings.json` to git!)
+**Note**: Use the example file as template (do not commit `local.settings.json` to git)
 
 ```bash
 # Copy example configuration
@@ -1406,7 +1406,7 @@ nano local.settings.json
 }
 ```
 
-**Azure Production Configuration** (managed identity - NO passwords!):
+**Azure Production Configuration** (managed identity - no passwords):
 ```bash
 # Set in Azure Portal → Function App → Configuration → Application Settings
 USE_MANAGED_IDENTITY=true
@@ -1427,7 +1427,7 @@ azurite --silent --location ./azurite --debug ./azurite/debug.log &
 # Start Azure Functions
 func start
 
-# Verify health endpoint (should show all green checks)
+# Verify health endpoint (shows system status checks)
 curl http://localhost:7071/api/health
 ```
 
@@ -1437,21 +1437,21 @@ curl http://localhost:7071/api/health
 
 ### Production Debugging: Application Insights
 
-**Access production logs without Azure Portal!**
+**Access production logs without Azure Portal**
 
 #### Prerequisites
 
 ```bash
-# Must be logged into Azure CLI
+# Log into Azure CLI
 az login
 
 # Verify login
 az account show --query "{subscription:name, user:user.name}" -o table
 ```
 
-#### Recommended Pattern: Query Script
+#### Query Script Pattern
 
-**Why scripts?** Inline commands fail due to shell evaluation issues with KQL queries.
+**Note**: Inline commands fail due to shell evaluation issues with KQL queries. Use script files for reliability.
 
 ```bash
 # Create reusable query script
@@ -1504,16 +1504,16 @@ union requests, traces
 | take 20
 ```
 
-**⚠️ CRITICAL: Azure Functions Python Logging Bug**
+**Azure Functions Python Logging Behavior**
 
-Azure SDK **incorrectly maps `logging.DEBUG` to severity 1 (INFO)** instead of 0 (DEBUG).
+Azure SDK maps `logging.DEBUG` to severity 1 (INFO) instead of 0 (DEBUG).
 
-**❌ This will return ZERO results**:
+**Note**: This query returns zero results:
 ```kql
-traces | where severityLevel == 0  # Wrong! Azure Functions maps DEBUG to 1
+traces | where severityLevel == 0  # Azure Functions maps DEBUG to 1
 ```
 
-**✅ Search by message content instead**:
+**Search by message content instead**:
 ```kql
 traces | where message contains '"level": "DEBUG"'
 ```
@@ -1573,7 +1573,7 @@ gdf = gdf[gdf.geometry.is_valid]                  # Drop unfixable (last resort)
 **Symptom**: TiTiler returns 403 or 404 errors when requesting tiles.
 
 **Causes**:
-1. COG not uploaded to correct container (should be `api-data`)
+1. COG not uploaded to correct container (use `api-data`)
 2. TiTiler Function App managed identity lacks Blob Reader role
 3. Incorrect blob URL format (missing SAS token or public access)
 
@@ -1605,7 +1605,7 @@ az webapp log tail \
 
 ## Deployment
 
-### Active Function App (CRITICAL)
+### Active Function App
 
 **Active Function App:**
 
@@ -1617,13 +1617,13 @@ az webapp log tail \
 ### Deployment Workflow
 
 ```bash
-# 1. Validate locally (CRITICAL - always run first!)
+# 1. Validate locally (run first)
 python3 -c "from jobs import validate_job_registry; validate_job_registry()"
 
 # 2. Deploy to Azure Functions
 func azure functionapp publish function_app_name --python --build remote
 
-# 3. Redeploy database schema (required after deployment!)
+# 3. Redeploy database schema (required after deployment)
 curl -X POST "https://functionapurl.eastus-01.azurewebsites.net/api/db/schema/redeploy?confirm=yes"
 
 # 4. Health check (verify all systems green)
@@ -1650,23 +1650,23 @@ curl "https://functionapurl.eastus-01.azurewebsites.net/api/db/tasks/{JOB_ID}"
 
 ### Git Workflow (Dev Branch Strategy)
 
-**CRITICAL: Always work on `dev` branch, commit frequently with detailed messages**
+**Note**: Work on `dev` branch and commit frequently with detailed messages
 
 ```bash
 # 1. Ensure you're on dev branch
 git checkout dev
 
-# 2. Make changes and commit frequently (detailed messages!)
+# 2. Make changes and commit frequently (detailed messages)
 git add -A
 git commit -m "Add vector ingestion job with parallel upload support
 
-🔧 Technical details:
+Technical details:
 - Created MyVectorIngestionJob with JobBaseMixin pattern
 - Implemented 4-stage workflow (validate → prepare → upload → stac)
 - Tested with 100K feature GeoJSON (completed in 45 seconds)
 
-✅ Status: Working end-to-end
-⚠️ Known issues: None
+Status: Working end-to-end
+Known issues: None
 "
 
 # 3. Push to remote dev branch
@@ -1682,12 +1682,12 @@ git checkout dev
 ```
 
 **Branch Strategy Benefits**:
-- ✅ Frequent commits on dev = Detailed change history
-- ✅ Clean master = Only stable, tested code
-- ✅ Easy rollback = Revert to last working commit
-- ✅ Clear debugging = Git log shows what changed between states
+- Frequent commits on dev = Detailed change history
+- Clean master = Only stable, tested code
+- Easy rollback = Revert to last working commit
+- Clear debugging = Git log shows what changed between states
 
-**Best Practice**: Commit frequently with detailed messages to maintain good development history.
+Commit frequently with detailed messages to maintain good development history.
 
 ### CI/CD Pipeline (Future)
 
@@ -1713,7 +1713,7 @@ def calculate_optimal_chunks(row_count: int, avg_row_size_bytes: int) -> int:
 
     Goals:
     - Each chunk fits in Function App memory (~2GB available)
-    - Minimize Service Bus message overhead (256KB max recommended)
+    - Minimize Service Bus message overhead (256KB maximum)
     - Maximize parallelism for large datasets
     """
     MAX_CHUNK_SIZE = 50000   # rows per chunk (tested at production scale)
@@ -1740,14 +1740,14 @@ def calculate_optimal_chunks(row_count: int, avg_row_size_bytes: int) -> int:
 
 ### PostGIS Index Strategy
 
-**Always create GIST index on geometry** (spatial queries), optionally add B-tree on attribute columns.
+**Create GIST index on geometry** (spatial queries), optionally add B-tree on attribute columns.
 
 ```python
 async def create_optimized_indices(table_name: str, attribute_columns: list):
     """
     Create indices for efficient OGC API Features queries.
 
-    Always create:
+    Standard indices:
     - GIST index on geometry (spatial queries via ST_Intersects, ST_DWithin)
 
     Optionally create (based on expected queries):
@@ -1836,7 +1836,7 @@ def get_cog_profile(src_profile: dict) -> dict:
 
 ### Managed Identity Authentication (Production)
 
-**All Azure resources use managed identities - NO connection strings or passwords in code!**
+**All Azure resources use managed identities - no connection strings or passwords in code**
 
 ```python
 from azure.identity import ManagedIdentityCredential
@@ -1851,7 +1851,7 @@ blob_client = BlobServiceClient(
     credential=credential
 )
 
-# PostgreSQL access (Entra authentication - no password!)
+# PostgreSQL access (Entra authentication - no password)
 from infrastructure.postgresql import PostgreSQLRepository
 repo = PostgreSQLRepository()  # Automatically uses managed identity in Azure
 
@@ -1866,20 +1866,20 @@ repo = PostgreSQLRepository()  # Automatically uses managed identity in Azure
 
 ### RBAC vs POSIX ACLs (Why We Don't Use Filesystem ACLs)
 
-**✅ DO: Container-level RBAC with managed identity**
+**Container-level RBAC with managed identity**
 
 ```python
-# GOOD: Direct blob access with RBAC
+# Direct blob access with RBAC
 async def read_cog(blob_path: str):
     blob_client = blob_service.get_blob_client(container='api-data', blob=blob_path)
     data = await blob_client.download_blob()
     return data.readall()
 ```
 
-**❌ DON'T: Mount blob storage as filesystem with ACL checks**
+**Avoid: Mount blob storage as filesystem with ACL checks**
 
 ```python
-# BAD: Mounting as filesystem with POSIX ACL checks
+# Mounting as filesystem with POSIX ACL checks (not recommended)
 # /mnt/blobfuse/api-data/dataset.tif
 # - Slow ACL checks on every read operation
 # - Breaks CDN edge caching
@@ -1888,11 +1888,11 @@ async def read_cog(blob_path: str):
 ```
 
 **Why RBAC is Superior for Cloud**:
-1. ✅ Token validated once per session (not per file access)
-2. ✅ Enables CDN edge caching (no server-side ACL checks)
-3. ✅ Container-level permissions scale better (not per-file)
-4. ✅ Cloud-native pattern (matches Azure architecture)
-5. ✅ Works with TiTiler's HTTP range requests
+1. Token validated once per session (not per file access)
+2. Enables CDN edge caching (no server-side ACL checks)
+3. Container-level permissions scale better (not per-file)
+4. Cloud-native pattern (matches Azure architecture)
+5. Works with TiTiler's HTTP range requests
 
 ---
 

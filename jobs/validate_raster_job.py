@@ -35,8 +35,6 @@ Stage 1 (Only): Validate Raster
 - Validate type match if user specified
 - Return validation results without processing
 
-Author: Robert and Geospatial Claude Legion
-Date: 9 OCT 2025
 """
 
 from typing import List, Dict, Any

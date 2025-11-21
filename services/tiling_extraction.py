@@ -54,8 +54,6 @@ Example:
 Cleanup: Intermediate tiles (598fc149/tiles/) cleaned by SEPARATE timer trigger
          (NOT part of ETL workflow stages)
 
-Author: Robert and Geospatial Claude Legion
-Date: 27 OCT 2025
 """
 
 import json

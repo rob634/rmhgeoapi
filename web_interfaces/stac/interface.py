@@ -28,8 +28,6 @@ Web interface for browsing STAC collections and items. Provides:
 
 Route: /api/interface/stac
 
-Author: Robert and Geospatial Claude Legion
-Date: 14 NOV 2025
 """
 
 import azure.functions as func

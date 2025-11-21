@@ -4,8 +4,6 @@ H3 Base Grid Generation - ABC Models for Type Safety
 Defines abstract interfaces and concrete models for H3 base grid generation.
 Uses ABC (Abstract Base Class) pattern to enforce method signatures.
 
-Author: Robert and Geospatial Claude Legion
-Date: 15 OCT 2025
 """
 
 from abc import ABC, abstractmethod

@@ -30,8 +30,6 @@ Pattern:
         def render(self, request):
             return self.wrap_html("Title", "<h1>Content</h1>")
 
-Author: Robert and Geospatial Claude Legion
-Date: 14 NOV 2025
 """
 
 from abc import ABC, abstractmethod

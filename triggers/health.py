@@ -130,8 +130,6 @@ Usage Notes:
 - VSI check uses 4-hour SAS token for test file access
 - Cache-Control: no-cache header prevents HTTP-level caching
 
-Author: Robert and Geospatial Claude Legion
-Date: Original implementation 2025
 Last Updated: 29 OCT 2025
 """
 
@@ -382,7 +380,7 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
             from infrastructure import RepositoryFactory
             from config import QueueNames
 
-            # Use QueueRepository singleton - credential reused!
+            # Use QueueRepository singleton - credential reused.
             queue_repo = RepositoryFactory.create_queue_repository()
 
             queue_status = {}

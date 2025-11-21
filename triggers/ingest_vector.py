@@ -75,8 +75,6 @@ Error Responses:
 - 404: Blob not found
 - 500: Internal server error
 
-Author: Azure Geospatial ETL Team
-Date: 7 OCT 2025
 """
 
 from typing import Dict, Any, List

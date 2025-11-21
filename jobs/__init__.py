@@ -49,8 +49,6 @@ Example:
         "container_list": ContainerListJob,  # <- Added here!
     }
 
-Author: Robert and Geospatial Claude Legion
-Date: 1 OCT 2025
 Last Updated: 29 OCT 2025
 """
 
@@ -212,7 +210,7 @@ def get_job_class(job_type: str):
     return ALL_JOBS[job_type]
 
 
-# Validate on import - fail fast if something's wrong!
+# Validate on import - fail fast if something's wrong.
 validate_job_registry()
 
 __all__ = [

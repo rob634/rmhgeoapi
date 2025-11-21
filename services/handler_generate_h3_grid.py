@@ -47,8 +47,6 @@ Use Cases:
     3. Custom project area: Generate res 5 within specific polygon
     4. Multi-filter: Combine table + bbox for precise filtering
 
-Author: Robert and Geospatial Claude Legion
-Date: 14 NOV 2025
 """
 
 import time

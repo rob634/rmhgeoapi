@@ -25,8 +25,6 @@ HTTP endpoint to extract STAC metadata from raster blobs and insert into PgSTAC.
 **IMPORTANT**: Uses lazy loading for GDAL/rasterio to prevent cold start delays.
 Heavy dependencies are imported inside handle_request(), not at module level.
 
-Author: Robert and Geospatial Claude Legion
-Date: 5 OCT 2025
 Last Updated: 29 OCT 2025
 """
 

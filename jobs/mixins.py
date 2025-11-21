@@ -296,8 +296,6 @@ SEE ALSO
 
 ═══════════════════════════════════════════════════════════════════════════
 
-Author: Robert and Geospatial Claude Legion
-Date: 14 NOV 2025
 """
 
 from abc import ABC

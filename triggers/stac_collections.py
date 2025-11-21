@@ -26,8 +26,6 @@ Currently supports Bronze tier collections with container parameter.
 Endpoints:
 - POST /api/stac/collections/bronze - Create Bronze collection
 
-Author: Robert and Geospatial Claude Legion
-Date: 5 OCT 2025
 Last Updated: 29 OCT 2025
 """
 

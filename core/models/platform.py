@@ -41,8 +41,6 @@ Table Names (29 OCT 2025):
     - "api_requests": Client-facing layer - RESTful API requests from DDH
     - "orchestration_jobs": Execution layer - Maps API requests to CoreMachine jobs
 
-Author: Robert and Geospatial Claude Legion
-Date: 29 OCT 2025 - Migrated to Infrastructure-as-Code pattern
 """
 
 from pydantic import BaseModel, Field, field_validator

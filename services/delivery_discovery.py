@@ -34,8 +34,6 @@ Design:
 - Returns structured dicts for JSON serialization
 - Built to extend ContainerAnalysisService patterns
 
-Author: Robert and Geospatial Claude Legion
-Date: 20 OCT 2025
 """
 
 from typing import Dict, List, Any, Optional, Tuple

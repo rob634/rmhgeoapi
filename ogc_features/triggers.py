@@ -47,8 +47,6 @@ Integration:
             auth_level=func.AuthLevel.ANONYMOUS
         )(trigger['handler'])
 
-Author: Robert and Geospatial Claude Legion
-Date: 29 OCT 2025
 """
 
 import azure.functions as func

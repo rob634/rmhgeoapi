@@ -23,8 +23,6 @@ STAC Catalog Vectors Job Declaration - Single Stage for Vector Table Cataloging
 This job catalogs PostGIS vector tables into STAC.
 Single-stage job: Extract STAC metadata from PostGIS table and insert into PgSTAC.
 
-Author: Robert and Geospatial Claude Legion
-Date: 8 OCT 2025
 Last Updated: 29 OCT 2025
 """
 

@@ -31,8 +31,6 @@ Architecture Responsibility:
     - Task Layer: Stage parameter validation ensuring type-safe task execution
     - Repository Layer: Parameter validation and constraint enforcement integration
 
-Author: Robert and Geospatial Claude Legion
-Date: 30 SEP 2025 (Copied to core/schema/)
 """
 
 from pydantic import BaseModel, Field, field_validator, model_validator

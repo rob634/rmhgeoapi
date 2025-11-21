@@ -22,9 +22,6 @@ CoreMachine Error Handler - Centralized Error Handling
 
 Provides context manager for consistent error logging and handling across
 CoreMachine operations. Eliminates 18 duplicate try-catch patterns.
-
-Author: Robert and Geospatial Claude Legion
-Date: 13 NOV 2025
 """
 
 from contextlib import contextmanager

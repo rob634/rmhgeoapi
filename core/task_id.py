@@ -9,9 +9,6 @@ Key Concepts:
 - Logical Unit: The identifier that stays constant across stages (e.g., "tile_x5_y10", "blob.tif")
 - Lineage: Tasks in different stages processing the same logical unit form a lineage chain
 - Deterministic: Same inputs always produce same task ID
-
-Author: Robert and Geospatial Claude Legion
-Date: 4 OCT 2025
 """
 
 import hashlib

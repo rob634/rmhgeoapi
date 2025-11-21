@@ -28,8 +28,6 @@ Web interface for browsing OGC API - Features collections. Provides:
 
 Route: /api/interface/vector
 
-Author: Robert and Geospatial Claude Legion
-Date: 15 NOV 2025
 """
 
 import azure.functions as func

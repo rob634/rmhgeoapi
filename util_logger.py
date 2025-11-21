@@ -32,8 +32,6 @@ Design Principles:
 - Clean factory pattern
 - No external dependencies
 
-Author: Robert and Geospatial Claude Legion
-Date: 9 September 2025
 """
 
 from enum import Enum

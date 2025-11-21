@@ -9,8 +9,6 @@ Handler functions are simple:
 - Execute business logic
 - Return result dict
 
-Author: Robert and Geospatial Claude Legion
-Date: 1 OCT 2025
 """
 
 from typing import Dict, Any, Optional

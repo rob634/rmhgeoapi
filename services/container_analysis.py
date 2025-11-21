@@ -33,8 +33,6 @@ Design Goals:
 - Optional output to Blob Storage or ADLS
 - Testable with mocked repositories
 
-Author: Robert and Geospatial Claude Legion
-Date: 4 OCT 2025
 Last Updated: 29 OCT 2025
 """
 

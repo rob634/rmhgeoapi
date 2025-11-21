@@ -24,8 +24,6 @@ Stage 1: list_container_blobs - Returns list of blob names
 Stage 2: analyze_single_blob - Analyzes and stores individual blob metadata (fan-out)
 Stage 3: aggregate_blob_analysis - Aggregates all blob metadata into summary (fan-in)
 
-Author: Robert and Geospatial Claude Legion
-Date: 4 OCT 2025 (Updated 16 OCT 2025 - Added fan-in aggregation)
 Last Updated: 29 OCT 2025
 """
 

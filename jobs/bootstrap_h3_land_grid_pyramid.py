@@ -58,8 +58,6 @@ Albania Test Support:
     - Expected: ~10-20 res 2 cells → ~168K res 7 cells
     - Success Criteria: Complete in <15 minutes with correct parent relationships
 
-Author: Robert and Geospatial Claude Legion
-Date: 14 NOV 2025
 Last Updated: 15 NOV 2025 - Redesigned for 3-stage cascade architecture
 """
 

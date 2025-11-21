@@ -4,8 +4,6 @@ STAC API Service Layer
 Business logic for STAC API endpoints.
 Calls infrastructure.stac for database operations.
 
-Author: Robert and Geospatial Claude Legion
-Date: 10 NOV 2025
 Updated: 11 NOV 2025 - Added all STAC v1.0.0 endpoints
 """
 

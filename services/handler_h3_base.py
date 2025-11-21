@@ -4,8 +4,6 @@ H3 Base Grid Generation Handler
 Executes H3 base grid generation tasks using Core Machine patterns.
 Implements the H3BaseGridHandler protocol from models/h3_base.py.
 
-Author: Robert and Geospatial Claude Legion
-Date: 15 OCT 2025
 """
 
 import time

@@ -24,19 +24,16 @@ This is the heart of Epoch 4's declarative architecture. It avoids the God Class
 anti-pattern by using composition and delegation instead of inheritance.
 
 Key Principles:
-1. **Composition**: All dependencies injected, none created internally
-2. **Single Responsibility**: ONLY coordinate, never execute business logic
-3. **Delegation**: Specialized components handle all actual work
-4. **Stateless**: No job-specific state stored in CoreMachine
+1. Composition: All dependencies injected, none created internally
+2. Single Responsibility: Only coordinate, never execute business logic
+3. Delegation: Specialized components handle all actual work
+4. Stateless: No job-specific state stored in CoreMachine
 
 Size Comparison:
 - BaseController (God Class): 2,290 lines, 34 methods
-- CoreMachine (Coordinator): ~450 lines, 6 methods (80% reduction)
+- CoreMachine (Coordinator): approximately 450 lines, 6 methods (80% reduction)
 
-The difference? BaseController does everything. CoreMachine coordinates everything.
-
-Author: Robert and Geospatial Claude Legion
-Date: 30 SEP 2025
+The difference: BaseController does everything, CoreMachine coordinates everything.
 """
 
 from typing import Dict, Any, Optional
@@ -148,7 +145,7 @@ class CoreMachine:
         on_job_complete: Optional[callable] = None
     ):
         """
-        Initialize CoreMachine with EXPLICIT registries (no decorator magic!).
+        Initialize CoreMachine with EXPLICIT registries (no decorator magic).
 
         CRITICAL: Registries must be passed explicitly to avoid import timing issues.
         Previous decorator-based approach failed because modules weren't imported (10 SEP 2025).
@@ -161,7 +158,7 @@ class CoreMachine:
             on_job_complete: Optional callback(job_id, job_type, status, result) called when job completes/fails
                             Used by Platform layer for job orchestration and chaining (30 OCT 2025)
         """
-        # EXPLICIT REGISTRIES - No decorator magic!
+        # EXPLICIT REGISTRIES - No decorator magic.
         self.jobs_registry = all_jobs
         self.handlers_registry = all_handlers
 
@@ -182,7 +179,7 @@ class CoreMachine:
             "CoreMachine"
         )
 
-        self.logger.info(f"🤖 CoreMachine initialized - {len(all_jobs)} jobs, {len(all_handlers)} handlers registered")
+        self.logger.info(f"CoreMachine initialized - {len(all_jobs)} jobs, {len(all_handlers)} handlers registered")
         self.logger.debug(f"   Registered jobs: {list(all_jobs.keys())}")
         self.logger.debug(f"   Registered handlers: {list(all_handlers.keys())}")
         if on_job_complete:

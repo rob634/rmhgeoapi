@@ -64,8 +64,6 @@ Example Usage:
     conn.execute(query, params)
     ```
 
-Author: Robert and Geospatial Claude Legion
-Date: 14 OCT 2025
 """
 
 import re

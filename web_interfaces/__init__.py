@@ -37,8 +37,6 @@ Usage:
     def web_interface(req):
         return unified_interface_handler(req)
 
-Author: Robert and Geospatial Claude Legion
-Date: 14 NOV 2025
 """
 
 from typing import Dict, Type, Optional, List
@@ -63,7 +61,7 @@ class InterfaceRegistry:
             def render(self, request):
                 return self.wrap_html("Title", "<h1>Hello</h1>")
 
-        # Now /api/interface/myinterface works automatically!
+        # Now /api/interface/myinterface works automatically.
     """
 
     # Class-level storage for registered interfaces
@@ -297,6 +295,18 @@ try:
     logger.info("✅ Imported Docs interface module")
 except ImportError as e:
     logger.warning(f"⚠️ Could not import Docs interface: {e}")
+
+try:
+    from .tasks import interface as _tasks
+    logger.info("✅ Imported Tasks interface module")
+except ImportError as e:
+    logger.warning(f"⚠️ Could not import Tasks interface: {e}")
+
+try:
+    from .pipeline import interface as _pipeline
+    logger.info("✅ Imported Pipeline interface module")
+except ImportError as e:
+    logger.warning(f"⚠️ Could not import Pipeline interface: {e}")
 
 
 # Public API

@@ -22,7 +22,7 @@ State Manager - Database State Management with Advisory Locks
 
 Manages all database state operations including the critical "last task turns
 out the lights" pattern using PostgreSQL advisory locks. This component is
-ESSENTIAL for both Queue Storage and Service Bus to prevent race conditions.
+essential for both Queue Storage and Service Bus to prevent race conditions.
 
 Key Responsibilities:
 - Job state transitions (QUEUED → PROCESSING → COMPLETED/FAILED)
@@ -35,9 +35,6 @@ Critical Pattern:
 The "last task turns out the lights" pattern uses PostgreSQL advisory locks
 to atomically determine when all tasks in a stage are complete, preventing
 race conditions when multiple tasks complete simultaneously.
-
-Author: Robert and Geospatial Claude Legion
-Date: 26 SEP 2025
 """
 
 from datetime import datetime, timezone

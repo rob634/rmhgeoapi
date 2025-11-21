@@ -30,8 +30,6 @@ Endpoints:
     GET /api/admin/db/schemas/{schema_name}
     GET /api/admin/db/schemas/{schema_name}/tables
 
-Author: Robert and Geospatial Claude Legion
-Date: 03 NOV 2025
 """
 
 import azure.functions as func

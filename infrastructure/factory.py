@@ -33,8 +33,6 @@ Future Support:
 - Cosmos DB repositories
 - Redis cache repositories
 
-Author: Robert and Geospatial Claude Legion
-Date: 10 September 2025
 """
 
 # Imports at top for fast failure

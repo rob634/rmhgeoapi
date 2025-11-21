@@ -38,8 +38,6 @@ Special Features:
 - Pagination for large tables
 - Row count and size metrics
 
-Author: Robert and Geospatial Claude Legion
-Date: 03 NOV 2025
 """
 
 import azure.functions as func

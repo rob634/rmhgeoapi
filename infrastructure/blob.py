@@ -70,8 +70,6 @@ Usage:
     # Use without worrying about credentials
     data = blob_repo.read_blob('bronze', 'path/to/file.tif')
     
-Author: Robert and Geospatial Claude Legion
-Date: 9 December 2025
 """
 
 # ============================================================================

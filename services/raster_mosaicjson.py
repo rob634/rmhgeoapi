@@ -32,8 +32,6 @@ MosaicJSON Format:
 - COG URL references for each tile
 - Automatic zoom level calculation
 
-Author: Robert and Geospatial Claude Legion
-Date: 20 OCT 2025
 """
 
 from typing import List, Dict, Any

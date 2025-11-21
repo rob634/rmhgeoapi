@@ -54,8 +54,6 @@ Key Features:
 - New create_mosaicjson and create_stac_collection handlers
 - Compatible with vendor delivery discovery system
 
-Author: Robert and Geospatial Claude Legion
-Date: 20 OCT 2025
 """
 
 from typing import List, Dict, Any
@@ -796,7 +794,7 @@ class ProcessRasterCollectionWorkflow(JobBase):
         mosaicjson_tasks = [t for t in task_results if t.task_type == "create_mosaicjson"]
         mosaicjson_summary = {}
         if mosaicjson_tasks and mosaicjson_tasks[0].result_data:
-            # CRITICAL (11 NOV 2025): result_data IS the result dict already!
+            # CRITICAL (11 NOV 2025): result_data IS the result dict already.
             # CoreMachine stores raw handler return: {"success": True, "mosaicjson_blob": "...", ...}
             # DO NOT access .get("result") - same bug pattern as STAC fix (line 140 in stac_collection.py)
             mosaicjson_result = mosaicjson_tasks[0].result_data
@@ -826,7 +824,7 @@ class ProcessRasterCollectionWorkflow(JobBase):
         if stac_tasks and stac_tasks[0].result_data:
             # CRITICAL FIX (20 NOV 2025): result_data IS the result dict already (not wrapped in "result" key)
             # Same bug pattern as MosaicJSON fix on line 802 (11 NOV 2025)
-            # OLD BUG: stac_result = stac_tasks[0].result_data.get("result", {})  # Returns {} because no "result" key!
+            # OLD BUG: stac_result = stac_tasks[0].result_data.get("result", {})  # Returns {} because no "result" key.
             # CORRECT: result_data IS the result
             stac_result = stac_tasks[0].result_data
             collection_id = stac_result.get("collection_id", "cogs")

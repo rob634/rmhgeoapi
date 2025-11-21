@@ -64,8 +64,6 @@ Deployment:
     1. Copy vector_viewer/ folder to Function App
     2. Deploy: func azure functionapp publish <app-name>
 
-Author: Robert and Geospatial Claude Legion
-Date: 13 NOV 2025
 """
 
 from .service import VectorViewerService

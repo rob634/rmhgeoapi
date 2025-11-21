@@ -53,8 +53,6 @@ Status Checks:
 - Functions available
 - Sample data accessible
 
-Author: Robert and Geospatial Claude Legion
-Date: 4 OCT 2025
 Last Updated: 29 OCT 2025
 """
 

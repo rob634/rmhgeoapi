@@ -42,8 +42,6 @@ Two usage patterns:
 
 See core/contracts/__init__.py for full architecture explanation.
 
-Author: Robert and Geospatial Claude Legion
-Date: 1 OCT 2025 (Renamed from Task to TaskExecutor for clarity)
 """
 
 from abc import ABC, abstractmethod

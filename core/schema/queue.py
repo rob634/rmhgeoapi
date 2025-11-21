@@ -46,8 +46,6 @@ The "Task" conceptual entity is composed of:
 
 See core/contracts/__init__.py for full architecture explanation.
 
-Author: Robert and Geospatial Claude Legion
-Date: 1 OCT 2025 (Refactored to inherit from TaskData/JobData)
 """
 
 from datetime import datetime

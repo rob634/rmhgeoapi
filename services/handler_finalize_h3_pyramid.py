@@ -25,8 +25,6 @@ after H3 bootstrap workflow completes.
 
 Stage 7 (Finalization) of bootstrap_h3_land_grid_pyramid workflow.
 
-Author: Robert and Geospatial Claude Legion
-Date: 14 NOV 2025
 """
 
 from typing import Dict, Any, List

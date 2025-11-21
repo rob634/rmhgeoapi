@@ -458,7 +458,7 @@ def create_cog(params: dict) -> dict:
                     from util_logger import log_memory_checkpoint
                     log_memory_checkpoint(logger, "After upload (cleanup)")
 
-                    # No STEP 7 needed - MemoryFile context managers handle cleanup automatically!
+                    # No STEP 7 needed - MemoryFile context managers handle cleanup automatically.
 
         # Success result
         logger.info("🎉 COG creation pipeline completed successfully")
@@ -520,4 +520,4 @@ def create_cog(params: dict) -> dict:
             "traceback": traceback.format_exc()
         }
 
-    # No finally block needed - MemoryFile context managers handle all cleanup automatically!
+    # No finally block needed - MemoryFile context managers handle all cleanup automatically.

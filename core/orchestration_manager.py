@@ -30,9 +30,6 @@ This is much simpler than BaseController's orchestration because:
 1. No workflow definitions needed
 2. Optimized for batch creation
 3. Direct integration with Service Bus batching
-
-Author: Robert and Geospatial Claude Legion
-Date: 26 SEP 2025
 """
 
 from typing import Dict, Any, List, Optional, Tuple

@@ -28,8 +28,6 @@ Workflow:
     Stage 2 (THIS HANDLER) → Load GeoParquet → Insert to PostGIS
     Stage 3 (separate handler) → Create STAC record
 
-Author: Robert and Geospatial Claude Legion
-Date: 9 NOV 2025
 """
 
 import time

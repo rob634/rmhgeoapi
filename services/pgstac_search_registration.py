@@ -37,8 +37,6 @@ Why This Pattern:
 - ETL owns all pgSTAC writes (collections, items, searches)
 - Atomic operations during ingestion workflow
 
-Author: Robert and Geospatial Claude Legion
-Date: 17 NOV 2025
 """
 
 import json
@@ -66,7 +64,7 @@ class PgSTACSearchRegistration:
     - ETL owns all pgSTAC writes (collections, items, searches)
     - Atomic operations during ingestion workflow
 
-    Author: Robert and Geospatial Claude Legion
+    
     Date: 17 NOV 2025
     """
 

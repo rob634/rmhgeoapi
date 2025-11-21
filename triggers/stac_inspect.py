@@ -37,8 +37,6 @@ Key Features:
 - Health monitoring (status, counts, issues detection)
 - Performance-friendly queries (optimized for read-only access)
 
-Author: Robert and Geospatial Claude Legion
-Date: 2 NOV 2025
 """
 
 import azure.functions as func

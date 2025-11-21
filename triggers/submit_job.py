@@ -125,8 +125,6 @@ Error Responses:
 - 404: Unsupported job_type (not in ALL_JOBS registry)
 - 500: Internal server error during job creation or queue submission
 
-Author: Robert and Geospatial Claude Legion
-Date: Original implementation 2025
 Last Updated: 29 OCT 2025
 """
 

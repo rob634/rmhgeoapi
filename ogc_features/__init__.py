@@ -57,8 +57,6 @@ Deployment:
     2. Set environment variables (POSTGIS_HOST, etc.)
     3. Deploy: func azure functionapp publish <app-name>
 
-Author: Robert and Geospatial Claude Legion
-Date: 29 OCT 2025
 """
 
 from .config import OGCFeaturesConfig

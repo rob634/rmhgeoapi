@@ -8,6 +8,7 @@
 .git*
 .vscode*
 .idea/
+.DS_Store
 
 # Azure local storage emulator
 __azurite_db*__.json
@@ -63,7 +64,9 @@ archive_epoch3_controllers/
 # LOCAL-ONLY FILES (development, testing, utilities)
 # ============================================================================
 
-# Test files - now all moved to local/ folder
+# Test files
+test_*.py
+*_test.py
 
 # Local utility scripts
 local_scripts/
@@ -102,6 +105,11 @@ NOTICE
 *.csv
 *.xlsx
 *.json.example
+*.yaml
+*.yml
+
+# OpenAPI documentation (not needed at runtime)
+openapi/
 
 # Claude-specific files
 .claude*

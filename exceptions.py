@@ -27,8 +27,6 @@ Distinguishes between:
 This separation ensures bugs are found quickly while the system
 remains robust to expected failures.
 
-Author: Robert and Geospatial Claude Legion
-Date: 27 SEP 2025
 """
 
 

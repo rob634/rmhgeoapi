@@ -40,8 +40,6 @@ Dynamic Orchestration Pattern:
     Stage 2: N parallel tasks process individual files
     Stage 3: Optional aggregation of results
 
-Author: Robert and Geospatial Claude Legion
-Date: 9 December 2025
 """
 
 # ============================================================================

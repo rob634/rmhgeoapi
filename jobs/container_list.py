@@ -26,8 +26,6 @@ This file declares a two-stage job that:
 
 Results stored in task.result_data JSONB fields for SQL querying.
 
-Author: Robert and Geospatial Claude Legion
-Date: 4 OCT 2025
 Last Updated: 29 OCT 2025
 """
 

@@ -732,7 +732,7 @@ class PostgreSQLRepository(BaseRepository):
                     elif fetch == 'many':
                         result = cursor.fetchmany()
                     
-                    # ALWAYS COMMIT - THE CRITICAL FIX!
+                    # ALWAYS COMMIT - THE CRITICAL FIX.
                     # This ensures PostgreSQL functions that modify data commit their changes
                     try:
                         conn.commit()

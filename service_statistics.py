@@ -30,8 +30,6 @@ This solves the "VRT seamless rendering" problem for MosaicJSON:
 - VRT: QGIS samples on-demand, caches in .qgs project file
 - Our approach: Pre-compute in Stage 4, store in STAC metadata
 
-Author: Robert and Geospatial Claude Legion
-Date: 23 OCT 2025
 """
 
 import numpy as np

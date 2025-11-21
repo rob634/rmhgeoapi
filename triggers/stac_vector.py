@@ -22,8 +22,6 @@ STAC Vector Cataloging Trigger
 
 HTTP endpoint to catalog PostGIS vector tables in STAC.
 
-Author: Robert and Geospatial Claude Legion
-Date: 7 OCT 2025
 Last Updated: 29 OCT 2025
 """
 

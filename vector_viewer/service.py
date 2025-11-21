@@ -25,8 +25,6 @@ Responsible for:
 2. Generating self-contained HTML viewer pages
 3. Embedding collection info and feature query endpoints
 
-Author: Robert and Geospatial Claude Legion
-Date: 13 NOV 2025
 """
 
 import json
@@ -368,6 +366,14 @@ class VectorViewerService:
             </div>
         </div>
 
+        <div class="metadata-row">
+            <span class="metadata-label">Simplify (m):</span>
+            <input type="number" class="qa-input" id="simplify-input"
+                   min="0" step="0.1" value="0"
+                   placeholder="0 = no simplification"
+                   style="margin: 0; padding: 6px; font-size: 12px;">
+        </div>
+
         <div class="button-row">
             <button class="load-button-small" onclick="loadFeatures(100)">100</button>
             <button class="load-button-small" onclick="loadFeatures(500)">500</button>
@@ -414,11 +420,17 @@ class VectorViewerService:
         // Load features from OGC Features API
         async function loadFeatures(limit) {{
             const statusDiv = document.getElementById('status');
+            const simplify = document.getElementById('simplify-input').value;
             const limitText = limit >= 10000 ? 'all' : limit;
-            statusDiv.textContent = `Loading ${{limitText}} features...`;
+            const simplifyNote = (simplify && parseFloat(simplify) > 0) ? ` (simplified: ${{simplify}}m)` : '';
+            statusDiv.textContent = `Loading ${{limitText}} features${{simplifyNote}}...`;
 
             try {{
-                const url = `${{ITEMS_URL}}?limit=${{limit}}`;
+                // Build URL with optional simplification
+                let url = `${{ITEMS_URL}}?limit=${{limit}}`;
+                if (simplify && parseFloat(simplify) > 0) {{
+                    url += `&simplify=${{simplify}}`;
+                }}
                 const response = await fetch(url);
                 if (!response.ok) {{
                     throw new Error(`HTTP ${{response.status}}: ${{response.statusText}}`);
@@ -427,7 +439,7 @@ class VectorViewerService:
                 const data = await response.json();
                 const features = data.features || [];
 
-                statusDiv.textContent = `Loaded ${{features.length}} features`;
+                statusDiv.textContent = `Loaded ${{features.length}} features${{simplifyNote}}`;
 
                 // Remove existing layer
                 if (featureLayer) {{

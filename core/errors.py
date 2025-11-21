@@ -36,12 +36,9 @@ Usage:
     return {
         "success": False,
         "error": ErrorCode.FILE_NOT_FOUND,
-        "message": "File 'test.tif' not found...",
+        "message": "File 'test.tif' not found",
         "retryable": is_retryable(ErrorCode.FILE_NOT_FOUND)
     }
-
-Author: Robert and Geospatial Claude Legion
-Date: 11 NOV 2025 (Phase 3 Implementation)
 """
 
 from enum import Enum

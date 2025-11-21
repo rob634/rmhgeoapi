@@ -22,8 +22,6 @@ STAC Initialization Trigger - Create Production Collections
 
 HTTP endpoint to initialize STAC production collections.
 
-Author: Robert and Geospatial Claude Legion
-Date: 5 OCT 2025
 Last Updated: 29 OCT 2025
 """
 

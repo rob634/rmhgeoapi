@@ -21,8 +21,6 @@ Strategy: DRY - Leverage PostGIS for spatial operations
 - stac-pydantic: Validation and type safety
 - Our code: Table metadata, custom properties, asset links
 
-Author: Robert and Geospatial Claude Legion
-Date: 7 OCT 2025
 """
 
 from typing import Dict, Any, Optional, List

@@ -40,8 +40,6 @@ Strategy:
 - Searches are dynamic (always reflect current collection contents)
 - Search IDs are stored in collection metadata for reuse
 
-Author: Robert and Geospatial Claude Legion
-Date: 12 NOV 2025
 """
 
 from typing import Dict, Any, Optional
@@ -70,7 +68,7 @@ class TiTilerSearchService:
     - pgSTAC searches use OAuth throughout (Managed Identity only)
     - Searches are dynamic (always reflect current collection state)
 
-    Author: Robert and Geospatial Claude Legion
+    
     Date: 12 NOV 2025
     """
 

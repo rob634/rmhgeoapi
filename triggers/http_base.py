@@ -75,8 +75,6 @@ Example:
             return {"status": "success", "job": job}
     ```
 
-Author: Robert and Geospatial Claude Legion
-Date: Original implementation 2025
 Last Updated: 29 OCT 2025
 """
 

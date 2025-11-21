@@ -4,8 +4,6 @@ STAC Vector Cataloging Handlers
 Handlers for extracting STAC metadata from PostGIS vector tables.
 Follows the same pattern as raster STAC cataloging.
 
-Author: Robert and Geospatial Claude Legion
-Date: 8 OCT 2025
 Updated: 18 OCT 2025 - Added create_vector_stac handler (Priority 0A)
 """
 

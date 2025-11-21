@@ -41,8 +41,6 @@ Key Innovation:
 - Eliminates intermediate files
 - Type-specific optimization (JPEG for RGB, WebP for RGBA, LERC for DEM)
 
-Author: Robert and Geospatial Claude Legion
-Date: 9 OCT 2025
 """
 
 from typing import List, Dict, Any

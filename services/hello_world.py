@@ -27,8 +27,6 @@ Each handler:
 - Returns result dict
 - Framework handles everything else (queuing, state, completion)
 
-Author: Robert and Geospatial Claude Legion
-Date: 30 SEP 2025
 """
 
 from typing import Dict, Any

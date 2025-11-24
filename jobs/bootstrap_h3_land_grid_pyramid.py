@@ -1,10 +1,17 @@
 # ============================================================================
+# 🚧 UNDER DEVELOPMENT - DO NOT USE IN PRODUCTION
+# ============================================================================
+# PURPOSE: H3 land grid pyramid generation (experimental)
+# STATUS: Experimental - H3 grid system in development
+# ============================================================================
+
+# ============================================================================
 # CLAUDE CONTEXT - JOB DEFINITION
 # ============================================================================
 # EPOCH: 4 - ACTIVE ✅
 # STATUS: Job - H3 Land Grid Pyramid Bootstrap (3-stage cascade workflow)
 # PURPOSE: Generate complete H3 land-filtered grid pyramid from resolution 2-7
-# LAST_REVIEWED: 15 NOV 2025
+# LAST_REVIEWED: 22 NOV 2025
 # EXPORTS: BootstrapH3LandGridPyramidJob (JobBase + JobBaseMixin implementation)
 # INTERFACES: JobBase (2 methods), JobBaseMixin (provides 4 methods)
 # PYDANTIC_MODELS: Uses declarative parameters_schema

@@ -127,6 +127,35 @@ class StacVectorService:
         if additional_properties:
             properties.update(additional_properties)
 
+        # Add ISO3 country attribution (22 NOV 2025)
+        # Uses PostGIS spatial query against geo.system_admin0_boundaries
+        try:
+            logger.debug(f"Adding ISO3 country attribution for {schema}.{table_name}...")
+            country_info = self._get_countries_for_bbox(bbox)
+
+            if country_info['available']:
+                if country_info['primary_iso3']:
+                    properties['geo:primary_iso3'] = country_info['primary_iso3']
+                    logger.debug(f"   Set geo:primary_iso3={country_info['primary_iso3']}")
+
+                if country_info['iso3_codes']:
+                    properties['geo:iso3'] = country_info['iso3_codes']
+                    logger.debug(f"   Set geo:iso3={country_info['iso3_codes']}")
+
+                if country_info['countries']:
+                    properties['geo:countries'] = country_info['countries']
+                    logger.debug(f"   Set geo:countries={country_info['countries']}")
+
+                if country_info['attribution_method']:
+                    properties['geo:attribution_method'] = country_info['attribution_method']
+
+                logger.debug(f"Country attribution added ({country_info['attribution_method']})")
+            else:
+                logger.debug("Country attribution unavailable (admin0 table not ready)")
+        except Exception as e:
+            # Non-fatal: Log warning but continue - STAC item can exist without country codes
+            logger.warning(f"Country attribution failed (non-fatal): {e}")
+
         # Build asset with postgis:// link
         asset_href = f"postgis://{self.config.postgis_host}/{self.config.postgis_database}/{schema}.{table_name}"
 
@@ -292,3 +321,180 @@ class StacVectorService:
                     'geometry_column': geom_column,
                     'created_at': created_at
                 }
+
+    def _get_countries_for_bbox(self, bbox: list) -> Dict[str, Any]:
+        """
+        Get ISO3 country codes for geometries intersecting the bounding box.
+
+        Uses PostGIS spatial query against geo.system_admin0_boundaries table
+        configured in config.h3.system_admin0_table.
+
+        Args:
+            bbox: Bounding box [minx, miny, maxx, maxy] in EPSG:4326
+
+        Returns:
+            Dict with:
+                - iso3_codes: List of ISO3 codes for intersecting countries
+                - primary_iso3: ISO3 code for country containing bbox centroid
+                - countries: List of country names
+                - attribution_method: 'centroid' or 'first_intersect'
+                - available: bool indicating if attribution was successful
+
+        Note:
+            Returns available=False if admin0 table is not populated or query fails.
+            This is a graceful degradation - STAC items can be created without country codes.
+        """
+        import traceback
+        from infrastructure.postgresql import PostgreSQLRepository
+
+        if not bbox or len(bbox) != 4:
+            logger.warning(f"Invalid bbox for country attribution: {bbox}")
+            return {
+                'iso3_codes': [],
+                'primary_iso3': None,
+                'countries': [],
+                'attribution_method': None,
+                'available': False
+            }
+
+        try:
+            admin0_table = self.config.h3.system_admin0_table  # "geo.system_admin0_boundaries"
+
+            # Parse schema.table
+            if '.' in admin0_table:
+                schema, table = admin0_table.split('.', 1)
+            else:
+                schema, table = 'geo', admin0_table
+
+            repo = PostgreSQLRepository()
+
+            with repo._get_connection() as conn:
+                with conn.cursor() as cur:
+                    # First check if table exists
+                    cur.execute("""
+                        SELECT EXISTS (
+                            SELECT 1 FROM information_schema.tables
+                            WHERE table_schema = %s AND table_name = %s
+                        ) as table_exists
+                    """, (schema, table))
+                    if not cur.fetchone()['table_exists']:
+                        logger.debug(f"Admin0 table {admin0_table} not found - skipping country attribution")
+                        return {
+                            'iso3_codes': [],
+                            'primary_iso3': None,
+                            'countries': [],
+                            'attribution_method': None,
+                            'available': False
+                        }
+
+                    # Check for required columns
+                    cur.execute("""
+                        SELECT column_name FROM information_schema.columns
+                        WHERE table_schema = %s AND table_name = %s
+                        AND column_name IN ('iso3', 'name_en', 'geom', 'geometry')
+                    """, (schema, table))
+                    columns = [row['column_name'] for row in cur.fetchall()]
+
+                    if 'iso3' not in columns:
+                        logger.warning(f"Admin0 table missing 'iso3' column - skipping country attribution")
+                        return {
+                            'iso3_codes': [],
+                            'primary_iso3': None,
+                            'countries': [],
+                            'attribution_method': None,
+                            'available': False
+                        }
+
+                    # Determine geometry column name
+                    geom_col = 'geom' if 'geom' in columns else 'geometry' if 'geometry' in columns else None
+                    if not geom_col:
+                        logger.warning(f"Admin0 table missing geometry column - skipping country attribution")
+                        return {
+                            'iso3_codes': [],
+                            'primary_iso3': None,
+                            'countries': [],
+                            'attribution_method': None,
+                            'available': False
+                        }
+
+                    # Determine name column
+                    name_col = 'name_en' if 'name_en' in columns else 'name' if 'name' in columns else None
+
+                    minx, miny, maxx, maxy = bbox
+
+                    # Query 1: Get all intersecting countries
+                    name_select = f", {name_col}" if name_col else ""
+                    intersect_query = f"""
+                        SELECT iso3{name_select}
+                        FROM {schema}.{table}
+                        WHERE ST_Intersects(
+                            {geom_col},
+                            ST_MakeEnvelope(%s, %s, %s, %s, 4326)
+                        )
+                        ORDER BY iso3
+                    """
+                    cur.execute(intersect_query, (minx, miny, maxx, maxy))
+                    results = cur.fetchall()
+
+                    if not results:
+                        logger.debug(f"No countries found for bbox {bbox} - may be in ocean")
+                        return {
+                            'iso3_codes': [],
+                            'primary_iso3': None,
+                            'countries': [],
+                            'attribution_method': None,
+                            'available': True
+                        }
+
+                    iso3_codes = [row['iso3'] for row in results if row['iso3']]
+                    countries = [row.get(name_col, '') for row in results if name_col and row.get(name_col)] if name_col else []
+
+                    # Query 2: Get primary country (centroid method)
+                    centroid_x = (minx + maxx) / 2
+                    centroid_y = (miny + maxy) / 2
+
+                    centroid_query = f"""
+                        SELECT iso3
+                        FROM {schema}.{table}
+                        WHERE ST_Contains(
+                            {geom_col},
+                            ST_SetSRID(ST_MakePoint(%s, %s), 4326)
+                        )
+                        LIMIT 1
+                    """
+                    cur.execute(centroid_query, (centroid_x, centroid_y))
+                    centroid_result = cur.fetchone()
+
+                    primary_iso3 = None
+                    attribution_method = None
+
+                    if centroid_result and centroid_result['iso3']:
+                        primary_iso3 = centroid_result['iso3']
+                        attribution_method = 'centroid'
+                    elif iso3_codes:
+                        primary_iso3 = iso3_codes[0]
+                        attribution_method = 'first_intersect'
+
+                    logger.debug(
+                        f"Country attribution: {len(iso3_codes)} countries, "
+                        f"primary={primary_iso3} ({attribution_method})"
+                    )
+
+                    return {
+                        'iso3_codes': iso3_codes,
+                        'primary_iso3': primary_iso3,
+                        'countries': countries,
+                        'attribution_method': attribution_method,
+                        'available': True
+                    }
+
+        except Exception as e:
+            logger.warning(f"Country attribution failed (non-fatal): {e}")
+            logger.debug(f"Traceback:\n{traceback.format_exc()}")
+            return {
+                'iso3_codes': [],
+                'primary_iso3': None,
+                'countries': [],
+                'attribution_method': None,
+                'available': False
+            }

@@ -1,10 +1,17 @@
 # ============================================================================
+# 🔧 TESTING INFRASTRUCTURE - Not for Production Use
+# ============================================================================
+# PURPOSE: Diamond pattern (fan-out/fan-in) testing tool
+# STATUS: Test only - Validates CoreMachine aggregation patterns
+# ============================================================================
+
+# ============================================================================
 # CLAUDE CONTEXT - JOB DEFINITION (TEST/DIAGNOSTIC TOOL)
 # ============================================================================
 # EPOCH: 4 - ACTIVE ✅ (DIAGNOSTIC/TEST ONLY)
 # STATUS: Test/Diagnostic - Three-stage diamond pattern (1→N→1) for container analysis
 # PURPOSE: TEST TOOL - Demonstrates fan-in aggregation pattern, validates CoreMachine fan-in logic
-# LAST_REVIEWED: 3 NOV 2025
+# LAST_REVIEWED: 22 NOV 2025
 # EXPORTS: ListContainerContentsDiamondWorkflow (JobBase implementation)
 # INTERFACES: JobBase (implements 6-method contract)
 # PYDANTIC_MODELS: None (uses dict-based validation)

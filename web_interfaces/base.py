@@ -284,9 +284,13 @@ class BaseInterface(ABC):
                     box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin-bottom: 20px;
                     display: flex; justify-content: space-between; align-items: center;
                     border-bottom: 3px solid #0071BC;">
-            <div style="font-size: 20px; font-weight: 700; color: #053657;">
+            <a href="/api/interface/home"
+               style="font-size: 20px; font-weight: 700; color: #053657;
+                      text-decoration: none; transition: color 0.2s;"
+               onmouseover="this.style.color='#0071BC'"
+               onmouseout="this.style.color='#053657'">
                 🛰️ Geospatial API
-            </div>
+            </a>
             <div style="display: flex; gap: 20px;">
                 <a href="/api/interface/stac"
                    style="color: #0071BC; text-decoration: none; font-weight: 600;
@@ -302,9 +306,13 @@ class BaseInterface(ABC):
                    onmouseout="this.style.color='#0071BC'">
                     OGC Features
                 </a>
-                <span style="color: #626F86; font-weight: 600; cursor: not-allowed; opacity: 0.6;">
-                    Staging Container
-                </span>
+                <a href="/api/interface/pipeline"
+                   style="color: #0071BC; text-decoration: none; font-weight: 600;
+                          transition: color 0.2s;"
+                   onmouseover="this.style.color='#00A3DA'"
+                   onmouseout="this.style.color='#0071BC'">
+                    Pipeline
+                </a>
                 <a href="/api/interface/jobs"
                    style="color: #0071BC; text-decoration: none; font-weight: 600;
                           transition: color 0.2s;"

@@ -1,133 +1,92 @@
 # ============================================================================
-# CLAUDE CONTEXT - PLATFORM API REQUEST HTTP TRIGGER
+# CLAUDE CONTEXT - PLATFORM API REQUEST HTTP TRIGGER (THIN TRACKING)
 # ============================================================================
 # EPOCH: 4 - ACTIVE ✅
-# STATUS: HTTP Trigger - Platform Service Layer orchestration endpoint
-# PURPOSE: Handle external application requests (DDH) and orchestrate CoreMachine jobs
-# LAST_REVIEWED: 29 OCT 2025
+# STATUS: HTTP Trigger - Platform Anti-Corruption Layer (simplified 22 NOV 2025)
+# PURPOSE: Translate DDH requests to CoreMachine jobs (1:1 mapping, no orchestration)
+# LAST_REVIEWED: 22 NOV 2025
 # EXPORTS: platform_request_submit (HTTP trigger function)
 # INTERFACES: None
-# PYDANTIC_MODELS: PlatformRequest, ApiRequest (renamed from PlatformRecord)
-# DEPENDENCIES: azure-functions, psycopg, azure-servicebus
+# PYDANTIC_MODELS: PlatformRequest, ApiRequest
+# DEPENDENCIES: azure-functions, psycopg, azure-servicebus, config
 # SOURCE: HTTP requests from external applications (DDH)
-# SCOPE: Platform-level orchestration above CoreMachine
-# VALIDATION: Pydantic models for request validation
-# PATTERNS: Repository, parallel to job submission trigger
+# SCOPE: Platform layer - Anti-Corruption Layer between DDH and CoreMachine
+# VALIDATION: Pydantic models + PlatformConfig validation
+# PATTERNS: Anti-Corruption Layer, Thin Tracking, Parameter Translation
 # ENTRY_POINTS: POST /api/platform/submit
 # INDEX:
-#   - Imports: Line 20
-#   - Models: Line 40
-#   - Repository: Line 100
-#   - HTTP Handler: Line 250
-#   - Platform Orchestrator: Line 350
+#   - Imports: Line 35
+#   - HTTP Handler: Line 80
+#   - Parameter Translation: Line 180
 # ============================================================================
 
 """
-Platform Request HTTP Trigger
+Platform Request HTTP Trigger - Thin Tracking Pattern (22 NOV 2025)
 
-Provides application-level orchestration above CoreMachine.
-Accepts requests from external applications (DDH) and creates
-appropriate CoreMachine jobs to fulfill them.
+SIMPLIFIED ARCHITECTURE:
+    Platform is an Anti-Corruption Layer (ACL) that:
+    1. Accepts DDH requests (dataset_id, resource_id, version_id, etc.)
+    2. Translates DDH params → CoreMachine job params
+    3. Creates ONE CoreMachine job per request (1:1 mapping)
+    4. Stores thin tracking record (request_id → job_id)
+    5. Returns request_id for DDH status polling
 
-This is the "turtle above CoreMachine" in our fractal pattern.
+    NO orchestration logic - CoreMachine handles job stages/tasks.
+    NO job chaining - each Platform request = one CoreMachine job.
+    NO callbacks - status delegated to CoreMachine.
+
+Supported Workflows (CREATE operation):
+    - VECTOR: ingest_vector (3-stage: prepare → upload → finalize)
+    - RASTER (single): process_raster (3-stage: validate → COG → STAC)
+    - RASTER (collection): process_raster_collection (4-stage: validate → COGs → MosaicJSON → STAC)
 """
 
 import json
 import logging
-import hashlib
 import traceback
 from datetime import datetime
-from typing import Dict, Any, Optional, List
-from enum import Enum
+from typing import Dict, Any, Optional
 
 import azure.functions as func
-from pydantic import BaseModel, Field, field_validator
-from azure.servicebus import ServiceBusClient, ServiceBusMessage
 
-# Configure logging using LoggerFactory (Application Insights integration)
+# Configure logging
 from util_logger import LoggerFactory, ComponentType
 logger = LoggerFactory.create_logger(ComponentType.TRIGGER, "trigger_platform")
 
-# Import config with error handling
+# Import config
 try:
-    from config import get_config
+    from config import get_config, generate_platform_request_id
     config = get_config()
-    logger.info("✅ Platform trigger: config loaded successfully")
-except ImportError as e:
-    logger.error(f"❌ CRITICAL: Failed to import get_config from config module")
-    logger.error(f"   ImportError: {e}")
-    logger.error(f"   Traceback: {traceback.format_exc()}")
-    raise
+    logger.info("Platform trigger: config loaded successfully")
 except Exception as e:
-    logger.error(f"❌ CRITICAL: Failed to initialize config")
-    logger.error(f"   Error: {e}")
-    logger.error(f"   Traceback: {traceback.format_exc()}")
+    logger.error(f"CRITICAL: Failed to load config: {e}")
     raise
 
-# Import infrastructure with error handling
+# Import infrastructure
 try:
     from infrastructure import PlatformRepository, JobRepository
-    logger.info("✅ Platform trigger: infrastructure modules loaded successfully")
-except ImportError as e:
-    logger.error(f"❌ CRITICAL: Failed to import infrastructure modules")
-    logger.error(f"   ImportError: {e}")
-    logger.error(f"   Traceback: {traceback.format_exc()}")
+    from infrastructure.service_bus import ServiceBusRepository
+    logger.info("Platform trigger: infrastructure modules loaded")
+except Exception as e:
+    logger.error(f"CRITICAL: Failed to import infrastructure: {e}")
     raise
 
-# Import core with error handling
+# Import core
 try:
-    from core.machine import CoreMachine
     from core.models.job import JobRecord
     from core.models.enums import JobStatus
-    # Import Platform models from core (Infrastructure-as-Code pattern - 29 OCT 2025)
-    # Updated 1 NOV 2025: Add OperationType for DDH integration
     from core.models import (
         ApiRequest,
-        PlatformRequestStatus,
         DataType,
         OperationType,
         PlatformRequest
     )
-    logger.info("✅ Platform trigger: core modules loaded successfully")
-except ImportError as e:
-    logger.error(f"❌ CRITICAL: Failed to import core modules")
-    logger.error(f"   ImportError: {e}")
-    logger.error(f"   Traceback: {traceback.format_exc()}")
-    logger.error(f"   NOTE: JobRecord should be imported from core.models.job, not core.models")
+    from core.schema.queue import JobQueueMessage
+    logger.info("Platform trigger: core modules loaded")
+except Exception as e:
+    logger.error(f"CRITICAL: Failed to import core: {e}")
     raise
 
-# ============================================================================
-# PLATFORM MODELS MOVED TO core/models/platform.py (29 OCT 2025)
-# ============================================================================
-# Platform models now use Infrastructure-as-Code pattern.
-# Models imported above from core.models:
-#   - ApiRequest (database schema definition, renamed from PlatformRecord)
-#   - PlatformRequestStatus (enum)
-#   - DataType (enum)
-#   - PlatformRequest (DTO for HTTP requests)
-#
-# Tables renamed (29 OCT 2025):
-#   - platform_requests → api_requests (client-facing layer)
-#   - platform_request_jobs → orchestration_jobs (execution layer)
-#
-# These models are the SINGLE SOURCE OF TRUTH for database schema.
-# PostgreSQL DDL is auto-generated from Pydantic field definitions.
-#
-# Benefits:
-#   - Zero drift between Python models and database schema
-#   - Consistent with JobRecord/TaskRecord pattern
-#   - Update model → schema updates automatically
-#
-# Reference: PLATFORM_SCHEMA_COMPARISON.md
-# ============================================================================
-
-# ============================================================================
-# REPOSITORY MOVED TO infrastructure/platform.py (29 OCT 2025)
-# ============================================================================
-# PlatformRepository class has been moved to infrastructure/platform.py
-# Now uses SQL composition pattern for injection safety.
-# Imported above via: from infrastructure import PlatformRepository
-# ============================================================================
 
 # ============================================================================
 # HTTP HANDLER
@@ -135,719 +94,410 @@ except ImportError as e:
 
 async def platform_request_submit(req: func.HttpRequest) -> func.HttpResponse:
     """
-    HTTP trigger for platform request submission.
+    HTTP trigger for Platform request submission.
 
     POST /api/platform/submit
 
-    Body:
+    Accepts DDH request format and creates appropriate CoreMachine job.
+    Returns request_id for status polling via /api/platform/status/{request_id}
+
+    Request Body (DDH Format):
     {
-        "dataset_id": "landsat-8",
-        "resource_id": "LC08_L1TP_044034_20210622",
+        "dataset_id": "aerial-imagery-2024",
+        "resource_id": "site-alpha",
         "version_id": "v1.0",
-        "data_type": "raster",
-        "source_location": "https://rmhazuregeo.blob.core.windows.net/bronze/...",
-        "parameters": {...},
-        "client_id": "ddh"
+        "operation": "CREATE",
+        "container_name": "bronze-rasters",
+        "file_name": "aerial-alpha.tif",
+        "service_name": "Aerial Imagery Site Alpha",
+        "access_level": "OUO"
+    }
+
+    Response:
+    {
+        "success": true,
+        "request_id": "a3f2c1b8e9d7f6a5...",
+        "job_id": "abc123def456...",
+        "job_type": "process_raster",
+        "monitor_url": "/api/platform/status/a3f2c1b8e9d7f6a5..."
     }
     """
     logger.info("Platform request submission endpoint called")
 
     try:
-        # Parse request body
+        # Parse and validate request
         req_body = req.get_json()
-
-        # Validate with Pydantic
         platform_req = PlatformRequest(**req_body)
 
-        # Generate deterministic request ID
-        request_id = generate_request_id(
+        # Generate deterministic request ID (idempotent)
+        request_id = generate_platform_request_id(
             platform_req.dataset_id,
             platform_req.resource_id,
             platform_req.version_id
         )
 
-        # Create platform record with DDH metadata (updated 1 NOV 2025)
-        platform_record = ApiRequest(
+        logger.info(f"Processing Platform request: {request_id[:16]}...")
+        logger.info(f"  Dataset: {platform_req.dataset_id}")
+        logger.info(f"  Resource: {platform_req.resource_id}")
+        logger.info(f"  Version: {platform_req.version_id}")
+        logger.info(f"  Data type: {platform_req.data_type.value}")
+        logger.info(f"  Operation: {platform_req.operation.value}")
+
+        # Check for existing request (idempotent)
+        platform_repo = PlatformRepository()
+        existing = platform_repo.get_request(request_id)
+        if existing:
+            logger.info(f"Request already exists: {request_id[:16]} → job {existing.job_id[:16]}")
+            return func.HttpResponse(
+                json.dumps({
+                    "success": True,
+                    "request_id": request_id,
+                    "job_id": existing.job_id,
+                    "message": "Request already submitted (idempotent)",
+                    "monitor_url": f"/api/platform/status/{request_id}"
+                }),
+                status_code=200,
+                headers={"Content-Type": "application/json"}
+            )
+
+        # Translate DDH request to CoreMachine job parameters
+        job_type, job_params = _translate_to_coremachine(platform_req, config)
+
+        logger.info(f"  Translated to job_type: {job_type}")
+
+        # Create CoreMachine job
+        job_id = await _create_and_submit_job(job_type, job_params, request_id)
+
+        if not job_id:
+            raise RuntimeError("Failed to create CoreMachine job")
+
+        # Store thin tracking record (request_id → job_id)
+        api_request = ApiRequest(
             request_id=request_id,
             dataset_id=platform_req.dataset_id,
             resource_id=platform_req.resource_id,
             version_id=platform_req.version_id,
-            data_type=platform_req.data_type.value,  # Computed from file extension
-            status=PlatformRequestStatus.PENDING,
-            parameters={
-                'operation': platform_req.operation.value,
-                'container_name': platform_req.container_name,
-                'file_name': platform_req.file_name,
-                'processing_options': platform_req.processing_options
-            },
-            metadata={
-                'service_name': platform_req.service_name,
-                'stac_item_id': platform_req.stac_item_id,  # Computed from service_name
-                'access_level': platform_req.access_level,
-                'description': platform_req.description,
-                'tags': platform_req.tags,
-                'client_id': platform_req.client_id,
-                'source_location': platform_req.source_location,  # Computed from container + file
-                'submission_time': datetime.utcnow().isoformat()
-            }
+            job_id=job_id,
+            data_type=platform_req.data_type.value
         )
+        platform_repo.create_request(api_request)
 
-        # Store in database
-        repo = PlatformRepository()
-        stored_record = repo.create_request(platform_record)
+        logger.info(f"Platform request submitted: {request_id[:16]} → job {job_id[:16]}")
 
-        # Create platform orchestrator
-        orchestrator = PlatformOrchestrator()
-
-        # Process the request (creates CoreMachine jobs)
-        jobs_created = await orchestrator.process_platform_request(stored_record)
-
-        # Return response
         return func.HttpResponse(
             json.dumps({
                 "success": True,
                 "request_id": request_id,
-                "status": stored_record.status.value if isinstance(stored_record.status, Enum) else stored_record.status,
-                "jobs_created": jobs_created,
-                "message": f"Platform request submitted. {len(jobs_created)} jobs created.",
+                "job_id": job_id,
+                "job_type": job_type,
+                "message": f"Platform request submitted. CoreMachine job created.",
                 "monitor_url": f"/api/platform/status/{request_id}"
             }),
-            status_code=200 if stored_record.status == PlatformRequestStatus.PENDING else 202,
+            status_code=202,
+            headers={"Content-Type": "application/json"}
+        )
+
+    except ValueError as e:
+        logger.warning(f"Validation error: {e}")
+        return func.HttpResponse(
+            json.dumps({
+                "success": False,
+                "error": str(e),
+                "error_type": "ValidationError"
+            }),
+            status_code=400,
+            headers={"Content-Type": "application/json"}
+        )
+
+    except NotImplementedError as e:
+        logger.warning(f"Not implemented: {e}")
+        return func.HttpResponse(
+            json.dumps({
+                "success": False,
+                "error": str(e),
+                "error_type": "NotImplemented"
+            }),
+            status_code=501,
             headers={"Content-Type": "application/json"}
         )
 
     except Exception as e:
-        logger.error(f"Platform request submission failed: {e}", exc_info=True)
+        logger.error(f"Platform request failed: {e}", exc_info=True)
         return func.HttpResponse(
             json.dumps({
                 "success": False,
                 "error": str(e),
                 "error_type": type(e).__name__
             }),
-            status_code=400,
+            status_code=500,
             headers={"Content-Type": "application/json"}
         )
 
+
 # ============================================================================
-# PLATFORM ORCHESTRATOR
+# PARAMETER TRANSLATION (DDH → CoreMachine)
 # ============================================================================
 
-class PlatformOrchestrator:
+def _translate_to_coremachine(
+    request: PlatformRequest,
+    cfg
+) -> tuple[str, Dict[str, Any]]:
     """
-    Orchestrates platform requests by creating appropriate CoreMachine jobs.
-    This is the "turtle above CoreMachine" - it doesn't execute work itself,
-    but creates jobs for CoreMachine to handle.
+    Translate DDH PlatformRequest to CoreMachine job_type + parameters.
+
+    This is the core of the Anti-Corruption Layer - it isolates DDH API
+    from CoreMachine internals. If DDH changes their API, we update this
+    function, not CoreMachine jobs.
+
+    Args:
+        request: PlatformRequest from DDH
+        cfg: AppConfig instance
+
+    Returns:
+        Tuple of (job_type, job_parameters)
+
+    Raises:
+        ValueError: If data type or operation not supported
+        NotImplementedError: If operation is UPDATE/DELETE (Phase 2)
     """
+    operation = request.operation
+    data_type = request.data_type
 
-    def __init__(self):
-        self.platform_repo = PlatformRepository()
-        self.job_repo = JobRepository()
+    # Only CREATE is implemented (Phase 1)
+    if operation != OperationType.CREATE:
+        raise NotImplementedError(f"{operation.value} operation coming in Phase 2")
 
-        # CRITICAL FIX (30 OCT 2025): Monkey-patch global callback function
-        # The global CoreMachine instance in function_app.py processes all jobs via Service Bus.
-        # We need to inject our handler into that global callback function.
-        # See: function_app.py:269 _global_platform_callback
-        import function_app
+    # Use PlatformConfig for output naming
+    platform_cfg = cfg.platform
 
-        # Store original callback (if any)
-        original_callback = function_app._global_platform_callback
+    # ========================================================================
+    # VECTOR CREATE → ingest_vector
+    # ========================================================================
+    if data_type == DataType.VECTOR:
+        # Generate PostGIS table name from DDH IDs
+        table_name = platform_cfg.generate_vector_table_name(
+            request.dataset_id,
+            request.resource_id,
+            request.version_id
+        )
 
-        # Replace with our handler (chain if original exists)
-        def combined_callback(job_id: str, job_type: str, status: str, result: dict):
-            logger.info(f"🔗 CALLBACK CHAIN: Entry point for job {job_id[:16]}, type={job_type}, status={status}")
-            try:
-                # Call our handler first
-                self._handle_job_completion(job_id, job_type, status, result)
-                logger.info(f"🔗 CALLBACK CHAIN: Platform handler completed successfully")
-            except Exception as e:
-                logger.error(f"🔗 CALLBACK CHAIN: Platform handler failed: {e}", exc_info=True)
-                # Don't re-raise - callback failures should not break job completion
+        # Generate STAC item ID
+        stac_item_id = platform_cfg.generate_stac_item_id(
+            request.dataset_id,
+            request.resource_id,
+            request.version_id
+        )
 
-            # Call original handler if it wasn't just a pass statement
-            if original_callback and original_callback.__code__.co_code != (lambda: None).__code__.co_code:
-                logger.debug(f"🔗 CALLBACK CHAIN: Calling original callback (if any)")
-                try:
-                    original_callback(job_id, job_type, status, result)
-                except Exception as e:
-                    logger.warning(f"🔗 CALLBACK CHAIN: Original callback failed: {e}")
+        # Detect file extension
+        file_name = request.file_name
+        if isinstance(file_name, list):
+            file_name = file_name[0]
+        file_ext = file_name.split('.')[-1].lower()
 
-        function_app._global_platform_callback = combined_callback
-
-        # Update the global CoreMachine's callback reference
-        function_app.core_machine.on_job_complete = combined_callback
-
-        logger.info(f"✅ PlatformOrchestrator initialized - callback injected into global CoreMachine")
-        logger.info(f"   🔗 All jobs processed via Service Bus will now trigger Platform callbacks")
-        logger.info(f"   🔍 Callback verification: {function_app.core_machine.on_job_complete.__name__}")
-
-    async def process_platform_request(self, request: ApiRequest) -> List[str]:
-        """
-        Process a platform request by creating CoreMachine jobs.
-
-        Returns list of job IDs created.
-        """
-        logger.info(f"Processing platform request: {request.request_id}")
-
-        try:
-            # Update status to processing
-            self.platform_repo.update_request_status(
-                request.request_id,
-                PlatformRequestStatus.PROCESSING
-            )
-
-            # Determine what jobs to create based on data type
-            jobs_to_create = self._determine_jobs(request)
-
-            # Create each job
-            job_ids = []
-            for job_config in jobs_to_create:
-                job_id = await self._create_coremachine_job(
-                    request,
-                    job_config['job_type'],
-                    job_config['parameters']
-                )
-
-                if job_id:
-                    job_ids.append(job_id)
-                    # Add job to platform request
-                    self.platform_repo.add_job_to_request(
-                        request.request_id,
-                        job_id,
-                        job_config['job_type']
-                    )
-
-            logger.info(f"Created {len(job_ids)} jobs for platform request {request.request_id}")
-
-            # If no jobs could be created, mark as failed
-            if not job_ids:
-                self.platform_repo.update_request_status(
-                    request.request_id,
-                    PlatformRequestStatus.FAILED
-                )
-
-            return job_ids
-
-        except Exception as e:
-            logger.error(f"Failed to process platform request: {e}", exc_info=True)
-            self.platform_repo.update_request_status(
-                request.request_id,
-                PlatformRequestStatus.FAILED
-            )
-            raise
-
-    def _determine_jobs(self, request: ApiRequest) -> List[Dict[str, Any]]:
-        """
-        Determine what CoreMachine jobs to create based on operation + data_type.
-
-        Updated: 1 NOV 2025 - DDH integration with CREATE/UPDATE/DELETE operations
-
-        This is where we implement the business logic of "what work needs
-        to be done for this type of data with this operation".
-
-        Args:
-            request: ApiRequest with DDH parameters
-
-        Returns:
-            List of job configurations (job_type + parameters)
-        """
-        jobs = []
-        operation = request.parameters.get('operation', 'CREATE')
-        data_type = request.data_type
-        source_location = request.metadata.get('source_location', '')
-        file_name = request.parameters.get('file_name')
-        processing_options = request.parameters.get('processing_options', {})
-        container_name = request.parameters.get('container_name')
-
-        logger.info(f"Determining jobs for operation={operation}, data_type={data_type}")
-
-        # ================================================================
-        # CREATE OPERATION (Phase 1 - ACTIVE)
-        # ================================================================
-        if operation == OperationType.CREATE.value:
-
-            # ------------------------------------------------------------
-            # VECTOR CREATE: Ingest to PostGIS (3-stage job with STAC)
-            # ------------------------------------------------------------
-            if data_type == DataType.VECTOR.value:
-                logger.info(f"  → Vector CREATE: ingest_vector (3 stages: prepare, upload, STAC)")
-
-                # Determine table name from dataset_id + resource_id
-                table_name = f"{request.dataset_id}_{request.resource_id}".lower()
-                table_name = table_name.replace('-', '_')  # PostgreSQL-safe
-
-                # Detect file extension
-                file_ext = file_name.split('.')[-1] if isinstance(file_name, str) else file_name[0].split('.')[-1]
-
-                jobs.append({
-                    'job_type': 'ingest_vector',
-                    'parameters': {
-                        # File location
-                        'blob_name': file_name,
-                        'file_extension': file_ext,
-                        'container_name': container_name,
-
-                        # PostGIS target
-                        'table_name': table_name,
-                        'schema': 'geo',
-
-                        # DDH Identifiers (NEW - for STAC Stage 3)
-                        'dataset_id': request.dataset_id,
-                        'resource_id': request.resource_id,
-                        'version_id': request.version_id,
-
-                        # DDH STAC Metadata (NEW - for Stage 3)
-                        'stac_item_id': request.metadata.get('stac_item_id'),
-                        'service_name': request.metadata.get('service_name'),
-                        'description': request.metadata.get('description'),
-                        'tags': request.metadata.get('tags', []),
-                        'access_level': request.metadata.get('access_level', 'public'),
-
-                        # Processing options
-                        'converter_params': {
-                            'lon_column': processing_options.get('lon_column'),
-                            'lat_column': processing_options.get('lat_column'),
-                            'wkt_column': processing_options.get('wkt_column')
-                        } if any([
-                            processing_options.get('lon_column'),
-                            processing_options.get('lat_column'),
-                            processing_options.get('wkt_column')
-                        ]) else {},
-                        'overwrite': processing_options.get('overwrite', False)
-                    }
-                })
-
-            # ------------------------------------------------------------
-            # RASTER CREATE: Validate + Create COG
-            # ------------------------------------------------------------
-            elif data_type == DataType.RASTER.value:
-                # Check if this is a raster collection (array of file names)
-                is_collection = isinstance(file_name, list) and len(file_name) > 1
-
-                if is_collection:
-                    logger.warning(f"  → Raster Collection CREATE not yet implemented (Phase 2) - skipping")
-                    # TODO: Implement process_raster_collection workflow (Phase 2)
-
-                else:
-                    logger.info(f"  → Raster CREATE: validate_raster_job + process_raster")
-
-                    jobs.extend([
-                        {
-                            'job_type': 'validate_raster_job',
-                            'parameters': {
-                                'source_path': source_location,
-                                'file_name': file_name,
-                                'dataset_id': request.dataset_id,
-                                'resource_id': request.resource_id,
-                                # Raster options (optional)
-                                'target_crs': processing_options.get('crs'),
-                                'nodata_value': processing_options.get('nodata_value')
-                            }
-                        },
-                        {
-                            'job_type': 'process_raster',
-                            'parameters': {
-                                'source_path': source_location,
-                                'file_name': file_name,
-                                'output_container': 'silver-cogs',
-                                'dataset_id': request.dataset_id,
-                                'resource_id': request.resource_id,
-                                # Raster options (optional)
-                                'target_crs': processing_options.get('crs'),
-                                'nodata_value': processing_options.get('nodata_value'),
-                                'band_descriptions': processing_options.get('band_descriptions')
-                            }
-                        }
-                    ])
-
-            # ------------------------------------------------------------
-            # POINTCLOUD CREATE (Phase 2 - Placeholder)
-            # ------------------------------------------------------------
-            elif data_type == DataType.POINTCLOUD.value:
-                logger.warning(f"  → Point cloud CREATE not yet implemented (Phase 2)")
-                # TODO: Implement point cloud workflow (Phase 2)
-
-            # ------------------------------------------------------------
-            # UNSUPPORTED DATA TYPE
-            # ------------------------------------------------------------
-            else:
-                logger.error(f"  → Unsupported data type: {data_type}")
-                raise ValueError(f"CREATE operation not supported for data type: {data_type}")
-
-        # ================================================================
-        # UPDATE OPERATION (Phase 2 - Placeholder)
-        # ================================================================
-        elif operation == OperationType.UPDATE.value:
-            logger.warning(f"UPDATE operation not yet implemented (Phase 2)")
-            raise NotImplementedError("UPDATE operation coming in Phase 2")
-
-        # ================================================================
-        # DELETE OPERATION (Phase 2 - Placeholder)
-        # ================================================================
-        elif operation == OperationType.DELETE.value:
-            logger.warning(f"DELETE operation not yet implemented (Phase 2)")
-            raise NotImplementedError("DELETE operation coming in Phase 2")
-
-        # ================================================================
-        # UNKNOWN OPERATION
-        # ================================================================
-        else:
-            logger.error(f"Unknown operation: {operation}")
-            raise ValueError(f"Unknown operation: {operation}")
-
-        logger.info(f"Determined {len(jobs)} jobs for request {request.request_id}")
-        return jobs
-
-    async def _create_coremachine_job(
-        self,
-        request: ApiRequest,
-        job_type: str,
-        parameters: Dict[str, Any]
-    ) -> Optional[str]:
-        """
-        Create a CoreMachine job and submit it to the jobs queue.
-
-        NOTE - ISSUE #4 (INTENTIONAL): Duplicate Job Submission Logic
-        ================================================================
-        This method duplicates job submission logic from triggers/trigger_job_submit.py:
-        - Job ID generation (SHA256 hash)
-        - JobRecord creation
-        - Database persistence via repository
-        - Service Bus queue submission
-
-        WHY INTENTIONAL (per Robert 26 OCT 2025):
-        "duplicate job submission logic is intentional so we can test both systems
-        - it will be reconciled in the near future"
-
-        Platform submission and standard job submission can coexist during testing.
-        When Platform is proven stable, consolidate to shared service.
-
-        FUTURE REFACTORING OPTIONS:
-        - Option A: Create shared JobSubmissionService (services/job_submission.py)
-        - Option B: Platform makes HTTP call to standard /api/jobs/submit endpoint
-
-        REFERENCE: PLATFORM_LAYER_FIXES_TODO.md Issue #4 (lines 286-363)
-        STATUS: DEFERRED - Intentional duplication for testing
-        ================================================================
-        """
-        try:
-            # Add platform metadata to job parameters
-            job_params = {
-                **parameters,
-                '_platform_request_id': request.request_id,
-                '_platform_dataset': request.dataset_id
+        # Build converter params if CSV/lon-lat columns specified
+        converter_params = {}
+        opts = request.processing_options
+        if opts.get('lon_column') or opts.get('lat_column') or opts.get('wkt_column'):
+            converter_params = {
+                'lon_column': opts.get('lon_column'),
+                'lat_column': opts.get('lat_column'),
+                'wkt_column': opts.get('wkt_column')
             }
 
-            # Generate job ID (duplicates trigger_job_submit.py pattern)
-            job_id = self._generate_job_id(job_type, job_params)
+        return 'ingest_vector', {
+            # File location
+            'blob_name': request.file_name,
+            'file_extension': file_ext,
+            'container_name': request.container_name,
 
-            # Create job record
-            # CRITICAL: Use JobStatus enum (not string) - mirrors CoreMachine pattern
-            job_record = JobRecord(
-                job_id=job_id,
-                job_type=job_type,
-                status=JobStatus.QUEUED,  # Enum value - consistent with CoreMachine
-                parameters=job_params,
-                metadata={
-                    'platform_request': request.request_id,
-                    'created_by': 'platform_orchestrator'
-                }
-            )
+            # PostGIS target
+            'table_name': table_name,
+            'schema': cfg.vector.target_schema,
 
-            # Store in database (returns bool: True if created, False if exists)
-            created = self.job_repo.create_job(job_record)
+            # DDH identifiers (for STAC metadata)
+            'dataset_id': request.dataset_id,
+            'resource_id': request.resource_id,
+            'version_id': request.version_id,
 
-            # Submit to Service Bus jobs queue (use job_record, not the bool return)
-            await self._submit_to_queue(job_record)
+            # STAC metadata
+            'stac_item_id': stac_item_id,
+            'service_name': request.service_name,
+            'description': request.description,
+            'tags': request.tags,
+            'access_level': request.access_level,
 
-            logger.info(f"Created CoreMachine job {job_id} for platform request {request.request_id}")
-            return job_id
-
-        except Exception as e:
-            logger.error(f"Failed to create CoreMachine job: {e}", exc_info=True)
-            return None
-
-    async def _submit_to_queue(self, job: JobRecord):
-        """Submit job to Service Bus jobs queue via repository pattern"""
-        try:
-            import uuid
-            from infrastructure.service_bus import ServiceBusRepository
-            from core.schema.queue import JobQueueMessage
-
-            # Use repository pattern (handles connection pooling, retries, etc.)
-            service_bus_repo = ServiceBusRepository()
-
-            # Use Pydantic message model (automatic serialization + validation)
-            # Platform always creates Stage 1 jobs
-            queue_message = JobQueueMessage(
-                job_id=job.job_id,
-                job_type=job.job_type,
-                parameters=job.parameters,
-                stage=1,  # Platform creates Stage 1 jobs
-                correlation_id=str(uuid.uuid4())[:8]
-            )
-
-            # Send via repository (uses config.service_bus_jobs_queue)
-            message_id = service_bus_repo.send_message(
-                config.service_bus_jobs_queue,
-                queue_message
-            )
-
-            logger.info(f"✅ Submitted job {job.job_id} to jobs queue (message_id: {message_id}, queue: {config.service_bus_jobs_queue})")
-
-        except Exception as e:
-            logger.error(f"❌ Failed to submit job to queue: {e}")
-            logger.error(f"   Job ID: {job.job_id}")
-            logger.error(f"   Job Type: {job.job_type}")
-            logger.error(f"   Traceback: {traceback.format_exc()}")
-            raise
-
-    def _handle_job_completion(self, job_id: str, job_type: str, status: str, result: Dict[str, Any]):
-        """
-        Handle job completion callback from CoreMachine.
-
-        This method is called by CoreMachine when ANY job completes or fails.
-        Platform uses this to:
-        1. Chain jobs (e.g., ingest_vector → stac_catalog_vectors)
-        2. Update Platform request status when all jobs complete
-        3. Populate data_access URLs in Platform response
-
-        Args:
-            job_id: Job identifier
-            job_type: Type of job that completed
-            status: 'completed' or 'failed'
-            result: Job result data (aggregated task results)
-
-        Added: 30 OCT 2025 - Platform job orchestration
-        """
-        try:
-            logger.info(f"🔔 Platform received job completion: {job_type} ({job_id[:16]}) - {status}")
-
-            # Check if this job belongs to a Platform request
-            job_record = self.job_repo.get_job(job_id)
-            if not job_record:
-                logger.warning(f"Job {job_id[:16]} not found - ignoring completion callback")
-                return
-
-            platform_request_id = job_record.parameters.get('_platform_request_id')
-            if not platform_request_id:
-                logger.debug(f"Job {job_id[:16]} not associated with Platform request - ignoring")
-                return
-
-            logger.info(f"   Platform request: {platform_request_id}")
-            logger.info(f"   Job type: {job_type}")
-            logger.info(f"   Status: {status}")
-
-            # Handle based on job type and status
-            if status == 'completed':
-                logger.info(f"   ✅ Job completed successfully")
-
-                # Job chaining logic - submit dependent jobs
-                if job_type == 'ingest_vector':
-                    # Vector ingestion complete → Submit STAC cataloging job
-                    logger.info(f"   🔗 Chaining: ingest_vector → stac_catalog_vectors")
-
-                    # Extract table name from job result
-                    table_name = result.get('table_name') or job_record.parameters.get('table_name')
-                    dataset_id = job_record.parameters.get('_platform_dataset') or job_record.parameters.get('dataset_id')
-
-                    if table_name:
-                        # Submit STAC catalog job
-                        import asyncio
-                        platform_request = self.platform_repo.get_request(platform_request_id)
-
-                        stac_job_id = asyncio.run(self._create_coremachine_job(
-                            platform_request,
-                            'stac_catalog_vectors',
-                            {
-                                'schema': 'geo',
-                                'table_name': table_name,
-                                'collection_id': dataset_id or 'vectors',
-                                'source_file': job_record.parameters.get('source_path')
-                            }
-                        ))
-
-                        if stac_job_id:
-                            logger.info(f"   ✅ Submitted stac_catalog_vectors job: {stac_job_id[:16]}")
-                            self.platform_repo.add_job_to_request(
-                                platform_request_id,
-                                stac_job_id,
-                                'stac_catalog_vectors'
-                            )
-                        else:
-                            logger.error(f"   ❌ Failed to submit STAC catalog job")
-                    else:
-                        logger.warning(f"   ⚠️ No table_name in result - cannot chain to STAC job")
-
-            elif status == 'failed':
-                # Mark Platform request as failed
-                logger.warning(f"   ❌ Job failed - marking Platform request as failed")
-                self.platform_repo.update_request_status(
-                    platform_request_id,
-                    PlatformRequestStatus.FAILED
-                )
-
-            # Check if all jobs for Platform request are complete
-            self._check_and_finalize_request(platform_request_id)
-
-        except Exception as e:
-            logger.error(f"Error in job completion handler: {e}", exc_info=True)
-            # Don't raise - callback failures should not affect job completion
-
-    def _check_and_finalize_request(self, platform_request_id: str):
-        """
-        Check if all jobs for Platform request are complete and finalize if so.
-
-        Finalization includes:
-        1. Mark Platform request as COMPLETED
-        2. Populate data_access URLs (OGC Features, STAC, web map)
-        3. Aggregate results from all jobs
-
-        Args:
-            platform_request_id: Platform request identifier
-
-        Added: 30 OCT 2025 - Platform request finalization
-        """
-        try:
-            # Get all jobs for this Platform request
-            platform_request = self.platform_repo.get_request(platform_request_id)
-            if not platform_request:
-                logger.warning(f"Platform request {platform_request_id} not found")
-                return
-
-            # Get jobs from the JSONB jobs field
-            jobs_dict = platform_request.jobs or {}
-            if not jobs_dict:
-                logger.warning(f"No jobs found for Platform request {platform_request_id}")
-                return
-
-            # Check if all jobs are complete (completed or failed)
-            all_complete = True
-            any_failed = False
-            job_results = {}
-
-            for job_key, job_info in jobs_dict.items():
-                job_id = job_info.get('job_id')
-                if job_id:
-                    job_record = self.job_repo.get_job(job_id)
-                    if job_record:
-                        job_status = job_record.status.value if hasattr(job_record.status, 'value') else job_record.status
-
-                        if job_status not in ['completed', 'failed']:
-                            all_complete = False
-                            break
-
-                        if job_status == 'failed':
-                            any_failed = True
-
-                        # Collect results
-                        job_results[job_record.job_type] = {
-                            'status': job_status,
-                            'result': job_record.result_data
-                        }
-
-            if not all_complete:
-                logger.debug(f"Platform request {platform_request_id} - not all jobs complete yet")
-                return
-
-            logger.info(f"🏁 All jobs complete for Platform request {platform_request_id}")
-
-            # Determine final status
-            if any_failed:
-                final_status = PlatformRequestStatus.FAILED
-                logger.warning(f"   ❌ At least one job failed - marking request as FAILED")
-            else:
-                final_status = PlatformRequestStatus.COMPLETED
-                logger.info(f"   ✅ All jobs succeeded - marking request as COMPLETED")
-
-                # Populate data_access URLs (only for successful completions)
-                data_access_urls = self._generate_data_access_urls(platform_request, job_results)
-                logger.info(f"   📍 Generated data access URLs: {list(data_access_urls.keys())}")
-
-                # TODO: Store data_access_urls in Platform request metadata
-                # self.platform_repo.update_data_access_urls(platform_request_id, data_access_urls)
-
-            # Update Platform request status
-            self.platform_repo.update_request_status(platform_request_id, final_status)
-            logger.info(f"   ✅ Platform request {platform_request_id} finalized: {final_status.value}")
-
-        except Exception as e:
-            logger.error(f"Error finalizing Platform request: {e}", exc_info=True)
-
-    def _generate_data_access_urls(self, platform_request: ApiRequest, job_results: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Generate data access URLs for completed Platform request.
-
-        Args:
-            platform_request: Platform request record
-            job_results: Dictionary of job_type → {status, result}
-
-        Returns:
-            Dictionary with OGC Features, STAC, and web map URLs
-
-        Added: 30 OCT 2025 - Data access URL generation
-        """
-        base_url = config.function_app_url or "https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net"
-        web_map_url = "https://rmhazuregeo.z13.web.core.windows.net"
-
-        # Extract data from job results
-        ingest_result = job_results.get('ingest_vector', {}).get('result', {})
-        stac_result = job_results.get('stac_catalog_vectors', {}).get('result', {})
-
-        table_name = ingest_result.get('table_name')
-        collection_id = stac_result.get('collection_id') or platform_request.dataset_id
-
-        urls = {}
-
-        # PostGIS info
-        if table_name:
-            urls['postgis'] = {
-                'schema': 'geo',
-                'table': table_name
-            }
-
-            # OGC Features API URLs
-            urls['ogc_features'] = {
-                'collection_url': f"{base_url}/api/features/collections/{table_name}",
-                'items_url': f"{base_url}/api/features/collections/{table_name}/items",
-                'web_map_url': f"{web_map_url}/?collection={table_name}"
-            }
-
-        # STAC API URLs
-        if collection_id:
-            urls['stac'] = {
-                'collection_id': collection_id,
-                'collection_url': f"{base_url}/api/collections/{collection_id}",
-                'items_url': f"{base_url}/api/collections/{collection_id}/items",
-                'search_url': f"{base_url}/api/search"
-            }
-
-        return urls
-
-    def _generate_job_id(self, job_type: str, parameters: Dict[str, Any]) -> str:
-        """
-        Generate deterministic job ID (SHA256 full 64-char hash).
-
-        CRITICAL: JobRecord requires minLength=64 for job_id validation.
-        Must return FULL SHA256 hash (64 chars), not truncated.
-        """
-        # Remove platform metadata for ID generation
-        clean_params = {
-            k: v for k, v in parameters.items()
-            if not k.startswith('_platform_')
+            # Processing options
+            'converter_params': converter_params,
+            'overwrite': opts.get('overwrite', False)
         }
 
+    # ========================================================================
+    # RASTER CREATE → process_raster or process_raster_collection
+    # ========================================================================
+    elif data_type == DataType.RASTER:
+        # Generate output paths from DDH IDs
+        output_folder = platform_cfg.generate_raster_output_folder(
+            request.dataset_id,
+            request.resource_id,
+            request.version_id
+        )
+
+        collection_id = platform_cfg.generate_stac_collection_id(
+            request.dataset_id,
+            request.resource_id,
+            request.version_id
+        )
+
+        stac_item_id = platform_cfg.generate_stac_item_id(
+            request.dataset_id,
+            request.resource_id,
+            request.version_id
+        )
+
+        opts = request.processing_options
+
+        # Check if this is a raster collection (multiple files)
+        if request.is_raster_collection:
+            # Multiple rasters → process_raster_collection
+            return 'process_raster_collection', {
+                # File location
+                'container_name': request.container_name,
+                'blob_list': request.file_name,  # Already a list
+
+                # Output location
+                'output_folder': output_folder,
+
+                # STAC metadata
+                'collection_id': collection_id,
+                'stac_item_id': stac_item_id,
+                'service_name': request.service_name,
+                'description': request.description,
+                'tags': request.tags,
+                'access_level': request.access_level,
+
+                # DDH identifiers
+                'dataset_id': request.dataset_id,
+                'resource_id': request.resource_id,
+                'version_id': request.version_id,
+
+                # Processing options
+                'output_tier': opts.get('output_tier', 'analysis'),
+                'target_crs': opts.get('crs'),
+                'nodata_value': opts.get('nodata_value')
+            }
+        else:
+            # Single raster → process_raster
+            file_name = request.file_name
+            if isinstance(file_name, list):
+                file_name = file_name[0]
+
+            return 'process_raster', {
+                # File location
+                'blob_name': file_name,
+                'container_name': request.container_name,
+
+                # Output location
+                'output_folder': output_folder,
+
+                # STAC metadata
+                'collection_id': collection_id,
+                'stac_item_id': stac_item_id,
+                'service_name': request.service_name,
+                'description': request.description,
+                'tags': request.tags,
+                'access_level': request.access_level,
+
+                # DDH identifiers
+                'dataset_id': request.dataset_id,
+                'resource_id': request.resource_id,
+                'version_id': request.version_id,
+
+                # Processing options
+                'output_tier': opts.get('output_tier', 'analysis'),
+                'target_crs': opts.get('crs'),
+                'nodata_value': opts.get('nodata_value')
+            }
+
+    # ========================================================================
+    # POINTCLOUD, MESH_3D, TABULAR - Phase 2
+    # ========================================================================
+    elif data_type in [DataType.POINTCLOUD, DataType.MESH_3D, DataType.TABULAR]:
+        raise NotImplementedError(f"{data_type.value} processing coming in Phase 2")
+
+    else:
+        raise ValueError(f"Unsupported data type: {data_type}")
+
+
+# ============================================================================
+# JOB CREATION & SUBMISSION
+# ============================================================================
+
+async def _create_and_submit_job(
+    job_type: str,
+    parameters: Dict[str, Any],
+    platform_request_id: str
+) -> Optional[str]:
+    """
+    Create CoreMachine job and submit to Service Bus queue.
+
+    Args:
+        job_type: CoreMachine job type (e.g., 'ingest_vector', 'process_raster')
+        parameters: Job parameters translated from DDH request
+        platform_request_id: Platform request ID for tracking
+
+    Returns:
+        job_id if successful, None if failed
+    """
+    import hashlib
+    import uuid
+
+    try:
+        # Add platform tracking to parameters
+        job_params = {
+            **parameters,
+            '_platform_request_id': platform_request_id
+        }
+
+        # Generate deterministic job ID
+        # Remove platform metadata for ID generation (so same CoreMachine params = same job)
+        clean_params = {k: v for k, v in job_params.items() if not k.startswith('_')}
         canonical = f"{job_type}:{json.dumps(clean_params, sort_keys=True)}"
-        return hashlib.sha256(canonical.encode()).hexdigest()  # FULL 64-char hash
+        job_id = hashlib.sha256(canonical.encode()).hexdigest()
 
-# ============================================================================
-# UTILITY FUNCTIONS
-# ============================================================================
+        # Create job record
+        job_record = JobRecord(
+            job_id=job_id,
+            job_type=job_type,
+            status=JobStatus.QUEUED,
+            parameters=job_params,
+            metadata={
+                'platform_request': platform_request_id,
+                'created_by': 'platform_trigger'
+            }
+        )
 
-def generate_request_id(dataset_id: str, resource_id: str, version_id: str) -> str:
-    """
-    Generate deterministic request ID from DDH identifiers.
-    Includes timestamp to allow reprocessing of same dataset.
-    """
-    timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S")
-    canonical = f"{dataset_id}:{resource_id}:{version_id}:{timestamp}"
-    return hashlib.sha256(canonical.encode()).hexdigest()[:32]
+        # Store in database
+        job_repo = JobRepository()
+        job_repo.create_job(job_record)
+
+        # Submit to Service Bus
+        service_bus = ServiceBusRepository()
+        queue_message = JobQueueMessage(
+            job_id=job_id,
+            job_type=job_type,
+            parameters=job_params,
+            stage=1,
+            correlation_id=str(uuid.uuid4())[:8]
+        )
+
+        message_id = service_bus.send_message(
+            config.service_bus_jobs_queue,
+            queue_message
+        )
+
+        logger.info(f"Submitted job {job_id[:16]} to queue (message_id: {message_id})")
+        return job_id
+
+    except Exception as e:
+        logger.error(f"Failed to create/submit job: {e}", exc_info=True)
+        return None

@@ -1,10 +1,17 @@
 # ============================================================================
+# 📦 ARCHIVED - Superseded by jobs/hello_world.py
+# ============================================================================
+# PURPOSE: Original mixin test implementation (kept for reference)
+# STATUS: Archived - Mixin pattern now in hello_world.py
+# ============================================================================
+
+# ============================================================================
 # CLAUDE CONTEXT - JOB DEFINITION (MIXIN TEST VERSION)
 # ============================================================================
 # EPOCH: 4 - ACTIVE ✅
 # STATUS: Job - Two-stage greeting workflow using JobBaseMixin (TEST VERSION)
 # PURPOSE: Test JobBaseMixin pattern before migrating hello_world.py
-# LAST_REVIEWED: 14 NOV 2025
+# LAST_REVIEWED: 22 NOV 2025
 # EXPORTS: HelloWorldMixinJob (JobBase + JobBaseMixin implementation)
 # INTERFACES: JobBase (implements 2 methods), JobBaseMixin (provides 4 methods)
 # PYDANTIC_MODELS: None (uses declarative parameters_schema)

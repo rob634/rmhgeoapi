@@ -1,10 +1,19 @@
 # ============================================================================
+# ✅ PRODUCTION READY - Corporate Deployment Approved
+# ============================================================================
+# WORKFLOW: process_raster
+# TESTED: 21 NOV 2025 - RGB GeoTIFF to COG (DEFLATE compression)
+# CAPABILITY: Single raster files <= 1GB, auto-detect type, STAC cataloging
+# NOTE: JPEG compression blocked (Azure Functions issue), use DEFLATE
+# ============================================================================
+
+# ============================================================================
 # CLAUDE CONTEXT - JOB DEFINITION
 # ============================================================================
 # EPOCH: 4 - ACTIVE ✅
 # STATUS: Job - Two-stage small raster processing (<= 1GB)
 # PURPOSE: 2-stage workflow for processing small rasters to COGs (<= 1GB)
-# LAST_REVIEWED: 3 NOV 2025
+# LAST_REVIEWED: 22 NOV 2025
 # EXPORTS: ProcessRasterWorkflow (JobBase implementation)
 # INTERFACES: JobBase (implements 5-method contract)
 # PYDANTIC_MODELS: None (uses dict-based validation)

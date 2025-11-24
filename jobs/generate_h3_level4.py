@@ -1,10 +1,17 @@
 # ============================================================================
+# 🚧 UNDER DEVELOPMENT - DO NOT USE IN PRODUCTION
+# ============================================================================
+# PURPOSE: H3 Level 4 land grid generation (experimental)
+# STATUS: Experimental - H3 grid system in development
+# ============================================================================
+
+# ============================================================================
 # CLAUDE CONTEXT - JOB DEFINITION
 # ============================================================================
 # EPOCH: 4 - ACTIVE ✅
 # STATUS: Job - Single-stage H3 Level 4 land grid generation
 # PURPOSE: Generate global Level 4 H3 land grid and save to gold container
-# LAST_REVIEWED: 29 OCT 2025
+# LAST_REVIEWED: 22 NOV 2025
 # EXPORTS: GenerateH3Level4Job (JobBase implementation)
 # INTERFACES: JobBase (implements 5-method contract)
 # PYDANTIC_MODELS: None (uses dict parameters)

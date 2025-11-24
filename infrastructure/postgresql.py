@@ -222,23 +222,19 @@ class PostgreSQLRepository(BaseRepository):
     
     def _get_connection_string(self) -> str:
         """
-        Build PostgreSQL connection string from configuration.
+        Build PostgreSQL connection string with automatic credential detection.
 
-        This method constructs a PostgreSQL connection string using the
-        application configuration. It supports both password-based and
-        passwordless (managed identity) authentication.
+        Authentication Priority Chain:
+        -----------------------------
+        1. User-Assigned Managed Identity (if MANAGED_IDENTITY_CLIENT_ID is set)
+        2. System-Assigned Managed Identity (if running in Azure with WEBSITE_SITE_NAME)
+        3. Password Authentication (if POSTGIS_PASSWORD is set)
+        4. FAIL with clear error message
 
-        Connection String Format:
-        ------------------------
-        Password: postgresql://user:password@host:port/database?sslmode=require
-        Managed Identity: host=hostname port=5432 dbname=database user=identity_name password=token sslmode=require
-
-        Configuration Sources (in priority order):
-        -----------------------------------------
-        1. POSTGRESQL_CONNECTION_STRING environment variable (complete string)
-        2. Managed Identity (if USE_MANAGED_IDENTITY=true)
-        3. AppConfig.postgis_connection_string property (password-based)
-        4. Individual components from AppConfig (host, user, database, etc.)
+        This allows the application to work in multiple environments:
+        - Azure Functions with user-assigned identity (production - recommended)
+        - Azure Functions with system-assigned identity (simpler setup)
+        - Local development with password (developer machines)
 
         Returns:
         -------
@@ -248,75 +244,65 @@ class PostgreSQLRepository(BaseRepository):
         Raises:
         ------
         ValueError
-            If required configuration is missing or invalid.
+            If no valid credentials are found.
 
         RuntimeError
             If managed identity token acquisition fails.
-
-        Security Notes:
-        --------------
-        - Managed identity tokens are valid for ~1 hour (auto-refreshed by Azure SDK)
-        - Passwords are included in the connection string (be careful with logging)
-        - SSL is enforced by default (sslmode=require)
-        - Managed identity is recommended for production (passwordless authentication)
         """
-        logger.debug("🔌 Getting PostgreSQL connection string...")
+        logger.debug("🔌 Detecting PostgreSQL authentication method...")
 
-        # Check if managed identity is enabled
-        use_managed_identity = self._should_use_managed_identity()
+        # Get environment variables for detection
+        client_id = os.getenv("MANAGED_IDENTITY_CLIENT_ID") or self.config.database.managed_identity_client_id
+        website_name = os.getenv("WEBSITE_SITE_NAME")
+        password = self.config.postgis_password
 
-        if use_managed_identity:
-            logger.info("🔐 Using Azure Managed Identity for PostgreSQL authentication (NO FALLBACK)")
-            return self._build_managed_identity_connection_string()
-        else:
-            # Use password-based authentication (NO FALLBACK)
-            logger.info("🔑 Using password-based authentication (NO FALLBACK)")
+        # Priority 1: User-Assigned Managed Identity
+        if client_id:
+            identity_name = os.getenv("MANAGED_IDENTITY_NAME", "rmhpgflexadmin")
+            logger.info(f"🔐 [AUTH] Using USER-ASSIGNED managed identity: {identity_name} (client_id: {client_id[:8]}...)")
+            return self._build_managed_identity_connection_string(
+                client_id=client_id,
+                identity_name=identity_name
+            )
 
-            # EXPLICIT FAILURE if password missing
-            if not self.config.postgis_password:
-                error_msg = (
-                    "❌ Password authentication selected but POSTGIS_PASSWORD not configured! "
-                    "Set POSTGIS_PASSWORD environment variable or set USE_MANAGED_IDENTITY=true"
-                )
-                logger.error(error_msg)
-                raise ValueError(error_msg)
+        # Priority 2: System-Assigned Managed Identity (running in Azure)
+        if website_name:
+            # Use website name as identity name for system-assigned identity
+            identity_name = os.getenv("MANAGED_IDENTITY_NAME", website_name)
+            logger.info(f"🔐 [AUTH] Using SYSTEM-ASSIGNED managed identity: {identity_name} (detected Azure environment)")
+            return self._build_managed_identity_connection_string(
+                client_id=None,
+                identity_name=identity_name
+            )
 
+        # Priority 3: Password Authentication
+        if password:
+            logger.info("🔑 [AUTH] Using PASSWORD authentication (local development mode)")
             conn_str = self.config.postgis_connection_string
             logger.debug(f"✅ Password-based connection string built successfully")
             return conn_str
 
-    def _should_use_managed_identity(self) -> bool:
-        """
-        Determine if managed identity authentication should be used.
+        # Priority 4: FAIL - No valid credentials
+        error_msg = (
+            "❌ NO DATABASE CREDENTIALS FOUND!\n"
+            "Please configure one of the following:\n"
+            "  1. User-Assigned Identity: Set MANAGED_IDENTITY_CLIENT_ID + MANAGED_IDENTITY_NAME\n"
+            "  2. System-Assigned Identity: Deploy to Azure (auto-detected via WEBSITE_SITE_NAME)\n"
+            "  3. Password Auth: Set POSTGIS_PASSWORD environment variable\n"
+            "\n"
+            "Current state:\n"
+            f"  - MANAGED_IDENTITY_CLIENT_ID: {'set' if client_id else 'NOT SET'}\n"
+            f"  - WEBSITE_SITE_NAME: {'set' if website_name else 'NOT SET (not in Azure)'}\n"
+            f"  - POSTGIS_PASSWORD: {'set' if password else 'NOT SET'}"
+        )
+        logger.error(error_msg)
+        raise ValueError(error_msg)
 
-        ONE PATTERN ONLY - NO FALLBACKS:
-        --------------------------------
-        Reads USE_MANAGED_IDENTITY environment variable.
-        - "true" → Use managed identity (fail if token acquisition fails)
-        - "false" or unset → Use password (fail if password missing)
-
-        No auto-detection. No fallbacks. Explicit configuration only.
-
-        Returns:
-        -------
-        bool
-            True if managed identity should be used, False for password auth.
-
-        Environment Variables:
-        ---------------------
-        USE_MANAGED_IDENTITY: "true" or "false" (case-insensitive, default: false)
-        """
-        # ONE PATTERN ONLY - explicit configuration, no auto-detection
-        use_mi_env = os.getenv("USE_MANAGED_IDENTITY", "false").lower()
-
-        if use_mi_env == "true":
-            logger.info("🔐 USE_MANAGED_IDENTITY=true - using managed identity (NO FALLBACK)")
-            return True
-        else:
-            logger.info("🔑 USE_MANAGED_IDENTITY=false - using password auth (NO FALLBACK)")
-            return False
-
-    def _build_managed_identity_connection_string(self) -> str:
+    def _build_managed_identity_connection_string(
+        self,
+        client_id: Optional[str] = None,
+        identity_name: str = "rmhpgflexadmin"
+    ) -> str:
         """
         Build PostgreSQL connection string using Azure Managed Identity.
 
@@ -324,21 +310,15 @@ class PostgreSQLRepository(BaseRepository):
         the password in the PostgreSQL connection string. The token is valid
         for approximately 1 hour and is automatically refreshed by the Azure SDK.
 
-        Token Acquisition:
-        -----------------
-        Uses ManagedIdentityCredential explicitly to acquire tokens for the
-        configured managed identity. Supports both system-assigned and user-assigned
-        managed identities via MANAGED_IDENTITY_CLIENT_ID environment variable.
+        Args:
+        ----
+        client_id : Optional[str]
+            Client ID for user-assigned managed identity.
+            If None, uses system-assigned identity.
 
-        System-Assigned Identity (default):
-            - Uses the Function App's system-assigned managed identity
-            - No client_id needed
-            - Identity name matches WEBSITE_SITE_NAME
-
-        User-Assigned Identity (production):
-            - Set MANAGED_IDENTITY_CLIENT_ID to the client ID of the user-assigned identity
-            - Allows using specific identities with different privileges
-            - Identity name set via MANAGED_IDENTITY_NAME environment variable
+        identity_name : str
+            PostgreSQL user name matching the managed identity.
+            Defaults to 'rmhpgflexadmin' for user-assigned identity.
 
         Connection String Format:
         ------------------------
@@ -352,42 +332,25 @@ class PostgreSQLRepository(BaseRepository):
         Raises:
         ------
         RuntimeError
-            If token acquisition fails (NO fallbacks).
-
-        Environment Variables:
-        ---------------------
-        MANAGED_IDENTITY_NAME: PostgreSQL user name (defaults to WEBSITE_SITE_NAME)
-        MANAGED_IDENTITY_CLIENT_ID: Client ID for user-assigned identity (optional)
+            If token acquisition fails.
 
         Security Notes:
         --------------
         - Tokens are short-lived (1 hour) and automatically refreshed
         - Token is logged in masked form for debugging
-        - NO password fallbacks - managed identity or fail
         """
         from azure.identity import ManagedIdentityCredential
         from azure.core.exceptions import ClientAuthenticationError
 
         try:
-            # Get managed identity name (matches PostgreSQL user)
-            # Default: Same as Function App name (Azure AD displayName for system-assigned identity)
-            managed_identity_name = os.getenv(
-                "MANAGED_IDENTITY_NAME",
-                os.getenv('WEBSITE_SITE_NAME', 'rmhazuregeoapi')
-            )
-
-            # Get client ID for user-assigned identity (optional)
-            # If not set, uses system-assigned identity
-            client_id = os.getenv("MANAGED_IDENTITY_CLIENT_ID")
-
             if client_id:
-                logger.debug(f"🔑 Acquiring token for user-assigned managed identity: {client_id}")
+                logger.debug(f"🔑 Acquiring token for user-assigned identity (client_id: {client_id[:8]}...)")
                 credential = ManagedIdentityCredential(client_id=client_id)
             else:
-                logger.debug(f"🔑 Acquiring token for system-assigned managed identity")
+                logger.debug("🔑 Acquiring token for system-assigned identity")
                 credential = ManagedIdentityCredential()
 
-            logger.debug(f"👤 PostgreSQL user: {managed_identity_name}")
+            logger.info(f"👤 PostgreSQL user: {identity_name}")
 
             # Get access token for PostgreSQL
             # Scope is fixed for all Azure PostgreSQL Flexible Servers
@@ -404,7 +367,7 @@ class PostgreSQLRepository(BaseRepository):
                 f"host={self.config.postgis_host} "
                 f"port={self.config.postgis_port} "
                 f"dbname={self.config.postgis_database} "
-                f"user={managed_identity_name} "
+                f"user={identity_name} "
                 f"password={token} "
                 f"sslmode=require"
             )
@@ -414,7 +377,7 @@ class PostgreSQLRepository(BaseRepository):
                 f"host={self.config.postgis_host} "
                 f"port={self.config.postgis_port} "
                 f"dbname={self.config.postgis_database} "
-                f"user={managed_identity_name} "
+                f"user={identity_name} "
                 f"password=***TOKEN({len(token)} chars)*** "
                 f"sslmode=require"
             )

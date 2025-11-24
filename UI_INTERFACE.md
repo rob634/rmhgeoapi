@@ -1,7 +1,6 @@
 # Web Interface Architecture
 
 **Last Updated**: 21 NOV 2025
-**Author**: Robert and Geospatial Claude Legion
 
 ---
 
@@ -343,9 +342,9 @@ class MyInterface(BaseInterface):
 # web_interfaces/__init__.py (add at bottom)
 try:
     from .myinterface import interface as _myinterface
-    logger.info("✅ Imported MyInterface module")
+    logger.info("Imported MyInterface module")
 except ImportError as e:
-    logger.warning(f"⚠️ Could not import MyInterface: {e}")
+    logger.warning(f"Could not import MyInterface: {e}")
 ```
 
 ### Step 3: Deploy and Access

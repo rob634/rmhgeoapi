@@ -419,9 +419,17 @@ def _create_stac_collection_impl(
             search_registrar = PgSTACSearchRegistration()
 
             # Register search directly in database (NO TiTiler API call)
+            # Pass collection bbox so TileJSON returns correct bounds for auto-zoom (21 NOV 2025)
+            # Extract bbox from collection extent (pystac Collection object)
+            collection_bbox = None
+            if collection.extent and collection.extent.spatial and collection.extent.spatial.bboxes:
+                collection_bbox = collection.extent.spatial.bboxes[0]  # First bbox
+                logger.debug(f"   Collection bbox for TileJSON: {collection_bbox}")
+
             search_id = search_registrar.register_collection_search(
                 collection_id=collection_id,
-                metadata={"name": f"{collection_id} mosaic"}
+                metadata={"name": f"{collection_id} mosaic"},
+                bbox=collection_bbox
             )
 
             logger.info(f"✅ Search registered: {search_id}")

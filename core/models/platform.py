@@ -1,46 +1,59 @@
 # ============================================================================
-# CLAUDE CONTEXT - PLATFORM MODELS (API REQUESTS & ORCHESTRATION)
+# CLAUDE CONTEXT - PLATFORM MODELS (THIN TRACKING LAYER)
 # ============================================================================
 # EPOCH: 4 - ACTIVE ✅
-# STATUS: Core Models - Platform API request and orchestration database schema definitions
-# PURPOSE: Pydantic models for Platform layer - SINGLE SOURCE OF TRUTH for database schema
-# LAST_REVIEWED: 1 NOV 2025
-# EXPORTS: ApiRequest, OrchestrationJob, PlatformRequestStatus, DataType, OperationType, PlatformRequest
+# STATUS: Core Models - Platform API request thin tracking (22 NOV 2025)
+# PURPOSE: Pydantic models for Platform layer - SIMPLIFIED to thin tracking only
+# LAST_REVIEWED: 22 NOV 2025
+# EXPORTS: ApiRequest, PlatformRequestStatus, DataType, OperationType, PlatformRequest
 # INTERFACES: BaseModel (Pydantic)
 # PYDANTIC_MODELS: All models in this file define database schema via Infrastructure-as-Code
-# DEPENDENCIES: pydantic, typing, datetime, enum
+# DEPENDENCIES: pydantic, typing, datetime, enum, config
 # SOURCE: These models ARE the schema - database DDL auto-generated from field definitions
-# SCOPE: Platform layer data model - orchestration above CoreMachine
-# VALIDATION: Pydantic field validation + PostgreSQL constraints (auto-generated)
-# PATTERNS: Infrastructure-as-Code (schema from code), Data Transfer Object (DTO)
-# ENTRY_POINTS: from core.models.platform import ApiRequest, OrchestrationJob
+# SCOPE: Platform layer - Anti-Corruption Layer between DDH and CoreMachine
+# VALIDATION: Pydantic field validation + config-based validation
+# PATTERNS: Infrastructure-as-Code, Anti-Corruption Layer, Thin Tracking
+# ENTRY_POINTS: from core.models.platform import ApiRequest, PlatformRequest
 # INDEX:
-#   - Enums: Line 48
-#   - PlatformRequest (DTO): Line 62
-#   - ApiRequest (DB): Line 85
-#   - OrchestrationJob (DB): Line 140
+#   - Enums: Line 60
+#   - PlatformRequest (DTO): Line 95
+#   - ApiRequest (DB): Line 210
 # ============================================================================
 
 """
-Platform Layer Data Models - Infrastructure-as-Code Pattern
+Platform Layer Data Models - Thin Tracking Pattern (22 NOV 2025)
 
-This module defines the Platform layer data models using Pydantic.
-These models are the SINGLE SOURCE OF TRUTH for the database schema.
+SIMPLIFIED ARCHITECTURE:
+    Platform is an Anti-Corruption Layer (ACL) that translates DDH API to CoreMachine.
+    It does NOT contain orchestration logic - that belongs in CoreMachine.
 
-Architecture Pattern (Same as JobRecord/TaskRecord):
-    1. Define Pydantic models with Field constraints (max_length, etc.)
-    2. PydanticToSQL introspects models and generates PostgreSQL DDL
-    3. Schema deployment uses generated DDL (no manual schema definition)
-    4. Result: Zero drift between Python models and database schema
+    OLD (Complex Orchestration):
+        api_requests → orchestration_jobs → jobs (many-to-many tracking)
+        - Job chaining logic in Platform
+        - Completion callbacks from CoreMachine
+        - Multi-job tracking per request
+
+    NEW (Thin Tracking):
+        api_requests → job_id (1:1 mapping)
+        - Platform translates DDH params → CoreMachine params
+        - Creates ONE CoreMachine job per request
+        - Stores request_id → job_id for DDH status lookups
+        - No orchestration - CoreMachine handles job internals
+
+Request ID Generation:
+    SHA256(dataset_id + resource_id + version_id)[:32]
+    - Idempotent: same inputs = same ID
+    - Natural deduplication of resubmitted requests
 
 Database Tables Auto-Generated:
-    - app.api_requests (from ApiRequest)
-    - app.orchestration_jobs (from OrchestrationJob)
+    - app.api_requests (thin: request_id, DDH IDs, job_id, created_at)
 
-Table Names (29 OCT 2025):
-    - "api_requests": Client-facing layer - RESTful API requests from DDH
-    - "orchestration_jobs": Execution layer - Maps API requests to CoreMachine jobs
-
+Removed (22 NOV 2025):
+    - app.orchestration_jobs table (no job chaining)
+    - OrchestrationJob model (moved to history)
+    - jobs JSONB column (1:1 mapping now via job_id)
+    - status column (delegate to CoreMachine)
+    - metadata column (pass through, don't store twice)
 """
 
 from pydantic import BaseModel, Field, field_validator
@@ -51,14 +64,15 @@ import re
 
 
 # ============================================================================
-# ENUMS - Auto-converted to PostgreSQL ENUM types
+# ENUMS
 # ============================================================================
 
 class PlatformRequestStatus(str, Enum):
     """
     Platform request status enum.
 
-    Auto-generates: CREATE TYPE app.platform_request_status_enum AS ENUM (...)
+    Note: With thin tracking, we mostly delegate status to CoreMachine.
+    This enum is kept for backward compatibility and API responses.
     """
     PENDING = "pending"
     PROCESSING = "processing"
@@ -70,7 +84,7 @@ class DataType(str, Enum):
     """
     Supported data types for processing.
 
-    Auto-generates: CREATE TYPE app.data_type_enum AS ENUM (...)
+    Used to determine which CoreMachine job to create.
     """
     RASTER = "raster"
     VECTOR = "vector"
@@ -83,9 +97,7 @@ class OperationType(str, Enum):
     """
     DDH operation types.
 
-    Auto-generates: CREATE TYPE app.operation_type_enum AS ENUM (...)
-
-    Added: 1 NOV 2025 - DDH APIM integration
+    CREATE is primary. UPDATE/DELETE are Phase 2.
     """
     CREATE = "CREATE"
     UPDATE = "UPDATE"  # Phase 2
@@ -101,9 +113,14 @@ class PlatformRequest(BaseModel):
     Platform request from external application (DDH).
 
     This is a DTO (Data Transfer Object) for incoming HTTP requests.
-    Accepts DDH API v1 format and transforms to internal ApiRequest format.
+    Accepts DDH API v1 format and gets translated to CoreMachine job parameters.
 
-    Updated: 1 NOV 2025 - DDH APIM integration
+    The Platform layer validates this DTO, then uses PlatformConfig to:
+    - Generate output naming (table names, folder paths, STAC IDs)
+    - Validate container names and access levels
+    - Create deterministic request_id from DDH identifiers
+
+    Updated: 22 NOV 2025 - Simplified validation, delegate to PlatformConfig
     """
 
     # ========================================================================
@@ -116,19 +133,37 @@ class PlatformRequest(BaseModel):
     # ========================================================================
     # DDH Operation (Required)
     # ========================================================================
-    operation: OperationType = Field(..., description="Operation type: CREATE/UPDATE/DELETE")
+    operation: OperationType = Field(
+        default=OperationType.CREATE,
+        description="Operation type: CREATE/UPDATE/DELETE"
+    )
 
     # ========================================================================
     # DDH File Information (Required)
     # ========================================================================
-    container_name: str = Field(..., max_length=100, description="Azure storage container name (e.g., bronze-vectors)")
-    file_name: Union[str, List[str]] = Field(..., description="File name(s) - single string or array for raster collections")
+    container_name: str = Field(
+        ...,
+        max_length=100,
+        description="Azure storage container name (e.g., bronze-vectors)"
+    )
+    file_name: Union[str, List[str]] = Field(
+        ...,
+        description="File name(s) - single string or array for raster collections"
+    )
 
     # ========================================================================
     # DDH Service Metadata (Required)
     # ========================================================================
-    service_name: str = Field(..., max_length=255, description="Human-readable service name (maps to STAC item_id)")
-    access_level: str = Field(..., max_length=50, description="Data classification: public, OUO, restricted")
+    service_name: str = Field(
+        ...,
+        max_length=255,
+        description="Human-readable service name (maps to STAC item_id)"
+    )
+    access_level: str = Field(
+        default="OUO",
+        max_length=50,
+        description="Data classification: public, OUO, restricted"
+    )
 
     # ========================================================================
     # DDH Optional Metadata
@@ -141,31 +176,7 @@ class PlatformRequest(BaseModel):
     # ========================================================================
     processing_options: Dict[str, Any] = Field(
         default_factory=dict,
-        description="""
-        Processing options from DDH.
-
-        Vector Options:
-        - overwrite: bool (replace existing service)
-        - lon_column: str (CSV longitude column)
-        - lat_column: str (CSV latitude column)
-        - wkt_column: str (WKT geometry column)
-        - time_index: str | array (temporal indexing - Phase 2)
-        - attribute_index: str | array (attribute indexing - Phase 2)
-
-        Raster Options:
-        - crs: int (EPSG code)
-        - nodata_value: int (NoData value)
-        - band_descriptions: dict (band metadata - Phase 2)
-        - raster_collection: str (collection name - Phase 2)
-        - temporal_order: dict (time-series mapping - Phase 2)
-
-        Styling Options (Phase 2):
-        - type: str (unique/classed/stretch)
-        - property: str (attribute for visualization)
-        - color_ramp: str | array (color palette)
-        - classification: str (natural-breaks/quantile/equal/standard-deviation)
-        - classes: int (number of classes)
-        """
+        description="Processing options (crs, nodata_value, overwrite, etc.)"
     )
 
     # ========================================================================
@@ -210,7 +221,7 @@ class PlatformRequest(BaseModel):
         ext = file_name.lower().split('.')[-1]
 
         # Map extension to data type
-        if ext in ['geojson', 'gpkg', 'shp', 'zip', 'csv']:
+        if ext in ['geojson', 'gpkg', 'shp', 'zip', 'csv', 'gdb']:
             return DataType.VECTOR
         elif ext in ['tif', 'tiff', 'img', 'hdf', 'nc']:
             return DataType.RASTER
@@ -229,58 +240,47 @@ class PlatformRequest(BaseModel):
         Generate URL-safe STAC item_id from service_name.
 
         Example: "King County Parcels 2024" → "king-county-parcels-2024"
+
+        Note: Consider using PlatformConfig.generate_stac_item_id() for consistency.
         """
         item_id = self.service_name.lower()
         item_id = item_id.replace(' ', '-')
         item_id = re.sub(r'[^a-z0-9\-_]', '', item_id)
         return item_id
 
-    # ========================================================================
-    # Validators
-    # ========================================================================
-
-    @field_validator('container_name')
-    @classmethod
-    def validate_container(cls, v: str) -> str:
-        """Ensure container name follows naming convention"""
-        valid_containers = [
-            'bronze-vectors', 'bronze-rasters', 'bronze-misc', 'bronze-temp',
-            'silver-cogs', 'silver-vectors', 'silver-mosaicjson', 'silver-stac-assets'
-        ]
-        if v not in valid_containers:
-            raise ValueError(f"Container must be one of: {', '.join(valid_containers)}")
-        return v
-
-    @field_validator('access_level')
-    @classmethod
-    def validate_access_level(cls, v: str) -> str:
-        """Ensure access level is valid"""
-        valid_levels = ['public', 'OUO', 'restricted']
-        if v not in valid_levels:
-            raise ValueError(f"access_level must be one of: {', '.join(valid_levels)}")
-        return v
+    @property
+    def is_raster_collection(self) -> bool:
+        """Check if this is a raster collection request (multiple files)."""
+        return (
+            isinstance(self.file_name, list) and
+            len(self.file_name) > 1 and
+            self.data_type == DataType.RASTER
+        )
 
 
 # ============================================================================
-# DATABASE MODELS - Infrastructure-as-Code Schema Definitions
+# DATABASE MODELS - Thin Tracking (22 NOV 2025)
 # ============================================================================
 
 class ApiRequest(BaseModel):
     """
-    API request database record (client-facing layer).
+    API request database record - THIN TRACKING ONLY.
 
-    ⚠️ CRITICAL: This model IS the database schema definition.
-    The PostgreSQL table schema is auto-generated from these field definitions.
+    ⚠️ SIMPLIFIED (22 NOV 2025): This is now a thin tracking layer.
 
-    This table represents client-facing API requests from DDH.
-    Each request can orchestrate multiple CoreMachine jobs (tracked via OrchestrationJob table).
+    Purpose:
+        - Store DDH identifiers for status lookup
+        - Map request_id → job_id (1:1)
+        - Enable DDH to poll /api/platform/status/{request_id}
+        - Platform looks up job_id, fetches status from CoreMachine
 
-    Schema Generation:
-    - Field type → PostgreSQL type (str → VARCHAR, Dict → JSONB, etc.)
-    - max_length → VARCHAR(n)
-    - default → DEFAULT value
-    - Optional → NULL, required → NOT NULL
-    - Enum → ENUM type + constraint
+    What's REMOVED:
+        - jobs JSONB (was: multi-job tracking)
+        - status column (delegate to CoreMachine job status)
+        - parameters JSONB (passed to CoreMachine, not stored twice)
+        - metadata JSONB (passed to CoreMachine, not stored twice)
+        - result_data JSONB (CoreMachine stores results)
+        - updated_at (thin record, doesn't update)
 
     Auto-generates:
         CREATE TABLE app.api_requests (
@@ -288,198 +288,80 @@ class ApiRequest(BaseModel):
             dataset_id VARCHAR(255) NOT NULL,
             resource_id VARCHAR(255) NOT NULL,
             version_id VARCHAR(50) NOT NULL,
+            job_id VARCHAR(64) NOT NULL,
             data_type VARCHAR(50) NOT NULL,
-            status app.platform_request_status_enum DEFAULT 'pending',
-            jobs JSONB DEFAULT '{}'::jsonb,
-            parameters JSONB DEFAULT '{}'::jsonb,
-            metadata JSONB DEFAULT '{}'::jsonb,
-            result_data JSONB,
-            created_at TIMESTAMPTZ DEFAULT NOW(),
-            updated_at TIMESTAMPTZ DEFAULT NOW()
+            created_at TIMESTAMPTZ DEFAULT NOW()
         );
 
-    Follows same Infrastructure-as-Code pattern as JobRecord (core/models/job.py).
+    Request ID Generation:
+        SHA256(dataset_id | resource_id | version_id)[:32]
+        - Idempotent: same DDH identifiers = same request_id
+        - See config.generate_platform_request_id()
     """
     request_id: str = Field(
         ...,
         max_length=32,
-        description="SHA256 hash of dataset+resource+version IDs (first 32 chars)"
+        description="SHA256(dataset_id|resource_id|version_id)[:32] - idempotent"
     )
     dataset_id: str = Field(..., max_length=255, description="DDH dataset identifier")
     resource_id: str = Field(..., max_length=255, description="DDH resource identifier")
     version_id: str = Field(..., max_length=50, description="DDH version identifier")
-    data_type: str = Field(..., max_length=50, description="Type of data being processed")
-    status: PlatformRequestStatus = Field(
-        default=PlatformRequestStatus.PENDING,
-        description="Current status of platform request"
+    job_id: str = Field(
+        ...,
+        max_length=64,
+        description="CoreMachine job ID (1:1 mapping)"
     )
-    jobs: Dict[str, Any] = Field(
-        default_factory=dict,
-        description="""
-        CoreMachine jobs orchestrated for this request.
-
-        Structure:
-        {
-            "validate_raster": {
-                "job_id": "abc123...",
-                "job_type": "validate_raster",
-                "status": "completed",
-                "sequence": 1,
-                "created_at": "2025-10-29T12:00:00Z",
-                "completed_at": "2025-10-29T12:01:30Z"
-            },
-            "create_cog": {
-                "job_id": "def456...",
-                "job_type": "process_raster",
-                "status": "processing",
-                "sequence": 2,
-                "created_at": "2025-10-29T12:01:31Z",
-                "depends_on": ["validate_raster"]
-            }
-        }
-
-        Key = logical step name (human-readable)
-        Value = job metadata with job_id reference
-        """
-    )
-    parameters: Dict[str, Any] = Field(
-        default_factory=dict,
-        description="Processing parameters from original request"
-    )
-    metadata: Dict[str, Any] = Field(
-        default_factory=dict,
-        description="""
-        Additional metadata about the request.
-
-        DDH Metadata Fields (added 1 NOV 2025):
-        - service_name: str (human-readable service name, maps to STAC title)
-        - stac_item_id: str (URL-safe STAC item identifier)
-        - access_level: str (public/OUO/restricted - enforcement Phase 2)
-        - description: str (service description for API/STAC)
-        - tags: list (categorization/search tags)
-        - client_id: str (client application identifier)
-        - source_location: str (Azure blob URL)
-        - submission_time: str (ISO 8601 timestamp)
-        """
-    )
-    result_data: Optional[Dict[str, Any]] = Field(
-        None,
-        description="Final results after all jobs complete"
-    )
+    data_type: str = Field(..., max_length=50, description="Type of data: raster, vector, etc.")
     created_at: datetime = Field(
         default_factory=datetime.utcnow,
         description="Timestamp when request was created"
     )
-    updated_at: datetime = Field(
-        default_factory=datetime.utcnow,
-        description="Timestamp when request was last updated"
-    )
 
     def to_dict(self) -> Dict[str, Any]:
-        """
-        Convert to dictionary for database storage.
-
-        Note: This method will be less necessary once repository uses
-        Pydantic model_dump() directly, but kept for backward compatibility.
-        """
+        """Convert to dictionary for database storage."""
         return {
             'request_id': self.request_id,
             'dataset_id': self.dataset_id,
             'resource_id': self.resource_id,
             'version_id': self.version_id,
+            'job_id': self.job_id,
             'data_type': self.data_type,
-            'status': self.status.value if isinstance(self.status, Enum) else self.status,
-            'job_ids': self.job_ids,
-            'parameters': self.parameters,
-            'metadata': self.metadata,
-            'result_data': self.result_data,
-            'created_at': self.created_at.isoformat() if self.created_at else None,
-            'updated_at': self.updated_at.isoformat() if self.updated_at else None
+            'created_at': self.created_at.isoformat() if self.created_at else None
         }
-
-
-class OrchestrationJob(BaseModel):
-    """
-    Orchestration job mapping (execution layer).
-
-    ⚠️ CRITICAL: This model IS the database schema definition.
-    The PostgreSQL table schema is auto-generated from these field definitions.
-
-    This table maps API requests to CoreMachine jobs, enabling:
-    - Bidirectional queries (request → jobs, job → requests)
-    - Workflow orchestration tracking
-    - Multiple requests referencing same job (idempotency)
-
-    Auto-generates:
-        CREATE TABLE app.orchestration_jobs (
-            request_id VARCHAR(32) NOT NULL,
-            job_id VARCHAR(64) NOT NULL,
-            job_type VARCHAR(100) NOT NULL,
-            sequence INTEGER DEFAULT 1,
-            status VARCHAR(20) DEFAULT 'pending',
-            created_at TIMESTAMPTZ DEFAULT NOW(),
-            PRIMARY KEY (request_id, job_id),
-            FOREIGN KEY (request_id) REFERENCES app.api_requests(request_id) ON DELETE CASCADE
-        );
-
-    This table tracks:
-    - Which CoreMachine jobs belong to which API request
-    - The sequence/order of jobs in the request workflow
-    - Individual job status (independent of API request status)
-    """
-    request_id: str = Field(
-        ...,
-        max_length=32,
-        description="API request ID (foreign key to api_requests)"
-    )
-    job_id: str = Field(
-        ...,
-        max_length=64,
-        description="CoreMachine job ID (SHA256 hash)"
-    )
-    job_type: str = Field(
-        ...,
-        max_length=100,
-        description="Type of CoreMachine job (e.g., 'process_raster')"
-    )
-    sequence: int = Field(
-        default=1,
-        description="Order of this job in the request workflow"
-    )
-    status: str = Field(
-        default="pending",
-        max_length=20,
-        description="Job status (mirrors CoreMachine job status)"
-    )
-    created_at: datetime = Field(
-        default_factory=datetime.utcnow,
-        description="Timestamp when mapping was created"
-    )
 
 
 # ============================================================================
 # SCHEMA METADATA - Used by PydanticToSQL generator
 # ============================================================================
 
-# Table names (29 OCT 2025 - Renamed for API clarity)
-# - "api_requests": Client-facing layer (what user asked for)
-# - "orchestration_jobs": Execution layer (how we execute it)
+# Table names (22 NOV 2025 - Simplified to single table)
 PLATFORM_TABLE_NAMES = {
-    'ApiRequest': 'api_requests',
-    'OrchestrationJob': 'orchestration_jobs'
+    'ApiRequest': 'api_requests'
+    # OrchestrationJob table REMOVED - no job chaining in Platform
 }
 
-# Primary keys (auto-detected, but explicit is better)
+# Primary keys
 PLATFORM_PRIMARY_KEYS = {
-    'ApiRequest': ['request_id'],
-    'OrchestrationJob': ['request_id', 'job_id']  # Composite key
+    'ApiRequest': ['request_id']
 }
 
-# Indexes to create (in addition to primary key indexes)
+# Indexes
 PLATFORM_INDEXES = {
     'ApiRequest': [
-        ('status',),           # Single column index
-        ('dataset_id',),       # Single column index
-        ('created_at',),       # Single column index (DESC handled in generator)
+        ('job_id',),       # Lookup by CoreMachine job
+        ('dataset_id',),   # DDH queries by dataset
+        ('created_at',),   # Recent requests
     ]
 }
+
+
+# ============================================================================
+# BACKWARD COMPATIBILITY - Deprecated exports (22 NOV 2025)
+# ============================================================================
+
+# OrchestrationJob is REMOVED - kept as comment for migration reference
+# class OrchestrationJob was used for multi-job tracking per request
+# This is no longer needed with thin tracking (1:1 request → job mapping)
+
+# If old code imports OrchestrationJob, it will get ImportError
+# This is intentional - forces migration to new pattern

@@ -36,13 +36,13 @@ from psycopg import sql
 from annotated_types import MaxLen  # Import at top for health check validation
 
 # Import the core models
+# NOTE: OrchestrationJob REMOVED (22 NOV 2025) - no job chaining in Platform
 from ..models import (
     JobRecord,
     TaskRecord,
     JobStatus,
     TaskStatus,
     ApiRequest,
-    OrchestrationJob,
     PlatformRequestStatus,
     DataType,
     JanitorRun,
@@ -928,17 +928,16 @@ $$""").format(
         # But we'll return them as sql.SQL objects for consistency
 
         # Tables - now using composed SQL
+        # NOTE: OrchestrationJob REMOVED (22 NOV 2025) - no job chaining in Platform
         composed.append(self.generate_table_composed(JobRecord, "jobs"))
         composed.append(self.generate_table_composed(TaskRecord, "tasks"))
         composed.append(self.generate_table_composed(ApiRequest, "api_requests"))
-        composed.append(self.generate_table_composed(OrchestrationJob, "orchestration_jobs"))
         composed.append(self.generate_table_composed(JanitorRun, "janitor_runs"))
 
         # Indexes - now using composed SQL
         composed.extend(self.generate_indexes_composed("jobs", JobRecord))
         composed.extend(self.generate_indexes_composed("tasks", TaskRecord))
         composed.extend(self.generate_indexes_composed("api_requests", ApiRequest))
-        composed.extend(self.generate_indexes_composed("orchestration_jobs", OrchestrationJob))
         composed.extend(self.generate_indexes_composed("janitor_runs", JanitorRun))
             
         # Functions - already sql.Composed objects

@@ -273,6 +273,12 @@ def unified_interface_handler(req: func.HttpRequest) -> func.HttpResponse:
 # Auto-import all interface modules to trigger registration
 # These imports cause the @InterfaceRegistry.register() decorators to execute
 try:
+    from .home import interface as _home
+    logger.info("✅ Imported Home interface module")
+except ImportError as e:
+    logger.warning(f"⚠️ Could not import Home interface: {e}")
+
+try:
     from .stac import interface as _stac
     logger.info("✅ Imported STAC interface module")
 except ImportError as e:

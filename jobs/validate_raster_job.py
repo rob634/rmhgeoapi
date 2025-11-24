@@ -1,10 +1,17 @@
 # ============================================================================
+# 🚧 UNDER DEVELOPMENT - DO NOT USE IN PRODUCTION
+# ============================================================================
+# PURPOSE: Standalone raster validation utility
+# STATUS: Functional - Supports production workflows, not standalone production use
+# ============================================================================
+
+# ============================================================================
 # CLAUDE CONTEXT - JOB DEFINITION
 # ============================================================================
 # EPOCH: 4 - ACTIVE ✅
 # STATUS: Job - Single-stage raster validation (no processing)
 # PURPOSE: Single-stage workflow for validating rasters without processing
-# LAST_REVIEWED: 29 OCT 2025
+# LAST_REVIEWED: 22 NOV 2025
 # EXPORTS: ValidateRasterJob (JobBase implementation)
 # INTERFACES: JobBase (implements 5-method contract)
 # PYDANTIC_MODELS: None (uses dict-based validation)

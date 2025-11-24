@@ -113,7 +113,7 @@ def get_blob_metadata_handler(req: func.HttpRequest) -> func.HttpResponse:
             return func.HttpResponse(
                 json.dumps({
                     "error": f"Container '{container_name}' not found",
-                    "available_containers": ["bronze-rasters", "bronze-vectors"]
+                    "available_containers": ["rmhazuregeobronze", "rmhazuregeosilver", "rmhazuregeogold", "silver-cogs", "source-data"]
                 }),
                 status_code=404,
                 mimetype="application/json"

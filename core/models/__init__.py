@@ -55,15 +55,15 @@ from .results import (
     JobCompletionResult
 )
 
-# Platform models (renamed 29 OCT 2025 for API clarity)
+# Platform models (simplified 22 NOV 2025 - thin tracking only)
 from .platform import (
     ApiRequest,
-    OrchestrationJob,
     PlatformRequestStatus,
     DataType,
     OperationType,
     PlatformRequest
 )
+# NOTE: OrchestrationJob REMOVED (22 NOV 2025) - no job chaining in Platform
 
 # Janitor models (21 NOV 2025)
 from .janitor import (
@@ -99,13 +99,13 @@ __all__ = [
     'StageAdvancementResult',
     'JobCompletionResult',
 
-    # Platform models (renamed 29 OCT 2025)
+    # Platform models (simplified 22 NOV 2025 - thin tracking)
     'ApiRequest',
-    'OrchestrationJob',
     'PlatformRequestStatus',
     'DataType',
     'OperationType',
     'PlatformRequest',
+    # NOTE: OrchestrationJob REMOVED - no job chaining in Platform
 
     # Janitor models (21 NOV 2025)
     'JanitorRun',

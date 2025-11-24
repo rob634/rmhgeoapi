@@ -21,7 +21,7 @@
 Pipeline Dashboard Interface
 
 Web interface for browsing Bronze container files. Provides:
-    - Container selector (bronze-vectors, bronze-rasters)
+    - Container selector (rmhazuregeobronze, rmhazuregeosilver, rmhazuregeogold)
     - Prefix/folder filter input
     - Load buttons (10, 50, All)
     - Files table (Name, Size, Modified, Type)
@@ -89,8 +89,11 @@ class PipelineInterface(BaseInterface):
                 <div class="control-group">
                     <label for="container-select">Container:</label>
                     <select id="container-select" class="filter-select">
-                        <option value="bronze-rasters" selected>bronze-rasters</option>
-                        <option value="bronze-vectors">bronze-vectors</option>
+                        <option value="rmhazuregeobronze" selected>rmhazuregeobronze (Bronze)</option>
+                        <option value="rmhazuregeosilver">rmhazuregeosilver (Silver)</option>
+                        <option value="rmhazuregeogold">rmhazuregeogold (Gold)</option>
+                        <option value="silver-cogs">silver-cogs</option>
+                        <option value="source-data">source-data</option>
                     </select>
                 </div>
 
@@ -619,8 +622,17 @@ class PipelineInterface(BaseInterface):
                 tbody.innerHTML = currentBlobs.map((blob, index) => {
                     const sizeMB = (blob.size / (1024 * 1024)).toFixed(2);
                     const date = blob.last_modified ? new Date(blob.last_modified).toLocaleDateString() : 'N/A';
-                    const ext = blob.name.split('.').pop()?.toUpperCase() || 'FILE';
                     const shortName = blob.name.split('/').pop();
+
+                    // Determine type: folders (size=0) or file extension
+                    let ext;
+                    if (blob.size === 0) {
+                        ext = 'Folder';
+                    } else if (shortName.includes('.')) {
+                        ext = shortName.split('.').pop().toUpperCase();
+                    } else {
+                        ext = 'File';
+                    }
 
                     return `
                         <tr onclick="selectBlob(${index})" data-index="${index}">

@@ -178,15 +178,26 @@ class JanitorService:
             JanitorRunResult with statistics and actions taken
         """
         result = JanitorRunResult(run_type="task_watchdog", success=False)
+        logger.debug("[JANITOR] task_watchdog: Creating JanitorRunResult object")
+
+        # Create audit record FIRST before doing any work
+        result.run_id = self._start_run(result)
+        logger.debug(f"[JANITOR] task_watchdog: Audit record created with run_id={result.run_id}")
 
         if not self.config.enabled:
-            logger.info("Janitor disabled via configuration - skipping task watchdog")
+            logger.info("[JANITOR] Janitor disabled via configuration - skipping task watchdog")
+            logger.debug("[JANITOR] task_watchdog: JANITOR_ENABLED=false, returning early")
             result.complete(success=True)
+            self._complete_run(result)
             return result
 
         try:
             logger.info(
-                f"Starting task watchdog (timeout: {self.config.task_timeout_minutes} min)"
+                f"[JANITOR] Starting task watchdog (timeout: {self.config.task_timeout_minutes} min)"
+            )
+            logger.debug(
+                f"[JANITOR] task_watchdog: Querying for tasks with status='PROCESSING' "
+                f"AND updated_at < NOW() - INTERVAL '{self.config.task_timeout_minutes} minutes'"
             )
 
             # Find stale tasks
@@ -194,44 +205,78 @@ class JanitorService:
                 timeout_minutes=self.config.task_timeout_minutes
             )
             result.items_scanned = len(stale_tasks)
+            logger.debug(f"[JANITOR] task_watchdog: Query returned {len(stale_tasks)} stale tasks")
 
             if not stale_tasks:
-                logger.info("No stale tasks found")
+                logger.info("[JANITOR] No stale tasks found - system healthy")
+                logger.debug("[JANITOR] task_watchdog: No stale tasks, completing with success=True")
                 result.complete(success=True)
-                self._log_run(result)
+                self._complete_run(result)
                 return result
 
-            logger.warning(f"Found {len(stale_tasks)} stale PROCESSING tasks")
+            logger.warning(f"[JANITOR] Found {len(stale_tasks)} stale PROCESSING tasks")
+
+            # Log each stale task with full details BEFORE fixing
+            for i, task in enumerate(stale_tasks, 1):
+                minutes_stuck = round(task.get('minutes_stuck', 0), 1)
+                logger.warning(
+                    f"[JANITOR] Stale task {i}/{len(stale_tasks)}: "
+                    f"task_id={task['task_id']}, "
+                    f"job_id={task['parent_job_id'][:16]}..., "
+                    f"job_type={task.get('job_type')}, "
+                    f"task_type={task.get('task_type')}, "
+                    f"stage={task.get('stage')}, "
+                    f"stuck_for={minutes_stuck}min, "
+                    f"retry_count={task.get('retry_count', 0)}, "
+                    f"updated_at={task.get('updated_at')}"
+                )
 
             # Mark tasks as failed
             task_ids = [t['task_id'] for t in stale_tasks]
+            logger.debug(f"[JANITOR] task_watchdog: Preparing to mark {len(task_ids)} tasks as FAILED")
             error_message = (
                 f"[JANITOR] Silent failure detected - task exceeded "
                 f"{self.config.task_timeout_minutes} minute timeout. "
                 f"Azure Functions max execution time is 10-30 minutes."
             )
+            logger.debug(f"[JANITOR] task_watchdog: Error message: {error_message[:80]}...")
 
+            logger.debug(f"[JANITOR] task_watchdog: Executing batch UPDATE for {len(task_ids)} tasks")
             fixed_count = self.repo.mark_tasks_as_failed(task_ids, error_message)
             result.items_fixed = fixed_count
+            logger.debug(f"[JANITOR] task_watchdog: Batch UPDATE completed, {fixed_count} rows affected")
 
-            # Record actions
+            # Record actions and log each fix
             for task in stale_tasks:
+                minutes_stuck = round(task.get('minutes_stuck', 0), 1)
                 result.actions_taken.append({
                     "action": "mark_task_failed",
                     "task_id": task['task_id'],
                     "parent_job_id": task['parent_job_id'],
-                    "minutes_stuck": round(task.get('minutes_stuck', 0), 1),
+                    "job_type": task.get('job_type'),
+                    "task_type": task.get('task_type'),
+                    "stage": task.get('stage'),
+                    "minutes_stuck": minutes_stuck,
                     "reason": "exceeded_timeout"
                 })
+                logger.info(
+                    f"[JANITOR] Marked task FAILED: task_id={task['task_id']}, "
+                    f"job_id={task['parent_job_id'][:16]}..., stuck={minutes_stuck}min"
+                )
 
-            logger.info(f"Marked {fixed_count} stale tasks as FAILED")
+            logger.warning(f"[JANITOR] Task watchdog complete: marked {fixed_count} stale tasks as FAILED")
+            logger.debug(f"[JANITOR] task_watchdog: Success - scanned={result.items_scanned}, fixed={result.items_fixed}")
             result.complete(success=True)
 
         except Exception as e:
-            logger.error(f"Task watchdog failed: {e}")
+            logger.error(f"[JANITOR] Task watchdog failed: {e}")
+            import traceback
+            logger.error(f"[JANITOR] Traceback: {traceback.format_exc()}")
             result.complete(success=False, error=str(e))
 
-        self._log_run(result)
+        logger.debug(f"[JANITOR] task_watchdog: Logging run to janitor_runs table")
+        self._complete_run(result)
+        logger.debug(f"[JANITOR] task_watchdog: Run complete, returning result")
         return result
 
     # ========================================================================
@@ -249,35 +294,69 @@ class JanitorService:
             JanitorRunResult with statistics and actions taken
         """
         result = JanitorRunResult(run_type="job_health", success=False)
+        logger.debug("[JANITOR] job_health: Creating JanitorRunResult object")
+
+        # Create audit record FIRST before doing any work
+        result.run_id = self._start_run(result)
+        logger.debug(f"[JANITOR] job_health: Audit record created with run_id={result.run_id}")
 
         if not self.config.enabled:
-            logger.info("Janitor disabled via configuration - skipping job health check")
+            logger.info("[JANITOR] Janitor disabled via configuration - skipping job health check")
+            logger.debug("[JANITOR] job_health: JANITOR_ENABLED=false, returning early")
             result.complete(success=True)
+            self._complete_run(result)
             return result
 
         try:
-            logger.info("Starting job health check")
+            logger.info("[JANITOR] Starting job health check")
+            logger.debug(
+                "[JANITOR] job_health: Querying for jobs with status='PROCESSING' "
+                "that have at least one task with status='FAILED'"
+            )
 
             # Find jobs with failed tasks
             failed_jobs = self.repo.get_processing_jobs_with_failed_tasks()
             result.items_scanned = len(failed_jobs)
+            logger.debug(f"[JANITOR] job_health: Query returned {len(failed_jobs)} jobs with failed tasks")
 
             if not failed_jobs:
-                logger.info("No jobs with failed tasks found")
+                logger.info("[JANITOR] No jobs with failed tasks found - system healthy")
+                logger.debug("[JANITOR] job_health: No failed jobs, completing with success=True")
                 result.complete(success=True)
-                self._log_run(result)
+                self._complete_run(result)
                 return result
 
-            logger.warning(f"Found {len(failed_jobs)} PROCESSING jobs with failed tasks")
+            logger.warning(f"[JANITOR] Found {len(failed_jobs)} PROCESSING jobs with failed tasks")
 
             # Process each failed job
-            for job in failed_jobs:
+            for i, job in enumerate(failed_jobs, 1):
                 job_id = job['job_id']
+                job_type = job.get('job_type')
                 failed_count = job.get('failed_count', 0)
                 completed_count = job.get('completed_count', 0)
+                processing_count = job.get('processing_count', 0)
+                queued_count = job.get('queued_count', 0)
                 total_tasks = job.get('total_tasks', 0)
                 failed_task_ids = job.get('failed_task_ids', [])
                 failed_errors = job.get('failed_task_errors', [])
+                stage = job.get('stage')
+                total_stages = job.get('total_stages')
+
+                # Log detailed job info BEFORE fixing
+                logger.warning(
+                    f"[JANITOR] Failed job {i}/{len(failed_jobs)}: "
+                    f"job_id={job_id[:16]}..., "
+                    f"job_type={job_type}, "
+                    f"stage={stage}/{total_stages}, "
+                    f"tasks: {completed_count} completed, {failed_count} failed, "
+                    f"{processing_count} processing, {queued_count} queued (total={total_tasks})"
+                )
+
+                # Log each failed task ID
+                for task_id in failed_task_ids[:10]:  # Limit to first 10
+                    logger.warning(f"[JANITOR]   - Failed task: {task_id}")
+                if len(failed_task_ids) > 10:
+                    logger.warning(f"[JANITOR]   - ... and {len(failed_task_ids) - 10} more failed tasks")
 
                 # Build error message
                 error_summary = "; ".join(filter(None, failed_errors[:3]))
@@ -306,21 +385,32 @@ class JanitorService:
                     result.actions_taken.append({
                         "action": "mark_job_failed",
                         "job_id": job_id,
-                        "job_type": job.get('job_type'),
+                        "job_type": job_type,
+                        "stage": stage,
+                        "total_stages": total_stages,
                         "failed_tasks": failed_count,
                         "completed_tasks": completed_count,
                         "total_tasks": total_tasks,
                         "reason": "task_failures"
                     })
+                    logger.info(
+                        f"[JANITOR] Marked job FAILED: job_id={job_id[:16]}..., "
+                        f"job_type={job_type}, failed_tasks={failed_count}"
+                    )
 
-            logger.info(f"Marked {result.items_fixed} jobs as FAILED")
+            logger.warning(f"[JANITOR] Job health check complete: marked {result.items_fixed} jobs as FAILED")
+            logger.debug(f"[JANITOR] job_health: Success - scanned={result.items_scanned}, fixed={result.items_fixed}")
             result.complete(success=True)
 
         except Exception as e:
-            logger.error(f"Job health check failed: {e}")
+            logger.error(f"[JANITOR] Job health check failed: {e}")
+            import traceback
+            logger.error(f"[JANITOR] Traceback: {traceback.format_exc()}")
             result.complete(success=False, error=str(e))
 
-        self._log_run(result)
+        logger.debug(f"[JANITOR] job_health: Logging run to janitor_runs table")
+        self._complete_run(result)
+        logger.debug(f"[JANITOR] job_health: Run complete, returning result")
         return result
 
     def _build_partial_results(
@@ -390,27 +480,45 @@ class JanitorService:
             JanitorRunResult with statistics and actions taken
         """
         result = JanitorRunResult(run_type="orphan_detector", success=False)
+        logger.debug("[JANITOR] orphan_detector: Creating JanitorRunResult object")
+
+        # Create audit record FIRST before doing any work
+        result.run_id = self._start_run(result)
+        logger.debug(f"[JANITOR] orphan_detector: Audit record created with run_id={result.run_id}")
 
         if not self.config.enabled:
-            logger.info("Janitor disabled via configuration - skipping orphan detection")
+            logger.info("[JANITOR] Janitor disabled via configuration - skipping orphan detection")
+            logger.debug("[JANITOR] orphan_detector: JANITOR_ENABLED=false, returning early")
             result.complete(success=True)
+            self._complete_run(result)
             return result
 
         try:
-            logger.info("Starting orphan detection")
+            logger.info("[JANITOR] Starting orphan detection (4 categories)")
+            logger.debug("[JANITOR] orphan_detector: Will check: orphaned_tasks, zombie_jobs, stuck_queued, ancient_stale")
 
             # 1. Find orphaned tasks
+            logger.info("[JANITOR] Checking for orphaned tasks (parent job missing)...")
             orphaned_tasks = self.repo.get_orphaned_tasks()
             result.items_scanned += len(orphaned_tasks)
 
             if orphaned_tasks:
-                logger.warning(f"Found {len(orphaned_tasks)} orphaned tasks")
-                for task in orphaned_tasks:
+                logger.warning(f"[JANITOR] Found {len(orphaned_tasks)} orphaned tasks!")
+                for i, task in enumerate(orphaned_tasks, 1):
+                    logger.warning(
+                        f"[JANITOR] Orphaned task {i}/{len(orphaned_tasks)}: "
+                        f"task_id={task['task_id']}, "
+                        f"missing_job_id={task['parent_job_id'][:16]}..., "
+                        f"status={task['status']}, "
+                        f"task_type={task.get('task_type')}, "
+                        f"created_at={task.get('created_at')}"
+                    )
                     result.actions_taken.append({
                         "action": "detected_orphaned_task",
                         "task_id": task['task_id'],
                         "parent_job_id": task['parent_job_id'],
                         "status": task['status'],
+                        "task_type": task.get('task_type'),
                         "created_at": task.get('created_at', '').isoformat() if task.get('created_at') else None,
                         "reason": "parent_job_missing"
                     })
@@ -422,115 +530,226 @@ class JanitorService:
                     "[JANITOR] Orphaned task - parent job does not exist"
                 )
                 result.items_fixed += len(task_ids)
+                logger.info(f"[JANITOR] Marked {len(task_ids)} orphaned tasks as FAILED")
+            else:
+                logger.info("[JANITOR] No orphaned tasks found")
 
             # 2. Find zombie jobs
+            logger.info("[JANITOR] Checking for zombie jobs (PROCESSING but all tasks terminal)...")
             zombie_jobs = self.repo.get_zombie_jobs()
             result.items_scanned += len(zombie_jobs)
 
             if zombie_jobs:
-                logger.warning(f"Found {len(zombie_jobs)} zombie jobs")
-                for job in zombie_jobs:
+                logger.warning(f"[JANITOR] Found {len(zombie_jobs)} zombie jobs!")
+                for i, job in enumerate(zombie_jobs, 1):
+                    job_id = job['job_id']
+                    job_type = job.get('job_type')
+                    completed = job.get('completed_tasks', 0)
+                    failed = job.get('failed_tasks', 0)
+                    total = job.get('total_tasks', 0)
+
+                    logger.warning(
+                        f"[JANITOR] Zombie job {i}/{len(zombie_jobs)}: "
+                        f"job_id={job_id[:16]}..., "
+                        f"job_type={job_type}, "
+                        f"stage={job.get('stage')}/{job.get('total_stages')}, "
+                        f"tasks: {completed} completed, {failed} failed (total={total})"
+                    )
+
                     # Determine if job should be marked completed or failed
-                    if job.get('failed_tasks', 0) > 0:
+                    if failed > 0:
                         # Has failed tasks - mark as failed
-                        partial_results = self._build_partial_results(job['job_id'], job)
+                        partial_results = self._build_partial_results(job_id, job)
                         self.repo.mark_job_as_failed(
-                            job['job_id'],
+                            job_id,
                             "[JANITOR] Zombie job detected - tasks finished but job stuck in PROCESSING",
                             partial_results
                         )
                         result.items_fixed += 1
                         result.actions_taken.append({
                             "action": "mark_zombie_job_failed",
-                            "job_id": job['job_id'],
+                            "job_id": job_id,
+                            "job_type": job_type,
+                            "completed_tasks": completed,
+                            "failed_tasks": failed,
                             "reason": "zombie_with_failures"
                         })
+                        logger.info(f"[JANITOR] Marked zombie job FAILED: {job_id[:16]}... (had {failed} failed tasks)")
                     else:
                         # All tasks completed - likely stage advancement failure
                         # Mark as failed with descriptive message
                         self.repo.mark_job_as_failed(
-                            job['job_id'],
+                            job_id,
                             "[JANITOR] Zombie job detected - all tasks completed but job stuck in PROCESSING. "
                             "Likely stage advancement failure.",
-                            {"status": "zombie_recovery", "tasks_completed": job.get('completed_tasks', 0)}
+                            {"status": "zombie_recovery", "tasks_completed": completed}
                         )
                         result.items_fixed += 1
                         result.actions_taken.append({
                             "action": "mark_zombie_job_failed",
-                            "job_id": job['job_id'],
+                            "job_id": job_id,
+                            "job_type": job_type,
+                            "completed_tasks": completed,
                             "reason": "zombie_stage_advancement_failure"
                         })
+                        logger.info(f"[JANITOR] Marked zombie job FAILED: {job_id[:16]}... (stage advancement failure)")
+            else:
+                logger.info("[JANITOR] No zombie jobs found")
 
             # 3. Find stuck QUEUED jobs
+            logger.info(f"[JANITOR] Checking for stuck QUEUED jobs (no tasks after {self.config.queued_timeout_hours}h)...")
             stuck_queued = self.repo.get_stuck_queued_jobs(
                 timeout_hours=self.config.queued_timeout_hours
             )
             result.items_scanned += len(stuck_queued)
 
             if stuck_queued:
-                logger.warning(f"Found {len(stuck_queued)} stuck QUEUED jobs")
-                for job in stuck_queued:
+                logger.warning(f"[JANITOR] Found {len(stuck_queued)} stuck QUEUED jobs!")
+                for i, job in enumerate(stuck_queued, 1):
+                    job_id = job['job_id']
+                    hours_stuck = job.get('hours_stuck', 0)
+
+                    logger.warning(
+                        f"[JANITOR] Stuck QUEUED job {i}/{len(stuck_queued)}: "
+                        f"job_id={job_id[:16]}..., "
+                        f"job_type={job.get('job_type')}, "
+                        f"stuck_for={hours_stuck:.1f}h, "
+                        f"created_at={job.get('created_at')}"
+                    )
+
                     self.repo.mark_job_as_failed(
-                        job['job_id'],
-                        f"[JANITOR] Job stuck in QUEUED state for {job.get('hours_stuck', '?'):.1f} hours "
+                        job_id,
+                        f"[JANITOR] Job stuck in QUEUED state for {hours_stuck:.1f} hours "
                         f"without any tasks created. Job processing likely failed before task creation."
                     )
                     result.items_fixed += 1
                     result.actions_taken.append({
                         "action": "mark_stuck_queued_failed",
-                        "job_id": job['job_id'],
-                        "hours_stuck": round(job.get('hours_stuck', 0), 2),
+                        "job_id": job_id,
+                        "job_type": job.get('job_type'),
+                        "hours_stuck": round(hours_stuck, 2),
                         "reason": "no_tasks_created"
                     })
+                    logger.info(f"[JANITOR] Marked stuck QUEUED job FAILED: {job_id[:16]}... (stuck {hours_stuck:.1f}h)")
+            else:
+                logger.info("[JANITOR] No stuck QUEUED jobs found")
 
             # 4. Find ancient stale jobs
+            logger.info(f"[JANITOR] Checking for ancient stale jobs (PROCESSING > {self.config.job_stale_hours}h)...")
             ancient_jobs = self.repo.get_ancient_stale_jobs(
                 timeout_hours=self.config.job_stale_hours
             )
             result.items_scanned += len(ancient_jobs)
 
             if ancient_jobs:
-                logger.warning(f"Found {len(ancient_jobs)} ancient stale jobs")
-                for job in ancient_jobs:
-                    partial_results = self._build_partial_results(job['job_id'], job)
+                logger.warning(f"[JANITOR] Found {len(ancient_jobs)} ancient stale jobs!")
+                for i, job in enumerate(ancient_jobs, 1):
+                    job_id = job['job_id']
+                    hours_stuck = job.get('hours_stuck', 0)
+
+                    logger.warning(
+                        f"[JANITOR] Ancient stale job {i}/{len(ancient_jobs)}: "
+                        f"job_id={job_id[:16]}..., "
+                        f"job_type={job.get('job_type')}, "
+                        f"stage={job.get('stage')}/{job.get('total_stages')}, "
+                        f"stuck_for={hours_stuck:.1f}h, "
+                        f"task_count={job.get('task_count', 0)}"
+                    )
+
+                    partial_results = self._build_partial_results(job_id, job)
                     self.repo.mark_job_as_failed(
-                        job['job_id'],
-                        f"[JANITOR] Job stuck in PROCESSING for {job.get('hours_stuck', '?'):.1f} hours. "
+                        job_id,
+                        f"[JANITOR] Job stuck in PROCESSING for {hours_stuck:.1f} hours. "
                         f"Jobs should complete within {self.config.job_stale_hours} hours.",
                         partial_results
                     )
                     result.items_fixed += 1
                     result.actions_taken.append({
                         "action": "mark_ancient_job_failed",
-                        "job_id": job['job_id'],
-                        "hours_stuck": round(job.get('hours_stuck', 0), 2),
+                        "job_id": job_id,
+                        "job_type": job.get('job_type'),
+                        "hours_stuck": round(hours_stuck, 2),
                         "task_count": job.get('task_count', 0),
                         "reason": "exceeded_max_duration"
                     })
+                    logger.info(f"[JANITOR] Marked ancient stale job FAILED: {job_id[:16]}... (stuck {hours_stuck:.1f}h)")
+            else:
+                logger.info("[JANITOR] No ancient stale jobs found")
 
-            logger.info(
-                f"Orphan detection complete: scanned={result.items_scanned}, "
-                f"fixed={result.items_fixed}"
+            # Summary
+            logger.warning(
+                f"[JANITOR] Orphan detection complete: "
+                f"scanned={result.items_scanned} records, "
+                f"fixed={result.items_fixed} issues"
+            )
+            logger.debug(
+                f"[JANITOR] orphan_detector: Success - "
+                f"orphaned_tasks={len(orphaned_tasks) if orphaned_tasks else 0}, "
+                f"zombie_jobs={len(zombie_jobs) if zombie_jobs else 0}, "
+                f"stuck_queued={len(stuck_queued) if stuck_queued else 0}, "
+                f"ancient_jobs={len(ancient_jobs) if ancient_jobs else 0}"
             )
             result.complete(success=True)
 
         except Exception as e:
-            logger.error(f"Orphan detection failed: {e}")
+            logger.error(f"[JANITOR] Orphan detection failed: {e}")
+            import traceback
+            logger.error(f"[JANITOR] Traceback: {traceback.format_exc()}")
             result.complete(success=False, error=str(e))
 
-        self._log_run(result)
+        logger.debug(f"[JANITOR] orphan_detector: Logging run to janitor_runs table")
+        self._complete_run(result)
+        logger.debug(f"[JANITOR] orphan_detector: Run complete, returning result")
         return result
 
     # ========================================================================
     # AUDIT LOGGING
     # ========================================================================
 
-    def _log_run(self, result: JanitorRunResult):
-        """Log a janitor run to the audit table."""
+    def _start_run(self, result: JanitorRunResult) -> Optional[str]:
+        """
+        Create audit record at START of janitor run.
+
+        This ensures we have evidence of activity even if the run crashes.
+
+        Returns:
+            run_id (UUID string) or None if logging fails
+        """
         try:
             run_id = self.repo.log_janitor_run(
                 run_type=result.run_type,
                 started_at=result.started_at,
+                completed_at=None,  # Not completed yet
+                items_scanned=0,  # Don't know yet
+                items_fixed=0,  # Don't know yet
+                actions_taken=[],  # Empty at start
+                status="running",  # IN PROGRESS
+                error_details=None
+            )
+            logger.info(f"[JANITOR] Created audit record: run_id={run_id}, type={result.run_type}")
+            return run_id
+        except Exception as e:
+            # Don't fail the janitor if audit logging fails
+            logger.error(f"[JANITOR] Failed to create audit record (non-fatal): {e}")
+            import traceback
+            logger.error(f"[JANITOR] Traceback: {traceback.format_exc()}")
+            return None
+
+    def _complete_run(self, result: JanitorRunResult):
+        """
+        Update audit record at END of janitor run with results.
+
+        If no run_id exists (logging failed at start), tries to create record anyway.
+        """
+        if not result.run_id:
+            logger.warning(f"[JANITOR] No run_id for {result.run_type} - audit record wasn't created at start")
+            # Try to create it now anyway
+            result.run_id = self._start_run(result)
+
+        try:
+            # Update the existing record with final results
+            self.repo.update_janitor_run(
+                run_id=result.run_id,
                 completed_at=result.completed_at or datetime.now(timezone.utc),
                 items_scanned=result.items_scanned,
                 items_fixed=result.items_fixed,
@@ -538,10 +757,16 @@ class JanitorService:
                 status="completed" if result.success else "failed",
                 error_details=result.error
             )
-            result.run_id = run_id
+            logger.info(
+                f"[JANITOR] Updated audit record: run_id={result.run_id}, "
+                f"status={'completed' if result.success else 'failed'}, "
+                f"scanned={result.items_scanned}, fixed={result.items_fixed}"
+            )
         except Exception as e:
             # Don't fail the janitor if audit logging fails
-            logger.warning(f"Failed to log janitor run (non-fatal): {e}")
+            logger.error(f"[JANITOR] Failed to update audit record (non-fatal): {e}")
+            import traceback
+            logger.error(f"[JANITOR] Traceback: {traceback.format_exc()}")
 
     # ========================================================================
     # STATUS / HISTORY

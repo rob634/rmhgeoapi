@@ -1,10 +1,17 @@
 # ============================================================================
+# 🚧 UNDER DEVELOPMENT - DO NOT USE IN PRODUCTION
+# ============================================================================
+# PURPOSE: Container statistics and monitoring utility
+# STATUS: Functional - Pending production testing
+# ============================================================================
+
+# ============================================================================
 # CLAUDE CONTEXT - JOB DEFINITION
 # ============================================================================
 # EPOCH: 4 - ACTIVE ✅
 # STATUS: Job - Single-stage container statistics generation
 # PURPOSE: Generate aggregate statistics about blob container (fast, lightweight)
-# LAST_REVIEWED: 29 OCT 2025
+# LAST_REVIEWED: 22 NOV 2025
 # EXPORTS: ContainerSummaryWorkflow (JobBase implementation)
 # INTERFACES: JobBase (implements 5-method contract)
 # PYDANTIC_MODELS: None (uses dict-based validation)

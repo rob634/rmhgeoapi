@@ -1,7 +1,120 @@
 # Active Tasks - process_raster_collection Implementation
 
-**Last Updated**: 20 NOV 2025 (00:40 UTC)
+**Last Updated**: 21 NOV 2025 (23:50 UTC)
 **Author**: Robert and Geospatial Claude Legion
+
+---
+
+## 🚨 CRITICAL: JPEG COG Compression Failing in Azure Functions (21 NOV 2025)
+
+**Status**: ❌ **BROKEN** - JPEG compression fails, DEFLATE works fine
+**Priority**: **CRITICAL** - Blocks visualization tier COG creation
+**Impact**: Cannot create web-optimized COGs for TiTiler streaming
+
+### Problem Description
+
+The `process_raster` job fails at Stage 2 (create_cog) when using `output_tier: "visualization"` (JPEG compression), but succeeds with `output_tier: "analysis"` (DEFLATE compression).
+
+**Error**: `COG_TRANSLATE_FAILED` after ~6 seconds of processing
+**Error Classification**: The error occurs in `cog_translate()` call (rio-cogeo library)
+
+### Evidence
+
+| Test | Output Tier | Compression | Result | Duration |
+|------|-------------|-------------|--------|----------|
+| dctest_v3 | visualization | JPEG | ❌ COG_TRANSLATE_FAILED | ~6 sec |
+| dctest_deflate | analysis | DEFLATE | ✅ SUCCESS (127.58 MB) | 9.8 sec |
+
+**Same input file**: dctest.tif (27 MB RGB GeoTIFF, 7777x5030 pixels, uint8)
+**Same infrastructure**: Azure Functions B3 tier, same runtime, same deployment
+
+### Root Cause Analysis (Suspected)
+
+1. **GDAL JPEG Driver Issue**: The Azure Functions Python runtime may have a broken or missing libjpeg library linkage with GDAL/rasterio
+2. **Memory Allocation Pattern**: JPEG compression may have different memory allocation patterns that fail in the constrained Azure Functions environment
+3. **rio-cogeo JPEG Profile Bug**: The JPEG COG profile configuration may be incompatible with rasterio version in Azure
+
+### Technical Context
+
+**Code Location**: `services/raster_cog.py` lines 388-401
+```python
+# This call fails for JPEG, succeeds for DEFLATE
+cog_translate(
+    src,                        # Input rasterio dataset
+    output_memfile.name,        # Output to MemoryFile
+    cog_profile,                # JPEG vs DEFLATE profile
+    config=config,
+    overview_level=None,
+    overview_resampling=overview_resampling_name,
+    in_memory=in_memory,
+    quiet=False,
+)
+```
+
+**COG Profile Source**: `rio_cogeo.profiles.cog_profiles` dictionary
+- DEFLATE profile: Works ✅
+- JPEG profile: Fails ❌
+
+### Workaround (Active)
+
+Use `output_tier: "analysis"` (DEFLATE) instead of `output_tier: "visualization"` (JPEG):
+```bash
+curl -X POST ".../api/jobs/submit/process_raster" \
+  -d '{"blob_name": "image.tif", "container_name": "rmhazuregeobronze", "output_tier": "analysis"}'
+```
+
+**Trade-offs**:
+- ✅ DEFLATE produces larger files (127 MB vs ~5-10 MB with JPEG for RGB imagery)
+- ✅ DEFLATE is lossless (better for analysis)
+- ❌ DEFLATE is slower to stream via TiTiler (more bytes to transfer)
+- ❌ JPEG compression ratio (97% reduction) unavailable
+
+### Investigation Steps Required
+
+- [ ] **Test JPEG locally**: Run rio-cogeo with JPEG profile on local machine to verify it works outside Azure
+- [ ] **Check GDAL drivers**: Add diagnostic to log available GDAL drivers in Azure Functions runtime
+  ```python
+  from osgeo import gdal
+  logger.info(f"GDAL drivers: {[gdal.GetDriver(i).ShortName for i in range(gdal.GetDriverCount())]}")
+  ```
+- [ ] **Check libjpeg linkage**: Verify JPEG driver is properly linked
+  ```python
+  import rasterio
+  logger.info(f"Rasterio GDAL version: {rasterio.gdal_version()}")
+  driver = rasterio.drivers.env.get('JPEG')
+  ```
+- [ ] **Test explicit JPEG driver**: Try creating JPEG COG with explicit driver specification
+- [ ] **Check Azure Functions base image**: Determine if Python 3.12 runtime image has JPEG support
+- [ ] **Review rio-cogeo GitHub issues**: Search for known JPEG issues in cloud environments
+- [ ] **Add detailed error logging**: Capture the actual exception message from cog_translate()
+
+### Fix Options (Once Root Cause Identified)
+
+1. **If missing driver**: Add GDAL JPEG driver to requirements or use custom Docker image
+2. **If memory issue**: Reduce JPEG quality or process smaller tiles
+3. **If rio-cogeo bug**: Pin to specific version or patch the library
+4. **If unfixable**: Document limitation and recommend DEFLATE for all tiers
+
+### Related Config Issue Fixed (Same Session)
+
+**Root Cause Found**: Missing `raster_cog_in_memory` legacy property in `config/app_config.py`
+
+**Fix Applied**: Added three missing legacy properties:
+```python
+@property
+def raster_cog_in_memory(self) -> bool:
+    return self.raster.cog_in_memory
+
+@property
+def raster_target_crs(self) -> str:
+    return self.raster.target_crs
+
+@property
+def raster_mosaicjson_maxzoom(self) -> int:
+    return self.raster.mosaicjson_maxzoom
+```
+
+This fix was required after the config.py → config/ package migration (20 NOV 2025).
 
 ---
 
@@ -975,12 +1088,102 @@ curl "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/fe
 
 ---
 
-## ✅ MANAGED IDENTITY - OPERATIONAL (15 NOV 2025)
+## ✅ MANAGED IDENTITY - USER-ASSIGNED PATTERN (22 NOV 2025)
 
-**Status**: ✅ Managed identity authentication working in production
+**Status**: ✅ Configured with automatic credential detection
+**Architecture**: User-assigned identity `rmhpgflexadmin` for read/write/admin database access
 **Documentation**: See [QA_DEPLOYMENT.md](../QA_DEPLOYMENT.md) lines 361-438 for complete setup guide
 
-**Production Setup Completed**:
+### Authentication Priority Chain (NEW - 22 NOV 2025)
+
+The system automatically detects and uses credentials in this order:
+
+1. **User-Assigned Managed Identity** - If `MANAGED_IDENTITY_CLIENT_ID` is set
+2. **System-Assigned Managed Identity** - If running in Azure (detected via `WEBSITE_SITE_NAME`)
+3. **Password Authentication** - If `POSTGIS_PASSWORD` is set
+4. **FAIL** - Clear error message with instructions
+
+This allows the same codebase to work in:
+- Azure Functions with user-assigned identity (production - recommended)
+- Azure Functions with system-assigned identity (simpler setup)
+- Local development with password (developer machines)
+
+### Identity Strategy
+
+**User-Assigned (RECOMMENDED)** - Single identity shared across multiple apps:
+- `rmhpgflexadmin` - Read/write/admin access (Function App, etc.)
+- `rmhpgflexreader` (future) - Read-only access (TiTiler, OGC/STAC apps)
+
+**Benefits**:
+- Single identity for multiple apps (easier to manage)
+- Identity persists even if app is deleted
+- Can grant permissions before app deployment
+- Cleaner separation of concerns
+
+### Environment Variables
+
+```bash
+# For User-Assigned Identity (production)
+MANAGED_IDENTITY_CLIENT_ID=<client-id>        # From Azure Portal → Managed Identities
+MANAGED_IDENTITY_NAME=rmhpgflexadmin          # PostgreSQL user name
+
+# For System-Assigned Identity (auto-detected in Azure)
+# No env vars needed - WEBSITE_SITE_NAME is set automatically
+
+# For Local Development
+POSTGIS_PASSWORD=<password>                   # Password auth fallback
+```
+
+### Azure Setup Required
+
+**1. Create PostgreSQL user for managed identity**:
+```sql
+-- As Entra admin
+SELECT * FROM pgaadauth_create_principal('rmhpgflexadmin', false, false);
+GRANT ALL PRIVILEGES ON SCHEMA geo TO rmhpgflexadmin;
+GRANT ALL PRIVILEGES ON SCHEMA app TO rmhpgflexadmin;
+GRANT ALL PRIVILEGES ON SCHEMA platform TO rmhpgflexadmin;
+GRANT ALL PRIVILEGES ON SCHEMA pgstac TO rmhpgflexadmin;
+GRANT ALL PRIVILEGES ON SCHEMA h3 TO rmhpgflexadmin;
+
+-- Grant on existing tables
+GRANT ALL ON ALL TABLES IN SCHEMA geo TO rmhpgflexadmin;
+GRANT ALL ON ALL TABLES IN SCHEMA app TO rmhpgflexadmin;
+GRANT ALL ON ALL TABLES IN SCHEMA platform TO rmhpgflexadmin;
+GRANT ALL ON ALL TABLES IN SCHEMA pgstac TO rmhpgflexadmin;
+GRANT ALL ON ALL TABLES IN SCHEMA h3 TO rmhpgflexadmin;
+
+-- Default for future tables
+ALTER DEFAULT PRIVILEGES IN SCHEMA geo GRANT ALL ON TABLES TO rmhpgflexadmin;
+ALTER DEFAULT PRIVILEGES IN SCHEMA app GRANT ALL ON TABLES TO rmhpgflexadmin;
+-- etc.
+```
+
+**2. Assign identity to Function App** (Azure Portal or CLI):
+```bash
+# Assign existing user-assigned identity
+az functionapp identity assign \
+  --name rmhazuregeoapi \
+  --resource-group rmhazure_rg \
+  --identities /subscriptions/{sub}/resourcegroups/rmhazure_rg/providers/Microsoft.ManagedIdentity/userAssignedIdentities/rmhpgflexadmin
+```
+
+**3. Configure environment variables**:
+```bash
+az functionapp config appsettings set \
+  --name rmhazuregeoapi \
+  --resource-group rmhazure_rg \
+  --settings \
+    USE_MANAGED_IDENTITY=true \
+    MANAGED_IDENTITY_NAME=rmhpgflexadmin \
+    MANAGED_IDENTITY_CLIENT_ID=<client-id-from-portal>
+```
+
+### Files Updated (22 NOV 2025)
+- `config/database_config.py` - Added `managed_identity_client_id` field
+- `infrastructure/postgresql.py` - Updated to use user-assigned identity by default
+
+### Previous Production Setup (15 NOV 2025)
 - ✅ PostgreSQL user `rmhazuregeoapi` created with pgaadauth
 - ✅ All schema permissions granted (app, geo, pgstac, h3)
 - ✅ Function App managed identity enabled
@@ -1135,3 +1338,509 @@ def get_all_collections(repo: Optional[PostgreSQLRepository] = None) -> Dict[str
 
 **Phase 2D: Final cleanup**
 - Delete `get_postgres_connection_string()` helper (after all migrations complete)
+
+---
+
+## 🌍 MEDIUM PRIORITY - ISO3 Country Attribution in STAC Items (21 NOV 2025)
+
+**Status**: Planned - Ready for implementation
+**Purpose**: Add ISO3 country codes to STAC item metadata during creation
+**Priority**: MEDIUM (enriches metadata, enables country-based filtering)
+**Effort**: 2-3 hours
+**Requested By**: Robert (21 NOV 2025)
+
+### Problem Statement
+
+**Current State**: STAC items are created WITHOUT country/ISO3 attribution:
+- Raster items ([services/service_stac_metadata.py](../services/service_stac_metadata.py)) extract bbox, geometry, projection
+- Vector items ([services/service_stac_vector.py](../services/service_stac_vector.py)) extract extent, row count, geometry types
+- **Neither includes which country the data is located in**
+
+**Desired State**: STAC items should include:
+```json
+{
+  "properties": {
+    "geo:iso3": ["USA"],
+    "geo:primary_iso3": "USA",
+    "geo:countries": ["United States of America"]
+  }
+}
+```
+
+### Existing Infrastructure
+
+**The `geo.system_admin0_boundaries` table is already configured** in [config/h3_config.py:145-152](../config/h3_config.py):
+```python
+system_admin0_table: str = Field(
+    default="geo.system_admin0_boundaries",
+    description="PostGIS table containing admin0 (country) boundaries..."
+)
+```
+
+**Expected schema** (from H3 code patterns in [infrastructure/h3_repository.py:352](../infrastructure/h3_repository.py)):
+- `iso3` VARCHAR(3) - ISO 3166-1 alpha-3 country code
+- `geom` GEOMETRY - Country boundary polygons (WGS84)
+- Optional: `name` - Country name
+
+**H3 already uses this for spatial joins**:
+```sql
+UPDATE h3.grids h
+SET country_code = c.iso3
+FROM geo.system_admin0 c
+WHERE ST_Intersects(h.geom, c.geom)
+```
+
+### Implementation Plan
+
+#### Step 1: Add Spatial Config (Optional - Use H3 Config)
+
+**Option A**: Reuse existing H3 config (RECOMMENDED - less code)
+```python
+# In service methods, access via:
+from config import get_config
+config = get_config()
+admin0_table = config.h3.system_admin0_table  # "geo.system_admin0_boundaries"
+```
+
+**Option B**: Create dedicated spatial config (if needed for separation)
+```python
+# config/spatial_config.py
+class SpatialConfig(BaseModel):
+    admin0_table: str = Field(default="geo.system_admin0_boundaries")
+    iso3_column: str = Field(default="iso3")
+    name_column: str = Field(default="name")
+    enable_country_attribution: bool = Field(default=True)
+```
+
+#### Step 2: Add Helper Method to StacMetadataService
+
+**File**: [services/service_stac_metadata.py](../services/service_stac_metadata.py) (after line 591)
+
+```python
+def _get_countries_for_bbox(self, bbox: List[float]) -> Dict[str, Any]:
+    """
+    Get ISO3 codes for countries intersecting the given bounding box.
+
+    Uses ST_Intersects with the bbox envelope to find all countries
+    that overlap with the STAC item's spatial extent.
+
+    For items spanning multiple countries (e.g., border regions),
+    returns all intersecting countries with the primary determined
+    by centroid point-in-polygon.
+
+    Args:
+        bbox: [minx, miny, maxx, maxy] in EPSG:4326
+
+    Returns:
+        {
+            "iso3_list": ["USA", "CAN"],  # All intersecting countries
+            "primary_iso3": "USA",         # Country containing centroid
+            "country_names": ["United States", "Canada"]
+        }
+    """
+    from config import get_config
+    from infrastructure.postgresql import PostgreSQLRepository
+    from psycopg import sql
+
+    config = get_config()
+    admin0_table = config.h3.system_admin0_table  # "geo.system_admin0_boundaries"
+
+    # Parse schema.table
+    if '.' in admin0_table:
+        schema, table = admin0_table.split('.', 1)
+    else:
+        schema, table = 'geo', admin0_table
+
+    minx, miny, maxx, maxy = bbox
+    centroid_x = (minx + maxx) / 2
+    centroid_y = (miny + maxy) / 2
+
+    repo = PostgreSQLRepository()
+
+    try:
+        with repo._get_connection() as conn:
+            with conn.cursor() as cur:
+                # Query 1: All countries intersecting bbox
+                query_intersects = sql.SQL("""
+                    SELECT iso3, name
+                    FROM {schema}.{table}
+                    WHERE ST_Intersects(
+                        geom,
+                        ST_MakeEnvelope(%s, %s, %s, %s, 4326)
+                    )
+                    ORDER BY iso3
+                """).format(
+                    schema=sql.Identifier(schema),
+                    table=sql.Identifier(table)
+                )
+                cur.execute(query_intersects, [minx, miny, maxx, maxy])
+                rows = cur.fetchall()
+
+                iso3_list = [r['iso3'] for r in rows if r.get('iso3')]
+                country_names = [r['name'] for r in rows if r.get('name')]
+
+                # Query 2: Primary country (centroid point-in-polygon)
+                primary_iso3 = None
+                if iso3_list:
+                    query_centroid = sql.SQL("""
+                        SELECT iso3
+                        FROM {schema}.{table}
+                        WHERE ST_Contains(geom, ST_Point(%s, %s, 4326))
+                        LIMIT 1
+                    """).format(
+                        schema=sql.Identifier(schema),
+                        table=sql.Identifier(table)
+                    )
+                    cur.execute(query_centroid, [centroid_x, centroid_y])
+                    result = cur.fetchone()
+                    primary_iso3 = result['iso3'] if result else iso3_list[0]
+
+                return {
+                    "iso3_list": iso3_list,
+                    "primary_iso3": primary_iso3,
+                    "country_names": country_names
+                }
+
+    except Exception as e:
+        logger.warning(f"Country attribution failed (non-critical): {e}")
+        return {
+            "iso3_list": [],
+            "primary_iso3": None,
+            "country_names": []
+        }
+```
+
+#### Step 3: Integrate into extract_item_from_blob()
+
+**File**: [services/service_stac_metadata.py](../services/service_stac_metadata.py)
+
+**Location**: After STEP G.1 (required STAC fields), before STEP G.5 (asset URL conversion)
+
+Add new **STEP G.2: Country Attribution**:
+
+```python
+# STEP G.2: Add country attribution (ISO3 codes)
+try:
+    logger.debug("   Step G.2: Adding country attribution...")
+    bbox = item_dict.get('bbox')
+    if bbox and len(bbox) == 4:
+        country_info = self._get_countries_for_bbox(bbox)
+
+        if country_info['iso3_list']:
+            item_dict['properties']['geo:iso3'] = country_info['iso3_list']
+            item_dict['properties']['geo:primary_iso3'] = country_info['primary_iso3']
+            if country_info['country_names']:
+                item_dict['properties']['geo:countries'] = country_info['country_names']
+
+            logger.debug(f"   ✅ Step G.2: Country attribution added - {country_info['primary_iso3']} ({len(country_info['iso3_list'])} countries)")
+        else:
+            logger.debug("   ⚠️ Step G.2: No countries found for bbox (may be ocean/international waters)")
+    else:
+        logger.warning("   ⚠️ Step G.2: No valid bbox available for country attribution")
+except Exception as e:
+    # Non-critical - don't fail item creation if country lookup fails
+    logger.warning(f"⚠️ Step G.2: Country attribution failed (non-critical): {e}")
+```
+
+#### Step 4: Add Same Logic to StacVectorService
+
+**File**: [services/service_stac_vector.py](../services/service_stac_vector.py)
+
+**Location**: In `extract_item_from_table()`, after building properties dict (around line 128)
+
+```python
+# Add country attribution
+try:
+    from services.service_stac_metadata import StacMetadataService
+    stac_service = StacMetadataService()
+    country_info = stac_service._get_countries_for_bbox(bbox)
+
+    if country_info['iso3_list']:
+        properties['geo:iso3'] = country_info['iso3_list']
+        properties['geo:primary_iso3'] = country_info['primary_iso3']
+        if country_info['country_names']:
+            properties['geo:countries'] = country_info['country_names']
+
+        logger.debug(f"Country attribution: {country_info['primary_iso3']}")
+except Exception as e:
+    logger.warning(f"Country attribution failed (non-critical): {e}")
+```
+
+**Alternative**: Extract the method to a shared utility to avoid circular imports.
+
+#### Step 5: Ensure admin0 Table Exists
+
+**PREREQUISITE**: The `geo.system_admin0_boundaries` table must exist with:
+- `iso3` column (VARCHAR 3)
+- `geom` column (GEOMETRY Polygon/MultiPolygon EPSG:4326)
+- Optional: `name` column (VARCHAR)
+
+**If table doesn't exist**, create it:
+```sql
+CREATE TABLE IF NOT EXISTS geo.system_admin0_boundaries (
+    id SERIAL PRIMARY KEY,
+    iso3 VARCHAR(3) NOT NULL,
+    name VARCHAR(255),
+    geom GEOMETRY(MultiPolygon, 4326) NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_admin0_geom ON geo.system_admin0_boundaries USING GIST(geom);
+CREATE INDEX IF NOT EXISTS idx_admin0_iso3 ON geo.system_admin0_boundaries(iso3);
+
+-- Populate from Natural Earth, GADM, or other admin boundary source
+```
+
+### Testing
+
+```bash
+# 1. Submit raster processing job
+curl -X POST ".../api/jobs/submit/process_raster" \
+  -H "Content-Type: application/json" \
+  -d '{"blob_name": "test.tif", "container_name": "rmhazuregeobronze"}'
+
+# 2. After job completes, check STAC item
+curl ".../api/stac/collections/dev/items/{item_id}" | jq '.properties | {iso3: .["geo:iso3"], primary: .["geo:primary_iso3"]}'
+
+# Expected output:
+# {
+#   "iso3": ["USA"],
+#   "primary": "USA"
+# }
+
+# 3. Test border case (item spanning multiple countries)
+# Upload a raster that crosses US-Canada border, verify both ISO3 codes returned
+```
+
+### Task Checklist
+
+- [ ] **Prerequisite**: Verify `geo.system_admin0_boundaries` table exists with iso3 and geom columns
+- [ ] **Step 1**: Decide on config approach (reuse H3Config or create SpatialConfig)
+- [ ] **Step 2**: Add `_get_countries_for_bbox()` helper to StacMetadataService
+- [ ] **Step 3**: Add STEP G.2 (country attribution) to `extract_item_from_blob()`
+- [ ] **Step 4**: Add country attribution to `StacVectorService.extract_item_from_table()`
+- [ ] **Step 5**: Test with raster job submission
+- [ ] **Step 6**: Test with vector STAC cataloging
+- [ ] **Step 7**: Test border case (multi-country item)
+- [ ] **Step 8**: Update documentation (note new STAC properties)
+- [ ] **Commit**: "Add ISO3 country attribution to STAC items during metadata extraction"
+
+### Properties Added to STAC Items
+
+| Property | Type | Description | Example |
+|----------|------|-------------|---------|
+| `geo:iso3` | List[str] | ISO 3166-1 alpha-3 codes for all intersecting countries | `["USA", "CAN"]` |
+| `geo:primary_iso3` | str | Primary country (centroid-based) | `"USA"` |
+| `geo:countries` | List[str] | Country names (if available in admin0 table) | `["United States", "Canada"]` |
+
+### Performance Considerations
+
+- **Single PostGIS query** per STAC item (~10-50ms overhead)
+- **Index-backed**: Spatial queries use GIST index on geom column
+- **Non-blocking**: Failures don't prevent STAC item creation
+- **Cached connection**: Uses PostgreSQLRepository connection pooling
+
+### Future Enhancements
+
+1. **H3 Cell Lookup** (Alternative approach): Use H3 grid with precomputed country_code instead of real-time spatial join
+2. **Admin1 Attribution**: Add state/province codes for more granular attribution
+3. **Configurable Columns**: Allow configuration of which spatial attributes to extract
+4. **Batch Processing**: Optimize for bulk STAC item creation (single query for multiple bboxes)
+
+---
+
+## 🎨 MEDIUM-LOW PRIORITY - Multispectral Band Combination URLs in STAC (21 NOV 2025)
+
+**Status**: Planned - Enhancement for satellite imagery visualization
+**Purpose**: Auto-generate TiTiler viewer URLs with common band combinations for Landsat/Sentinel-2 imagery
+**Priority**: MEDIUM-LOW (nice-to-have for multispectral data users)
+**Effort**: 2-3 hours
+**Requested By**: Robert (21 NOV 2025)
+
+### Problem Statement
+
+**Current State**: When `process_raster` detects multispectral imagery (11+ bands like Sentinel-2), it creates standard TiTiler URLs that don't specify band combinations. The default TiTiler viewer can't display 11-band data without explicit band selection.
+
+**User Experience Today**:
+1. User processes Sentinel-2 GeoTIFF
+2. TiTiler preview URL opens blank/error page
+3. User must manually craft URL with `&bidx=4&bidx=3&bidx=2&rescale=0,3000` parameters
+4. No guidance provided for common visualization patterns
+
+**Desired State**: STAC items for multispectral imagery should include multiple ready-to-use visualization URLs:
+```json
+{
+  "assets": {
+    "data": { "href": "..." },
+    "visual_truecolor": {
+      "href": "https://titiler.../preview?url=...&bidx=4&bidx=3&bidx=2&rescale=0,3000",
+      "title": "True Color (RGB)",
+      "type": "text/html",
+      "roles": ["visual"]
+    },
+    "visual_falsecolor": {
+      "href": "https://titiler.../preview?url=...&bidx=8&bidx=4&bidx=3&rescale=0,3000",
+      "title": "False Color (NIR)",
+      "type": "text/html",
+      "roles": ["visual"]
+    },
+    "visual_swir": {
+      "href": "https://titiler.../preview?url=...&bidx=11&bidx=8&bidx=4&rescale=0,3000",
+      "title": "SWIR Composite",
+      "type": "text/html",
+      "roles": ["visual"]
+    }
+  }
+}
+```
+
+### Detection Logic
+
+**When to generate band combination URLs**:
+```python
+# Criteria for "multispectral satellite imagery"
+should_add_band_urls = (
+    band_count >= 4 and
+    (dtype == 'uint16' or dtype == 'int16') and
+    (
+        # Sentinel-2 pattern (11-13 bands)
+        band_count in [10, 11, 12, 13] or
+        # Landsat 8/9 pattern (7-11 bands)
+        band_count in [7, 8, 9, 10, 11] or
+        # Generic multispectral with band descriptions
+        has_band_descriptions_matching(['blue', 'green', 'red', 'nir'])
+    )
+)
+```
+
+### Standard Band Combinations
+
+**Sentinel-2 (10m/20m bands)**:
+| Combination | Bands | TiTiler Parameters | Use Case |
+|-------------|-------|-------------------|----------|
+| True Color RGB | B4, B3, B2 | `bidx=4&bidx=3&bidx=2&rescale=0,3000` | Natural appearance |
+| False Color NIR | B8, B4, B3 | `bidx=8&bidx=4&bidx=3&rescale=0,3000` | Vegetation health |
+| SWIR | B11, B8, B4 | `bidx=11&bidx=8&bidx=4&rescale=0,3000` | Moisture/geology |
+| Agriculture | B11, B8, B2 | `bidx=11&bidx=8&bidx=2&rescale=0,3000` | Crop analysis |
+
+**Landsat 8/9**:
+| Combination | Bands | TiTiler Parameters | Use Case |
+|-------------|-------|-------------------|----------|
+| True Color RGB | B4, B3, B2 | `bidx=4&bidx=3&bidx=2&rescale=0,10000` | Natural appearance |
+| False Color NIR | B5, B4, B3 | `bidx=5&bidx=4&bidx=3&rescale=0,10000` | Vegetation health |
+| SWIR | B7, B5, B4 | `bidx=7&bidx=5&bidx=4&rescale=0,10000` | Moisture/geology |
+
+### Implementation Location
+
+**File**: [services/service_stac_metadata.py](../services/service_stac_metadata.py)
+
+**Location**: In `_generate_titiler_urls()` method, after standard URL generation (around line 455)
+
+```python
+# After generating standard URLs...
+
+# Check if multispectral imagery
+if raster_type == 'multispectral' and band_count >= 10:
+    # Determine rescale based on dtype
+    rescale = "0,3000" if dtype == 'uint16' else "0,255"
+
+    # Sentinel-2 band combinations (11-13 bands)
+    if band_count >= 10:
+        band_combinations = {
+            'truecolor': {
+                'bands': [4, 3, 2],
+                'title': 'True Color (RGB)',
+                'description': 'Natural color composite (Red, Green, Blue)'
+            },
+            'falsecolor_nir': {
+                'bands': [8, 4, 3],
+                'title': 'False Color (NIR)',
+                'description': 'Near-infrared composite for vegetation analysis'
+            },
+            'swir': {
+                'bands': [11, 8, 4] if band_count >= 11 else [8, 4, 3],
+                'title': 'SWIR Composite',
+                'description': 'Short-wave infrared for moisture and geology'
+            }
+        }
+
+        for combo_name, combo_info in band_combinations.items():
+            bidx_params = '&'.join([f'bidx={b}' for b in combo_info['bands']])
+            urls[f'preview_{combo_name}'] = f"{titiler_base}/cog/preview?url={encoded_url}&{bidx_params}&rescale={rescale}"
+
+        logger.info(f"Added {len(band_combinations)} band combination URLs for multispectral imagery")
+```
+
+### Task Checklist
+
+- [ ] **Step 1**: Add band combination detection logic to `_validate_raster()` or `_detect_raster_type()`
+- [ ] **Step 2**: Create band combination profiles (Sentinel-2, Landsat 8/9, generic)
+- [ ] **Step 3**: Extend `_generate_titiler_urls()` to add band-specific preview URLs
+- [ ] **Step 4**: Update STAC item assets structure to include visual role URLs
+- [ ] **Step 5**: Test with Sentinel-2 imagery (bia_glo30dem.tif is actually Sentinel-2)
+- [ ] **Step 6**: Test with Landsat imagery (if available)
+- [ ] **Step 7**: Document new STAC asset types in API documentation
+- [ ] **Commit**: "Add band combination URLs for multispectral STAC items"
+
+### Expected STAC Item Structure
+
+```json
+{
+  "type": "Feature",
+  "stac_version": "1.0.0",
+  "id": "sentinel2-scene-001",
+  "properties": {
+    "datetime": "2025-11-21T00:00:00Z",
+    "geo:raster_type": "multispectral",
+    "eo:bands": [
+      {"name": "B1", "description": "Coastal aerosol"},
+      {"name": "B2", "description": "Blue"},
+      {"name": "B3", "description": "Green"},
+      {"name": "B4", "description": "Red"},
+      {"name": "B5", "description": "Vegetation Red Edge"},
+      {"name": "B6", "description": "Vegetation Red Edge"},
+      {"name": "B7", "description": "Vegetation Red Edge"},
+      {"name": "B8", "description": "NIR"},
+      {"name": "B8A", "description": "Vegetation Red Edge"},
+      {"name": "B11", "description": "SWIR"},
+      {"name": "B12", "description": "SWIR"}
+    ]
+  },
+  "assets": {
+    "data": {
+      "href": "https://rmhazuregeo.blob.core.windows.net/silver-cogs/...",
+      "type": "image/tiff; application=geotiff; profile=cloud-optimized",
+      "roles": ["data"]
+    },
+    "thumbnail": {
+      "href": "https://titiler.../cog/preview?url=...&bidx=4&bidx=3&bidx=2&rescale=0,3000&width=256&height=256",
+      "type": "image/png",
+      "roles": ["thumbnail"]
+    },
+    "visual_truecolor": {
+      "href": "https://titiler.../cog/viewer?url=...&bidx=4&bidx=3&bidx=2&rescale=0,3000",
+      "title": "True Color (RGB) Viewer",
+      "type": "text/html",
+      "roles": ["visual"]
+    },
+    "visual_falsecolor": {
+      "href": "https://titiler.../cog/viewer?url=...&bidx=8&bidx=4&bidx=3&rescale=0,3000",
+      "title": "False Color (NIR) Viewer",
+      "type": "text/html",
+      "roles": ["visual"]
+    },
+    "visual_swir": {
+      "href": "https://titiler.../cog/viewer?url=...&bidx=11&bidx=8&bidx=4&rescale=0,3000",
+      "title": "SWIR Composite Viewer",
+      "type": "text/html",
+      "roles": ["visual"]
+    }
+  }
+}
+```
+
+### Notes
+
+- **Rescale values**: Sentinel-2 L2A reflectance is typically 0-10000 but clipped at 3000 for visualization
+- **Band indexing**: TiTiler uses 1-based indexing (band 1 = first band)
+- **uint16 handling**: Most satellite imagery is uint16, requires rescale parameter
+- **Graceful degradation**: If band combination bands don't exist, skip that combination

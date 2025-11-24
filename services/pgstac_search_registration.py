@@ -188,7 +188,8 @@ class PgSTACSearchRegistration:
     def register_collection_search(
         self,
         collection_id: str,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
+        bbox: Optional[List[float]] = None
     ) -> str:
         """
         Register standard search for a collection (all items, no filters).
@@ -199,17 +200,30 @@ class PgSTACSearchRegistration:
         Args:
             collection_id: STAC collection identifier
             metadata: Optional metadata (defaults to {"name": "{collection_id} mosaic"})
+            bbox: Optional bounding box [minx, miny, maxx, maxy] for TileJSON bounds.
+                  When provided, TiTiler's map.html viewer will auto-zoom to this extent
+                  instead of showing world bounds. Should be the collection's spatial extent.
 
         Returns:
             search_id (str): SHA256 hash to use in TiTiler URLs
 
         Example:
             >>> registrar = PgSTACSearchRegistration()
-            >>> search_id = registrar.register_collection_search("namangan_collection")
+            >>> search_id = registrar.register_collection_search(
+            ...     "namangan_collection",
+            ...     bbox=[71.6063, 40.9806, 71.7219, 40.9850]
+            ... )
             >>> print(f"Viewer: https://rmhtitiler.../searches/{search_id}/map.html")
         """
         if metadata is None:
             metadata = {"name": f"{collection_id} mosaic"}
+
+        # Include bounds in metadata for TiTiler TileJSON auto-zoom (21 NOV 2025)
+        # When TiTiler-PgSTAC generates TileJSON, it uses metadata.bounds if present
+        # This allows map.html fitBounds() to zoom to actual collection extent
+        if bbox:
+            metadata["bounds"] = bbox
+            logger.debug(f"   Added bounds to metadata: {bbox}")
 
         return self.register_search(
             collections=[collection_id],

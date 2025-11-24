@@ -93,16 +93,19 @@ class JanitorRepository(PostgreSQLRepository):
                 t.retry_count,
                 EXTRACT(EPOCH FROM (NOW() - t.updated_at)) / 60 AS minutes_stuck
             FROM {schema}.tasks t
-            WHERE t.status = 'PROCESSING'
-              AND t.updated_at < NOW() - INTERVAL %s
+            WHERE t.status = 'processing'
+              AND t.updated_at < NOW() - make_interval(mins => %s)
             ORDER BY t.updated_at ASC
         """).format(schema=sql.Identifier(self.schema_name))
 
-        interval_str = f'{timeout_minutes} minutes'
-
+        logger.debug(
+            f"[JANITOR] get_stale_processing_tasks: Executing query with timeout={timeout_minutes} minutes"
+        )
         with self._error_context("get stale processing tasks"):
-            result = self._execute_query(query, (interval_str,), fetch='all')
-            logger.info(f"Found {len(result) if result else 0} stale PROCESSING tasks (>{timeout_minutes}min)")
+            result = self._execute_query(query, (timeout_minutes,), fetch='all')
+            count = len(result) if result else 0
+            logger.debug(f"[JANITOR] get_stale_processing_tasks: Query returned {count} rows")
+            logger.info(f"[JANITOR] Found {count} stale PROCESSING tasks (>{timeout_minutes}min)")
             return result or []
 
     def mark_tasks_as_failed(
@@ -121,22 +124,27 @@ class JanitorRepository(PostgreSQLRepository):
             Number of tasks updated
         """
         if not task_ids:
+            logger.debug("[JANITOR] mark_tasks_as_failed: No task_ids provided, returning 0")
             return 0
+
+        logger.debug(f"[JANITOR] mark_tasks_as_failed: Preparing batch UPDATE for {len(task_ids)} tasks")
 
         query = sql.SQL("""
             UPDATE {schema}.tasks
             SET
-                status = 'FAILED',
+                status = 'failed',
                 error_details = %s,
                 updated_at = NOW()
             WHERE task_id = ANY(%s)
             RETURNING task_id
         """).format(schema=sql.Identifier(self.schema_name))
 
+        logger.debug(f"[JANITOR] mark_tasks_as_failed: Executing UPDATE with task_ids={task_ids[:5]}{'...' if len(task_ids) > 5 else ''}")
         with self._error_context("mark tasks as failed"):
             result = self._execute_query(query, (error_message, task_ids), fetch='all')
             count = len(result) if result else 0
-            logger.info(f"Marked {count} tasks as FAILED: {error_message[:100]}")
+            logger.debug(f"[JANITOR] mark_tasks_as_failed: UPDATE affected {count} rows")
+            logger.info(f"[JANITOR] Marked {count} tasks as FAILED: {error_message[:80]}...")
             return count
 
     # ========================================================================
@@ -165,18 +173,18 @@ class JanitorRepository(PostgreSQLRepository):
                 j.stage_results,
                 j.created_at,
                 j.updated_at,
-                COUNT(t.*) FILTER (WHERE t.status = 'FAILED') AS failed_count,
-                COUNT(t.*) FILTER (WHERE t.status = 'COMPLETED') AS completed_count,
-                COUNT(t.*) FILTER (WHERE t.status = 'PROCESSING') AS processing_count,
-                COUNT(t.*) FILTER (WHERE t.status = 'QUEUED') AS queued_count,
+                COUNT(t.*) FILTER (WHERE t.status = 'failed') AS failed_count,
+                COUNT(t.*) FILTER (WHERE t.status = 'completed') AS completed_count,
+                COUNT(t.*) FILTER (WHERE t.status = 'processing') AS processing_count,
+                COUNT(t.*) FILTER (WHERE t.status = 'queued') AS queued_count,
                 COUNT(t.*) AS total_tasks,
-                ARRAY_AGG(t.task_id) FILTER (WHERE t.status = 'FAILED') AS failed_task_ids,
-                ARRAY_AGG(t.error_details) FILTER (WHERE t.status = 'FAILED') AS failed_task_errors
+                ARRAY_AGG(t.task_id) FILTER (WHERE t.status = 'failed') AS failed_task_ids,
+                ARRAY_AGG(t.error_details) FILTER (WHERE t.status = 'failed') AS failed_task_errors
             FROM {schema}.jobs j
             JOIN {schema}.tasks t ON t.parent_job_id = j.job_id
-            WHERE j.status = 'PROCESSING'
+            WHERE j.status = 'processing'
             GROUP BY j.job_id
-            HAVING COUNT(t.*) FILTER (WHERE t.status = 'FAILED') > 0
+            HAVING COUNT(t.*) FILTER (WHERE t.status = 'failed') > 0
             ORDER BY j.updated_at ASC
         """).format(schema=sql.Identifier(self.schema_name))
 
@@ -207,7 +215,7 @@ class JanitorRepository(PostgreSQLRepository):
                 updated_at
             FROM {schema}.tasks
             WHERE parent_job_id = %s
-              AND status = 'COMPLETED'
+              AND status = 'completed'
             ORDER BY stage, task_id
         """).format(schema=sql.Identifier(self.schema_name))
 
@@ -238,7 +246,7 @@ class JanitorRepository(PostgreSQLRepository):
             query = sql.SQL("""
                 UPDATE {schema}.jobs
                 SET
-                    status = 'FAILED',
+                    status = 'failed',
                     error_details = %s,
                     result_data = %s::jsonb,
                     updated_at = NOW()
@@ -250,7 +258,7 @@ class JanitorRepository(PostgreSQLRepository):
             query = sql.SQL("""
                 UPDATE {schema}.jobs
                 SET
-                    status = 'FAILED',
+                    status = 'failed',
                     error_details = %s,
                     updated_at = NOW()
                 WHERE job_id = %s
@@ -319,16 +327,16 @@ class JanitorRepository(PostgreSQLRepository):
                 j.created_at,
                 j.updated_at,
                 COUNT(t.*) AS total_tasks,
-                COUNT(t.*) FILTER (WHERE t.status = 'COMPLETED') AS completed_tasks,
-                COUNT(t.*) FILTER (WHERE t.status = 'FAILED') AS failed_tasks
+                COUNT(t.*) FILTER (WHERE t.status = 'completed') AS completed_tasks,
+                COUNT(t.*) FILTER (WHERE t.status = 'failed') AS failed_tasks
             FROM {schema}.jobs j
             LEFT JOIN {schema}.tasks t ON t.parent_job_id = j.job_id
-            WHERE j.status = 'PROCESSING'
+            WHERE j.status = 'processing'
             GROUP BY j.job_id
             HAVING NOT EXISTS (
                 SELECT 1 FROM {schema}.tasks t2
                 WHERE t2.parent_job_id = j.job_id
-                  AND t2.status IN ('QUEUED', 'PROCESSING')
+                  AND t2.status IN ('queued', 'processing')
             )
             ORDER BY j.updated_at ASC
         """).format(schema=sql.Identifier(self.schema_name))
@@ -363,7 +371,7 @@ class JanitorRepository(PostgreSQLRepository):
                 j.updated_at,
                 EXTRACT(EPOCH FROM (NOW() - j.created_at)) / 3600 AS hours_stuck
             FROM {schema}.jobs j
-            WHERE j.status = 'QUEUED'
+            WHERE j.status = 'queued'
               AND j.created_at < NOW() - INTERVAL %s
               AND NOT EXISTS (
                   SELECT 1 FROM {schema}.tasks t
@@ -407,7 +415,7 @@ class JanitorRepository(PostgreSQLRepository):
                 EXTRACT(EPOCH FROM (NOW() - j.updated_at)) / 3600 AS hours_stuck,
                 (SELECT COUNT(*) FROM {schema}.tasks t WHERE t.parent_job_id = j.job_id) AS task_count
             FROM {schema}.jobs j
-            WHERE j.status = 'PROCESSING'
+            WHERE j.status = 'processing'
               AND j.updated_at < NOW() - INTERVAL %s
             ORDER BY j.updated_at ASC
         """).format(schema=sql.Identifier(self.schema_name))
@@ -500,6 +508,80 @@ class JanitorRepository(PostgreSQLRepository):
             # Don't fail the janitor if audit logging fails
             logger.warning(f"Failed to log janitor run (non-fatal): {e}")
             return None
+
+    def update_janitor_run(
+        self,
+        run_id: str,
+        completed_at: datetime,
+        items_scanned: int,
+        items_fixed: int,
+        actions_taken: List[Dict[str, Any]],
+        status: str,
+        error_details: Optional[str]
+    ) -> bool:
+        """
+        Update an existing janitor run with final results.
+
+        Args:
+            run_id: UUID of the run to update
+            completed_at: When the run completed
+            items_scanned: Total items scanned
+            items_fixed: Total items fixed
+            actions_taken: List of actions taken
+            status: Final status ('completed', 'failed')
+            error_details: Error message if failed
+
+        Returns:
+            True if updated successfully, False otherwise
+        """
+        import json
+
+        # Calculate duration if we have both start and completion times
+        query = sql.SQL("""
+            UPDATE {schema}.janitor_runs
+            SET
+                completed_at = %s,
+                items_scanned = %s,
+                items_fixed = %s,
+                actions_taken = %s::jsonb,
+                status = %s,
+                error_details = %s,
+                duration_ms = EXTRACT(EPOCH FROM (%s - started_at)) * 1000
+            WHERE run_id = %s
+            RETURNING run_id
+        """).format(schema=sql.Identifier(self.schema_name))
+
+        try:
+            with self._error_context("update janitor run"):
+                result = self._execute_query(
+                    query,
+                    (
+                        completed_at,
+                        items_scanned,
+                        items_fixed,
+                        json.dumps(actions_taken),
+                        status,
+                        error_details,
+                        completed_at,  # For duration calculation
+                        run_id
+                    ),
+                    fetch='one'
+                )
+
+                if result:
+                    logger.info(
+                        f"Updated janitor run: run_id={run_id}, status={status}, "
+                        f"scanned={items_scanned}, fixed={items_fixed}"
+                    )
+                    return True
+                else:
+                    logger.warning(f"No janitor run found with run_id={run_id}")
+                    return False
+
+        except Exception as e:
+            # Don't fail the janitor if audit logging fails
+            logger.warning(f"Failed to update janitor run (non-fatal): {e}")
+            return False
 
     def get_recent_janitor_runs(
         self,

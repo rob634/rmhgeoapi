@@ -253,11 +253,16 @@ from vector_viewer import get_vector_viewer_triggers
 from triggers.list_container_blobs import list_container_blobs_handler
 from triggers.get_blob_metadata import get_blob_metadata_handler
 
-# Janitor Timer Triggers (21 NOV 2025) - System maintenance
+# Janitor Triggers (21 NOV 2025) - System maintenance (timer + HTTP)
 from triggers.janitor import (
+    # Timer handlers
     task_watchdog_handler,
     job_health_handler,
-    orphan_detector_handler
+    orphan_detector_handler,
+    # HTTP handlers
+    janitor_run_handler,
+    janitor_status_handler,
+    janitor_history_handler
 )
 
 # ========================================================================
@@ -2274,10 +2279,15 @@ def _mark_task_failed_from_queue_error(task_id: str, parent_job_id: Optional[str
 # Janitor is a standalone maintenance subsystem (NOT a CoreMachine job).
 # This avoids circular dependency - janitor can't clean itself if stuck.
 #
+# Timer Schedule Rationale (22 NOV 2025):
+# - Task timeout is 30 min, so checking more frequently is wasteful
+# - All janitors run every 30 min for consistent, predictable behavior
+# - HTTP endpoints available for immediate on-demand runs
+#
 # Three timers for different maintenance operations:
-# 1. Task Watchdog (5 min): Detect stale PROCESSING tasks (Azure Functions timeout)
-# 2. Job Health (10 min): Detect jobs with failed tasks, propagate failure
-# 3. Orphan Detector (15 min): Find orphaned tasks, zombie jobs, stuck queued jobs
+# 1. Task Watchdog: Detect stale PROCESSING tasks (Azure Functions timeout)
+# 2. Job Health: Detect jobs with failed tasks, propagate failure
+# 3. Orphan Detector: Find orphaned tasks, zombie jobs, stuck queued jobs
 #
 # Configuration via environment variables:
 # - JANITOR_ENABLED: true/false (default: true)
@@ -2287,7 +2297,7 @@ def _mark_task_failed_from_queue_error(task_id: str, parent_job_id: Optional[str
 # ============================================================================
 
 @app.timer_trigger(
-    schedule="0 */5 * * * *",  # Every 5 minutes
+    schedule="0 */30 * * * *",  # Every 30 minutes (matches task timeout)
     arg_name="timer",
     run_on_startup=False
 )
@@ -2298,13 +2308,13 @@ def janitor_task_watchdog(timer: func.TimerRequest) -> None:
     Tasks stuck in PROCESSING for > 30 minutes have silently failed
     (Azure Functions max execution time is 10-30 minutes).
 
-    Schedule: Every 5 minutes (0 */5 * * * *)
+    Schedule: Every 30 minutes - no point checking more often than timeout
     """
     task_watchdog_handler(timer)
 
 
 @app.timer_trigger(
-    schedule="0 */10 * * * *",  # Every 10 minutes
+    schedule="0 15,45 * * * *",  # At :15 and :45 past each hour
     arg_name="timer",
     run_on_startup=False
 )
@@ -2315,13 +2325,15 @@ def janitor_job_health(timer: func.TimerRequest) -> None:
     Finds PROCESSING jobs with failed tasks and marks them as FAILED.
     Captures partial results from completed tasks for debugging.
 
-    Schedule: Every 10 minutes (0 */10 * * * *)
+    Schedule: Every 30 minutes, offset from task_watchdog by 15 min
+    This runs AFTER task_watchdog has marked failed tasks, allowing
+    proper failure propagation to job level.
     """
     job_health_handler(timer)
 
 
 @app.timer_trigger(
-    schedule="0 */15 * * * *",  # Every 15 minutes
+    schedule="0 0 * * * *",  # Every hour on the hour
     arg_name="timer",
     run_on_startup=False
 )
@@ -2335,6 +2347,59 @@ def janitor_orphan_detector(timer: func.TimerRequest) -> None:
     3. Stuck QUEUED jobs (no tasks created after timeout)
     4. Ancient stale jobs (PROCESSING > 24 hours)
 
-    Schedule: Every 15 minutes (0 */15 * * * *)
+    Schedule: Every hour - these are edge cases, not time-critical
     """
     orphan_detector_handler(timer)
+
+
+# ============================================================================
+# JANITOR HTTP ENDPOINTS - Manual Triggering and Status (21 NOV 2025)
+# ============================================================================
+# These endpoints allow manual janitor operations for testing and debugging.
+# Useful for:
+# - Testing janitor logic before deploying timer triggers
+# - On-demand cleanup after known issues
+# - Monitoring janitor health and activity
+# ============================================================================
+
+# NOTE: Using /api/cleanup/* instead of /api/admin/janitor/* because Azure Functions
+# reserves /api/admin/* for built-in admin UI (returns 404)
+@app.route(route="cleanup/run", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
+def cleanup_run(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Manually trigger a cleanup (janitor) run.
+
+    POST /api/cleanup/run?type={task_watchdog|job_health|orphan_detector|all}
+
+    Examples:
+        curl -X POST "https://.../api/cleanup/run?type=task_watchdog"
+        curl -X POST "https://.../api/cleanup/run?type=all"
+    """
+    return janitor_run_handler(req)
+
+
+@app.route(route="cleanup/status", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def cleanup_status(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Get current cleanup (janitor) status and configuration.
+
+    GET /api/cleanup/status
+
+    Returns config, enabled status, and last 24h statistics.
+    """
+    return janitor_status_handler(req)
+
+
+@app.route(route="cleanup/history", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def cleanup_history(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Get recent cleanup (janitor) run history.
+
+    GET /api/cleanup/history?hours=24&type=task_watchdog&limit=50
+
+    Query Parameters:
+        hours: How many hours of history (default: 24, max: 168)
+        type: Filter by run type (optional)
+        limit: Max records to return (default: 50, max: 200)
+    """
+    return janitor_history_handler(req)

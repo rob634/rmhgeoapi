@@ -104,7 +104,8 @@ if TYPE_CHECKING:
     from .blob import BlobRepository as _BlobRepository
     from .vault import VaultRepository as _VaultRepository
     from .platform import PlatformRepository as _PlatformRepository
-    from .platform import PlatformStatusRepository as _PlatformStatusRepository
+    from .platform import ApiRequestRepository as _ApiRequestRepository
+    # NOTE: PlatformStatusRepository REMOVED (22 NOV 2025) - thin tracking pattern
     from .interface_repository import (
         IJobRepository as _IJobRepository,
         ITaskRepository as _ITaskRepository,
@@ -153,13 +154,14 @@ def __getattr__(name: str):
         from .vault import VaultRepository
         return VaultRepository
 
-    # Platform repositories
+    # Platform repositories (simplified 22 NOV 2025 - thin tracking)
     elif name == "PlatformRepository":
         from .platform import PlatformRepository
         return PlatformRepository
-    elif name == "PlatformStatusRepository":
-        from .platform import PlatformStatusRepository
-        return PlatformStatusRepository
+    elif name == "ApiRequestRepository":
+        from .platform import ApiRequestRepository
+        return ApiRequestRepository
+    # NOTE: PlatformStatusRepository REMOVED - use ApiRequestRepository instead
 
     # Interfaces
     elif name == "IJobRepository":
@@ -192,7 +194,8 @@ __all__ = [
     "BlobRepository",
     "VaultRepository",
     "PlatformRepository",
-    "PlatformStatusRepository",
+    "ApiRequestRepository",
+    # NOTE: PlatformStatusRepository REMOVED (22 NOV 2025)
     "IJobRepository",
     "ITaskRepository",
     "IBlobRepository",

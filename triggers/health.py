@@ -10,7 +10,7 @@
 # PYDANTIC_MODELS: None directly - uses dict responses for health status
 # DEPENDENCIES: http_base.SystemMonitoringTrigger, config, core.schema.deployer.SchemaManagerFactory, utils.validator, azure.functions
 # SOURCE: HTTP GET requests, environment variables, component status from PostgreSQL/Service Bus/Blob Storage/imports
-# SCOPE: HTTP endpoint for monitoring 9 system components - database, Service Bus, imports, DuckDB, VSI, jobs registry, schema validation
+# SCOPE: HTTP endpoint for monitoring 10 system components - database, Service Bus, imports, DuckDB, VSI, jobs registry, schema validation, system reference tables
 # VALIDATION: Component connectivity checks, schema validation and auto-creation, import validation with auto-discovery, configuration checks
 # PATTERNS: Template Method (base class), Health Check pattern, Component pattern, Status Code pattern (200/503/500)
 # ENTRY_POINTS: GET /api/health - Used by function_app.py via health_check_trigger singleton
@@ -24,7 +24,7 @@ Concrete implementation of health check endpoint using BaseHttpTrigger pattern.
 Performs comprehensive health checks on all critical and optional system components
 with proper HTTP status code semantics (200 healthy, 503 unhealthy, 500 error).
 
-Components Monitored (9 total):
+Components Monitored (10 total):
 1. Import Validation - Critical dependency and application module validation with auto-discovery
 2. Service Bus Queues - Jobs and tasks queues connectivity and message counts
 3. Database Configuration - PostgreSQL connection string and environment variable validation
@@ -32,8 +32,9 @@ Components Monitored (9 total):
 5. DuckDB - Optional analytical engine for serverless Parquet queries (non-critical)
 6. VSI Support - Rasterio /vsicurl/ capability for Big Raster ETL (critical for large rasters)
 7. Jobs Registry - Available job types from jobs.ALL_JOBS (critical for job submission)
-8. Azure Table Storage - Deprecated (PostgreSQL replaced for ACID compliance)
-9. Key Vault - Disabled (using environment variables only)
+8. PgSTAC - STAC metadata storage (collections, items, searches tables)
+9. System Reference Tables - Admin0 boundaries for ISO3 country attribution (optional)
+10. Azure Table Storage & Key Vault - Deprecated/Disabled
 
 Health Check Features:
 - Proper HTTP status codes: 200 (healthy), 503 (unhealthy), 500 (error)
@@ -297,6 +298,14 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
             # Note: PgSTAC is optional - don't fail overall health if unavailable
             if pgstac_health["status"] == "error":
                 health_data["errors"].append("PgSTAC unavailable (impacts STAC collection/item workflows)")
+
+            # Check system reference tables (admin0 boundaries for ISO3 attribution)
+            system_tables_health = self._check_system_reference_tables()
+            health_data["components"]["system_reference_tables"] = system_tables_health
+            # Note: System reference tables are optional - don't fail overall health
+            # Missing tables just means ISO3 country attribution won't be available
+            if system_tables_health["status"] == "error":
+                health_data["errors"].append("System reference tables unavailable (ISO3 country attribution disabled)")
 
         return health_data
     
@@ -1373,6 +1382,138 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                 }
 
         return self.check_component_health("pgstac", check_pgstac)
+
+    def _check_system_reference_tables(self) -> Dict[str, Any]:
+        """
+        Check system reference tables required for spatial operations.
+
+        System reference tables include:
+        - geo.system_admin0_boundaries - Country boundaries for ISO3 attribution
+
+        These tables are used for enriching STAC items with country codes and
+        for H3 grid generation with land/ocean filtering.
+
+        Returns:
+            Dict with system reference tables health status including:
+            - admin0_table: Configured table name from H3Config
+            - exists: Whether table exists in database
+            - row_count: Number of country records loaded
+            - columns: Required column availability (iso3, geom, name)
+            - spatial_index: Whether GIST index exists for query performance
+            - ready_for_attribution: Boolean indicating readiness for ISO3 attribution
+        """
+        def check_system_tables():
+            from infrastructure.postgresql import PostgreSQLRepository
+            from config import get_config
+
+            config = get_config()
+            repo = PostgreSQLRepository()
+
+            # Get configured admin0 table from H3Config
+            admin0_table = config.h3.system_admin0_table  # "geo.system_admin0_boundaries"
+
+            # Parse schema.table
+            if '.' in admin0_table:
+                schema, table = admin0_table.split('.', 1)
+            else:
+                schema, table = 'geo', admin0_table
+
+            try:
+                with repo._get_connection() as conn:
+                    with conn.cursor() as cur:
+                        # Check table exists
+                        cur.execute("""
+                            SELECT EXISTS (
+                                SELECT FROM information_schema.tables
+                                WHERE table_schema = %s AND table_name = %s
+                            ) as table_exists
+                        """, (schema, table))
+                        table_exists = cur.fetchone()['table_exists']
+
+                        if not table_exists:
+                            return {
+                                "admin0_table": admin0_table,
+                                "exists": False,
+                                "error": f"Table {admin0_table} not found",
+                                "impact": "ISO3 country attribution will be unavailable for STAC items",
+                                "fix": "Load country boundaries from Natural Earth or GADM into geo.system_admin0_boundaries"
+                            }
+
+                        # Check required columns
+                        cur.execute("""
+                            SELECT column_name
+                            FROM information_schema.columns
+                            WHERE table_schema = %s AND table_name = %s
+                        """, (schema, table))
+                        columns = [row['column_name'] for row in cur.fetchall()]
+
+                        has_iso3 = 'iso3' in columns
+                        has_geom = 'geom' in columns or 'geometry' in columns
+                        has_name = 'name' in columns
+
+                        # Check row count
+                        row_count = 0
+                        try:
+                            cur.execute(f"SELECT COUNT(*) as count FROM {schema}.{table}")
+                            row_count = cur.fetchone()['count']
+                        except Exception:
+                            row_count = "error"
+
+                        # Check spatial index exists
+                        cur.execute("""
+                            SELECT COUNT(*) > 0 as has_gist_index
+                            FROM pg_indexes
+                            WHERE schemaname = %s AND tablename = %s
+                            AND indexdef LIKE '%%USING gist%%'
+                        """, (schema, table))
+                        has_spatial_index = cur.fetchone()['has_gist_index']
+
+                        # Build result
+                        ready = has_iso3 and has_geom and isinstance(row_count, int) and row_count > 0
+
+                        result = {
+                            "admin0_table": admin0_table,
+                            "exists": True,
+                            "row_count": row_count,
+                            "columns": {
+                                "iso3": has_iso3,
+                                "geom": has_geom,
+                                "name": has_name
+                            },
+                            "spatial_index": has_spatial_index,
+                            "ready_for_attribution": ready
+                        }
+
+                        # Add warnings if issues detected
+                        warnings = []
+                        if not has_iso3:
+                            warnings.append("Missing required column: iso3")
+                        if not has_geom:
+                            warnings.append("Missing required column: geom")
+                        if not has_spatial_index:
+                            warnings.append("No GIST spatial index - queries will be slow")
+                        if isinstance(row_count, int) and row_count == 0:
+                            warnings.append("Table is empty - no country boundaries loaded")
+
+                        if warnings:
+                            result["warnings"] = warnings
+                            result["impact"] = "ISO3 country attribution may fail or be incomplete"
+                            result["fix"] = "Ensure table has iso3, geom columns with data and GIST index"
+
+                        return result
+
+            except Exception as e:
+                import traceback
+                return {
+                    "admin0_table": admin0_table,
+                    "exists": False,
+                    "error": str(e)[:200],
+                    "error_type": type(e).__name__,
+                    "traceback": traceback.format_exc()[:500],
+                    "impact": "System reference tables check failed"
+                }
+
+        return self.check_component_health("system_reference_tables", check_system_tables)
 
 
 # Create singleton instance for use in function_app.py

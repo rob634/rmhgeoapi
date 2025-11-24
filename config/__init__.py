@@ -69,6 +69,7 @@ from .vector_config import VectorConfig
 from .queue_config import QueueConfig, QueueNames
 from .analytics_config import AnalyticsConfig, DuckDBConnectionType
 from .h3_config import H3Config
+from .platform_config import PlatformConfig, generate_platform_request_id
 from .app_config import AppConfig
 
 
@@ -146,6 +147,9 @@ def debug_config() -> dict:
             # H3
             'h3': config.h3.debug_dict(),
 
+            # Platform
+            'platform': config.platform.debug_dict(),
+
             # Application
             'debug_mode': config.debug_mode,
             'environment': config.environment,
@@ -196,4 +200,8 @@ __all__ = [
 
     # H3
     'H3Config',
+
+    # Platform
+    'PlatformConfig',
+    'generate_platform_request_id',
 ]

@@ -1,10 +1,63 @@
 # API Job Submission Guide
 
-**Author**: Robert and Geospatial Claude Legion
-**Date**: 21 NOV 2025
+**Date**: 22 NOV 2025
 **Purpose**: Quick reference for submitting jobs via REST API
 
-**⚠️ IMPORTANT**: This document includes admin/maintenance endpoints with **DESTRUCTIVE OPERATIONS**. These nuclear red buttons (schema redeploy, STAC nuke, etc.) are **DEV/TEST ONLY**. See the [Admin & Maintenance section](#-admin--maintenance-endpoints-devtest-only) for full safety warnings.
+**Important**: This document includes admin/maintenance endpoints with destructive operations. These endpoints (schema redeploy, STAC nuke, etc.) are for development and testing only. See the [Admin & Maintenance section](#-admin--maintenance-endpoints-devtest-only) for full safety warnings.
+
+---
+
+## 🏗️ Two API Patterns: CoreMachine vs Platform
+
+This application provides **two ways to submit geospatial processing jobs**, designed for different use cases:
+
+### 🔧 CoreMachine API (Direct) - Power Users & Internal Tools
+
+**Pattern**: `/api/jobs/submit/{job_type}`
+
+**Who uses it**: Developers, internal tools, power users who understand the system internals
+
+**Characteristics**:
+- Direct access to CoreMachine job orchestration engine
+- Requires knowledge of CoreMachine job parameters (blob paths, container names, etc.)
+- Full flexibility and control over all job parameters
+- Idempotent job IDs based on SHA256 hash of parameters
+- Status queries via `/api/jobs/status/{job_id}`
+
+**Use when**: You're building internal tools, scripts, or have deep knowledge of the system
+
+---
+
+### 🌐 Platform API (DDH Integration) - External Applications
+
+**Pattern**: `/api/platform/request`
+
+**Who uses it**: DDH (Data Discovery Hub), external applications, non-technical users
+
+**Characteristics**:
+- Anti-Corruption Layer (ACL) that translates external identifiers to CoreMachine parameters
+- Uses high-level identifiers: `dataset_id`, `resource_id`, `version_id` (DDH standard)
+- Automatically generates output paths, table names, STAC IDs from DDH identifiers
+- Idempotent request IDs based on SHA256 hash of DDH identifiers
+- Status queries via `/api/platform/status/{request_id}`
+- Shields external applications from CoreMachine internal changes
+
+**Use when**: Integrating with DDH or building external applications that shouldn't know CoreMachine internals
+
+**Key Benefit**: DDH API changes are absorbed in Platform layer without touching CoreMachine jobs
+
+---
+
+### Quick Comparison
+
+| Feature | CoreMachine API | Platform API |
+|---------|----------------|--------------|
+| **Audience** | Internal developers | External applications (DDH) |
+| **Identifiers** | `job_id` (SHA256 of params) | `request_id` (SHA256 of DDH IDs) |
+| **Parameters** | CoreMachine-specific (blob_name, table_name) | DDH-specific (dataset_id, resource_id, version_id) |
+| **Output Naming** | You specify table/collection names | Auto-generated from DDH identifiers |
+| **Status Endpoint** | `/api/jobs/status/{job_id}` | `/api/platform/status/{request_id}` |
+| **Use Case** | Internal automation, scripts | DDH integration, external apps |
 
 ---
 
@@ -16,7 +69,9 @@ https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net
 
 ---
 
-## 📋 General Job Submission Pattern
+## 📋 CoreMachine API - Direct Job Submission
+
+**Pattern for power users and internal tools:**
 
 ```bash
 POST /api/jobs/submit/{job_type}
@@ -163,7 +218,13 @@ curl -X POST \
 
 **Job Type**: `ingest_vector`
 
-### Parameters
+---
+
+### 🔧 CoreMachine API (Direct)
+
+Direct submission when you know the exact table name and parameters.
+
+#### Parameters
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
@@ -178,7 +239,7 @@ curl -X POST \
 | `geometry_params` | dict | No | {} | Geometry processing options |
 | `render_params` | dict | No | {} | Future: rendering optimization |
 
-### Indexes Configuration
+#### Indexes Configuration
 
 Default indexes:
 ```json
@@ -198,7 +259,7 @@ Example with custom indexes:
 }
 ```
 
-### Examples
+#### CoreMachine Examples
 
 **Basic GeoJSON ingestion**:
 ```bash
@@ -244,7 +305,33 @@ curl -X POST \
   }'
 ```
 
-**Shapefile ingestion** (upload .shp, .shx, .dbf, .prj to blob storage first):
+**Shapefile ingestion (zipped)** - Real example from 21 NOV 2025:
+```bash
+curl -X POST \
+  https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/jobs/submit/ingest_vector \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "blob_name": "kba_shp.zip",
+    "file_extension": "shp",
+    "table_name": "kba_shp_01"
+  }'
+```
+
+**Results** (Key Biodiversity Areas - global dataset):
+| Metric | Value |
+|--------|-------|
+| Status | `completed` |
+| Total Tasks | 99 (1 prepare + 97 uploads + 1 finalize) |
+| Chunks Processed | 97 (100% success) |
+| Features Uploaded | 16,214 |
+| Duration | ~4 min 46 sec |
+| Bounding Box | Global (-180, -79 to 180, 81) |
+
+**Output URLs**:
+- Vector Viewer: https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/vector/viewer?collection=kba_shp_01
+- OGC Features: https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/features/collections/kba_shp_01
+
+**Shapefile ingestion (unzipped)** - upload .shp, .shx, .dbf, .prj to blob storage first:
 ```bash
 curl -X POST \
   https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/jobs/submit/ingest_vector \
@@ -341,6 +428,39 @@ curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/fea
 https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/vector/viewer?collection={table_name}
 ```
 
+---
+
+### 🌐 Platform API (DDH Integration)
+
+<!-- TODO: Add Platform API examples after testing (22 NOV 2025)
+
+     Platform API uses DDH identifiers instead of CoreMachine parameters:
+     - dataset_id, resource_id, version_id → auto-generated table names
+     - Endpoint: POST /api/platform/request
+     - Status: GET /api/platform/status/{request_id}
+
+     Example structure (to be tested and verified):
+     {
+       "dataset_id": "admin-boundaries",
+       "resource_id": "county-level",
+       "version_id": "v1-0",
+       "data_type": "vector",
+       "file_name": "boundaries.geojson",
+       "container_name": "bronze-vectors",
+       "service_name": "DDH Data Import",
+       "description": "County-level administrative boundaries",
+       "tags": ["boundaries", "admin"],
+       "access_level": "public"
+     }
+
+     Output:
+     - Table name: admin_boundaries_county_level_v1_0 (auto-generated)
+     - STAC item ID: admin-boundaries_county-level_v1-0 (auto-generated)
+     - OGC Features URL: /api/features/collections/admin_boundaries_county_level_v1_0
+-->
+
+---
+
 ### Supported File Formats
 
 | Format | Extension | Notes |
@@ -411,7 +531,13 @@ https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/vector/v
 
 **Job Type**: `process_raster`
 
-### Parameters
+---
+
+### 🔧 CoreMachine API (Direct)
+
+Direct submission when you know the exact output folder and collection names.
+
+#### Parameters
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
@@ -427,7 +553,7 @@ https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/vector/v
 | `strict_mode` | bool | No | false | Fail on warnings (not just errors) |
 | `output_folder` | string | No | null | Custom output folder in silver container |
 
-### Raster Types
+#### Raster Types
 
 | Type | Description | Compression |
 |------|-------------|-------------|
@@ -439,16 +565,40 @@ https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/vector/v
 | `multispectral` | Multi-band scientific data | DEFLATE |
 | `nir` | Near-infrared imagery | DEFLATE |
 
-### Output Tiers
+#### Output Tiers
 
-| Tier | Compression | Access Tier | Use Case |
-|------|-------------|-------------|----------|
-| `visualization` | JPEG (Q85) | Hot | Web display, TiTiler, fast streaming |
-| `analysis` | DEFLATE | Hot | Scientific analysis, lossless |
-| `archive` | LZW | Cool | Long-term storage, cost-optimized |
-| `all` | All above | Mixed | Create all applicable tiers |
+| Tier | Compression | Access Tier | Use Case | Status |
+|------|-------------|-------------|----------|--------|
+| `visualization` | JPEG (Q85) | Hot | Web display, TiTiler, fast streaming | ⚠️ BROKEN |
+| `analysis` | DEFLATE | Hot | Scientific analysis, lossless | ✅ **RECOMMENDED** |
+| `archive` | LZW | Cool | Long-term storage, cost-optimized | ✅ Works |
+| `all` | All above | Mixed | Create all applicable tiers | ⚠️ Partial |
 
-### Examples
+**⚠️ KNOWN ISSUE (21 NOV 2025)**: `visualization` tier (JPEG compression) is currently failing with `COG_TRANSLATE_FAILED`. Use `analysis` tier (DEFLATE) as workaround. See [TODO.md](docs_claude/TODO.md) for investigation status.
+
+#### CoreMachine Examples
+
+**Working example** (21 NOV 2025 - verified with dctest.tif):
+```bash
+curl -X POST \
+  https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/jobs/submit/process_raster \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "blob_name": "dctest.tif",
+    "container_name": "rmhazuregeobronze",
+    "output_tier": "analysis",
+    "output_folder": "cogs/my_test"
+  }'
+```
+
+**Results**:
+| Metric | Value |
+|--------|-------|
+| Status | `completed` |
+| Processing Time | ~22 seconds total |
+| COG Size | 127.58 MB (DEFLATE compression) |
+| STAC Inserted | Yes |
+| TiTiler URLs | Generated (9 URLs including viewer, preview, tilejson)
 
 **Basic raster to COG (uses defaults)**:
 ```bash
@@ -550,26 +700,62 @@ curl -X POST \
 
 ### Result Data
 
-Successful completion includes:
+**Real example** (21 NOV 2025 - dctest.tif 27 MB RGB GeoTIFF):
 ```json
 {
   "status": "completed",
-  "job_type": "process_raster",
-  "cog_path": "silver-cogs/dctest_cog.tif",
-  "cog_size_mb": 127.6,
-  "stac": {
-    "collection_id": "system-rasters",
-    "item_id": "system-rasters-dctest-tif",
-    "bbox": [-77.028, 38.908, -77.013, 38.932],
-    "inserted_to_pgstac": true
-  },
-  "titiler_urls": {
-    "tilejson": "https://titiler.../tilejson.json?collection=system-rasters&item=...",
-    "preview": "https://titiler.../preview.png?collection=system-rasters&item=...",
-    "viewer": "https://titiler.../viewer?collection=system-rasters&item=..."
+  "resultData": {
+    "job_type": "process_raster",
+    "source_blob": "dctest.tif",
+    "source_container": "rmhazuregeobronze",
+    "validation": {
+      "warnings": [],
+      "confidence": "VERY_HIGH",
+      "source_crs": "EPSG:4326",
+      "raster_type": "rgb",
+      "bit_depth_efficient": true
+    },
+    "cog": {
+      "size_mb": 127.58,
+      "cog_blob": "cogs/dctest_titiler_test/dctest_cog_analysis.tif",
+      "compression": "deflate",
+      "cog_container": "silver-cogs",
+      "reprojection_performed": false,
+      "processing_time_seconds": 9.91
+    },
+    "stac": {
+      "bbox": [-77.028, 38.908, -77.013, 38.932],
+      "item_id": "system-rasters-cogs-dctest_titiler_test-dctest_cog_analysis-tif",
+      "collection_id": "system-rasters",
+      "ready_for_titiler": true,
+      "inserted_to_pgstac": true
+    },
+    "share_url": "https://rmhtitiler-ghcyd7g0bxdvc2hc.eastus-01.azurewebsites.net/cog/WebMercatorQuad/map.html?url=%2Fvsiaz%2Fsilver-cogs%2Fcogs%2Fdctest_titiler_test%2Fdctest_cog_analysis.tif",
+    "titiler_urls": {
+      "viewer_url": "https://rmhtitiler-.../cog/WebMercatorQuad/map.html?url=...",
+      "info_url": "https://rmhtitiler-.../cog/info?url=...",
+      "preview_url": "https://rmhtitiler-.../cog/preview.png?url=...&max_size=512",
+      "thumbnail_url": "https://rmhtitiler-.../cog/preview.png?url=...&max_size=256",
+      "tilejson_url": "https://rmhtitiler-.../cog/WebMercatorQuad/tilejson.json?url=...",
+      "statistics_url": "https://rmhtitiler-.../cog/statistics?url=...",
+      "bounds_url": "https://rmhtitiler-.../cog/bounds?url=...",
+      "tiles_url_template": "https://rmhtitiler-.../cog/tiles/WebMercatorQuad/{z}/{x}/{y}.png?url=..."
+    },
+    "stages_completed": 3,
+    "total_tasks_executed": 3,
+    "tasks_by_status": {
+      "completed": 3,
+      "failed": 0
+    }
   }
 }
 ```
+
+**Key URLs in result:**
+- `share_url` - **PRIMARY** - Direct link to interactive TiTiler map viewer (share this with users!)
+- `titiler_urls.viewer_url` - Same as share_url
+- `titiler_urls.preview_url` - PNG thumbnail (512px)
+- `titiler_urls.tilejson_url` - TileJSON spec for web maps (Leaflet, MapLibre, etc.)
 
 ### Access Processed Rasters
 
@@ -621,7 +807,16 @@ azure://silver-cogs/{blob_name}_cog.tif
 ```
 **Solution**: Convert to GeoTIFF first, ensure GDAL can read the format
 
-**4. STAC insertion failed** (COG created but metadata failed):
+**4. COG_TRANSLATE_FAILED (JPEG compression)**:
+```json
+{
+  "status": "failed",
+  "error_details": "COG_TRANSLATE_FAILED"
+}
+```
+**Solution**: Use `output_tier: "analysis"` (DEFLATE) instead of `visualization` (JPEG). This is a known issue with JPEG compression in Azure Functions. See [TODO.md](docs_claude/TODO.md) for investigation.
+
+**5. STAC insertion failed** (COG created but metadata failed):
 ```json
 {
   "status": "completed_with_errors",
@@ -630,6 +825,44 @@ azure://silver-cogs/{blob_name}_cog.tif
 }
 ```
 **Solution**: COG is usable, manually add to STAC if needed
+
+---
+
+### 🌐 Platform API (DDH Integration)
+
+<!-- TODO: Add Platform API examples after testing (22 NOV 2025)
+
+     Platform API uses DDH identifiers instead of CoreMachine parameters:
+     - dataset_id, resource_id, version_id → auto-generated output folders and STAC IDs
+     - Endpoint: POST /api/platform/request
+     - Status: GET /api/platform/status/{request_id}
+
+     Example structure (to be tested and verified):
+     {
+       "dataset_id": "aerial-imagery",
+       "resource_id": "site-alpha",
+       "version_id": "v1-0",
+       "data_type": "raster",
+       "file_name": "image.tif",
+       "container_name": "bronze-rasters",
+       "service_name": "DDH Raster Import",
+       "description": "Aerial imagery for Site Alpha",
+       "tags": ["aerial", "rgb"],
+       "access_level": "public",
+       "options": {
+         "output_tier": "analysis",
+         "target_crs": "EPSG:4326"
+       }
+     }
+
+     Output:
+     - Output folder: aerial-imagery/site-alpha/v1-0 (auto-generated)
+     - Collection ID: aerial-imagery (auto-generated)
+     - STAC item ID: aerial-imagery_site-alpha_v1-0 (auto-generated)
+     - TiTiler viewer URL: auto-generated with search_id
+-->
+
+---
 
 ### Supported Input Formats
 
@@ -653,27 +886,255 @@ azure://silver-cogs/{blob_name}_cog.tif
 
 ---
 
+## 🗺️ 4. Process Raster Collection Job
+
+**Purpose**: Process multiple raster files into a unified STAC collection with MosaicJSON for seamless tile serving
+
+**Job Type**: `process_raster_collection`
+
+---
+
+### 🔧 CoreMachine API (Direct)
+
+Direct submission when you know the exact blob paths and collection names.
+
+#### Parameters
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `container_name` | string | **Yes** | - | Source blob container (e.g., "rmhazuregeobronze") |
+| `blob_list` | list | **Yes** | - | List of raster blob paths to process |
+| `collection_id` | string | No | Auto-generated | STAC collection identifier |
+| `output_folder` | string | No | Auto-generated | Output folder in silver-cogs container |
+| `target_crs` | string | No | "EPSG:4326" | Target coordinate reference system |
+| `output_tier` | string | No | "analysis" | COG compression tier |
+| `jpeg_quality` | int | No | 85 | JPEG quality (1-100) |
+| `create_mosaicjson` | bool | No | true | Create MosaicJSON index |
+| `create_stac_collection` | bool | No | true | Create STAC collection |
+
+#### CoreMachine Examples
+
+**Process multiple raster tiles** (22 NOV 2025 - verified with Namangan imagery):
+```bash
+curl -X POST \
+  https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/jobs/submit/process_raster_collection \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "container_name": "rmhazuregeobronze",
+    "blob_list": [
+      "namangan/namangan14aug2019_R1C1cog.tif",
+      "namangan/namangan14aug2019_R1C2cog.tif",
+      "namangan/namangan14aug2019_R2C1cog.tif",
+      "namangan/namangan14aug2019_R2C2cog.tif"
+    ],
+    "collection_id": "namangan-full-collection",
+    "output_folder": "cogs/namangan_full"
+  }'
+```
+
+**Results** (Namangan 4-tile collection - 1.7 GB total):
+| Metric | Value |
+|--------|-------|
+| Status | `completed` |
+| Total Tasks | 10 (4 COG + 4 STAC items + MosaicJSON + Collection) |
+| COGs Created | 4 (1654.49 MB total) |
+| STAC Items | 4 |
+| Duration | ~9 minutes |
+| Bounding Box | `[71.6063, 40.9806, 71.7219, 41.0318]` (Namangan, Uzbekistan) |
+
+### Workflow Stages
+
+**Stage 1**: Validate Rasters (parallel tasks)
+- Validate each raster file
+- Check CRS, bounds, band structure
+- Duration: 2-10 seconds per file
+
+**Stage 2**: Create COGs (parallel tasks)
+- Convert each raster to COG
+- Apply compression
+- Upload to silver-cogs
+- Duration: 10-300 seconds per file (depends on size)
+
+**Stage 3**: Create MosaicJSON (single task)
+- Generate MosaicJSON index from all COGs
+- Upload to silver-mosaicjson container
+- Duration: 2-5 seconds
+
+**Stage 4**: Create STAC Collection (single task)
+- Create STAC collection with unified bbox
+- Create STAC items for each COG
+- Register pgSTAC search with collection bbox
+- Generate TiTiler visualization URLs
+- Duration: 5-15 seconds
+
+### Result Data
+
+**Real example** (22 NOV 2025 - Namangan 4-tile collection):
+```json
+{
+  "status": "completed",
+  "resultData": {
+    "job_type": "process_raster_collection",
+    "collection_id": "namangan-full-collection",
+    "cogs": {
+      "successful": 4,
+      "failed": 0,
+      "total_size_mb": 1654.49
+    },
+    "stac": {
+      "collection_id": "namangan-full-collection",
+      "items_created": 4,
+      "search_id": "19f27606ef42aaa1ec1fc49878f52ee4",
+      "inserted_to_pgstac": true,
+      "ready_for_titiler": true
+    },
+    "mosaicjson": {
+      "url": "https://rmhazuregeo.blob.core.windows.net/silver-mosaicjson/cogs/namangan_full/namangan-full-collection.json",
+      "bounds": [71.6063, 40.9806, 71.7219, 41.0318],
+      "tile_count": 4
+    },
+    "share_url": "https://rmhtitiler-.../searches/{search_id}/WebMercatorQuad/map.html?assets=data",
+    "titiler_urls": {
+      "viewer_url": "https://rmhtitiler-.../searches/{search_id}/WebMercatorQuad/map.html?assets=data",
+      "tilejson_url": "https://rmhtitiler-.../searches/{search_id}/WebMercatorQuad/tilejson.json?assets=data",
+      "tiles_url": "https://rmhtitiler-.../searches/{search_id}/tiles/WebMercatorQuad/{z}/{x}/{y}?assets=data"
+    },
+    "stages_completed": 4,
+    "total_tasks_executed": 10,
+    "tasks_by_status": {
+      "completed": 10,
+      "failed": 0
+    }
+  }
+}
+```
+
+### Key URLs in Result
+
+- `share_url` - **PRIMARY** - Interactive map viewer (auto-zooms to collection bbox!)
+- `titiler_urls.viewer_url` - Same as share_url
+- `titiler_urls.tilejson_url` - TileJSON spec for web maps
+- `titiler_urls.tiles_url` - XYZ tile URL template
+
+### Auto-Zoom Feature (22 NOV 2025)
+
+**The viewer URL now auto-zooms to the collection's bounding box!**
+
+When you open the `share_url`, the map automatically zooms to the collection extent instead of showing the entire world. This is achieved by:
+
+1. Collection bbox is extracted from the STAC collection extent
+2. Bbox is stored in pgSTAC search metadata as `bounds`
+3. TiTiler reads bounds from search metadata when generating TileJSON
+4. Leaflet's `map.fitBounds()` uses these bounds for initial view
+
+**Before**: Viewer opened at world zoom level (user had to manually zoom/pan)
+**After**: Viewer opens zoomed directly to the data extent (e.g., Namangan, Uzbekistan)
+
+---
+
+### 🌐 Platform API (DDH Integration)
+
+<!-- TODO: Add Platform API examples after testing (22 NOV 2025)
+
+     Platform API uses DDH identifiers instead of CoreMachine parameters:
+     - dataset_id, resource_id, version_id → auto-generated collection ID and output folder
+     - Endpoint: POST /api/platform/request
+     - Status: GET /api/platform/status/{request_id}
+
+     Example structure (to be tested and verified):
+     {
+       "dataset_id": "satellite-imagery",
+       "resource_id": "region-alpha",
+       "version_id": "v1-0",
+       "data_type": "raster_collection",
+       "file_list": [
+         "satellite/tile1.tif",
+         "satellite/tile2.tif",
+         "satellite/tile3.tif"
+       ],
+       "container_name": "bronze-rasters",
+       "service_name": "DDH Satellite Import",
+       "description": "Multi-tile satellite collection for Region Alpha",
+       "tags": ["satellite", "multispectral"],
+       "access_level": "public",
+       "options": {
+         "output_tier": "analysis",
+         "target_crs": "EPSG:4326",
+         "create_mosaicjson": true
+       }
+     }
+
+     Output:
+     - Collection ID: satellite-imagery (auto-generated from dataset_id)
+     - Output folder: satellite-imagery/region-alpha/v1-0 (auto-generated)
+     - MosaicJSON: satellite-imagery/region-alpha/v1-0/collection.json
+     - TiTiler viewer URL: auto-generated with auto-zoom to collection bbox
+-->
+
+---
+
+### Use Cases
+
+- ✅ Process satellite image tile grids (e.g., Maxar WorldView)
+- ✅ Create unified collections from multi-scene acquisitions
+- ✅ Build seamless mosaics from adjacent raster tiles
+- ✅ Generate STAC collections with MosaicJSON for dynamic tiling
+- ✅ Enable TiTiler-PgSTAC search-based tile serving
+
+---
+
 ## 🔍 Monitoring Jobs
 
-### Get All Jobs (Last 24 Hours)
+### CoreMachine API - Direct Job Monitoring
+
+**Get All Jobs (Last 24 Hours)**:
 ```bash
 curl "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/dbadmin/jobs?limit=100"
 ```
 
-### Get Tasks for Specific Job
+**Get Tasks for Specific Job**:
 ```bash
 curl "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/dbadmin/tasks/{JOB_ID}"
 ```
 
-### Filter Jobs by Status
+**Filter Jobs by Status**:
 ```bash
 curl "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/dbadmin/jobs?status=failed&limit=20"
 ```
 
-### Filter Jobs by Type
+**Filter Jobs by Type**:
 ```bash
 curl "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/dbadmin/jobs?job_type=ingest_vector&limit=20"
 ```
+
+---
+
+### Platform API - Request Status Monitoring
+
+<!-- TODO: Add Platform API status examples after testing (22 NOV 2025)
+
+     Platform status endpoint queries by request_id (DDH identifier hash):
+     - Endpoint: GET /api/platform/status/{request_id}
+     - Lists all requests: GET /api/platform/status?limit=100
+     - Filter by dataset: GET /api/platform/status?dataset_id=aerial-imagery
+
+     Example response structure (to be verified):
+     {
+       "success": true,
+       "request_id": "a3f2c1b8...",
+       "dataset_id": "aerial-imagery",
+       "resource_id": "site-alpha",
+       "version_id": "v1-0",
+       "job_id": "abc123...",
+       "job_status": "completed",
+       "job_result": {...},
+       "data_access": {
+         "ogc_features": "...",
+         "stac": "...",
+         "titiler": "..."
+       }
+     }
+-->
 
 ---
 

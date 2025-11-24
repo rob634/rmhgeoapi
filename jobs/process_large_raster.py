@@ -1,10 +1,17 @@
 # ============================================================================
+# 🚧 UNDER DEVELOPMENT - DO NOT USE IN PRODUCTION
+# ============================================================================
+# PURPOSE: Large raster tiling pipeline (1-30 GB files)
+# STATUS: Functional - Pending production testing with large files
+# ============================================================================
+
+# ============================================================================
 # CLAUDE CONTEXT - JOB WORKFLOW - PROCESS LARGE RASTER
 # ============================================================================
 # EPOCH: 4 - ACTIVE ✅
 # STATUS: Job workflow - Large raster tiling and processing (1-30 GB)
 # PURPOSE: 4-stage workflow for tiling large rasters into COG mosaics
-# LAST_REVIEWED: 3 NOV 2025
+# LAST_REVIEWED: 22 NOV 2025
 # EXPORTS: ProcessLargeRasterWorkflow class
 # INTERFACES: JobBase contract - create_tasks_for_stage() signature
 # PYDANTIC_MODELS: None (class attributes)

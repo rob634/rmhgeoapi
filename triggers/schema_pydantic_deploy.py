@@ -70,9 +70,9 @@ from core.schema.sql_generator import PydanticToSQL
 from core.models import (
     JobRecord,
     TaskRecord,
-    ApiRequest,
-    OrchestrationJob
+    ApiRequest
 )
+# NOTE: OrchestrationJob REMOVED (22 NOV 2025) - no job chaining in Platform
 
 class PydanticSchemaDeployTrigger:
     """

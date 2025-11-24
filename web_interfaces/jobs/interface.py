@@ -92,6 +92,13 @@ class JobsInterface(BaseInterface):
                     <option value="completed">Completed</option>
                     <option value="failed">Failed</option>
                 </select>
+                <select id="time-filter" onchange="loadJobs()" class="filter-select">
+                    <option value="24">Last 24 Hours</option>
+                    <option value="168" selected>Last 7 Days</option>
+                    <option value="720">Last 30 Days</option>
+                    <option value="4320">Last 6 Months</option>
+                    <option value="8760">Last Year</option>
+                </select>
                 <select id="limit-filter" onchange="loadJobs()" class="filter-select">
                     <option value="10">Last 10</option>
                     <option value="25" selected>Last 25</option>
@@ -735,10 +742,11 @@ class JobsInterface(BaseInterface):
 
             // Get filters
             const statusFilter = document.getElementById('status-filter').value;
+            const timeFilter = document.getElementById('time-filter').value;
             const limit = document.getElementById('limit-filter').value;
 
             // Build query params
-            const params = new URLSearchParams({ limit });
+            const params = new URLSearchParams({ limit, hours: timeFilter });
             if (statusFilter) params.append('status', statusFilter);
 
             // Show loading

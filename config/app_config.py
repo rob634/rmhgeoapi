@@ -53,6 +53,7 @@ from .vector_config import VectorConfig
 from .queue_config import QueueConfig
 from .analytics_config import AnalyticsConfig
 from .h3_config import H3Config
+from .platform_config import PlatformConfig
 
 
 # ============================================================================
@@ -203,8 +204,8 @@ class AppConfig(BaseModel):
     )
 
     ogc_features_base_url: str = Field(
-        default="https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/features",
-        description="Base URL for OGC API - Features (vector data access)"
+        default="https://rmhgeoapifn-dydhe8dddef4f7bd.eastus-01.azurewebsites.net/api/features",
+        description="Base URL for OGC API - Features (vector data access) - Read-only function app"
     )
 
     titiler_mode: str = Field(
@@ -268,6 +269,11 @@ class AppConfig(BaseModel):
         description="H3 spatial indexing system configuration"
     )
 
+    platform: PlatformConfig = Field(
+        default_factory=PlatformConfig.from_environment,
+        description="Platform layer configuration (DDH integration, anti-corruption layer)"
+    )
+
     # ========================================================================
     # Legacy Compatibility Properties (During Migration)
     # ========================================================================
@@ -318,6 +324,21 @@ class AppConfig(BaseModel):
     def raster_cog_tile_size(self) -> int:
         """Legacy compatibility - use raster.cog_tile_size instead."""
         return self.raster.cog_tile_size
+
+    @property
+    def raster_cog_in_memory(self) -> bool:
+        """Legacy compatibility - use raster.cog_in_memory instead."""
+        return self.raster.cog_in_memory
+
+    @property
+    def raster_target_crs(self) -> str:
+        """Legacy compatibility - use raster.target_crs instead."""
+        return self.raster.target_crs
+
+    @property
+    def raster_mosaicjson_maxzoom(self) -> int:
+        """Legacy compatibility - use raster.mosaicjson_maxzoom instead."""
+        return self.raster.mosaicjson_maxzoom
 
     @property
     def vector_pickle_container(self) -> str:
@@ -436,6 +457,34 @@ class AppConfig(BaseModel):
         """Legacy compatibility - use analytics.threads instead."""
         return self.analytics.threads
 
+    @property
+    def intermediate_tiles_container(self) -> Optional[str]:
+        """Legacy compatibility - use raster.intermediate_tiles_container instead."""
+        return self.raster.intermediate_tiles_container
+
+    @property
+    def resolved_intermediate_tiles_container(self) -> str:
+        """
+        Get intermediate tiles container, defaulting to silver-mosaicjson if not specified.
+
+        UPDATED (12 NOV 2025): Changed default from "silver-tiles" to "silver-mosaicjson"
+        to separate MosaicJSON files from other tile data.
+
+        Returns container name for MosaicJSON files (Stage 3 output).
+        If intermediate_tiles_container is None, falls back to silver-mosaicjson.
+
+        Usage:
+            config = get_config()
+            container = config.resolved_intermediate_tiles_container
+            # Returns: "silver-mosaicjson" (or custom value if env var set)
+        """
+        return self.raster.intermediate_tiles_container or "silver-mosaicjson"
+
+    @property
+    def titiler_pgstac_base_url(self) -> str:
+        """Legacy compatibility - same as titiler_base_url for pgstac mode."""
+        return self.titiler_base_url
+
     # ========================================================================
     # URL Generation Methods (Legacy Compatibility)
     # ========================================================================
@@ -499,6 +548,90 @@ class AppConfig(BaseModel):
             "preview": f"{base}/preview.png?collection={collection_id}&item={item_id}"
         }
 
+    def generate_titiler_urls_unified(
+        self,
+        mode: str,
+        container: str = None,
+        blob_name: str = None,
+        search_id: str = None
+    ) -> dict:
+        """
+        Generate TiTiler URLs for all three access patterns.
+
+        Consolidates three TiTiler visualization patterns into single method:
+        1. Single COG - Direct /vsiaz/ access to individual raster
+        2. MosaicJSON - Collection of COGs as single layer
+        3. PgSTAC Search - Dynamic queries across STAC catalog
+
+        Args:
+            mode: URL generation mode ('cog', 'mosaicjson', 'pgstac')
+            container: Azure container name (required for cog/mosaicjson modes)
+            blob_name: Blob path within container (required for cog/mosaicjson modes)
+            search_id: PgSTAC search hash (required for pgstac mode)
+
+        Returns:
+            Dict with TiTiler URLs (viewer_url, info_url, preview_url, etc.)
+        """
+        import urllib.parse
+
+        base = self.titiler_base_url.rstrip('/')
+
+        if mode == "cog":
+            if not container or not blob_name:
+                raise ValueError(
+                    f"mode='cog' requires container and blob_name. "
+                    f"Got: container={container}, blob_name={blob_name}"
+                )
+
+            vsiaz_path = f"/vsiaz/{container}/{blob_name}"
+            encoded_vsiaz = urllib.parse.quote(vsiaz_path, safe='')
+
+            return {
+                "viewer_url": f"{base}/cog/WebMercatorQuad/map.html?url={encoded_vsiaz}",
+                "info_url": f"{base}/cog/info?url={encoded_vsiaz}",
+                "preview_url": f"{base}/cog/preview.png?url={encoded_vsiaz}&max_size=512",
+                "thumbnail_url": f"{base}/cog/preview.png?url={encoded_vsiaz}&max_size=256",
+                "statistics_url": f"{base}/cog/statistics?url={encoded_vsiaz}",
+                "bounds_url": f"{base}/cog/bounds?url={encoded_vsiaz}",
+                "info_geojson_url": f"{base}/cog/info.geojson?url={encoded_vsiaz}",
+                "tilejson_url": f"{base}/cog/WebMercatorQuad/tilejson.json?url={encoded_vsiaz}",
+                "tiles_url_template": f"{base}/cog/tiles/WebMercatorQuad/{{z}}/{{x}}/{{y}}.png?url={encoded_vsiaz}"
+            }
+
+        elif mode == "mosaicjson":
+            if not container or not blob_name:
+                raise ValueError(
+                    f"mode='mosaicjson' requires container and blob_name. "
+                    f"Got: container={container}, blob_name={blob_name}"
+                )
+
+            if not blob_name.endswith('.json'):
+                raise ValueError(
+                    f"mode='mosaicjson' requires blob_name to be a .json file. Got: {blob_name}"
+                )
+
+            vsiaz_path = f"/vsiaz/{container}/{blob_name}"
+            encoded_vsiaz = urllib.parse.quote(vsiaz_path, safe='')
+
+            return {
+                "viewer_url": f"{base}/mosaicjson/WebMercatorQuad/map.html?url={encoded_vsiaz}",
+                "info_url": f"{base}/mosaicjson/info?url={encoded_vsiaz}",
+                "bounds_url": f"{base}/mosaicjson/bounds?url={encoded_vsiaz}",
+                "tilejson_url": f"{base}/mosaicjson/WebMercatorQuad/tilejson.json?url={encoded_vsiaz}",
+                "tiles_url_template": f"{base}/mosaicjson/tiles/WebMercatorQuad/{{z}}/{{x}}/{{y}}.png?url={encoded_vsiaz}",
+                "assets_url_template": f"{base}/mosaicjson/tiles/WebMercatorQuad/{{z}}/{{x}}/{{y}}/assets?url={encoded_vsiaz}",
+                "point_url_template": f"{base}/mosaicjson/point/{{lon}},{{lat}}?url={encoded_vsiaz}"
+            }
+
+        elif mode == "pgstac":
+            raise NotImplementedError(
+                "PgSTAC search URL generation not yet implemented. "
+                f"For now, construct URLs directly: {base}/searches/{{search_id}}/WebMercatorQuad/map.html"
+            )
+
+        else:
+            raise ValueError(f"Invalid mode: {mode}. Must be one of: 'cog', 'mosaicjson', 'pgstac'")
+
     # ========================================================================
     # Factory Methods
     # ========================================================================
@@ -524,5 +657,6 @@ class AppConfig(BaseModel):
             vector=VectorConfig.from_environment(),
             queues=QueueConfig.from_environment(),
             analytics=AnalyticsConfig.from_environment(),
-            h3=H3Config.from_environment()
+            h3=H3Config.from_environment(),
+            platform=PlatformConfig.from_environment()
         )

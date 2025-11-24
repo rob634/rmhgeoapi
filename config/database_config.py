@@ -59,9 +59,20 @@ class DatabaseConfig(BaseModel):
         description="PostgreSQL server port number"
     )
 
-    user: str = Field(
-        ...,
-        description="PostgreSQL username for database connections"
+    user: Optional[str] = Field(
+        default=None,
+        description="""PostgreSQL username for password-based authentication.
+
+        IMPORTANT: Only used for password authentication (local development/troubleshooting).
+
+        Authentication Methods:
+        - Managed Identity (Production): User is determined by MANAGED_IDENTITY_NAME
+        - Password Auth (Dev/Troubleshooting): Uses this POSTGIS_USER value
+
+        Security Note:
+        - Production should use managed identity (passwordless)
+        - POSTGIS_USER is for troubleshooting only (no passwords in production)
+        """
     )
 
     password: Optional[str] = Field(
@@ -124,14 +135,14 @@ class DatabaseConfig(BaseModel):
         Behavior:
             - When True: Uses ManagedIdentityCredential to acquire PostgreSQL access tokens
             - When False: Uses traditional password-based authentication
-            - Auto-detect: If running in Azure Functions without password, enables automatically
 
         Environment Variable: USE_MANAGED_IDENTITY
 
         Prerequisites:
-            1. Azure Function App has system-assigned or user-assigned managed identity enabled
-            2. PostgreSQL user created matching managed identity name (via pgaadauth_create_principal)
-            3. Managed identity granted necessary database permissions
+            1. User-assigned managed identity created in Azure (e.g., 'rmhpgflexadmin')
+            2. Identity assigned to the Function App in Azure Portal
+            3. PostgreSQL user created matching managed identity name (via pgaadauth_create_principal)
+            4. Managed identity granted necessary database permissions
 
         Local Development:
             - Requires `az login` to use AzureCliCredential
@@ -155,25 +166,60 @@ class DatabaseConfig(BaseModel):
             Specifies the PostgreSQL user name that matches the Azure managed identity.
             This must exactly match the identity name created in PostgreSQL.
 
+        User-Assigned Identity Pattern (RECOMMENDED):
+            Use the same user-assigned identity across multiple apps for easier management:
+            - 'rmhpgflexadmin' for read/write/admin access (Function App, etc.)
+            - 'rmhpgflexreader' for read-only access (TiTiler, OGC/STAC apps)
+
         Behavior:
             - If specified: Uses this exact name as PostgreSQL user
-            - If None: Auto-generates from Function App name (WEBSITE_SITE_NAME)
-            - Example: 'rmhazuregeoapi' for Function App 'rmhazuregeoapi'
+            - If None: Defaults to 'rmhpgflexadmin' (user-assigned identity)
 
         Environment Variable: MANAGED_IDENTITY_NAME
 
         PostgreSQL Setup:
             The managed identity user must be created in PostgreSQL using:
-            SELECT * FROM pgaadauth_create_principal('rmhazuregeoapi', false, false);
+            SELECT * FROM pgaadauth_create_principal('rmhpgflexadmin', false, false);
+            GRANT ALL PRIVILEGES ON SCHEMA geo TO rmhpgflexadmin;
+            GRANT ALL PRIVILEGES ON SCHEMA app TO rmhpgflexadmin;
+            -- etc. for all required schemas
 
         Important:
             - Name must match EXACTLY (case-sensitive)
             - Must be a valid PostgreSQL identifier
-            - Should follow naming convention: {function-app-name}
+            - For user-assigned identities: matches the identity's display name in Azure AD
+        """
+    )
 
-        Default Calculation:
-            - Azure Functions: {WEBSITE_SITE_NAME}
-            - Local Dev: 'rmhazuregeoapi' (fallback)
+    managed_identity_client_id: Optional[str] = Field(
+        default=None,
+        description="""Client ID of the user-assigned managed identity for PostgreSQL authentication.
+
+        Purpose:
+            When using a user-assigned managed identity (recommended pattern), this specifies
+            which identity to use for acquiring Azure AD tokens. This is required because
+            multiple user-assigned identities can be attached to a single Function App.
+
+        User-Assigned vs System-Assigned:
+            - User-Assigned (RECOMMENDED): Specify client_id to use a specific identity
+              that can be shared across multiple apps (e.g., 'rmhpgflexadmin')
+            - System-Assigned: Leave client_id as None to use the app's own identity
+
+        Benefits of User-Assigned Identity:
+            - Single identity for multiple apps (easier to manage)
+            - Identity persists even if app is deleted
+            - Can grant permissions before app deployment
+            - Cleaner separation of concerns
+
+        Environment Variable: MANAGED_IDENTITY_CLIENT_ID
+
+        How to Find Client ID:
+            1. Azure Portal → Managed Identities → rmhpgflexadmin
+            2. Copy "Client ID" value (NOT Object ID)
+            3. Set as MANAGED_IDENTITY_CLIENT_ID environment variable
+
+        Example:
+            MANAGED_IDENTITY_CLIENT_ID=12345678-1234-1234-1234-123456789abc
         """
     )
 
@@ -198,12 +244,20 @@ class DatabaseConfig(BaseModel):
         """
         Build PostgreSQL connection string.
 
-        Returns basic connection string. Password or managed identity token
-        should be added separately by PostgreSQLRepository.
+        NOTE: This property is deprecated for managed identity connections.
+        PostgreSQLRepository._get_connection_string() builds the connection
+        string dynamically with the correct user and token.
+
+        For password auth only, returns basic connection string.
         """
         if self.use_managed_identity:
-            return f"host={self.host} port={self.port} dbname={self.database} user={self.user}"
+            # Managed identity: user is determined by MANAGED_IDENTITY_NAME
+            # This connection string is not actually used by PostgreSQLRepository
+            return f"host={self.host} port={self.port} dbname={self.database}"
         else:
+            # Password auth: requires POSTGIS_USER
+            if not self.user:
+                raise ValueError("POSTGIS_USER is required for password authentication")
             password_part = f" password={self.password}" if self.password else ""
             return f"host={self.host} port={self.port} dbname={self.database} user={self.user}{password_part}"
 
@@ -217,6 +271,7 @@ class DatabaseConfig(BaseModel):
             "password": "***MASKED***" if self.password else None,
             "managed_identity": self.use_managed_identity,
             "managed_identity_name": self.managed_identity_name,
+            "managed_identity_client_id": self.managed_identity_client_id[:8] + "..." if self.managed_identity_client_id else None,
             "postgis_schema": self.postgis_schema,
             "app_schema": self.app_schema,
             "platform_schema": self.platform_schema,
@@ -226,11 +281,15 @@ class DatabaseConfig(BaseModel):
 
     @classmethod
     def from_environment(cls):
-        """Load from environment variables."""
+        """Load from environment variables.
+
+        POSTGIS_USER is optional when using managed identity authentication.
+        It's only required for password-based authentication (local dev/troubleshooting).
+        """
         return cls(
             host=os.environ["POSTGIS_HOST"],
             port=int(os.environ.get("POSTGIS_PORT", "5432")),
-            user=os.environ["POSTGIS_USER"],
+            user=os.environ.get("POSTGIS_USER"),  # Optional - only for password auth
             password=os.environ.get("POSTGIS_PASSWORD"),
             database=os.environ["POSTGIS_DATABASE"],
             postgis_schema=os.environ.get("POSTGIS_SCHEMA", "geo"),
@@ -240,6 +299,7 @@ class DatabaseConfig(BaseModel):
             h3_schema=os.environ.get("H3_SCHEMA", "h3"),
             use_managed_identity=os.environ.get("USE_MANAGED_IDENTITY", "false").lower() == "true",
             managed_identity_name=os.environ.get("MANAGED_IDENTITY_NAME"),
+            managed_identity_client_id=os.environ.get("MANAGED_IDENTITY_CLIENT_ID"),
             connection_timeout_seconds=int(os.environ.get("DB_CONNECTION_TIMEOUT", "30"))
         )
 

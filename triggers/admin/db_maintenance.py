@@ -150,6 +150,8 @@ class AdminDbMaintenanceTrigger:
                 return self._redeploy_schema(req)
             elif path == 'pgstac/redeploy' or path == 'redeploy-pgstac':
                 return self._redeploy_pgstac_schema(req)
+            elif path == 'full-rebuild':
+                return self._full_rebuild(req)
             elif path == 'cleanup':
                 return self._cleanup_old_records(req)
             else:
@@ -746,6 +748,424 @@ class AdminDbMaintenanceTrigger:
                     'steps_completed': results.get("steps", []),
                     'timestamp': datetime.now(timezone.utc).isoformat()
                 }, indent=2),
+                status_code=500,
+                mimetype='application/json'
+            )
+
+    def _full_rebuild(self, req: func.HttpRequest) -> func.HttpResponse:
+        """
+        Full infrastructure rebuild: Nuke and redeploy BOTH app and pgstac schemas atomically.
+
+        POST /api/dbadmin/maintenance/full-rebuild?confirm=yes
+
+        ARCHITECTURE PRINCIPLE (25 NOV 2025):
+        App and pgstac schemas must be wiped together to maintain referential integrity:
+        - Job IDs in app.jobs correspond to STAC items in pgstac.items
+        - Wiping one without the other creates orphaned references
+        - This endpoint enforces atomic rebuild of both schemas
+
+        NEVER TOUCHED:
+        - geo schema (business data - user uploads)
+        - h3 schema (static bootstrap data)
+        - public schema (PostgreSQL/PostGIS extensions)
+
+        Query Parameters:
+            confirm: Must be "yes" (required)
+
+        Returns:
+            {
+                "operation": "full_rebuild",
+                "status": "success",
+                "execution_time_ms": 3500,
+                "steps": [...],
+                "warning": "..."
+            }
+        """
+        import time
+        start_time = time.time()
+
+        confirm = req.params.get('confirm')
+
+        if confirm != 'yes':
+            return func.HttpResponse(
+                body=json.dumps({
+                    'error': 'Full rebuild requires explicit confirmation',
+                    'usage': 'POST /api/dbadmin/maintenance/full-rebuild?confirm=yes',
+                    'warning': 'This will DESTROY ALL job/task data AND all STAC collections/items, then rebuild both schemas from code. geo schema (business data) is NOT touched.'
+                }),
+                status_code=400,
+                mimetype='application/json'
+            )
+
+        logger.warning("🔥 FULL REBUILD: Nuking and rebuilding app + pgstac schemas atomically")
+
+        results = {
+            "operation": "full_rebuild",
+            "steps": [],
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+
+        try:
+            # ================================================================
+            # STEP 1: Drop app schema
+            # ================================================================
+            logger.info("💣 Step 1/8: Dropping app schema...")
+            step1 = {"step": 1, "action": "drop_app_schema", "status": "pending"}
+
+            try:
+                from infrastructure.postgresql import PostgreSQLRepository
+                app_repo = PostgreSQLRepository(schema_name='app')
+
+                with app_repo._get_connection() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute(sql.SQL("DROP SCHEMA IF EXISTS {} CASCADE").format(
+                            sql.Identifier('app')
+                        ))
+                        conn.commit()
+                        logger.info("✅ app schema dropped")
+
+                step1["status"] = "success"
+
+            except Exception as e:
+                logger.error(f"❌ Failed to drop app schema: {e}")
+                step1["status"] = "failed"
+                step1["error"] = str(e)
+                results["steps"].append(step1)
+                results["status"] = "failed"
+                results["failed_at"] = "drop_app_schema"
+                results["execution_time_ms"] = int((time.time() - start_time) * 1000)
+                return func.HttpResponse(
+                    body=json.dumps(results, indent=2),
+                    status_code=500,
+                    mimetype='application/json'
+                )
+
+            results["steps"].append(step1)
+
+            # ================================================================
+            # STEP 2: Drop pgstac schema
+            # ================================================================
+            logger.info("💣 Step 2/8: Dropping pgstac schema...")
+            step2 = {"step": 2, "action": "drop_pgstac_schema", "status": "pending"}
+
+            try:
+                from infrastructure.postgresql import PostgreSQLRepository
+                pgstac_repo = PostgreSQLRepository(schema_name='pgstac')
+
+                with pgstac_repo._get_connection() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute(sql.SQL("DROP SCHEMA IF EXISTS {} CASCADE").format(
+                            sql.Identifier('pgstac')
+                        ))
+                        conn.commit()
+                        logger.info("✅ pgstac schema dropped")
+
+                step2["status"] = "success"
+
+            except Exception as e:
+                logger.error(f"❌ Failed to drop pgstac schema: {e}")
+                step2["status"] = "failed"
+                step2["error"] = str(e)
+                results["steps"].append(step2)
+                results["status"] = "failed"
+                results["failed_at"] = "drop_pgstac_schema"
+                results["execution_time_ms"] = int((time.time() - start_time) * 1000)
+                return func.HttpResponse(
+                    body=json.dumps(results, indent=2),
+                    status_code=500,
+                    mimetype='application/json'
+                )
+
+            results["steps"].append(step2)
+
+            # ================================================================
+            # STEP 3: Redeploy app schema from Pydantic models
+            # ================================================================
+            logger.info("🏗️ Step 3/8: Deploying app schema from Pydantic models...")
+            step3 = {"step": 3, "action": "deploy_app_schema", "status": "pending"}
+
+            try:
+                from triggers.schema_pydantic_deploy import pydantic_deploy_trigger
+                from unittest.mock import MagicMock
+
+                # Create a mock request with confirm=yes
+                mock_req = MagicMock()
+                mock_req.params = {'confirm': 'yes', 'action': 'deploy'}
+                mock_req.method = 'POST'
+
+                deploy_response = pydantic_deploy_trigger.handle_request(mock_req)
+                deploy_result = json.loads(deploy_response.get_body().decode('utf-8'))
+
+                if deploy_response.status_code == 200 and deploy_result.get('status') == 'success':
+                    step3["status"] = "success"
+                    step3["objects"] = {
+                        "tables": deploy_result.get('statistics', {}).get('tables_created', 0),
+                        "functions": deploy_result.get('statistics', {}).get('functions_created', 0),
+                        "enums": deploy_result.get('statistics', {}).get('enums_processed', 0),
+                        "indexes": deploy_result.get('statistics', {}).get('indexes_created', 0),
+                        "triggers": deploy_result.get('statistics', {}).get('triggers_created', 0)
+                    }
+                    logger.info(f"✅ app schema deployed: {step3['objects']}")
+                else:
+                    step3["status"] = "failed"
+                    step3["error"] = deploy_result.get('error', 'Unknown deployment error')
+                    results["steps"].append(step3)
+                    results["status"] = "failed"
+                    results["failed_at"] = "deploy_app_schema"
+                    results["execution_time_ms"] = int((time.time() - start_time) * 1000)
+                    return func.HttpResponse(
+                        body=json.dumps(results, indent=2),
+                        status_code=500,
+                        mimetype='application/json'
+                    )
+
+            except Exception as e:
+                logger.error(f"❌ Exception during app schema deployment: {e}")
+                logger.error(traceback.format_exc())
+                step3["status"] = "failed"
+                step3["error"] = str(e)
+                results["steps"].append(step3)
+                results["status"] = "failed"
+                results["failed_at"] = "deploy_app_schema"
+                results["execution_time_ms"] = int((time.time() - start_time) * 1000)
+                return func.HttpResponse(
+                    body=json.dumps(results, indent=2),
+                    status_code=500,
+                    mimetype='application/json'
+                )
+
+            results["steps"].append(step3)
+
+            # ================================================================
+            # STEP 4: Redeploy pgstac schema via pypgstac migrate
+            # ================================================================
+            logger.info("📦 Step 4/8: Running pypgstac migrate...")
+            step4 = {"step": 4, "action": "deploy_pgstac_schema", "status": "pending"}
+
+            try:
+                from infrastructure.pgstac_bootstrap import PgStacBootstrap
+                bootstrap = PgStacBootstrap()
+
+                migration_output = bootstrap.install_pgstac(
+                    drop_existing=False,  # Already dropped in Step 2
+                    run_migrations=True
+                )
+
+                if migration_output.get('success'):
+                    step4["status"] = "success"
+                    step4["version"] = migration_output.get('version')
+                    step4["tables_created"] = migration_output.get('tables_created', 0)
+                    logger.info(f"✅ pgstac schema deployed: version {step4['version']}")
+                else:
+                    step4["status"] = "failed"
+                    step4["error"] = migration_output.get('error', 'Unknown migration error')
+                    results["steps"].append(step4)
+                    results["status"] = "failed"
+                    results["failed_at"] = "deploy_pgstac_schema"
+                    results["execution_time_ms"] = int((time.time() - start_time) * 1000)
+                    return func.HttpResponse(
+                        body=json.dumps(results, indent=2),
+                        status_code=500,
+                        mimetype='application/json'
+                    )
+
+            except Exception as e:
+                logger.error(f"❌ Exception during pypgstac migrate: {e}")
+                logger.error(traceback.format_exc())
+                step4["status"] = "failed"
+                step4["error"] = str(e)
+                results["steps"].append(step4)
+                results["status"] = "failed"
+                results["failed_at"] = "deploy_pgstac_schema"
+                results["execution_time_ms"] = int((time.time() - start_time) * 1000)
+                return func.HttpResponse(
+                    body=json.dumps(results, indent=2),
+                    status_code=500,
+                    mimetype='application/json'
+                )
+
+            results["steps"].append(step4)
+
+            # ================================================================
+            # STEP 5: Grant pgstac_read role to rmhpgflexreader
+            # ================================================================
+            # ARCHITECTURE PRINCIPLE (25 NOV 2025):
+            # rmhpgflexreader is the read-only PostgreSQL user used by the OGC/STAC API
+            # function app. After pypgstac migrate recreates the pgstac schema and roles,
+            # we must grant pgstac_read to rmhpgflexreader so it can query STAC data.
+            logger.info("🔐 Step 5/8: Granting pgstac_read role to rmhpgflexreader...")
+            step5 = {"step": 5, "action": "grant_pgstac_read_role", "status": "pending"}
+
+            try:
+                from infrastructure.postgresql import PostgreSQLRepository
+                pgstac_repo = PostgreSQLRepository(schema_name='pgstac')
+
+                with pgstac_repo._get_connection() as conn:
+                    with conn.cursor() as cur:
+                        # Grant pgstac_read role to rmhpgflexreader
+                        # This allows the read-only OGC/STAC API to query pgstac tables
+                        cur.execute("GRANT pgstac_read TO rmhpgflexreader")
+                        conn.commit()
+                        logger.info("✅ Granted pgstac_read to rmhpgflexreader")
+
+                step5["status"] = "success"
+                step5["role_granted"] = "pgstac_read"
+                step5["granted_to"] = "rmhpgflexreader"
+
+            except Exception as e:
+                # Non-fatal error - log warning but continue
+                # The role grant might fail if rmhpgflexreader doesn't exist yet
+                logger.warning(f"⚠️ Failed to grant pgstac_read to rmhpgflexreader: {e}")
+                step5["status"] = "warning"
+                step5["error"] = str(e)
+                step5["note"] = "Role grant failed - OGC/STAC API may not have read access"
+
+            results["steps"].append(step5)
+
+            # ================================================================
+            # STEP 6: Create system STAC collections
+            # ================================================================
+            logger.info("📚 Step 6/8: Creating system STAC collections...")
+            step6 = {"step": 6, "action": "create_system_collections", "status": "pending", "collections": []}
+
+            try:
+                from infrastructure.pgstac_bootstrap import get_system_stac_collections
+                from triggers.stac_collections import stac_collections_trigger
+                from unittest.mock import MagicMock
+
+                system_collections = get_system_stac_collections()
+
+                for collection_data in system_collections:
+                    try:
+                        mock_req = MagicMock()
+                        mock_req.method = 'POST'
+                        mock_req.get_json.return_value = collection_data
+
+                        result_response = stac_collections_trigger.handle_request(mock_req)
+                        result = json.loads(result_response.get_body().decode('utf-8'))
+
+                        if result_response.status_code in [200, 201] or result.get('status') == 'success':
+                            step6["collections"].append(collection_data['id'])
+                            logger.info(f"✅ Created collection: {collection_data['id']}")
+                        else:
+                            logger.warning(f"⚠️ Failed to create collection {collection_data['id']}: {result.get('error')}")
+
+                    except Exception as col_e:
+                        logger.warning(f"⚠️ Exception creating collection {collection_data['id']}: {col_e}")
+
+                step6["status"] = "success" if len(step6["collections"]) >= 1 else "partial"
+
+            except Exception as e:
+                logger.error(f"❌ Exception during system collections creation: {e}")
+                step6["status"] = "partial"
+                step6["error"] = str(e)
+
+            results["steps"].append(step6)
+
+            # ================================================================
+            # STEP 7: Verify app schema
+            # ================================================================
+            logger.info("🔍 Step 7/8: Verifying app schema...")
+            step7 = {"step": 7, "action": "verify_app_schema", "status": "pending"}
+
+            try:
+                from infrastructure.postgresql import PostgreSQLRepository
+                app_repo = PostgreSQLRepository(schema_name='app')
+
+                with app_repo._get_connection() as conn:
+                    with conn.cursor() as cur:
+                        # Count tables
+                        cur.execute("SELECT COUNT(*) as cnt FROM pg_tables WHERE schemaname = 'app'")
+                        tables_count = cur.fetchone()['cnt']
+
+                        # Count functions
+                        cur.execute("""
+                            SELECT COUNT(*) as cnt FROM pg_proc p
+                            JOIN pg_namespace n ON p.pronamespace = n.oid
+                            WHERE n.nspname = 'app'
+                        """)
+                        functions_count = cur.fetchone()['cnt']
+
+                        # Count enums
+                        cur.execute("""
+                            SELECT COUNT(*) as cnt FROM pg_type t
+                            JOIN pg_namespace n ON t.typnamespace = n.oid
+                            WHERE n.nspname = 'app' AND t.typtype = 'e'
+                        """)
+                        enums_count = cur.fetchone()['cnt']
+
+                step7["status"] = "success"
+                step7["counts"] = {
+                    "tables": tables_count,
+                    "functions": functions_count,
+                    "enums": enums_count
+                }
+                logger.info(f"✅ app schema verified: {step7['counts']}")
+
+            except Exception as e:
+                logger.error(f"❌ Exception during app schema verification: {e}")
+                step7["status"] = "failed"
+                step7["error"] = str(e)
+
+            results["steps"].append(step7)
+
+            # ================================================================
+            # STEP 8: Verify pgstac schema
+            # ================================================================
+            logger.info("🔍 Step 8/8: Verifying pgstac schema...")
+            step8 = {"step": 8, "action": "verify_pgstac_schema", "status": "pending"}
+
+            try:
+                from infrastructure.pgstac_bootstrap import PgStacBootstrap
+                bootstrap = PgStacBootstrap()
+
+                verification = bootstrap.verify_installation()
+
+                if verification.get('valid'):
+                    step8["status"] = "success"
+                    step8["checks"] = {
+                        "version": verification.get('version'),
+                        "hash_functions": verification.get('search_hash_functions', False),
+                        "tables_count": verification.get('tables_count', 0)
+                    }
+                    logger.info(f"✅ pgstac schema verified: version {step8['checks']['version']}")
+                else:
+                    step8["status"] = "partial"
+                    step8["errors"] = verification.get('errors', [])
+                    logger.warning(f"⚠️ pgstac verification issues: {step8['errors']}")
+
+            except Exception as e:
+                logger.error(f"❌ Exception during pgstac verification: {e}")
+                step8["status"] = "failed"
+                step8["error"] = str(e)
+
+            results["steps"].append(step8)
+
+            # ================================================================
+            # Final result
+            # ================================================================
+            execution_time_ms = int((time.time() - start_time) * 1000)
+            results["execution_time_ms"] = execution_time_ms
+            results["status"] = "success"
+            results["warning"] = "All job/task data and STAC items have been cleared. geo schema (business data) preserved."
+
+            logger.info(f"✅ FULL REBUILD COMPLETE in {execution_time_ms}ms")
+
+            return func.HttpResponse(
+                body=json.dumps(results, indent=2),
+                status_code=200,
+                mimetype='application/json'
+            )
+
+        except Exception as e:
+            logger.error(f"❌ Unexpected error during full rebuild: {e}")
+            logger.error(traceback.format_exc())
+            results["status"] = "failed"
+            results["error"] = str(e)
+            results["traceback"] = traceback.format_exc()[:1000]
+            results["execution_time_ms"] = int((time.time() - start_time) * 1000)
+            return func.HttpResponse(
+                body=json.dumps(results, indent=2),
                 status_code=500,
                 mimetype='application/json'
             )

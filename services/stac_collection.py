@@ -107,7 +107,9 @@ def create_stac_collection(
         # Get parameters from job_parameters (passed by CoreMachine for fan_in tasks)
         collection_id = job_parameters.get("collection_id") or params.get("collection_id")
         stac_item_id = job_parameters.get("stac_item_id") or params.get("stac_item_id")
-        description = job_parameters.get("collection_description") or params.get("description")
+        # FIX (25 NOV 2025): Provide default description to satisfy STAC 1.1.0 validation
+        # STAC spec requires description to be a non-empty string, not None
+        description = job_parameters.get("collection_description") or params.get("description") or f"Raster collection: {collection_id}"
         license = params.get("license", "proprietary")
         container = params.get("container", "rmhazuregeosilver")
 

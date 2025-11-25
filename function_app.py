@@ -89,8 +89,10 @@ Endpoints:
     POST /api/monitor/poison - Process poison messages
 
     Schema Management (DEV ONLY):
-    POST /api/dbadmin/maintenance/nuke?confirm=yes - Drop all schema objects (dev only)
-    POST /api/dbadmin/maintenance/redeploy?confirm=yes - Nuke and redeploy schema (dev only)
+    POST /api/dbadmin/maintenance/nuke?confirm=yes - Drop app schema objects (dev only)
+    POST /api/dbadmin/maintenance/redeploy?confirm=yes - Nuke and redeploy app schema (dev only)
+    POST /api/dbadmin/maintenance/pgstac/redeploy?confirm=yes - Redeploy pgstac schema (dev only)
+    POST /api/dbadmin/maintenance/full-rebuild?confirm=yes - Atomic rebuild of BOTH app+pgstac (dev only)
 
 Supported Operations:
     Pydantic Workflow Definition Pattern (Job→Task Architecture):
@@ -485,6 +487,16 @@ def db_maintenance_cleanup(req: func.HttpRequest) -> func.HttpResponse:
 @app.route(route="dbadmin/maintenance/pgstac/redeploy", methods=["POST"])
 def db_maintenance_pgstac_redeploy(req: func.HttpRequest) -> func.HttpResponse:
     """⚠️ FCO - Keep for QA, remove before UAT. POST /api/dbadmin/maintenance/pgstac/redeploy?confirm=yes"""
+    return admin_db_maintenance_trigger.handle_request(req)
+
+
+@app.route(route="dbadmin/maintenance/full-rebuild", methods=["POST"])
+def db_maintenance_full_rebuild(req: func.HttpRequest) -> func.HttpResponse:
+    """⚠️ FCO - Keep for QA, remove before UAT. POST /api/dbadmin/maintenance/full-rebuild?confirm=yes
+
+    Full infrastructure rebuild: Atomically nuke and redeploy BOTH app and pgstac schemas.
+    Preserves geo schema (business data) and h3 schema (static bootstrap data).
+    """
     return admin_db_maintenance_trigger.handle_request(req)
 
 

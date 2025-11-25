@@ -16,15 +16,27 @@ This is your main starting point - it contains everything you need to understand
 
 ### Documentation Structure:
 ```
-docs_claude/
+docs_claude/                               # 🎯 ACTIVE DOCS (12 files)
 ├── CLAUDE_CONTEXT.md                      # 🎯 START HERE - Primary context
 ├── TODO.md                                # ⚡ PRIMARY TASK LIST - Only active TODO file
 ├── COREMACHINE_PLATFORM_ARCHITECTURE.md   # 🏗️ Two-layer architecture (26 OCT 2025)
 ├── SERVICE_BUS_HARMONIZATION.md           # 🔧 Three-layer config architecture (27 OCT 2025)
+├── SCHEMA_ARCHITECTURE.md                 # Database schema design
 ├── ARCHITECTURE_REFERENCE.md              # Deep technical specifications
 ├── FILE_CATALOG.md                        # Quick file lookup
 ├── DEPLOYMENT_GUIDE.md                    # Deployment procedures
-└── HISTORY.md                             # Completed work log
+├── HISTORY.md                             # Completed work log
+├── APPLICATION_INSIGHTS_QUERY_PATTERNS.md # Log querying guide
+├── claude_log_access.md                   # Azure log access
+└── MANAGED_IDENTITY_QUICKSTART.md         # Identity ops reference
+
+docs/archive/docs_claude/                  # 📦 ARCHIVED (83 files, 25 NOV 2025)
+├── migrations/                            # Completed migration phases
+├── implementation_plans/                  # Completed implementation plans
+├── bug_reports/                           # Resolved bugs and analysis
+├── research/                              # Superseded research/planning
+├── work_azure/                            # Work environment migration docs
+└── execution_traces/                      # Historical execution traces
 
 Root Documentation:
 ├── JOB_CREATION_QUICKSTART.md             # 🚀 START HERE FOR NEW JOBS - JobBaseMixin pattern (14 NOV 2025)
@@ -394,8 +406,9 @@ Please refer to claude_log_access.md for instructions on accessing function app 
 # 1. Health Check
 curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/health
 
-# 2. 🔄 REDEPLOY DATABASE SCHEMA (Required after deployment!)
-curl -X POST https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/dbadmin/maintenance/redeploy?confirm=yes
+# 2. 🔄 FULL REBUILD DATABASE SCHEMAS (Required after deployment!)
+# Atomically rebuilds BOTH app+pgstac schemas (preserves geo business data)
+curl -X POST https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/dbadmin/maintenance/full-rebuild?confirm=yes
 
 # 3. Submit Test Job
 curl -X POST https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/jobs/submit/hello_world \
@@ -407,8 +420,10 @@ curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/job
 ```
 
 **🔄 SCHEMA MANAGEMENT ENDPOINTS (FCO - For Claude Only):**
-- **Redeploy (Recommended)**: `POST /api/dbadmin/maintenance/redeploy?confirm=yes` - Nuke and redeploy in one operation
-- **Nuke Only**: `POST /api/dbadmin/maintenance/nuke?confirm=yes` - Just drop everything (use with caution)
+- **Full Rebuild (RECOMMENDED)**: `POST /api/dbadmin/maintenance/full-rebuild?confirm=yes` - Atomic rebuild of BOTH app+pgstac schemas (preserves geo schema)
+- **Redeploy App Only**: `POST /api/dbadmin/maintenance/redeploy?confirm=yes` - Nuke and redeploy app schema only
+- **Redeploy pgstac Only**: `POST /api/dbadmin/maintenance/pgstac/redeploy?confirm=yes` - Redeploy pgstac schema only
+- **Nuke App Only**: `POST /api/dbadmin/maintenance/nuke?confirm=yes` - Just drop app schema (use with caution)
 - **Cleanup Old Records**: `POST /api/dbadmin/maintenance/cleanup?confirm=yes&days=30` - Delete completed jobs/tasks older than N days
 
 **🚨 STAC NUCLEAR BUTTON (DEV/TEST ONLY - ⭐ NEW 29 OCT 2025):**

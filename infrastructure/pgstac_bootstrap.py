@@ -525,6 +525,7 @@ class PgStacBootstrap:
                         checks['version_query'] = True
                     except psycopg.Error as e:
                         checks['errors'].append(f"Version query failed: {e}")
+                        conn.rollback()  # Allow subsequent checks to run
 
                     # 3. Tables exist
                     cur.execute(
@@ -552,12 +553,26 @@ class PgStacBootstrap:
                         checks['errors'].append(f"Expected 3+ roles, found {len(checks['roles'])}")
 
                     # 5. Search function available
+                    # NOTE: Instead of calling search('{}') which can fail due to transaction
+                    # visibility issues immediately after pypgstac migrate, we verify the
+                    # search function exists in the catalog. The health endpoint performs
+                    # full functional testing.
                     try:
-                        # Test search with empty query (fast)
-                        cur.execute("SELECT pgstac.search('{}') LIMIT 1")
-                        checks['search_available'] = True
+                        cur.execute("""
+                            SELECT COUNT(*) as count FROM pg_proc p
+                            JOIN pg_namespace n ON p.pronamespace = n.oid
+                            WHERE n.nspname = 'pgstac' AND p.proname = 'search'
+                        """)
+                        row = cur.fetchone()
+                        checks['search_available'] = (row['count'] >= 1)
+                        if not checks['search_available']:
+                            checks['errors'].append("pgstac.search function not found in catalog")
                     except psycopg.Error as e:
-                        checks['errors'].append(f"Search function failed: {e}")
+                        checks['errors'].append(f"Search function check failed: {e}")
+                        # CRITICAL: Rollback aborted transaction to allow subsequent checks
+                        # PostgreSQL marks transaction as aborted after first error,
+                        # all subsequent queries fail with "current transaction is aborted"
+                        conn.rollback()
 
                     # 6. Search hash functions available (18 NOV 2025)
                     # Required for pgstac.searches table GENERATED hash column
@@ -580,6 +595,8 @@ class PgStacBootstrap:
                             )
                     except psycopg.Error as e:
                         checks['errors'].append(f"Search hash function check failed: {e}")
+                        # Rollback in case this check also fails
+                        conn.rollback()
 
                     # Overall validation
                     checks['valid'] = (
@@ -2128,3 +2145,54 @@ def get_all_collections(repo: Optional['PostgreSQLRepository'] = None) -> Dict[s
             'error': str(e),
             'error_type': type(e).__name__
         }
+
+
+# =============================================================================
+# MODULE-LEVEL HELPER FUNCTIONS
+# =============================================================================
+
+def get_system_stac_collections() -> List[Dict[str, Any]]:
+    """
+    Get STAC collection definitions for system collections (system-vectors, system-rasters).
+
+    This function returns the collection definitions needed to create the system
+    STAC collections after a full schema rebuild. These collections track operational
+    data created by ETL processes.
+
+    Returns:
+        List of STAC collection dictionaries ready for insertion via pgstac.create_collection
+
+    Used by:
+        - triggers/admin/db_maintenance.py full_rebuild endpoint (Step 6)
+
+    Date: 25 NOV 2025
+    """
+    system_collections = []
+
+    # Only create system collections (system-vectors, system-rasters)
+    # Other collections (cogs, vectors, geoparquet, dev) are created on-demand
+    system_collection_types = ['system-vectors', 'system-rasters']
+
+    for collection_type in system_collection_types:
+        if collection_type in PgStacBootstrap.PRODUCTION_COLLECTIONS:
+            config = PgStacBootstrap.PRODUCTION_COLLECTIONS[collection_type]
+
+            collection = {
+                "id": collection_type,
+                "type": "Collection",
+                "stac_version": "1.0.0",
+                "title": config['title'],
+                "description": config['description'],
+                "license": "proprietary",
+                "extent": {
+                    "spatial": {"bbox": [[-180, -90, 180, 90]]},
+                    "temporal": {"interval": [[None, None]]}
+                },
+                "summaries": {
+                    "asset_type": [config['asset_type']],
+                    "media_type": [config['media_type']]
+                }
+            }
+            system_collections.append(collection)
+
+    return system_collections

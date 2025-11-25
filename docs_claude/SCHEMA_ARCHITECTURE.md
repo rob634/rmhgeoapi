@@ -293,14 +293,78 @@ Trigger created:
 
 ---
 
+## Infrastructure-as-Code (IaC) Guarantees
+
+**Date Added**: 25 NOV 2025
+
+### Core Principle
+
+The `app` and `pgstac` schemas meet **infrastructure-as-code** standards:
+
+> **IaC Standard**: Both schemas can be completely wiped and recreated perfectly from code, with no manual intervention required.
+
+### Schema Classification
+
+| Schema | IaC Status | Rebuild Method | Can Be Wiped |
+|--------|------------|----------------|--------------|
+| `app` | ✅ **100% IaC** | Pydantic → `PydanticToSQL` DDL | **YES** |
+| `pgstac` | ✅ **100% IaC** | `pypgstac migrate` CLI | **YES** |
+| `geo` | ❌ Business Data | Dynamic at runtime | **NEVER** |
+| `h3` | ⚠️ Bootstrap | Static SQL files | Manual only |
+
+### Why app + pgstac Must Be Wiped Together
+
+**Architectural Decision (25 NOV 2025)**:
+
+```
+Job IDs in app.jobs ←→ STAC items in pgstac.items
+```
+
+Every job ID corresponds to a STAC item. Wiping one without the other creates orphaned references:
+- Wiping `app` only → STAC items with no job context
+- Wiping `pgstac` only → Jobs referencing non-existent STAC items
+
+**Solution**: The `full-rebuild` endpoint enforces atomic rebuild of both schemas.
+
+### What NEVER Gets Touched
+
+- **`geo` schema**: User-uploaded vector/raster data (business data)
+- **`h3` schema**: Static H3 grid bootstrap data
+- **`public` schema**: PostgreSQL/PostGIS extensions
+
+---
+
 ## Deployment Commands
 
-### Redeploy App Schema (jobs, tasks, platform tables)
+### ⚡ Full Infrastructure Rebuild (RECOMMENDED)
+
+Atomically wipe and redeploy BOTH `app` and `pgstac` schemas together:
+
+```bash
+curl -X POST "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/dbadmin/maintenance/full-rebuild?confirm=yes"
+```
+
+**Steps Performed**:
+1. Drop `app` schema (CASCADE)
+2. Drop `pgstac` schema (CASCADE)
+3. Deploy `app` schema from Pydantic models
+4. Deploy `pgstac` schema via `pypgstac migrate`
+5. Create system STAC collections
+6. Verify `app` schema (tables, functions, enums)
+7. Verify `pgstac` schema (version, hash functions)
+
+**Use Cases**:
+- Fresh development environment
+- Schema corruption recovery
+- Major architecture changes
+- Resetting demo/test environments
+
+### Redeploy App Schema Only
 ```bash
 curl -X POST "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/dbadmin/maintenance/redeploy?confirm=yes"
 ```
 
-### Redeploy pgstac Schema
+### Redeploy pgstac Schema Only
 ```bash
 curl -X POST "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/dbadmin/maintenance/pgstac/redeploy?confirm=yes"
 ```

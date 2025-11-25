@@ -1,53 +1,30 @@
 # Active Tasks - process_raster_collection Implementation
 
-**Last Updated**: 24 NOV 2025 (21:15 UTC)
+**Last Updated**: 25 NOV 2025 (15:30 UTC)
 **Author**: Robert and Geospatial Claude Legion
 
 ---
 
-## 🚨 CRITICAL: SQL Generator Creates Invalid Index on api_requests.status (24 NOV 2025)
+## ✅ RESOLVED: SQL Generator Invalid Index Bug (24 NOV 2025)
 
-**Status**: ❌ **BUG** - Schema redeploy fails due to invalid index
-**Priority**: **CRITICAL** - Blocks schema redeploy API endpoint
-**Impact**: Cannot use `/api/dbadmin/maintenance/redeploy` endpoint
+**Status**: ✅ **FIXED** on 24 NOV 2025
+**Fix Location**: `core/schema/sql_generator.py:478-491`
 
-### Problem Description
+### What Was Fixed
 
-The `PydanticToSQL` generator in `core/schema/sql_generator.py` creates an index on a non-existent column:
+The `generate_indexes_composed()` method was creating an invalid `idx_api_requests_status` index for the `api_requests` table, which does NOT have a `status` column.
 
-```sql
-CREATE INDEX IF NOT EXISTS "idx_api_requests_status" ON "app"."api_requests" ("status")
-```
-
-**Error**: `column "status" does not exist`
-
-The `ApiRequest` model (in `core/models/platform.py`) does NOT have a `status` field, but the SQL generator is creating an index for it anyway.
-
-### Root Cause
-
-The `generate_indexes_composed()` method in `sql_generator.py` likely has hardcoded index definitions that include `status` for all tables, or incorrectly assumes all tables have a `status` column.
-
-### Fix Required
-
-1. **Locate**: `core/schema/sql_generator.py` - `generate_indexes_composed()` method (around line 363)
-2. **Fix**: Remove hardcoded `idx_api_requests_status` index, or make index generation model-aware (only create indexes for columns that exist in the model)
-
-### Temporary Workaround
-
-Schema can be deployed manually via psql with `autocommit=True` to skip failed statements:
+**Fix Applied** (sql_generator.py:479-481):
 ```python
-with psycopg.connect(conn_str, autocommit=True) as conn:
-    for stmt in statements:
-        try:
-            cur.execute(stmt)
-        except Exception:
-            pass  # Continue past errors
+elif table_name == "api_requests":
+    # Platform Layer indexes (added 16 NOV 2025, FIXED 24 NOV 2025)
+    # NOTE: api_requests does NOT have a status column (removed 22 NOV 2025)
+    # Status is delegated to CoreMachine job_id lookup
 ```
 
-### Related Files
-- `core/schema/sql_generator.py` - SQL generation from Pydantic models
-- `core/models/platform.py` - ApiRequest model definition (no `status` field)
-- `triggers/schema_pydantic_deploy.py` - Deploy trigger that calls generator
+Now only valid indexes are generated:
+- `idx_api_requests_dataset_id`
+- `idx_api_requests_created_at`
 
 ---
 

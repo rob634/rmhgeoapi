@@ -4,7 +4,7 @@
 # EPOCH: 4 - ACTIVE ✅
 # STATUS: Service - Direct database registration for pgSTAC searches
 # PURPOSE: Register searches in pgstac.searches table (bypassing TiTiler API)
-# LAST_REVIEWED: 17 NOV 2025
+# LAST_REVIEWED: 25 NOV 2025
 # EXPORTS: PgSTACSearchRegistration class
 # INTERFACES: Service layer for search registration
 # PYDANTIC_MODELS: None - uses dicts for search payloads
@@ -144,46 +144,73 @@ class PgSTACSearchRegistration:
         metadata.setdefault("registered_by", "etl-pipeline")
         metadata.setdefault("registered_at", datetime.now(timezone.utc).isoformat())
 
-        # Insert into pgstac.searches table
-        # ON CONFLICT: If search already exists, update lastused and increment usecount
-        # SCHEMA FIX (18 NOV 2025): pgstac.searches.hash is a GENERATED column
-        # - hash is computed automatically from search_hash(search, metadata)
-        # - DO NOT include hash in INSERT column list or VALUES
-        # - CAN use hash in ON CONFLICT and RETURNING (read-only operations)
+        # Insert into pgstac.searches table using SELECT-then-INSERT/UPDATE pattern
+        #
+        # FIX (25 NOV 2025): Avoid ON CONFLICT (hash) due to PostgreSQL GENERATED column inlining bug
+        # - pgstac.searches.hash is GENERATED ALWAYS AS (search_tohash(search, metadata))
+        # - ON CONFLICT (hash) triggers query inlining which looks for search_tohash(jsonb) (1 param)
+        #   instead of search_tohash(jsonb, jsonb) (2 params), causing "function does not exist" error
+        # - Workaround: Use Python-computed hash for lookup, then INSERT or UPDATE separately
+        #
         # Actual columns: hash (generated), search, metadata, lastused, usecount
         with self.repo._get_connection() as conn:
             with conn.cursor() as cur:
+                # FIX (25 NOV 2025): Set search_path to include pgstac for GENERATED column computation
+                # The hash column is GENERATED ALWAYS AS (search_hash(search, metadata))
+                # search_hash() internally calls search_tohash() WITHOUT schema prefix
+                # Without pgstac in search_path, PostgreSQL can't find search_tohash()
+                cur.execute("SET search_path TO pgstac, public")
+
+                # Step 1: Check if search already exists using Python-computed hash
                 cur.execute(
                     """
-                    INSERT INTO pgstac.searches (search, metadata, lastused, usecount)
-                    VALUES (%s, %s, NOW(), 1)
-                    ON CONFLICT (hash)
-                    DO UPDATE SET
-                        lastused = NOW(),
-                        usecount = pgstac.searches.usecount + 1,
-                        metadata = EXCLUDED.metadata
-                    RETURNING hash, usecount
+                    SELECT hash, usecount FROM pgstac.searches WHERE hash = %s
                     """,
-                    (json.dumps(search_query), json.dumps(metadata))
+                    (search_hash,)
                 )
-                result = cur.fetchone()
-                conn.commit()
+                existing = cur.fetchone()
 
-                if result:
-                    # CRITICAL FIX (20 NOV 2025): result is a DictRow, not tuple
-                    # Unpacking a dict iterates over KEYS not VALUES
-                    # OLD BUG: returned_hash, use_count = result  # returned_hash='hash', use_count='usecount' (WRONG!)
-                    # CORRECT: Extract values by key name
+                if existing:
+                    # Step 2a: Update existing search (increment usecount, update metadata)
+                    cur.execute(
+                        """
+                        UPDATE pgstac.searches
+                        SET lastused = NOW(),
+                            usecount = usecount + 1,
+                            metadata = %s
+                        WHERE hash = %s
+                        RETURNING hash, usecount
+                        """,
+                        (json.dumps(metadata), search_hash)
+                    )
+                    result = cur.fetchone()
+                    conn.commit()
+
                     returned_hash = result['hash']
                     use_count = result['usecount']
-                    if use_count == 1:
-                        logger.info(f"✅ Search registered (new): {returned_hash}")
-                    else:
-                        logger.info(f"✅ Search already exists (use_count={use_count}): {returned_hash}")
+                    logger.info(f"✅ Search already exists (use_count={use_count}): {returned_hash}")
                     return returned_hash
                 else:
-                    logger.info(f"✅ Search registered: {search_hash}")
-                    return search_hash
+                    # Step 2b: Insert new search (let PostgreSQL compute hash via GENERATED column)
+                    cur.execute(
+                        """
+                        INSERT INTO pgstac.searches (search, metadata, lastused, usecount)
+                        VALUES (%s, %s, NOW(), 1)
+                        RETURNING hash, usecount
+                        """,
+                        (json.dumps(search_query), json.dumps(metadata))
+                    )
+                    result = cur.fetchone()
+                    conn.commit()
+
+                    if result:
+                        returned_hash = result['hash']
+                        logger.info(f"✅ Search registered (new): {returned_hash}")
+                        return returned_hash
+                    else:
+                        # Fallback: return Python-computed hash
+                        logger.info(f"✅ Search registered: {search_hash}")
+                        return search_hash
 
     def register_collection_search(
         self,

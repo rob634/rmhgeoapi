@@ -204,8 +204,13 @@ class AppConfig(BaseModel):
     )
 
     ogc_features_base_url: str = Field(
-        default="https://rmhgeoapifn-dydhe8dddef4f7bd.eastus-01.azurewebsites.net/api/features",
-        description="Base URL for OGC API - Features (vector data access) - Read-only function app"
+        default="https://rmhogcstac-b4f5ccetf0a7hwe9.eastus-01.azurewebsites.net/api/features",
+        description="Base URL for OGC API - Features (vector data access) - Dedicated OGC/STAC function app"
+    )
+
+    stac_api_base_url: str = Field(
+        default="https://rmhogcstac-b4f5ccetf0a7hwe9.eastus-01.azurewebsites.net/api/stac",
+        description="Base URL for STAC API (metadata catalog) - Currently co-located with OGC Features, can be separated later"
     )
 
     titiler_mode: str = Field(

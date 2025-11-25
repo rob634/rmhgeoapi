@@ -128,13 +128,11 @@ def create_mosaicjson(
         # Get cog_container from job_parameters (12 NOV 2025)
         # This is WHERE the COG files are located (for SAS URL generation)
         # MosaicJSON will REFERENCE these COGs in its tile URLs
-        cog_container = job_parameters.get("cog_container")
-        if not cog_container:
-            # Default to output_container if not specified
-            cog_container = job_parameters.get("output_container")
-            if not cog_container:
-                raise ValueError("cog_container must be specified or output_container must be provided")
-            logger.info(f"   Using output_container as cog_container: {cog_container}")
+        # NOTE (25 NOV 2025): For fan_in stages, cog_container is usually extracted from
+        # previous_results (Stage 3 COG tasks). Only check job_parameters as fallback.
+        cog_container_from_params = job_parameters.get("cog_container") or job_parameters.get("output_container")
+        if cog_container_from_params:
+            logger.info(f"   cog_container from job_parameters: {cog_container_from_params}")
 
         # Optional output_folder (None = flat namespace, write to container root)
         output_folder = job_parameters.get("output_folder")
@@ -142,7 +140,6 @@ def create_mosaicjson(
         logger.info(f"🔄 MosaicJSON task handler invoked (fan_in aggregation)")
         logger.info(f"   Collection: {collection_id}")
         logger.info(f"   MosaicJSON Container (where JSON file is written): {mosaicjson_container}")
-        logger.info(f"   COG Container (where COG files are located): {cog_container}")
         logger.info(f"   Output Folder: {output_folder or '(root - flat namespace)'}")
         logger.info(f"   Previous results count: {len(previous_results)}")
 
@@ -204,6 +201,16 @@ def create_mosaicjson(
 
         logger.info(f"📊 Extracted {len(cog_blobs)} COG blobs from previous results")
         logger.debug(f"🔍 [MOSAIC-DEBUG] COG blobs: {cog_blobs}")
+
+        # FIX (25 NOV 2025): Fall back to job_parameters if cog_container not in previous_results
+        if not cog_container:
+            cog_container = cog_container_from_params
+            if cog_container:
+                logger.info(f"   Using cog_container from job_parameters: {cog_container}")
+            else:
+                raise ValueError("cog_container not found in previous_results or job_parameters")
+
+        logger.info(f"   COG Container (where COG files are located): {cog_container}")
 
         # Call internal implementation
         result = _create_mosaicjson_impl(

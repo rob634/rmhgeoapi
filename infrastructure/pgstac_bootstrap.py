@@ -354,13 +354,47 @@ class PgStacBootstrap:
 
         try:
             # Set environment variables for pypgstac
+            # ARCHITECTURE PRINCIPLE (24 NOV 2025): Support managed identity for pypgstac CLI
             env = os.environ.copy()
+
+            # Determine authentication method
+            client_id = os.getenv("MANAGED_IDENTITY_CLIENT_ID") or self.config.database.managed_identity_client_id
+            website_name = os.getenv("WEBSITE_SITE_NAME")
+
+            if client_id or website_name:
+                # Managed identity: acquire token for PostgreSQL
+                logger.info("🔐 Using managed identity for pypgstac migrate...")
+                from azure.identity import ManagedIdentityCredential, DefaultAzureCredential
+
+                # Get the identity name for PostgreSQL user
+                identity_name = os.getenv("MANAGED_IDENTITY_NAME", "rmhpgflexadmin")
+
+                # Acquire token
+                if client_id:
+                    credential = ManagedIdentityCredential(client_id=client_id)
+                else:
+                    credential = DefaultAzureCredential()
+
+                token = credential.get_token("https://ossrdbms-aad.database.windows.net/.default")
+                pg_password = token.token
+                pg_user = identity_name
+                logger.info(f"✅ Acquired managed identity token for user: {pg_user}")
+            else:
+                # Password auth: use config values
+                pg_user = self.config.postgis_user
+                pg_password = self.config.postgis_password
+                if not pg_user or not pg_password:
+                    return {
+                        'success': False,
+                        'error': 'No credentials available - need POSTGIS_USER/PASSWORD or managed identity'
+                    }
+
             env.update({
                 'PGHOST': self.config.postgis_host,
                 'PGPORT': str(self.config.postgis_port),
                 'PGDATABASE': self.config.postgis_database,
-                'PGUSER': self.config.postgis_user,
-                'PGPASSWORD': self.config.postgis_password
+                'PGUSER': pg_user,
+                'PGPASSWORD': pg_password
             })
 
             # Run pypgstac migrate

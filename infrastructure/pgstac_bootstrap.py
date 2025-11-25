@@ -314,7 +314,7 @@ class PgStacBootstrap:
             # Verify installation
             verification = self.verify_installation()
 
-            return {
+            result = {
                 'success': verification['valid'],
                 'version': verification.get('version'),
                 'schema': self.PGSTAC_SCHEMA,
@@ -323,6 +323,12 @@ class PgStacBootstrap:
                 'migration_output': migration_result.get('output') if run_migrations else None,
                 'verification': verification
             }
+
+            # FIX (25 NOV 2025): Propagate verification errors so callers know what failed
+            if not verification['valid'] and verification.get('errors'):
+                result['error'] = '; '.join(verification['errors'])
+
+            return result
 
         except Exception as e:
             logger.error(f"❌ PgSTAC installation failed: {e}")

@@ -476,16 +476,10 @@ class PydanticToSQL:
             )
 
         elif table_name == "api_requests":
-            # Platform Layer indexes (added 16 NOV 2025)
-            # Status index for filtering by request status
-            indexes.append(
-                sql.SQL("CREATE INDEX IF NOT EXISTS {} ON {}.{} ({})").format(
-                    sql.Identifier("idx_api_requests_status"),
-                    sql.Identifier(self.schema_name),
-                    sql.Identifier("api_requests"),
-                    sql.Identifier("status")
-                )
-            )
+            # Platform Layer indexes (added 16 NOV 2025, FIXED 24 NOV 2025)
+            # NOTE: api_requests does NOT have a status column (removed 22 NOV 2025)
+            # Status is delegated to CoreMachine job_id lookup
+
             # Dataset ID index for filtering by dataset
             indexes.append(
                 sql.SQL("CREATE INDEX IF NOT EXISTS {} ON {}.{} ({})").format(

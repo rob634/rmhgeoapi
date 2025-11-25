@@ -2,6 +2,7 @@
 
 **Date**: 22 NOV 2025
 **Status**: Reference Documentation
+**Wiki**: Azure DevOps Wiki - Technical workflow documentation
 
 ---
 
@@ -298,7 +299,7 @@ def validate_job_parameters(params: dict) -> dict:
     if not blob_repo.container_exists(container_name):
         raise ValueError(f"Container '{container_name}' does not exist")
 
-    # 7. Validate blob existence (fast-fail for all blobs)
+    # 7. Validate blob existence (early validation for all blobs)
     missing_blobs = []
     for blob_name in blob_list:
         if not blob_repo.blob_exists(container_name, blob_name):
@@ -328,7 +329,7 @@ def validate_job_parameters(params: dict) -> dict:
     }
 ```
 
-**Key Validation**: All blobs are checked for existence at submission time (fast-fail pattern).
+**Key Validation**: All blobs are checked for existence at submission time (early validation pattern).
 
 ---
 
@@ -979,7 +980,7 @@ HTTP POST /api/jobs/submit/process_raster_collection (with 4 tiles)
    ├─ Validate blob_list (required, non-empty list)
    ├─ Validate collection_id (alphanumeric + hyphens/underscores)
    ├─ Check container existence
-   └─ Check all blobs exist (fast-fail)
+   └─ Check all blobs exist (early validation)
     ↓
 5. Call generate_job_id() → SHA256 hash
 6. Check for existing job (idempotency)
@@ -1186,7 +1187,7 @@ JOB (Controller Layer - Orchestration)
 - **Stage 1**: N validation tasks (one per tile)
 - **Stage 2**: N COG creation tasks (one per validated tile)
 - Each task runs independently in parallel
-- "Last task turns out the lights" triggers stage advancement
+- Last task completion detection triggers stage advancement
 
 ### 17.3 Fan-In: Aggregation
 
@@ -1208,7 +1209,7 @@ JOB (Controller Layer - Orchestration)
 - Duplicate submissions return existing job
 - Prevents wasted compute on re-submissions
 
-### 17.6 Fast-Fail Validation
+### 17.6 Early Validation Pattern
 
 - All blobs checked for existence at job submission time
 - Container existence checked at job submission time
@@ -1288,7 +1289,7 @@ https://rmhtitiler-ghcyd7g0bxdvc2hc.eastus-01.azurewebsites.net/searches/{search
 - MosaicJSON: Virtual mosaic with 4 tiles, quadkey indexing
 - STAC Collection: 1 collection + 4 items in pgSTAC
 - TiTiler URLs: 5 endpoints (viewer, tilejson, tiles, info, statistics)
-- Auto-Zoom Feature: Viewer opens directly at Namangan, Uzbekistan extent.
+- Auto-Zoom Feature: Viewer opens directly at Namangan, Uzbekistan extent
 
 **Scaling Notes**:
 - **10 tiles**: ~25 minutes (Stage 2 bottleneck)

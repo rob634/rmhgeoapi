@@ -205,11 +205,8 @@ class StacVectorService:
         """
         logger.debug(f"Querying metadata for {schema}.{table_name}")
 
-        from config import get_postgres_connection_string
-
-        connection_string = get_postgres_connection_string()
-
         # Use PostgreSQLRepository for managed identity support (18 NOV 2025)
+        # Note: Removed dead code calling get_postgres_connection_string() - 24 NOV 2025
         from infrastructure.postgresql import PostgreSQLRepository
         repo = PostgreSQLRepository()
 

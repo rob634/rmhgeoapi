@@ -2,16 +2,17 @@
 
 **Date**: 22 NOV 2025
 **Purpose**: Quick reference for submitting jobs via REST API
+**Wiki**: Azure DevOps Wiki - API reference documentation
 
-**Important**: This document includes admin/maintenance endpoints with destructive operations. These endpoints (schema redeploy, STAC nuke, etc.) are for development and testing only. See the [Admin & Maintenance section](#-admin--maintenance-endpoints-devtest-only) for full safety warnings.
+**Important**: This document includes admin/maintenance endpoints with destructive operations. These endpoints (schema redeploy, STAC nuke, etc.) are for development and testing only. See the [Admin and Maintenance section](#admin-and-maintenance-endpoints-devtest-only) for full safety warnings.
 
 ---
 
-## 🏗️ Two API Patterns: CoreMachine vs Platform
+## Two API Patterns: CoreMachine vs Platform
 
 This application provides **two ways to submit geospatial processing jobs**, designed for different use cases:
 
-### 🔧 CoreMachine API (Direct) - Power Users & Internal Tools
+### CoreMachine API (Direct) - Power Users and Internal Tools
 
 **Pattern**: `/api/jobs/submit/{job_type}`
 
@@ -28,7 +29,7 @@ This application provides **two ways to submit geospatial processing jobs**, des
 
 ---
 
-### 🌐 Platform API (DDH Integration) - External Applications
+### Platform API (DDH Integration) - External Applications
 
 **Pattern**: `/api/platform/request`
 
@@ -61,7 +62,7 @@ This application provides **two ways to submit geospatial processing jobs**, des
 
 ---
 
-## 🎯 Base URL
+## Base URL
 
 ```
 https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net
@@ -69,7 +70,7 @@ https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net
 
 ---
 
-## 📋 CoreMachine API - Direct Job Submission
+## CoreMachine API - Direct Job Submission
 
 **Pattern for power users and internal tools:**
 
@@ -102,7 +103,7 @@ Content-Type: application/json
 
 ---
 
-## ✅ Check Job Status
+## Check Job Status
 
 ```bash
 GET /api/jobs/status/{job_id}
@@ -130,7 +131,7 @@ curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/job
 
 ---
 
-## 🔧 Available Jobs
+## Available Jobs
 
 Current job types (as of 21 NOV 2025):
 - `hello_world` - Simple test job
@@ -150,7 +151,7 @@ Current job types (as of 21 NOV 2025):
 
 ---
 
-## 🌍 1. Hello World Job
+## 1. Hello World Job
 
 **Purpose**: Simple test job to verify system is operational
 
@@ -204,15 +205,15 @@ curl -X POST \
 - High parallelism (n=100): 15-30 seconds
 
 ### Use Cases
-- ✅ Verify deployment successful
-- ✅ Test queue processing
-- ✅ Validate database connectivity
-- ✅ Test parallel task execution
-- ✅ Simulate failure scenarios
+- Verify deployment successful
+- Test queue processing
+- Validate database connectivity
+- Test parallel task execution
+- Simulate failure scenarios
 
 ---
 
-## 🗺️ 2. Ingest Vector Job
+## 2. Ingest Vector Job
 
 **Purpose**: Load vector data (GeoJSON, Shapefile, GeoPackage) into PostGIS
 
@@ -220,7 +221,7 @@ curl -X POST \
 
 ---
 
-### 🔧 CoreMachine API (Direct)
+### CoreMachine API (Direct)
 
 Direct submission when you know the exact table name and parameters.
 
@@ -430,7 +431,7 @@ https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/vector/v
 
 ---
 
-### 🌐 Platform API (DDH Integration)
+### Platform API (DDH Integration)
 
 <!-- TODO: Add Platform API examples after testing (22 NOV 2025)
 
@@ -514,18 +515,18 @@ https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/vector/v
 **Solution**: Data was successfully ingested, check task results manually
 
 ### Use Cases
-- ✅ Upload CSV with lat/lon to PostGIS
-- ✅ Convert Shapefile to PostGIS with indexes
-- ✅ Import large GeoJSON files (chunked parallel upload)
-- ✅ Load GeoPackage layers
-- ✅ Ingest File Geodatabase features
-- ✅ Create spatial indexes automatically
-- ✅ Access via OGC Features API
-- ✅ Visualize via interactive web map
+- Upload CSV with lat/lon to PostGIS
+- Convert Shapefile to PostGIS with indexes
+- Import large GeoJSON files (chunked parallel upload)
+- Load GeoPackage layers
+- Ingest File Geodatabase features
+- Create spatial indexes automatically
+- Access via OGC Features API
+- Visualize via interactive web map
 
 ---
 
-## 🖼️ 3. Process Raster Job
+## 3. Process Raster Job
 
 **Purpose**: Convert raster files (GeoTIFF, etc.) to Cloud-Optimized GeoTIFF (COG) with STAC metadata
 
@@ -533,7 +534,7 @@ https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/vector/v
 
 ---
 
-### 🔧 CoreMachine API (Direct)
+### CoreMachine API (Direct)
 
 Direct submission when you know the exact output folder and collection names.
 
@@ -752,7 +753,7 @@ curl -X POST \
 ```
 
 **Key URLs in result:**
-- `share_url` - **PRIMARY** - Direct link to interactive TiTiler map viewer (share this with users!)
+- `share_url` - **PRIMARY** - Direct link to interactive TiTiler map viewer (share this URL with users)
 - `titiler_urls.viewer_url` - Same as share_url
 - `titiler_urls.preview_url` - PNG thumbnail (512px)
 - `titiler_urls.tilejson_url` - TileJSON spec for web maps (Leaflet, MapLibre, etc.)
@@ -828,7 +829,7 @@ azure://silver-cogs/{blob_name}_cog.tif
 
 ---
 
-### 🌐 Platform API (DDH Integration)
+### Platform API (DDH Integration)
 
 <!-- TODO: Add Platform API examples after testing (22 NOV 2025)
 
@@ -876,17 +877,17 @@ azure://silver-cogs/{blob_name}_cog.tif
 | NetCDF | `.nc` | Scientific data |
 
 ### Use Cases
-- ✅ Convert satellite imagery to web-optimized COG
-- ✅ Process aerial photography for visualization
-- ✅ Create analysis-ready DEMs
-- ✅ Reproject rasters to standard CRS
-- ✅ Catalog rasters with STAC metadata
-- ✅ Enable TiTiler tile serving
-- ✅ Archive large raster collections
+- Convert satellite imagery to web-optimized COG
+- Process aerial photography for visualization
+- Create analysis-ready DEMs
+- Reproject rasters to standard CRS
+- Catalog rasters with STAC metadata
+- Enable TiTiler tile serving
+- Archive large raster collections
 
 ---
 
-## 🗺️ 4. Process Raster Collection Job
+## 4. Process Raster Collection Job
 
 **Purpose**: Process multiple raster files into a unified STAC collection with MosaicJSON for seamless tile serving
 
@@ -894,7 +895,7 @@ azure://silver-cogs/{blob_name}_cog.tif
 
 ---
 
-### 🔧 CoreMachine API (Direct)
+### CoreMachine API (Direct)
 
 Direct submission when you know the exact blob paths and collection names.
 
@@ -1011,16 +1012,16 @@ curl -X POST \
 
 ### Key URLs in Result
 
-- `share_url` - **PRIMARY** - Interactive map viewer (auto-zooms to collection bbox!)
+- `share_url` - **PRIMARY** - Interactive map viewer (automatically zooms to collection bbox)
 - `titiler_urls.viewer_url` - Same as share_url
 - `titiler_urls.tilejson_url` - TileJSON spec for web maps
 - `titiler_urls.tiles_url` - XYZ tile URL template
 
 ### Auto-Zoom Feature (22 NOV 2025)
 
-**The viewer URL now auto-zooms to the collection's bounding box!**
+**The viewer URL now automatically zooms to the collection bounding box.**
 
-When you open the `share_url`, the map automatically zooms to the collection extent instead of showing the entire world. This is achieved by:
+When you open the `share_url`, the map automatically zooms to the collection extent instead of showing the entire world. This behavior is achieved by:
 
 1. Collection bbox is extracted from the STAC collection extent
 2. Bbox is stored in pgSTAC search metadata as `bounds`
@@ -1028,11 +1029,11 @@ When you open the `share_url`, the map automatically zooms to the collection ext
 4. Leaflet's `map.fitBounds()` uses these bounds for initial view
 
 **Before**: Viewer opened at world zoom level (user had to manually zoom/pan)
-**After**: Viewer opens zoomed directly to the data extent (e.g., Namangan, Uzbekistan)
+**After**: Viewer opens zoomed directly to the data extent (for example, Namangan, Uzbekistan)
 
 ---
 
-### 🌐 Platform API (DDH Integration)
+### Platform API (DDH Integration)
 
 <!-- TODO: Add Platform API examples after testing (22 NOV 2025)
 
@@ -1075,15 +1076,15 @@ When you open the `share_url`, the map automatically zooms to the collection ext
 
 ### Use Cases
 
-- ✅ Process satellite image tile grids (e.g., Maxar WorldView)
-- ✅ Create unified collections from multi-scene acquisitions
-- ✅ Build seamless mosaics from adjacent raster tiles
-- ✅ Generate STAC collections with MosaicJSON for dynamic tiling
-- ✅ Enable TiTiler-PgSTAC search-based tile serving
+- Process satellite image tile grids (for example, Maxar WorldView)
+- Create unified collections from multi-scene acquisitions
+- Build seamless mosaics from adjacent raster tiles
+- Generate STAC collections with MosaicJSON for dynamic tiling
+- Enable TiTiler-PgSTAC search-based tile serving
 
 ---
 
-## 🔍 Monitoring Jobs
+## Monitoring Jobs
 
 ### CoreMachine API - Direct Job Monitoring
 
@@ -1168,17 +1169,17 @@ curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/dba
 
 ---
 
-## 🚨 ADMIN & MAINTENANCE ENDPOINTS (DEV/TEST ONLY!)
+## ADMIN AND MAINTENANCE ENDPOINTS (DEV/TEST ONLY)
 
-**⚠️ WARNING: THESE ARE NUCLEAR RED BUTTONS - DEV/TEST ENVIRONMENTS ONLY!**
+**WARNING: THESE ARE DESTRUCTIVE OPERATIONS - DEV/TEST ENVIRONMENTS ONLY**
 
 These endpoints perform **DESTRUCTIVE OPERATIONS** that can delete data, drop schemas, and reset the entire system. They are designed for development and testing environments where you need to quickly reset state.
 
-**DO NOT USE IN PRODUCTION** unless you absolutely know what you're doing and have:
-- ✅ Full database backups
-- ✅ Explicit approval from data owners
-- ✅ Maintenance window scheduled
-- ✅ Users notified of downtime
+**DO NOT USE IN PRODUCTION** unless you have verified:
+- Full database backups
+- Explicit approval from data owners
+- Maintenance window scheduled
+- Users notified of downtime
 
 ---
 
@@ -1406,14 +1407,14 @@ curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/hea
 
 ### When NOT to Use These Endpoints
 
-**❌ DON'T USE IN PRODUCTION IF**:
+**Do Not Use in Production If**:
 - Users are actively running jobs
 - You have important job history to preserve
 - STAC catalog has production metadata
 - No recent backups exist
 - Multiple teams depend on the data
 
-**✅ USE IN DEV/TEST IF**:
+**Use in Development/Test If**:
 - Testing new features
 - Database is in broken state
 - Need clean slate for testing

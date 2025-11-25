@@ -5,7 +5,7 @@
 # EXPORTS: VectorToPostGISHandler class
 # INTERFACES: None (concrete implementation)
 # PYDANTIC_MODELS: None (operates on GeoDataFrames)
-# DEPENDENCIES: geopandas, psycopg, config
+# DEPENDENCIES: geopandas, psycopg, config, core.schema.geo_table_builder
 # SOURCE: Called by validate_vector and upload_vector_chunk tasks
 # SCOPE: Service layer - PostGIS integration
 # VALIDATION: Geometry validation, CRS reprojection, column name cleaning
@@ -20,6 +20,8 @@
 #   - _get_postgres_type (line 250): Map pandas dtypes to PostgreSQL types
 #   - _create_table_if_not_exists (line 270): Create PostGIS table
 #   - _insert_features (line 320): Insert GeoDataFrame rows
+#   - create_table_with_metadata (line NEW): Create table with GeoTableBuilder + metadata
+# UPDATED: 24 NOV 2025 - Added GeoTableBuilder integration for ArcGIS compatibility
 # ============================================================================
 
 """
@@ -754,3 +756,321 @@ class VectorToPostGISHandler:
                 values = [geom_wkt]
 
             cur.execute(insert_stmt, values)
+
+    # =========================================================================
+    # NEW: GeoTableBuilder Integration (24 NOV 2025)
+    # =========================================================================
+    # These methods use GeoTableBuilder for standardized table creation with:
+    # - Standard metadata columns (created_at, source_file, stac_item_id, etc.)
+    # - ArcGIS Enterprise Geodatabase compatibility ('shape' column option)
+    # - Automatic triggers for updated_at
+    # =========================================================================
+
+    def create_table_with_metadata(
+        self,
+        gdf: gpd.GeoDataFrame,
+        table_name: str,
+        schema: str = "geo",
+        source_file: str = None,
+        source_format: str = None,
+        source_crs: str = None,
+        stac_item_id: str = None,
+        stac_collection_id: str = None,
+        etl_job_id: str = None,
+        index_config: dict = None,
+        arcgis_mode: bool = False
+    ):
+        """
+        Create PostGIS table with standard metadata columns using GeoTableBuilder.
+
+        This method creates tables with:
+        - Standard metadata columns (objectid, created_at, updated_at, source_file, etc.)
+        - STAC catalog linkage columns (stac_item_id, stac_collection_id)
+        - ETL traceability (etl_job_id, etl_batch_id)
+        - Automatic updated_at trigger
+        - Configurable geometry column name (PostGIS 'geom' vs ArcGIS 'shape')
+
+        Args:
+            gdf: Sample GeoDataFrame for schema detection
+            table_name: Target table name
+            schema: Target schema (default 'geo')
+            source_file: Original filename for tracking
+            source_format: File format (shp, gpkg, geojson)
+            source_crs: Original CRS before reprojection
+            stac_item_id: STAC item ID for catalog linkage
+            stac_collection_id: STAC collection ID
+            etl_job_id: CoreMachine job ID for traceability
+            index_config: Index configuration dict:
+                - spatial: bool (default True)
+                - attributes: list of column names
+                - temporal: list of column names for DESC indexes
+            arcgis_mode: If True, use 'shape' column name for ArcGIS compatibility
+
+        Returns:
+            dict with table creation result:
+                - success: bool
+                - table_name: str
+                - schema: str
+                - columns: list of column names
+                - geometry_column: str ('geom' or 'shape')
+
+        Raises:
+            psycopg.Error: If table creation fails
+        """
+        from core.schema.geo_table_builder import GeoTableBuilder, GeometryColumnConfig
+
+        # Create builder with appropriate configuration
+        geom_config = GeometryColumnConfig.ARCGIS if arcgis_mode else GeometryColumnConfig.POSTGIS
+        builder = GeoTableBuilder(geometry_column=geom_config)
+
+        logger.info(f"🏗️ Creating table with GeoTableBuilder:")
+        logger.info(f"   Table: {schema}.{table_name}")
+        logger.info(f"   ArcGIS mode: {arcgis_mode}")
+        logger.info(f"   Geometry column: {builder.geometry_column_name}")
+
+        # Generate complete DDL
+        ddl_statements = builder.create_complete_ddl(
+            gdf=gdf,
+            table_name=table_name,
+            schema=schema,
+            source_file=source_file,
+            source_format=source_format,
+            source_crs=source_crs,
+            stac_item_id=stac_item_id,
+            stac_collection_id=stac_collection_id,
+            etl_job_id=etl_job_id,
+            index_config=index_config
+        )
+
+        # Execute DDL
+        with self._pg_repo._get_connection() as conn:
+            with conn.cursor() as cur:
+                for stmt in ddl_statements:
+                    cur.execute(stmt)
+                conn.commit()
+
+        logger.info(f"✅ Created table {schema}.{table_name} with {len(ddl_statements)} DDL statements")
+
+        return {
+            'success': True,
+            'table_name': table_name,
+            'schema': schema,
+            'geometry_column': builder.geometry_column_name,
+            'arcgis_mode': arcgis_mode,
+            'ddl_count': len(ddl_statements)
+        }
+
+    def insert_features_with_metadata(
+        self,
+        chunk: gpd.GeoDataFrame,
+        table_name: str,
+        schema: str = "geo",
+        source_file: str = None,
+        source_format: str = None,
+        source_crs: str = None,
+        stac_item_id: str = None,
+        stac_collection_id: str = None,
+        etl_job_id: str = None,
+        etl_batch_id: str = None,
+        arcgis_mode: bool = False
+    ):
+        """
+        Insert features with standard metadata columns populated.
+
+        This method inserts features AND populates the standard metadata columns
+        created by create_table_with_metadata().
+
+        Args:
+            chunk: GeoDataFrame to insert
+            table_name: Target table name
+            schema: Target schema (default 'geo')
+            source_file: Original filename
+            source_format: File format
+            source_crs: Original CRS
+            stac_item_id: STAC item ID
+            stac_collection_id: STAC collection ID
+            etl_job_id: CoreMachine job ID
+            etl_batch_id: Chunk/batch identifier
+            arcgis_mode: If True, use 'shape' column name
+
+        Returns:
+            dict with insert result:
+                - success: bool
+                - rows_inserted: int
+                - table_name: str
+
+        Raises:
+            psycopg.Error: If insert fails
+        """
+        geom_col = 'shape' if arcgis_mode else 'geom'
+
+        # Get attribute columns (exclude geometry)
+        attr_cols = [col for col in chunk.columns if col != 'geometry']
+
+        # Clean column names to match table
+        import re
+        def clean_col(name):
+            cleaned = name.lower()
+            cleaned = re.sub(r'[^a-z0-9_]', '_', cleaned)
+            cleaned = re.sub(r'_+', '_', cleaned).strip('_')
+            if cleaned and cleaned[0].isdigit():
+                cleaned = 'col_' + cleaned
+            return cleaned or 'unnamed_column'
+
+        cleaned_attr_cols = [clean_col(col) for col in attr_cols]
+
+        # Build column list including metadata
+        all_cols = [geom_col]  # Geometry first
+        all_cols.extend(cleaned_attr_cols)  # Dynamic attributes
+
+        # Add metadata columns
+        metadata_cols = ['source_file', 'source_format', 'source_crs',
+                        'stac_item_id', 'stac_collection_id',
+                        'etl_job_id', 'etl_batch_id']
+        all_cols.extend(metadata_cols)
+
+        # Build INSERT statement
+        cols_sql = sql.SQL(', ').join([sql.Identifier(col) for col in all_cols])
+        placeholders = sql.SQL(', ').join([sql.Placeholder()] * len(all_cols))
+
+        insert_stmt = sql.SQL("""
+            INSERT INTO {schema}.{table} ({cols})
+            VALUES ({placeholders})
+        """).format(
+            schema=sql.Identifier(schema),
+            table=sql.Identifier(table_name),
+            cols=cols_sql,
+            placeholders=placeholders
+        )
+
+        # Insert each feature with metadata
+        rows_inserted = 0
+        with self._pg_repo._get_connection() as conn:
+            with conn.cursor() as cur:
+                for idx, row in chunk.iterrows():
+                    # Geometry as WKT with ST_GeomFromText
+                    geom_wkt = row.geometry.wkt
+
+                    # Build values list
+                    values = [f"SRID=4326;{geom_wkt}"]  # EWKT format
+
+                    # Add attribute values
+                    for col in attr_cols:
+                        values.append(row[col])
+
+                    # Add metadata values
+                    values.extend([
+                        source_file,
+                        source_format,
+                        source_crs,
+                        stac_item_id,
+                        stac_collection_id,
+                        etl_job_id,
+                        etl_batch_id
+                    ])
+
+                    # Use ST_GeomFromEWKT for geometry
+                    insert_with_geom = sql.SQL("""
+                        INSERT INTO {schema}.{table} ({cols})
+                        VALUES (ST_GeomFromEWKT(%s), {attr_placeholders}, %s, %s, %s, %s, %s, %s, %s)
+                    """).format(
+                        schema=sql.Identifier(schema),
+                        table=sql.Identifier(table_name),
+                        cols=cols_sql,
+                        attr_placeholders=sql.SQL(', ').join([sql.Placeholder()] * len(attr_cols))
+                    )
+
+                    cur.execute(insert_with_geom, values)
+                    rows_inserted += 1
+
+                conn.commit()
+
+        logger.info(f"✅ Inserted {rows_inserted} rows with metadata into {schema}.{table_name}")
+
+        return {
+            'success': True,
+            'rows_inserted': rows_inserted,
+            'table_name': table_name,
+            'schema': schema
+        }
+
+    def upload_chunk_with_metadata(
+        self,
+        chunk: gpd.GeoDataFrame,
+        table_name: str,
+        schema: str = "geo",
+        source_file: str = None,
+        source_format: str = None,
+        source_crs: str = None,
+        stac_item_id: str = None,
+        stac_collection_id: str = None,
+        etl_job_id: str = None,
+        etl_batch_id: str = None,
+        index_config: dict = None,
+        arcgis_mode: bool = False
+    ):
+        """
+        Complete upload with table creation and metadata (convenience method).
+
+        Combines create_table_with_metadata() and insert_features_with_metadata()
+        for simple single-chunk uploads. For parallel uploads, use the separate
+        methods to avoid table creation race conditions.
+
+        Args:
+            chunk: GeoDataFrame to upload
+            table_name: Target table name
+            schema: Target schema (default 'geo')
+            source_file: Original filename
+            source_format: File format
+            source_crs: Original CRS
+            stac_item_id: STAC item ID
+            stac_collection_id: STAC collection ID
+            etl_job_id: CoreMachine job ID
+            etl_batch_id: Chunk/batch identifier
+            index_config: Index configuration dict
+            arcgis_mode: If True, use 'shape' column for ArcGIS
+
+        Returns:
+            dict with upload result
+
+        Raises:
+            psycopg.Error: If operation fails
+        """
+        # Create table
+        create_result = self.create_table_with_metadata(
+            gdf=chunk,
+            table_name=table_name,
+            schema=schema,
+            source_file=source_file,
+            source_format=source_format,
+            source_crs=source_crs,
+            stac_item_id=stac_item_id,
+            stac_collection_id=stac_collection_id,
+            etl_job_id=etl_job_id,
+            index_config=index_config,
+            arcgis_mode=arcgis_mode
+        )
+
+        # Insert features
+        insert_result = self.insert_features_with_metadata(
+            chunk=chunk,
+            table_name=table_name,
+            schema=schema,
+            source_file=source_file,
+            source_format=source_format,
+            source_crs=source_crs,
+            stac_item_id=stac_item_id,
+            stac_collection_id=stac_collection_id,
+            etl_job_id=etl_job_id,
+            etl_batch_id=etl_batch_id,
+            arcgis_mode=arcgis_mode
+        )
+
+        return {
+            'success': True,
+            'table_name': table_name,
+            'schema': schema,
+            'rows_inserted': insert_result['rows_inserted'],
+            'geometry_column': create_result['geometry_column'],
+            'arcgis_mode': arcgis_mode
+        }

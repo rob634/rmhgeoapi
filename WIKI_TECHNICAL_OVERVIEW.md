@@ -3,6 +3,7 @@
 **Last Updated**: 18 NOV 2025
 **Audience**: Development team (all disciplines)
 **Purpose**: High-level understanding of platform architecture, patterns, and technology stack
+**Wiki**: Azure DevOps Wiki - Technical architecture documentation
 
 ---
 
@@ -85,18 +86,18 @@ def process_task(msg: ServiceBusMessage):
 
 ### When to Use Serverless
 
-**✅ Great for**:
-- APIs with variable traffic (quiet at night, busy during day)
+**Suitable for**:
+- APIs with variable traffic (low usage at night, high usage during day)
 - Event-driven workloads (process files when uploaded)
-- Jobs that can be broken into independent tasks
-- Prototypes and MVPs (deploy fast, scale later)
+- Jobs that can be divided into independent tasks
+- Prototypes and MVPs (deploy quickly, scale later)
 
-**❌ Not ideal for**:
+**Not ideal for**:
 - Long-running processes (>10 min timeout per function)
 - Stateful applications (servers come and go)
 - Predictable constant load (dedicated VMs might be cheaper)
 
-**Our use case**: Perfect fit! ETL jobs are event-driven (triggered by data uploads), embarrassingly parallel (chunks processed independently), and have variable load.
+**Our use case**: This architecture is well-suited to our needs. ETL jobs are event-driven (triggered by data uploads), highly parallelizable (chunks processed independently), and have variable load.
 
 ---
 
@@ -189,9 +190,9 @@ def process_upload(file_path, job_id):
 2. **Database constraints**: PRIMARY KEY on job_id prevents duplicates
 3. **Check-then-act**: Always check if work already done before doing it
 
-### "Last One Turns Off the Lights" Pattern
+### Last Task Completion Detection Pattern
 
-**Problem**: 129 tasks uploading chunks in parallel. When they all finish, who triggers the next stage?
+**Problem**: 129 tasks uploading chunks in parallel. When all tasks finish, which task triggers the next stage?
 
 **Naive approach** (race condition):
 ```python
@@ -254,9 +255,9 @@ $$ LANGUAGE plpgsql;
 ### Why FOSS for Geospatial?
 
 **Industry standards**: NASA, USGS, Planet, Maxar all use these tools
-**Interoperability**: Works with QGIS, ArcGIS, FME, GDAL out of the box
+**Interoperability**: Works with QGIS, ArcGIS, FME, GDAL without additional configuration
 **No vendor lock-in**: Can migrate to any cloud provider
-**Battle-tested**: Decades of development, billions of spatial operations
+**Production-proven**: Decades of development, billions of spatial operations
 
 ### The Stack (Bottom to Top)
 
@@ -266,7 +267,7 @@ $$ LANGUAGE plpgsql;
 
 **What it does**: Read/write 200+ geospatial file formats (GeoTIFF, Shapefile, NetCDF, etc.)
 
-**Think of it as**: `ffmpeg` for geospatial data (like ffmpeg converts video formats, GDAL converts spatial formats)
+**Comparison**: Similar to `ffmpeg` for video. ffmpeg converts video formats; GDAL converts spatial formats.
 
 **Example**:
 ```python
@@ -285,7 +286,7 @@ with rasterio.open('elevation.tif') as src:
 
 **What it does**: Create, manipulate, and analyze geometric shapes
 
-**Think of it as**: JavaScript's `Path2D` API but for geospatial coordinates
+**Comparison**: Similar to JavaScript's `Path2D` API, but designed for geospatial coordinates.
 
 **Example**:
 ```python
@@ -309,11 +310,11 @@ eiffel_tower.within(paris_bbox)  # True
 
 **Why it matters**: All geometry validation, buffering, intersection checks use Shapely
 
-#### 3. GeoPandas - "Pandas for Maps"
+#### 3. GeoPandas - Pandas with Spatial Support
 
-**What it does**: Work with geospatial tabular data (like Pandas but with geometry column)
+**What it does**: Work with geospatial tabular data (Pandas DataFrame with geometry column)
 
-**Think of it as**: Excel + Maps combined
+**Comparison**: Combines tabular data operations (like Excel) with spatial geometry support.
 
 **Example**:
 ```python
@@ -338,11 +339,11 @@ countries.to_postgis('countries', engine, schema='geo', if_exists='replace')
 
 **Why we use it**: Perfect for ETL - read shapefiles, validate, clean, write to PostGIS
 
-#### 4. Rasterio - "Raster I/O"
+#### 4. Rasterio - Raster Input/Output
 
 **What it does**: Read/write raster data (satellite imagery, elevation models, etc.)
 
-**Think of it as**: `PIL` (Python Imaging Library) but for geospatial rasters with coordinates
+**Comparison**: Similar to `PIL` (Python Imaging Library), but designed for geospatial rasters with coordinate systems.
 
 **Example**:
 ```python
@@ -367,11 +368,11 @@ with rasterio.open('landsat_scene.tif') as src:
 
 **Why we use it**: Create Cloud-Optimized GeoTIFFs (COGs) for TiTiler
 
-#### 5. PostGIS - "Spatial Database"
+#### 5. PostGIS - Spatial Database Extension
 
 **What it does**: PostgreSQL extension that adds spatial data types and functions
 
-**Think of it as**: MongoDB + spatial indexes, or Elasticsearch + geometries
+**Comparison**: Adds spatial query capabilities to PostgreSQL, similar to how MongoDB supports geospatial indexes.
 
 **Spatial data types**:
 ```sql
@@ -412,7 +413,7 @@ WHERE ST_Intersects(
 
 **What it is**: GeoTIFF file optimized for cloud storage (HTTP range requests)
 
-**Think of it as**: Progressive JPEG but for geospatial rasters
+**Comparison**: Similar concept to progressive JPEG images, but for geospatial rasters.
 
 **Normal GeoTIFF problem**:
 ```
@@ -444,11 +445,11 @@ COG File:
 
 **Why we use it**: TiTiler can serve tiles without downloading entire file
 
-#### 7. TiTiler - "Dynamic Tile Server"
+#### 7. TiTiler - Dynamic Tile Server
 
-**What it does**: Generates map tiles from COGs on-the-fly (no pre-processing needed)
+**What it does**: Generates map tiles from COGs dynamically at request time (no pre-processing needed)
 
-**Think of it as**: Serverless image API for geospatial data
+**Comparison**: A serverless image API specifically designed for geospatial data.
 
 **Traditional tile server**:
 ```
@@ -458,12 +459,12 @@ Preprocessing step:
 3. Store tiles in S3 (expensive!)
 4. Client requests: /tiles/5/10/12.png → Serve pre-rendered PNG
 
-Problem: What if user wants different color ramp? Regenerate all 1M tiles!
+Problem: If the user wants a different color scheme, all 1 million tiles must be regenerated.
 ```
 
 **TiTiler (dynamic)**:
 ```
-No preprocessing! Just upload COG to blob storage.
+No preprocessing required. Upload COG to blob storage.
 
 Client requests: /tiles/5/10/12?url=https://storage.blob.core.windows.net/data/elevation.tif&colormap=terrain&rescale=0,3000
 
@@ -477,13 +478,11 @@ Change color ramp? Just change URL parameter. No regeneration needed.
 
 **Why we use it**: Serve raster tiles without pre-processing or storage costs
 
-#### 8. STAC - "Google for Geospatial Data"
+#### 8. STAC - SpatioTemporal Asset Catalog
 
-**SpatioTemporal Asset Catalog**
+**What it does**: Standardized metadata format for searching and discovering geospatial data
 
-**What it does**: Standardized metadata format for searching geospatial data
-
-**Think of it as**: OpenGraph tags for spatial data, or RSS feeds for geospatial catalogs
+**Comparison**: Similar to OpenGraph tags for websites or RSS feeds, but designed for geospatial data catalogs.
 
 **STAC Item** (metadata for one dataset):
 ```json
@@ -543,7 +542,7 @@ for item in search.items():
 
 **What it is**: REST API standard for serving vector data (points, lines, polygons)
 
-**Think of it as**: GraphQL but specifically designed for geospatial features
+**Comparison**: A REST API standard for geospatial features, similar in purpose to GraphQL but with spatial query support.
 
 **Replaces**: WFS (Web Feature Service) - old XML-based SOAP standard
 
@@ -567,9 +566,9 @@ GET /api/features/collections/countries/items/123
 ```
 
 **Why it matters**:
-- Works with QGIS, ArcGIS, FME, GDAL out of the box
+- Works with QGIS, ArcGIS, FME, GDAL without additional configuration
 - Client gets GeoJSON (already understood by Leaflet, Mapbox, etc.)
-- No custom API documentation needed - it's a standard!
+- No custom API documentation needed because it follows a published standard.
 
 ---
 
@@ -616,7 +615,7 @@ User uploads countries.shp to Azure Blob Storage
 │ STAGE 4: Finalize                               │
 │ • Create STAC item in pgSTAC                    │
 │ • Validate OGC API endpoint                     │
-│ • Job complete! ✅                              │
+│ • Job complete                                  │
 └─────────────────────────────────────────────────┘
 
 Now available:
@@ -629,7 +628,7 @@ Now available:
 
 **Your JavaScript/TypeScript app**:
 ```typescript
-// No custom API client needed - it's standard GeoJSON!
+// No custom API client needed - the response is standard GeoJSON
 const response = await fetch(
   'https://api.example.com/api/features/collections/countries/items?limit=100'
 );
@@ -695,4 +694,4 @@ const tileLayer = L.tileLayer(
 
 ---
 
-**Questions?** Check the [full onboarding guide](onboarding.md) or ask the team!
+**Questions?** See the [full onboarding guide](onboarding.md) or contact the team.

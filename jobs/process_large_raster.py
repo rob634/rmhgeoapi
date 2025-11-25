@@ -80,9 +80,10 @@ import hashlib
 import json
 
 from jobs.base import JobBase
+from jobs.raster_workflows_base import RasterWorkflowsBase
 
 
-class ProcessLargeRasterWorkflow(JobBase):
+class ProcessLargeRasterWorkflow(RasterWorkflowsBase, JobBase):
     """
     Large raster tiling workflow (1-30 GB files).
 
@@ -535,7 +536,7 @@ class ProcessLargeRasterWorkflow(JobBase):
                     "blob_name": job_params["blob_name"],
                     "tile_size": job_params.get("tile_size"),  # None = auto-calculate
                     "overlap": job_params.get("overlap", 512),
-                    "output_container": config.storage.silver.get_container('tiles'),
+                    "output_container": config.storage.silver.get_container('cogs'),  # Tiling scheme stored in silver-cogs
                     "band_names": job_params.get("band_names", {5: "Red", 3: "Green", 2: "Blue"}),  # For tile size calculation
                     "target_crs": job_params.get("target_crs", "EPSG:4326")  # Tiling scheme calculated in target CRS
                 }
@@ -561,7 +562,7 @@ class ProcessLargeRasterWorkflow(JobBase):
                     "container_name": container_name,
                     "blob_name": job_params["blob_name"],
                     "tiling_scheme_blob": tiling_scheme_blob,
-                    "tiling_scheme_container": config.storage.silver.get_container('tiles'),
+                    "tiling_scheme_container": config.storage.silver.get_container('cogs'),  # Read from silver-cogs
                     "output_container": config.resolved_intermediate_tiles_container,  # Use config for intermediate tiles
                     "job_id": job_id,  # Pass job_id for folder naming ({job_id[:8]}/tiles/)
                     "band_names": job_params.get("band_names", {5: "Red", 3: "Green", 2: "Blue"})  # Pass band selection for efficient reading
@@ -725,12 +726,11 @@ class ProcessLargeRasterWorkflow(JobBase):
         """
         Create final job summary from all completed tasks.
 
-        Extracts:
-        - Tiling statistics (Stage 1-2)
-        - COG processing results (Stage 3)
-        - MosaicJSON metadata (Stage 4)
-        - STAC collection details (Stage 5)
-        - TiTiler visualization URLs
+        Uses shared RasterWorkflowsBase._finalize_cog_mosaicjson_stac_stages()
+        for stages 3-5 (COG, MosaicJSON, STAC) which are identical to
+        process_raster_collection stages 2-4.
+
+        Extracts workflow-specific summaries for stages 1-2 (tiling, extraction).
 
         Args:
             context: JobExecutionContext with task results
@@ -738,18 +738,14 @@ class ProcessLargeRasterWorkflow(JobBase):
         Returns:
             Comprehensive job summary with TiTiler URLs
         """
-        from util_logger import LoggerFactory, ComponentType
         from core.models import TaskStatus
-        from config import get_config
-
-        logger = LoggerFactory.create_logger(
-            ComponentType.CONTROLLER,
-            "ProcessLargeRasterWorkflow.finalize_job"
-        )
 
         task_results = context.task_results
         params = context.parameters
-        config = get_config()
+
+        # ================================================================
+        # Extract WORKFLOW-SPECIFIC summaries (Stages 1-2)
+        # ================================================================
 
         # Extract tiling scheme results (Stage 1)
         tiling_tasks = [t for t in task_results if t.task_type == "generate_tiling_scheme"]
@@ -772,108 +768,22 @@ class ProcessLargeRasterWorkflow(JobBase):
                 "tiles_extracted": extraction_result.get("tile_count")
             }
 
-        # Extract COG results (Stage 3 - fan-out, N tasks)
-        cog_tasks = [t for t in task_results if t.task_type == "create_cog"]
-        successful_cogs = [t for t in cog_tasks if t.status == TaskStatus.COMPLETED]
-        failed_cogs = [t for t in cog_tasks if t.status == TaskStatus.FAILED]
-
-        # Calculate total COG size
-        total_size_mb = 0
-        for cog_task in successful_cogs:
-            if cog_task.result_data and cog_task.result_data.get("result"):
-                size_mb = cog_task.result_data["result"].get("size_mb", 0)
-                total_size_mb += size_mb
-
-        cog_summary = {
-            "total_count": len(successful_cogs),
-            "successful": len(successful_cogs),
-            "failed": len(failed_cogs),
-            "total_size_mb": round(total_size_mb, 2)
-        }
-
-        # Extract MosaicJSON result (Stage 4 - fan-in)
-        mosaicjson_tasks = [t for t in task_results if t.task_type == "create_mosaicjson"]
-        mosaicjson_summary = {}
-        if mosaicjson_tasks and mosaicjson_tasks[0].result_data:
-            mosaicjson_result = mosaicjson_tasks[0].result_data.get("result", {})
-            mosaicjson_summary = {
-                "blob_path": mosaicjson_result.get("mosaicjson_blob"),
-                "url": mosaicjson_result.get("mosaicjson_url"),
-                "bounds": mosaicjson_result.get("bounds"),
-                "tile_count": mosaicjson_result.get("tile_count")
-            }
-
-        # Extract STAC result (Stage 5 - fan-in)
-        stac_tasks = [t for t in task_results if t.task_type == "create_stac_collection"]
-        stac_summary = {}
-        titiler_urls = {}
-        # TODO (7 NOV 2025): Update to match process_raster_collection pattern
-        # - Comment out PgSTAC URLs (line 789, 804-809, 826)
-        # - Add vanilla TiTiler URLs for MosaicJSON (use generate_vanilla_titiler_urls)
-        # - Add share_url field (MosaicJSON viewer)
-        # - See process_raster_collection.py:674-738 for reference implementation
-
-        if stac_tasks and stac_tasks[0].result_data:
-            stac_result = stac_tasks[0].result_data.get("result", {})
-            collection_id = stac_result.get("collection_id", "cogs")
-            item_id = stac_result.get("stac_id") or stac_result.get("pgstac_id")
-
-            stac_summary = {
-                "collection_id": collection_id,
-                "stac_id": item_id,
-                "pgstac_id": stac_result.get("pgstac_id"),
-                "inserted_to_pgstac": stac_result.get("inserted_to_pgstac", True),
-                "ready_for_titiler": True
-            }
-
-        # Generate TiTiler URLs based on configured mode (8 NOV 2025)
-        titiler_pgstac_urls = None
-        vanilla_titiler_urls = None
-
-        if config.titiler_mode == "pgstac" and item_id:
-            # PgSTAC mode: Generate database-backed TiTiler URLs
-            titiler_pgstac_urls = config.generate_titiler_urls(
-                collection_id=collection_id,
-                item_id=item_id
-            )
-            share_url = titiler_pgstac_urls.get("viewer_url")
-        elif config.titiler_mode == "vanilla" and mosaicjson_summary.get("blob_path"):
-            # Vanilla mode: Generate MosaicJSON viewer URLs
-            mosaicjson_blob = mosaicjson_summary["blob_path"]
-            mosaic_container = config.resolved_intermediate_tiles_container  # "silver-tiles"
-
-            vanilla_titiler_urls = config.generate_vanilla_titiler_urls(
-                container=mosaic_container,
-                blob_name=mosaicjson_blob
-            )
-            share_url = vanilla_titiler_urls.get("viewer_url")
-        else:
-            # xarray mode or missing data - no URLs generated
-            share_url = None
-
-        logger.info(
-            f"✅ Large raster job {context.job_id[:16]} completed: "
-            f"{len(successful_cogs)} COGs, MosaicJSON created, STAC published"
-        )
-
-        return {
-            "job_type": "process_large_raster",
-            "job_id": context.job_id,
+        # ================================================================
+        # Use SHARED finalization for Stages 3-5 (COG, MosaicJSON, STAC)
+        # ================================================================
+        # This is the DRY magic - identical to process_raster_collection!
+        extra_summaries = {
             "source_blob": params.get("blob_name"),
             "source_container": params.get("container_name"),
             "tiling": tiling_summary,
-            "extraction": extraction_summary,
-            "cogs": cog_summary,
-            "mosaicjson": mosaicjson_summary,
-            "stac": stac_summary,
-            "titiler_pgstac": titiler_pgstac_urls,  # Database-backed URLs (if mode=pgstac)
-            "titiler_direct": vanilla_titiler_urls,  # Direct URLs (if mode=vanilla)
-            "share_url": share_url,  # PRIMARY URL - share this with end users!
-            "titiler_mode": config.titiler_mode,  # Which mode was used
-            "stages_completed": context.current_stage,
-            "total_tasks_executed": len(task_results),
-            "tasks_by_status": {
-                "completed": sum(1 for t in task_results if t.status == TaskStatus.COMPLETED),
-                "failed": sum(1 for t in task_results if t.status == TaskStatus.FAILED)
-            }
+            "extraction": extraction_summary
         }
+
+        return RasterWorkflowsBase._finalize_cog_mosaicjson_stac_stages(
+            context=context,
+            job_type="process_large_raster",
+            cog_stage_num=3,
+            mosaicjson_stage_num=4,
+            stac_stage_num=5,
+            extra_summaries=extra_summaries
+        )

@@ -2,6 +2,7 @@
 
 **Date**: 22 NOV 2025
 **Status**: Reference Documentation
+**Wiki**: Azure DevOps Wiki - Technical workflow documentation
 
 ---
 
@@ -285,7 +286,7 @@ def validate_job_parameters(params: dict) -> dict:
     if not isinstance(jpeg_quality, int) or not (1 <= jpeg_quality <= 100):
         raise ValueError(f"jpeg_quality must be an integer between 1-100, got {jpeg_quality}")
 
-    # 7. Check blob existence (fast-fail)
+    # 7. Check blob existence (early validation)
     from infrastructure.blob import BlobRepository
     blob_repo = BlobRepository.instance()
 
@@ -995,7 +996,7 @@ def process_task_message(self, task_message: TaskQueueMessage) -> Dict[str, Any]
         result
     )
 
-    # Step 6: Handle stage completion ("last task turns out lights")
+    # Step 6: Handle stage completion (last task completion detection)
     if completion.stage_complete:
         self._handle_stage_completion(
             task_message.parent_job_id,
@@ -1170,7 +1171,7 @@ HTTP POST /api/jobs/submit/process_raster
 3. Get ProcessRasterWorkflow from ALL_JOBS registry
 4. Call ProcessRasterWorkflow.validate_job_parameters()
    ├─ Validate required parameters
-   ├─ Check blob existence (fast-fail)
+   ├─ Check blob existence (early validation)
    └─ Return validated parameters
     ↓
 5. Call ProcessRasterWorkflow.generate_job_id() → SHA256 hash
@@ -1358,7 +1359,7 @@ JOB (Controller Layer - Orchestration)
 - **Stage 2 → Stage 3**: COG metadata (blob path, bounds, container)
 - **Stage 3 → Finalization**: STAC metadata (item_id, collection_id, bbox)
 
-### 20.4 Fast-Fail Validation
+### 20.4 Early Validation Pattern
 
 - Blob existence checked at job submission time
 - Container existence checked at job submission time

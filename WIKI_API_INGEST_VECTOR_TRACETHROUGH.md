@@ -2,6 +2,7 @@
 
 **Date**: 22 NOV 2025
 **Status**: Reference Documentation
+**Wiki**: Azure DevOps Wiki - Technical workflow documentation
 
 ---
 
@@ -255,7 +256,7 @@ if not all(c.isalnum() or c == '_' for c in table_name):
     raise ValueError("table_name must contain only letters, numbers, and underscores")
 ```
 
-### 4.2 Table Existence Check (Fast-Fail)
+### 4.2 Table Existence Check (Early Validation)
 
 ```python
 # jobs/ingest_vector.py:311-350
@@ -272,7 +273,7 @@ if table_exists:
     )
 ```
 
-### 4.3 Blob Existence Check (Fast-Fail)
+### 4.3 Blob Existence Check (Early Validation)
 
 ```python
 # jobs/ingest_vector.py:352-377
@@ -606,7 +607,7 @@ def prepare_gdf(self, gdf: gpd.GeoDataFrame, geometry_params: dict = None):
     5. Validate PostGIS supported geometry types
     6. Reproject to EPSG:4326 if needed
     7. Clean column names (lowercase, replace spaces)
-    8. Apply optional simplification/quantization
+    8. Apply optional simplification or quantization
     """
 ```
 
@@ -849,7 +850,7 @@ def process_task_message(self, task_message: TaskQueueMessage) -> Dict[str, Any]
 
 ---
 
-## 15. Stage Completion: "Last Task Turns Out the Lights"
+## 15. Stage Completion: Last Task Completion Detection Pattern
 
 ### File: [core/machine.py:1217-1304](core/machine.py)
 
@@ -860,7 +861,7 @@ When the last task in a stage completes, CoreMachine advances to the next stage 
 def _handle_stage_completion(self, job_id, job_type, completed_stage):
     """
     Handle stage completion by advancing or completing job.
-    This is the "last task turns out lights" pattern.
+    This is the last task completion detection pattern.
     """
     # Get workflow to check total stages
     workflow = self.jobs_registry[job_type]
@@ -1053,13 +1054,13 @@ JOB (Controller Layer - Orchestration)
 - Parallel tasks only INSERT data (no DDL operations)
 - Prevents PostgreSQL lock contention
 
-### 18.5 "Last Task Turns Out the Lights"
+### 18.5 Last Task Completion Detection Pattern
 
 - Atomic SQL operation detects stage completion
 - Only the last task to complete triggers stage advancement
 - Prevents race conditions in parallel task completion
 
-### 18.6 Fast-Fail Validation
+### 18.6 Early Validation Pattern
 
 - Table existence checked at job submission time
 - Blob existence checked at job submission time

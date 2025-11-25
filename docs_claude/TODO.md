@@ -1,7 +1,53 @@
 # Active Tasks - process_raster_collection Implementation
 
-**Last Updated**: 21 NOV 2025 (23:50 UTC)
+**Last Updated**: 24 NOV 2025 (21:15 UTC)
 **Author**: Robert and Geospatial Claude Legion
+
+---
+
+## 🚨 CRITICAL: SQL Generator Creates Invalid Index on api_requests.status (24 NOV 2025)
+
+**Status**: ❌ **BUG** - Schema redeploy fails due to invalid index
+**Priority**: **CRITICAL** - Blocks schema redeploy API endpoint
+**Impact**: Cannot use `/api/dbadmin/maintenance/redeploy` endpoint
+
+### Problem Description
+
+The `PydanticToSQL` generator in `core/schema/sql_generator.py` creates an index on a non-existent column:
+
+```sql
+CREATE INDEX IF NOT EXISTS "idx_api_requests_status" ON "app"."api_requests" ("status")
+```
+
+**Error**: `column "status" does not exist`
+
+The `ApiRequest` model (in `core/models/platform.py`) does NOT have a `status` field, but the SQL generator is creating an index for it anyway.
+
+### Root Cause
+
+The `generate_indexes_composed()` method in `sql_generator.py` likely has hardcoded index definitions that include `status` for all tables, or incorrectly assumes all tables have a `status` column.
+
+### Fix Required
+
+1. **Locate**: `core/schema/sql_generator.py` - `generate_indexes_composed()` method (around line 363)
+2. **Fix**: Remove hardcoded `idx_api_requests_status` index, or make index generation model-aware (only create indexes for columns that exist in the model)
+
+### Temporary Workaround
+
+Schema can be deployed manually via psql with `autocommit=True` to skip failed statements:
+```python
+with psycopg.connect(conn_str, autocommit=True) as conn:
+    for stmt in statements:
+        try:
+            cur.execute(stmt)
+        except Exception:
+            pass  # Continue past errors
+```
+
+### Related Files
+- `core/schema/sql_generator.py` - SQL generation from Pydantic models
+- `core/models/platform.py` - ApiRequest model definition (no `status` field)
+- `triggers/schema_pydantic_deploy.py` - Deploy trigger that calls generator
 
 ---
 

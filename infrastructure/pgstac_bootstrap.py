@@ -1378,12 +1378,12 @@ def clear_stac_data(mode: str = 'all') -> Dict[str, Any]:
 
     try:
         # Get counts before deletion
-        # ARCHITECTURE PRINCIPLE (20 NOV 2025): Use managed identity connection helper
-        # Supports both managed identity tokens and password-based auth via USE_MANAGED_IDENTITY env var
-        from config import get_postgres_connection_string
-        conn_str = get_postgres_connection_string()
+        # ARCHITECTURE PRINCIPLE (24 NOV 2025): Use PostgreSQLRepository for managed identity support
+        # PostgreSQLRepository handles both managed identity tokens and password-based auth
+        from infrastructure.postgresql import PostgreSQLRepository
+        repo = PostgreSQLRepository()
 
-        with psycopg.connect(conn_str) as conn:
+        with repo._get_connection() as conn:
             with conn.cursor() as cur:
                 # Get pre-deletion counts
                 cur.execute("SELECT COUNT(*) FROM pgstac.items")

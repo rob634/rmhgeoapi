@@ -1386,11 +1386,12 @@ def clear_stac_data(mode: str = 'all') -> Dict[str, Any]:
         with repo._get_connection() as conn:
             with conn.cursor() as cur:
                 # Get pre-deletion counts
-                cur.execute("SELECT COUNT(*) FROM pgstac.items")
-                items_before = cur.fetchone()[0]
+                # NOTE: PostgreSQLRepository uses dict_row factory, so results are dicts
+                cur.execute("SELECT COUNT(*) as cnt FROM pgstac.items")
+                items_before = cur.fetchone()['cnt']
 
-                cur.execute("SELECT COUNT(*) FROM pgstac.collections")
-                collections_before = cur.fetchone()[0]
+                cur.execute("SELECT COUNT(*) as cnt FROM pgstac.collections")
+                collections_before = cur.fetchone()['cnt']
 
                 logger.info(f"🚨 STAC NUKE - Mode: {mode}")
                 logger.info(f"   Items before: {items_before}")

@@ -701,13 +701,13 @@ class ProcessLargeRasterWorkflow(RasterWorkflowsBase, JobBase):
                 "task_type": "create_mosaicjson",
                 "parameters": {
                     "cog_blobs": successful_cogs,
-                    "container_name": config.storage.silver.get_container('cogs'),
+                    "cog_container": config.storage.silver.get_container('cogs'),  # Where COGs are stored (for SAS URLs)
                     "job_id": job_id,
                     "bounds": bounds,
                     "band_names": job_params.get("band_names", {5: "Red", 3: "Green", 2: "Blue"}),  # dict[int, str] format
                     "overview_level": job_params.get("overview_level", 2),
                     "maxzoom": job_params.get("maxzoom"),  # Pass through maxzoom (None = use config default)
-                    "output_container": config.storage.silver.get_container('mosaicjson'),
+                    "output_container": config.storage.silver.get_container('mosaicjson'),  # Where MosaicJSON is written
                     "collection_id": collection_id,
                     "output_folder": None  # Flat namespace - write to container root
                 }

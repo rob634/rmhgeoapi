@@ -225,12 +225,28 @@ def extract_stac_metadata(params: dict) -> dict[str, Any]:
             logger.info(f"📡 STEP 3: Starting STAC extraction from blob (this may take 30-60s)...")
             extract_start = datetime.utcnow()
 
+            # STEP 3A: Extract platform and app metadata for STAC enrichment (25 NOV 2025)
+            platform_meta = None
+            app_meta = None
+            try:
+                from services.stac_metadata_helper import PlatformMetadata, AppMetadata
+                platform_meta = PlatformMetadata.from_job_params(params)
+                app_meta = AppMetadata(
+                    job_id=params.get('_job_id'),
+                    job_type=params.get('_job_type', 'stac_catalog_container')
+                )
+                logger.debug(f"   Step 3A: Platform/App metadata extracted - job_id={params.get('_job_id')}")
+            except Exception as meta_err:
+                logger.warning(f"   Step 3A: Metadata extraction failed (non-critical): {meta_err}")
+
             # Pass item_id if provided, otherwise auto-generate
             item = stac_service.extract_item_from_blob(
                 container=container_name,
                 blob_name=blob_name,
                 collection_id=collection_id,
-                item_id=item_id  # Will be None if not provided, service will auto-generate
+                item_id=item_id,  # Will be None if not provided, service will auto-generate
+                platform_meta=platform_meta,
+                app_meta=app_meta
             )
 
             extract_duration = (datetime.utcnow() - extract_start).total_seconds()

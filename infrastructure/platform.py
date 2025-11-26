@@ -9,7 +9,7 @@
 # INTERFACES: PostgreSQLRepository (from infrastructure.postgresql)
 # PYDANTIC_MODELS: ApiRequest
 # DEPENDENCIES: psycopg, psycopg.sql, infrastructure.postgresql
-# SOURCE: PostgreSQL database (app.api_requests)
+# SOURCE: PostgreSQL database (app.api_requests) - Platform tables live in app schema
 # SCOPE: Platform layer - thin tracking for DDH status lookups
 # VALIDATION: SQL injection prevention via psycopg.sql composition
 # PATTERNS: Repository pattern, SQL composition, thin tracking

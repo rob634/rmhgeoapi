@@ -332,6 +332,18 @@ class ProcessRasterWorkflow(JobBase):
                 f"Available blobs can be listed via /api/containers/{container_name}/blobs endpoint."
             )
 
+        # ================================================================
+        # DDH Platform Metadata Pass-through (26 NOV 2025)
+        # ================================================================
+        # These fields are NOT validated - just preserved for STAC metadata.
+        # Platform layer passes DDH identifiers which flow through to STAC items
+        # as platform:* properties for data lineage and discovery.
+        # ================================================================
+        platform_fields = ['dataset_id', 'resource_id', 'version_id', 'access_level', 'stac_item_id']
+        for field in platform_fields:
+            if field in params and params[field] is not None:
+                validated[field] = params[field]
+
         return validated
 
     @staticmethod
@@ -601,12 +613,18 @@ class ProcessRasterWorkflow(JobBase):
             task_params = {
                 "container_name": cog_container,
                 "blob_name": cog_blob,
-                "collection_id": collection_id
+                "collection_id": collection_id,
+                # DDH Platform Metadata (26 NOV 2025) - flow through to STAC item
+                "dataset_id": job_params.get('dataset_id'),
+                "resource_id": job_params.get('resource_id'),
+                "version_id": job_params.get('version_id'),
+                "access_level": job_params.get('access_level'),
             }
 
-            # Add item_id if provided
-            if item_id:
-                task_params["item_id"] = item_id
+            # Add item_id if provided (prefer stac_item_id from Platform, fallback to item_id)
+            stac_item_id = job_params.get('stac_item_id') or item_id
+            if stac_item_id:
+                task_params["item_id"] = stac_item_id
 
             return [
                 {

@@ -45,8 +45,10 @@ Request ID Generation:
     - Idempotent: same inputs = same ID
     - Natural deduplication of resubmitted requests
 
-Database Tables Auto-Generated:
+Database Tables Auto-Generated (stored in app schema with jobs/tasks):
     - app.api_requests (thin: request_id, DDH IDs, job_id, created_at)
+    - NOTE: Platform tables live in app schema (not a separate platform schema)
+    - This ensures api_requests is cleared during full-rebuild with other app tables
 
 Removed (22 NOV 2025):
     - app.orchestration_jobs table (no job chaining)

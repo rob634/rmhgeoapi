@@ -122,10 +122,12 @@ class STACAPIService:
                 }
             ]
 
-            # Add links to each collection
+            # Add links to each collection (preserving custom TiTiler links)
             for coll in response['collections']:
                 coll_id = coll.get('id', '')
-                coll['links'] = [
+
+                # Build standard STAC links
+                standard_links = [
                     {
                         "rel": "self",
                         "type": "application/json",
@@ -152,6 +154,14 @@ class STACAPIService:
                     }
                 ]
 
+                # FIX (25 NOV 2025): Preserve TiTiler links stored in pgstac database
+                existing_links = coll.get('links', [])
+                standard_rels = {'self', 'items', 'parent', 'root'}
+                custom_links = [link for link in existing_links if link.get('rel') not in standard_rels]
+
+                # Combine: standard links + custom links (TiTiler preview, tilejson, tiles)
+                coll['links'] = standard_links + custom_links
+
         return response
 
     def get_collection(self, collection_id: str, base_url: str) -> Dict[str, Any]:
@@ -170,8 +180,8 @@ class STACAPIService:
         response = get_collection(collection_id)
 
         if 'error' not in response:
-            # infrastructure.stac.get_collection returns collection directly, not wrapped
-            response['links'] = [
+            # Build standard STAC links
+            standard_links = [
                 {
                     "rel": "self",
                     "type": "application/json",
@@ -197,6 +207,18 @@ class STACAPIService:
                     "title": "Root catalog"
                 }
             ]
+
+            # FIX (25 NOV 2025): Preserve TiTiler links stored in pgstac database
+            # The collection may have preview/tilejson/tiles links added during creation
+            # Merge standard links with existing links (standard links first, then custom)
+            existing_links = response.get('links', [])
+
+            # Filter out existing standard links (self, items, parent, root) to avoid duplicates
+            standard_rels = {'self', 'items', 'parent', 'root'}
+            custom_links = [link for link in existing_links if link.get('rel') not in standard_rels]
+
+            # Combine: standard links + custom links (TiTiler preview, tilejson, tiles)
+            response['links'] = standard_links + custom_links
 
         return response
 

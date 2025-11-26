@@ -223,7 +223,7 @@ Jobs inheriting from JobBaseMixin MUST define:
 
     parameters_schema: Dict[str, Dict[str, Any]]
         Declarative parameter validation schema
-        Supported types: 'int', 'str', 'float', 'bool'
+        Supported types: 'int', 'str', 'float', 'bool', 'list', 'dict'
         Supported constraints: 'required', 'default', 'min', 'max', 'allowed'
         Example:
             {
@@ -363,7 +363,7 @@ class JobBaseMixin(ABC):
         Schema format:
             {
                 'param_name': {
-                    'type': 'int'|'str'|'float'|'bool'|'list',
+                    'type': 'int'|'str'|'float'|'bool'|'list'|'dict',
                     'required': True|False,
                     'default': <value>,
                     'min': <number>,  # For int/float
@@ -428,6 +428,8 @@ class JobBaseMixin(ABC):
                 value = cls._validate_bool(param_name, value)
             elif param_type == 'list':
                 value = cls._validate_list(param_name, value, schema)
+            elif param_type == 'dict':
+                value = cls._validate_dict(param_name, value, schema)
             else:
                 raise ValueError(f"Unknown type '{param_type}' for parameter '{param_name}'")
 
@@ -508,6 +510,15 @@ class JobBaseMixin(ABC):
         if not isinstance(value, list):
             raise ValueError(
                 f"Parameter '{param_name}' must be a list, got {type(value).__name__}"
+            )
+        return value
+
+    @staticmethod
+    def _validate_dict(param_name: str, value: Any, schema: dict) -> dict:
+        """Validate dict parameter."""
+        if not isinstance(value, dict):
+            raise ValueError(
+                f"Parameter '{param_name}' must be a dict, got {type(value).__name__}"
             )
         return value
 

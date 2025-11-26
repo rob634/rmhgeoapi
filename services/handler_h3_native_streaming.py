@@ -2,28 +2,28 @@
 # CLAUDE CONTEXT - H3 NATIVE STREAMING HANDLER
 # ============================================================================
 # EPOCH: 4 - ACTIVE ✅
-# STATUS: Service Layer - H3 grid generation with Python native h3-py + async streaming to PostGIS
+# STATUS: Service Layer - H3 grid generation with Python native h3-py + streaming to PostGIS
 # PURPOSE: Generate H3 hexagonal grids using h3-py C bindings and stream directly to PostGIS
-# LAST_REVIEWED: 9 NOV 2025
+# LAST_REVIEWED: 25 NOV 2025
 # EXPORTS: h3_native_streaming_postgis (task handler)
 # INTERFACES: Task handler interface (dict → dict)
-# DEPENDENCIES: h3>=4.0.0 (C bindings), asyncpg>=0.29.0, psycopg[binary], shapely
+# DEPENDENCIES: h3>=4.0.0 (C bindings), psycopg[binary], shapely, infrastructure.h3_repository
 # SOURCE: Task parameters from CoreMachine jobs
 # SCOPE: H3 grid generation (Stage 1 of create_h3_base and generate_h3_level4 jobs)
 # VALIDATION: Task parameter validation, PostGIS connection validation
-# PATTERNS: Generator pattern (memory efficiency), async I/O (performance), batch insertion
+# PATTERNS: Generator pattern (memory efficiency), Repository pattern, batch insertion
 # ENTRY_POINTS: Called by CoreMachine task processor via services.ALL_HANDLERS registry
 # INDEX:
 #   - Lines 30-80: generate_h3_cells_native() - h3-py generator function
-#   - Lines 85-150: stream_to_postgis_async() - async batch insertion to PostGIS
-#   - Lines 155-250: h3_native_streaming_postgis() - main task handler with metrics
+#   - Lines 85-130: stream_to_postgis_sync() - batch insertion via H3Repository
+#   - Lines 135-250: h3_native_streaming_postgis() - main task handler with metrics
 # ============================================================================
 
 """
 H3 Native Streaming Handler
 
 Generates H3 hexagonal grids using h3-py (Python bindings to Uber's C library)
-and streams directly to PostGIS using async I/O for optimal performance.
+and streams directly to PostGIS using H3Repository for managed identity support.
 
 Performance Comparison:
 - DuckDB approach: 60-90 seconds (SQL overhead)
@@ -32,13 +32,14 @@ Performance Comparison:
 
 Architecture:
 1. Generator pattern: Yields H3 cells one at a time (memory efficient)
-2. Async I/O: Non-blocking PostgreSQL writes (overlaps CPU + I/O)
+2. H3Repository: Managed identity authentication, safe SQL composition
 3. Batch insertion: 1000 cells per batch (optimizes network round-trips)
+
+Updated 25 NOV 2025: Replaced asyncpg with H3Repository for managed identity support.
 """
 
 import time
-import asyncio
-from typing import Dict, Any, Generator, Tuple
+from typing import Dict, Any, Generator, List
 import psutil
 import logging
 
@@ -88,12 +89,11 @@ def generate_h3_cells_native(
         children = h3.cell_to_children(base_cell, resolution)
 
         for cell in children:
-            # Convert H3 index to integer (h3-py returns hex strings in some versions)
+            # h3 v4 returns hex strings - convert to int for database storage
             if isinstance(cell, str):
-                h3_index_int = int(cell, 16)
+                h3_index_int = h3.str_to_int(cell)
             else:
-                # Newer h3-py versions return integers directly
-                h3_index_int = cell
+                h3_index_int = int(cell)
 
             # Get cell boundary as list of (lat, lon) tuples
             boundary = h3.cell_to_boundary(cell)
@@ -126,7 +126,7 @@ def generate_h3_cells_native(
     logger.info(f"H3 cell generation complete - total cells: {total_generated}")
 
 
-async def stream_to_postgis_async(
+def stream_to_postgis_sync(
     cells_generator: Generator[Dict[str, Any], None, None],
     grid_id: str,
     grid_type: str,
@@ -134,7 +134,11 @@ async def stream_to_postgis_async(
     batch_size: int = 1000
 ) -> int:
     """
-    Stream H3 cells to PostGIS using async I/O and batch insertion.
+    Stream H3 cells to PostGIS using H3Repository (managed identity safe).
+
+    Uses synchronous batch insertion via H3Repository.insert_h3_cells().
+    No connection pooling - each batch gets a fresh connection that is
+    closed immediately after use.
 
     Args:
         cells_generator: Generator yielding H3 cell dictionaries
@@ -147,70 +151,40 @@ async def stream_to_postgis_async(
         Total number of cells inserted
 
     Performance:
-        - Async I/O: Overlaps CPU generation with network I/O
         - Batch insertion: Reduces round-trips vs single-row inserts
-        - Connection pooling: Reuses connections across batches
+        - Repository pattern: Managed identity authentication
+        - No pooling: Fresh connection per batch (safe for Azure Functions)
+
+    Updated 25 NOV 2025: Replaced asyncpg with H3Repository for managed identity support.
     """
-    try:
-        import asyncpg
-    except ImportError as e:
-        logger.error(f"Missing asyncpg library: {e}")
-        raise RuntimeError(f"Cannot stream to PostGIS - missing asyncpg: {e}")
+    from infrastructure.h3_repository import H3Repository
 
-    from config import get_config
-    from infrastructure.database_utils import batched_executemany_async
+    logger.info(f"Starting sync stream to PostGIS via H3Repository (grid_id={grid_id}, batch_size={batch_size})")
 
-    config = get_config()
+    repo = H3Repository()
+    batch: List[Dict[str, Any]] = []
+    total_inserted = 0
+    batch_count = 0
 
-    logger.info(f"Starting async stream to PostGIS (grid_id={grid_id}, batch_size={batch_size})")
+    for cell in cells_generator:
+        batch.append(cell)
 
-    # Create async connection pool (2-4 connections)
-    from config import get_postgres_connection_string
+        if len(batch) >= batch_size:
+            rows = repo.insert_h3_cells(batch, grid_id, grid_type, source_job_id)
+            total_inserted += rows
+            batch_count += 1
 
-    connection_string = get_postgres_connection_string()
+            if batch_count % 10 == 0:
+                logger.debug(f"Inserted {total_inserted:,} cells ({batch_count} batches)")
 
-    pool = await asyncpg.create_pool(
-        connection_string,
-        min_size=2,
-        max_size=4,
-        command_timeout=60
-    )
+            batch = []
 
-    try:
-        async with pool.acquire() as conn:
-            # Prepare SQL statement (asyncpg uses $1, $2 placeholders)
-            stmt = """
-                INSERT INTO geo.h3_grids
-                    (h3_index, resolution, geom, grid_id, grid_type, source_job_id)
-                VALUES
-                    ($1, $2, ST_GeomFromText($3, 4326), $4, $5, $6)
-                ON CONFLICT (h3_index, grid_id) DO NOTHING
-            """
+    # Insert remaining cells
+    if batch:
+        rows = repo.insert_h3_cells(batch, grid_id, grid_type, source_job_id)
+        total_inserted += rows
 
-            # Transform generator output to tuple format for batched insert
-            def data_rows():
-                for cell_data in cells_generator:
-                    yield (
-                        cell_data['h3_index'],
-                        cell_data['resolution'],
-                        cell_data['geom_wkt'],
-                        grid_id,
-                        grid_type,
-                        source_job_id
-                    )
-
-            # Use shared batched_executemany_async utility
-            total_inserted = await batched_executemany_async(
-                conn,
-                stmt,
-                data_rows(),
-                batch_size=batch_size,
-                description="H3 cells"
-            )
-
-    finally:
-        await pool.close()
-
+    logger.info(f"Stream complete: {total_inserted:,} cells inserted in {batch_count + (1 if batch else 0)} batches")
     return total_inserted
 
 
@@ -234,7 +208,7 @@ def h3_native_streaming_postgis(task_params: dict) -> dict:
             'success': True/False,
             'result': {
                 'grid_id': str,
-                'table_name': str ('geo.h3_grids'),
+                'table_name': str ('h3.grids'),
                 'rows_inserted': int,
                 'bbox': [minx, miny, maxx, maxy],
                 'processing_time_seconds': float,
@@ -304,22 +278,17 @@ def h3_native_streaming_postgis(task_params: dict) -> dict:
         # Generate cells using h3-py (generator pattern)
         cells_generator = generate_h3_cells_native(resolution, land_filter)
 
-        # Stream to PostGIS using async I/O
-        rows_inserted = asyncio.run(stream_to_postgis_async(
+        # Stream to PostGIS using H3Repository (managed identity safe)
+        rows_inserted = stream_to_postgis_sync(
             cells_generator,
             grid_id,
             grid_type,
             source_job_id
-        ))
+        )
 
-        # Calculate bbox from PostGIS
-        import psycopg
-        from config import get_config
-        config = get_config()
-
-        # Use PostgreSQLRepository for managed identity support (18 NOV 2025)
-        from infrastructure.postgresql import PostgreSQLRepository
-        repo = PostgreSQLRepository()
+        # Calculate bbox from PostGIS using H3Repository
+        from infrastructure.h3_repository import H3Repository
+        repo = H3Repository()
 
         with repo._get_connection() as conn:
             with conn.cursor() as cur:
@@ -331,12 +300,12 @@ def h3_native_streaming_postgis(task_params: dict) -> dict:
                         ST_YMax(extent) as maxy
                     FROM (
                         SELECT ST_Extent(geom) as extent
-                        FROM geo.h3_grids
+                        FROM h3.grids
                         WHERE grid_id = %s
                     ) AS bbox_calc
                 """, (grid_id,))
                 bbox_row = cur.fetchone()
-                bbox = [bbox_row['minx'], bbox_row['miny'], bbox_row['maxx'], bbox_row['maxy']] if bbox_row else [-180, -90, 180, 90]
+                bbox = [bbox_row['minx'], bbox_row['miny'], bbox_row['maxx'], bbox_row['maxy']] if bbox_row and bbox_row['minx'] else [-180, -90, 180, 90]
 
         end_memory = process.memory_info().rss / 1024 / 1024
         processing_time = time.time() - start_time
@@ -351,7 +320,7 @@ def h3_native_streaming_postgis(task_params: dict) -> dict:
             'success': True,
             'result': {
                 'grid_id': grid_id,
-                'table_name': 'geo.h3_grids',
+                'table_name': 'h3.grids',
                 'rows_inserted': rows_inserted,
                 'bbox': bbox,
                 'processing_time_seconds': round(processing_time, 2),

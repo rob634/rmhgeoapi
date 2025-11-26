@@ -310,6 +310,23 @@ def _create_stac_collection_impl(
             )
         )
 
+        # Add ISO3 country attribution to collection extra_fields (25 NOV 2025)
+        # Uses centralized ISO3AttributionService for geographic metadata
+        try:
+            from services.iso3_attribution import ISO3AttributionService
+            iso3_service = ISO3AttributionService()
+            iso3_attribution = iso3_service.get_attribution_for_bbox(spatial_extent)
+
+            if iso3_attribution.available and iso3_attribution.iso3_codes:
+                collection.extra_fields['geo:iso3'] = iso3_attribution.iso3_codes
+                collection.extra_fields['geo:primary_iso3'] = iso3_attribution.primary_iso3
+                if iso3_attribution.countries:
+                    collection.extra_fields['geo:countries'] = iso3_attribution.countries
+                logger.debug(f"   Added ISO3 attribution to collection: {iso3_attribution.primary_iso3}")
+        except Exception as e:
+            # Non-fatal: Log warning but continue - collection can exist without country codes
+            logger.warning(f"   ISO3 attribution failed for collection (non-fatal): {e}")
+
         # CRITICAL (12 NOV 2025): CREATE COLLECTION FIRST before Items
         # PgSTAC requires collections to exist before items because collections
         # create table partitions that items use. Without collection, item insertion

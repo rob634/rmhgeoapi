@@ -1025,35 +1025,36 @@ class AdminDbMaintenanceTrigger:
             # ================================================================
             # STEP 6: Create system STAC collections
             # ================================================================
+            # FIX (26 NOV 2025): Use create_production_collection() directly
+            # instead of going through mock HTTP trigger which was silently failing
             logger.info("📚 Step 6/8: Creating system STAC collections...")
             step6 = {"step": 6, "action": "create_system_collections", "status": "pending", "collections": []}
 
             try:
-                from infrastructure.pgstac_bootstrap import get_system_stac_collections
-                from triggers.stac_collections import stac_collections_trigger
-                from unittest.mock import MagicMock
+                from infrastructure.pgstac_bootstrap import PgStacBootstrap
 
-                system_collections = get_system_stac_collections()
+                # Create system collections directly via PgStacBootstrap
+                # This bypasses the HTTP trigger which requires route_params
+                bootstrap = PgStacBootstrap()
+                system_collection_types = ['system-vectors', 'system-rasters']
 
-                for collection_data in system_collections:
+                for collection_type in system_collection_types:
                     try:
-                        mock_req = MagicMock()
-                        mock_req.method = 'POST'
-                        mock_req.get_json.return_value = collection_data
+                        result = bootstrap.create_production_collection(collection_type)
 
-                        result_response = stac_collections_trigger.handle_request(mock_req)
-                        result = json.loads(result_response.get_body().decode('utf-8'))
-
-                        if result_response.status_code in [200, 201] or result.get('status') == 'success':
-                            step6["collections"].append(collection_data['id'])
-                            logger.info(f"✅ Created collection: {collection_data['id']}")
+                        if result.get('success'):
+                            step6["collections"].append(collection_type)
+                            if result.get('existed'):
+                                logger.info(f"⏭️ Collection {collection_type} already exists (idempotent)")
+                            else:
+                                logger.info(f"✅ Created collection: {collection_type}")
                         else:
-                            logger.warning(f"⚠️ Failed to create collection {collection_data['id']}: {result.get('error')}")
+                            logger.warning(f"⚠️ Failed to create collection {collection_type}: {result.get('error')}")
 
                     except Exception as col_e:
-                        logger.warning(f"⚠️ Exception creating collection {collection_data['id']}: {col_e}")
+                        logger.warning(f"⚠️ Exception creating collection {collection_type}: {col_e}")
 
-                step6["status"] = "success" if len(step6["collections"]) >= 1 else "partial"
+                step6["status"] = "success" if len(step6["collections"]) >= 2 else "partial"
 
             except Exception as e:
                 logger.error(f"❌ Exception during system collections creation: {e}")

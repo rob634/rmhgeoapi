@@ -13,8 +13,9 @@
 # SCOPE: Multi-resolution cascade generation with batching support
 # VALIDATION: Parent grid existence, batch bounds checking
 # PATTERNS: Task handler, Batch processing, Multi-level cascade, ON CONFLICT idempotency
+# IDEMPOTENCY: Batch-level tracking via H3BatchTracker (26 NOV 2025)
 # ENTRY_POINTS: Registered in services/__init__.py as "cascade_h3_descendants"
-# INDEX: cascade_h3_descendants:44, _cascade_batch:165, _insert_descendants:245
+# INDEX: cascade_h3_descendants:44, _cascade_batch:175, _insert_descendants:255
 # ============================================================================
 
 """
@@ -35,6 +36,7 @@ Example Use Case:
 Key Properties:
     - No spatial filtering needed (children inherit parent land membership)
     - Idempotent (ON CONFLICT DO NOTHING for duplicate cells)
+    - Batch-level idempotency via H3BatchTracker (enables resumable jobs)
     - Batch processing support (process N parent cells per task)
     - Multi-resolution in single operation (res 2 → res 7 direct)
 
@@ -61,6 +63,7 @@ def cascade_h3_descendants(params: Dict[str, Any], context: Dict[str, Any] = Non
             - grid_id_prefix (str): Prefix for grid IDs (e.g., "test_albania")
             - batch_start (int, optional): Starting parent index for batching (default: 0)
             - batch_size (int, optional): Number of parents to process (default: all remaining)
+            - batch_index (int, optional): Batch index for idempotency tracking (default: 0)
             - source_job_id (str): Job ID for tracking
 
         context: Optional execution context (not used in this handler)
@@ -113,6 +116,7 @@ def cascade_h3_descendants(params: Dict[str, Any], context: Dict[str, Any] = Non
     grid_id_prefix = params.get('grid_id_prefix')
     batch_start = params.get('batch_start', 0)
     batch_size = params.get('batch_size')  # None = process all remaining
+    batch_index = params.get('batch_index', 0)  # For idempotency tracking
     source_job_id = params.get('source_job_id')
 
     if not parent_grid_id:
@@ -124,17 +128,45 @@ def cascade_h3_descendants(params: Dict[str, Any], context: Dict[str, Any] = Non
     if not grid_id_prefix:
         raise ValueError("grid_id_prefix is required")
 
+    # Generate batch_id for idempotency tracking
+    # Format: {job_id_prefix}-s2-batch{index}
+    batch_id = f"{source_job_id[:8] if source_job_id else 'unknown'}-s2-batch{batch_index}"
+
     logger.info(f"🌳 H3 Cascade - Multi-Level Descendants")
     logger.info(f"   Parent Grid: {parent_grid_id}")
     logger.info(f"   Target Resolutions: {target_resolutions}")
     logger.info(f"   Grid ID Prefix: {grid_id_prefix}")
-    logger.info(f"   Batch: start={batch_start}, size={batch_size if batch_size else 'ALL'}")
+    logger.info(f"   Batch: start={batch_start}, size={batch_size if batch_size else 'ALL'}, id={batch_id}")
 
     try:
         from infrastructure.h3_repository import H3Repository
+        from infrastructure.h3_batch_tracking import H3BatchTracker
 
-        # Create repository
+        # Create repositories
         h3_repo = H3Repository()
+        batch_tracker = H3BatchTracker()
+
+        # STEP 1.5: IDEMPOTENCY CHECK - Skip if batch already completed
+        if source_job_id and batch_tracker.is_batch_completed(source_job_id, batch_id):
+            logger.info(f"✅ Batch {batch_id} already completed - skipping (idempotent)")
+            return {
+                "success": True,
+                "result": {
+                    "skipped": True,
+                    "batch_id": batch_id,
+                    "message": "Batch already completed (idempotent skip)"
+                }
+            }
+
+        # Record batch as started
+        if source_job_id:
+            batch_tracker.start_batch(
+                job_id=source_job_id,
+                batch_id=batch_id,
+                stage_number=2,
+                batch_index=batch_index,
+                operation_type="cascade_h3_descendants"
+            )
 
         # STEP 2: Verify parent grid exists
         logger.info(f"🔍 Verifying parent grid exists...")
@@ -206,6 +238,15 @@ def cascade_h3_descendants(params: Dict[str, Any], context: Dict[str, Any] = Non
         logger.info(f"   Resolutions: {target_resolutions}")
         logger.info(f"   Cells per resolution: {cells_per_resolution}")
 
+        # STEP 6: Mark batch as completed (idempotency tracking)
+        if source_job_id:
+            batch_tracker.complete_batch(
+                job_id=source_job_id,
+                batch_id=batch_id,
+                items_processed=parents_processed,
+                items_inserted=total_cells_inserted
+            )
+
         return {
             "success": True,
             "result": {
@@ -213,6 +254,8 @@ def cascade_h3_descendants(params: Dict[str, Any], context: Dict[str, Any] = Non
                 "parents_processed": parents_processed,
                 "batch_start": batch_start,
                 "batch_size": batch_size,
+                "batch_index": batch_index,
+                "batch_id": batch_id,
                 "target_resolutions": target_resolutions,
                 "cells_per_resolution": cells_per_resolution,
                 "total_cells_generated": total_cells_generated,
@@ -227,10 +270,21 @@ def cascade_h3_descendants(params: Dict[str, Any], context: Dict[str, Any] = Non
         logger.error(f"❌ Cascade failed: {e}")
         import traceback
         logger.error(traceback.format_exc())
+
+        # Record batch failure (for debugging and retry tracking)
+        try:
+            from infrastructure.h3_batch_tracking import H3BatchTracker
+            batch_tracker = H3BatchTracker()
+            if source_job_id:
+                batch_tracker.fail_batch(source_job_id, batch_id, str(e))
+        except Exception as tracking_error:
+            logger.warning(f"Failed to record batch failure: {tracking_error}")
+
         return {
             "success": False,
             "error": f"Cascade failed: {str(e)}",
-            "error_type": type(e).__name__
+            "error_type": type(e).__name__,
+            "batch_id": batch_id
         }
 
 
@@ -263,16 +317,21 @@ def _cascade_batch(
     logger.debug(f"   Cascading {len(parent_cells):,} parents to res {target_resolution}...")
 
     for h3_index, parent_res2 in parent_cells:
+        # Convert integer h3_index to hex string for h3 library v4+
+        # Database stores BIGINT, but h3 v4 API expects hex strings
+        h3_str = h3.int_to_str(h3_index)
+
         # Generate children at target resolution using H3
         # NOTE: h3.cell_to_children() can jump multiple levels (res 2 → res 7 directly!)
-        child_indices = h3.cell_to_children(h3_index, target_resolution)
+        child_indices = h3.cell_to_children(h3_str, target_resolution)
 
         for child_index in child_indices:
-            # Convert to int if string
+            # h3 v4 returns hex strings - convert to int for database storage
+            # Use h3.str_to_int() for consistent conversion
             if isinstance(child_index, str):
-                child_index_int = int(child_index, 16)
+                child_index_int = h3.str_to_int(child_index)
             else:
-                child_index_int = child_index
+                child_index_int = int(child_index)
 
             # Get geometry as WKT (cell_to_boundary returns [(lat, lng), ...])
             boundary = h3.cell_to_boundary(child_index)

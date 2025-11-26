@@ -1074,3 +1074,219 @@ class VectorToPostGISHandler:
             'geometry_column': create_result['geometry_column'],
             'arcgis_mode': arcgis_mode
         }
+
+    # =========================================================================
+    # IDEMPOTENT CHUNK OPERATIONS (26 NOV 2025)
+    # =========================================================================
+    # Methods for process_vector workflow with built-in idempotency via
+    # DELETE+INSERT pattern using etl_batch_id column.
+    # =========================================================================
+
+    def create_table_with_batch_tracking(
+        self,
+        table_name: str,
+        schema: str,
+        gdf: gpd.GeoDataFrame,
+        indexes: dict = None
+    ) -> None:
+        """
+        Create PostGIS table with etl_batch_id column for idempotent chunk tracking.
+
+        IDEMPOTENT: Uses IF NOT EXISTS - safe to call multiple times.
+
+        Schema includes:
+        - id: SERIAL PRIMARY KEY
+        - geom: GEOMETRY (auto-detected type, 4326)
+        - etl_batch_id: TEXT (for DELETE+INSERT pattern)
+        - [user columns from GeoDataFrame]
+
+        Indexes created:
+        - idx_{table}_geom: GIST spatial index (if indexes.spatial=True)
+        - idx_{table}_etl_batch_id: BTREE for fast DELETE lookups
+        - idx_{table}_{col}: BTREE for each column in indexes.attributes
+
+        Args:
+            table_name: Target table name
+            schema: Target schema (default: 'geo')
+            gdf: Sample GeoDataFrame for schema detection
+            indexes: Index configuration dict with keys:
+                - spatial: bool (default True)
+                - attributes: list of column names
+                - temporal: list of column names for DESC indexes
+        """
+        # Default index config
+        if indexes is None:
+            indexes = {'spatial': True, 'attributes': [], 'temporal': []}
+
+        with self._pg_repo._get_connection() as conn:
+            with conn.cursor() as cur:
+                # Detect geometry type from first feature
+                geom_type = gdf.geometry.iloc[0].geom_type.upper()
+
+                # Build column definitions
+                columns = []
+                for col in gdf.columns:
+                    if col == 'geometry':
+                        continue
+                    pg_type = self._get_postgres_type(gdf[col].dtype)
+                    columns.append(sql.Identifier(col) + sql.SQL(f" {pg_type}"))
+
+                # Create table with id, geom, etl_batch_id, and user columns
+                create_table = sql.SQL("""
+                    CREATE TABLE IF NOT EXISTS {schema}.{table} (
+                        id SERIAL PRIMARY KEY,
+                        geom GEOMETRY({geom_type}, 4326),
+                        etl_batch_id TEXT,
+                        {columns}
+                    )
+                """).format(
+                    schema=sql.Identifier(schema),
+                    table=sql.Identifier(table_name),
+                    geom_type=sql.SQL(geom_type),
+                    columns=sql.SQL(', ').join(columns) if columns else sql.SQL('')
+                )
+                cur.execute(create_table)
+
+                # Get column names for index validation
+                column_names = [col for col in gdf.columns if col != 'geometry']
+
+                # Create spatial index
+                if indexes.get('spatial', True):
+                    cur.execute(sql.SQL("""
+                        CREATE INDEX IF NOT EXISTS {idx_name}
+                        ON {schema}.{table} USING GIST (geom)
+                    """).format(
+                        idx_name=sql.Identifier(f"idx_{table_name}_geom"),
+                        schema=sql.Identifier(schema),
+                        table=sql.Identifier(table_name)
+                    ))
+
+                # Create etl_batch_id index (CRITICAL for DELETE performance)
+                cur.execute(sql.SQL("""
+                    CREATE INDEX IF NOT EXISTS {idx_name}
+                    ON {schema}.{table} (etl_batch_id)
+                """).format(
+                    idx_name=sql.Identifier(f"idx_{table_name}_etl_batch_id"),
+                    schema=sql.Identifier(schema),
+                    table=sql.Identifier(table_name)
+                ))
+
+                # Create attribute indexes
+                for attr_col in indexes.get('attributes', []):
+                    if attr_col in column_names:
+                        cur.execute(sql.SQL("""
+                            CREATE INDEX IF NOT EXISTS {idx_name}
+                            ON {schema}.{table} ({col})
+                        """).format(
+                            idx_name=sql.Identifier(f"idx_{table_name}_{attr_col}"),
+                            schema=sql.Identifier(schema),
+                            table=sql.Identifier(table_name),
+                            col=sql.Identifier(attr_col)
+                        ))
+
+                # Create temporal indexes (DESC for time-series queries)
+                for temp_col in indexes.get('temporal', []):
+                    if temp_col in column_names:
+                        cur.execute(sql.SQL("""
+                            CREATE INDEX IF NOT EXISTS {idx_name}
+                            ON {schema}.{table} ({col} DESC)
+                        """).format(
+                            idx_name=sql.Identifier(f"idx_{table_name}_{temp_col}_desc"),
+                            schema=sql.Identifier(schema),
+                            table=sql.Identifier(table_name),
+                            col=sql.Identifier(temp_col)
+                        ))
+
+                conn.commit()
+                logger.info(f"✅ Created table {schema}.{table_name} with etl_batch_id tracking")
+
+    def insert_chunk_idempotent(
+        self,
+        chunk: gpd.GeoDataFrame,
+        table_name: str,
+        schema: str,
+        batch_id: str
+    ) -> Dict[str, int]:
+        """
+        Insert GeoDataFrame chunk with DELETE+INSERT idempotency pattern.
+
+        IDEMPOTENCY MECHANISM:
+        1. DELETE all rows WHERE etl_batch_id = batch_id
+        2. INSERT new rows with that batch_id
+
+        Both operations in single transaction - atomic success or failure.
+
+        This ensures re-running the same task:
+        - Deletes the partial/complete previous attempt
+        - Inserts fresh data
+        - Results in exactly the same final state
+
+        Args:
+            chunk: GeoDataFrame chunk to insert
+            table_name: Target table
+            schema: Target schema
+            batch_id: Unique identifier for this chunk (job_id[:8]-chunk-N)
+
+        Returns:
+            {'rows_deleted': int, 'rows_inserted': int}
+        """
+        rows_deleted = 0
+        rows_inserted = 0
+
+        with self._pg_repo._get_connection() as conn:
+            with conn.cursor() as cur:
+                # Step 1: DELETE existing rows for this batch (IDEMPOTENCY)
+                delete_stmt = sql.SQL("""
+                    DELETE FROM {schema}.{table}
+                    WHERE etl_batch_id = %s
+                """).format(
+                    schema=sql.Identifier(schema),
+                    table=sql.Identifier(table_name)
+                )
+                cur.execute(delete_stmt, (batch_id,))
+                rows_deleted = cur.rowcount
+
+                if rows_deleted > 0:
+                    logger.info(f"🔄 Deleted {rows_deleted} existing rows for batch {batch_id} (idempotent re-run)")
+
+                # Step 2: INSERT new rows with batch_id
+                attr_cols = [col for col in chunk.columns if col != 'geometry']
+
+                if attr_cols:
+                    cols_sql = sql.SQL(', ').join([sql.Identifier(col) for col in attr_cols])
+                    placeholders = sql.SQL(', ').join([sql.Placeholder()] * len(attr_cols))
+
+                    insert_stmt = sql.SQL("""
+                        INSERT INTO {schema}.{table} (geom, etl_batch_id, {cols})
+                        VALUES (ST_GeomFromText(%s, 4326), %s, {placeholders})
+                    """).format(
+                        schema=sql.Identifier(schema),
+                        table=sql.Identifier(table_name),
+                        cols=cols_sql,
+                        placeholders=placeholders
+                    )
+                else:
+                    insert_stmt = sql.SQL("""
+                        INSERT INTO {schema}.{table} (geom, etl_batch_id)
+                        VALUES (ST_GeomFromText(%s, 4326), %s)
+                    """).format(
+                        schema=sql.Identifier(schema),
+                        table=sql.Identifier(table_name)
+                    )
+
+                # Insert each row with batch_id
+                for idx, row in chunk.iterrows():
+                    geom_wkt = row.geometry.wkt
+
+                    if attr_cols:
+                        values = [geom_wkt, batch_id] + [row[col] for col in attr_cols]
+                    else:
+                        values = [geom_wkt, batch_id]
+
+                    cur.execute(insert_stmt, values)
+                    rows_inserted += 1
+
+                conn.commit()
+
+        logger.info(f"✅ Chunk {batch_id}: deleted={rows_deleted}, inserted={rows_inserted}")
+        return {'rows_deleted': rows_deleted, 'rows_inserted': rows_inserted}

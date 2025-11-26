@@ -95,7 +95,7 @@ class H3Config(BaseModel):
     system_admin0_table: PostGIS table with admin0 (country) boundaries
         - Used for spatial filtering during H3 grid generation
         - Full qualified name: schema.table
-        - Default: "geo.system_admin0_boundaries"
+        - Default: "geo.system_admin0"
 
     spatial_filter_table: Short reference key for H3 spatial filters
         - Used in job parameters to select which filter to apply
@@ -143,7 +143,7 @@ class H3Config(BaseModel):
 
     # System reference tables (PostGIS)
     system_admin0_table: str = Field(
-        default="geo.system_admin0_boundaries",
+        default="geo.system_admin0",
         description=(
             "PostGIS table containing admin0 (country) boundaries. "
             "Full qualified name (schema.table). "
@@ -188,7 +188,7 @@ class H3Config(BaseModel):
 
         Environment Variables:
         ---------------------
-        H3_SYSTEM_ADMIN0_TABLE: PostGIS admin0 table (default: "geo.system_admin0_boundaries")
+        H3_SYSTEM_ADMIN0_TABLE: PostGIS admin0 table (default: "geo.system_admin0")
         H3_SPATIAL_FILTER_TABLE: Spatial filter key (default: "system_admin0")
         H3_DEFAULT_RESOLUTION: Default H3 resolution (default: 4)
         H3_ENABLE_LAND_FILTER: Enable land filtering (default: "true")
@@ -203,7 +203,7 @@ class H3Config(BaseModel):
         return cls(
             system_admin0_table=os.environ.get(
                 "H3_SYSTEM_ADMIN0_TABLE",
-                "geo.system_admin0_boundaries"
+                "geo.system_admin0"
             ),
             spatial_filter_table=os.environ.get(
                 "H3_SPATIAL_FILTER_TABLE",

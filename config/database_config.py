@@ -105,13 +105,12 @@ class DatabaseConfig(BaseModel):
 
     app_schema: str = Field(
         default="app",
-        description="PostgreSQL schema name for application tables (jobs, tasks, etc.)"
+        description="PostgreSQL schema name for application tables (jobs, tasks, api_requests, janitor_runs)"
     )
 
-    platform_schema: str = Field(
-        default="platform",
-        description="PostgreSQL schema name for platform orchestration"
-    )
+    # NOTE: platform_schema REMOVED (26 NOV 2025)
+    # Platform tables (api_requests) are stored in app schema, not a separate platform schema.
+    # This eliminates schema sprawl and ensures Platform tables are cleaned with full-rebuild.
 
     pgstac_schema: str = Field(
         default="pgstac",
@@ -274,7 +273,6 @@ class DatabaseConfig(BaseModel):
             "managed_identity_client_id": self.managed_identity_client_id[:8] + "..." if self.managed_identity_client_id else None,
             "postgis_schema": self.postgis_schema,
             "app_schema": self.app_schema,
-            "platform_schema": self.platform_schema,
             "pgstac_schema": self.pgstac_schema,
             "h3_schema": self.h3_schema
         }
@@ -294,7 +292,6 @@ class DatabaseConfig(BaseModel):
             database=os.environ["POSTGIS_DATABASE"],
             postgis_schema=os.environ.get("POSTGIS_SCHEMA", "geo"),
             app_schema=os.environ.get("APP_SCHEMA", "app"),
-            platform_schema=os.environ.get("PLATFORM_SCHEMA", "platform"),
             pgstac_schema=os.environ.get("PGSTAC_SCHEMA", "pgstac"),
             h3_schema=os.environ.get("H3_SCHEMA", "h3"),
             use_managed_identity=os.environ.get("USE_MANAGED_IDENTITY", "false").lower() == "true",

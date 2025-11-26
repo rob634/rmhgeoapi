@@ -87,10 +87,24 @@ from .handler_generate_h3_grid import generate_h3_grid  # Universal H3 handler (
 from .handler_cascade_h3_descendants import cascade_h3_descendants  # Multi-level cascade handler (15 NOV 2025) - res N → res N+1,N+2,etc
 from .handler_finalize_h3_pyramid import finalize_h3_pyramid  # H3 pyramid finalization (14 NOV 2025)
 from .vector.tasks import prepare_vector_chunks, upload_pickled_chunk
+from .vector.process_vector_tasks import process_vector_prepare, process_vector_upload  # Idempotent (26 NOV 2025)
 from .raster_mosaicjson import create_mosaicjson
 from .stac_collection import create_stac_collection
 from .tiling_scheme import generate_tiling_scheme
 from .tiling_extraction import extract_tiles
+from .fathom_etl import fathom_inventory, fathom_merge_stack, fathom_stac_register
+
+# ============================================================================
+# STAC METADATA HELPER (25 NOV 2025)
+# ============================================================================
+# Centralized STAC metadata enrichment - platform, app, geographic, visualization
+from .iso3_attribution import ISO3Attribution, ISO3AttributionService
+from .stac_metadata_helper import (
+    STACMetadataHelper,
+    PlatformMetadata,
+    AppMetadata,
+    VisualizationMetadata
+)
 
 # ============================================================================
 # EXPLICIT HANDLER REGISTRY
@@ -135,6 +149,14 @@ ALL_HANDLERS = {
     # Big Raster ETL handlers (24 OCT 2025)
     "generate_tiling_scheme": generate_tiling_scheme,  # Stage 1: Generate tiling scheme in EPSG:4326
     "extract_tiles": extract_tiles,                   # Stage 2: Extract tiles sequentially
+    # Fathom ETL handlers (26 NOV 2025)
+    "fathom_inventory": fathom_inventory,             # Stage 1: Parse CSV, create merge groups
+    "fathom_merge_stack": fathom_merge_stack,         # Stage 2: Merge tiles + stack bands
+    "fathom_stac_register": fathom_stac_register,     # Stage 3: STAC collection/items
+    # Idempotent Vector ETL handlers (26 NOV 2025)
+    "process_vector_prepare": process_vector_prepare,  # Stage 1: Load, validate, chunk, create table
+    "process_vector_upload": process_vector_upload,    # Stage 2: DELETE+INSERT idempotent upload
+    # Note: create_vector_stac already registered above - reused for Stage 3
 }
 
 # ============================================================================
@@ -186,7 +208,15 @@ def get_handler(task_type: str):
 validate_handler_registry()
 
 __all__ = [
+    # Handler registry
     'ALL_HANDLERS',
     'get_handler',
     'validate_handler_registry',
+    # STAC Metadata Helper (25 NOV 2025)
+    'STACMetadataHelper',
+    'PlatformMetadata',
+    'AppMetadata',
+    'VisualizationMetadata',
+    'ISO3Attribution',
+    'ISO3AttributionService',
 ]

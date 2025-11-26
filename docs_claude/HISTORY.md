@@ -1,9 +1,100 @@
 # Project History
 
-**Last Updated**: 20 NOV 2025 - STAC API Fix & End-to-End Validation ✅
+**Last Updated**: 26 NOV 2025 - Platform Schema Consolidation & DDH Metadata Passthrough ✅
 **Note**: For project history prior to September 11, 2025, see **OLDER_HISTORY.md**
 
 This document tracks completed architectural changes and improvements to the Azure Geospatial ETL Pipeline from September 11, 2025 onwards.
+
+---
+
+## 26 NOV 2025: Platform Schema Consolidation & DDH Metadata Passthrough ✅
+
+**Status**: ✅ **COMPLETE** - Platform layer fully operational with DDH identifiers flowing to STAC
+**Impact**: Simplified architecture, verified end-to-end DDH → CoreMachine → STAC metadata pipeline
+**Timeline**: Single session
+**Author**: Robert and Geospatial Claude Legion
+
+### 🎯 Achievement: Platform Schema Consolidation
+
+**Problem Solved**: The `platform_schema` config existed but was never used - `api_requests` table was already in `app` schema. This dead code was causing confusion.
+
+**What Was Removed**:
+- `platform_schema` field from `config/database_config.py`
+- References in `debug_dict()` and `from_environment()`
+- Misleading documentation suggesting Platform had its own schema
+
+**What Was Updated**:
+- `infrastructure/platform.py` - Clarified SOURCE comment about `app.api_requests`
+- `core/models/platform.py` - Updated docstring to document table location in app schema
+- `triggers/admin/db_data.py` - Fixed queries to use correct columns and schema
+
+**Benefit**: Platform tables (`api_requests`) now explicitly documented as living in `app` schema, ensuring they are cleared during full-rebuild with other CoreMachine tables.
+
+### 🔧 Deprecated Endpoints (HTTP 410)
+
+Removed `orchestration_jobs` table support (was removed 22 NOV 2025):
+- `GET /api/admin/db/platform/orchestration` → Returns HTTP 410 Gone
+- `GET /api/admin/db/platform/orchestration?request_id=X` → Returns HTTP 410 Gone
+
+**Migration Path**: Use `GET /api/admin/db/platform/requests` which includes `job_id` for CoreMachine lookup.
+
+### ⚙️ Worker Configuration Optimization
+
+**Changes Made**:
+```bash
+# Set worker process count (4 Python processes per instance)
+az functionapp config appsettings set --name rmhazuregeoapi \
+  --settings FUNCTIONS_WORKER_PROCESS_COUNT=4
+
+# host.json adjustments
+"serviceBus": {
+  "prefetchCount": 2,
+  "maxConcurrentCalls": 2  # Was 8, reduced to prevent DB overload
+}
+```
+
+**Result**: 4 workers × 2 concurrent calls = 8 concurrent DB connections (down from 16)
+
+**Why**: Previous configuration with `maxConcurrentCalls=8` was overwhelming the database with 16+ concurrent connections. New configuration balances parallelism with database capacity.
+
+### ✅ DDH Metadata Passthrough Verified
+
+**Test Performed**:
+```bash
+curl -X POST ".../api/jobs/submit/process_raster" \
+  -d '{
+    "container_name": "rmhazuregeobronze",
+    "blob_name": "dctest.tif",
+    "collection_id": "test-rasters",
+    "dataset_id": "ddh-dataset-123",
+    "resource_id": "ddh-resource-456",
+    "version_id": "v1-0",
+    "access_level": "public"
+  }'
+```
+
+**STAC Item Properties Verified**:
+```json
+{
+  "platform:access_level": "public",
+  "platform:client": "ddh",
+  "platform:dataset_id": "ddh-dataset-123",
+  "platform:resource_id": "ddh-resource-456",
+  "platform:version_id": "v1-0"
+}
+```
+
+**Conclusion**: DDH identifiers successfully flow from Platform layer through CoreMachine to STAC item properties. This enables DDH to lookup assets by their platform identifiers.
+
+### 📁 Files Modified
+
+| File | Changes |
+|------|---------|
+| `config/database_config.py` | Removed `platform_schema` field and references |
+| `infrastructure/platform.py` | Updated SOURCE comment |
+| `core/models/platform.py` | Updated docstring about table location |
+| `triggers/admin/db_data.py` | Fixed `_get_api_requests()`, `_get_api_request()`, deprecated orchestration endpoints |
+| `host.json` | Changed `maxConcurrentCalls` from 4 to 2, `prefetchCount` from 4 to 2 |
 
 ---
 

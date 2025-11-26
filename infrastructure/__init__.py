@@ -106,6 +106,7 @@ if TYPE_CHECKING:
     from .platform import PlatformRepository as _PlatformRepository
     from .platform import ApiRequestRepository as _ApiRequestRepository
     # NOTE: PlatformStatusRepository REMOVED (22 NOV 2025) - thin tracking pattern
+    from .h3_batch_tracking import H3BatchTracker as _H3BatchTracker
     from .interface_repository import (
         IJobRepository as _IJobRepository,
         ITaskRepository as _ITaskRepository,
@@ -163,6 +164,11 @@ def __getattr__(name: str):
         return ApiRequestRepository
     # NOTE: PlatformStatusRepository REMOVED - use ApiRequestRepository instead
 
+    # H3 batch tracking (26 NOV 2025 - idempotency framework)
+    elif name == "H3BatchTracker":
+        from .h3_batch_tracking import H3BatchTracker
+        return H3BatchTracker
+
     # Interfaces
     elif name == "IJobRepository":
         from .interface_repository import IJobRepository
@@ -196,6 +202,7 @@ __all__ = [
     "PlatformRepository",
     "ApiRequestRepository",
     # NOTE: PlatformStatusRepository REMOVED (22 NOV 2025)
+    "H3BatchTracker",  # Added 26 NOV 2025 - idempotency framework
     "IJobRepository",
     "ITaskRepository",
     "IBlobRepository",

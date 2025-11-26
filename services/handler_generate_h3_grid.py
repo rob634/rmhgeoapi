@@ -329,11 +329,11 @@ def _generate_from_base(resolution: int) -> List[Dict[str, Any]]:
             children = h3.cell_to_children(base_cell, resolution)
 
         for cell in children:
-            # Convert H3 index to integer
+            # h3 v4 returns hex strings - convert to int for database storage
             if isinstance(cell, str):
-                h3_index_int = int(cell, 16)
+                h3_index_int = h3.str_to_int(cell)
             else:
-                h3_index_int = cell
+                h3_index_int = int(cell)
 
             # Get geometry as WKT (cell_to_boundary returns [(lat, lng), ...])
             boundary = h3.cell_to_boundary(cell)
@@ -396,15 +396,18 @@ def _generate_from_cascade(
     cells = []
 
     for h3_index, parent_res2 in parent_batch:
+        # Convert integer h3_index to hex string for h3 library v4+
+        h3_str = h3.int_to_str(h3_index)
+
         # Generate 7 children for this parent (H3 deterministic)
-        child_indices = h3.cell_to_children(h3_index, target_resolution)
+        child_indices = h3.cell_to_children(h3_str, target_resolution)
 
         for child_index in child_indices:
-            # Convert to int if string
+            # h3 v4 returns hex strings - convert to int for database storage
             if isinstance(child_index, str):
-                child_index_int = int(child_index, 16)
+                child_index_int = h3.str_to_int(child_index)
             else:
-                child_index_int = child_index
+                child_index_int = int(child_index)
 
             # Get geometry as WKT (cell_to_boundary returns [(lat, lng), ...])
             boundary = h3.cell_to_boundary(child_index)

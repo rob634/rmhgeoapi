@@ -1388,7 +1388,7 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
         Check system reference tables required for spatial operations.
 
         System reference tables include:
-        - geo.system_admin0_boundaries - Country boundaries for ISO3 attribution
+        - geo.system_admin0 - Country boundaries for ISO3 attribution
 
         These tables are used for enriching STAC items with country codes and
         for H3 grid generation with land/ocean filtering.
@@ -1436,7 +1436,7 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                                 "exists": False,
                                 "error": f"Table {admin0_table} not found",
                                 "impact": "ISO3 country attribution will be unavailable for STAC items",
-                                "fix": "Load country boundaries from Natural Earth or GADM into geo.system_admin0_boundaries"
+                                "fix": "Load country boundaries from Natural Earth or GADM into geo.system_admin0"
                             }
 
                         # Check required columns

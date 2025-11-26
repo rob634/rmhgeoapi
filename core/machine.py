@@ -663,8 +663,18 @@ class CoreMachine:
             self.logger.debug(f"▶️ Executing handler for task {task_message.task_id[:16]}...")
             start_time = time.time()
 
+            # Inject job context into parameters (underscore prefix = system-injected)
+            # This allows handlers to access job_id, job_type, stage without modifying every job definition
+            enriched_params = {
+                **task_message.parameters,
+                '_job_id': task_message.parent_job_id,
+                '_job_type': task_message.job_type,
+                '_stage': task_message.stage,
+                '_task_id': task_message.task_id,
+            }
+
             # Execute handler (returns dict or TaskResult)
-            raw_result = handler(task_message.parameters)
+            raw_result = handler(enriched_params)
 
             elapsed = time.time() - start_time
             self.logger.debug(f"✅ Handler executed in {elapsed:.2f}s")

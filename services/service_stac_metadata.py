@@ -100,7 +100,9 @@ class StacMetadataService:
         blob_name: str,
         collection_id: str = 'dev',
         existing_metadata: Optional[Dict[str, Any]] = None,
-        item_id: Optional[str] = None
+        item_id: Optional[str] = None,
+        platform_meta: Optional['PlatformMetadata'] = None,
+        app_meta: Optional['AppMetadata'] = None
     ) -> Item:
         """
         Extract STAC Item from raster blob using rio-stac.
@@ -111,6 +113,8 @@ class StacMetadataService:
             collection_id: STAC collection ID (default: 'dev')
             existing_metadata: Optional metadata from analyze_single_blob()
             item_id: Optional custom STAC item ID (auto-generated if not provided)
+            platform_meta: Optional PlatformMetadata for DDH identifiers (25 NOV 2025)
+            app_meta: Optional AppMetadata for job linkage (25 NOV 2025)
 
         Returns:
             Validated stac-pydantic Item
@@ -123,7 +127,8 @@ class StacMetadataService:
             1. Generate SAS URL for rasterio access
             2. Let rio-stac extract geometry, bbox, projection, raster metadata
             3. Supplement with Azure blob metadata
-            4. Validate with stac-pydantic
+            4. Add platform/app metadata via STACMetadataHelper (25 NOV 2025)
+            5. Validate with stac-pydantic
         """
         import traceback
 
@@ -325,39 +330,28 @@ class StacMetadataService:
             # Fail fast - these fields are mandatory for pgSTAC compatibility
             raise RuntimeError(f"Failed to add required STAC fields: {e}")
 
-        # STEP G.2: Add ISO3 country attribution (22 NOV 2025)
-        # Uses PostGIS spatial query against geo.system_admin0_boundaries
+        # STEP G.2: Add metadata via STACMetadataHelper (25 NOV 2025)
+        # Adds: platform:*, app:*, geo:* properties + TiTiler links/assets
+        # Replaces inline ISO3 code with centralized ISO3AttributionService
         try:
-            logger.debug("   Step G.2: Adding ISO3 country attribution...")
-            bbox = item_dict.get('bbox')
-            if bbox:
-                country_info = self._get_countries_for_bbox(bbox)
+            logger.debug("   Step G.2: Adding metadata via STACMetadataHelper...")
+            from services.stac_metadata_helper import STACMetadataHelper
 
-                if country_info['available']:
-                    # Add geo:iso3 properties to STAC item
-                    if country_info['primary_iso3']:
-                        item_dict['properties']['geo:primary_iso3'] = country_info['primary_iso3']
-                        logger.debug(f"      Set geo:primary_iso3={country_info['primary_iso3']}")
-
-                    if country_info['iso3_codes']:
-                        item_dict['properties']['geo:iso3'] = country_info['iso3_codes']
-                        logger.debug(f"      Set geo:iso3={country_info['iso3_codes']}")
-
-                    if country_info['countries']:
-                        item_dict['properties']['geo:countries'] = country_info['countries']
-                        logger.debug(f"      Set geo:countries={country_info['countries']}")
-
-                    if country_info['attribution_method']:
-                        item_dict['properties']['geo:attribution_method'] = country_info['attribution_method']
-
-                    logger.debug(f"   ✅ Step G.2: Country attribution added ({country_info['attribution_method']})")
-                else:
-                    logger.debug("   ⚠️  Step G.2: Country attribution unavailable (admin0 table not ready)")
-            else:
-                logger.debug("   ⚠️  Step G.2: No bbox available for country attribution")
+            metadata_helper = STACMetadataHelper()
+            item_dict = metadata_helper.augment_item(
+                item_dict=item_dict,
+                bbox=item_dict.get('bbox'),
+                container=container,
+                blob_name=blob_name,
+                platform=platform_meta,
+                app=app_meta,
+                include_iso3=True,
+                include_titiler=True  # Adds TiTiler links + thumbnail asset
+            )
+            logger.debug("   ✅ Step G.2: Metadata enrichment complete (platform, app, geo, titiler)")
         except Exception as e:
-            # Non-fatal: Log warning but continue - STAC item can exist without country codes
-            logger.warning(f"   ⚠️  Step G.2: Country attribution failed (non-fatal): {e}")
+            # Non-fatal: Log warning but continue - core STAC item can exist without enrichment
+            logger.warning(f"   ⚠️  Step G.2: Metadata enrichment failed (non-fatal): {e}")
             logger.debug(f"   Traceback:\n{traceback.format_exc()}")
 
         # STEP G.5: Convert asset URLs to /vsiaz/ paths for OAuth compatibility
@@ -429,56 +423,9 @@ class StacMetadataService:
             logger.error(f"   Traceback:\n{traceback.format_exc()}")
             raise ValueError(f"Failed to add Azure properties: {e}")
 
-        # STEP H.5: Add vanilla TiTiler visualization links and thumbnail asset
-        try:
-            logger.debug("   Step H.5: Adding vanilla TiTiler visualization links...")
-            from config import get_config
-            import urllib.parse
-
-            config = get_config()
-            titiler_base = config.titiler_base_url.rstrip('/')
-            vsiaz_path = f"/vsiaz/{container}/{blob_name}"
-            encoded_vsiaz = urllib.parse.quote(vsiaz_path, safe='')
-
-            # Add thumbnail asset (overwrites rio-stac generated asset if present)
-            item_dict['assets']['thumbnail'] = {
-                'href': f"{titiler_base}/cog/preview.png?url={encoded_vsiaz}&max_size=256",
-                'type': 'image/png',
-                'roles': ['thumbnail'],
-                'title': 'Thumbnail preview via TiTiler'
-            }
-            logger.debug("      Added thumbnail asset (vanilla TiTiler)")
-
-            # Add vanilla TiTiler visualization links
-            titiler_links = [
-                {
-                    'rel': 'preview',
-                    'href': f"{titiler_base}/cog/WebMercatorQuad/map.html?url={encoded_vsiaz}",
-                    'type': 'text/html',
-                    'title': 'Interactive map viewer (vanilla TiTiler)'
-                },
-                {
-                    'rel': 'tilejson',
-                    'href': f"{titiler_base}/cog/WebMercatorQuad/tilejson.json?url={encoded_vsiaz}",
-                    'type': 'application/json',
-                    'title': 'TileJSON specification for web maps'
-                }
-            ]
-
-            # Append to existing links or create new list
-            if 'links' not in item_dict:
-                item_dict['links'] = []
-            item_dict['links'].extend(titiler_links)
-
-            logger.debug(f"   ✅ Step H.5: Added {len(titiler_links)} vanilla TiTiler links + thumbnail asset")
-        except Exception as e:
-            logger.error(f"❌ Step H.5 FAILED: Error adding TiTiler visualization links")
-            logger.error(f"   Error: {e}")
-            logger.error(f"   Traceback:\n{traceback.format_exc()}")
-            # CRITICAL (11 NOV 2025): If TiTiler link generation fails, indicates config/URL issue
-            # Better to fail fast and fix the root cause than silently create incomplete Items
-            # TiTiler URLs are a core feature - if they fail, something is wrong with config
-            raise RuntimeError(f"TiTiler link generation failed: {e}")
+        # STEP H.5: REMOVED (25 NOV 2025)
+        # TiTiler links and thumbnail asset now added by STACMetadataHelper in Step G.2
+        # This consolidates all metadata enrichment in one place for maintainability
 
         # STEP I: Validate with stac-pydantic
         try:
@@ -624,195 +571,10 @@ class StacMetadataService:
             return 'gold'
         return 'dev'
 
-    def _get_countries_for_bbox(self, bbox: list) -> Dict[str, Any]:
-        """
-        Get ISO3 country codes for geometries intersecting the bounding box.
-
-        Uses PostGIS spatial query against geo.system_admin0_boundaries table
-        configured in config.h3.system_admin0_table.
-
-        Args:
-            bbox: Bounding box [minx, miny, maxx, maxy] in EPSG:4326
-
-        Returns:
-            Dict with:
-                - iso3_codes: List of ISO3 codes for intersecting countries
-                - primary_iso3: ISO3 code for country containing bbox centroid (or largest overlap)
-                - countries: List of country names
-                - attribution_method: 'centroid' or 'largest_overlap'
-                - available: bool indicating if attribution was successful
-
-        Example:
-            _get_countries_for_bbox([-70.7, -56.3, -70.6, -56.2])
-            → {
-                'iso3_codes': ['CHL'],
-                'primary_iso3': 'CHL',
-                'countries': ['Chile'],
-                'attribution_method': 'centroid',
-                'available': True
-            }
-
-        Note:
-            Returns available=False if admin0 table is not populated or query fails.
-            This is a graceful degradation - STAC items can be created without country codes.
-        """
-        import traceback
-        from config import get_config
-        from infrastructure.postgresql import PostgreSQLRepository
-
-        if not bbox or len(bbox) != 4:
-            logger.warning(f"   ⚠️  Invalid bbox for country attribution: {bbox}")
-            return {
-                'iso3_codes': [],
-                'primary_iso3': None,
-                'countries': [],
-                'attribution_method': None,
-                'available': False
-            }
-
-        try:
-            config = get_config()
-            admin0_table = config.h3.system_admin0_table  # "geo.system_admin0_boundaries"
-
-            # Parse schema.table
-            if '.' in admin0_table:
-                schema, table = admin0_table.split('.', 1)
-            else:
-                schema, table = 'geo', admin0_table
-
-            repo = PostgreSQLRepository()
-
-            with repo._get_connection() as conn:
-                with conn.cursor() as cur:
-                    # First check if table exists and has data
-                    cur.execute("""
-                        SELECT EXISTS (
-                            SELECT 1 FROM information_schema.tables
-                            WHERE table_schema = %s AND table_name = %s
-                        ) as table_exists
-                    """, (schema, table))
-                    if not cur.fetchone()['table_exists']:
-                        logger.debug(f"   Admin0 table {admin0_table} not found - skipping country attribution")
-                        return {
-                            'iso3_codes': [],
-                            'primary_iso3': None,
-                            'countries': [],
-                            'attribution_method': None,
-                            'available': False
-                        }
-
-                    # Check for required columns (iso3, name_en, geom)
-                    cur.execute("""
-                        SELECT column_name FROM information_schema.columns
-                        WHERE table_schema = %s AND table_name = %s
-                        AND column_name IN ('iso3', 'name_en', 'geom', 'geometry')
-                    """, (schema, table))
-                    columns = [row['column_name'] for row in cur.fetchall()]
-
-                    if 'iso3' not in columns:
-                        logger.warning(f"   Admin0 table missing 'iso3' column - skipping country attribution")
-                        return {
-                            'iso3_codes': [],
-                            'primary_iso3': None,
-                            'countries': [],
-                            'attribution_method': None,
-                            'available': False
-                        }
-
-                    # Determine geometry column name
-                    geom_col = 'geom' if 'geom' in columns else 'geometry' if 'geometry' in columns else None
-                    if not geom_col:
-                        logger.warning(f"   Admin0 table missing geometry column - skipping country attribution")
-                        return {
-                            'iso3_codes': [],
-                            'primary_iso3': None,
-                            'countries': [],
-                            'attribution_method': None,
-                            'available': False
-                        }
-
-                    # Determine name column
-                    name_col = 'name_en' if 'name_en' in columns else 'name' if 'name' in columns else None
-
-                    minx, miny, maxx, maxy = bbox
-
-                    # Query 1: Get all intersecting countries
-                    name_select = f", {name_col}" if name_col else ""
-                    intersect_query = f"""
-                        SELECT iso3{name_select}
-                        FROM {schema}.{table}
-                        WHERE ST_Intersects(
-                            {geom_col},
-                            ST_MakeEnvelope(%s, %s, %s, %s, 4326)
-                        )
-                        ORDER BY iso3
-                    """
-                    cur.execute(intersect_query, (minx, miny, maxx, maxy))
-                    results = cur.fetchall()
-
-                    if not results:
-                        logger.debug(f"   No countries found for bbox {bbox} - may be in ocean")
-                        return {
-                            'iso3_codes': [],
-                            'primary_iso3': None,
-                            'countries': [],
-                            'attribution_method': None,
-                            'available': True  # Table exists, just no intersections (e.g., ocean)
-                        }
-
-                    iso3_codes = [row['iso3'] for row in results if row['iso3']]
-                    countries = [row.get(name_col, '') for row in results if name_col and row.get(name_col)] if name_col else []
-
-                    # Query 2: Get primary country (centroid method)
-                    centroid_x = (minx + maxx) / 2
-                    centroid_y = (miny + maxy) / 2
-
-                    centroid_query = f"""
-                        SELECT iso3
-                        FROM {schema}.{table}
-                        WHERE ST_Contains(
-                            {geom_col},
-                            ST_SetSRID(ST_MakePoint(%s, %s), 4326)
-                        )
-                        LIMIT 1
-                    """
-                    cur.execute(centroid_query, (centroid_x, centroid_y))
-                    centroid_result = cur.fetchone()
-
-                    primary_iso3 = None
-                    attribution_method = None
-
-                    if centroid_result and centroid_result['iso3']:
-                        primary_iso3 = centroid_result['iso3']
-                        attribution_method = 'centroid'
-                    elif iso3_codes:
-                        # Fallback: Use first intersecting country (or could calculate largest overlap)
-                        primary_iso3 = iso3_codes[0]
-                        attribution_method = 'first_intersect'
-
-                    logger.debug(
-                        f"   Country attribution: {len(iso3_codes)} countries found, "
-                        f"primary={primary_iso3} ({attribution_method})"
-                    )
-
-                    return {
-                        'iso3_codes': iso3_codes,
-                        'primary_iso3': primary_iso3,
-                        'countries': countries,
-                        'attribution_method': attribution_method,
-                        'available': True
-                    }
-
-        except Exception as e:
-            logger.warning(f"   ⚠️  Country attribution failed (non-fatal): {e}")
-            logger.debug(f"   Traceback:\n{traceback.format_exc()}")
-            return {
-                'iso3_codes': [],
-                'primary_iso3': None,
-                'countries': [],
-                'attribution_method': None,
-                'available': False
-            }
+    # _get_countries_for_bbox() REMOVED (25 NOV 2025)
+    # ISO3 country attribution now handled by services/iso3_attribution.py
+    # Use: from services.iso3_attribution import ISO3AttributionService
+    # This eliminates ~190 lines of duplicated code across service files
 
     def create_cog_asset(
         self,

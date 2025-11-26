@@ -67,6 +67,8 @@ from .create_h3_base import CreateH3BaseJob
 from .bootstrap_h3_land_grid_pyramid import BootstrapH3LandGridPyramidJob
 from .process_raster_collection import ProcessRasterCollectionWorkflow
 from .process_large_raster import ProcessLargeRasterWorkflow
+from .process_fathom import ProcessFathomWorkflow
+from .process_vector import ProcessVectorJob  # Idempotent vector ETL (26 NOV 2025)
 
 # ============================================================================
 # EXPLICIT JOB REGISTRY
@@ -92,6 +94,8 @@ ALL_JOBS = {
     "generate_h3_level4": GenerateH3Level4Job,
     "create_h3_base": CreateH3BaseJob,
     "bootstrap_h3_land_grid_pyramid": BootstrapH3LandGridPyramidJob,  # H3 land pyramid bootstrap (res 2-7) - 14 NOV 2025
+    "process_fathom": ProcessFathomWorkflow,  # Fathom flood hazard consolidation (26 NOV 2025)
+    "process_vector": ProcessVectorJob,  # Idempotent vector ETL with DELETE+INSERT pattern (26 NOV 2025)
 
     # Test/Diagnostic Workflows
     "list_container_contents_diamond": ListContainerContentsDiamondWorkflow,  # TEST ONLY - Fan-in demo (16 OCT 2025)

@@ -9,7 +9,7 @@
 # INTERFACES: Azure Functions HTTP trigger
 # PYDANTIC_MODELS: None - uses dict responses
 # DEPENDENCIES: azure.functions, psycopg, infrastructure.postgresql, util_logger
-# SOURCE: PostgreSQL app schema (jobs, tasks) and platform schema (api_requests, orchestration_jobs)
+# SOURCE: PostgreSQL app schema (jobs, tasks, api_requests)
 # SCOPE: Read-only queries for CoreMachine and Platform layer data
 # VALIDATION: None yet (future APIM authentication)
 # PATTERNS: Singleton trigger, RESTful admin API
@@ -23,8 +23,10 @@ Database Data Admin Trigger
 Provides read-only access to CoreMachine and Platform layer data:
 - Jobs (CoreMachine orchestration)
 - Tasks (CoreMachine execution)
-- API Requests (Platform layer)
-- Orchestration Jobs (Platform → CoreMachine mapping)
+- API Requests (Platform layer - thin tracking)
+
+NOTE (26 NOV 2025): Platform tables now live in app schema (not separate platform schema).
+orchestration_jobs table was REMOVED (22 NOV 2025) - thin tracking pattern.
 
 Endpoints:
     GET /api/admin/db/jobs?limit=100&status=processing&hours=24
@@ -33,8 +35,6 @@ Endpoints:
     GET /api/admin/db/tasks/{job_id}
     GET /api/admin/db/platform/requests?limit=100&dataset_id=xyz
     GET /api/admin/db/platform/requests/{request_id}
-    GET /api/admin/db/platform/orchestration?request_id=xyz
-    GET /api/admin/db/platform/orchestration/{request_id}
 
 Features:
 - Query filtering by status, time, job type
@@ -666,13 +666,17 @@ class AdminDbDataTrigger:
         """
         Query Platform API requests with filtering.
 
-        GET /api/admin/db/platform/requests?limit=100&status=processing&dataset_id=xyz
+        GET /api/admin/db/platform/requests?limit=100&dataset_id=xyz
+
+        UPDATED 26 NOV 2025: Simplified to match thin tracking pattern.
+        - api_requests now in app schema (not platform schema)
+        - status column REMOVED (delegate to CoreMachine job status)
+        - Columns: request_id, dataset_id, resource_id, version_id, job_id, data_type, created_at
 
         Query Parameters:
             limit: Number of results (default: 10, max: 1000)
-            status: Filter by status
             hours: Only show requests from last N hours (default: 24, max: 168)
-            dataset_id: Filter by dataset ID
+            dataset_id: Filter by DDH dataset ID
 
         Returns:
             {
@@ -680,33 +684,27 @@ class AdminDbDataTrigger:
                 "query_info": {...}
             }
         """
-        logger.info("📊 Querying Platform API requests")
+        logger.info("📊 Querying Platform API requests (thin tracking)")
 
         try:
             # Parse query parameters
             limit = self._validate_limit(req.params.get('limit'))
             hours = self._validate_hours(req.params.get('hours'))
-            status_filter = req.params.get('status')
             dataset_filter = req.params.get('dataset_id')
 
-            # Build query
+            # Build query - UPDATED for simplified schema (26 NOV 2025)
+            # Platform tables now in app schema, not platform schema
             query_parts = [
-                f"SELECT request_id, client_id, client_request_id, identifiers,",
-                f"       data_type, source_location, processing_options,",
-                f"       status, api_endpoints, data_characteristics,",
-                f"       error_details, created_at, updated_at",
-                f"FROM {self.config.platform_schema}.api_requests",
+                f"SELECT request_id, dataset_id, resource_id, version_id,",
+                f"       job_id, data_type, created_at",
+                f"FROM {self.config.app_schema}.api_requests",
                 f"WHERE created_at >= NOW() - INTERVAL '{hours} hours'"
             ]
 
             params = []
 
-            if status_filter:
-                query_parts.append("AND status = %s")
-                params.append(status_filter)
-
             if dataset_filter:
-                query_parts.append("AND identifiers->>'dataset_id' = %s")
+                query_parts.append("AND dataset_id = %s")
                 params.append(dataset_filter)
 
             query_parts.extend([
@@ -730,18 +728,12 @@ class AdminDbDataTrigger:
                     for row in rows:
                         api_requests.append({
                             'request_id': row['request_id'],
-                            'client_id': row['client_id'],
-                            'client_request_id': row['client_request_id'],
-                            'identifiers': row['identifiers'],
+                            'dataset_id': row['dataset_id'],
+                            'resource_id': row['resource_id'],
+                            'version_id': row['version_id'],
+                            'job_id': row['job_id'],
                             'data_type': row['data_type'],
-                            'source_location': row['source_location'],
-                            'processing_options': row['processing_options'],
-                            'status': row['status'],
-                            'api_endpoints': row['api_endpoints'],
-                            'data_characteristics': row['data_characteristics'],
-                            'error_details': row['error_details'],
-                            'created_at': row['created_at'].isoformat() if row['created_at'] else None,
-                            'updated_at': row['updated_at'].isoformat() if row['updated_at'] else None
+                            'created_at': row['created_at'].isoformat() if row['created_at'] else None
                         })
 
             result = {
@@ -749,9 +741,9 @@ class AdminDbDataTrigger:
                 'query_info': {
                     'limit': limit,
                     'hours_back': hours,
-                    'status_filter': status_filter,
                     'dataset_filter': dataset_filter,
-                    'total_found': len(api_requests)
+                    'total_found': len(api_requests),
+                    'note': 'Thin tracking - status via job_id lookup to CoreMachine'
                 },
                 'timestamp': datetime.now(timezone.utc).isoformat()
             }
@@ -782,8 +774,12 @@ class AdminDbDataTrigger:
 
         GET /api/admin/db/platform/requests/{request_id}
 
+        UPDATED 26 NOV 2025: Simplified to match thin tracking pattern.
+        - api_requests now in app schema (not platform schema)
+        - Columns: request_id, dataset_id, resource_id, version_id, job_id, data_type, created_at
+
         Args:
-            request_id: Request ID (32-char hex MD5 hash)
+            request_id: Request ID (32-char hex SHA256 hash)
 
         Returns:
             {
@@ -803,12 +799,12 @@ class AdminDbDataTrigger:
                     mimetype='application/json'
                 )
 
+            # UPDATED for simplified schema (26 NOV 2025)
+            # Platform tables now in app schema, not platform schema
             query = f"""
-                SELECT request_id, client_id, client_request_id, identifiers,
-                       data_type, source_location, processing_options,
-                       status, api_endpoints, data_characteristics,
-                       error_details, created_at, updated_at
-                FROM {self.config.platform_schema}.api_requests
+                SELECT request_id, dataset_id, resource_id, version_id,
+                       job_id, data_type, created_at
+                FROM {self.config.app_schema}.api_requests
                 WHERE request_id = %s
             """
 
@@ -832,18 +828,13 @@ class AdminDbDataTrigger:
 
                     api_request = {
                         'request_id': row['request_id'],
-                        'client_id': row['client_id'],
-                        'client_request_id': row['client_request_id'],
-                        'identifiers': row['identifiers'],
+                        'dataset_id': row['dataset_id'],
+                        'resource_id': row['resource_id'],
+                        'version_id': row['version_id'],
+                        'job_id': row['job_id'],
                         'data_type': row['data_type'],
-                        'source_location': row['source_location'],
-                        'processing_options': row['processing_options'],
-                        'status': row['status'],
-                        'api_endpoints': row['api_endpoints'],
-                        'data_characteristics': row['data_characteristics'],
-                        'error_details': row['error_details'],
                         'created_at': row['created_at'].isoformat() if row['created_at'] else None,
-                        'updated_at': row['updated_at'].isoformat() if row['updated_at'] else None
+                        'note': 'Thin tracking - status via job_id lookup to CoreMachine'
                     }
 
             result = {
@@ -873,185 +864,55 @@ class AdminDbDataTrigger:
 
     def _get_orchestration_jobs(self, req: func.HttpRequest) -> func.HttpResponse:
         """
-        Query orchestration jobs (Platform → CoreMachine mappings).
+        DEPRECATED (26 NOV 2025): orchestration_jobs table was REMOVED (22 NOV 2025).
 
-        GET /api/admin/db/platform/orchestration?request_id=xyz
+        Platform now uses thin tracking pattern:
+        - 1:1 mapping: api_requests.job_id → CoreMachine job
+        - No separate orchestration table needed
+        - Use /api/admin/db/platform/requests instead
 
-        Query Parameters:
-            request_id: Filter by Platform request ID
-            limit: Number of results (default: 10, max: 1000)
-
-        Returns:
-            {
-                "orchestration_jobs": [...],
-                "query_info": {...}
-            }
+        Returns deprecation notice.
         """
-        logger.info("📊 Querying orchestration jobs")
+        logger.warning("⚠️ Deprecated endpoint: orchestration_jobs table removed (22 NOV 2025)")
 
-        try:
-            # Parse query parameters
-            request_id_filter = req.params.get('request_id')
-            limit = self._validate_limit(req.params.get('limit'))
-
-            # Build query
-            query_parts = [
-                f"SELECT id, platform_request_id, coremachine_job_id,",
-                f"       job_type, status, created_at, updated_at",
-                f"FROM {self.config.platform_schema}.orchestration_jobs",
-                f"WHERE 1=1"
-            ]
-
-            params = []
-
-            if request_id_filter:
-                query_parts.append("AND platform_request_id = %s")
-                params.append(request_id_filter)
-
-            query_parts.extend([
-                "ORDER BY created_at DESC",
-                f"LIMIT %s"
-            ])
-            params.append(limit)
-
-            query = " ".join(query_parts)
-
-            # Execute query
-            if not isinstance(self.db_repo, PostgreSQLRepository):
-                raise ValueError("Database repository is not PostgreSQL")
-
-            with self.db_repo._get_connection() as conn:
-                with conn.cursor() as cursor:
-                    cursor.execute(query, tuple(params))
-                    rows = cursor.fetchall()
-
-                    orchestration_jobs = []
-                    for row in rows:
-                        orchestration_jobs.append({
-                            'id': row['id'],
-                            'platform_request_id': row['platform_request_id'],
-                            'coremachine_job_id': row['coremachine_job_id'],
-                            'job_type': row['job_type'],
-                            'status': row['status'],
-                            'created_at': row['created_at'].isoformat() if row['created_at'] else None,
-                            'updated_at': row['updated_at'].isoformat() if row['updated_at'] else None
-                        })
-
-            result = {
-                'orchestration_jobs': orchestration_jobs,
-                'query_info': {
-                    'request_id_filter': request_id_filter,
-                    'limit': limit,
-                    'total_found': len(orchestration_jobs)
-                },
+        return func.HttpResponse(
+            body=json.dumps({
+                'error': 'Endpoint deprecated',
+                'message': 'orchestration_jobs table was removed on 22 NOV 2025',
+                'reason': 'Platform now uses thin tracking pattern (1:1 api_request → job mapping)',
+                'alternative': 'Use GET /api/admin/db/platform/requests - includes job_id for CoreMachine lookup',
                 'timestamp': datetime.now(timezone.utc).isoformat()
-            }
-
-            logger.info(f"✅ Found {len(orchestration_jobs)} orchestration jobs")
-
-            return func.HttpResponse(
-                body=json.dumps(result, indent=2),
-                status_code=200,
-                mimetype='application/json'
-            )
-
-        except Exception as e:
-            logger.error(f"❌ Error querying orchestration jobs: {e}")
-            logger.error(traceback.format_exc())
-            return func.HttpResponse(
-                body=json.dumps({
-                    'error': str(e),
-                    'timestamp': datetime.now(timezone.utc).isoformat()
-                }),
-                status_code=500,
-                mimetype='application/json'
-            )
+            }),
+            status_code=410,  # 410 Gone - resource no longer available
+            mimetype='application/json'
+        )
 
     def _get_orchestration_jobs_for_request(self, req: func.HttpRequest, request_id: str) -> func.HttpResponse:
         """
-        Get all orchestration jobs for a specific Platform request.
+        DEPRECATED (26 NOV 2025): orchestration_jobs table was REMOVED (22 NOV 2025).
 
-        GET /api/admin/db/platform/orchestration/{request_id}
+        Platform now uses thin tracking pattern:
+        - 1:1 mapping: api_requests.job_id → CoreMachine job
+        - No separate orchestration table needed
+        - Use /api/admin/db/platform/requests/{request_id} instead
 
-        Args:
-            request_id: Platform request ID (32-char hex MD5 hash)
-
-        Returns:
-            {
-                "request_id": "...",
-                "orchestration_jobs": [...],
-                "query_info": {...}
-            }
+        Returns deprecation notice.
         """
-        logger.info(f"📊 Getting orchestration jobs for request: {request_id}")
+        logger.warning(f"⚠️ Deprecated endpoint: orchestration_jobs table removed (22 NOV 2025)")
 
-        try:
-            if not self._validate_request_id(request_id):
-                return func.HttpResponse(
-                    body=json.dumps({
-                        'error': 'Invalid request ID format',
-                        'message': 'Request ID must be a 32-character hexadecimal string'
-                    }),
-                    status_code=400,
-                    mimetype='application/json'
-                )
-
-            query = f"""
-                SELECT id, platform_request_id, coremachine_job_id,
-                       job_type, status, created_at, updated_at
-                FROM {self.config.platform_schema}.orchestration_jobs
-                WHERE platform_request_id = %s
-                ORDER BY created_at ASC
-            """
-
-            if not isinstance(self.db_repo, PostgreSQLRepository):
-                raise ValueError("Database repository is not PostgreSQL")
-
-            with self.db_repo._get_connection() as conn:
-                with conn.cursor() as cursor:
-                    cursor.execute(query, (request_id,))
-                    rows = cursor.fetchall()
-
-                    orchestration_jobs = []
-                    for row in rows:
-                        orchestration_jobs.append({
-                            'id': row['id'],
-                            'platform_request_id': row['platform_request_id'],
-                            'coremachine_job_id': row['coremachine_job_id'],
-                            'job_type': row['job_type'],
-                            'status': row['status'],
-                            'created_at': row['created_at'].isoformat() if row['created_at'] else None,
-                            'updated_at': row['updated_at'].isoformat() if row['updated_at'] else None
-                        })
-
-            result = {
+        return func.HttpResponse(
+            body=json.dumps({
+                'error': 'Endpoint deprecated',
+                'message': 'orchestration_jobs table was removed on 22 NOV 2025',
+                'reason': 'Platform now uses thin tracking pattern (1:1 api_request → job mapping)',
+                'alternative': f'Use GET /api/admin/db/platform/requests/{request_id} - includes job_id for CoreMachine lookup',
                 'request_id': request_id,
-                'orchestration_jobs': orchestration_jobs,
-                'query_info': {
-                    'total_jobs': len(orchestration_jobs)
-                },
                 'timestamp': datetime.now(timezone.utc).isoformat()
-            }
+            }),
+            status_code=410,  # 410 Gone - resource no longer available
+            mimetype='application/json'
+        )
 
-            logger.info(f"✅ Found {len(orchestration_jobs)} orchestration jobs for request {request_id}")
-
-            return func.HttpResponse(
-                body=json.dumps(result, indent=2),
-                status_code=200,
-                mimetype='application/json'
-            )
-
-        except Exception as e:
-            logger.error(f"❌ Error getting orchestration jobs for request: {e}")
-            logger.error(traceback.format_exc())
-            return func.HttpResponse(
-                body=json.dumps({
-                    'error': str(e),
-                    'timestamp': datetime.now(timezone.utc).isoformat()
-                }),
-                status_code=500,
-                mimetype='application/json'
-            )
 
 
 # Create singleton instance

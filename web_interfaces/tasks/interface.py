@@ -467,15 +467,16 @@ class TasksInterface(BaseInterface):
 
                 const tasks = tasksData.tasks || [];
 
-                // Render job info
-                renderJobInfo(job);
+                // Render job info (API returns {job: {...}, timestamp: ...})
+                const jobData = job.job || job;
+                renderJobInfo(jobData);
 
                 // Render tasks
                 if (tasks.length === 0) {{
                     tasksContainer.classList.add('hidden');
                     emptyState.classList.remove('hidden');
                 }} else {{
-                    renderTasks(job, tasks);
+                    renderTasks(jobData, tasks);
                 }}
 
             }} catch (error) {{

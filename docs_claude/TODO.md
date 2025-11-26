@@ -1,7 +1,640 @@
 # Active Tasks - process_raster_collection Implementation
 
-**Last Updated**: 25 NOV 2025 (15:30 UTC)
+**Last Updated**: 26 NOV 2025 (UTC)
 **Author**: Robert and Geospatial Claude Legion
+
+---
+
+## 🚨 HIGH PRIORITY: Idempotency Fixes for ETL Workflows (25 NOV 2025)
+
+**Status**: 🔴 **PLANNING COMPLETE** - Ready for implementation
+**Priority**: **HIGH** - Critical for production reliability
+**Impact**: Prevents duplicate data on retry, enables safe job recovery
+
+### Background
+
+Analysis revealed idempotency gaps in three workflows:
+- **ingest_vector**: Stage 2 INSERT creates duplicates, Stage 3 STAC items can duplicate
+- **process_raster_collection**: Stage 4 pgstac search registration (already has workaround)
+- **All workflows**: No failed job recovery mechanism
+
+### 1. FIX: ingest_vector Stage 2 - PostGIS INSERT Idempotency
+
+**Problem**: `upload_pickled_chunk` uses plain INSERT, creating duplicate rows if task retries.
+
+**Location**: `services/vector/postgis_handler.py` lines 707-758
+
+**Current Code** (non-idempotent):
+```python
+def _insert_features(self, cur, chunk, table_name, schema):
+    insert_stmt = sql.SQL("""
+        INSERT INTO {schema}.{table} (geom, {cols})
+        VALUES (ST_GeomFromText(%s, 4326), {placeholders})
+    """)
+    for idx, row in chunk.iterrows():
+        cur.execute(insert_stmt, values)
+```
+
+**Solution Options**:
+
+#### Option A: TRUNCATE + INSERT (Recommended for ingest_vector)
+**Rationale**: Stage 2 tasks process distinct chunks; each chunk owns specific rows.
+
+**Implementation**:
+```python
+def _insert_features_idempotent(
+    self,
+    cur: psycopg.Cursor,
+    chunk: gpd.GeoDataFrame,
+    table_name: str,
+    schema: str,
+    chunk_index: int,
+    job_id: str
+):
+    """
+    Idempotent insert: Delete existing rows for this chunk, then INSERT.
+
+    Uses etl_batch_id column (added in GeoTableBuilder) to identify chunk rows.
+    Format: {job_id[:8]}-chunk-{chunk_index}
+    """
+    batch_id = f"{job_id[:8]}-chunk-{chunk_index}"
+
+    # Step 1: Delete any existing rows from this chunk (idempotent cleanup)
+    delete_stmt = sql.SQL("""
+        DELETE FROM {schema}.{table}
+        WHERE etl_batch_id = %s
+    """).format(
+        schema=sql.Identifier(schema),
+        table=sql.Identifier(table_name)
+    )
+    cur.execute(delete_stmt, (batch_id,))
+    deleted_count = cur.rowcount
+    if deleted_count > 0:
+        logger.info(f"♻️ Idempotency: Deleted {deleted_count} existing rows for batch {batch_id}")
+
+    # Step 2: INSERT new rows with batch_id for tracking
+    for idx, row in chunk.iterrows():
+        values = [geom_wkt, batch_id] + [row[col] for col in attr_cols]
+        cur.execute(insert_stmt, values)
+```
+
+**Required Schema Change** (already in GeoTableBuilder):
+```sql
+-- etl_batch_id column for chunk tracking
+ALTER TABLE geo.{table} ADD COLUMN IF NOT EXISTS etl_batch_id TEXT;
+CREATE INDEX IF NOT EXISTS idx_{table}_etl_batch_id ON geo.{table}(etl_batch_id);
+```
+
+#### Option B: UPSERT with Unique Constraint
+**For tables with natural keys** (e.g., country codes, admin boundaries):
+```python
+# Add unique constraint during table creation
+ALTER TABLE geo.{table} ADD CONSTRAINT uq_{table}_natural_key UNIQUE (iso3, admin_level);
+
+# Use UPSERT
+INSERT INTO geo.{table} (geom, iso3, admin_level, ...)
+VALUES (...)
+ON CONFLICT (iso3, admin_level) DO UPDATE SET
+    geom = EXCLUDED.geom,
+    updated_at = NOW();
+```
+
+**Task Checklist - ingest_vector Stage 2**:
+- [ ] **Step 1**: Add `etl_batch_id` column to `_create_table_if_not_exists()` in `postgis_handler.py`
+- [ ] **Step 2**: Modify `_insert_features()` to accept `chunk_index` and `job_id` parameters
+- [ ] **Step 3**: Add DELETE before INSERT pattern (DELETE WHERE etl_batch_id = ...)
+- [ ] **Step 4**: Update `insert_features_only()` to pass chunk metadata
+- [ ] **Step 5**: Update `upload_pickled_chunk()` in `services/vector/tasks.py` to pass chunk_index and job_id
+- [ ] **Step 6**: Test with duplicate task execution
+- [ ] **Commit**: "Fix: ingest_vector Stage 2 idempotency via DELETE+INSERT pattern"
+
+**Files to Modify**:
+| File | Changes |
+|------|---------|
+| `services/vector/postgis_handler.py` | Add etl_batch_id to schema, DELETE+INSERT pattern |
+| `services/vector/tasks.py` | Pass job_id and chunk_index to handler |
+| `jobs/ingest_vector.py` | Ensure job_id in Stage 2 task parameters |
+
+---
+
+### 2. FIX: ingest_vector Stage 3 - STAC Item Idempotency
+
+**Problem**: `create_vector_stac` may create duplicate STAC items if retried.
+
+**Location**: `services/stac_vector_catalog.py` lines 111-128
+
+**Current Code** (already has partial fix):
+```python
+# Check if item already exists (idempotency)
+if stac_infra.item_exists(item.id, collection_id):
+    logger.info(f"⏭️ STEP 2: Item {item.id} already exists...")
+    insert_result = {'success': True, 'skipped': True}
+else:
+    insert_result = stac_infra.insert_item(item, collection_id)
+```
+
+**Status**: ✅ **ALREADY IMPLEMENTED** - Code review confirms idempotency check exists.
+
+**Verification**:
+- [ ] Confirm `item_exists()` uses correct collection_id
+- [ ] Confirm item_id generation is deterministic (table name based)
+- [ ] Test by running Stage 3 twice with same parameters
+
+---
+
+### 3. FIX: process_raster_collection Stage 4 - pgstac Search Registration
+
+**Problem**: Search registration may create duplicates on retry.
+
+**Location**: `services/pgstac_search_registration.py` lines 214-239
+
+**Current Code** (already has workaround):
+```python
+# Step 1: Check if search already exists using Python-computed hash
+cur.execute("SELECT hash FROM pgstac.searches WHERE hash = %s", (search_hash,))
+existing = cur.fetchone()
+
+if existing:
+    # UPDATE existing (idempotent)
+    cur.execute("UPDATE pgstac.searches SET lastused = NOW() WHERE hash = %s", (search_hash,))
+else:
+    # INSERT new
+    cur.execute("INSERT INTO pgstac.searches ...")
+```
+
+**Status**: ✅ **ALREADY IMPLEMENTED** - SELECT-then-INSERT/UPDATE pattern is idempotent.
+
+**Verification**:
+- [ ] Confirm search_hash computation is deterministic
+- [ ] Test by calling `register_search()` twice with same parameters
+
+---
+
+### 4. NEW: Failed Job Recovery & Cleanup Workflow
+
+**Problem**: Failed jobs cannot be retried; intermediate artifacts persist.
+
+**Current Behavior**:
+```
+Submit job → job_id = ABC, status = QUEUED
+Processing fails → status = FAILED
+Resubmit identical params → Returns {"status": "failed", "idempotent": true}
+                          → NO retry, NO cleanup
+```
+
+**Solution**: Two-part system:
+1. **Retry endpoint**: Force retry of failed jobs
+2. **Cleanup handler**: Remove intermediate artifacts from failed jobs
+
+#### 4.1 Retry Failed Job Endpoint
+
+**New Endpoint**: `POST /api/jobs/retry/{job_id}?confirm=yes`
+
+**File**: `triggers/job_retry.py` (NEW FILE)
+
+```python
+"""
+Job Retry Trigger
+
+Allows retrying failed jobs by:
+1. Cleaning up intermediate artifacts
+2. Resetting job status to QUEUED
+3. Re-queueing to Service Bus
+
+Endpoint: POST /api/jobs/retry/{job_id}?confirm=yes
+"""
+
+class JobRetryTrigger:
+    """Handle retry requests for failed jobs."""
+
+    def handle_request(self, req: func.HttpRequest) -> func.HttpResponse:
+        """
+        Retry a failed job.
+
+        1. Validate job exists and is in FAILED status
+        2. Call cleanup handler for job type
+        3. Reset job status to QUEUED, clear error fields
+        4. Reset all tasks to PENDING
+        5. Queue job to Service Bus
+        """
+        job_id = req.route_params.get('job_id')
+        confirm = req.params.get('confirm')
+
+        if confirm != 'yes':
+            return error_response("Retry requires ?confirm=yes")
+
+        # Get job from database
+        job = self.job_repo.get_job(job_id)
+        if not job:
+            return error_response(f"Job {job_id} not found", 404)
+
+        if job.status.value != 'failed':
+            return error_response(f"Job {job_id} is {job.status.value}, not failed", 400)
+
+        # Execute cleanup for this job type
+        cleanup_result = self._cleanup_job_artifacts(job)
+
+        # Reset job status
+        self.job_repo.update_job_status(
+            job_id=job_id,
+            status='queued',
+            stage=1,
+            metadata={'retry_count': (job.metadata.get('retry_count', 0) + 1)}
+        )
+
+        # Reset all tasks to pending
+        self.job_repo.reset_tasks_for_job(job_id)
+
+        # Queue to Service Bus
+        from core.machine import CoreMachine
+        core_machine = CoreMachine.instance()
+        core_machine.queue_job(job_id, job.job_type, job.parameters)
+
+        return success_response({
+            "job_id": job_id,
+            "status": "queued",
+            "retry_count": job.metadata.get('retry_count', 0) + 1,
+            "cleanup_result": cleanup_result,
+            "message": f"Job {job_id} has been reset and re-queued"
+        })
+```
+
+#### 4.2 Cleanup Handlers by Job Type
+
+**File**: `services/job_cleanup.py` (NEW FILE)
+
+```python
+"""
+Job Cleanup Service
+
+Handles cleanup of intermediate artifacts when jobs fail or are retried.
+Each job type registers its own cleanup handler.
+
+Cleanup Operations by Job Type:
+- ingest_vector: Delete pickle files, optionally drop PostGIS table
+- process_raster: Delete intermediate COG files (if partial)
+- process_raster_collection: Delete partial MosaicJSON, partial COGs
+"""
+
+from typing import Dict, Any, Callable
+from config import get_config
+from infrastructure.blob import BlobRepository
+
+# Registry of cleanup handlers
+CLEANUP_HANDLERS: Dict[str, Callable[[str, dict], dict]] = {}
+
+
+def register_cleanup(job_type: str):
+    """Decorator to register cleanup handler for job type."""
+    def decorator(func):
+        CLEANUP_HANDLERS[job_type] = func
+        return func
+    return decorator
+
+
+@register_cleanup("ingest_vector")
+def cleanup_ingest_vector(job_id: str, job_params: dict) -> dict:
+    """
+    Cleanup for failed ingest_vector jobs.
+
+    Artifacts to clean:
+    1. Pickle files in blob storage ({container}/{prefix}/{job_id}/*.pkl)
+    2. Optionally: PostGIS table (if partially created)
+    3. Optionally: STAC item (if Stage 3 partially ran)
+
+    Args:
+        job_id: Job ID
+        job_params: Original job parameters
+
+    Returns:
+        {
+            "pickles_deleted": int,
+            "table_action": "dropped" | "preserved" | "not_found",
+            "stac_item_action": "deleted" | "preserved" | "not_found"
+        }
+    """
+    config = get_config()
+    blob_repo = BlobRepository.instance()
+    result = {"job_id": job_id}
+
+    # 1. Delete pickle files
+    pickle_prefix = f"{config.vector_pickle_prefix}/{job_id}/"
+    try:
+        deleted = blob_repo.delete_blobs_by_prefix(
+            container=config.vector_pickle_container,
+            prefix=pickle_prefix
+        )
+        result["pickles_deleted"] = deleted
+        logger.info(f"🗑️ Deleted {deleted} pickle files for job {job_id}")
+    except Exception as e:
+        result["pickles_deleted"] = 0
+        result["pickle_error"] = str(e)
+
+    # 2. Optionally drop PostGIS table
+    # Only drop if explicitly requested (default: preserve data for debugging)
+    table_name = job_params.get("table_name")
+    schema = job_params.get("schema", "geo")
+    drop_table = job_params.get("cleanup_drop_table", False)
+
+    if drop_table and table_name:
+        try:
+            from infrastructure.postgresql import PostgreSQLRepository
+            repo = PostgreSQLRepository()
+            with repo._get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        sql.SQL("DROP TABLE IF EXISTS {}.{} CASCADE").format(
+                            sql.Identifier(schema),
+                            sql.Identifier(table_name)
+                        )
+                    )
+                    conn.commit()
+            result["table_action"] = "dropped"
+            logger.info(f"🗑️ Dropped table {schema}.{table_name}")
+        except Exception as e:
+            result["table_action"] = "error"
+            result["table_error"] = str(e)
+    else:
+        result["table_action"] = "preserved"
+
+    # 3. Delete STAC item if exists
+    try:
+        from infrastructure.pgstac_bootstrap import PgStacBootstrap
+        stac = PgStacBootstrap()
+        item_id = f"{schema}-{table_name}"  # Standard item_id format
+        collection_id = job_params.get("collection_id", "system-vectors")
+
+        if stac.item_exists(item_id, collection_id):
+            stac.delete_item(item_id, collection_id)
+            result["stac_item_action"] = "deleted"
+        else:
+            result["stac_item_action"] = "not_found"
+    except Exception as e:
+        result["stac_item_action"] = "error"
+        result["stac_error"] = str(e)
+
+    return result
+
+
+@register_cleanup("process_raster")
+def cleanup_process_raster(job_id: str, job_params: dict) -> dict:
+    """
+    Cleanup for failed process_raster jobs.
+
+    Artifacts to clean:
+    1. Intermediate COG in silver container (if Stage 2 failed mid-upload)
+    2. STAC item (if Stage 3 partially ran)
+    """
+    config = get_config()
+    blob_repo = BlobRepository.instance()
+    result = {"job_id": job_id}
+
+    # 1. Delete COG blob (if exists)
+    blob_name = job_params.get("blob_name", "")
+    output_tier = job_params.get("output_tier", "analysis")
+    # Derive output blob name (same logic as raster_cog.py)
+    base_name = blob_name.rsplit('.', 1)[0]
+    cog_blob_name = f"{base_name}_cog_{output_tier}.tif"
+
+    try:
+        silver_container = config.storage.silver_cog_container
+        if blob_repo.blob_exists(silver_container, cog_blob_name):
+            blob_repo.delete_blob(silver_container, cog_blob_name)
+            result["cog_action"] = "deleted"
+        else:
+            result["cog_action"] = "not_found"
+    except Exception as e:
+        result["cog_action"] = "error"
+        result["cog_error"] = str(e)
+
+    # 2. Delete STAC item if exists
+    try:
+        from infrastructure.pgstac_bootstrap import PgStacBootstrap
+        stac = PgStacBootstrap()
+        collection_id = job_params.get("collection_id")
+        item_id = f"{collection_id}-{cog_blob_name.replace('/', '-')}"
+
+        if collection_id and stac.item_exists(item_id, collection_id):
+            stac.delete_item(item_id, collection_id)
+            result["stac_item_action"] = "deleted"
+        else:
+            result["stac_item_action"] = "not_found"
+    except Exception as e:
+        result["stac_item_action"] = "error"
+
+    return result
+
+
+@register_cleanup("process_raster_collection")
+def cleanup_process_raster_collection(job_id: str, job_params: dict) -> dict:
+    """
+    Cleanup for failed process_raster_collection jobs.
+
+    Artifacts to clean:
+    1. Partial COGs in silver container
+    2. MosaicJSON file
+    3. STAC collection
+    4. pgstac search registration
+    """
+    config = get_config()
+    blob_repo = BlobRepository.instance()
+    result = {"job_id": job_id}
+
+    collection_id = job_params.get("collection_id")
+
+    # 1. Delete COGs by prefix
+    cog_prefix = f"collections/{collection_id}/"
+    try:
+        deleted = blob_repo.delete_blobs_by_prefix(
+            container=config.storage.silver_cog_container,
+            prefix=cog_prefix
+        )
+        result["cogs_deleted"] = deleted
+    except Exception as e:
+        result["cogs_deleted"] = 0
+        result["cog_error"] = str(e)
+
+    # 2. Delete MosaicJSON
+    mosaic_blob = f"mosaics/{collection_id}/mosaic.json"
+    try:
+        if blob_repo.blob_exists(config.storage.mosaicjson_container, mosaic_blob):
+            blob_repo.delete_blob(config.storage.mosaicjson_container, mosaic_blob)
+            result["mosaicjson_action"] = "deleted"
+        else:
+            result["mosaicjson_action"] = "not_found"
+    except Exception as e:
+        result["mosaicjson_action"] = "error"
+
+    # 3. Delete STAC collection
+    try:
+        from infrastructure.pgstac_repository import PgStacRepository
+        pgstac_repo = PgStacRepository()
+        if pgstac_repo.collection_exists(collection_id):
+            pgstac_repo.delete_collection(collection_id)  # Cascades to items
+            result["stac_collection_action"] = "deleted"
+        else:
+            result["stac_collection_action"] = "not_found"
+    except Exception as e:
+        result["stac_collection_action"] = "error"
+
+    # 4. Delete pgstac search registration
+    try:
+        from services.pgstac_search_registration import PgSTACSearchRegistration
+        search_reg = PgSTACSearchRegistration()
+        search_reg.delete_search_by_collection(collection_id)
+        result["search_registration_action"] = "deleted"
+    except Exception as e:
+        result["search_registration_action"] = "error"
+
+    return result
+
+
+def cleanup_job(job_id: str, job_type: str, job_params: dict) -> dict:
+    """
+    Execute cleanup for a job based on its type.
+
+    Args:
+        job_id: Job ID
+        job_type: Job type (ingest_vector, process_raster, etc.)
+        job_params: Original job parameters
+
+    Returns:
+        Cleanup result dict
+    """
+    handler = CLEANUP_HANDLERS.get(job_type)
+    if handler:
+        return handler(job_id, job_params)
+    else:
+        return {
+            "job_id": job_id,
+            "job_type": job_type,
+            "cleanup_action": "no_handler",
+            "message": f"No cleanup handler registered for job type: {job_type}"
+        }
+```
+
+#### 4.3 Cleanup Endpoint (Standalone)
+
+**New Endpoint**: `POST /api/jobs/cleanup/{job_id}?confirm=yes`
+
+For cleaning up artifacts without retrying:
+
+```python
+def handle_cleanup_request(self, req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Cleanup artifacts from a failed job WITHOUT retrying.
+
+    Use cases:
+    - Job failed due to bad input data (no point retrying)
+    - Manual cleanup before data correction
+    - Freeing up storage from abandoned jobs
+    """
+    job_id = req.route_params.get('job_id')
+    confirm = req.params.get('confirm')
+
+    if confirm != 'yes':
+        return error_response("Cleanup requires ?confirm=yes")
+
+    job = self.job_repo.get_job(job_id)
+    if not job:
+        return error_response(f"Job {job_id} not found", 404)
+
+    # Execute cleanup
+    cleanup_result = cleanup_job(job_id, job.job_type, job.parameters)
+
+    # Mark job as cleaned (optional metadata field)
+    self.job_repo.update_job_metadata(job_id, {
+        "cleaned_at": datetime.now(timezone.utc).isoformat(),
+        "cleanup_result": cleanup_result
+    })
+
+    return success_response({
+        "job_id": job_id,
+        "job_type": job.job_type,
+        "job_status": job.status.value,
+        "cleanup_result": cleanup_result,
+        "message": f"Cleanup completed for job {job_id}"
+    })
+```
+
+**Task Checklist - Job Retry & Cleanup**:
+- [ ] **Step 1**: Create `services/job_cleanup.py` with cleanup handlers registry
+- [ ] **Step 2**: Implement `cleanup_ingest_vector()` handler
+- [ ] **Step 3**: Implement `cleanup_process_raster()` handler
+- [ ] **Step 4**: Implement `cleanup_process_raster_collection()` handler
+- [ ] **Step 5**: Create `triggers/job_retry.py` with retry endpoint
+- [ ] **Step 6**: Add `POST /api/jobs/retry/{job_id}` route to `function_app.py`
+- [ ] **Step 7**: Add `POST /api/jobs/cleanup/{job_id}` route to `function_app.py`
+- [ ] **Step 8**: Add `reset_tasks_for_job()` method to PostgreSQLRepository
+- [ ] **Step 9**: Add `delete_blobs_by_prefix()` method to BlobRepository
+- [ ] **Step 10**: Add `delete_item()` and `delete_collection()` to PgStacBootstrap
+- [ ] **Step 11**: Add `delete_search_by_collection()` to PgSTACSearchRegistration
+- [ ] **Step 12**: Test retry flow end-to-end
+- [ ] **Step 13**: Test cleanup flow end-to-end
+- [ ] **Commit**: "Add job retry and cleanup workflow for failed jobs"
+
+**New Files**:
+| File | Purpose |
+|------|---------|
+| `services/job_cleanup.py` | Cleanup handlers registry and implementations |
+| `triggers/job_retry.py` | HTTP trigger for retry endpoint |
+
+**Files to Modify**:
+| File | Changes |
+|------|---------|
+| `function_app.py` | Add routes for /api/jobs/retry and /api/jobs/cleanup |
+| `infrastructure/postgresql.py` | Add `reset_tasks_for_job()` method |
+| `infrastructure/blob.py` | Add `delete_blobs_by_prefix()` method |
+| `infrastructure/pgstac_bootstrap.py` | Add `delete_item()`, `delete_collection()` methods |
+| `services/pgstac_search_registration.py` | Add `delete_search_by_collection()` method |
+
+---
+
+### Summary: Implementation Order
+
+| Priority | Task | Effort | Impact |
+|----------|------|--------|--------|
+| 1 | ingest_vector Stage 2 DELETE+INSERT | 2 hours | Prevents duplicate rows |
+| 2 | Job cleanup handlers | 3 hours | Enables artifact cleanup |
+| 3 | Job retry endpoint | 2 hours | Enables failed job recovery |
+| 4 | Verification of existing idempotency | 1 hour | Confirms STAC handlers work |
+
+**Total Estimated Effort**: 8 hours
+
+---
+
+## ✅ RESOLVED: Platform Schema Consolidation & DDH Metadata (26 NOV 2025)
+
+**Status**: ✅ **COMPLETED** on 26 NOV 2025
+**Impact**: Simplified configuration, verified DDH → STAC metadata flow
+
+### What Was Done
+
+**1. Platform Schema Consolidation**:
+- Removed unused `platform_schema` config field from `config/database_config.py`
+- Confirmed `api_requests` table was already in `app` schema (no migration needed)
+- Updated documentation in `infrastructure/platform.py` and `core/models/platform.py`
+- Fixed `triggers/admin/db_data.py` queries to use correct schema and columns
+- Deprecated `orchestration_jobs` endpoints (HTTP 410)
+
+**2. Worker Configuration Optimization**:
+- Set `FUNCTIONS_WORKER_PROCESS_COUNT=4` via Azure CLI
+- Reduced `maxConcurrentCalls` from 8 to 2 in `host.json`
+- Result: 4 workers × 2 calls = 8 concurrent DB connections (was 16)
+
+**3. DDH Metadata Passthrough Verification**:
+- Tested `process_raster` job with DDH identifiers (dataset_id, resource_id, version_id, access_level)
+- Verified STAC items contain `platform:*` properties with DDH values
+- Confirms Platform → CoreMachine → STAC metadata pipeline is operational
+
+**Files Modified**:
+- `config/database_config.py`
+- `infrastructure/platform.py`
+- `core/models/platform.py`
+- `triggers/admin/db_data.py`
+- `host.json`
+
+**See**: HISTORY.md entry for 26 NOV 2025 for full details.
 
 ---
 
@@ -178,594 +811,47 @@ This fix was required after the config.py → config/ package migration (20 NOV 
 
 ---
 
-## 🔧 HIGH PRIORITY - Refactor config.py God Object (18 NOV 2025)
+## ✅ COMPLETED - Refactor config.py God Object (25 NOV 2025)
 
-**Status**: Planned - Incremental migration with parallel operation
+**Status**: ✅ **COMPLETED** on 25 NOV 2025
+**Restore Point**: Commit `f765f58` (pre-deletion backup)
 **Purpose**: Split 1,747-line config.py into domain-specific modules
-**Priority**: HIGH (maintainability + testing + merge conflicts)
-**Strategy**: Create new modules alongside old code, migrate incrementally, delete old code last
-**Effort**: 6-8 hours over 2-3 sessions
-**Documentation**: See [GOD_OBJECTS_EXPLAINED.md](GOD_OBJECTS_EXPLAINED.md) for detailed analysis
-
-### The Problem
-
-**Current State**: config.py is 1,747 lines with 6 different configuration domains:
-- Lines 496-1586: AppConfig class (1,090 lines!)
-  - 63+ fields covering Storage + Database + Raster + Vector + Queues + STAC + H3 + Application settings
-  - 10+ computed properties
-  - 5+ validation methods
-  - 200+ lines of documentation strings
-
-**Pain Points**:
-1. ❌ **Hard to find settings**: "What's the COG compression default?" = search 1,747 lines
-2. ❌ **Unclear dependencies**: Does raster code need database config? (AppConfig has both - can't tell!)
-3. ❌ **Testing complexity**: Test COG creation = mock 63+ fields (only need 15 raster fields!)
-4. ❌ **Merge conflicts**: Two developers changing different configs = editing same AppConfig class
-
-**Analysis**: See [GOD_OBJECTS_EXPLAINED.md](GOD_OBJECTS_EXPLAINED.md) section "2. config.py - The Configuration Monster"
-
----
-
-### Incremental Migration Strategy (Safe, Testable)
-
-**Core Principle**: Create new structure alongside old code, migrate piece by piece, delete old code last
-
-#### Phase 1: Create New Config Modules (2 hours)
-
-**Step 1.1: Create config/ folder structure**
-```bash
-mkdir -p config
-touch config/__init__.py
-touch config/app_config.py        # Core application settings
-touch config/storage_config.py    # COG tiers, multi-account storage
-touch config/database_config.py   # PostgreSQL/PostGIS
-touch config/raster_config.py     # Raster pipeline settings
-touch config/vector_config.py     # Vector pipeline settings
-touch config/queue_config.py      # Service Bus queues
-```
-
-**Step 1.2: Implement new config modules**
-
-Create each module with clean, focused configuration classes:
-
-**config/storage_config.py** (400 lines):
-```python
-"""Azure Storage configuration - COG tiers, multi-account trust zones."""
-
-from enum import Enum
-from typing import List, Optional
-from pydantic import BaseModel, Field
-
-# Copy from config.py lines 59-254 (COG tier enums/profiles)
-class CogTier(str, Enum):
-    VISUALIZATION = "visualization"
-    ANALYSIS = "analysis"
-    ARCHIVE = "archive"
-
-class CogTierProfile(BaseModel):
-    # ... copy from config.py
-
-# Copy from config.py lines 255-299 (utility function)
-def determine_applicable_tiers(band_count: int, data_type: str) -> List[CogTier]:
-    # ... copy from config.py
-
-# Copy from config.py lines 300-364
-class StorageAccountConfig(BaseModel):
-    # ... copy from config.py
-
-# Copy from config.py lines 365-495
-class MultiAccountStorageConfig(BaseModel):
-    # ... copy from config.py
-
-# NEW: Clean wrapper
-class StorageConfig(BaseModel):
-    """Azure Storage configuration."""
-    storage: MultiAccountStorageConfig
-
-    @classmethod
-    def from_environment(cls):
-        """Load from environment variables."""
-        return cls(storage=MultiAccountStorageConfig.from_environment())
-```
-
-**config/database_config.py** (300 lines):
-```python
-"""PostgreSQL/PostGIS database configuration."""
-
-from typing import Optional
-from pydantic import BaseModel, Field
-
-class DatabaseConfig(BaseModel):
-    """PostgreSQL/PostGIS configuration."""
-
-    # Extract from AppConfig lines ~620-710
-    host: str = Field(...)
-    port: int = Field(default=5432)
-    user: str = Field(...)
-    password: Optional[str] = Field(default=None, repr=False)
-    database: str = Field(...)
-    postgis_schema: str = Field(default="geo")
-    app_schema: str = Field(default="app")
-    platform_schema: str = Field(default="platform")
-
-    # Extract managed identity fields
-    use_managed_identity: bool = Field(default=True)
-    managed_identity_name: Optional[str] = Field(default=None)
-
-    # Connection pooling (extract from AppConfig if present)
-    min_connections: int = Field(default=1)
-    max_connections: int = Field(default=20)
-    connection_timeout_seconds: int = Field(default=30)
-
-    @property
-    def connection_string(self) -> str:
-        """Build PostgreSQL connection string."""
-        if self.use_managed_identity:
-            return f"host={self.host} port={self.port} dbname={self.database} user={self.user}"
-        else:
-            return f"host={self.host} port={self.port} dbname={self.database} user={self.user} password={self.password}"
-
-    def debug_dict(self) -> dict:
-        """Debug output with masked password."""
-        return {
-            "host": self.host,
-            "database": self.database,
-            "password": "***MASKED***" if self.password else None,
-            "managed_identity": self.use_managed_identity
-        }
-
-    @classmethod
-    def from_environment(cls):
-        """Load from environment variables."""
-        import os
-        return cls(
-            host=os.environ["POSTGIS_HOST"],
-            port=int(os.environ.get("POSTGIS_PORT", "5432")),
-            user=os.environ["POSTGIS_USER"],
-            password=os.environ.get("POSTGIS_PASSWORD"),
-            database=os.environ["POSTGIS_DATABASE"],
-            # ... all fields from env
-        )
-
-def get_postgres_connection_string(config: Optional[DatabaseConfig] = None) -> str:
-    """Legacy compatibility function."""
-    if config is None:
-        from infrastructure.postgresql import PostgreSQLRepository
-        repo = PostgreSQLRepository()
-        return repo.conn_string
-    return config.connection_string
-```
-
-**config/raster_config.py** (250 lines):
-```python
-"""Raster processing pipeline configuration."""
-
-from typing import Optional
-from pydantic import BaseModel, Field
-
-class RasterConfig(BaseModel):
-    """Raster processing configuration."""
-
-    # Extract from AppConfig lines ~560-642
-    size_threshold_mb: int = Field(default=1000)
-    cog_compression: str = Field(default="deflate")
-    cog_jpeg_quality: int = Field(default=85)
-    cog_tile_size: int = Field(default=512)
-    cog_in_memory: bool = Field(default=True)
-    overview_resampling: str = Field(default="average")
-    target_crs: str = Field(default="EPSG:4326")
-    reproject_resampling: str = Field(default="bilinear")
-    strict_validation: bool = Field(default=True)
-    mosaicjson_maxzoom: int = Field(default=24)
-    intermediate_tiles_container: Optional[str] = Field(default=None)
-    intermediate_prefix: str = Field(default="temp/raster_etl")
-
-    @classmethod
-    def from_environment(cls):
-        """Load from environment variables."""
-        import os
-        return cls(
-            cog_compression=os.environ.get("RASTER_COG_COMPRESSION", "deflate"),
-            cog_jpeg_quality=int(os.environ.get("RASTER_COG_JPEG_QUALITY", "85")),
-            # ... all fields
-        )
-```
-
-**config/vector_config.py** (150 lines):
-```python
-"""Vector processing pipeline configuration."""
-
-from pydantic import BaseModel, Field
-
-class VectorConfig(BaseModel):
-    """Vector processing configuration."""
-
-    # Extract from AppConfig lines ~545-558
-    pickle_container: str = Field(default="rmhazuregeotemp")
-    pickle_prefix: str = Field(default="temp/vector_etl")
-    default_chunk_size: int = Field(default=1000)
-    auto_chunk_sizing: bool = Field(default=True)
-    target_schema: str = Field(default="geo")
-    create_spatial_indexes: bool = Field(default=True)
-
-    @classmethod
-    def from_environment(cls):
-        """Load from environment variables."""
-        import os
-        return cls(
-            pickle_container=os.environ.get("VECTOR_PICKLE_CONTAINER", "rmhazuregeotemp"),
-            # ... all fields
-        )
-```
-
-**config/queue_config.py** (200 lines):
-```python
-"""Azure Service Bus queue configuration."""
-
-from pydantic import BaseModel, Field
-
-class QueueNames:
-    """Queue name constants (copied from config.py lines 1622-1626)."""
-    JOBS = "geospatial-jobs"
-    TASKS = "geospatial-tasks"
-
-class QueueConfig(BaseModel):
-    """Service Bus queue configuration."""
-
-    # Extract from AppConfig if present
-    connection_string: str = Field(..., repr=False)
-    jobs_queue: str = Field(default=QueueNames.JOBS)
-    tasks_queue: str = Field(default=QueueNames.TASKS)
-    batch_size: int = Field(default=100)
-    batch_threshold: int = Field(default=50)
-
-    @classmethod
-    def from_environment(cls):
-        """Load from environment variables."""
-        import os
-        return cls(
-            connection_string=os.environ["ServiceBusConnection"],
-            # ... all fields
-        )
-```
-
-**config/app_config.py** (150 lines):
-```python
-"""Main application configuration - composes domain configs."""
-
-from pydantic import BaseModel, Field
-from .storage_config import StorageConfig
-from .database_config import DatabaseConfig
-from .raster_config import RasterConfig
-from .vector_config import VectorConfig
-from .queue_config import QueueConfig
-
-class AppConfig(BaseModel):
-    """
-    Application configuration - composition of domain configs.
-
-    NEW PATTERN: Instead of 63+ fields in one class, compose smaller configs.
-    Each domain config manages its own validation and defaults.
-    """
-
-    # Core application settings (extract from old AppConfig)
-    debug_mode: bool = Field(default=False)
-    environment: str = Field(default="dev")
-    timeout_seconds: int = Field(default=300)
-    max_retries: int = Field(default=3)
-    log_level: str = Field(default="INFO")
-
-    # Domain configurations (composition, not inheritance)
-    storage: StorageConfig
-    database: DatabaseConfig
-    raster: RasterConfig
-    vector: VectorConfig
-    queues: QueueConfig
-
-    # Legacy fields for backward compatibility during migration
-    # These delegate to domain configs
-    @property
-    def postgis_host(self) -> str:
-        """Legacy compatibility - use database.host instead."""
-        return self.database.host
-
-    @property
-    def raster_cog_compression(self) -> str:
-        """Legacy compatibility - use raster.cog_compression instead."""
-        return self.raster.cog_compression
-
-    # ... add more legacy properties as needed during migration
-
-    @classmethod
-    def from_environment(cls):
-        """Load all configs from environment."""
-        return cls(
-            storage=StorageConfig.from_environment(),
-            database=DatabaseConfig.from_environment(),
-            raster=RasterConfig.from_environment(),
-            vector=VectorConfig.from_environment(),
-            queues=QueueConfig.from_environment()
-        )
-```
-
-**config/__init__.py** (100 lines):
-```python
-"""Configuration management - exports for backward compatibility."""
-
-# Export domain configs
-from .storage_config import (
-    CogTier,
-    CogTierProfile,
-    StorageConfig,
-    determine_applicable_tiers
-)
-from .database_config import DatabaseConfig, get_postgres_connection_string
-from .raster_config import RasterConfig
-from .vector_config import VectorConfig
-from .queue_config import QueueConfig, QueueNames
-from .app_config import AppConfig
-
-# Singleton pattern
-_config_instance: Optional[AppConfig] = None
-
-def get_config() -> AppConfig:
-    """Get global configuration - backward compatible."""
-    global _config_instance
-    if _config_instance is None:
-        _config_instance = AppConfig.from_environment()
-    return _config_instance
-
-def debug_config() -> dict:
-    """Debug output with masked passwords."""
-    config = get_config()
-    return {
-        "storage": config.storage.dict(),
-        "database": config.database.debug_dict(),
-        "raster": config.raster.dict(),
-        "vector": config.vector.dict(),
-        "queues": {"connection": "***MASKED***"}
-    }
-
-__all__ = [
-    'AppConfig', 'get_config', 'debug_config',
-    'CogTier', 'CogTierProfile', 'StorageConfig', 'determine_applicable_tiers',
-    'DatabaseConfig', 'get_postgres_connection_string',
-    'RasterConfig', 'VectorConfig',
-    'QueueConfig', 'QueueNames'
-]
-```
-
-**Step 1.3: Test new config modules**
-```python
-# test_new_config.py
-from config import get_config, CogTier, QueueNames
-
-config = get_config()
-
-# Test composition
-assert config.database.host is not None
-assert config.raster.cog_compression == "deflate"
-assert config.storage.storage is not None
-
-# Test backward compatibility properties
-assert config.postgis_host == config.database.host
-assert config.raster_cog_compression == config.raster.cog_compression
-
-print("✅ New config modules working!")
-```
-
----
-
-#### Phase 2: Parallel Operation & Testing (2 hours)
-
-**Step 2.1: Both configs operational**
-
-At this point, BOTH import patterns work:
-```python
-# OLD PATTERN (still works via backward compatibility)
-from config import get_config
-config = get_config()
-host = config.postgis_host  # Legacy property
-
-# NEW PATTERN (preferred)
-from config import get_config
-config = get_config()
-host = config.database.host  # Direct domain access
-```
-
-**Step 2.2: Test with existing code**
-
-Run full test suite to ensure nothing breaks:
-```bash
-# Deploy to Azure
-func azure functionapp publish rmhazuregeoapi --python --build remote
-
-# Test health endpoint
-curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/health
-
-# Test job submission (uses config extensively)
-curl -X POST https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/jobs/submit/hello_world \
-  -H "Content-Type: application/json" \
-  -d '{"message": "test"}'
-
-# Verify: Check logs for config access patterns
-```
-
----
-
-#### Phase 3: Migrate Code to New Pattern (2-3 hours)
-
-**Step 3.1: Prioritize files by domain**
-
-**Raster pipeline files** (migrate to `config.raster`):
-- services/raster_cog.py
-- services/raster_validation.py
-- services/handler_create_cog.py
-- jobs/process_raster.py
-
-**Vector pipeline files** (migrate to `config.vector`):
-- services/vector/postgis_handler.py
-- jobs/ingest_vector.py
-
-**Database files** (migrate to `config.database`):
-- infrastructure/postgresql.py
-- triggers/db_query.py
-
-**Step 3.2: Migrate one domain at a time**
-
-Example: Migrate raster pipeline first
-```python
-# BEFORE (services/raster_cog.py)
-from config import get_config
-config = get_config()
-compression = config.raster_cog_compression  # Legacy property
-
-# AFTER
-from config import get_config
-config = get_config()
-compression = config.raster.cog_compression  # Direct domain access
-```
-
-**Step 3.3: Test after each domain migration**
-- Migrate raster files → test raster job → commit
-- Migrate vector files → test vector job → commit
-- Migrate database files → test schema operations → commit
-
----
-
-#### Phase 4: Remove Legacy Code (1 hour)
-
-**Step 4.1: Remove backward compatibility properties**
-
-Once all code migrated, remove from config/app_config.py:
-```python
-# DELETE these legacy properties
-@property
-def postgis_host(self) -> str:
-    return self.database.host
-
-@property
-def raster_cog_compression(self) -> str:
-    return self.raster.cog_compression
-```
-
-**Step 4.2: Delete old config.py**
-
-```bash
-# Backup first (just in case)
-cp config.py config.py.old
-
-# Delete old monolithic config
-git rm config.py
-
-# config/ folder is now the only config source
-```
-
-**Step 4.3: Update imports across codebase**
-
-```bash
-# Find any remaining old-style imports
-grep -r "from config import" --include="*.py" .
-
-# Should only find:
-# - from config import get_config
-# - from config import CogTier, QueueNames, etc.
-
-# All using new config/ package
-```
-
-**Step 4.4: Final deployment & testing**
-
-```bash
-func azure functionapp publish rmhazuregeoapi --python --build remote
-
-# Run full test suite
-curl .../api/health
-curl .../api/jobs/submit/hello_world
-curl .../api/jobs/submit/ingest_vector
-curl .../api/jobs/submit/process_raster
-```
-
----
-
-### Task Checklist
-
-#### Phase 1: Create New Config Modules
-- [ ] Create config/ folder structure (7 files)
-- [ ] Implement config/storage_config.py (copy COG tiers, storage classes)
-- [ ] Implement config/database_config.py (extract database fields)
-- [ ] Implement config/raster_config.py (extract raster fields)
-- [ ] Implement config/vector_config.py (extract vector fields)
-- [ ] Implement config/queue_config.py (extract queue fields)
-- [ ] Implement config/app_config.py (composition with legacy properties)
-- [ ] Implement config/__init__.py (exports for backward compatibility)
-- [ ] Write test_new_config.py (verify new modules work)
-- [ ] Test: Both old and new import patterns work
-- [ ] Commit: "Add new config/ package (parallel to old config.py)"
-
-#### Phase 2: Parallel Operation & Testing
-- [ ] Deploy to Azure with both configs active
-- [ ] Test health endpoint (uses config extensively)
-- [ ] Test hello_world job (validates config access)
-- [ ] Test process_raster job (validates raster config)
-- [ ] Test ingest_vector job (validates vector config)
-- [ ] Verify Application Insights logs (no config errors)
-- [ ] Commit: "Verify parallel config operation in production"
-
-#### Phase 3: Migrate Code to New Pattern
-- [ ] Migrate raster pipeline files (5-7 files)
-  - [ ] services/raster_cog.py
-  - [ ] services/raster_validation.py
-  - [ ] jobs/process_raster.py
-  - [ ] Test: process_raster job still works
-  - [ ] Commit: "Migrate raster pipeline to config.raster"
-- [ ] Migrate vector pipeline files (3-5 files)
-  - [ ] services/vector/postgis_handler.py
-  - [ ] jobs/ingest_vector.py
-  - [ ] Test: ingest_vector job still works
-  - [ ] Commit: "Migrate vector pipeline to config.vector"
-- [ ] Migrate database files (3-4 files)
-  - [ ] infrastructure/postgresql.py
-  - [ ] triggers/db_query.py
-  - [ ] Test: Schema redeploy still works
-  - [ ] Commit: "Migrate database code to config.database"
-- [ ] Migrate remaining files (grep for legacy properties)
-- [ ] Commit: "Complete migration to new config/ package"
-
-#### Phase 4: Remove Legacy Code
-- [ ] Remove legacy @property methods from config/app_config.py
-- [ ] Test: Ensure no code still uses legacy properties
-- [ ] Delete old config.py (backup first!)
-- [ ] Update all remaining imports (should be minimal)
-- [ ] Final deployment to Azure
-- [ ] Full regression testing (all jobs, all endpoints)
-- [ ] Update documentation (FILE_CATALOG.md, ARCHITECTURE_REFERENCE.md)
-- [ ] Commit: "Remove old config.py - migration complete"
-
----
-
-### Expected Benefits
+**Achievement**: 10 clean, focused modules instead of 1 monolithic file
+
+### What Was Done
+
+**Phase 1-3**: Created new `config/` package with domain-specific modules:
+- ✅ `config/__init__.py` - Exports and singleton pattern
+- ✅ `config/app_config.py` - Main composition class with legacy properties
+- ✅ `config/storage_config.py` - COG tiers, multi-account storage
+- ✅ `config/database_config.py` - PostgreSQL/PostGIS configuration
+- ✅ `config/raster_config.py` - Raster pipeline settings
+- ✅ `config/vector_config.py` - Vector pipeline settings
+- ✅ `config/queue_config.py` - Service Bus queue configuration
+- ✅ `config/h3_config.py` - H3 hexagonal grid configuration
+- ✅ `config/stac_config.py` - STAC metadata configuration
+- ✅ `config/validation.py` - Configuration validators
+
+**Phase 4**: Deleted old `config.py` (25 NOV 2025)
+- All imports now use `config/` package
+- Legacy properties in `app_config.py` maintained for backward compatibility
+- Production deployment verified: health check passing
+
+### Results
 
 | Metric | Before | After |
 |--------|--------|-------|
 | **AppConfig size** | 1,090 lines (63+ fields) | 150 lines (5 composed configs) |
-| **Find raster setting** | Search 1,747 lines | Look in config/raster_config.py (250 lines) |
-| **Test raster code** | Mock all 63+ fields | Only mock RasterConfig (15 fields) |
-| **Merge conflicts** | High (everyone edits AppConfig) | Low (different files per domain) |
-| **Clear dependencies** | Unclear (everything in one class) | Obvious (import only what you need) |
+| **Find raster setting** | Search 1,747 lines | Look in config/raster_config.py |
+| **Test raster code** | Mock all 63+ fields | Only mock RasterConfig |
+| **Merge conflicts** | High | Low (different files per domain) |
 
-### Risk Mitigation
-
-**Low Risk Strategy**:
-1. ✅ New code runs alongside old code (both operational)
-2. ✅ Backward compatibility via legacy properties (nothing breaks)
-3. ✅ Incremental migration (one domain at a time, tested)
-4. ✅ Old config.py deleted LAST (after everything migrated)
-
-**Rollback Plan**:
-- If issues discovered: Keep using legacy properties while debugging
-- If critical failure: Revert to old config.py (single file)
-- Git history preserves all migration steps for analysis
+### Deployment Verified
+```bash
+# 25 NOV 2025 - Post-deletion verification
+curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/health
+# ✅ Status: healthy
+```
 
 ---
 
@@ -872,6 +958,203 @@ if not repo.collection_exists(collection_id):  # Use SAME instance for verificat
 3. ✅ **Clearer architecture** - PgStacBootstrap = setup, PgStacRepository = data operations
 4. ✅ **Easier maintenance** - no more confusion about which class to use
 5. ✅ **Better testability** - single repository pattern easier to mock
+
+---
+
+## ✅ RESOLVED - STAC Metadata Encapsulation (25 NOV 2025)
+
+**Status**: ✅ **COMPLETED** on 25 NOV 2025
+**Purpose**: Standardized approach for adding custom metadata to STAC collections and items
+**Achievement**: Centralized metadata enrichment with ~375 lines of duplicate code eliminated
+
+### What Was Implemented
+
+**Created New Files**:
+- `services/iso3_attribution.py` (~300 lines) - Standalone ISO3 country code attribution service
+- `services/stac_metadata_helper.py` (~550 lines) - Main helper class with dataclasses
+
+**Key Classes Created**:
+
+```python
+# services/iso3_attribution.py
+@dataclass
+class ISO3Attribution:
+    iso3_codes: List[str]
+    primary_iso3: Optional[str]
+    countries: List[str]
+    attribution_method: Optional[str]  # 'centroid' or 'first_intersect'
+    available: bool
+
+class ISO3AttributionService:
+    def get_attribution_for_bbox(bbox: List[float]) -> ISO3Attribution
+    def get_attribution_for_geometry(geometry: Dict) -> ISO3Attribution
+
+# services/stac_metadata_helper.py
+@dataclass
+class PlatformMetadata:
+    dataset_id: Optional[str]
+    resource_id: Optional[str]
+    version_id: Optional[str]
+    request_id: Optional[str]
+    access_level: Optional[str]
+    client_id: str = 'ddh'
+
+    @classmethod
+    def from_job_params(cls, params: Dict) -> Optional['PlatformMetadata']
+    def to_stac_properties(self) -> Dict[str, Any]  # Returns platform:* prefixed dict
+
+@dataclass
+class AppMetadata:
+    job_id: Optional[str]
+    job_type: Optional[str]
+    created_by: str = 'rmhazuregeoapi'
+    processing_timestamp: Optional[str]
+
+    def to_stac_properties(self) -> Dict[str, Any]  # Returns app:* prefixed dict
+
+class STACMetadataHelper:
+    def augment_item(item_dict, bbox, container, blob_name, platform, app,
+                     include_iso3=True, include_titiler=True) -> Dict
+    def augment_collection(collection_dict, bbox, platform, app,
+                          include_iso3=True, register_search=True) -> Tuple[Dict, VisualizationMetadata]
+```
+
+**Files Modified**:
+
+| File | Changes |
+|------|---------|
+| `services/__init__.py` | Added exports for new classes |
+| `services/service_stac_metadata.py` | Added `platform_meta`, `app_meta` params; replaced inline ISO3 code with helper (~190 lines removed) |
+| `services/service_stac_vector.py` | Added `platform_meta`, `app_meta` params; replaced inline ISO3 code with helper (~175 lines removed) |
+| `services/stac_collection.py` | Added ISO3 attribution to collection `extra_fields` |
+
+### Property Namespaces Implemented
+
+| Namespace | Purpose | Example Properties |
+|-----------|---------|-------------------|
+| `platform:*` | DDH platform identifiers | `platform:dataset_id`, `platform:resource_id`, `platform:version_id` |
+| `app:*` | Application/job linkage | `app:job_id`, `app:job_type`, `app:created_by` |
+| `geo:*` | Geographic attribution | `geo:iso3`, `geo:primary_iso3`, `geo:countries` |
+| `azure:*` | Azure storage provenance | `azure:source_container`, `azure:source_blob` (existing) |
+
+### Usage Example
+
+```python
+from services import STACMetadataHelper, PlatformMetadata, AppMetadata
+
+# Extract metadata from job parameters
+platform_meta = PlatformMetadata.from_job_params(job_params)
+app_meta = AppMetadata(job_id=job_id, job_type='process_raster')
+
+# Augment STAC item
+helper = STACMetadataHelper()
+item_dict = helper.augment_item(
+    item_dict=item_dict,
+    bbox=bbox,
+    container='rmhazuregeobronze',
+    blob_name='test.tif',
+    platform=platform_meta,
+    app=app_meta,
+    include_iso3=True,
+    include_titiler=True
+)
+```
+
+### Benefits
+
+1. ✅ **DRY Code**: Eliminated ~375 lines of duplicated ISO3 attribution code
+2. ✅ **Type Safety**: Dataclasses with factory methods prevent parameter errors
+3. ✅ **Consistent Namespacing**: All metadata uses standardized prefixes
+4. ✅ **Job Linkage**: Every STAC item now links back to its creating job via `app:job_id`
+5. ✅ **Graceful Degradation**: Non-critical metadata failures don't block STAC creation
+6. ✅ **Extensible**: Easy to add new metadata categories
+
+### Related Bug Fix (25 NOV 2025)
+
+**Issue**: TiTiler URLs were missing from STAC API responses at `/api/stac/collections/{id}`
+**Root Cause**: `stac_api/service.py` was OVERWRITING `links[]` with standard STAC links
+**Fix Applied**: Modified to preserve existing custom links (TiTiler preview/tilejson/tiles) by merging:
+```python
+# FIX (25 NOV 2025): Preserve TiTiler links stored in pgstac database
+existing_links = response.get('links', [])
+standard_rels = {'self', 'items', 'parent', 'root'}
+custom_links = [link for link in existing_links if link.get('rel') not in standard_rels]
+response['links'] = standard_links + custom_links
+```
+
+---
+
+## ✅ RESOLVED - pgSTAC search_tohash() Function Failure (25 NOV 2025)
+
+**Status**: ✅ **RESOLVED** - Workaround implemented + full-rebuild available
+**Resolution Date**: 25 NOV 2025
+**Documentation**: See `services/pgstac_search_registration.py` module docstring for full details
+
+### Problem Summary
+
+**Error**: `function search_tohash(jsonb) does not exist`
+**Context**: Occurred when using `ON CONFLICT (hash)` with pgstac.searches GENERATED column
+
+### Root Cause
+
+The pgstac.searches table has a GENERATED column:
+```sql
+hash TEXT GENERATED ALWAYS AS (search_hash(search, metadata))
+```
+
+When using `ON CONFLICT (hash)`, PostgreSQL's query planner "inlines" the GENERATED column
+expression during conflict detection. This caused it to look for `search_tohash(jsonb)` with
+1 argument, but the function was defined as `search_tohash(jsonb, jsonb)` with 2 arguments.
+
+### Resolution
+
+**Two-Part Fix:**
+
+1. **Workaround Implemented** (`services/pgstac_search_registration.py`):
+   - Uses SELECT-then-INSERT/UPDATE pattern instead of UPSERT
+   - Avoids `ON CONFLICT (hash)` entirely (the only operation that triggers the bug)
+   - Computes hash in Python, uses it for lookup, then INSERT or UPDATE separately
+
+2. **Root Cause Fix Available** (`/api/dbadmin/maintenance/full-rebuild?confirm=yes`):
+   - `DROP SCHEMA pgstac CASCADE` + fresh `pypgstac migrate`
+   - Creates functions with correct signatures
+   - After clean rebuild, workaround is technically unnecessary but kept as defensive programming
+
+### Verification Query
+
+```sql
+SELECT p.proname, pg_get_function_arguments(p.oid)
+FROM pg_proc p
+JOIN pg_namespace n ON p.pronamespace = n.oid
+WHERE n.nspname = 'pgstac'
+AND p.proname IN ('search_tohash', 'search_hash');
+
+-- Expected (correct after full-rebuild):
+--   search_hash    | search jsonb, metadata jsonb
+--   search_tohash  | search jsonb                   <- 1 argument
+```
+
+---
+
+## ✅ RESOLVED - Fix STAC Collection Description Validation Error (25 NOV 2025)
+
+**Status**: ✅ **FIXED** in code
+**Fix Location**: `services/stac_collection.py:110-112`
+**Resolution**: Default description provided: `f"Raster collection: {collection_id}"`
+
+### Problem Summary
+
+**Error**: `None is not of type 'string'`
+**Context**: STAC 1.1.0 collection validation fails on `description` field
+**Impact**: `process_large_raster` Stage 5 (STAC creation) fails; Stages 1-4 complete successfully
+
+### Fix Applied
+
+**File**: `services/stac_collection.py:110-112`
+```python
+# FIX (25 NOV 2025): Provide default description to satisfy STAC 1.1.0 validation
+description = job_parameters.get("collection_description") or params.get("description") or f"Raster collection: {collection_id}"
+```
 
 ---
 
@@ -1364,288 +1647,40 @@ def get_all_collections(repo: Optional[PostgreSQLRepository] = None) -> Dict[str
 
 ---
 
-## 🌍 MEDIUM PRIORITY - ISO3 Country Attribution in STAC Items (21 NOV 2025)
+## ✅ RESOLVED - ISO3 Country Attribution in STAC Items (25 NOV 2025)
 
-**Status**: Planned - Ready for implementation
+**Status**: ✅ **COMPLETED** on 25 NOV 2025 (as part of STAC Metadata Encapsulation)
 **Purpose**: Add ISO3 country codes to STAC item metadata during creation
-**Priority**: MEDIUM (enriches metadata, enables country-based filtering)
-**Effort**: 2-3 hours
-**Requested By**: Robert (21 NOV 2025)
+**Achievement**: Extracted to standalone service with graceful degradation
 
-### Problem Statement
+### What Was Implemented
 
-**Current State**: STAC items are created WITHOUT country/ISO3 attribution:
-- Raster items ([services/service_stac_metadata.py](../services/service_stac_metadata.py)) extract bbox, geometry, projection
-- Vector items ([services/service_stac_vector.py](../services/service_stac_vector.py)) extract extent, row count, geometry types
-- **Neither includes which country the data is located in**
-
-**Desired State**: STAC items should include:
-```json
-{
-  "properties": {
-    "geo:iso3": ["USA"],
-    "geo:primary_iso3": "USA",
-    "geo:countries": ["United States of America"]
-  }
-}
-```
-
-### Existing Infrastructure
-
-**The `geo.system_admin0_boundaries` table is already configured** in [config/h3_config.py:145-152](../config/h3_config.py):
-```python
-system_admin0_table: str = Field(
-    default="geo.system_admin0_boundaries",
-    description="PostGIS table containing admin0 (country) boundaries..."
-)
-```
-
-**Expected schema** (from H3 code patterns in [infrastructure/h3_repository.py:352](../infrastructure/h3_repository.py)):
-- `iso3` VARCHAR(3) - ISO 3166-1 alpha-3 country code
-- `geom` GEOMETRY - Country boundary polygons (WGS84)
-- Optional: `name` - Country name
-
-**H3 already uses this for spatial joins**:
-```sql
-UPDATE h3.grids h
-SET country_code = c.iso3
-FROM geo.system_admin0 c
-WHERE ST_Intersects(h.geom, c.geom)
-```
-
-### Implementation Plan
-
-#### Step 1: Add Spatial Config (Optional - Use H3 Config)
-
-**Option A**: Reuse existing H3 config (RECOMMENDED - less code)
-```python
-# In service methods, access via:
-from config import get_config
-config = get_config()
-admin0_table = config.h3.system_admin0_table  # "geo.system_admin0_boundaries"
-```
-
-**Option B**: Create dedicated spatial config (if needed for separation)
-```python
-# config/spatial_config.py
-class SpatialConfig(BaseModel):
-    admin0_table: str = Field(default="geo.system_admin0_boundaries")
-    iso3_column: str = Field(default="iso3")
-    name_column: str = Field(default="name")
-    enable_country_attribution: bool = Field(default=True)
-```
-
-#### Step 2: Add Helper Method to StacMetadataService
-
-**File**: [services/service_stac_metadata.py](../services/service_stac_metadata.py) (after line 591)
+**File Created**: `services/iso3_attribution.py` (~300 lines)
 
 ```python
-def _get_countries_for_bbox(self, bbox: List[float]) -> Dict[str, Any]:
-    """
-    Get ISO3 codes for countries intersecting the given bounding box.
+@dataclass
+class ISO3Attribution:
+    iso3_codes: List[str]           # All intersecting countries
+    primary_iso3: Optional[str]      # Centroid-based primary country
+    countries: List[str]             # Country names (if available)
+    attribution_method: Optional[str] # 'centroid' or 'first_intersect'
+    available: bool                  # True if attribution succeeded
 
-    Uses ST_Intersects with the bbox envelope to find all countries
-    that overlap with the STAC item's spatial extent.
+    def to_stac_properties(self, prefix: str = "geo") -> Dict[str, Any]:
+        """Convert to STAC properties dict with namespaced keys."""
 
-    For items spanning multiple countries (e.g., border regions),
-    returns all intersecting countries with the primary determined
-    by centroid point-in-polygon.
-
-    Args:
-        bbox: [minx, miny, maxx, maxy] in EPSG:4326
-
-    Returns:
-        {
-            "iso3_list": ["USA", "CAN"],  # All intersecting countries
-            "primary_iso3": "USA",         # Country containing centroid
-            "country_names": ["United States", "Canada"]
-        }
-    """
-    from config import get_config
-    from infrastructure.postgresql import PostgreSQLRepository
-    from psycopg import sql
-
-    config = get_config()
-    admin0_table = config.h3.system_admin0_table  # "geo.system_admin0_boundaries"
-
-    # Parse schema.table
-    if '.' in admin0_table:
-        schema, table = admin0_table.split('.', 1)
-    else:
-        schema, table = 'geo', admin0_table
-
-    minx, miny, maxx, maxy = bbox
-    centroid_x = (minx + maxx) / 2
-    centroid_y = (miny + maxy) / 2
-
-    repo = PostgreSQLRepository()
-
-    try:
-        with repo._get_connection() as conn:
-            with conn.cursor() as cur:
-                # Query 1: All countries intersecting bbox
-                query_intersects = sql.SQL("""
-                    SELECT iso3, name
-                    FROM {schema}.{table}
-                    WHERE ST_Intersects(
-                        geom,
-                        ST_MakeEnvelope(%s, %s, %s, %s, 4326)
-                    )
-                    ORDER BY iso3
-                """).format(
-                    schema=sql.Identifier(schema),
-                    table=sql.Identifier(table)
-                )
-                cur.execute(query_intersects, [minx, miny, maxx, maxy])
-                rows = cur.fetchall()
-
-                iso3_list = [r['iso3'] for r in rows if r.get('iso3')]
-                country_names = [r['name'] for r in rows if r.get('name')]
-
-                # Query 2: Primary country (centroid point-in-polygon)
-                primary_iso3 = None
-                if iso3_list:
-                    query_centroid = sql.SQL("""
-                        SELECT iso3
-                        FROM {schema}.{table}
-                        WHERE ST_Contains(geom, ST_Point(%s, %s, 4326))
-                        LIMIT 1
-                    """).format(
-                        schema=sql.Identifier(schema),
-                        table=sql.Identifier(table)
-                    )
-                    cur.execute(query_centroid, [centroid_x, centroid_y])
-                    result = cur.fetchone()
-                    primary_iso3 = result['iso3'] if result else iso3_list[0]
-
-                return {
-                    "iso3_list": iso3_list,
-                    "primary_iso3": primary_iso3,
-                    "country_names": country_names
-                }
-
-    except Exception as e:
-        logger.warning(f"Country attribution failed (non-critical): {e}")
-        return {
-            "iso3_list": [],
-            "primary_iso3": None,
-            "country_names": []
-        }
+class ISO3AttributionService:
+    def get_attribution_for_bbox(bbox: List[float]) -> ISO3Attribution
+    def get_attribution_for_geometry(geometry: Dict) -> ISO3Attribution
 ```
 
-#### Step 3: Integrate into extract_item_from_blob()
+### Integration Points
 
-**File**: [services/service_stac_metadata.py](../services/service_stac_metadata.py)
-
-**Location**: After STEP G.1 (required STAC fields), before STEP G.5 (asset URL conversion)
-
-Add new **STEP G.2: Country Attribution**:
-
-```python
-# STEP G.2: Add country attribution (ISO3 codes)
-try:
-    logger.debug("   Step G.2: Adding country attribution...")
-    bbox = item_dict.get('bbox')
-    if bbox and len(bbox) == 4:
-        country_info = self._get_countries_for_bbox(bbox)
-
-        if country_info['iso3_list']:
-            item_dict['properties']['geo:iso3'] = country_info['iso3_list']
-            item_dict['properties']['geo:primary_iso3'] = country_info['primary_iso3']
-            if country_info['country_names']:
-                item_dict['properties']['geo:countries'] = country_info['country_names']
-
-            logger.debug(f"   ✅ Step G.2: Country attribution added - {country_info['primary_iso3']} ({len(country_info['iso3_list'])} countries)")
-        else:
-            logger.debug("   ⚠️ Step G.2: No countries found for bbox (may be ocean/international waters)")
-    else:
-        logger.warning("   ⚠️ Step G.2: No valid bbox available for country attribution")
-except Exception as e:
-    # Non-critical - don't fail item creation if country lookup fails
-    logger.warning(f"⚠️ Step G.2: Country attribution failed (non-critical): {e}")
-```
-
-#### Step 4: Add Same Logic to StacVectorService
-
-**File**: [services/service_stac_vector.py](../services/service_stac_vector.py)
-
-**Location**: In `extract_item_from_table()`, after building properties dict (around line 128)
-
-```python
-# Add country attribution
-try:
-    from services.service_stac_metadata import StacMetadataService
-    stac_service = StacMetadataService()
-    country_info = stac_service._get_countries_for_bbox(bbox)
-
-    if country_info['iso3_list']:
-        properties['geo:iso3'] = country_info['iso3_list']
-        properties['geo:primary_iso3'] = country_info['primary_iso3']
-        if country_info['country_names']:
-            properties['geo:countries'] = country_info['country_names']
-
-        logger.debug(f"Country attribution: {country_info['primary_iso3']}")
-except Exception as e:
-    logger.warning(f"Country attribution failed (non-critical): {e}")
-```
-
-**Alternative**: Extract the method to a shared utility to avoid circular imports.
-
-#### Step 5: Ensure admin0 Table Exists
-
-**PREREQUISITE**: The `geo.system_admin0_boundaries` table must exist with:
-- `iso3` column (VARCHAR 3)
-- `geom` column (GEOMETRY Polygon/MultiPolygon EPSG:4326)
-- Optional: `name` column (VARCHAR)
-
-**If table doesn't exist**, create it:
-```sql
-CREATE TABLE IF NOT EXISTS geo.system_admin0_boundaries (
-    id SERIAL PRIMARY KEY,
-    iso3 VARCHAR(3) NOT NULL,
-    name VARCHAR(255),
-    geom GEOMETRY(MultiPolygon, 4326) NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_admin0_geom ON geo.system_admin0_boundaries USING GIST(geom);
-CREATE INDEX IF NOT EXISTS idx_admin0_iso3 ON geo.system_admin0_boundaries(iso3);
-
--- Populate from Natural Earth, GADM, or other admin boundary source
-```
-
-### Testing
-
-```bash
-# 1. Submit raster processing job
-curl -X POST ".../api/jobs/submit/process_raster" \
-  -H "Content-Type: application/json" \
-  -d '{"blob_name": "test.tif", "container_name": "rmhazuregeobronze"}'
-
-# 2. After job completes, check STAC item
-curl ".../api/stac/collections/dev/items/{item_id}" | jq '.properties | {iso3: .["geo:iso3"], primary: .["geo:primary_iso3"]}'
-
-# Expected output:
-# {
-#   "iso3": ["USA"],
-#   "primary": "USA"
-# }
-
-# 3. Test border case (item spanning multiple countries)
-# Upload a raster that crosses US-Canada border, verify both ISO3 codes returned
-```
-
-### Task Checklist
-
-- [ ] **Prerequisite**: Verify `geo.system_admin0_boundaries` table exists with iso3 and geom columns
-- [ ] **Step 1**: Decide on config approach (reuse H3Config or create SpatialConfig)
-- [ ] **Step 2**: Add `_get_countries_for_bbox()` helper to StacMetadataService
-- [ ] **Step 3**: Add STEP G.2 (country attribution) to `extract_item_from_blob()`
-- [ ] **Step 4**: Add country attribution to `StacVectorService.extract_item_from_table()`
-- [ ] **Step 5**: Test with raster job submission
-- [ ] **Step 6**: Test with vector STAC cataloging
-- [ ] **Step 7**: Test border case (multi-country item)
-- [ ] **Step 8**: Update documentation (note new STAC properties)
-- [ ] **Commit**: "Add ISO3 country attribution to STAC items during metadata extraction"
+| Location | How ISO3 is Added |
+|----------|-------------------|
+| Raster STAC items | `STACMetadataHelper.augment_item()` calls ISO3AttributionService |
+| Vector STAC items | `STACMetadataHelper.augment_item()` with `include_titiler=False` |
+| STAC collections | Direct call to `ISO3AttributionService.get_attribution_for_bbox()` |
 
 ### Properties Added to STAC Items
 
@@ -1654,20 +1689,29 @@ curl ".../api/stac/collections/dev/items/{item_id}" | jq '.properties | {iso3: .
 | `geo:iso3` | List[str] | ISO 3166-1 alpha-3 codes for all intersecting countries | `["USA", "CAN"]` |
 | `geo:primary_iso3` | str | Primary country (centroid-based) | `"USA"` |
 | `geo:countries` | List[str] | Country names (if available in admin0 table) | `["United States", "Canada"]` |
+| `geo:attribution_method` | str | How primary was determined | `"centroid"` or `"first_intersect"` |
 
-### Performance Considerations
+### Configuration
 
-- **Single PostGIS query** per STAC item (~10-50ms overhead)
-- **Index-backed**: Spatial queries use GIST index on geom column
-- **Non-blocking**: Failures don't prevent STAC item creation
-- **Cached connection**: Uses PostgreSQLRepository connection pooling
+Uses existing H3 config for admin0 table:
+```python
+from config import get_config
+config = get_config()
+admin0_table = config.h3.system_admin0_table  # "geo.system_admin0_boundaries"
+```
 
-### Future Enhancements
+### Graceful Degradation
 
-1. **H3 Cell Lookup** (Alternative approach): Use H3 grid with precomputed country_code instead of real-time spatial join
-2. **Admin1 Attribution**: Add state/province codes for more granular attribution
-3. **Configurable Columns**: Allow configuration of which spatial attributes to extract
-4. **Batch Processing**: Optimize for bulk STAC item creation (single query for multiple bboxes)
+The service handles failures gracefully:
+- Returns `available=False` if admin0 table doesn't exist
+- Returns `available=True` with empty lists if geometry is in ocean/international waters
+- Non-fatal warnings logged but STAC item creation continues
+
+### Future Enhancements (Unchanged)
+
+1. **H3 Cell Lookup**: Use H3 grid with precomputed country_code for faster lookup
+2. **Admin1 Attribution**: Add state/province codes for granular attribution
+3. **Batch Processing**: Single query for multiple bboxes in bulk operations
 
 ---
 

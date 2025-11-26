@@ -11,15 +11,15 @@
 # EPOCH: 4 - ACTIVE ✅
 # STATUS: Job - H3 Land Grid Pyramid Bootstrap (3-stage cascade workflow)
 # PURPOSE: Generate complete H3 land-filtered grid pyramid from resolution 2-7
-# LAST_REVIEWED: 22 NOV 2025
+# LAST_REVIEWED: 26 NOV 2025
 # EXPORTS: BootstrapH3LandGridPyramidJob (JobBase + JobBaseMixin implementation)
 # INTERFACES: JobBase (2 methods), JobBaseMixin (provides 4 methods)
 # PYDANTIC_MODELS: Uses declarative parameters_schema
-# DEPENDENCIES: jobs.base.JobBase, jobs.mixins.JobBaseMixin, services.handler_generate_h3_grid, services.handler_cascade_h3_descendants
+# DEPENDENCIES: jobs.base.JobBase, jobs.mixins.JobBaseMixin, infrastructure.h3_batch_tracking.H3BatchTracker, services.handler_generate_h3_grid, services.handler_cascade_h3_descendants
 # SOURCE: HTTP job submission for H3 bootstrap workflow
 # SCOPE: Land-filtered H3 grids for World Bank Agricultural Geography Platform
 # VALIDATION: Declarative schema via JobBaseMixin
-# PATTERNS: Mixin pattern (composition over inheritance), 3-stage cascade, Batched fan-out, DRY architecture
+# PATTERNS: Mixin pattern, 3-stage cascade, Batched fan-out, Batch-level idempotency (26 NOV 2025)
 # ENTRY_POINTS: Registered in jobs/__init__.py ALL_JOBS as "bootstrap_h3_land_grid_pyramid"
 # INDEX: BootstrapH3LandGridPyramidJob:60, stages:108, parameters_schema:135, create_tasks_for_stage:180
 # ============================================================================
@@ -65,7 +65,31 @@ Albania Test Support:
     - Expected: ~10-20 res 2 cells → ~168K res 7 cells
     - Success Criteria: Complete in <15 minutes with correct parent relationships
 
-Last Updated: 15 NOV 2025 - Redesigned for 3-stage cascade architecture
+Idempotency (26 NOV 2025):
+    - Batch-level tracking via H3BatchTracker (h3.batch_progress table)
+    - Jobs can resume from partial failures - only incomplete batches re-execute
+    - Handler early-exit if batch already completed
+    - Cell-level idempotency via ON CONFLICT (h3_index, grid_id) DO NOTHING
+
+PREREQUISITE - H3 Schema Tables (MUST exist before running this job):
+    The h3 schema and its tables are NOT created by the full-rebuild endpoint.
+    Before running H3 bootstrap jobs, ensure these SQL scripts have been executed:
+
+    1. sql/init/00_create_h3_schema.sql      - Creates h3 schema
+    2. sql/init/01_create_h3_grids.sql       - Creates h3.grids table
+    3. sql/init/02_create_h3_reference_filters.sql - Reference filter storage
+    4. sql/init/03_create_h3_grid_metadata.sql - Grid metadata tracking
+    5. sql/init/07_create_h3_batch_progress.sql - Batch-level idempotency (26 NOV 2025)
+
+    Run manually via psql:
+        PGPASSWORD='...' psql -h rmhpgflex.postgres.database.azure.com -U rob634 -d geopgflex \\
+            -f sql/init/00_create_h3_schema.sql
+        # ... repeat for each file
+
+    The h3 schema is intentionally preserved by full-rebuild because it contains
+    static bootstrap data that takes hours to regenerate.
+
+Last Updated: 26 NOV 2025 - Added batch-level idempotency framework
 """
 
 from typing import List, Dict, Any
@@ -237,28 +261,48 @@ class BootstrapH3LandGridPyramidJob(JobBaseMixin, JobBase):  # Mixin FIRST for c
         elif stage == 2:
             # STAGE 2: Cascade res 2 → res 3,4,5,6,7 (batched fan-out)
             # Create N parallel tasks based on parent count and batch size
+            # IDEMPOTENCY: Skip batches that already completed (enables resumable jobs)
 
             if not previous_results or len(previous_results) == 0:
                 raise ValueError("Stage 2 requires Stage 1 results")
 
             # Extract parent count from Stage 1 result
+            # Use cells_generated (not cells_inserted) to handle idempotent reruns
+            # ON CONFLICT DO NOTHING means cells_inserted=0 when grid already exists
             stage1_result = previous_results[0].get('result', {})
+            cells_generated = stage1_result.get('cells_generated', 0)
             cells_inserted = stage1_result.get('cells_inserted', 0)
 
-            if cells_inserted == 0:
-                raise ValueError("Stage 1 inserted 0 cells - cannot cascade")
+            # Use generated count (total cells in grid) not inserted count (new cells this run)
+            parent_count = cells_generated if cells_generated > 0 else cells_inserted
+            if parent_count == 0:
+                raise ValueError("Stage 1 generated 0 cells - cannot cascade (check spatial filter)")
 
             # Calculate number of batches
             from math import ceil
-            num_batches = ceil(cells_inserted / cascade_batch_size)
+            num_batches = ceil(parent_count / cascade_batch_size)
 
-            # Create fan-out tasks (one per batch)
+            # IDEMPOTENCY: Query completed batches to skip them
+            # This enables resumable jobs - only incomplete batches get new tasks
+            from infrastructure.h3_batch_tracking import H3BatchTracker
+            batch_tracker = H3BatchTracker()
+            completed_batch_ids = batch_tracker.get_completed_batch_ids(job_id, stage_number=2)
+
+            # Create fan-out tasks (one per batch), skipping completed batches
             tasks = []
+            skipped_count = 0
             for batch_idx in range(num_batches):
+                batch_id = f"{job_id[:8]}-s2-batch{batch_idx}"
+
+                # Skip already completed batches (idempotency)
+                if batch_id in completed_batch_ids:
+                    skipped_count += 1
+                    continue
+
                 batch_start = batch_idx * cascade_batch_size
 
                 tasks.append({
-                    "task_id": f"{job_id[:8]}-s2-batch{batch_idx}",
+                    "task_id": batch_id,
                     "task_type": "cascade_h3_descendants",
                     "parameters": {
                         "parent_grid_id": f"{grid_id_prefix}_res2",
@@ -266,9 +310,19 @@ class BootstrapH3LandGridPyramidJob(JobBaseMixin, JobBase):  # Mixin FIRST for c
                         "grid_id_prefix": grid_id_prefix,
                         "batch_start": batch_start,
                         "batch_size": cascade_batch_size,
+                        "batch_index": batch_idx,  # For idempotency tracking
                         "source_job_id": job_id
                     }
                 })
+
+            # Log idempotency status
+            if skipped_count > 0:
+                from util_logger import LoggerFactory, ComponentType
+                logger = LoggerFactory.create_logger(ComponentType.CONTROLLER, "BootstrapH3LandGridPyramidJob")
+                logger.info(
+                    f"♻️  IDEMPOTENT RESUME: {skipped_count}/{num_batches} batches already complete, "
+                    f"creating {len(tasks)} new tasks"
+                )
 
             return tasks
 

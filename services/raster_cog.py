@@ -297,15 +297,20 @@ def create_cog(params: dict) -> dict:
             logger.warning(f"⚠️ Unknown compression '{compression}', falling back to deflate")
             cog_profile = cog_profiles.get('deflate')
 
-        # Override to BAND interleave for cloud-native selective access
-        # BAND interleave optimizes for:
-        # - Selective band access via HTTP range requests (read only bands needed)
-        # - Multi-spectral analysis (NDVI = only NIR+Red, not all bands)
-        # - Cloud storage access patterns (minimize bytes transferred)
-        # - Modern standard for scientific/remote sensing data (HDF, NetCDF, Zarr)
-        # PIXEL interleave is legacy pattern from display-oriented workflows
-        cog_profile["INTERLEAVE"] = "BAND"
-        logger.info(f"   Interleave: BAND (cloud-native pattern for selective band access)")
+        # Set interleave based on compression type
+        # JPEG/WebP: PIXEL interleave required (YCbCr encoding operates on interleaved RGB)
+        # DEFLATE/LZW/LERC: BAND interleave preferred (cloud-native selective band access)
+        if compression in ("jpeg", "webp"):
+            cog_profile["INTERLEAVE"] = "PIXEL"
+            logger.info(f"   Interleave: PIXEL (required for {compression.upper()} YCbCr encoding)")
+        else:
+            # BAND interleave optimizes for:
+            # - Selective band access via HTTP range requests (read only bands needed)
+            # - Multi-spectral analysis (NDVI = only NIR+Red, not all bands)
+            # - Cloud storage access patterns (minimize bytes transferred)
+            # - Modern standard for scientific/remote sensing data (HDF, NetCDF, Zarr)
+            cog_profile["INTERLEAVE"] = "BAND"
+            logger.info(f"   Interleave: BAND (cloud-native pattern for selective band access)")
 
         # Add JPEG quality if using JPEG compression
         if compression == "jpeg":

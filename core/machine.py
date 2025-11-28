@@ -72,8 +72,8 @@ from config import AppConfig
 # Logging
 from util_logger import LoggerFactory, ComponentType
 
-# Error handling (13 NOV 2025 - Part 1 Task 1.3)
-from core.error_handler import CoreMachineErrorHandler
+# Error handling (13 NOV 2025 - Part 1 Task 1.3, 28 NOV 2025 - nested error logging)
+from core.error_handler import CoreMachineErrorHandler, log_nested_error
 
 # Exception categorization for retry decisions (13 NOV 2025 - Part 2 Task 2.4)
 from exceptions import (
@@ -615,6 +615,8 @@ class CoreMachine:
                 self.logger.error(f"❌ {error_msg}")
 
                 # Mark task and job as FAILED
+                # Create a RuntimeError to preserve context if cleanup fails
+                primary_error = RuntimeError(error_msg)
                 try:
                     self.state_manager.mark_task_failed(task_message.task_id, error_msg)
                     self.state_manager.mark_job_failed(
@@ -623,7 +625,15 @@ class CoreMachine:
                     )
                     self.logger.error(f"❌ Task and job marked as FAILED - handler will NOT execute")
                 except Exception as cleanup_error:
-                    self.logger.error(f"❌ Cleanup failed: {cleanup_error}")
+                    # 28 NOV 2025: Preserve both primary and cleanup error context
+                    log_nested_error(
+                        self.logger,
+                        primary_error=primary_error,
+                        cleanup_error=cleanup_error,
+                        operation="mark_task_and_job_failed_after_status_update_failure",
+                        job_id=task_message.parent_job_id,
+                        task_id=task_message.task_id
+                    )
 
                 # Return failure - do NOT execute task handler
                 return {
@@ -640,6 +650,8 @@ class CoreMachine:
             self.logger.error(f"Traceback: {traceback.format_exc()}")
 
             # Mark task and job as FAILED
+            # Create primary error for context preservation
+            primary_error = RuntimeError(error_msg)
             try:
                 self.state_manager.mark_task_failed(task_message.task_id, error_msg)
                 self.state_manager.mark_job_failed(
@@ -647,7 +659,15 @@ class CoreMachine:
                     f"Task {task_message.task_id} status update exception: {e}"
                 )
             except Exception as cleanup_error:
-                self.logger.error(f"❌ Cleanup failed: {cleanup_error}")
+                # 28 NOV 2025: Preserve both primary and cleanup error context
+                log_nested_error(
+                    self.logger,
+                    primary_error=primary_error,
+                    cleanup_error=cleanup_error,
+                    operation="mark_task_and_job_failed_after_status_update_exception",
+                    job_id=task_message.parent_job_id,
+                    task_id=task_message.task_id
+                )
 
             # Return failure - do NOT execute handler
             return {
@@ -872,7 +892,16 @@ class CoreMachine:
                                 f"due to stage advancement failure"
                             )
                         except Exception as cleanup_error:
-                            self.logger.error(f"❌ Failed to mark job as FAILED: {cleanup_error}")
+                            # 28 NOV 2025: Preserve both primary and cleanup error context
+                            log_nested_error(
+                                self.logger,
+                                primary_error=stage_error,
+                                cleanup_error=cleanup_error,
+                                operation="mark_job_failed_after_stage_advancement_failure",
+                                job_id=task_message.parent_job_id,
+                                task_id=task_message.task_id,
+                                stage=task_message.stage
+                            )
 
                         # Do NOT re-raise - task is completed, just log failure
                         # Return failure status but don't crash function
@@ -903,7 +932,15 @@ class CoreMachine:
                         f"Task {task_message.task_id} completion SQL failed: {e}"
                     )
                 except Exception as cleanup_error:
-                    self.logger.error(f"❌ Cleanup failed: {cleanup_error}")
+                    # 28 NOV 2025: Preserve both primary and cleanup error context
+                    log_nested_error(
+                        self.logger,
+                        primary_error=e,
+                        cleanup_error=cleanup_error,
+                        operation="mark_task_and_job_failed_after_completion_sql_failure",
+                        job_id=task_message.parent_job_id,
+                        task_id=task_message.task_id
+                    )
 
                 # Do NOT re-raise - prevents infinite Service Bus retries
                 return {

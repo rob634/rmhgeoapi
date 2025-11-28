@@ -86,7 +86,8 @@ from .handler_h3_native_streaming import h3_native_streaming_postgis
 from .handler_generate_h3_grid import generate_h3_grid  # Universal H3 handler (14 NOV 2025) - replaces bootstrap_res2
 from .handler_cascade_h3_descendants import cascade_h3_descendants  # Multi-level cascade handler (15 NOV 2025) - res N → res N+1,N+2,etc
 from .handler_finalize_h3_pyramid import finalize_h3_pyramid  # H3 pyramid finalization (14 NOV 2025)
-from .vector.tasks import prepare_vector_chunks, upload_pickled_chunk
+# Old ingest_vector handlers REMOVED (27 NOV 2025) - process_vector uses new idempotent handlers
+# from .vector.tasks import prepare_vector_chunks, upload_pickled_chunk
 from .vector.process_vector_tasks import process_vector_prepare, process_vector_upload  # Idempotent (26 NOV 2025)
 from .raster_mosaicjson import create_mosaicjson
 from .stac_collection import create_stac_collection
@@ -139,10 +140,9 @@ ALL_HANDLERS = {
     "generate_h3_grid": generate_h3_grid,  # Universal handler for ALL resolutions (0-15), base OR cascade, flexible filtering (replaces bootstrap_res2)
     "cascade_h3_descendants": cascade_h3_descendants,  # Multi-level cascade handler (15 NOV 2025) - res N → [N+1, N+2, ..., N+K] in one operation
     "finalize_h3_pyramid": finalize_h3_pyramid,  # H3 pyramid finalization and verification (14 NOV 2025)
-    # Vector ETL handlers (17 OCT 2025)
-    "prepare_vector_chunks": prepare_vector_chunks,  # Stage 1: Load, validate, chunk, pickle
-    "upload_pickled_chunk": upload_pickled_chunk,    # Stage 2: Load pickle and upload to PostGIS
-    "create_vector_stac": create_vector_stac,        # Stage 3: Create STAC record (18 OCT 2025 - Priority 0A)
+    # Vector ETL handlers - OLD ingest_vector handlers REMOVED (27 NOV 2025)
+    # "prepare_vector_chunks" and "upload_pickled_chunk" removed - use process_vector idempotent handlers
+    "create_vector_stac": create_vector_stac,        # Stage 3: Create STAC record (shared by process_vector)
     # Raster collection handlers (20 OCT 2025)
     "create_mosaicjson": create_mosaicjson,          # Stage 3: Create MosaicJSON from COG collection
     "create_stac_collection": create_stac_collection,  # Stage 4: Create STAC collection item

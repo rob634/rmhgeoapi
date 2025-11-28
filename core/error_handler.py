@@ -4,17 +4,17 @@
 # EPOCH: 4 - ACTIVE ✅
 # STATUS: Core utility - Centralized error handling for CoreMachine
 # PURPOSE: Eliminate duplicate error logging patterns with context manager
-# LAST_REVIEWED: 13 NOV 2025
-# EXPORTS: CoreMachineErrorHandler (context manager)
+# LAST_REVIEWED: 28 NOV 2025
+# EXPORTS: CoreMachineErrorHandler (context manager), log_nested_error (function)
 # INTERFACES: None (utility class)
 # PYDANTIC_MODELS: None
 # DEPENDENCIES: logging, traceback, contextlib, typing
 # SOURCE: Extracted from core/machine.py duplicate patterns
 # SCOPE: CoreMachine error handling
 # VALIDATION: None
-# PATTERNS: Context Manager, Structured Logging
-# ENTRY_POINTS: with CoreMachineErrorHandler.handle_operation(...)
-# INDEX: CoreMachineErrorHandler:40, handle_operation:80
+# PATTERNS: Context Manager, Structured Logging, Nested Error Preservation
+# ENTRY_POINTS: with CoreMachineErrorHandler.handle_operation(...), log_nested_error(...)
+# INDEX: CoreMachineErrorHandler:60, handle_operation:100, log_nested_error:140
 # ============================================================================
 
 """
@@ -22,6 +22,9 @@ CoreMachine Error Handler - Centralized Error Handling
 
 Provides context manager for consistent error logging and handling across
 CoreMachine operations. Eliminates 18 duplicate try-catch patterns.
+
+Also provides log_nested_error() for preserving exception context when
+cleanup operations fail after a primary error (28 NOV 2025).
 """
 
 from contextlib import contextmanager
@@ -134,3 +137,84 @@ class CoreMachineErrorHandler:
             # Re-raise or return None
             if raise_on_error:
                 raise
+
+
+def log_nested_error(
+    logger: logging.Logger,
+    primary_error: Exception,
+    cleanup_error: Exception,
+    operation: str,
+    job_id: Optional[str] = None,
+    task_id: Optional[str] = None,
+    stage: Optional[int] = None,
+    additional_context: Optional[Dict[str, Any]] = None
+) -> None:
+    """
+    Log both primary and cleanup errors with full context preservation.
+
+    When a cleanup operation (like marking a job as failed) fails after a
+    primary error, this function ensures BOTH errors are logged with full
+    context. This is critical for debugging because otherwise the original
+    root cause error gets lost.
+
+    Args:
+        logger: Logger instance
+        primary_error: The original error that triggered cleanup
+        cleanup_error: The error that occurred during cleanup
+        operation: Description of what operation was being performed
+        job_id: Optional job ID for context
+        task_id: Optional task ID for context
+        stage: Optional stage number for context
+        additional_context: Optional dict of extra context fields
+
+    Usage:
+        except Exception as stage_error:
+            try:
+                self.state_manager.mark_job_failed(job_id, str(stage_error))
+            except Exception as cleanup_error:
+                log_nested_error(
+                    self.logger,
+                    primary_error=stage_error,
+                    cleanup_error=cleanup_error,
+                    operation="stage_advancement",
+                    job_id=job_id,
+                    stage=stage
+                )
+
+    In Application Insights, you can search for:
+        - customDimensions.primary_error_type to find root cause
+        - customDimensions.cleanup_error_type to find cleanup failures
+        - customDimensions.nested_error = true to find all nested errors
+    """
+    # Build comprehensive error context
+    error_context: Dict[str, Any] = {
+        'nested_error': True,  # Flag for easy filtering in Application Insights
+        'operation': operation,
+        # Primary error (the root cause)
+        'primary_error': str(primary_error),
+        'primary_error_type': type(primary_error).__name__,
+        # Cleanup error (the symptom)
+        'cleanup_error': str(cleanup_error),
+        'cleanup_error_type': type(cleanup_error).__name__,
+    }
+
+    # Add optional context
+    if job_id:
+        error_context['job_id'] = job_id[:16] + '...' if len(job_id) > 16 else job_id
+    if task_id:
+        error_context['task_id'] = task_id[:16] + '...' if len(task_id) > 16 else task_id
+    if stage is not None:
+        error_context['stage'] = stage
+    if additional_context:
+        error_context.update(additional_context)
+
+    # Log with full context
+    logger.error(
+        f"❌ Nested error: {operation} failed, cleanup also failed. "
+        f"PRIMARY: {type(primary_error).__name__}: {primary_error} | "
+        f"CLEANUP: {type(cleanup_error).__name__}: {cleanup_error}",
+        extra=error_context
+    )
+
+    # Also log traceback at debug level for detailed investigation
+    logger.debug(f"Primary error traceback: {traceback.format_exception(type(primary_error), primary_error, primary_error.__traceback__)}")

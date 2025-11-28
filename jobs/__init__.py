@@ -59,7 +59,7 @@ from .container_list import ListContainerContentsWorkflow
 from .container_list_diamond import ListContainerContentsDiamondWorkflow
 from .stac_catalog_container import StacCatalogContainerWorkflow
 from .stac_catalog_vectors import StacCatalogVectorsWorkflow
-from .ingest_vector import IngestVectorJob
+# ingest_vector REMOVED (27 NOV 2025) - Replaced by process_vector (idempotent DELETE+INSERT)
 from .validate_raster_job import ValidateRasterJob
 from .process_raster import ProcessRasterWorkflow
 from .generate_h3_level4 import GenerateH3Level4Job
@@ -87,7 +87,7 @@ ALL_JOBS = {
     "list_container_contents": ListContainerContentsWorkflow,
     "stac_catalog_container": StacCatalogContainerWorkflow,
     "stac_catalog_vectors": StacCatalogVectorsWorkflow,
-    "ingest_vector": IngestVectorJob,
+    # "ingest_vector" REMOVED (27 NOV 2025) - Platform now routes to process_vector
     "validate_raster_job": ValidateRasterJob,
     "process_raster": ProcessRasterWorkflow,
     "process_raster_collection": ProcessRasterCollectionWorkflow,  # Multi-tile COG + MosaicJSON (20 OCT 2025)

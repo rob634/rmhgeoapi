@@ -280,17 +280,31 @@ class ProcessRasterV2Job(JobBaseMixin, JobBase):
 
         # Build STAC summary and TiTiler URLs
         stac_summary = {}
+        stac_urls = None
         titiler_urls = None
         share_url = None
 
         if stage_3 and stage_3[0].result_data:
             s = stage_3[0].result_data.get("result", {})
+            item_id = s.get("item_id")
+            collection_id = s.get("collection_id")
+
             stac_summary = {
-                "item_id": s.get("item_id"),
-                "collection_id": s.get("collection_id"),
+                "item_id": item_id,
+                "collection_id": collection_id,
                 "bbox": s.get("bbox"),
                 "inserted_to_pgstac": s.get("inserted_to_pgstac", True)
             }
+
+            # Generate STAC API URLs (uses OGC_STAC_APP_URL from config)
+            if item_id and collection_id:
+                stac_base = config.stac_api_base_url.rstrip('/')
+                stac_urls = {
+                    "item_url": f"{stac_base}/collections/{collection_id}/items/{item_id}",
+                    "collection_url": f"{stac_base}/collections/{collection_id}",
+                    "items_url": f"{stac_base}/collections/{collection_id}/items",
+                    "catalog_url": stac_base
+                }
 
             if cog_summary.get('cog_blob') and cog_summary.get('cog_container'):
                 try:
@@ -310,6 +324,7 @@ class ProcessRasterV2Job(JobBaseMixin, JobBase):
             "validation": validation_summary,
             "cog": cog_summary,
             "stac": stac_summary,
+            "stac_urls": stac_urls,
             "titiler_urls": titiler_urls,
             "share_url": share_url,
             "stages_completed": context.current_stage,

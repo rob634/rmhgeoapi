@@ -304,7 +304,7 @@ def _translate_to_coremachine(
                 'wkt_column': opts.get('wkt_column')
             }
 
-        return 'ingest_vector', {
+        return 'process_vector', {
             # File location
             'blob_name': request.file_name,
             'file_extension': file_ext,

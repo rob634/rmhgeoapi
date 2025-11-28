@@ -64,9 +64,61 @@ from .interface_repository import (
 )
 from core.schema.updates import TaskUpdateModel, JobUpdateModel
 from utils import enforce_contract  # Added for contract enforcement
+from exceptions import DatabaseError
 
 # Logger setup
 logger = logging.getLogger(__name__)
+
+
+def _parse_jsonb_column(value: Any, column_name: str, record_id: str, default: Any = None) -> Any:
+    """
+    Parse a JSONB column value with explicit error handling (28 NOV 2025).
+
+    Replaces silent fallbacks that hide data corruption. Now logs errors
+    and raises DatabaseError on malformed JSON.
+
+    Args:
+        value: The raw value from PostgreSQL (could be dict, str, or None)
+        column_name: Name of the column for error context
+        record_id: Job/task ID for error context
+        default: Default value if column is NULL (not for parse errors!)
+
+    Returns:
+        Parsed dict/value or default if NULL
+
+    Raises:
+        DatabaseError: If JSON parsing fails (data corruption)
+    """
+    # NULL is allowed - return default
+    if value is None:
+        return default
+
+    # Already parsed by psycopg (JSONB columns often come as dict)
+    if isinstance(value, dict):
+        return value
+
+    # String needs parsing
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError as e:
+            logger.error(
+                f"❌ Corrupted JSON in {column_name} for {record_id[:16]}...: {e}",
+                extra={
+                    'record_id': record_id,
+                    'column': column_name,
+                    'error_type': 'JSONDecodeError',
+                    'preview': value[:200] if len(value) > 200 else value
+                }
+            )
+            raise DatabaseError(f"Corrupted {column_name} JSON for {record_id}: {e}")
+
+    # Unexpected type
+    logger.error(
+        f"❌ Unexpected type for {column_name}: {type(value).__name__}",
+        extra={'record_id': record_id, 'column': column_name, 'value_type': type(value).__name__}
+    )
+    raise DatabaseError(f"Unexpected type for {column_name}: {type(value).__name__}")
 
 
 # ============================================================================
@@ -875,21 +927,22 @@ class PostgreSQLJobRepository(PostgreSQLRepository, IJobRepository):
                 logger.debug(f"📋 Job not found: {job_id[:16]}...")
                 return None
             
-            # Convert row to JobRecord (row is now a dict thanks to dict_row)
+            # Convert row to JobRecord with explicit JSONB parsing (28 NOV 2025)
+            # Uses _parse_jsonb_column helper for error handling instead of silent fallbacks
             job_data = {
                 'job_id': row['job_id'],
                 'job_type': row['job_type'],
                 'status': row['status'],
                 'stage': row['stage'],
                 'total_stages': row['total_stages'],
-                'parameters': row['parameters'] if isinstance(row['parameters'], dict) else json.loads(row['parameters']) if row['parameters'] else {},
-                'stage_results': row['stage_results'] if isinstance(row['stage_results'], dict) else json.loads(row['stage_results']) if row['stage_results'] else {},
-                'result_data': row['result_data'] if isinstance(row['result_data'], dict) else json.loads(row['result_data']) if row['result_data'] else None,
+                'parameters': _parse_jsonb_column(row['parameters'], 'parameters', job_id, default={}),
+                'stage_results': _parse_jsonb_column(row['stage_results'], 'stage_results', job_id, default={}),
+                'result_data': _parse_jsonb_column(row['result_data'], 'result_data', job_id, default=None),
                 'error_details': row['error_details'],
                 'created_at': row['created_at'],
                 'updated_at': row['updated_at']
             }
-            
+
             job_record = JobRecord(**job_data)
             logger.debug(f"📋 Retrieved job: {job_id[:16]}... status={job_record.status}")
             
@@ -999,15 +1052,17 @@ class PostgreSQLJobRepository(PostgreSQLRepository, IJobRepository):
             
             jobs = []
             for row in rows:
+                # Use _parse_jsonb_column helper for error handling (28 NOV 2025)
+                job_id = row['job_id']
                 job_data = {
-                    'job_id': row['job_id'],
+                    'job_id': job_id,
                     'job_type': row['job_type'],
                     'status': row['status'],
                     'stage': row['stage'],
                     'total_stages': row['total_stages'],
-                    'parameters': row['parameters'] if isinstance(row['parameters'], dict) else json.loads(row['parameters']) if row['parameters'] else {},
-                    'stage_results': row['stage_results'] if isinstance(row['stage_results'], dict) else json.loads(row['stage_results']) if row['stage_results'] else {},
-                    'result_data': row['result_data'] if isinstance(row['result_data'], dict) else json.loads(row['result_data']) if row['result_data'] else None,
+                    'parameters': _parse_jsonb_column(row['parameters'], 'parameters', job_id, default={}),
+                    'stage_results': _parse_jsonb_column(row['stage_results'], 'stage_results', job_id, default={}),
+                    'result_data': _parse_jsonb_column(row['result_data'], 'result_data', job_id, default=None),
                     'error_details': row['error_details'],
                     'created_at': row['created_at'],
                     'updated_at': row['updated_at']
@@ -1119,7 +1174,7 @@ class PostgreSQLTaskRepository(PostgreSQLRepository, ITaskRepository):
                 logger.debug(f"📋 Task not found: {task_id}")
                 return None
             
-            # Convert row to TaskRecord
+            # Convert row to TaskRecord with explicit JSONB parsing (28 NOV 2025)
             task_data = {
                 'task_id': row['task_id'],
                 'parent_job_id': row['parent_job_id'],
@@ -1128,15 +1183,15 @@ class PostgreSQLTaskRepository(PostgreSQLRepository, ITaskRepository):
                 'status': row['status'],
                 'stage': row['stage'],
                 'task_index': row['task_index'],
-                'parameters': row['parameters'] if isinstance(row['parameters'], dict) else json.loads(row['parameters']) if row['parameters'] else {},
-                'result_data': row['result_data'] if isinstance(row['result_data'], dict) else json.loads(row['result_data']) if row['result_data'] else None,
+                'parameters': _parse_jsonb_column(row['parameters'], 'parameters', task_id, default={}),
+                'result_data': _parse_jsonb_column(row['result_data'], 'result_data', task_id, default=None),
                 'error_details': row['error_details'],
                 'retry_count': row['retry_count'],
                 'heartbeat': row['heartbeat'],
                 'created_at': row['created_at'],
                 'updated_at': row['updated_at']
             }
-            
+
             task_record = TaskRecord(**task_data)
             logger.debug(f"📋 Retrieved task: {task_id} status={task_record.status}")
             
@@ -1269,17 +1324,19 @@ class PostgreSQLTaskRepository(PostgreSQLRepository, ITaskRepository):
                     status = row['status']
 
                 # Now we have job_type from the fixed query
+                # Use _parse_jsonb_column helper for error handling (28 NOV 2025)
+                task_id = row['task_id']
                 try:
                     task_record = TaskRecord(
-                        task_id=row['task_id'],
+                        task_id=task_id,
                         parent_job_id=row['parent_job_id'],
                         job_type=row['job_type'],
                         task_type=row['task_type'],
                         status=status,
                         stage=row['stage'],
                         task_index=row['task_index'],
-                        parameters=row['parameters'] if isinstance(row['parameters'], dict) else json.loads(row['parameters']) if row['parameters'] else {},
-                        result_data=row['result_data'] if isinstance(row['result_data'], dict) else json.loads(row['result_data']) if row['result_data'] else None,
+                        parameters=_parse_jsonb_column(row['parameters'], 'parameters', task_id, default={}),
+                        result_data=_parse_jsonb_column(row['result_data'], 'result_data', task_id, default=None),
                         error_details=row['error_details'],
                         retry_count=row['retry_count'],
                         heartbeat=row['heartbeat'],

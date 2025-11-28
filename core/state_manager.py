@@ -130,86 +130,98 @@ class StateManager:
     # JOB RECORD OPERATIONS
     # ========================================================================
 
-    def create_job_record(
-        self,
-        job_id: str,
-        job_type: str,
-        parameters: Dict[str, Any],
-        total_stages: int
-    ) -> JobRecord:
-        """
-        Create and store initial job record in database.
+    # ========================================================================
+    # DEAD CODE - COMMENTED OUT 28 NOV 2025
+    # ========================================================================
+    # These two create_job_record methods are DEAD CODE:
+    # 1. First method (lines 133-173) was overwritten by Python's method resolution
+    # 2. Second method (lines 175-212) is never called - job creation happens
+    #    via job class interface (jobs/*.py), not StateManager
+    #
+    # CoreMachine uses StateManager for state TRANSITIONS (update, complete, fail),
+    # not initial CREATION. Keeping commented for reference during dead code audit.
+    # ========================================================================
 
-        Creates JobRecord in PostgreSQL with initial QUEUED status.
-        This establishes the job in the system before any tasks are created.
+    # def create_job_record(
+    #     self,
+    #     job_id: str,
+    #     job_type: str,
+    #     parameters: Dict[str, Any],
+    #     total_stages: int
+    # ) -> JobRecord:
+    #     """
+    #     Create and store initial job record in database.
+    #
+    #     Creates JobRecord in PostgreSQL with initial QUEUED status.
+    #     This establishes the job in the system before any tasks are created.
+    #
+    #     Args:
+    #         job_id: Generated job ID (SHA256 hash)
+    #         job_type: Type of job (e.g., "hello_world")
+    #         parameters: Validated job parameters
+    #         total_stages: Number of stages in workflow
+    #
+    #     Returns:
+    #         JobRecord instance stored in database
+    #
+    #     Raises:
+    #         RuntimeError: If database operation fails
+    #     """
+    #     self.logger.debug(f"Creating job record for {job_id[:16]}...")
+    #
+    #     try:
+    #         # Create job record
+    #         job_record = self.repos['job_repo'].create_job_from_params(
+    #             job_type=job_type,
+    #             parameters=parameters,
+    #             total_stages=total_stages
+    #         )
+    #
+    #         self.logger.info(f"Job record created: {job_id[:16]}... (status: QUEUED)")
+    #         return job_record
+    #
+    #     except Exception as e:
+    #         self.logger.error(f"Failed to create job record: {e}")
+    #         raise RuntimeError(f"Job record creation failed: {e}")
 
-        Args:
-            job_id: Generated job ID (SHA256 hash)
-            job_type: Type of job (e.g., "hello_world")
-            parameters: Validated job parameters
-            total_stages: Number of stages in workflow
-
-        Returns:
-            JobRecord instance stored in database
-
-        Raises:
-            RuntimeError: If database operation fails
-        """
-        self.logger.debug(f"Creating job record for {job_id[:16]}...")
-
-        try:
-            # Create job record
-            job_record = self.repos['job_repo'].create_job_from_params(
-                job_type=job_type,
-                parameters=parameters,
-                total_stages=total_stages
-            )
-
-            self.logger.info(f"Job record created: {job_id[:16]}... (status: QUEUED)")
-            return job_record
-
-        except Exception as e:
-            self.logger.error(f"Failed to create job record: {e}")
-            raise RuntimeError(f"Job record creation failed: {e}")
-
-    def create_job_record(self, job_record: JobRecord) -> bool:
-        """
-        Create a new job record in the database.
-
-        Args:
-            job_record: JobRecord instance to store
-
-        Returns:
-            True if creation successful
-
-        Raises:
-            ContractViolationError: If job_record is not a JobRecord or has invalid types
-            DatabaseError: If database operation fails
-        """
-        from exceptions import ContractViolationError, DatabaseError
-
-        # CONTRACT ENFORCEMENT - Validate types
-        # Note: JobRecord and JobStatus already imported from core.models at top
-        if not isinstance(job_record, JobRecord):
-            raise ContractViolationError(
-                f"Contract violation: create_job_record requires JobRecord, "
-                f"got {type(job_record).__name__}"
-            )
-
-        if not isinstance(job_record.status, JobStatus):
-            raise ContractViolationError(
-                f"Contract violation: JobRecord.status must be JobStatus enum, "
-                f"got {type(job_record.status).__name__} with value '{job_record.status}'"
-            )
-
-        # BUSINESS LOGIC - Handle database errors gracefully
-        try:
-            self.repos['job_repo'].create_job(job_record)
-            self.logger.info(f"Job record created: {job_record.job_id[:16]}...")
-            return True
-        except Exception as e:
-            self.logger.error(f"Database error creating job record: {e}")
-            raise DatabaseError(f"Failed to create job record: {e}") from e
+    # def create_job_record(self, job_record: JobRecord) -> bool:
+    #     """
+    #     Create a new job record in the database.
+    #
+    #     Args:
+    #         job_record: JobRecord instance to store
+    #
+    #     Returns:
+    #         True if creation successful
+    #
+    #     Raises:
+    #         ContractViolationError: If job_record is not a JobRecord or has invalid types
+    #         DatabaseError: If database operation fails
+    #     """
+    #     from exceptions import ContractViolationError, DatabaseError
+    #
+    #     # CONTRACT ENFORCEMENT - Validate types
+    #     # Note: JobRecord and JobStatus already imported from core.models at top
+    #     if not isinstance(job_record, JobRecord):
+    #         raise ContractViolationError(
+    #             f"Contract violation: create_job_record requires JobRecord, "
+    #             f"got {type(job_record).__name__}"
+    #         )
+    #
+    #     if not isinstance(job_record.status, JobStatus):
+    #         raise ContractViolationError(
+    #             f"Contract violation: JobRecord.status must be JobStatus enum, "
+    #             f"got {type(job_record.status).__name__} with value '{job_record.status}'"
+    #         )
+    #
+    #     # BUSINESS LOGIC - Handle database errors gracefully
+    #     try:
+    #         self.repos['job_repo'].create_job(job_record)
+    #         self.logger.info(f"Job record created: {job_record.job_id[:16]}...")
+    #         return True
+    #     except Exception as e:
+    #         self.logger.error(f"Database error creating job record: {e}")
+    #         raise DatabaseError(f"Failed to create job record: {e}") from e
 
     def get_job_record(self, job_id: str) -> Optional[JobRecord]:
         """

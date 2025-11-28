@@ -166,6 +166,361 @@ See plan file: `/Users/robertharrison/.claude/plans/abundant-twirling-music.md`
 
 ---
 
+## ✅ COMPLETED: Exception Context Loss in Nested Error Handlers (28 NOV 2025)
+
+**Status**: ✅ **COMPLETED**
+**Priority**: **HIGH** - Critical for debugging production failures
+**Impact**: Preserves original exception context for root cause analysis
+**Author**: Robert and Geospatial Claude Legion
+**Completed**: 28 NOV 2025
+
+### Solution Implemented
+
+Created `log_nested_error()` helper function in `core/error_handler.py` that logs both primary and cleanup errors with structured context for Application Insights filtering.
+
+### Fixed Locations in CoreMachine
+
+| File | Lines | Pattern | Fix Applied |
+|------|-------|---------|-------------|
+| `core/machine.py` | ~617-636 | Status update failure cleanup | ✅ `log_nested_error()` |
+| `core/machine.py` | ~652-670 | Status update exception cleanup | ✅ `log_nested_error()` |
+| `core/machine.py` | ~885-904 | Stage advancement failure cleanup | ✅ `log_nested_error()` |
+| `core/machine.py` | ~935-943 | Task completion SQL failure cleanup | ✅ `log_nested_error()` |
+
+### Application Insights Filtering
+
+In Application Insights, you can now search for:
+- `customDimensions.nested_error = true` - Find all nested errors
+- `customDimensions.primary_error_type` - Filter by root cause type
+- `customDimensions.cleanup_error_type` - Filter by cleanup failure type
+
+### Files Modified
+
+- `core/error_handler.py` - Added `log_nested_error()` helper function (~80 lines)
+- `core/machine.py` - Updated 4 nested error handlers to use `log_nested_error()`
+
+---
+
+## ✅ COMPLETED: JSON Deserialization Error Handling (28 NOV 2025)
+
+**Status**: ✅ **COMPLETED**
+**Priority**: **HIGH** - Data corruption prevention
+**Impact**: Fail-fast on serialization errors, explicit logging
+**Author**: Robert and Geospatial Claude Legion
+**Completed**: 28 NOV 2025
+
+### Solution Implemented
+
+Research found **50+ Pydantic models already exist** covering all boundaries. No new modules needed - just added explicit error handling to existing code:
+
+1. **Service Bus** - Added try/except with dead-letter routing for malformed messages
+2. **PostgreSQL** - Created `_parse_jsonb_column()` helper that logs and raises `DatabaseError` instead of silent fallbacks
+
+### Files Modified
+
+| File | Change |
+|------|--------|
+| `infrastructure/service_bus.py` | Added try/except to `receive_messages()` and `peek_messages()` |
+| `infrastructure/postgresql.py` | Added `_parse_jsonb_column()` helper, updated 4 methods to use it |
+
+### Application Insights Queries
+
+```kql
+# Find JSON deserialization errors
+traces | where customDimensions.error_type == "JSONDecodeError"
+
+# Find corrupted database records
+traces | where message contains "Corrupted JSON"
+```
+
+### Original Problem Statement
+
+The codebase uses raw `json.loads()` and `json.dumps()` throughout (~200+ occurrences), often with silent fallbacks that hide data corruption. Pydantic models should handle all serialization with explicit validation.
+
+### Current Anti-Patterns Found
+
+**1. Silent Fallback (Data Corruption Risk)**
+```python
+# infrastructure/postgresql.py:885-887
+'parameters': row['parameters'] if isinstance(row['parameters'], dict)
+              else json.loads(row['parameters']) if row['parameters'] else {},
+```
+Problem: If JSON is malformed, this silently returns `{}` instead of failing.
+
+**2. Inconsistent Serialization**
+```python
+# Some places use:
+json.dumps(params, sort_keys=True)
+
+# Others use:
+json.dumps(params, sort_keys=True, default=str)
+
+# Others use Pydantic:
+model.model_dump_json()
+```
+
+**3. No Type Safety**
+```python
+# Raw dict passed around, no validation
+result_data = json.loads(row['result_data'])
+# Could be anything - no schema enforcement
+```
+
+### Solution: Pydantic-First JSON Handling
+
+**Principle**: All JSON serialization/deserialization should go through Pydantic models.
+
+**1. Create Serialization Helpers in `core/serialization.py`**
+
+```python
+from typing import TypeVar, Type
+from pydantic import BaseModel, ValidationError
+import json
+
+from exceptions import ContractViolationError
+
+T = TypeVar('T', bound=BaseModel)
+
+
+def deserialize_json(
+    json_str: str | None,
+    model: Type[T],
+    context: str = "unknown"
+) -> T | None:
+    """
+    Deserialize JSON string to Pydantic model with explicit error handling.
+
+    Args:
+        json_str: JSON string to deserialize (None returns None)
+        model: Pydantic model class to deserialize into
+        context: Description for error messages
+
+    Returns:
+        Pydantic model instance or None
+
+    Raises:
+        ContractViolationError: If JSON is malformed or doesn't match schema
+    """
+    if json_str is None:
+        return None
+
+    try:
+        data = json.loads(json_str)
+        return model.model_validate(data)
+    except json.JSONDecodeError as e:
+        raise ContractViolationError(
+            f"Malformed JSON in {context}: {e}"
+        )
+    except ValidationError as e:
+        raise ContractViolationError(
+            f"Schema validation failed in {context}: {e}"
+        )
+
+
+def serialize_json(
+    model: BaseModel | dict,
+    sort_keys: bool = True,
+    context: str = "unknown"
+) -> str:
+    """
+    Serialize Pydantic model or dict to JSON with explicit error handling.
+
+    Args:
+        model: Pydantic model or dict to serialize
+        sort_keys: Whether to sort keys (for deterministic output)
+        context: Description for error messages
+
+    Returns:
+        JSON string
+
+    Raises:
+        ContractViolationError: If serialization fails
+    """
+    try:
+        if isinstance(model, BaseModel):
+            return model.model_dump_json(indent=None)
+        else:
+            return json.dumps(model, sort_keys=sort_keys, default=str)
+    except (TypeError, ValueError) as e:
+        raise ContractViolationError(
+            f"JSON serialization failed in {context}: {e}"
+        )
+
+
+def safe_json_loads(
+    json_str: str | None,
+    default: dict | None = None,
+    context: str = "unknown",
+    loud: bool = True
+) -> dict | None:
+    """
+    Load JSON with explicit failure handling.
+
+    Args:
+        json_str: JSON string to parse
+        default: Default value if json_str is None/empty
+        context: Description for error messages
+        loud: If True, raise on errors. If False, log warning and return default.
+
+    Returns:
+        Parsed dict or default
+
+    Raises:
+        ContractViolationError: If loud=True and JSON is malformed
+    """
+    if not json_str:
+        return default
+
+    try:
+        return json.loads(json_str)
+    except json.JSONDecodeError as e:
+        if loud:
+            raise ContractViolationError(
+                f"Malformed JSON in {context}: {e}"
+            )
+        else:
+            from util_logger import LoggerFactory, ComponentType
+            logger = LoggerFactory.create_logger(ComponentType.INFRASTRUCTURE, "serialization")
+            logger.warning(f"⚠️ Malformed JSON in {context}, using default: {e}")
+            return default
+```
+
+**2. Update Repository Layer**
+
+Replace:
+```python
+# OLD - Silent fallback
+'parameters': row['parameters'] if isinstance(row['parameters'], dict)
+              else json.loads(row['parameters']) if row['parameters'] else {},
+```
+
+With:
+```python
+# NEW - Explicit handling
+from core.serialization import safe_json_loads
+
+'parameters': safe_json_loads(
+    row['parameters'] if not isinstance(row['parameters'], dict) else None,
+    default=row['parameters'] if isinstance(row['parameters'], dict) else {},
+    context=f"job {row['job_id']} parameters",
+    loud=False  # Log warning but don't crash on legacy data
+),
+```
+
+### Implementation Phases
+
+#### Phase 1: Create Serialization Module (IMMEDIATE)
+1. [ ] Create `core/serialization.py` with helper functions
+2. [ ] Add unit tests for serialization helpers
+3. [ ] Document usage patterns
+
+#### Phase 2: Update CoreMachine (HIGH)
+4. [ ] Update `infrastructure/postgresql.py` job/task deserialization
+5. [ ] Update `infrastructure/jobs_tasks.py` task serialization
+6. [ ] Update `core/machine.py` result handling
+
+#### Phase 3: Update Job Classes (MEDIUM)
+7. [ ] Update `jobs/mixins.py` generate_job_id() serialization
+8. [ ] Update individual job classes using raw json.dumps()
+
+#### Phase 4: Audit Remaining Usage (LOW)
+9. [ ] Audit all `json.loads()` calls for proper error handling
+10. [ ] Audit all `json.dumps()` calls for consistency
+11. [ ] Create migration guide for new code
+
+### Files to Modify
+
+| File | Changes | Priority |
+|------|---------|----------|
+| `core/serialization.py` | CREATE - New serialization helpers | P1 |
+| `infrastructure/postgresql.py` | UPDATE - Use safe_json_loads | P2 |
+| `infrastructure/jobs_tasks.py` | UPDATE - Use serialize_json | P2 |
+| `core/machine.py` | UPDATE - Explicit result handling | P2 |
+| `jobs/mixins.py` | UPDATE - Deterministic serialization | P3 |
+
+---
+
+## 🔴 MEDIUM-HIGH PRIORITY: Dead Code Audit (28 NOV 2025)
+
+**Status**: 🟡 **IN PROGRESS** - `create_job_record` methods commented out
+**Priority**: **MEDIUM-HIGH** - Technical debt cleanup before further development
+**Impact**: Reduced cognitive load, smaller codebase, fewer maintenance surprises
+**Author**: Robert and Geospatial Claude Legion
+
+### Problem Statement
+
+During error handling review, discovered duplicate method definitions in `core/state_manager.py` where **BOTH versions are dead code** - never called by any part of the system. This suggests more orphaned code likely exists.
+
+### Known Dead Code (Confirmed)
+
+| File | Lines | Code | Status |
+|------|-------|------|--------|
+| `core/state_manager.py` | 133-173 | `create_job_record(job_id, job_type, parameters, total_stages)` | Dead (overwritten by duplicate) |
+| `core/state_manager.py` | 175-212 | `create_job_record(job_record: JobRecord)` | Dead (never called) |
+
+**Note**: Job creation happens via job class interface (`jobs/*.py`), not StateManager.
+
+### Audit Strategy
+
+#### Phase 1: StateManager Method Audit
+Check which StateManager methods are actually called by CoreMachine:
+
+```bash
+# Methods CoreMachine DOES call:
+grep -n "self.state_manager\." core/machine.py | grep -oP '\.\w+\(' | sort -u
+```
+
+**Known used methods** (from grep):
+- `update_job_status()`, `update_job_stage()`, `get_task_current_status()`
+- `update_task_status_direct()`, `mark_task_failed()`, `mark_job_failed()`
+- `complete_task_with_sql()`, `complete_job()`, `get_stage_results()`
+- `increment_task_retry_count()`
+
+**Potentially unused** (need verification):
+- `create_job_record()` - CONFIRMED DEAD
+- `get_job_record()` - check callers
+- `get_completed_stages()` - check callers
+- `get_stage_status()` - check callers
+
+#### Phase 2: Backup File Cleanup
+```bash
+# Find backup/original files that should be archived
+find . -name "*_backup*" -o -name "*_original*" -o -name "*_old*" | grep "\.py$"
+```
+
+#### Phase 3: Unused Import Detection
+```bash
+# Use pylint or similar to find unused imports
+# Example: pylint --disable=all --enable=W0611 core/*.py
+```
+
+#### Phase 4: Epoch 3 Remnants
+Check for Epoch 3 code that was superseded by Epoch 4:
+- Old controller patterns
+- Deprecated decorators
+- Legacy queue handling
+
+### Implementation Steps
+
+1. [ ] Comment out `create_job_record` methods in `state_manager.py` (both versions)
+2. [ ] Deploy and test - verify no runtime errors
+3. [ ] Audit remaining StateManager methods for callers
+4. [ ] Run backup file search and archive to `docs/archive/`
+5. [ ] Document any other dead code found
+6. [ ] Create PR with cleanup
+
+### Files to Audit
+
+| File | Reason |
+|------|--------|
+| `core/state_manager.py` | Known duplicate methods, potential unused methods |
+| `core/core_controller.py` | May be Epoch 3 remnant |
+| `jobs/hello_world_original_backup.py` | Backup file - archive candidate |
+| `core/logic/*.py` | May contain unused calculations |
+| `core/contracts/*.py` | Check if contracts are enforced anywhere |
+
+---
+
 ## ✅ IMPLEMENTED: Pre-Flight Resource Validation Architecture (27 NOV 2025)
 
 **Status**: ✅ **COMPLETE** - Implemented in `infrastructure/validators.py`

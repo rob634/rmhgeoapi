@@ -224,7 +224,7 @@ from triggers.stac_nuke import stac_nuke_trigger
 # STAC API v1.0.0 Portable Module (10 NOV 2025)
 from stac_api import get_stac_triggers
 
-from triggers.ingest_vector import ingest_vector_trigger
+# ingest_vector REMOVED (27 NOV 2025) - Platform now uses process_vector
 from triggers.test_raster_create import test_raster_create_trigger
 
 # Admin API triggers (10 NOV 2025) - Consolidated under /api/admin/*
@@ -1742,33 +1742,9 @@ def web_interface_unified(req: func.HttpRequest) -> func.HttpResponse:
     return unified_interface_handler(req)
 
 
-@app.route(route="jobs/ingest_vector", methods=["POST"])
-def ingest_vector(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    Submit vector file for ETL to PostGIS.
-
-    POST /api/jobs/ingest_vector
-
-    Body:
-        {
-            "blob_name": "data/parcels.gpkg",       // Required
-            "file_extension": "gpkg",               // Required (csv, geojson, gpkg, kml, kmz, shp, zip)
-            "table_name": "parcels_2025",           // Required (PostgreSQL identifier)
-            "container_name": "bronze",             // Optional (default: bronze)
-            "schema": "geo",                        // Optional (default: geo)
-            "chunk_size": 1000,                     // Optional (None = auto-calculate)
-            "converter_params": {                   // Optional (format-specific)
-                "layer_name": "parcels"             // For GPKG
-                // OR
-                "lat_name": "latitude",             // For CSV
-                "lon_name": "longitude"             // For CSV
-            }
-        }
-
-    Returns:
-        Job creation response with job_id and status
-    """
-    return ingest_vector_trigger.handle_request(req)
+# ingest_vector HTTP endpoint REMOVED (27 NOV 2025)
+# Platform layer now routes vector requests to process_vector (idempotent DELETE+INSERT)
+# Direct vector job submission should use: POST /api/jobs/submit/process_vector
 
 
 # ============================================================================

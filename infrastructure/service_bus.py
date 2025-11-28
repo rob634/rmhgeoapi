@@ -449,8 +449,28 @@ class ServiceBusRepository(IQueueRepository):
 
                 result = []
                 for msg in messages:
-                    # Parse message body
-                    message_data = json.loads(str(msg))
+                    # Parse message body with explicit error handling (28 NOV 2025)
+                    # Malformed messages are logged and skipped rather than crashing
+                    try:
+                        message_data = json.loads(str(msg))
+                    except json.JSONDecodeError as e:
+                        logger.error(
+                            f"❌ Failed to deserialize Service Bus message: {e}",
+                            extra={
+                                'queue': queue_name,
+                                'message_id': msg.message_id,
+                                'error_type': 'JSONDecodeError',
+                                'delivery_count': msg.delivery_count,
+                                'preview': str(msg)[:200]
+                            }
+                        )
+                        # Dead-letter this malformed message
+                        try:
+                            receiver.dead_letter_message(msg, reason="JSONDecodeError", error_description=str(e))
+                            logger.warning(f"📤 Dead-lettered malformed message {msg.message_id}")
+                        except Exception as dl_error:
+                            logger.error(f"❌ Failed to dead-letter message: {dl_error}")
+                        continue  # Skip to next message
 
                     result.append({
                         'id': msg.message_id,
@@ -509,7 +529,20 @@ class ServiceBusRepository(IQueueRepository):
 
                 result = []
                 for msg in messages:
-                    message_data = json.loads(str(msg))
+                    # Parse message body with explicit error handling (28 NOV 2025)
+                    try:
+                        message_data = json.loads(str(msg))
+                    except json.JSONDecodeError as e:
+                        logger.error(
+                            f"❌ Failed to deserialize peeked message: {e}",
+                            extra={
+                                'queue': queue_name,
+                                'message_id': msg.message_id,
+                                'error_type': 'JSONDecodeError',
+                                'preview': str(msg)[:200]
+                            }
+                        )
+                        continue  # Skip malformed message in peek results
 
                     result.append({
                         'id': msg.message_id,

@@ -191,10 +191,10 @@ class PgStacBootstrap:
                 with conn.cursor() as cur:
                     # Check schema existence
                     cur.execute(
-                        sql.SQL("SELECT EXISTS(SELECT 1 FROM pg_namespace WHERE nspname = %s)"),
+                        sql.SQL("SELECT EXISTS(SELECT 1 FROM pg_namespace WHERE nspname = %s) as exists"),
                         [self.PGSTAC_SCHEMA]
                     )
-                    schema_exists = cur.fetchone()[0]
+                    schema_exists = cur.fetchone()['exists']
 
                     if not schema_exists:
                         logger.info("❌ PgSTAC schema not found")
@@ -210,26 +210,26 @@ class PgStacBootstrap:
                     # Get version
                     version = None
                     try:
-                        cur.execute("SELECT pgstac.get_version()")
-                        version = cur.fetchone()[0]
+                        cur.execute("SELECT pgstac.get_version() as version")
+                        version = cur.fetchone()['version']
                     except psycopg.Error:
                         logger.warning("⚠️ pgstac.get_version() failed - may need migration")
 
                     # Count tables in pgstac schema
                     cur.execute(
                         sql.SQL(
-                            "SELECT COUNT(*) FROM information_schema.tables "
+                            "SELECT COUNT(*) as count FROM information_schema.tables "
                             "WHERE table_schema = %s"
                         ),
                         [self.PGSTAC_SCHEMA]
                     )
-                    tables_count = cur.fetchone()[0]
+                    tables_count = cur.fetchone()['count']
 
                     # Check roles
                     cur.execute(
                         "SELECT rolname FROM pg_roles WHERE rolname LIKE 'pgstac_%'"
                     )
-                    roles = [row[0] for row in cur.fetchall()]
+                    roles = [row['rolname'] for row in cur.fetchall()]
 
                     installed = (
                         schema_exists and
@@ -805,10 +805,10 @@ class PgStacBootstrap:
                     # Check if collection already exists before attempting creation
                     logger.debug(f"🔍 Checking if collection '{collection_type}' exists...")
                     cur.execute(
-                        "SELECT EXISTS(SELECT 1 FROM pgstac.collections WHERE id = %s)",
+                        "SELECT EXISTS(SELECT 1 FROM pgstac.collections WHERE id = %s) as exists",
                         [collection_type]
                     )
-                    exists = cur.fetchone()[0]
+                    exists = cur.fetchone()['exists']
 
                     if exists:
                         logger.info(f"✅ Collection '{collection_type}' already exists (idempotent - skipping creation)")
@@ -1045,10 +1045,10 @@ class PgStacBootstrap:
             with self._pg_repo._get_connection() as conn:
                 with conn.cursor() as cur:
                     cur.execute(
-                        "SELECT EXISTS(SELECT 1 FROM pgstac.collections WHERE id = %s)",
+                        "SELECT EXISTS(SELECT 1 FROM pgstac.collections WHERE id = %s) as exists",
                         (collection_id,)
                     )
-                    exists = cur.fetchone()[0]
+                    exists = cur.fetchone()['exists']
                     logger.debug(f"Collection '{collection_id}' exists: {exists}")
                     return exists
         except Exception as e:
@@ -1549,8 +1549,8 @@ def get_schema_info(repo: Optional['PostgreSQLRepository'] = None) -> Dict[str, 
                 # Get PgSTAC version
                 version = None
                 try:
-                    cur.execute("SELECT pgstac.get_version()")
-                    version = cur.fetchone()[0]
+                    cur.execute("SELECT pgstac.get_version() as version")
+                    version = cur.fetchone()['version']
                 except psycopg.Error:
                     version = "unknown"
 
@@ -1568,15 +1568,18 @@ def get_schema_info(repo: Optional['PostgreSQLRepository'] = None) -> Dict[str, 
                 tables_raw = cur.fetchall()
 
                 tables = {}
-                for table_name, size_mb, col_count in tables_raw:
+                for row in tables_raw:
+                    table_name = row['tablename']
+                    size_mb = row['size_mb']
+                    col_count = row['column_count']
                     # Get row count for each table
                     try:
                         cur.execute(
-                            sql.SQL("SELECT COUNT(*) FROM {}").format(
+                            sql.SQL("SELECT COUNT(*) as count FROM {}").format(
                                 sql.Identifier('pgstac', table_name)
                             )
                         )
-                        row_count = cur.fetchone()[0]
+                        row_count = cur.fetchone()['count']
                     except psycopg.Error:
                         row_count = None
 
@@ -1586,7 +1589,7 @@ def get_schema_info(repo: Optional['PostgreSQLRepository'] = None) -> Dict[str, 
                         FROM pg_indexes
                         WHERE schemaname = 'pgstac' AND tablename = %s
                     """, [table_name])
-                    indexes = [row[0] for row in cur.fetchall()]
+                    indexes = [r['indexname'] for r in cur.fetchall()]
 
                     tables[table_name] = {
                         'row_count': row_count,
@@ -1602,13 +1605,13 @@ def get_schema_info(repo: Optional['PostgreSQLRepository'] = None) -> Dict[str, 
                     WHERE routine_schema = 'pgstac'
                     ORDER BY routine_name
                 """)
-                functions = [row[0] for row in cur.fetchall()]
+                functions = [row['routine_name'] for row in cur.fetchall()]
 
                 # Get roles
                 cur.execute(
                     "SELECT rolname FROM pg_roles WHERE rolname LIKE 'pgstac_%'"
                 )
-                roles = [row[0] for row in cur.fetchall()]
+                roles = [row['rolname'] for row in cur.fetchall()]
 
                 # Get total schema size
                 cur.execute("""
@@ -1625,8 +1628,8 @@ def get_schema_info(repo: Optional['PostgreSQLRepository'] = None) -> Dict[str, 
                 return {
                     'schema': 'pgstac',
                     'version': version,
-                    'total_size': size_data[0] if size_data else 'unknown',
-                    'total_size_mb': round(size_data[1], 2) if size_data else 0,
+                    'total_size': size_data['total_size'] if size_data else 'unknown',
+                    'total_size_mb': round(size_data['total_size_mb'], 2) if size_data else 0,
                     'tables': tables,
                     'table_count': len(tables),
                     'function_count': len(functions),
@@ -1671,10 +1674,10 @@ def get_collection_stats(collection_id: str, repo: Optional['PostgreSQLRepositor
             with conn.cursor() as cur:
                 # Check if collection exists
                 cur.execute(
-                    "SELECT EXISTS(SELECT 1 FROM pgstac.collections WHERE id = %s)",
+                    "SELECT EXISTS(SELECT 1 FROM pgstac.collections WHERE id = %s) as exists",
                     [collection_id]
                 )
-                if not cur.fetchone()[0]:
+                if not cur.fetchone()['exists']:
                     return {
                         'error': f"Collection '{collection_id}' not found",
                         'collection_id': collection_id
@@ -1686,14 +1689,14 @@ def get_collection_stats(collection_id: str, repo: Optional['PostgreSQLRepositor
                     [collection_id]
                 )
                 collection_data = cur.fetchone()
-                collection_json = collection_data[0] if collection_data else {}
+                collection_json = collection_data['content'] if collection_data else {}
 
                 # Get item count
                 cur.execute(
-                    "SELECT COUNT(*) FROM pgstac.items WHERE collection = %s",
+                    "SELECT COUNT(*) as count FROM pgstac.items WHERE collection = %s",
                     [collection_id]
                 )
-                item_count = cur.fetchone()[0]
+                item_count = cur.fetchone()['count']
 
                 # Get spatial extent (actual bbox from items)
                 cur.execute("""
@@ -1729,7 +1732,7 @@ def get_collection_stats(collection_id: str, repo: Optional['PostgreSQLRepositor
                     WHERE collection = %s
                     GROUP BY asset_key
                 """, [collection_id])
-                assets = {row[0]: row[1] for row in cur.fetchall()}
+                assets = {row['asset_key']: row['count'] for row in cur.fetchall()}
 
                 # Get recent items (last 5)
                 cur.execute("""
@@ -1740,7 +1743,7 @@ def get_collection_stats(collection_id: str, repo: Optional['PostgreSQLRepositor
                     LIMIT 5
                 """, [collection_id])
                 recent_items = [
-                    {'id': row[0], 'datetime': row[1]}
+                    {'id': row['id'], 'datetime': row['datetime']}
                     for row in cur.fetchall()
                 ]
 
@@ -1871,9 +1874,9 @@ def get_health_metrics(repo: Optional['PostgreSQLRepository'] = None) -> Dict[st
             with conn.cursor() as cur:
                 # Check schema exists
                 cur.execute(
-                    "SELECT EXISTS(SELECT 1 FROM information_schema.schemata WHERE schema_name = 'pgstac')"
+                    "SELECT EXISTS(SELECT 1 FROM information_schema.schemata WHERE schema_name = 'pgstac') as exists"
                 )
-                schema_exists = cur.fetchone()[0]
+                schema_exists = cur.fetchone()['exists']
 
                 if not schema_exists:
                     return {
@@ -1884,26 +1887,26 @@ def get_health_metrics(repo: Optional['PostgreSQLRepository'] = None) -> Dict[st
 
                 # Get version
                 try:
-                    cur.execute("SELECT pgstac.get_version()")
-                    version = cur.fetchone()[0]
+                    cur.execute("SELECT pgstac.get_version() as version")
+                    version = cur.fetchone()['version']
                 except psycopg.Error:
                     version = "unknown"
 
                 # Get counts
-                cur.execute("SELECT COUNT(*) FROM pgstac.collections")
-                collections_count = cur.fetchone()[0]
+                cur.execute("SELECT COUNT(*) as count FROM pgstac.collections")
+                collections_count = cur.fetchone()['count']
 
-                cur.execute("SELECT COUNT(*) FROM pgstac.items")
-                items_count = cur.fetchone()[0]
+                cur.execute("SELECT COUNT(*) as count FROM pgstac.items")
+                items_count = cur.fetchone()['count']
 
                 # Get database size
                 cur.execute("""
                     SELECT
-                        SUM(pg_total_relation_size(quote_ident(schemaname) || '.' || quote_ident(tablename))) / 1024.0 / 1024.0
+                        SUM(pg_total_relation_size(quote_ident(schemaname) || '.' || quote_ident(tablename))) / 1024.0 / 1024.0 as size_mb
                     FROM pg_tables
                     WHERE schemaname = 'pgstac'
                 """)
-                db_size_mb = round(cur.fetchone()[0], 2)
+                db_size_mb = round(cur.fetchone()['size_mb'], 2)
 
                 # Check for issues
                 issues = []

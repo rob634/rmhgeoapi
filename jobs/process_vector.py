@@ -120,6 +120,19 @@ class ProcessVectorJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
         }
     }
 
+    # Pre-flight resource validation (28 NOV 2025)
+    # Validates source blob exists BEFORE job creation - fail fast at HTTP 400!
+    # Prevents wasted job records and queue messages for non-existent files.
+    resource_validators = [
+        {
+            'type': 'blob_exists',
+            'container_param': 'container_name',
+            'blob_param': 'blob_name',
+            'zone': 'bronze',  # Source files are in Bronze tier
+            'error': 'Source file does not exist in Bronze storage. Check blob_name and container_name.'
+        }
+    ]
+
     # 3-stage pipeline
     stages: List[Dict[str, Any]] = [
         {

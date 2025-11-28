@@ -435,7 +435,30 @@ class JobBaseMixin(ABC):
 
             validated[param_name] = value
 
-        logger.debug(f"✅ Parameters validated: {list(validated.keys())}")
+        logger.debug(f"✅ Schema validation passed: {list(validated.keys())}")
+
+        # ====================================================================
+        # STEP 2: Resource Validation (28 NOV 2025)
+        # Optional - only runs if job declares resource_validators
+        # Validates external resources (blobs, containers, tables) BEFORE
+        # job creation. Fail-fast pattern prevents wasted DB records/queue
+        # messages for jobs that would immediately fail at task execution.
+        # ====================================================================
+
+        if hasattr(cls, 'resource_validators') and cls.resource_validators:
+            from infrastructure.validators import run_validators
+
+            logger.debug(f"🔍 Running {len(cls.resource_validators)} resource validators...")
+
+            result = run_validators(cls.resource_validators, validated)
+
+            if not result['valid']:
+                error_msg = f"Pre-flight validation failed: {result['message']}"
+                logger.warning(f"❌ {error_msg}")
+                raise ValueError(error_msg)
+
+            logger.debug(f"✅ All resource validators passed")
+
         return validated
 
     @staticmethod

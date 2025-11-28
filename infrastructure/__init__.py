@@ -112,6 +112,12 @@ if TYPE_CHECKING:
         ITaskRepository as _ITaskRepository,
         IBlobRepository as _IBlobRepository,
     )
+    # Resource validators (28 NOV 2025 - pre-flight validation)
+    from .validators import (
+        RESOURCE_VALIDATORS as _RESOURCE_VALIDATORS,
+        run_validators as _run_validators,
+        ValidatorResult as _ValidatorResult,
+    )
 
 
 def __getattr__(name: str):
@@ -169,6 +175,17 @@ def __getattr__(name: str):
         from .h3_batch_tracking import H3BatchTracker
         return H3BatchTracker
 
+    # Resource validators (28 NOV 2025 - pre-flight validation)
+    elif name == "RESOURCE_VALIDATORS":
+        from .validators import RESOURCE_VALIDATORS
+        return RESOURCE_VALIDATORS
+    elif name == "run_validators":
+        from .validators import run_validators
+        return run_validators
+    elif name == "ValidatorResult":
+        from .validators import ValidatorResult
+        return ValidatorResult
+
     # Interfaces
     elif name == "IJobRepository":
         from .interface_repository import IJobRepository
@@ -203,6 +220,10 @@ __all__ = [
     "ApiRequestRepository",
     # NOTE: PlatformStatusRepository REMOVED (22 NOV 2025)
     "H3BatchTracker",  # Added 26 NOV 2025 - idempotency framework
+    # Resource validators (28 NOV 2025 - pre-flight validation)
+    "RESOURCE_VALIDATORS",
+    "run_validators",
+    "ValidatorResult",
     "IJobRepository",
     "ITaskRepository",
     "IBlobRepository",

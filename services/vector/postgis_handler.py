@@ -1124,12 +1124,23 @@ class VectorToPostGISHandler:
                 geom_type = gdf.geometry.iloc[0].geom_type.upper()
 
                 # Build column definitions
+                # RESERVED COLUMNS: These are created by our schema, skip if in source data
+                reserved_cols = {'id', 'geom', 'geometry', 'etl_batch_id'}
+
                 columns = []
+                skipped_cols = []
                 for col in gdf.columns:
                     if col == 'geometry':
                         continue
+                    # Skip reserved column names to avoid "column specified more than once" error
+                    if col.lower() in reserved_cols:
+                        skipped_cols.append(col)
+                        continue
                     pg_type = self._get_postgres_type(gdf[col].dtype)
                     columns.append(sql.Identifier(col) + sql.SQL(f" {pg_type}"))
+
+                if skipped_cols:
+                    logger.warning(f"⚠️ Skipped reserved columns from source data: {skipped_cols}")
 
                 # Create table with id, geom, etl_batch_id, and user columns
                 create_table = sql.SQL("""
@@ -1250,7 +1261,9 @@ class VectorToPostGISHandler:
                     logger.info(f"🔄 Deleted {rows_deleted} existing rows for batch {batch_id} (idempotent re-run)")
 
                 # Step 2: INSERT new rows with batch_id
-                attr_cols = [col for col in chunk.columns if col != 'geometry']
+                # Skip reserved columns that we create in our schema
+                reserved_cols = {'id', 'geom', 'geometry', 'etl_batch_id'}
+                attr_cols = [col for col in chunk.columns if col != 'geometry' and col.lower() not in reserved_cols]
 
                 if attr_cols:
                     cols_sql = sql.SQL(', ').join([sql.Identifier(col) for col in attr_cols])

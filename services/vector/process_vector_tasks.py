@@ -147,7 +147,18 @@ def process_vector_prepare(parameters: Dict[str, Any]) -> Dict[str, Any]:
 
     # Get metadata
     geometry_type = validated_gdf.geometry.iloc[0].geom_type.upper()
-    columns = [c for c in validated_gdf.columns if c != 'geometry']
+
+    # Check for reserved column names (id, geom, etl_batch_id are created by our schema)
+    reserved_cols = {'id', 'geom', 'geometry', 'etl_batch_id'}
+    all_columns = [c for c in validated_gdf.columns if c != 'geometry']
+    skipped_columns = [c for c in all_columns if c.lower() in reserved_cols]
+    columns = [c for c in all_columns if c.lower() not in reserved_cols]
+
+    if skipped_columns:
+        logger.warning(
+            f"[{job_id[:8]}] ⚠️ Source data contains reserved column names that will be skipped: {skipped_columns}. "
+            f"These columns are created by our schema (id=PRIMARY KEY, geom=GEOMETRY, etl_batch_id=IDEMPOTENCY)."
+        )
 
     # Step 4: Create table with etl_batch_id column (IDEMPOTENT - IF NOT EXISTS)
     handler.create_table_with_batch_tracking(
@@ -176,20 +187,26 @@ def process_vector_prepare(parameters: Dict[str, Any]) -> Dict[str, Any]:
         chunk_paths.append(chunk_path)
         logger.info(f"[{job_id[:8]}] Pickled chunk {i+1}/{len(chunks)}: {len(chunk)} rows")
 
+    result = {
+        'chunk_paths': chunk_paths,
+        'total_features': total_features,
+        'num_chunks': len(chunks),
+        'chunk_size_used': actual_chunk_size,
+        'table_name': table_name,
+        'schema': schema,
+        'columns': columns,
+        'geometry_type': geometry_type,
+        'srid': 4326,
+        'source_file': blob_name
+    }
+
+    # Include skipped columns in result if any were filtered
+    if skipped_columns:
+        result['skipped_reserved_columns'] = skipped_columns
+
     return {
         "success": True,
-        "result": {
-            'chunk_paths': chunk_paths,
-            'total_features': total_features,
-            'num_chunks': len(chunks),
-            'chunk_size_used': actual_chunk_size,
-            'table_name': table_name,
-            'schema': schema,
-            'columns': columns,
-            'geometry_type': geometry_type,
-            'srid': 4326,
-            'source_file': blob_name
-        }
+        "result": result
     }
 
 

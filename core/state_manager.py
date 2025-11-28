@@ -236,6 +236,9 @@ class StateManager:
         """
         Update job status in database.
 
+        Infrastructure errors propagate as exceptions so they can be properly
+        recorded in job error_details.
+
         Args:
             job_id: Job identifier
             new_status: New job status
@@ -243,20 +246,19 @@ class StateManager:
 
         Returns:
             True if update successful
+
+        Raises:
+            psycopg.Error: Database connection/query errors
+            RuntimeError: Infrastructure failures
         """
-        try:
+        # Let infrastructure errors propagate - don't swallow them!
+        if new_status == JobStatus.FAILED and error_details:
+            self.repos['job_repo'].mark_job_failed(job_id, error_details)
+        else:
+            self.repos['job_repo'].update_job_status_with_validation(job_id, new_status)
 
-            if new_status == JobStatus.FAILED and error_details:
-                self.repos['job_repo'].mark_job_failed(job_id, error_details)
-            else:
-                self.repos['job_repo'].update_job_status_with_validation(job_id, new_status)
-
-            self.logger.info(f"Job {job_id[:16]}... status updated to {new_status}")
-            return True
-
-        except Exception as e:
-            self.logger.error(f"Failed to update job status: {e}")
-            return False
+        self.logger.info(f"Job {job_id[:16]}... status updated to {new_status}")
+        return True
 
     def update_job_stage(self, job_id: str, new_stage: int) -> bool:
         """
@@ -264,6 +266,7 @@ class StateManager:
 
         This ensures the job record's stage field stays synchronized with
         the actual processing stage when advancing through the workflow.
+        Infrastructure errors propagate as exceptions.
 
         Args:
             job_id: Job identifier
@@ -272,29 +275,27 @@ class StateManager:
         Returns:
             True if update successful
 
+        Raises:
+            psycopg.Error: Database connection/query errors
+            RuntimeError: Infrastructure failures
+
         Added: 14 NOV 2025 - Fix job stage advancement bug
         """
-        try:
-            # Create update model with just the stage field
-            from core.schema import JobUpdateModel
-            update = JobUpdateModel(stage=new_stage)
+        # Let infrastructure errors propagate - don't swallow them!
+        from core.schema import JobUpdateModel
+        update = JobUpdateModel(stage=new_stage)
 
-            # Update via repository
-            success = self.repos['job_repo'].update_job(job_id, update)
+        success = self.repos['job_repo'].update_job(job_id, update)
 
-            if success:
-                self.logger.debug(f"✅ Job {job_id[:16]} stage updated to {new_stage}")
-            else:
-                self.logger.warning(
-                    f"⚠️ Job {job_id[:16]} stage update returned False - "
-                    f"repository update_job() affected 0 rows"
-                )
+        if success:
+            self.logger.debug(f"✅ Job {job_id[:16]} stage updated to {new_stage}")
+        else:
+            self.logger.warning(
+                f"⚠️ Job {job_id[:16]} stage update returned False - "
+                f"repository update_job() affected 0 rows"
+            )
 
-            return success
-
-        except Exception as e:
-            self.logger.error(f"❌ Failed to update job stage: {e}")
-            return False
+        return success
 
     def update_job_with_model(
         self,
@@ -305,24 +306,33 @@ class StateManager:
         Update job using type-safe Pydantic model.
 
         This method directly uses the Pydantic update model for type safety.
+        Infrastructure errors (connection failures, etc.) propagate as exceptions
+        so they can be properly recorded in job error_details.
 
         Args:
             job_id: Job identifier
             update: JobUpdateModel with fields to update
 
         Returns:
-            True if update successful
+            True if update successful, False if no rows affected (job not found)
+
+        Raises:
+            psycopg.Error: Database connection/query errors
+            RuntimeError: Infrastructure failures
         """
-        try:
-
-            success = self.repos['job_repo'].update_job(job_id, update)
-            if success:
-                self.logger.info(f"Job {job_id[:16]}... updated with model")
-            return success
-
-        except Exception as e:
-            self.logger.error(f"Failed to update job with model: {e}")
-            return False
+        # Let infrastructure errors propagate - don't swallow them!
+        # This ensures PostgreSQL connection errors (like "remaining connection
+        # slots are reserved") appear in job error_details instead of being
+        # hidden as "Failed to update" generic messages.
+        success = self.repos['job_repo'].update_job(job_id, update)
+        if success:
+            self.logger.info(f"Job {job_id[:16]}... updated with model")
+        else:
+            self.logger.warning(
+                f"⚠️ Job {job_id[:16]} update returned False - "
+                f"repository update_job() affected 0 rows"
+            )
+        return success
 
     def update_task_with_model(
         self,
@@ -333,30 +343,33 @@ class StateManager:
         Update task using type-safe Pydantic model.
 
         This method directly uses the Pydantic update model for type safety.
+        Infrastructure errors (connection failures, etc.) propagate as exceptions
+        so they can be properly recorded in job error_details.
 
         Args:
             task_id: Task identifier
             update: TaskUpdateModel with fields to update
 
         Returns:
-            True if update successful
+            True if update successful, False if no rows affected (task not found)
+
+        Raises:
+            psycopg.Error: Database connection/query errors
+            RuntimeError: Infrastructure failures
         """
-        try:
-
-            success = self.repos['task_repo'].update_task(task_id, update)
-            if success:
-                self.logger.info(f"Task {task_id} updated with model")
-            else:
-                # FIX: Log when update returns False (11 NOV 2025)
-                self.logger.warning(
-                    f"⚠️ Task {task_id[:16]} update returned False - "
-                    f"repository update_task() affected 0 rows"
-                )
-            return success
-
-        except Exception as e:
-            self.logger.error(f"Failed to update task with model: {e}")
-            return False
+        # Let infrastructure errors propagate - don't swallow them!
+        # This ensures PostgreSQL connection errors (like "remaining connection
+        # slots are reserved") appear in job error_details instead of being
+        # hidden as "Failed to update task status to PROCESSING" generic messages.
+        success = self.repos['task_repo'].update_task(task_id, update)
+        if success:
+            self.logger.info(f"Task {task_id} updated with model")
+        else:
+            self.logger.warning(
+                f"⚠️ Task {task_id[:16]} update returned False - "
+                f"repository update_task() affected 0 rows"
+            )
+        return success
 
     def update_task_status_direct(
         self,

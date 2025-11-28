@@ -1023,6 +1023,63 @@ class AdminDbMaintenanceTrigger:
             results["steps"].append(step5)
 
             # ================================================================
+            # STEP 5b: Grant geo schema permissions to rmhpgflexreader
+            # ================================================================
+            # ARCHITECTURE PRINCIPLE (27 NOV 2025):
+            # rmhpgflexreader needs SELECT on geo schema tables for OGC Features API.
+            # Unlike pgstac (which has the pgstac_read role), geo schema tables
+            # are created dynamically by process_vector jobs. We:
+            # 1. Grant SELECT on ALL existing geo tables
+            # 2. Set DEFAULT PRIVILEGES so future tables auto-grant SELECT
+            logger.info("🔐 Step 5b/8: Granting geo schema permissions to rmhpgflexreader...")
+            step5b = {"step": "5b", "action": "grant_geo_schema_permissions", "status": "pending"}
+
+            try:
+                from infrastructure.postgresql import PostgreSQLRepository
+                geo_repo = PostgreSQLRepository(schema_name='geo')
+
+                with geo_repo._get_connection() as conn:
+                    with conn.cursor() as cur:
+                        # 1. Grant USAGE on geo schema
+                        cur.execute("GRANT USAGE ON SCHEMA geo TO rmhpgflexreader")
+
+                        # 2. Grant SELECT on ALL existing tables in geo schema
+                        cur.execute("GRANT SELECT ON ALL TABLES IN SCHEMA geo TO rmhpgflexreader")
+
+                        # 3. Set default privileges for FUTURE tables created in geo schema
+                        # This ensures process_vector created tables auto-grant SELECT
+                        cur.execute("ALTER DEFAULT PRIVILEGES IN SCHEMA geo GRANT SELECT ON TABLES TO rmhpgflexreader")
+
+                        # 4. Also grant on h3 schema (static bootstrap data)
+                        cur.execute("GRANT USAGE ON SCHEMA h3 TO rmhpgflexreader")
+                        cur.execute("GRANT SELECT ON ALL TABLES IN SCHEMA h3 TO rmhpgflexreader")
+                        cur.execute("ALTER DEFAULT PRIVILEGES IN SCHEMA h3 GRANT SELECT ON TABLES TO rmhpgflexreader")
+
+                        conn.commit()
+                        logger.info("✅ Granted geo+h3 schema permissions to rmhpgflexreader (existing + future tables)")
+
+                step5b["status"] = "success"
+                step5b["grants"] = [
+                    "USAGE ON SCHEMA geo",
+                    "SELECT ON ALL TABLES IN SCHEMA geo",
+                    "DEFAULT PRIVILEGES SELECT ON TABLES IN geo",
+                    "USAGE ON SCHEMA h3",
+                    "SELECT ON ALL TABLES IN SCHEMA h3",
+                    "DEFAULT PRIVILEGES SELECT ON TABLES IN h3"
+                ]
+                step5b["granted_to"] = "rmhpgflexreader"
+
+            except Exception as e:
+                # Non-fatal error - log warning but continue
+                # The grants might fail if rmhpgflexreader doesn't exist yet
+                logger.warning(f"⚠️ Failed to grant geo schema permissions to rmhpgflexreader: {e}")
+                step5b["status"] = "warning"
+                step5b["error"] = str(e)
+                step5b["note"] = "Geo schema grants failed - OGC Features API may not have read access to geo tables"
+
+            results["steps"].append(step5b)
+
+            # ================================================================
             # STEP 6: Create system STAC collections
             # ================================================================
             # FIX (26 NOV 2025): Use create_production_collection() directly

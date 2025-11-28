@@ -1,6 +1,6 @@
 # API Job Submission Guide
 
-**Date**: 22 NOV 2025
+**Date**: 27 NOV 2025
 **Purpose**: Quick reference for submitting jobs via REST API
 **Wiki**: Azure DevOps Wiki - API reference documentation
 
@@ -133,9 +133,10 @@ curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/job
 
 ## Available Jobs
 
-Current job types (as of 21 NOV 2025):
+Current job types (as of 27 NOV 2025):
 - `hello_world` - Simple test job
-- `ingest_vector` - Vector data ingestion to PostGIS
+- `process_vector` - **RECOMMENDED** Idempotent vector data ingestion to PostGIS (CSV, GeoJSON, Shapefile, GeoPackage, KML, KMZ)
+- `ingest_vector` - Legacy vector data ingestion (use `process_vector` instead)
 - `process_raster` - Single raster to COG conversion
 - `process_raster_collection` - Multi-raster collection processing
 - `process_large_raster` - Large raster tiling and COG conversion
@@ -213,11 +214,429 @@ curl -X POST \
 
 ---
 
-## 2. Ingest Vector Job
+## 2. Process Vector Job (RECOMMENDED)
+
+**Purpose**: Load vector data into PostGIS with idempotent-by-design workflow
+
+**Job Type**: `process_vector`
+
+**Status**: **RECOMMENDED** - Replaces `ingest_vector` with built-in idempotency (27 NOV 2025)
+
+---
+
+### Why Use process_vector Instead of ingest_vector?
+
+| Feature | `process_vector` | `ingest_vector` |
+|---------|------------------|-----------------|
+| **Idempotency** | Built-in (DELETE+INSERT) | Optional, error-prone |
+| **Retry Safety** | Safe - no duplicate rows | Can create duplicates |
+| **Codebase** | 77% less code (JobBaseMixin) | Legacy boilerplate |
+| **Chunk Tracking** | `etl_batch_id` column | None |
+| **Recommended** | **Yes** | No (use process_vector) |
+
+---
+
+### CoreMachine API (Direct)
+
+Direct submission when you know the exact table name and parameters.
+
+#### Parameters
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `blob_name` | string | **Yes** | - | Source file path in blob container |
+| `file_extension` | string | **Yes** | - | File type: `csv`, `geojson`, `json`, `gpkg`, `kml`, `kmz`, `shp`, `zip` |
+| `table_name` | string | **Yes** | - | Target PostGIS table name (will be created) |
+| `container_name` | string | No | "rmhazuregeobronze" | Source blob container |
+| `schema` | string | No | "geo" | PostgreSQL schema for table |
+| `chunk_size` | integer | No | Auto | Rows per chunk (100-500000, auto-calculated if not specified) |
+| `converter_params` | dict | No | {} | File-specific conversion parameters |
+| `geometry_params` | dict | No | {} | Geometry processing options |
+| `indexes` | dict | No | See below | Index configuration |
+
+#### Converter Parameters by File Type
+
+**CSV files** (required for CSV):
+```json
+{
+  "converter_params": {
+    "lat_name": "latitude",    // Column name containing latitude
+    "lon_name": "longitude"    // Column name containing longitude
+  }
+}
+```
+OR for WKT geometry column:
+```json
+{
+  "converter_params": {
+    "wkt_column": "geometry"   // Column name containing WKT geometry
+  }
+}
+```
+
+**GeoPackage files** (optional):
+```json
+{
+  "converter_params": {
+    "layer_name": "my_layer"   // Specific layer to extract (optional, uses first layer by default)
+  }
+}
+```
+
+**KMZ files** (optional):
+```json
+{
+  "converter_params": {
+    "kml_name": "doc.kml"      // Specific KML file in archive (optional, uses first .kml found)
+  }
+}
+```
+
+**Shapefile/ZIP** (optional):
+```json
+{
+  "converter_params": {
+    "shp_name": "data.shp"     // Specific .shp file in archive (optional, uses first .shp found)
+  }
+}
+```
+
+#### Indexes Configuration
+
+Default indexes:
+```json
+{
+  "spatial": true,         // GIST index on geometry column
+  "attributes": [],        // B-tree indexes on attribute columns
+  "temporal": []          // DESC B-tree indexes on temporal columns
+}
+```
+
+Example with custom indexes:
+```json
+{
+  "spatial": true,
+  "attributes": ["country_code", "admin1_name"],
+  "temporal": ["event_date"]
+}
+```
+
+---
+
+### CoreMachine Examples
+
+**CSV with lat/lon columns** (27 NOV 2025 - verified with ACLED 2.57M rows):
+```bash
+curl -X POST \
+  https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/jobs/submit/process_vector \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "blob_name": "acled_export.csv",
+    "file_extension": "csv",
+    "table_name": "acled_events",
+    "chunk_size": 20000,
+    "converter_params": {
+      "lat_name": "latitude",
+      "lon_name": "longitude"
+    }
+  }'
+```
+
+**Results** (ACLED conflict data - 2.57M rows):
+| Metric | Value |
+|--------|-------|
+| Status | `completed` |
+| Total Features | 2,570,844 |
+| Chunks | 129 (20,000 rows each) |
+| Parallelism | 32 workers (4 processes × 8 concurrent) |
+| Duration | ~8 minutes |
+
+**GeoJSON ingestion**:
+```bash
+curl -X POST \
+  https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/jobs/submit/process_vector \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "blob_name": "boundaries.geojson",
+    "file_extension": "geojson",
+    "table_name": "admin_boundaries"
+  }'
+```
+
+**Shapefile (zipped)** (27 NOV 2025 - verified with roads.zip):
+```bash
+curl -X POST \
+  https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/jobs/submit/process_vector \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "blob_name": "roads.zip",
+    "file_extension": "shp",
+    "table_name": "roads_network"
+  }'
+```
+
+**GeoPackage ingestion**:
+```bash
+curl -X POST \
+  https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/jobs/submit/process_vector \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "blob_name": "data.gpkg",
+    "file_extension": "gpkg",
+    "table_name": "gpkg_features"
+  }'
+```
+
+**KML ingestion**:
+```bash
+curl -X POST \
+  https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/jobs/submit/process_vector \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "blob_name": "locations.kml",
+    "file_extension": "kml",
+    "table_name": "kml_locations"
+  }'
+```
+
+**KMZ ingestion**:
+```bash
+curl -X POST \
+  https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/jobs/submit/process_vector \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "blob_name": "routes.kmz",
+    "file_extension": "kmz",
+    "table_name": "kmz_routes"
+  }'
+```
+
+**Large dataset with custom chunk size and indexes**:
+```bash
+curl -X POST \
+  https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/jobs/submit/process_vector \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "blob_name": "global_events.csv",
+    "file_extension": "csv",
+    "table_name": "global_events_v1",
+    "chunk_size": 25000,
+    "converter_params": {
+      "lat_name": "lat",
+      "lon_name": "lon"
+    },
+    "indexes": {
+      "spatial": true,
+      "attributes": ["country", "event_type", "source"],
+      "temporal": ["event_date"]
+    }
+  }'
+```
+
+---
+
+### Workflow Stages
+
+**Stage 1**: Prepare Chunks (`process_vector_prepare`)
+- Download source file from blob storage
+- Convert to GeoDataFrame (CSV, GeoJSON, GPKG, KML, KMZ, Shapefile)
+- Validate and clean geometry
+- Create PostGIS table with `etl_batch_id` column (idempotent - IF NOT EXISTS)
+- Chunk data based on chunk_size
+- Pickle chunks to blob storage (idempotent - overwrite=True)
+- Duration: 10-120 seconds (depends on file size)
+
+**Stage 2**: Upload Chunks (`process_vector_upload`) - Fan-out
+- N parallel tasks (one per chunk)
+- Each task uses DELETE+INSERT pattern:
+  1. DELETE all rows WHERE etl_batch_id = batch_id
+  2. INSERT new rows with that batch_id
+- Atomic transaction per chunk (no partial data on failure)
+- **Idempotent**: Re-running same task deletes previous attempt first
+- Duration: 5-120 seconds (depends on chunk count and concurrency)
+
+**Stage 3**: STAC Cataloging (`create_vector_stac`)
+- Query PostGIS table for metadata (bbox, feature count)
+- Create/update STAC item in pgstac
+- Generate OGC Features API URL
+- Generate Vector Viewer URL
+- Duration: 2-5 seconds
+
+---
+
+### Idempotency Mechanism
+
+The `process_vector` workflow is idempotent **by design**, not by configuration:
+
+1. **Table Creation**: Uses `CREATE TABLE IF NOT EXISTS` (safe to re-run)
+2. **Pickle Storage**: Uses `overwrite=True` (safe to re-run)
+3. **Chunk Upload**: Uses DELETE+INSERT pattern with `etl_batch_id`:
+   - Each chunk has unique ID: `{job_id[:8]}-chunk-{index}`
+   - DELETE removes any existing rows with that batch_id
+   - INSERT adds fresh data with same batch_id
+   - Single transaction ensures atomic success/failure
+4. **STAC Catalog**: Checks if item exists before insert
+
+**Result**: You can safely retry failed jobs or tasks without creating duplicate data.
+
+**Idempotency Metrics in Result**:
+```json
+{
+  "summary": {
+    "total_rows_inserted": 2570844,
+    "total_rows_deleted": 0,        // >0 indicates reruns occurred
+    "idempotent_reruns_detected": false
+  }
+}
+```
+
+---
+
+### Response Time
+
+| File Size | Features | Typical Time | Chunk Count |
+|-----------|----------|--------------|-------------|
+| < 10 MB | < 10K | 15-30 sec | 1-10 |
+| 10-100 MB | 10K-100K | 30-90 sec | 10-100 |
+| 100MB-500MB | 100K-500K | 90-300 sec | 50-250 |
+| 500MB-1GB | 500K-2M | 300-600 sec | 250-1000 |
+| > 1 GB | > 2M | 600-1200 sec | 1000+ |
+
+**Note**: With 32 parallel workers (4 processes × 8 concurrent), chunk upload speed scales linearly with worker count.
+
+---
+
+### Result Data
+
+Successful completion includes:
+```json
+{
+  "status": "completed",
+  "resultData": {
+    "job_type": "process_vector",
+    "blob_name": "acled_export.csv",
+    "file_extension": "csv",
+    "table_name": "acled_events",
+    "schema": "geo",
+    "summary": {
+      "total_chunks": 129,
+      "chunks_uploaded": 129,
+      "chunks_failed": 0,
+      "total_rows_inserted": 2570844,
+      "total_rows_deleted": 0,
+      "idempotent_reruns_detected": false,
+      "success_rate": "100.0%",
+      "data_complete": true
+    },
+    "stac": {
+      "collection_id": "system-vectors",
+      "stac_id": "acled_events",
+      "inserted_to_pgstac": true,
+      "feature_count": 2570844,
+      "bbox": [-180.0, -56.0, 180.0, 85.0]
+    },
+    "ogc_features_url": "https://rmhazuregeoapi-.../api/features/collections/acled_events",
+    "viewer_url": "https://rmhazuregeoapi-.../api/vector/viewer?collection=acled_events",
+    "stages_completed": 3,
+    "total_tasks_executed": 131,
+    "tasks_by_status": {
+      "completed": 131,
+      "failed": 0
+    }
+  }
+}
+```
+
+---
+
+### Supported File Formats
+
+| Format | Extension | Converter Params | Notes |
+|--------|-----------|------------------|-------|
+| CSV | `.csv` | `lat_name`, `lon_name` OR `wkt_column` | **Required** geometry column params |
+| GeoJSON | `.geojson`, `.json` | None | Direct load, best performance |
+| GeoPackage | `.gpkg` | `layer_name` (optional) | SQLite-based, multi-layer support |
+| KML | `.kml` | None | Google Earth format |
+| KMZ | `.kmz` | `kml_name` (optional) | Zipped KML |
+| Shapefile | `.shp`, `.zip` | `shp_name` (optional) | Zipped shapefile components |
+
+---
+
+### Common Issues
+
+**1. CSV missing converter_params**:
+```json
+{
+  "error": "CSV conversion requires either 'wkt_column' or both 'lat_name' and 'lon_name'"
+}
+```
+**Solution**: Add `converter_params` with `lat_name`/`lon_name` or `wkt_column`
+
+**2. Wrong CSV column names**:
+```json
+{
+  "error": "ValueError: lat_name 'latitude' not found in columns"
+}
+```
+**Solution**: Check exact column names in your CSV (case-sensitive)
+
+**3. File not found**:
+```json
+{
+  "error": "Blob 'data.csv' does not exist in container 'rmhazuregeobronze'"
+}
+```
+**Solution**: Verify file exists in container using Azure Portal or CLI
+
+**4. Invalid geometry**:
+```json
+{
+  "error": "GEOSException: Invalid geometry"
+}
+```
+**Solution**: Clean geometry using QGIS "Fix geometries" or similar
+
+**5. GeoPackage layer not found**:
+```json
+{
+  "error": "Layer 'my_layer' not found in GeoPackage"
+}
+```
+**Solution**: Check available layers, or omit `layer_name` to use first layer
+
+---
+
+### Access Ingested Data
+
+**OGC Features API** (standards-compliant GeoJSON):
+```bash
+# Collection metadata
+curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/features/collections/{table_name}
+
+# Query features (with pagination)
+curl "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/features/collections/{table_name}/items?limit=100&offset=0"
+
+# Spatial query (bounding box)
+curl "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/features/collections/{table_name}/items?bbox=-70.7,-56.3,-70.6,-56.2"
+
+# Single feature by ID
+curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/features/collections/{table_name}/items/1
+```
+
+**Vector Viewer** (interactive Leaflet map):
+```
+https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/vector/viewer?collection={table_name}
+```
+
+---
+
+## 3. Ingest Vector Job (LEGACY)
 
 **Purpose**: Load vector data (GeoJSON, Shapefile, GeoPackage) into PostGIS
 
 **Job Type**: `ingest_vector`
+
+**Status**: **LEGACY** - Use `process_vector` instead for new projects (has built-in idempotency)
 
 ---
 
@@ -1508,7 +1927,7 @@ curl -X POST \
 
 ---
 
-**Last Updated**: 21 NOV 2025
+**Last Updated**: 27 NOV 2025
 **Function App**: rmhazuregeoapi (B3 Basic tier)
 **Region**: East US
 **Python Version**: 3.12

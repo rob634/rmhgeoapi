@@ -195,26 +195,49 @@ class AppConfig(BaseModel):
     )
 
     # ========================================================================
-    # API Endpoint Configuration (3 NOV 2025)
+    # API Endpoint Configuration (27 NOV 2025)
+    # ========================================================================
+    # Environment Variables:
+    #   TITILER_BASE_URL     - TiTiler tile server (raster visualization)
+    #   OGC_STAC_APP_URL     - Dedicated OGC/STAC function app (end-user queries)
+    #   ETL_APP_URL          - ETL/Admin function app (job submission, viewer, admin)
+    #   TITILER_MODE         - TiTiler deployment mode (vanilla, pgstac, xarray)
     # ========================================================================
 
     titiler_base_url: str = Field(
-        default="https://rmhtitiler-ghcyd7g0bxdvc2hc.eastus-01.azurewebsites.net",
+        default_factory=lambda: os.getenv(
+            "TITILER_BASE_URL",
+            "https://rmhtitiler-ghcyd7g0bxdvc2hc.eastus-01.azurewebsites.net"
+        ),
         description="Base URL for TiTiler-PgSTAC tile server (raster visualization)"
     )
 
     ogc_features_base_url: str = Field(
-        default="https://rmhogcstac-b4f5ccetf0a7hwe9.eastus-01.azurewebsites.net/api/features",
+        default_factory=lambda: os.getenv(
+            "OGC_STAC_APP_URL",
+            "https://rmhogcstac-b4f5ccetf0a7hwe9.eastus-01.azurewebsites.net"
+        ) + "/api/features",
         description="Base URL for OGC API - Features (vector data access) - Dedicated OGC/STAC function app"
     )
 
     stac_api_base_url: str = Field(
-        default="https://rmhogcstac-b4f5ccetf0a7hwe9.eastus-01.azurewebsites.net/api/stac",
-        description="Base URL for STAC API (metadata catalog) - Currently co-located with OGC Features, can be separated later"
+        default_factory=lambda: os.getenv(
+            "OGC_STAC_APP_URL",
+            "https://rmhogcstac-b4f5ccetf0a7hwe9.eastus-01.azurewebsites.net"
+        ) + "/api/stac",
+        description="Base URL for STAC API (metadata catalog) - Currently co-located with OGC Features"
+    )
+
+    etl_app_base_url: str = Field(
+        default_factory=lambda: os.getenv(
+            "ETL_APP_URL",
+            "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net"
+        ),
+        description="Base URL for ETL/Admin Function App (rmhazuregeoapi) - Hosts viewer, job submission, admin endpoints"
     )
 
     titiler_mode: str = Field(
-        default="pgstac",
+        default_factory=lambda: os.getenv("TITILER_MODE", "pgstac"),
         description="TiTiler deployment mode (vanilla, pgstac, xarray)",
         examples=["vanilla", "pgstac", "xarray"]
     )
@@ -518,19 +541,17 @@ class AppConfig(BaseModel):
         """
         Generate interactive vector viewer URL for PostGIS collection.
 
-        Legacy compatibility method - derives from ogc_features_base_url.
+        Uses ETL app (rmhazuregeoapi) for viewer - admin/curation functionality.
+        End-user queries go through rmhogcstac (OGC Features API).
 
         Args:
             collection_id: Collection name (same as PostGIS table name)
 
         Returns:
-            Vector viewer URL for interactive map visualization
+            Vector viewer URL for interactive map visualization (ETL app)
         """
-        # Extract base URL from ogc_features_base_url (remove /api/features suffix)
-        base_url = self.ogc_features_base_url.rstrip('/')
-        if base_url.endswith('/api/features'):
-            base_url = base_url[:-len('/api/features')]
-        return f"{base_url}/api/vector/viewer?collection={collection_id}"
+        # Viewer is hosted on ETL app, not OGC/STAC app (27 NOV 2025)
+        return f"{self.etl_app_base_url.rstrip('/')}/api/vector/viewer?collection={collection_id}"
 
     def generate_titiler_urls(self, collection_id: str, item_id: str) -> dict:
         """

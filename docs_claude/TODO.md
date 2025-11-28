@@ -1,7 +1,1001 @@
 # Active Tasks - process_raster_collection Implementation
 
-**Last Updated**: 26 NOV 2025 (UTC)
+**Last Updated**: 28 NOV 2025 (UTC)
 **Author**: Robert and Geospatial Claude Legion
+
+---
+
+## 🚀 HIGH PRIORITY: PROCESS_RASTER_V2 - JobBaseMixin Implementation (28 NOV 2025)
+
+**Status**: 🟡 **READY FOR IMPLEMENTATION**
+**Priority**: **HIGH** - Clean slate raster workflow using JobBaseMixin pattern
+**Impact**: 73% code reduction, proper config integration, resource validators
+**Author**: Robert and Geospatial Claude Legion
+
+### Summary
+
+Create `process_raster_v2` job using JobBaseMixin pattern with resource validators. Clean slate design - no deprecated parameters, proper config integration.
+
+### What's REUSED (No Changes Needed)
+
+| Component | File | Purpose |
+|-----------|------|---------|
+| `validate_raster` handler | `services/raster_validation.py` | Stage 1: CRS, bit-depth, type detection |
+| `create_cog` handler | `services/raster_cog.py` | Stage 2: Reproject + COG creation |
+| `extract_stac_metadata` handler | `services/stac_catalog.py` | Stage 3: STAC metadata + pgstac insert |
+| `blob_exists` validator | `infrastructure/validators.py` | Pre-flight blob existence check |
+| `BlobRepository` | `infrastructure/blob.py` | Azure Blob Storage operations |
+| `JobBaseMixin` | `jobs/mixins.py` | Provides 4 boilerplate methods |
+| `RasterConfig` | `config/raster_config.py` | All raster processing defaults |
+
+### What's CREATED (New)
+
+| File | Action | Description |
+|------|--------|-------------|
+| `jobs/process_raster_v2.py` | CREATE | ~200 lines, new job class |
+| `jobs/__init__.py` | EDIT | +2 lines (import + registration) |
+
+### Parameters (Clean Slate)
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `blob_name` | string | **Yes** | - | Name of raster file in blob storage |
+| `container_name` | string | **Yes** | - | Source blob container |
+| `collection_id` | string | No | config | STAC collection ID |
+| `item_id` | string | No | Auto | Custom STAC item ID |
+| `raster_type` | string | No | "auto" | Raster type detection mode |
+| `output_tier` | string | No | "analysis" | COG compression tier |
+| `target_crs` | string | No | config | Target CRS |
+| `input_crs` | string | No | null | Source CRS override |
+| `jpeg_quality` | int | No | config | JPEG quality (1-100) |
+| `strict_mode` | bool | No | false | Fail on warnings |
+| `in_memory` | bool | No | config | Override config for ETL optimization |
+| `output_folder` | string | No | null | Custom output folder |
+| Platform passthrough | | | | `dataset_id`, `resource_id`, `version_id`, `access_level`, `stac_item_id` |
+
+**Removed (Deprecated)**:
+- ~~`compression`~~ → use `output_tier`
+- ~~`overview_resampling`~~ → config-controlled only
+- ~~`reproject_resampling`~~ → config-controlled only
+
+### Implementation Steps
+
+#### Step 1: Create `jobs/process_raster_v2.py` (~200 lines)
+
+```python
+from typing import Dict, Any, List
+from jobs.base import JobBase
+from jobs.mixins import JobBaseMixin
+
+
+class ProcessRasterV2Job(JobBaseMixin, JobBase):
+    """Small file raster processing (<= 1GB) using JobBaseMixin."""
+
+    job_type = "process_raster_v2"
+    description = "Process raster to COG with STAC metadata (mixin pattern)"
+
+    stages = [
+        {"number": 1, "name": "validate", "task_type": "validate_raster", "parallelism": "single"},
+        {"number": 2, "name": "create_cog", "task_type": "create_cog", "parallelism": "single"},
+        {"number": 3, "name": "create_stac", "task_type": "extract_stac_metadata", "parallelism": "single"}
+    ]
+
+    parameters_schema = {
+        'blob_name': {'type': 'str', 'required': True},
+        'container_name': {'type': 'str', 'required': True},
+        'input_crs': {'type': 'str', 'default': None},
+        'target_crs': {'type': 'str', 'default': None},
+        'raster_type': {'type': 'str', 'default': 'auto', 'allowed': ['auto', 'rgb', 'rgba', 'dem', 'categorical', 'multispectral', 'nir']},
+        'output_tier': {'type': 'str', 'default': 'analysis', 'allowed': ['visualization', 'analysis', 'archive', 'all']},
+        'jpeg_quality': {'type': 'int', 'default': None, 'min': 1, 'max': 100},
+        'output_folder': {'type': 'str', 'default': None},
+        'strict_mode': {'type': 'bool', 'default': False},
+        'in_memory': {'type': 'bool', 'default': None},
+        'collection_id': {'type': 'str', 'default': None},
+        'item_id': {'type': 'str', 'default': None},
+        'dataset_id': {'type': 'str', 'default': None},
+        'resource_id': {'type': 'str', 'default': None},
+        'version_id': {'type': 'str', 'default': None},
+        'access_level': {'type': 'str', 'default': None},
+        'stac_item_id': {'type': 'str', 'default': None},
+        '_skip_validation': {'type': 'bool', 'default': False},
+    }
+
+    resource_validators = [
+        {
+            'type': 'blob_exists',
+            'container_param': 'container_name',
+            'blob_param': 'blob_name',
+            'error': 'Source raster file does not exist. Verify blob_name and container_name.'
+        }
+    ]
+
+    @staticmethod
+    def create_tasks_for_stage(stage, job_params, job_id, previous_results=None):
+        # See full implementation in plan file
+        pass
+
+    @staticmethod
+    def finalize_job(context):
+        # See full implementation in plan file
+        pass
+```
+
+#### Step 2: Register in `jobs/__init__.py`
+
+Add import (around line 71):
+```python
+from .process_raster_v2 import ProcessRasterV2Job
+```
+
+Add to ALL_JOBS dict (around line 91):
+```python
+"process_raster_v2": ProcessRasterV2Job,
+```
+
+#### Step 3: Deploy and Test
+
+```bash
+# Deploy
+func azure functionapp publish rmhazuregeoapi --python --build remote
+
+# Test with dctest.tif
+curl -X POST \
+  https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/jobs/submit/process_raster_v2 \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "blob_name": "dctest.tif",
+    "container_name": "rmhazuregeobronze"
+  }'
+
+# Check status
+curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/jobs/status/{JOB_ID}
+```
+
+### Key Design Decisions
+
+1. **Both `blob_name` and `container_name` REQUIRED** - matches wiki docs
+2. **`in_memory` KEPT** - useful for ETL optimization, overrides config default
+3. **Config defaults resolved at task creation** - not schema validation time
+4. **Resource validator uses singleton** - `BlobRepository.instance()`
+5. **`compression` removed** - `output_tier` controls compression
+
+### Full Implementation
+
+See plan file: `/Users/robertharrison/.claude/plans/abundant-twirling-music.md`
+
+---
+
+## ✅ IMPLEMENTED: Pre-Flight Resource Validation Architecture (27 NOV 2025)
+
+**Status**: ✅ **COMPLETE** - Implemented in `infrastructure/validators.py`
+**Priority**: **HIGH** - Prevents wasted job records and queue messages for invalid requests
+**Impact**: Fail-fast validation at job submission instead of task execution
+
+**Implementation Summary**:
+- Created `infrastructure/validators.py` with registry pattern
+- 4 validators: `blob_exists`, `container_exists`, `table_exists`, `table_not_exists`
+- JobBaseMixin integration complete (calls `run_validators()` in `validate_job_parameters()`)
+- Updated to use `BlobRepository.instance()` singleton pattern (28 NOV 2025)
+- Used by `process_vector` job, ready for `process_raster_v2`
+**Author**: Robert and Geospatial Claude Legion
+
+### Problem Statement
+
+**Current Flow (Broken)**:
+```
+Submit Job → Parameters Validated (✅) → Job Created (✅) → Job Queued (✅)
+→ Stage 1 Task Starts → read_blob() → ❌ ResourceNotFoundError (TOO LATE!)
+```
+
+When a user submits a job with a non-existent blob file or container:
+- User gets HTTP 200 success response with `job_id`
+- Job shows as `processing` or `failed` later (delayed error feedback)
+- Wasted database records (app.jobs) and queue messages (Service Bus)
+- Poor user experience - error hidden in Application Insights logs
+
+**Desired Flow (Fixed)**:
+```
+Submit Job → Parameters Validated (✅) → Resources Validated (✅ or ❌ FAIL FAST)
+→ Job Created → Job Queued → Processing begins
+```
+
+### Architecture: Declarative Resource Validators
+
+Extend the existing `parameters_schema` pattern with a new `resource_validators` declaration.
+
+**Design Principles**:
+1. **DRY** - Validation logic written once in `infrastructure/validators.py`
+2. **Declarative** - Jobs declare WHAT to validate, not HOW
+3. **Consistent** - Same pattern as `parameters_schema` (already understood)
+4. **Fail-Fast** - Errors at HTTP submission, not task execution
+5. **Testable** - Validators are pure functions, easy to unit test
+6. **Extensible** - Add new validator types without touching job classes
+
+### Implementation Plan
+
+#### File 1: `infrastructure/validators.py` (NEW FILE)
+
+**Purpose**: Registry of resource validators + implementations
+
+```python
+# ============================================================================
+# CLAUDE CONTEXT - RESOURCE VALIDATORS
+# ============================================================================
+# EPOCH: 4 - ACTIVE ✅
+# STATUS: Infrastructure - Pre-flight resource validation
+# PURPOSE: Centralized validators for blob/container/table existence checks
+# LAST_REVIEWED: 27 NOV 2025
+# EXPORTS: RESOURCE_VALIDATORS registry, validate_blob_exists, validate_container_exists, validate_table_exists
+# INTERFACES: ValidatorResult TypedDict
+# PYDANTIC_MODELS: None (uses TypedDict for lightweight validation results)
+# DEPENDENCIES: infrastructure.blob.BlobRepository, infrastructure.postgresql.PostgreSQLRepository
+# SOURCE: Called by JobBaseMixin.validate_job_parameters() during job submission
+# SCOPE: ALL job types that declare resource_validators
+# VALIDATION: Blob existence, container existence, PostGIS table existence
+# PATTERNS: Registry pattern, Strategy pattern (validators are interchangeable)
+# ENTRY_POINTS: JobBaseMixin calls RESOURCE_VALIDATORS[type](params, config)
+# INDEX:
+#   - ValidatorResult TypedDict: line 45
+#   - RESOURCE_VALIDATORS registry: line 55
+#   - validate_blob_exists: line 70
+#   - validate_container_exists: line 120
+#   - validate_table_exists: line 160
+#   - validate_table_not_exists: line 200
+#   - _get_zone_from_container: line 240 (helper)
+# ============================================================================
+
+"""
+Pre-Flight Resource Validators
+
+This module provides a registry of validation functions for checking external
+resource existence BEFORE job creation. This prevents wasted database records
+and queue messages for jobs that would fail immediately.
+
+Usage in Job Classes:
+    class ProcessVectorJob(JobBaseMixin, JobBase):
+        resource_validators = [
+            {
+                'type': 'blob_exists',
+                'container_param': 'container_name',
+                'blob_param': 'blob_name',
+                'error': 'Source file does not exist in Bronze storage'
+            }
+        ]
+
+The JobBaseMixin.validate_job_parameters() method automatically runs these
+validators after schema validation passes.
+
+Validator Interface:
+    def validator_fn(params: dict, config: dict) -> ValidatorResult:
+        '''
+        Args:
+            params: Validated job parameters (after schema validation)
+            config: Validator config from resource_validators declaration
+
+        Returns:
+            ValidatorResult with 'valid' bool and 'message' str
+        '''
+"""
+
+from typing import Dict, Any, Callable, Optional, TypedDict, List
+from util_logger import LoggerFactory, ComponentType
+
+logger = LoggerFactory.create_logger(ComponentType.INFRASTRUCTURE, "validators")
+
+
+class ValidatorResult(TypedDict):
+    """Result from a resource validator."""
+    valid: bool
+    message: Optional[str]
+
+
+# Type alias for validator functions
+ValidatorFn = Callable[[Dict[str, Any], Dict[str, Any]], ValidatorResult]
+
+# Registry of validator functions
+RESOURCE_VALIDATORS: Dict[str, ValidatorFn] = {}
+
+
+def register_validator(name: str):
+    """Decorator to register a validator function."""
+    def decorator(func: ValidatorFn) -> ValidatorFn:
+        RESOURCE_VALIDATORS[name] = func
+        logger.debug(f"Registered resource validator: {name}")
+        return func
+    return decorator
+
+
+# ============================================================================
+# VALIDATOR IMPLEMENTATIONS
+# ============================================================================
+
+@register_validator("blob_exists")
+def validate_blob_exists(params: Dict[str, Any], config: Dict[str, Any]) -> ValidatorResult:
+    """
+    Validate that a blob exists in Azure Blob Storage.
+
+    Config options:
+        container_param: str - Name of parameter containing container name
+        blob_param: str - Name of parameter containing blob path
+        zone: str - Optional trust zone ('bronze', 'silver', 'silverext').
+                    If not specified, inferred from container name.
+        error: str - Optional custom error message
+
+    Example:
+        resource_validators = [
+            {
+                'type': 'blob_exists',
+                'container_param': 'container_name',
+                'blob_param': 'blob_name',
+                'zone': 'bronze',  # Optional
+                'error': 'Source file not found'  # Optional
+            }
+        ]
+    """
+    from infrastructure.blob import BlobRepository
+
+    # Extract parameter names from config
+    container_param = config.get('container_param', 'container_name')
+    blob_param = config.get('blob_param', 'blob_name')
+
+    # Get actual values from job parameters
+    container = params.get(container_param)
+    blob_path = params.get(blob_param)
+
+    if not container:
+        return ValidatorResult(
+            valid=False,
+            message=f"Container parameter '{container_param}' is missing or empty"
+        )
+
+    if not blob_path:
+        return ValidatorResult(
+            valid=False,
+            message=f"Blob parameter '{blob_param}' is missing or empty"
+        )
+
+    # Determine trust zone
+    zone = config.get('zone') or _get_zone_from_container(container)
+
+    try:
+        blob_repo = BlobRepository.for_zone(zone)
+        validation = blob_repo.validate_container_and_blob(container, blob_path)
+
+        if validation['valid']:
+            logger.debug(f"✅ Pre-flight: blob exists: {container}/{blob_path}")
+            return ValidatorResult(valid=True, message=None)
+        else:
+            error_msg = config.get('error') or validation['message']
+            logger.warning(f"❌ Pre-flight: {error_msg}")
+            return ValidatorResult(valid=False, message=error_msg)
+
+    except Exception as e:
+        error_msg = f"Failed to validate blob existence: {e}"
+        logger.error(error_msg)
+        return ValidatorResult(valid=False, message=error_msg)
+
+
+@register_validator("container_exists")
+def validate_container_exists(params: Dict[str, Any], config: Dict[str, Any]) -> ValidatorResult:
+    """
+    Validate that a container exists in Azure Blob Storage.
+
+    Config options:
+        container_param: str - Name of parameter containing container name
+        zone: str - Optional trust zone ('bronze', 'silver', 'silverext')
+        error: str - Optional custom error message
+
+    Example:
+        resource_validators = [
+            {
+                'type': 'container_exists',
+                'container_param': 'source_container',
+                'error': 'Source container does not exist'
+            }
+        ]
+    """
+    from infrastructure.blob import BlobRepository
+
+    container_param = config.get('container_param', 'container_name')
+    container = params.get(container_param)
+
+    if not container:
+        return ValidatorResult(
+            valid=False,
+            message=f"Container parameter '{container_param}' is missing or empty"
+        )
+
+    zone = config.get('zone') or _get_zone_from_container(container)
+
+    try:
+        blob_repo = BlobRepository.for_zone(zone)
+
+        if blob_repo.container_exists(container):
+            logger.debug(f"✅ Pre-flight: container exists: {container}")
+            return ValidatorResult(valid=True, message=None)
+        else:
+            error_msg = config.get('error') or f"Container '{container}' does not exist"
+            logger.warning(f"❌ Pre-flight: {error_msg}")
+            return ValidatorResult(valid=False, message=error_msg)
+
+    except Exception as e:
+        error_msg = f"Failed to validate container existence: {e}"
+        logger.error(error_msg)
+        return ValidatorResult(valid=False, message=error_msg)
+
+
+@register_validator("table_exists")
+def validate_table_exists(params: Dict[str, Any], config: Dict[str, Any]) -> ValidatorResult:
+    """
+    Validate that a PostGIS table exists.
+
+    Config options:
+        table_param: str - Name of parameter containing table name
+        schema_param: str - Name of parameter containing schema name (default: 'schema')
+        default_schema: str - Default schema if not in params (default: 'geo')
+        error: str - Optional custom error message
+
+    Example:
+        resource_validators = [
+            {
+                'type': 'table_exists',
+                'table_param': 'source_table',
+                'schema_param': 'source_schema',
+                'error': 'Source table does not exist'
+            }
+        ]
+    """
+    from infrastructure.postgresql import PostgreSQLRepository
+    from psycopg import sql
+
+    table_param = config.get('table_param', 'table_name')
+    schema_param = config.get('schema_param', 'schema')
+    default_schema = config.get('default_schema', 'geo')
+
+    table_name = params.get(table_param)
+    schema = params.get(schema_param, default_schema)
+
+    if not table_name:
+        return ValidatorResult(
+            valid=False,
+            message=f"Table parameter '{table_param}' is missing or empty"
+        )
+
+    try:
+        repo = PostgreSQLRepository()
+        with repo._get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT EXISTS (
+                        SELECT 1 FROM information_schema.tables
+                        WHERE table_schema = %s AND table_name = %s
+                    )
+                """, (schema, table_name))
+                exists = cur.fetchone()[0]
+
+        if exists:
+            logger.debug(f"✅ Pre-flight: table exists: {schema}.{table_name}")
+            return ValidatorResult(valid=True, message=None)
+        else:
+            error_msg = config.get('error') or f"Table '{schema}.{table_name}' does not exist"
+            logger.warning(f"❌ Pre-flight: {error_msg}")
+            return ValidatorResult(valid=False, message=error_msg)
+
+    except Exception as e:
+        error_msg = f"Failed to validate table existence: {e}"
+        logger.error(error_msg)
+        return ValidatorResult(valid=False, message=error_msg)
+
+
+@register_validator("table_not_exists")
+def validate_table_not_exists(params: Dict[str, Any], config: Dict[str, Any]) -> ValidatorResult:
+    """
+    Validate that a PostGIS table does NOT exist (for "don't overwrite" checks).
+
+    Config options:
+        table_param: str - Name of parameter containing table name
+        schema_param: str - Name of parameter containing schema name
+        default_schema: str - Default schema if not in params (default: 'geo')
+        error: str - Optional custom error message
+        allow_overwrite_param: str - Optional param that if True bypasses this check
+
+    Example:
+        resource_validators = [
+            {
+                'type': 'table_not_exists',
+                'table_param': 'table_name',
+                'error': 'Table already exists. Use overwrite=true to replace.',
+                'allow_overwrite_param': 'overwrite'
+            }
+        ]
+    """
+    # Check if overwrite is allowed and enabled
+    allow_overwrite_param = config.get('allow_overwrite_param')
+    if allow_overwrite_param and params.get(allow_overwrite_param, False):
+        logger.debug(f"✅ Pre-flight: overwrite enabled, skipping table_not_exists check")
+        return ValidatorResult(valid=True, message=None)
+
+    # Inverse of table_exists
+    result = validate_table_exists(params, config)
+
+    if result['valid']:
+        # Table exists - this is a FAILURE for table_not_exists
+        table_param = config.get('table_param', 'table_name')
+        schema_param = config.get('schema_param', 'schema')
+        default_schema = config.get('default_schema', 'geo')
+        table_name = params.get(table_param)
+        schema = params.get(schema_param, default_schema)
+
+        error_msg = config.get('error') or f"Table '{schema}.{table_name}' already exists"
+        return ValidatorResult(valid=False, message=error_msg)
+    else:
+        # Table doesn't exist - this is SUCCESS for table_not_exists
+        # (unless the check itself failed due to connection error)
+        if "Failed to validate" in (result.get('message') or ''):
+            return result  # Propagate connection errors
+        return ValidatorResult(valid=True, message=None)
+
+
+# ============================================================================
+# HELPER FUNCTIONS
+# ============================================================================
+
+def _get_zone_from_container(container_name: str) -> str:
+    """
+    Infer trust zone from container name.
+
+    Container naming convention:
+        - bronze-* or *bronze* → 'bronze'
+        - silver-* or *silver* → 'silver'
+        - silverext-* or *external* → 'silverext'
+        - Default → 'silver'
+
+    Args:
+        container_name: Azure Blob Storage container name
+
+    Returns:
+        Trust zone: 'bronze', 'silver', or 'silverext'
+    """
+    container_lower = container_name.lower()
+
+    if 'bronze' in container_lower:
+        return 'bronze'
+    elif 'external' in container_lower or 'silverext' in container_lower:
+        return 'silverext'
+    elif 'silver' in container_lower:
+        return 'silver'
+    else:
+        # Default to silver (most common for processed data)
+        return 'silver'
+
+
+def run_validators(
+    validators: List[Dict[str, Any]],
+    params: Dict[str, Any]
+) -> ValidatorResult:
+    """
+    Run a list of validators and return first failure or success.
+
+    Args:
+        validators: List of validator configs from job's resource_validators
+        params: Validated job parameters
+
+    Returns:
+        ValidatorResult - first failure, or success if all pass
+
+    Example:
+        validators = [
+            {'type': 'container_exists', 'container_param': 'source'},
+            {'type': 'blob_exists', 'container_param': 'source', 'blob_param': 'file'}
+        ]
+        result = run_validators(validators, params)
+        if not result['valid']:
+            raise ValueError(result['message'])
+    """
+    for validator_config in validators:
+        validator_type = validator_config.get('type')
+
+        if not validator_type:
+            return ValidatorResult(
+                valid=False,
+                message="Validator config missing 'type' field"
+            )
+
+        validator_fn = RESOURCE_VALIDATORS.get(validator_type)
+
+        if not validator_fn:
+            return ValidatorResult(
+                valid=False,
+                message=f"Unknown validator type: '{validator_type}'. "
+                        f"Available: {list(RESOURCE_VALIDATORS.keys())}"
+            )
+
+        result = validator_fn(params, validator_config)
+
+        if not result['valid']:
+            return result  # Fail fast on first error
+
+    return ValidatorResult(valid=True, message=None)
+
+
+# ============================================================================
+# EXPORTS
+# ============================================================================
+
+__all__ = [
+    'RESOURCE_VALIDATORS',
+    'ValidatorResult',
+    'ValidatorFn',
+    'register_validator',
+    'run_validators',
+    'validate_blob_exists',
+    'validate_container_exists',
+    'validate_table_exists',
+    'validate_table_not_exists',
+]
+```
+
+---
+
+#### File 2: `jobs/mixins.py` (MODIFY)
+
+**Purpose**: Add resource validation to `validate_job_parameters()`
+
+**Location**: After schema validation (~line 438), before return statement
+
+**Changes Required**:
+
+```python
+# ADD after line 438 (after schema validation, before return)
+
+# ========================================================================
+# STEP 2: Resource Validation (Optional - if job declares resource_validators)
+# ========================================================================
+
+if hasattr(cls, 'resource_validators') and cls.resource_validators:
+    from infrastructure.validators import run_validators
+
+    logger.debug(f"🔍 Running {len(cls.resource_validators)} resource validators...")
+
+    result = run_validators(cls.resource_validators, validated)
+
+    if not result['valid']:
+        error_msg = f"Pre-flight validation failed: {result['message']}"
+        logger.warning(f"❌ {error_msg}")
+        raise ValueError(error_msg)
+
+    logger.debug(f"✅ All resource validators passed")
+```
+
+**Full Method After Modification** (for context):
+
+```python
+@classmethod
+def validate_job_parameters(cls, params: dict) -> dict:
+    """
+    Default parameter validation using parameters_schema + resource_validators.
+
+    Validation is performed in two phases:
+    1. Schema validation (type checking, required fields, ranges, enums)
+    2. Resource validation (blob/container/table existence) - optional
+
+    Override for complex validation logic (cross-field validation, etc).
+    """
+    from util_logger import LoggerFactory, ComponentType
+
+    logger = LoggerFactory.create_logger(
+        ComponentType.CONTROLLER,
+        f"{cls.__name__}.validate_job_parameters"
+    )
+
+    # ========================================================================
+    # STEP 1: Schema Validation (existing code - unchanged)
+    # ========================================================================
+
+    # Safety check: Ensure parameters_schema is defined
+    if not hasattr(cls, 'parameters_schema') or cls.parameters_schema is None:
+        raise AttributeError(
+            f"{cls.__name__} must define 'parameters_schema' class attribute."
+        )
+
+    validated = {}
+
+    for param_name, schema in cls.parameters_schema.items():
+        # ... existing schema validation logic (lines 407-436) ...
+        value = params.get(param_name, schema.get('default'))
+
+        if value is None and schema.get('required', False):
+            raise ValueError(f"Parameter '{param_name}' is required")
+
+        if value is None:
+            continue
+
+        # Type validation
+        param_type = schema.get('type', 'str')
+        if param_type == 'int':
+            value = cls._validate_int(param_name, value, schema)
+        elif param_type == 'float':
+            value = cls._validate_float(param_name, value, schema)
+        elif param_type == 'str':
+            value = cls._validate_str(param_name, value, schema)
+        elif param_type == 'bool':
+            value = cls._validate_bool(param_name, value)
+        elif param_type == 'list':
+            value = cls._validate_list(param_name, value, schema)
+        elif param_type == 'dict':
+            value = cls._validate_dict(param_name, value, schema)
+        else:
+            raise ValueError(f"Unknown type '{param_type}' for parameter '{param_name}'")
+
+        validated[param_name] = value
+
+    logger.debug(f"✅ Schema validation passed: {list(validated.keys())}")
+
+    # ========================================================================
+    # STEP 2: Resource Validation (NEW - 27 NOV 2025)
+    # ========================================================================
+
+    if hasattr(cls, 'resource_validators') and cls.resource_validators:
+        from infrastructure.validators import run_validators
+
+        logger.debug(f"🔍 Running {len(cls.resource_validators)} resource validators...")
+
+        result = run_validators(cls.resource_validators, validated)
+
+        if not result['valid']:
+            error_msg = f"Pre-flight validation failed: {result['message']}"
+            logger.warning(f"❌ {error_msg}")
+            raise ValueError(error_msg)
+
+        logger.debug(f"✅ All resource validators passed")
+
+    return validated
+```
+
+---
+
+#### File 3: `jobs/process_vector.py` (MODIFY - Pilot Implementation)
+
+**Purpose**: Add `resource_validators` declaration to pilot the pattern
+
+**Location**: After `parameters_schema` (~line 121)
+
+**Changes Required**:
+
+```python
+# ADD after line 121 (after parameters_schema closing brace)
+
+# Pre-flight resource validation (27 NOV 2025)
+# Validates blob exists BEFORE job creation - fail fast!
+resource_validators = [
+    {
+        'type': 'blob_exists',
+        'container_param': 'container_name',
+        'blob_param': 'blob_name',
+        'zone': 'bronze',  # Source files are in Bronze tier
+        'error': 'Source file does not exist in Bronze storage. Check blob_name and container_name.'
+    }
+]
+```
+
+**Full Class Declaration After Modification**:
+
+```python
+class ProcessVectorJob(JobBaseMixin, JobBase):
+    """
+    Idempotent vector ETL workflow.
+    """
+
+    job_type: str = "process_vector"
+    description: str = "Idempotent vector ETL: Bronze -> PostGIS + STAC"
+
+    # Declarative validation schema (JobBaseMixin handles validation)
+    parameters_schema = {
+        'blob_name': {
+            'type': 'str',
+            'required': True,
+            'description': 'Source file path in container'
+        },
+        'file_extension': {
+            'type': 'str',
+            'required': True,
+            'allowed': ['csv', 'geojson', 'json', 'gpkg', 'kml', 'kmz', 'shp', 'zip'],
+            'description': 'Source file format'
+        },
+        'table_name': {
+            'type': 'str',
+            'required': True,
+            'description': 'Target PostGIS table name'
+        },
+        'container_name': {
+            'type': 'str',
+            'default': 'rmhazuregeobronze',
+            'description': 'Source blob container'
+        },
+        # ... rest of parameters_schema ...
+    }
+
+    # Pre-flight resource validation (27 NOV 2025)
+    resource_validators = [
+        {
+            'type': 'blob_exists',
+            'container_param': 'container_name',
+            'blob_param': 'blob_name',
+            'zone': 'bronze',
+            'error': 'Source file does not exist in Bronze storage. Check blob_name and container_name.'
+        }
+    ]
+
+    stages: List[Dict[str, Any]] = [
+        # ... stages unchanged ...
+    ]
+```
+
+---
+
+### Task Checklist
+
+**Phase 1: Core Infrastructure**
+- [ ] **Step 1**: Create `infrastructure/validators.py` with registry and 4 validators
+- [ ] **Step 2**: Add `run_validators()` helper function
+- [ ] **Step 3**: Add `_get_zone_from_container()` helper
+- [ ] **Step 4**: Unit test validators with mock BlobRepository
+
+**Phase 2: Integration**
+- [ ] **Step 5**: Modify `jobs/mixins.py` to call resource validators
+- [ ] **Step 6**: Ensure backward compatibility (jobs without resource_validators still work)
+- [ ] **Step 7**: Integration test with HelloWorldJob (no validators) - should pass
+
+**Phase 3: Pilot Rollout**
+- [ ] **Step 8**: Add `resource_validators` to `jobs/process_vector.py`
+- [ ] **Step 9**: Test with valid blob → job should be created
+- [ ] **Step 10**: Test with invalid blob → should get HTTP 400 with clear error
+- [ ] **Step 11**: Test with invalid container → should get HTTP 400 with clear error
+
+**Phase 4: Rollout to Other Jobs**
+- [ ] **Step 12**: Add validators to `jobs/ingest_vector.py`
+- [ ] **Step 13**: Add validators to `jobs/process_raster.py`
+- [ ] **Step 14**: Add validators to `jobs/process_large_raster.py`
+- [ ] **Step 15**: Add validators to `jobs/container_list.py` (container_exists only)
+
+**Phase 5: Documentation**
+- [ ] **Step 16**: Update `JOB_CREATION_QUICKSTART.md` with resource_validators section
+- [ ] **Step 17**: Add examples to `jobs/mixins.py` docstring
+- [ ] **Step 18**: Update `ARCHITECTURE_REFERENCE.md` with validation flow diagram
+- [ ] **Commit**: "Add pre-flight resource validation to job submission flow"
+
+---
+
+### Files Summary
+
+| File | Action | Purpose |
+|------|--------|---------|
+| `infrastructure/validators.py` | **CREATE** | Validator registry + implementations |
+| `infrastructure/__init__.py` | **MODIFY** | Export validators module |
+| `jobs/mixins.py` | **MODIFY** | Add resource validation to validate_job_parameters() |
+| `jobs/process_vector.py` | **MODIFY** | Pilot: add resource_validators declaration |
+| `jobs/ingest_vector.py` | **MODIFY** | Rollout: add resource_validators |
+| `jobs/process_raster.py` | **MODIFY** | Rollout: add resource_validators |
+| `jobs/process_large_raster.py` | **MODIFY** | Rollout: add resource_validators |
+| `jobs/container_list.py` | **MODIFY** | Rollout: add container_exists validator |
+| `JOB_CREATION_QUICKSTART.md` | **MODIFY** | Document resource_validators pattern |
+
+---
+
+### Available Validator Types
+
+| Validator | Purpose | Config Options | Example Use Case |
+|-----------|---------|----------------|------------------|
+| `blob_exists` | Verify blob file exists | container_param, blob_param, zone, error | Source file for ETL jobs |
+| `container_exists` | Verify container exists | container_param, zone, error | Container listing jobs |
+| `table_exists` | Verify PostGIS table exists | table_param, schema_param, default_schema, error | Append-to-table jobs |
+| `table_not_exists` | Verify table does NOT exist | table_param, schema_param, allow_overwrite_param, error | Create-new-table jobs |
+
+---
+
+### Example Usage in Jobs
+
+**process_vector** (source blob must exist):
+```python
+resource_validators = [
+    {
+        'type': 'blob_exists',
+        'container_param': 'container_name',
+        'blob_param': 'blob_name',
+        'zone': 'bronze',
+        'error': 'Source file not found in Bronze storage'
+    }
+]
+```
+
+**container_list** (container must exist):
+```python
+resource_validators = [
+    {
+        'type': 'container_exists',
+        'container_param': 'container_name',
+        'error': 'Container does not exist'
+    }
+]
+```
+
+**export_to_geoparquet** (source table must exist):
+```python
+resource_validators = [
+    {
+        'type': 'table_exists',
+        'table_param': 'source_table',
+        'schema_param': 'source_schema',
+        'error': 'Source table does not exist in PostGIS'
+    }
+]
+```
+
+**process_vector with overwrite check**:
+```python
+resource_validators = [
+    {
+        'type': 'blob_exists',
+        'container_param': 'container_name',
+        'blob_param': 'blob_name'
+    },
+    {
+        'type': 'table_not_exists',
+        'table_param': 'table_name',
+        'allow_overwrite_param': 'overwrite',
+        'error': 'Table already exists. Set overwrite=true to replace.'
+    }
+]
+```
+
+---
+
+### Error Response Example
+
+**Before (current - error hidden in task execution)**:
+```json
+HTTP 200 OK
+{
+    "job_id": "abc123...",
+    "status": "created",
+    "message": "Job created and queued for processing"
+}
+// User has to check job status later to find out it failed
+```
+
+**After (with pre-flight validation)**:
+```json
+HTTP 400 Bad Request
+{
+    "error": "Pre-flight validation failed: Source file 'data/missing.csv' does not exist in container 'rmhazuregeobronze'",
+    "job_type": "process_vector",
+    "validation_type": "blob_exists",
+    "parameters": {
+        "blob_name": "data/missing.csv",
+        "container_name": "rmhazuregeobronze"
+    }
+}
+// User gets immediate, actionable error
+```
+
+---
+
+### Performance Notes
+
+- **Latency**: ~100-300ms added to job submission (blob existence check)
+- **Acceptable**: ETL jobs are async; users don't expect instant responses
+- **Benefit**: Prevents wasted DB records + queue messages + debugging time
+- **Caching**: Not implemented (blobs can change between check and execution)
+
+---
+
+### Future Enhancements
+
+1. **Async Validation** (if needed): Run validators in Stage 0 task instead of HTTP request
+2. **Batch Validation**: Validate multiple blobs in single API call (for collection jobs)
+3. **Custom Validators**: Allow jobs to define inline validator functions
+4. **Validation Caching**: Cache positive results for short TTL (risky - blob could be deleted)
 
 ---
 

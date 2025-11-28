@@ -187,11 +187,10 @@ def validate_blob_exists(params: Dict[str, Any], config: Dict[str, Any]) -> Vali
             message=f"Blob parameter '{blob_param}' is missing or empty"
         )
 
-    # Determine trust zone
-    zone = config.get('zone') or _get_zone_from_container(container)
-
+    # Use singleton instance (managed identity) - works for all zones
+    # NOTE: .for_zone() reserved for future multi-account support
     try:
-        blob_repo = BlobRepository.for_zone(zone)
+        blob_repo = BlobRepository.instance()
         validation = blob_repo.validate_container_and_blob(container, blob_path)
 
         if validation['valid']:
@@ -238,10 +237,10 @@ def validate_container_exists(params: Dict[str, Any], config: Dict[str, Any]) ->
             message=f"Container parameter '{container_param}' is missing or empty"
         )
 
-    zone = config.get('zone') or _get_zone_from_container(container)
-
+    # Use singleton instance (managed identity) - works for all zones
+    # NOTE: .for_zone() reserved for future multi-account support
     try:
-        blob_repo = BlobRepository.for_zone(zone)
+        blob_repo = BlobRepository.instance()
 
         if blob_repo.container_exists(container):
             logger.debug(f"✅ Pre-flight: container exists: {container}")

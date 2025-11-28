@@ -40,6 +40,22 @@ Performance:
 
 from azure.servicebus import ServiceBusClient, ServiceBusMessage, ServiceBusSender, ServiceBusReceiver
 from azure.servicebus.aio import ServiceBusClient as AsyncServiceBusClient
+from azure.servicebus.exceptions import (
+    ServiceBusError,                    # Base exception
+    ServiceBusConnectionError,          # Connection failures
+    ServiceBusCommunicationError,       # Network/firewall issues
+    ServiceBusAuthenticationError,      # Auth credential failures
+    ServiceBusAuthorizationError,       # Permission denied
+    MessageSizeExceededError,           # Message too large (256KB limit)
+    MessageLockLostError,               # Lock expired during processing
+    MessageAlreadySettled,              # Already completed/abandoned
+    MessageNotFoundError,               # Message doesn't exist
+    MessagingEntityNotFoundError,       # Queue/topic doesn't exist
+    OperationTimeoutError,              # Timeout (transient, retry)
+    ServiceBusQuotaExceededError,       # Quota exceeded (permanent)
+    ServiceBusServerBusyError,          # Server busy (transient, retry)
+    AutoLockRenewTimeout,               # Lock renewal failed (transient)
+)
 from azure.identity import DefaultAzureCredential
 from azure.core.exceptions import ServiceRequestError
 from typing import Optional, List, Dict, Any, Union
@@ -341,28 +357,124 @@ class ServiceBusRepository(IQueueRepository):
                     message_id = f"sb_{datetime.now(timezone.utc).timestamp()}"
                     return message_id
 
-            except Exception as e:
-                error_msg = str(e)
-                error_type = type(e).__name__
-                logger.warning(f"⚠️ Attempt {attempt + 1}/{self.max_retries} failed")
-                logger.warning(f"   Error type: {error_type}")
-                logger.warning(f"   Error message: {error_msg}")
+            # === PERMANENT ERRORS (28 NOV 2025) - Never retry, fail immediately ===
+            except (ServiceBusAuthenticationError, ServiceBusAuthorizationError) as e:
+                # Auth failures won't resolve with retry
+                logger.error(
+                    f"❌ Authentication/Authorization failed for {queue_name}: {e}",
+                    extra={
+                        'queue': queue_name,
+                        'error_type': type(e).__name__,
+                        'retryable': False,
+                        'error_category': 'auth'
+                    }
+                )
+                raise RuntimeError(f"Service Bus auth failed: {e}")
 
-                # Check for specific error types
-                if "from_env" in error_msg.lower():
-                    logger.error("❌ Authentication error: DefaultAzureCredential failed to authenticate")
-                    logger.error("Ensure managed identity is configured or connection string is provided")
-                    raise RuntimeError(f"Service Bus authentication failed: {error_msg}")
+            except MessageSizeExceededError as e:
+                # Message too large (256KB limit) - won't fix with retry
+                logger.error(
+                    f"❌ Message too large for {queue_name}: {e}",
+                    extra={
+                        'queue': queue_name,
+                        'error_type': 'MessageSizeExceededError',
+                        'retryable': False,
+                        'error_category': 'validation',
+                        'message_type': type(message).__name__
+                    }
+                )
+                raise RuntimeError(f"Message exceeds 256KB limit: {e}")
+
+            except MessagingEntityNotFoundError as e:
+                # Queue doesn't exist - configuration error
+                logger.error(
+                    f"❌ Queue '{queue_name}' not found: {e}",
+                    extra={
+                        'queue': queue_name,
+                        'error_type': 'MessagingEntityNotFoundError',
+                        'retryable': False,
+                        'error_category': 'config'
+                    }
+                )
+                raise RuntimeError(f"Queue '{queue_name}' does not exist: {e}")
+
+            except ServiceBusQuotaExceededError as e:
+                # Quota exceeded - needs manual intervention
+                logger.error(
+                    f"❌ Service Bus quota exceeded for {queue_name}: {e}",
+                    extra={
+                        'queue': queue_name,
+                        'error_type': 'ServiceBusQuotaExceededError',
+                        'retryable': False,
+                        'error_category': 'quota'
+                    }
+                )
+                raise RuntimeError(f"Service Bus quota exceeded: {e}")
+
+            # === TRANSIENT ERRORS - Retry with backoff ===
+            except (OperationTimeoutError, ServiceBusServerBusyError, ServiceBusConnectionError, ServiceBusCommunicationError) as e:
+                error_type = type(e).__name__
+                logger.warning(
+                    f"⚠️ Transient error on attempt {attempt + 1}/{self.max_retries}: {error_type}",
+                    extra={
+                        'queue': queue_name,
+                        'error_type': error_type,
+                        'retryable': True,
+                        'error_category': 'transient',
+                        'attempt': attempt + 1
+                    }
+                )
 
                 if attempt == self.max_retries - 1:
-                    logger.error(f"❌ Failed to send message after {self.max_retries} attempts")
-                    logger.error(f"   Final error type: {error_type}")
-                    logger.error(f"   Final error: {error_msg}")
-                    raise RuntimeError(f"Failed to send message to {queue_name}: {error_msg}")
+                    logger.error(
+                        f"❌ Failed to send message after {self.max_retries} attempts (transient errors)",
+                        extra={
+                            'queue': queue_name,
+                            'error_type': error_type,
+                            'final_error': str(e)
+                        }
+                    )
+                    raise RuntimeError(f"Failed to send to {queue_name} after retries: {e}")
 
                 wait_time = self.retry_delay * (2 ** attempt)
                 logger.debug(f"⏳ Waiting {wait_time} seconds before retry...")
                 time.sleep(wait_time)
+
+            # === UNEXPECTED ERRORS - Log full context, then retry ===
+            except ServiceBusError as e:
+                # Catch-all for other Service Bus errors
+                error_type = type(e).__name__
+                logger.warning(
+                    f"⚠️ ServiceBusError on attempt {attempt + 1}/{self.max_retries}: {error_type}: {e}",
+                    extra={
+                        'queue': queue_name,
+                        'error_type': error_type,
+                        'retryable': True,
+                        'error_category': 'service_bus_other',
+                        'attempt': attempt + 1
+                    }
+                )
+
+                if attempt == self.max_retries - 1:
+                    logger.error(f"❌ Failed to send message after {self.max_retries} attempts: {e}")
+                    raise RuntimeError(f"Failed to send to {queue_name}: {e}")
+
+                wait_time = self.retry_delay * (2 ** attempt)
+                time.sleep(wait_time)
+
+            except Exception as e:
+                # Non-Service Bus errors (serialization, etc.)
+                error_type = type(e).__name__
+                logger.error(
+                    f"❌ Unexpected error sending to {queue_name}: {error_type}: {e}",
+                    extra={
+                        'queue': queue_name,
+                        'error_type': error_type,
+                        'retryable': False,
+                        'error_category': 'unexpected'
+                    }
+                )
+                raise RuntimeError(f"Unexpected error sending to {queue_name}: {e}")
 
     def send_message_with_delay(
         self,
@@ -486,8 +598,78 @@ class ServiceBusRepository(IQueueRepository):
                 logger.info(f"📥 Received {len(result)} messages from {queue_name}")
                 return result
 
+        # === Specific exception handling for receive operations (28 NOV 2025) ===
+        except (ServiceBusAuthenticationError, ServiceBusAuthorizationError) as e:
+            logger.error(
+                f"❌ Auth failed receiving from {queue_name}: {e}",
+                extra={
+                    'queue': queue_name,
+                    'error_type': type(e).__name__,
+                    'retryable': False,
+                    'error_category': 'auth'
+                }
+            )
+            raise RuntimeError(f"Service Bus auth failed: {e}")
+
+        except MessagingEntityNotFoundError as e:
+            logger.error(
+                f"❌ Queue '{queue_name}' not found: {e}",
+                extra={
+                    'queue': queue_name,
+                    'error_type': 'MessagingEntityNotFoundError',
+                    'retryable': False,
+                    'error_category': 'config'
+                }
+            )
+            raise RuntimeError(f"Queue '{queue_name}' does not exist: {e}")
+
+        except (OperationTimeoutError, ServiceBusServerBusyError) as e:
+            # Transient - caller may retry
+            logger.warning(
+                f"⚠️ Transient error receiving from {queue_name}: {type(e).__name__}",
+                extra={
+                    'queue': queue_name,
+                    'error_type': type(e).__name__,
+                    'retryable': True,
+                    'error_category': 'transient'
+                }
+            )
+            raise  # Let caller decide to retry
+
+        except (ServiceBusConnectionError, ServiceBusCommunicationError) as e:
+            # Connection issues - may need reconnect
+            logger.error(
+                f"❌ Connection error receiving from {queue_name}: {e}",
+                extra={
+                    'queue': queue_name,
+                    'error_type': type(e).__name__,
+                    'retryable': True,
+                    'error_category': 'connection'
+                }
+            )
+            raise
+
+        except ServiceBusError as e:
+            # Other Service Bus errors
+            logger.error(
+                f"❌ ServiceBusError receiving from {queue_name}: {type(e).__name__}: {e}",
+                extra={
+                    'queue': queue_name,
+                    'error_type': type(e).__name__,
+                    'error_category': 'service_bus_other'
+                }
+            )
+            raise
+
         except Exception as e:
-            logger.error(f"❌ Failed to receive messages from {queue_name}: {e}")
+            logger.error(
+                f"❌ Unexpected error receiving from {queue_name}: {type(e).__name__}: {e}",
+                extra={
+                    'queue': queue_name,
+                    'error_type': type(e).__name__,
+                    'error_category': 'unexpected'
+                }
+            )
             raise
 
     def delete_message(self, queue_name: str, message_id: str, pop_receipt: str = None) -> bool:
@@ -554,8 +736,63 @@ class ServiceBusRepository(IQueueRepository):
                 logger.debug(f"👀 Peeked at {len(result)} messages in {queue_name}")
                 return result
 
+        # === Specific exception handling for peek operations (28 NOV 2025) ===
+        except (ServiceBusAuthenticationError, ServiceBusAuthorizationError) as e:
+            logger.error(
+                f"❌ Auth failed peeking {queue_name}: {e}",
+                extra={
+                    'queue': queue_name,
+                    'error_type': type(e).__name__,
+                    'retryable': False,
+                    'error_category': 'auth'
+                }
+            )
+            raise RuntimeError(f"Service Bus auth failed: {e}")
+
+        except MessagingEntityNotFoundError as e:
+            logger.error(
+                f"❌ Queue '{queue_name}' not found for peek: {e}",
+                extra={
+                    'queue': queue_name,
+                    'error_type': 'MessagingEntityNotFoundError',
+                    'retryable': False,
+                    'error_category': 'config'
+                }
+            )
+            raise RuntimeError(f"Queue '{queue_name}' does not exist: {e}")
+
+        except (OperationTimeoutError, ServiceBusServerBusyError, ServiceBusConnectionError, ServiceBusCommunicationError) as e:
+            logger.warning(
+                f"⚠️ Transient error peeking {queue_name}: {type(e).__name__}",
+                extra={
+                    'queue': queue_name,
+                    'error_type': type(e).__name__,
+                    'retryable': True,
+                    'error_category': 'transient'
+                }
+            )
+            raise
+
+        except ServiceBusError as e:
+            logger.error(
+                f"❌ ServiceBusError peeking {queue_name}: {type(e).__name__}: {e}",
+                extra={
+                    'queue': queue_name,
+                    'error_type': type(e).__name__,
+                    'error_category': 'service_bus_other'
+                }
+            )
+            raise
+
         except Exception as e:
-            logger.error(f"❌ Failed to peek messages in {queue_name}: {e}")
+            logger.error(
+                f"❌ Unexpected error peeking {queue_name}: {type(e).__name__}: {e}",
+                extra={
+                    'queue': queue_name,
+                    'error_type': type(e).__name__,
+                    'error_category': 'unexpected'
+                }
+            )
             raise
 
     def get_queue_length(self, queue_name: str) -> int:
@@ -686,7 +923,7 @@ class ServiceBusRepository(IQueueRepository):
 
                     sb_messages.append(sb_message)
 
-                # Send batch with retry
+                # Send batch with retry and specific exception handling (28 NOV 2025)
                 for attempt in range(self.max_retries):
                     try:
                         sender.send_messages(sb_messages)
@@ -696,13 +933,109 @@ class ServiceBusRepository(IQueueRepository):
                             logger.debug(f"Progress: {messages_sent}/{len(messages)} messages sent")
                         break
 
-                    except Exception as e:
+                    # === PERMANENT ERRORS - Stop entire batch operation ===
+                    except (ServiceBusAuthenticationError, ServiceBusAuthorizationError) as e:
+                        logger.error(
+                            f"❌ Auth failed on batch {batch_count}: {e}",
+                            extra={
+                                'queue': queue_name,
+                                'error_type': type(e).__name__,
+                                'retryable': False,
+                                'error_category': 'auth',
+                                'batch_number': batch_count,
+                                'messages_sent_so_far': messages_sent
+                            }
+                        )
+                        # Auth errors affect all batches - abort entirely
+                        raise RuntimeError(f"Service Bus auth failed during batch: {e}")
+
+                    except MessagingEntityNotFoundError as e:
+                        logger.error(
+                            f"❌ Queue '{queue_name}' not found during batch: {e}",
+                            extra={
+                                'queue': queue_name,
+                                'error_type': 'MessagingEntityNotFoundError',
+                                'retryable': False,
+                                'error_category': 'config'
+                            }
+                        )
+                        raise RuntimeError(f"Queue '{queue_name}' does not exist: {e}")
+
+                    except ServiceBusQuotaExceededError as e:
+                        logger.error(
+                            f"❌ Quota exceeded at batch {batch_count}: {e}",
+                            extra={
+                                'queue': queue_name,
+                                'error_type': 'ServiceBusQuotaExceededError',
+                                'retryable': False,
+                                'error_category': 'quota',
+                                'messages_sent_so_far': messages_sent
+                            }
+                        )
+                        # Return partial success - some messages sent before quota hit
+                        errors.append(f"Batch {batch_count}: Quota exceeded - {e}")
+                        break  # Stop processing more batches
+
+                    except MessageSizeExceededError as e:
+                        logger.error(
+                            f"❌ Batch {batch_count} message too large: {e}",
+                            extra={
+                                'queue': queue_name,
+                                'error_type': 'MessageSizeExceededError',
+                                'retryable': False,
+                                'error_category': 'validation',
+                                'batch_number': batch_count
+                            }
+                        )
+                        errors.append(f"Batch {batch_count}: Message size exceeded")
+                        break  # Skip this batch, continue with next
+
+                    # === TRANSIENT ERRORS - Retry this batch ===
+                    except (OperationTimeoutError, ServiceBusServerBusyError, ServiceBusConnectionError, ServiceBusCommunicationError) as e:
+                        error_type = type(e).__name__
+                        logger.warning(
+                            f"⚠️ Transient error on batch {batch_count}, attempt {attempt + 1}: {error_type}",
+                            extra={
+                                'queue': queue_name,
+                                'error_type': error_type,
+                                'retryable': True,
+                                'error_category': 'transient',
+                                'batch_number': batch_count,
+                                'attempt': attempt + 1
+                            }
+                        )
+
                         if attempt == self.max_retries - 1:
-                            error_msg = f"Batch {batch_count} failed: {e}"
-                            errors.append(error_msg)
-                            logger.error(error_msg)
+                            errors.append(f"Batch {batch_count} failed after {self.max_retries} retries: {error_type}")
+                            logger.error(f"❌ Batch {batch_count} failed after retries: {e}")
                         else:
                             time.sleep(self.retry_delay * (2 ** attempt))
+
+                    # === OTHER SERVICE BUS ERRORS - Retry ===
+                    except ServiceBusError as e:
+                        error_type = type(e).__name__
+                        if attempt == self.max_retries - 1:
+                            errors.append(f"Batch {batch_count}: {error_type} - {e}")
+                            logger.error(f"❌ Batch {batch_count} ServiceBusError: {e}")
+                        else:
+                            logger.warning(f"⚠️ Batch {batch_count} attempt {attempt + 1}: {error_type}")
+                            time.sleep(self.retry_delay * (2 ** attempt))
+
+                    # === UNEXPECTED ERRORS - Log and continue ===
+                    except Exception as e:
+                        error_type = type(e).__name__
+                        logger.error(
+                            f"❌ Unexpected error on batch {batch_count}: {error_type}: {e}",
+                            extra={
+                                'queue': queue_name,
+                                'error_type': error_type,
+                                'retryable': False,
+                                'error_category': 'unexpected',
+                                'batch_number': batch_count
+                            }
+                        )
+                        errors.append(f"Batch {batch_count}: Unexpected {error_type} - {e}")
+                        break  # Don't retry unexpected errors
 
             elapsed_ms = (time.time() - start_time) * 1000
 

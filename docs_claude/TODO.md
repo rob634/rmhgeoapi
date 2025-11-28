@@ -521,6 +521,180 @@ Check for Epoch 3 code that was superseded by Epoch 4:
 
 ---
 
+## ✅ COMPLETED: Service Bus Specific Exception Handling (28 NOV 2025)
+
+**Status**: ✅ **COMPLETED**
+**Priority**: **MEDIUM** - Improved debugging by distinguishing error types
+**Completed**: 28 NOV 2025
+**Author**: Robert and Geospatial Claude Legion
+
+### Summary
+
+Replaced generic `except Exception` blocks with Azure SDK specific exception handling in `infrastructure/service_bus.py`. Now distinguishes between:
+- **Permanent errors** (auth, config, quota, message size) - fail immediately, no retry
+- **Transient errors** (timeout, server busy, connection) - retry with backoff
+
+### Changes Made
+
+| Method | Lines Changed | Exceptions Handled |
+|--------|---------------|-------------------|
+| `send_message()` | 360-477 | Auth, MessageSize, EntityNotFound, Quota, Timeout, ServerBusy, Connection |
+| `batch_send_messages()` | 801-913 | Same categories with batch-specific behavior |
+| `receive_messages()` | 601-673 | Auth, EntityNotFound, Timeout, ServerBusy, Connection |
+| `peek_messages()` | 739-796 | Same as receive_messages |
+
+### Exception Categories
+
+```python
+# PERMANENT (never retry):
+ServiceBusAuthenticationError, ServiceBusAuthorizationError
+MessageSizeExceededError
+MessagingEntityNotFoundError
+ServiceBusQuotaExceededError
+
+# TRANSIENT (retry with backoff):
+OperationTimeoutError
+ServiceBusServerBusyError
+ServiceBusConnectionError
+ServiceBusCommunicationError
+```
+
+### Structured Logging
+
+All exceptions now include `extra={}` with:
+- `error_type`: Specific exception class name
+- `retryable`: Boolean for retry decisions
+- `error_category`: Category for Application Insights filtering (auth, config, quota, transient, connection, unexpected)
+
+---
+
+## 🟡 LOW PRIORITY: Inconsistent Logging Levels (28 NOV 2025)
+
+**Status**: 🟡 **NOT STARTED**
+**Priority**: **LOW** - Code quality improvement
+**Impact**: Consistent log severity for better alerting
+**Author**: Robert and Geospatial Claude Legion
+
+### Problem Statement
+
+Same severity events are logged at different levels across the codebase:
+- Some failures logged as `logger.error()`
+- Similar failures logged as `logger.warning()`
+
+### Examples Found
+
+| File | Line | Current | Should Be |
+|------|------|---------|-----------|
+| `core/machine.py` | ~360 | `logger.error()` for registry lookup | ERROR (correct) |
+| `core/machine.py` | ~405-407 | `logger.warning()` for fetch failure | ERROR (should match) |
+
+### Guidelines to Establish
+
+| Level | When to Use |
+|-------|-------------|
+| ERROR | Operation failed, job/task will fail |
+| WARNING | Recoverable issue, graceful degradation |
+| INFO | Normal operations, milestones |
+| DEBUG | Detailed troubleshooting |
+
+### Implementation Steps
+
+1. [ ] Audit `core/machine.py` for logging level consistency
+2. [ ] Audit `core/state_manager.py` for logging level consistency
+3. [ ] Document logging level guidelines in CLAUDE.md
+4. [ ] Apply consistent levels across CoreMachine
+
+---
+
+## 🟡 LOW PRIORITY: Missing Error Source Field (28 NOV 2025)
+
+**Status**: 🟡 **NOT STARTED**
+**Priority**: **LOW** - Debugging improvement
+**Impact**: Easier error triage in Application Insights
+**Author**: Robert and Geospatial Claude Legion
+
+### Problem Statement
+
+Hard to distinguish where errors originate:
+- Orchestration layer (CoreMachine)
+- Execution layer (task handlers)
+- Infrastructure layer (database, blob, queue)
+
+### Solution
+
+Add `error_source` field to structured logging:
+
+```python
+logger.error(
+    "Operation failed",
+    extra={
+        'error_source': 'orchestration',  # or 'execution', 'infrastructure'
+        'error_type': type(e).__name__,
+        ...
+    }
+)
+```
+
+### Application Insights Query
+
+```kql
+traces
+| where customDimensions.error_source == "infrastructure"
+| summarize count() by customDimensions.error_type
+```
+
+### Implementation Steps
+
+1. [ ] Define error_source enum/constants
+2. [ ] Add to `CoreMachineErrorHandler.handle_operation()`
+3. [ ] Add to `log_nested_error()`
+4. [ ] Update infrastructure layer error logging
+
+---
+
+## 🟢 NICE-TO-HAVE: Retry Telemetry (28 NOV 2025)
+
+**Status**: 🟢 **NOT STARTED**
+**Priority**: **NICE-TO-HAVE** - Enhanced monitoring
+**Impact**: Track retry patterns for optimization
+**Author**: Robert and Geospatial Claude Legion
+
+### Problem Statement
+
+Retry attempts are not fully tracked in structured logging. Cannot answer:
+- How many retries are typical?
+- Which tasks retry most?
+- What's the retry success rate?
+
+### Location
+
+`core/machine.py` lines ~938-949 - retry logic
+
+### Solution
+
+Add retry telemetry to structured logging:
+
+```python
+logger.info(
+    "Task retry scheduled",
+    extra={
+        'retry_attempt': current_retry + 1,
+        'max_retries': max_retries,
+        'error_type': type(e).__name__,
+        'task_type': task_type,
+        'retryable': is_retryable
+    }
+)
+```
+
+### Implementation Steps
+
+1. [ ] Add retry metrics to task retry path
+2. [ ] Add retry outcome tracking (success after N retries)
+3. [ ] Create Application Insights dashboard query
+
+---
+
 ## ✅ IMPLEMENTED: Pre-Flight Resource Validation Architecture (27 NOV 2025)
 
 **Status**: ✅ **COMPLETE** - Implemented in `infrastructure/validators.py`

@@ -1,0 +1,240 @@
+{
+  "deployment_name": "rmhgeoapi_corporate_replication",
+  "source_environment": {
+    "subscription": "rmhazure",
+    "tenant_id": "086aef7e-db12-4161-8a9f-777deb499cfa",
+    "resource_group": "rmhazure_rg",
+    "region": "eastus"
+  },
+  "resources": {
+    "function_app": {
+      "name": "rmhgeoapibeta",
+      "type": "Microsoft.Web/sites",
+      "kind": "functionapp,linux",
+      "properties": {
+        "runtime": "python",
+        "runtime_version": "3.12",
+        "functions_extension_version": "~4",
+        "always_on": false,
+        "http20_enabled": false,
+        "min_tls_version": "1.2",
+        "ftps_state": "FtpsOnly",
+        "managed_identity": {
+          "type": "SystemAssigned",
+          "principal_id": "995badc6-9b03-481f-9544-9f5957dd893d"
+        }
+      },
+      "app_settings": {
+        "FUNCTIONS_WORKER_RUNTIME": "python",
+        "FUNCTIONS_EXTENSION_VERSION": "~4",
+        "ServiceBusConnection__fullyQualifiedNamespace": "<namespace>.servicebus.windows.net",
+        "POSTGIS_HOST": "<postgres-server>.postgres.database.azure.com",
+        "POSTGIS_PORT": "5432",
+        "POSTGIS_USER": "<admin-user>",
+        "POSTGIS_PASSWORD": "<secure-password>",
+        "POSTGIS_DATABASE": "<database-name>",
+        "POSTGIS_SCHEMA": "geo",
+        "APP_SCHEMA": "app",
+        "AZURE_STORAGE_ACCOUNT": "<storage-account-name>",
+        "AZURE_STORAGE_KEY": "<storage-account-key>",
+        "BRONZE_CONTAINER_NAME": "<bronze-container>",
+        "SILVER_CONTAINER_NAME": "<silver-container>",
+        "GOLD_CONTAINER_NAME": "<gold-container>"
+      },
+      "host_json": {
+        "version": "2.0",
+        "functionTimeout": "00:30:00",
+        "extensions": {
+          "serviceBus": {
+            "prefetchCount": 0,
+            "messageHandlerOptions": {
+              "autoComplete": true,
+              "maxConcurrentCalls": 1,
+              "maxAutoLockRenewalDuration": "00:30:00"
+            }
+          },
+          "queues": {
+            "maxPollingInterval": "00:00:02",
+            "visibilityTimeout": "00:00:30",
+            "batchSize": 16,
+            "maxDequeueCount": 1
+          }
+        }
+      }
+    },
+    "storage_account": {
+      "name": "rmhazuregeo",
+      "type": "Microsoft.Storage/storageAccounts",
+      "sku": "Standard_RAGRS",
+      "kind": "StorageV2",
+      "properties": {
+        "enable_https_traffic_only": true,
+        "allow_blob_public_access": true,
+        "min_tls_version": "TLS1_2",
+        "access_tier": "Hot"
+      },
+      "containers": [
+        {"name": "rmhazuregeobronze", "public_access": "None"},
+        {"name": "rmhazuregeosilver", "public_access": "None"},
+        {"name": "rmhazuregeogold", "public_access": "None"},
+        {"name": "rmhazuregeotemp", "public_access": "None"},
+        {"name": "rmhazuregeoinventory", "public_access": "None"},
+        {"name": "rmhazuregeopipelines", "public_access": "None"},
+        {"name": "silver-cogs", "public_access": "None"},
+        {"name": "silver-tiles", "public_access": "None"},
+        {"name": "silver-vectors", "public_access": "None"},
+        {"name": "silver-stac-assets", "public_access": "None"},
+        {"name": "$web", "public_access": "Blob"}
+      ],
+      "static_website": {
+        "enabled": true,
+        "index_document": "index.html",
+        "error_404_document": "404.html"
+      },
+      "cors": {
+        "allowed_origins": ["*"],
+        "allowed_methods": ["GET", "OPTIONS"],
+        "allowed_headers": ["*"],
+        "exposed_headers": ["*"],
+        "max_age_seconds": 3600
+      }
+    },
+    "service_bus": {
+      "name": "rmhazure",
+      "type": "Microsoft.ServiceBus/namespaces",
+      "sku": "Standard",
+      "properties": {
+        "zone_redundant": false
+      },
+      "queues": [
+        {
+          "name": "geospatial-jobs",
+          "properties": {
+            "lock_duration": "PT5M",
+            "max_delivery_count": 3,
+            "max_size_in_megabytes": 1024,
+            "default_message_time_to_live": "P7D",
+            "enable_partitioning": false,
+            "enable_dead_lettering_on_message_expiration": true
+          }
+        },
+        {
+          "name": "geospatial-tasks",
+          "properties": {
+            "lock_duration": "PT5M",
+            "max_delivery_count": 3,
+            "max_size_in_megabytes": 1024,
+            "default_message_time_to_live": "P7D",
+            "enable_partitioning": false,
+            "enable_dead_lettering_on_message_expiration": true
+          }
+        }
+      ]
+    },
+    "postgresql": {
+      "name": "rmhpgflex",
+      "type": "Microsoft.DBforPostgreSQL/flexibleServers",
+      "version": "17",
+      "sku": "Standard_B1ms",
+      "tier": "Burstable",
+      "properties": {
+        "storage_size_gb": 32,
+        "backup_retention_days": 7,
+        "geo_redundant_backup": "Disabled",
+        "high_availability": "Disabled"
+      },
+      "extensions": [
+        "postgis",
+        "postgis_topology",
+        "pgcrypto",
+        "uuid-ossp",
+        "hstore"
+      ],
+      "schemas": [
+        "geo",
+        "app",
+        "pgstac",
+        "platform"
+      ],
+      "firewall_rules": [
+        {
+          "name": "AllowAllAzureServicesAndResourcesWithinAzureIps",
+          "start_ip_address": "0.0.0.0",
+          "end_ip_address": "0.0.0.0"
+        }
+      ]
+    }
+  },
+  "rbac_assignments": [
+    {
+      "principal_id": "<function-app-managed-identity-principal-id>",
+      "role": "Storage Blob Data Contributor",
+      "scope": "/subscriptions/<sub>/resourceGroups/<rg>/providers/Microsoft.Storage/storageAccounts/<storage-account>"
+    },
+    {
+      "principal_id": "<function-app-managed-identity-principal-id>",
+      "role": "Azure Service Bus Data Owner",
+      "scope": "/subscriptions/<sub>/resourceGroups/<rg>/providers/Microsoft.ServiceBus/namespaces/<servicebus-namespace>"
+    }
+  ],
+  "configuration_validation": {
+    "critical_relationships": {
+      "service_bus_lock_duration": "PT5M",
+      "host_json_max_auto_lock_renewal": "00:30:00",
+      "host_json_function_timeout": "00:30:00",
+      "config_py_function_timeout_minutes": 30
+    },
+    "validation_rule": "lockDuration <= maxAutoLockRenewalDuration = functionTimeout = function_timeout_minutes",
+    "retry_configuration": {
+      "service_bus_max_delivery_count": 3,
+      "config_py_task_max_retries": 3,
+      "note": "Service Bus handles message redelivery, CoreMachine handles task retries"
+    }
+  },
+  "estimated_costs": {
+    "development": {
+      "function_app_consumption": "$5-20/month",
+      "storage_ragrs": "$30-50/month",
+      "service_bus_standard": "$10/month",
+      "postgresql_b1ms": "$30-40/month",
+      "total": "$75-120/month"
+    },
+    "production": {
+      "function_app_premium_ep1": "$150-200/month",
+      "storage_ragrs": "$100-200/month",
+      "service_bus_standard": "$10-20/month",
+      "postgresql_general_purpose": "$300-500/month",
+      "total": "$560-920/month"
+    }
+  },
+  "deployment_checklist": [
+    "Create resource group",
+    "Create Function App with Python 3.12 runtime",
+    "Enable managed identity on Function App",
+    "Create Storage Account (Standard_RAGRS)",
+    "Create storage containers (bronze, silver, gold, etc.)",
+    "Enable static website on Storage Account",
+    "Create Service Bus namespace (Standard tier)",
+    "Create Service Bus queues (geospatial-jobs, geospatial-tasks)",
+    "Configure queue settings (lock duration PT5M, max delivery 3)",
+    "Create PostgreSQL Flexible Server (version 17)",
+    "Configure PostgreSQL firewall (allow 0.0.0.0 for Azure services)",
+    "Install PostgreSQL extensions (postgis, pgcrypto, etc.)",
+    "Create PostgreSQL schemas (geo, app, pgstac, platform)",
+    "Assign RBAC roles to Function App managed identity",
+    "Configure Function App application settings",
+    "Deploy code via Azure Functions Core Tools",
+    "Deploy database schema via /api/db/schema/redeploy",
+    "Test health endpoint",
+    "Submit test job",
+    "Verify job completion"
+  ],
+  "documentation_references": [
+    "CORPORATE_AZURE_CONFIG_REQUEST.md - Full deployment guide",
+    "AZURE_CONFIG_QUICK_REFERENCE.md - Quick reference commands",
+    "AZURE_ARCHITECTURE_DIAGRAM.md - Visual architecture reference",
+    "SERVICE_BUS_HARMONIZATION.md - Configuration harmonization details",
+    "CLAUDE_CONTEXT.md - System overview",
+    "ARCHITECTURE_REFERENCE.md - Technical specifications"
+  ]
+}

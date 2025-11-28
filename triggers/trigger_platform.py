@@ -92,7 +92,7 @@ except Exception as e:
 # HTTP HANDLER
 # ============================================================================
 
-async def platform_request_submit(req: func.HttpRequest) -> func.HttpResponse:
+def platform_request_submit(req: func.HttpRequest) -> func.HttpResponse:
     """
     HTTP trigger for Platform request submission.
 
@@ -166,7 +166,7 @@ async def platform_request_submit(req: func.HttpRequest) -> func.HttpResponse:
         logger.info(f"  Translated to job_type: {job_type}")
 
         # Create CoreMachine job
-        job_id = await _create_and_submit_job(job_type, job_params, request_id)
+        job_id = _create_and_submit_job(job_type, job_params, request_id)
 
         if not job_id:
             raise RuntimeError("Failed to create CoreMachine job")
@@ -432,7 +432,7 @@ def _translate_to_coremachine(
 # JOB CREATION & SUBMISSION
 # ============================================================================
 
-async def _create_and_submit_job(
+def _create_and_submit_job(
     job_type: str,
     parameters: Dict[str, Any],
     platform_request_id: str

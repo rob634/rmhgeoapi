@@ -133,10 +133,9 @@ curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/job
 
 ## Available Jobs
 
-Current job types (as of 27 NOV 2025):
+Current job types (as of 28 NOV 2025):
 - `hello_world` - Simple test job
 - `process_vector` - **RECOMMENDED** Idempotent vector data ingestion to PostGIS (CSV, GeoJSON, Shapefile, GeoPackage, KML, KMZ)
-- `ingest_vector` - Legacy vector data ingestion (use `process_vector` instead)
 - `process_raster` - Single raster to COG conversion
 - `process_raster_collection` - Multi-raster collection processing
 - `process_large_raster` - Large raster tiling and COG conversion
@@ -214,25 +213,19 @@ curl -X POST \
 
 ---
 
-## 2. Process Vector Job (RECOMMENDED)
+## 2. Process Vector Job
 
 **Purpose**: Load vector data into PostGIS with idempotent-by-design workflow
 
 **Job Type**: `process_vector`
 
-**Status**: **RECOMMENDED** - Replaces `ingest_vector` with built-in idempotency (27 NOV 2025)
+**Status**: **PRODUCTION READY** - Idempotent vector ingestion (28 NOV 2025)
 
----
-
-### Why Use process_vector Instead of ingest_vector?
-
-| Feature | `process_vector` | `ingest_vector` |
-|---------|------------------|-----------------|
-| **Idempotency** | Built-in (DELETE+INSERT) | Optional, error-prone |
-| **Retry Safety** | Safe - no duplicate rows | Can create duplicates |
-| **Codebase** | 77% less code (JobBaseMixin) | Legacy boilerplate |
-| **Chunk Tracking** | `etl_batch_id` column | None |
-| **Recommended** | **Yes** | No (use process_vector) |
+**Key Features**:
+- Built-in idempotency via DELETE+INSERT pattern with `etl_batch_id` tracking
+- Retry-safe: no duplicate rows on task retries
+- Pre-flight validation: fails fast if source blob doesn't exist (HTTP 400)
+- Supports CSV, GeoJSON, Shapefile, GeoPackage, KML, KMZ
 
 ---
 
@@ -627,321 +620,6 @@ curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/fea
 ```
 https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/vector/viewer?collection={table_name}
 ```
-
----
-
-## 3. Ingest Vector Job (LEGACY)
-
-**Purpose**: Load vector data (GeoJSON, Shapefile, GeoPackage) into PostGIS
-
-**Job Type**: `ingest_vector`
-
-**Status**: **LEGACY** - Use `process_vector` instead for new projects (has built-in idempotency)
-
----
-
-### CoreMachine API (Direct)
-
-Direct submission when you know the exact table name and parameters.
-
-#### Parameters
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `blob_name` | string | **Yes** | - | Name of file in blob storage (e.g., "data.geojson") |
-| `file_extension` | string | **Yes** | - | File type: "geojson", "shp", "gpkg", "gdb" |
-| `table_name` | string | **Yes** | - | Target PostGIS table name (will be created) |
-| `container_name` | string | No | "rmhazuregeobronze" | Source blob container |
-| `schema` | string | No | "geo" | PostgreSQL schema for table |
-| `chunk_size` | integer | No | Auto | Rows per chunk (auto-calculated if not specified) |
-| `converter_params` | dict | No | {} | GDAL conversion parameters |
-| `indexes` | dict | No | See below | Index configuration |
-| `geometry_params` | dict | No | {} | Geometry processing options |
-| `render_params` | dict | No | {} | Future: rendering optimization |
-
-#### Indexes Configuration
-
-Default indexes:
-```json
-{
-  "spatial": true,         // GIST index on geometry column
-  "attributes": [],        // B-tree indexes on attribute columns
-  "temporal": []          // DESC B-tree indexes on temporal columns
-}
-```
-
-Example with custom indexes:
-```json
-{
-  "spatial": true,
-  "attributes": ["country_code", "admin1_name"],
-  "temporal": ["event_date"]
-}
-```
-
-#### CoreMachine Examples
-
-**Basic GeoJSON ingestion**:
-```bash
-curl -X POST \
-  https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/jobs/submit/ingest_vector \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "blob_name": "8.geojson",
-    "file_extension": "geojson",
-    "table_name": "test_vector_data"
-  }'
-```
-
-**With custom container and schema**:
-```bash
-curl -X POST \
-  https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/jobs/submit/ingest_vector \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "blob_name": "boundaries.geojson",
-    "file_extension": "geojson",
-    "table_name": "admin_boundaries",
-    "container_name": "rmhazuregeobronze",
-    "schema": "geo"
-  }'
-```
-
-**With specific chunk size and indexes**:
-```bash
-curl -X POST \
-  https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/jobs/submit/ingest_vector \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "blob_name": "acled_data.csv",
-    "file_extension": "csv",
-    "table_name": "acled_events",
-    "chunk_size": 5000,
-    "indexes": {
-      "spatial": true,
-      "attributes": ["country", "event_type"],
-      "temporal": ["event_date"]
-    }
-  }'
-```
-
-**Shapefile ingestion (zipped)** - Real example from 21 NOV 2025:
-```bash
-curl -X POST \
-  https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/jobs/submit/ingest_vector \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "blob_name": "kba_shp.zip",
-    "file_extension": "shp",
-    "table_name": "kba_shp_01"
-  }'
-```
-
-**Results** (Key Biodiversity Areas - global dataset):
-| Metric | Value |
-|--------|-------|
-| Status | `completed` |
-| Total Tasks | 99 (1 prepare + 97 uploads + 1 finalize) |
-| Chunks Processed | 97 (100% success) |
-| Features Uploaded | 16,214 |
-| Duration | ~4 min 46 sec |
-| Bounding Box | Global (-180, -79 to 180, 81) |
-
-**Output URLs**:
-- Vector Viewer: https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/vector/viewer?collection=kba_shp_01
-- OGC Features: https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/features/collections/kba_shp_01
-
-**Shapefile ingestion (unzipped)** - upload .shp, .shx, .dbf, .prj to blob storage first:
-```bash
-curl -X POST \
-  https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/jobs/submit/ingest_vector \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "blob_name": "countries.shp",
-    "file_extension": "shp",
-    "table_name": "world_countries"
-  }'
-```
-
-**GeoPackage ingestion**:
-```bash
-curl -X POST \
-  https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/jobs/submit/ingest_vector \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "blob_name": "data.gpkg",
-    "file_extension": "gpkg",
-    "table_name": "gpkg_features"
-  }'
-```
-
-### Workflow Stages
-
-**Stage 1**: Prepare Chunks (single task)
-- Download file from blob storage
-- Validate geometry
-- Chunk data based on chunk_size
-- Pickle chunks to temp blob storage
-- Duration: 10-60 seconds (depends on file size)
-
-**Stage 2**: Upload Chunks (parallel tasks)
-- N parallel tasks (one per chunk)
-- Upload each chunk to PostGIS
-- Create spatial indexes
-- Duration: 5-120 seconds (depends on chunk count and size)
-
-**Stage 3**: Finalization
-- Aggregate results
-- Generate OGC Features URL
-- Generate Vector Viewer URL
-- Update job status
-
-### Response Time
-
-| File Size | Features | Typical Time | Chunk Count |
-|-----------|----------|--------------|-------------|
-| < 10 MB | < 10K | 15-30 sec | 1-10 |
-| 10-100 MB | 10K-100K | 30-90 sec | 10-100 |
-| 100MB-1GB | 100K-1M | 90-300 sec | 100-1000 |
-| > 1 GB | > 1M | 300-900 sec | 1000+ |
-
-### Result Data
-
-Successful completion includes:
-```json
-{
-  "status": "completed",
-  "job_type": "ingest_vector",
-  "table_name": "config_test_vector",
-  "schema": "geo",
-  "total_features": 5436,
-  "chunks_processed": 6,
-  "ogc_features_url": "https://.../api/features/collections/config_test_vector",
-  "vector_viewer_url": "https://.../api/vector/viewer?collection=config_test_vector",
-  "indexes_created": {
-    "spatial": true,
-    "attributes": ["country_code"],
-    "temporal": []
-  }
-}
-```
-
-### Access Ingested Data
-
-**OGC Features API** (standards-compliant GeoJSON):
-```bash
-# Collection metadata
-curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/features/collections/{table_name}
-
-# Query features (with pagination)
-curl "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/features/collections/{table_name}/items?limit=100&offset=0"
-
-# Spatial query (bounding box)
-curl "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/features/collections/{table_name}/items?bbox=-70.7,-56.3,-70.6,-56.2"
-
-# Single feature by ID
-curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/features/collections/{table_name}/items/1
-```
-
-**Vector Viewer** (interactive Leaflet map):
-```
-https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/vector/viewer?collection={table_name}
-```
-
----
-
-### Platform API (DDH Integration)
-
-<!-- TODO: Add Platform API examples after testing (22 NOV 2025)
-
-     Platform API uses DDH identifiers instead of CoreMachine parameters:
-     - dataset_id, resource_id, version_id → auto-generated table names
-     - Endpoint: POST /api/platform/request
-     - Status: GET /api/platform/status/{request_id}
-
-     Example structure (to be tested and verified):
-     {
-       "dataset_id": "admin-boundaries",
-       "resource_id": "county-level",
-       "version_id": "v1-0",
-       "data_type": "vector",
-       "file_name": "boundaries.geojson",
-       "container_name": "bronze-vectors",
-       "service_name": "DDH Data Import",
-       "description": "County-level administrative boundaries",
-       "tags": ["boundaries", "admin"],
-       "access_level": "public"
-     }
-
-     Output:
-     - Table name: admin_boundaries_county_level_v1_0 (auto-generated)
-     - STAC item ID: admin-boundaries_county-level_v1-0 (auto-generated)
-     - OGC Features URL: /api/features/collections/admin_boundaries_county_level_v1_0
--->
-
----
-
-### Supported File Formats
-
-| Format | Extension | Notes |
-|--------|-----------|-------|
-| GeoJSON | `.geojson`, `.json` | Most common, best performance |
-| Shapefile | `.shp` | Upload all components (.shp, .shx, .dbf, .prj) |
-| GeoPackage | `.gpkg` | SQLite-based, single file |
-| File Geodatabase | `.gdb` | Requires .gdb directory structure |
-| CSV | `.csv` | Must have X/Y or lat/lon columns |
-| KML/KMZ | `.kml`, `.kmz` | Google Earth format |
-| GML | `.gml` | OGC Geography Markup Language |
-
-### Common Issues
-
-**1. Missing blob_name parameter**:
-```json
-{
-  "error": "Bad request",
-  "message": "blob_name is required"
-}
-```
-**Solution**: Ensure `blob_name` is provided
-
-**2. File not found in blob storage**:
-```json
-{
-  "status": "failed",
-  "error_details": "Blob not found: 8.geojson"
-}
-```
-**Solution**: Verify file exists in container using Azure Portal or CLI
-
-**3. Invalid geometry**:
-```json
-{
-  "status": "failed",
-  "error_details": "Invalid geometry in feature 123"
-}
-```
-**Solution**: Clean geometry using QGIS "Fix geometries" or similar
-
-**4. Completion with errors** (tasks succeeded but finalization failed):
-```json
-{
-  "status": "completed_with_errors",
-  "message": "Job completed but finalization failed: ...",
-  "completed_tasks": 6,
-  "failed_tasks": 0
-}
-```
-**Solution**: Data was successfully ingested, check task results manually
-
-### Use Cases
-- Upload CSV with lat/lon to PostGIS
-- Convert Shapefile to PostGIS with indexes
-- Import large GeoJSON files (chunked parallel upload)
-- Load GeoPackage layers
-- Ingest File Geodatabase features
-- Create spatial indexes automatically
-- Access via OGC Features API
-- Visualize via interactive web map
 
 ---
 
@@ -1524,7 +1202,7 @@ curl "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/db
 
 **Filter Jobs by Type**:
 ```bash
-curl "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/dbadmin/jobs?job_type=ingest_vector&limit=20"
+curl "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/dbadmin/jobs?job_type=process_vector&limit=20"
 ```
 
 ---
@@ -1890,13 +1568,12 @@ curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/job
 **5. Vector Ingestion Test**:
 ```bash
 curl -X POST \
-  https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/jobs/submit/ingest_vector \
+  https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/jobs/submit/process_vector \
   -H 'Content-Type: application/json' \
   -d '{
     "blob_name": "8.geojson",
     "file_extension": "geojson",
-    "table_name": "deployment_test_vector",
-    "chunk_size": 1000
+    "table_name": "deployment_test_vector"
   }'
 ```
 
@@ -1927,7 +1604,7 @@ curl -X POST \
 
 ---
 
-**Last Updated**: 27 NOV 2025
+**Last Updated**: 28 NOV 2025
 **Function App**: rmhazuregeoapi (B3 Basic tier)
 **Region**: East US
 **Python Version**: 3.12

@@ -438,16 +438,26 @@ def _create_and_submit_job(
     """
     Create CoreMachine job and submit to Service Bus queue.
 
+    Uses the job class's validation method to:
+    1. Validate parameters against schema
+    2. Run pre-flight resource validators (e.g., blob_exists)
+    3. Generate deterministic job ID
+    4. Create job record and queue message
+
     Args:
-        job_type: CoreMachine job type (e.g., 'ingest_vector', 'process_raster')
+        job_type: CoreMachine job type (e.g., 'process_vector', 'process_raster_v2')
         parameters: Job parameters translated from DDH request
         platform_request_id: Platform request ID for tracking
 
     Returns:
         job_id if successful, None if failed
+
+    Raises:
+        ValueError: If pre-flight validation fails (e.g., blob doesn't exist)
     """
     import hashlib
     import uuid
+    from jobs import ALL_JOBS
 
     try:
         # Add platform tracking to parameters
@@ -456,9 +466,23 @@ def _create_and_submit_job(
             '_platform_request_id': platform_request_id
         }
 
+        # ====================================================================
+        # FIX (29 NOV 2025): Run job class validation BEFORE creating job
+        # This ensures pre-flight resource validators run (e.g., blob_exists)
+        # Previously Platform bypassed validation, allowing jobs with missing files
+        # ====================================================================
+        job_class = ALL_JOBS.get(job_type)
+        if not job_class:
+            raise ValueError(f"Unknown job type: {job_type}")
+
+        # Run validation (includes resource validators like blob_exists)
+        # This will raise ValueError if validation fails
+        validated_params = job_class.validate_job_parameters(job_params)
+        logger.info(f"✅ Pre-flight validation passed for {job_type}")
+
         # Generate deterministic job ID
         # Remove platform metadata for ID generation (so same CoreMachine params = same job)
-        clean_params = {k: v for k, v in job_params.items() if not k.startswith('_')}
+        clean_params = {k: v for k, v in validated_params.items() if not k.startswith('_')}
         canonical = f"{job_type}:{json.dumps(clean_params, sort_keys=True)}"
         job_id = hashlib.sha256(canonical.encode()).hexdigest()
 
@@ -467,7 +491,7 @@ def _create_and_submit_job(
             job_id=job_id,
             job_type=job_type,
             status=JobStatus.QUEUED,
-            parameters=job_params,
+            parameters=validated_params,
             metadata={
                 'platform_request': platform_request_id,
                 'created_by': 'platform_trigger'
@@ -483,7 +507,7 @@ def _create_and_submit_job(
         queue_message = JobQueueMessage(
             job_id=job_id,
             job_type=job_type,
-            parameters=job_params,
+            parameters=validated_params,
             stage=1,
             correlation_id=str(uuid.uuid4())[:8]
         )
@@ -495,6 +519,11 @@ def _create_and_submit_job(
 
         logger.info(f"Submitted job {job_id[:16]} to queue (message_id: {message_id})")
         return job_id
+
+    except ValueError as e:
+        # Re-raise validation errors - caller will handle as 400 Bad Request
+        logger.warning(f"Pre-flight validation failed: {e}")
+        raise
 
     except Exception as e:
         logger.error(f"Failed to create/submit job: {e}", exc_info=True)

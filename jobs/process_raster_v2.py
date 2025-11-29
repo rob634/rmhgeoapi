@@ -314,6 +314,25 @@ class ProcessRasterV2Job(JobBaseMixin, JobBase):
                         blob_name=cog_summary['cog_blob']
                     )
                     share_url = titiler_urls.get("viewer_url")
+
+                    # Add DEM-specific visualization URLs with terrain colormap
+                    detected_type = validation_summary.get("raster_type")
+                    if detected_type == "dem" and titiler_urls.get("viewer_url"):
+                        base_url = titiler_urls["viewer_url"]
+                        # Add terrain visualization URLs (rescale will be auto from statistics endpoint)
+                        titiler_urls["dem_terrain_viewer"] = f"{base_url}&colormap_name=terrain"
+                        titiler_urls["dem_viridis_viewer"] = f"{base_url}&colormap_name=viridis"
+                        titiler_urls["dem_gist_earth_viewer"] = f"{base_url}&colormap_name=gist_earth"
+
+                        # Set share_url to terrain colormap for DEMs
+                        share_url = titiler_urls["dem_terrain_viewer"]
+
+                        # Add preview URLs with colormaps
+                        if titiler_urls.get("preview_url"):
+                            preview_base = titiler_urls["preview_url"]
+                            titiler_urls["dem_terrain_preview"] = f"{preview_base}&colormap_name=terrain"
+                            titiler_urls["dem_hillshade_note"] = "Use TiTiler /cog/DEM endpoint for hillshade"
+
                 except Exception:
                     pass
 

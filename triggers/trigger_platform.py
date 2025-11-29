@@ -36,8 +36,8 @@ SIMPLIFIED ARCHITECTURE:
     NO callbacks - status delegated to CoreMachine.
 
 Supported Workflows (CREATE operation):
-    - VECTOR: ingest_vector (3-stage: prepare → upload → finalize)
-    - RASTER (single): process_raster (3-stage: validate → COG → STAC)
+    - VECTOR: process_vector (3-stage: prepare → upload → finalize) [28 NOV 2025]
+    - RASTER (single): process_raster_v2 (3-stage: validate → COG → STAC) [28 NOV 2025]
     - RASTER (collection): process_raster_collection (4-stage: validate → COGs → MosaicJSON → STAC)
 """
 
@@ -332,8 +332,9 @@ def _translate_to_coremachine(
         }
 
     # ========================================================================
-    # RASTER CREATE → process_raster or process_raster_collection
+    # RASTER CREATE → process_raster_v2 or process_raster_collection
     # ========================================================================
+    # Updated 28 NOV 2025: Single rasters now use process_raster_v2 (mixin pattern)
     elif data_type == DataType.RASTER:
         # Generate output paths from DDH IDs
         output_folder = platform_cfg.generate_raster_output_folder(
@@ -386,13 +387,13 @@ def _translate_to_coremachine(
                 'nodata_value': opts.get('nodata_value')
             }
         else:
-            # Single raster → process_raster
+            # Single raster → process_raster_v2 (mixin pattern, 28 NOV 2025)
             file_name = request.file_name
             if isinstance(file_name, list):
                 file_name = file_name[0]
 
-            return 'process_raster', {
-                # File location
+            return 'process_raster_v2', {
+                # File location (required)
                 'blob_name': file_name,
                 'container_name': request.container_name,
 
@@ -402,12 +403,9 @@ def _translate_to_coremachine(
                 # STAC metadata
                 'collection_id': collection_id,
                 'stac_item_id': stac_item_id,
-                'service_name': request.service_name,
-                'description': request.description,
-                'tags': request.tags,
                 'access_level': request.access_level,
 
-                # DDH identifiers
+                # DDH identifiers (Platform passthrough)
                 'dataset_id': request.dataset_id,
                 'resource_id': request.resource_id,
                 'version_id': request.version_id,
@@ -415,7 +413,7 @@ def _translate_to_coremachine(
                 # Processing options
                 'output_tier': opts.get('output_tier', 'analysis'),
                 'target_crs': opts.get('crs'),
-                'nodata_value': opts.get('nodata_value')
+                'raster_type': opts.get('raster_type', 'auto')
             }
 
     # ========================================================================

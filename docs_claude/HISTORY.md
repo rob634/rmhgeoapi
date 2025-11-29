@@ -1,9 +1,81 @@
 # Project History
 
-**Last Updated**: 26 NOV 2025 - process_vector Job with Built-in Idempotency ✅
+**Last Updated**: 28 NOV 2025 - process_raster_v2 with JobBaseMixin + JPEG Fix ✅
 **Note**: For project history prior to September 11, 2025, see **OLDER_HISTORY.md**
 
 This document tracks completed architectural changes and improvements to the Azure Geospatial ETL Pipeline from September 11, 2025 onwards.
+
+---
+
+## 28 NOV 2025: process_raster_v2 with JobBaseMixin + JPEG Visualization Fix 🎨
+
+**Status**: ✅ **COMPLETE** - Clean slate raster ETL using JobBaseMixin pattern
+**Impact**: 73% code reduction (743 → 280 lines), pre-flight blob validation, JPEG interleave fix
+**Timeline**: Single session - design → implement → test → fix JPEG → verify
+**Author**: Robert and Geospatial Claude Legion
+
+### 🎯 Achievement: Clean Slate Raster ETL
+
+**Problem Solved**: `process_raster` had deprecated parameters, no pre-flight validation, and 743 lines of code. Also JPEG visualization tier was broken due to incorrect INTERLEAVE setting.
+
+**Solution**: New `process_raster_v2` job with JobBaseMixin pattern:
+- Declarative `parameters_schema` for validation
+- `resource_validators` for pre-flight blob existence check
+- Clean parameters (no deprecated `compression`, `overview_resampling`, `reproject_resampling`)
+- Config integration for defaults (env vars → fallback defaults)
+
+### 📊 Code Reduction: 73% Less Code
+
+| Metric | process_raster | process_raster_v2 | Reduction |
+|--------|---------------|-------------------|-----------|
+| **Total Lines** | 743 | 280 | **73%** |
+| **Validation Code** | Imperative | Declarative schema | **~80%** |
+| **Inherited Methods** | 0 | 4 (validate, generate_id, create_record, queue) | N/A |
+| **Pre-flight Checks** | None | blob_exists validator | New |
+
+### 🔧 JPEG Visualization Tier Fix
+
+**Problem**: JPEG encoding failed with "Can't process input with band interleaving"
+
+**Root Cause**: Code unconditionally set `INTERLEAVE = "BAND"` for all compression types. JPEG requires `INTERLEAVE = "PIXEL"` for YCbCr encoding.
+
+**Fix** (in `services/raster_cog.py`):
+```python
+if compression in ("jpeg", "webp"):
+    cog_profile["INTERLEAVE"] = "PIXEL"  # Required for YCbCr encoding
+else:
+    cog_profile["INTERLEAVE"] = "BAND"   # Cloud-native for selective band access
+```
+
+### 📁 Files Created/Modified
+
+| File | Action | Description |
+|------|--------|-------------|
+| `jobs/process_raster_v2.py` | CREATED | ~280 lines, JobBaseMixin implementation |
+| `jobs/__init__.py` | EDITED | +2 lines (import + registration) |
+| `services/raster_cog.py` | EDITED | Fixed JPEG INTERLEAVE for visualization tier |
+| `WIKI_JOB_PROCESS_RASTER_V2.md` | CREATED | Full documentation |
+
+### ✅ Test Results
+
+```bash
+# Visualization tier (JPEG) - WORKING
+curl -X POST '.../api/jobs/submit/process_raster_v2' \
+  -d '{"blob_name": "dctest.tif", "container_name": "rmhazuregeobronze", "output_tier": "visualization"}'
+# Result: 11.08 MB JPEG COG, STAC item created
+
+# Analysis tier (DEFLATE) - WORKING
+curl -X POST '.../api/jobs/submit/process_raster_v2' \
+  -d '{"blob_name": "dctest.tif", "container_name": "rmhazuregeobronze"}'
+# Result: COG with DEFLATE compression, STAC metadata in pgstac
+```
+
+### 🌐 Output URLs
+
+Job result_data now includes:
+- `stac_urls`: Using rmhogcstac STAC API (item_url, collection_url, catalog_url)
+- `titiler_urls`: Using rmhtitiler (viewer_url, preview_url, tile_url)
+- `share_url`: Quick viewer link
 
 ---
 

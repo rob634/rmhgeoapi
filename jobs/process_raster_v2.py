@@ -110,13 +110,17 @@ class ProcessRasterV2Job(JobBaseMixin, JobBase):
         '_skip_validation': {'type': 'bool', 'default': False},
     }
 
-    # Pre-flight resource validation
+    # Pre-flight resource validation (29 NOV 2025: Added size check)
+    # Uses blob_exists_with_size for efficient single API call
+    # Size limits from RASTER_MAX_FILE_SIZE_MB env var (default: 20GB)
     resource_validators = [
         {
-            'type': 'blob_exists',
+            'type': 'blob_exists_with_size',
             'container_param': 'container_name',
             'blob_param': 'blob_name',
-            'error': 'Source raster file does not exist. Verify blob_name and container_name.'
+            'max_size_env': 'RASTER_MAX_FILE_SIZE_MB',  # From config/raster_config.py
+            'error_not_found': 'Source raster file does not exist. Verify blob_name and container_name.',
+            'error_too_large': 'Raster file exceeds maximum size limit. Use process_raster_collection for large files.'
         }
     ]
 
@@ -194,8 +198,9 @@ class ProcessRasterV2Job(JobBaseMixin, JobBase):
                     # Config-controlled (not user-exposed in v2)
                     'overview_resampling': config.raster.overview_resampling,
                     'reproject_resampling': config.raster.reproject_resampling,
-                    # in_memory: job override or config default
-                    'in_memory': job_params.get('in_memory') if job_params.get('in_memory') is not None else config.raster.cog_in_memory,
+                    # in_memory: Automatic based on file size (29 NOV 2025)
+                    # Priority: 1) explicit job param, 2) size-based auto, 3) config default
+                    'in_memory': ProcessRasterV2Job._resolve_in_memory(job_params, config),
                 }
             }]
 
@@ -207,7 +212,8 @@ class ProcessRasterV2Job(JobBaseMixin, JobBase):
 
             cog_result = previous_results[0].get('result', {})
             cog_blob = cog_result.get('output_blob') or cog_result.get('cog_blob')
-            cog_container = cog_result.get('cog_container') or config.silver_container_name
+            # Modern pattern (30 NOV 2025): config.storage.silver.cogs
+            cog_container = cog_result.get('cog_container') or config.storage.silver.cogs
 
             if not cog_blob:
                 raise ValueError("Stage 2 missing COG blob path")
@@ -353,3 +359,40 @@ class ProcessRasterV2Job(JobBaseMixin, JobBase):
                 "failed": sum(1 for t in task_results if t.status == TaskStatus.FAILED)
             }
         }
+
+    @staticmethod
+    def _resolve_in_memory(job_params: Dict[str, Any], config) -> bool:
+        """
+        Resolve in_memory setting based on file size and config.
+
+        Priority:
+        1. Explicit job parameter (user override)
+        2. Size-based automatic selection (if blob size available from pre-flight)
+        3. Config default (raster.cog_in_memory)
+
+        Size-based logic (29 NOV 2025):
+        - Files <= in_memory_threshold_mb: Use in-memory (faster for small files)
+        - Files > in_memory_threshold_mb: Use disk-based (safer for large files)
+
+        The blob size is captured during pre-flight validation and stored
+        in _blob_size_mb by the blob_exists_with_size validator.
+        """
+        # Priority 1: Explicit job parameter
+        if job_params.get('in_memory') is not None:
+            return job_params['in_memory']
+
+        # Priority 2: Size-based automatic selection
+        blob_size_mb = job_params.get('_blob_size_mb')
+        if blob_size_mb is not None:
+            threshold = config.raster.in_memory_threshold_mb
+            use_in_memory = blob_size_mb <= threshold
+            # Log the decision for debugging
+            from util_logger import LoggerFactory, ComponentType
+            logger = LoggerFactory.create_logger(ComponentType.SERVICE, "process_raster_v2")
+            logger.info(
+                f"📏 Auto in_memory={use_in_memory} (size={blob_size_mb:.1f}MB, threshold={threshold}MB)"
+            )
+            return use_in_memory
+
+        # Priority 3: Config default
+        return config.raster.cog_in_memory

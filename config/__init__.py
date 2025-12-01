@@ -52,6 +52,21 @@ Created: 20 NOV 2025 as part of config.py god object refactoring
 
 from typing import Optional
 
+# Export defaults module (single source of truth for all default values)
+from .defaults import (
+    AzureDefaults,
+    DatabaseDefaults,
+    StorageDefaults,
+    QueueDefaults,
+    RasterDefaults,
+    VectorDefaults,
+    AnalyticsDefaults,
+    H3Defaults,
+    PlatformDefaults,
+    AppDefaults,
+    KeyVaultDefaults,
+)
+
 # Export domain configs
 from .storage_config import (
     CogTier,
@@ -63,7 +78,7 @@ from .storage_config import (
     StorageConfig,
     determine_applicable_tiers
 )
-from .database_config import DatabaseConfig, get_postgres_connection_string
+from .database_config import DatabaseConfig, BusinessDatabaseConfig, get_postgres_connection_string
 from .raster_config import RasterConfig
 from .vector_config import VectorConfig
 from .queue_config import QueueConfig, QueueNames
@@ -119,6 +134,8 @@ def debug_config() -> dict:
 
             # Database
             'database': config.database.debug_dict(),
+            'business_database': config.business_database.debug_dict() if config.business_database else None,
+            'business_database_configured': config.is_business_database_configured(),
 
             # Raster
             'raster': {
@@ -165,6 +182,19 @@ def debug_config() -> dict:
 # ============================================================================
 
 __all__ = [
+    # Defaults (single source of truth)
+    'AzureDefaults',
+    'DatabaseDefaults',
+    'StorageDefaults',
+    'QueueDefaults',
+    'RasterDefaults',
+    'VectorDefaults',
+    'AnalyticsDefaults',
+    'H3Defaults',
+    'PlatformDefaults',
+    'AppDefaults',
+    'KeyVaultDefaults',
+
     # Main config
     'AppConfig',
     'get_config',
@@ -182,6 +212,7 @@ __all__ = [
 
     # Database
     'DatabaseConfig',
+    'BusinessDatabaseConfig',
     'get_postgres_connection_string',
 
     # Raster

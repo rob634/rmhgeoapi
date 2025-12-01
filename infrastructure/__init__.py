@@ -118,6 +118,9 @@ if TYPE_CHECKING:
         run_validators as _run_validators,
         ValidatorResult as _ValidatorResult,
     )
+    # Azure Data Factory (29 NOV 2025 - ADF pipeline orchestration)
+    from .data_factory import AzureDataFactoryRepository as _AzureDataFactoryRepository
+    from .interface_repository import IDataFactoryRepository as _IDataFactoryRepository
 
 
 def __getattr__(name: str):
@@ -196,6 +199,14 @@ def __getattr__(name: str):
     elif name == "IBlobRepository":
         from .interface_repository import IBlobRepository
         return IBlobRepository
+    elif name == "IDataFactoryRepository":
+        from .interface_repository import IDataFactoryRepository
+        return IDataFactoryRepository
+
+    # Azure Data Factory (29 NOV 2025 - ADF pipeline orchestration)
+    elif name == "AzureDataFactoryRepository":
+        from .data_factory import AzureDataFactoryRepository
+        return AzureDataFactoryRepository
 
     # Helper function for getting default repositories
     elif name == "get_default_repositories":
@@ -227,5 +238,7 @@ __all__ = [
     "IJobRepository",
     "ITaskRepository",
     "IBlobRepository",
+    "IDataFactoryRepository",
+    "AzureDataFactoryRepository",  # Added 29 NOV 2025 - ADF pipeline orchestration
     "get_default_repositories",
 ]

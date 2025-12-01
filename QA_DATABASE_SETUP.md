@@ -1,91 +1,78 @@
-# QA Database Setup - Managed Identity Configuration
+# App Database Setup - Managed Identity for Infrastructure-as-Code
 
-**Date**: 26 NOV 2025
-**Environment**: QA (ddhgeodb)
-**Managed Identity**: migeoetldbadminqa
+**Date**: 30 NOV 2025
+**Purpose**: Create PostgreSQL user for Azure User-Assigned Managed Identity with full IaC permissions
 
 ---
 
 ## Overview
 
-This document provides instructions for setting up the PostgreSQL user and Azure AD integration for the QA environment managed identity.
+This document covers setup for the **App Database** only - the database containing `app`, `pgstac`, `geo`, and `h3` schemas that can be wiped and rebuilt via Infrastructure-as-Code.
+
+**Managed Identity**: `rmhpgflexadmin` (already exists in Azure)
 
 ---
 
-## Step 1: Create PostgreSQL User (SQL - DBA Action)
+## Step 1: Create PostgreSQL User (SQL)
 
-Run as a user with CREATEROLE privilege (e.g., `sde` or Azure AD admin):
+Connect as database admin and run:
 
 ```sql
 -- ============================================================
 -- Create PostgreSQL user for Azure Managed Identity
--- Database: ddhgeodb
--- User: migeoetldbadminqa (must match Azure Managed Identity name exactly)
+-- User: rmhpgflexadmin (must match Azure Managed Identity name exactly)
 -- ============================================================
 
--- 1. Create the user (name MUST match managed identity name exactly)
-CREATE USER migeoetldbadminqa WITH LOGIN;
+-- 1. Create the user
+CREATE USER rmhpgflexadmin WITH LOGIN;
 
--- 2. Grant permission to create schemas in this database
-GRANT CREATE ON DATABASE ddhgeodb TO migeoetldbadminqa;
+-- 2. Grant CREATE ON DATABASE (required for CREATE/DROP SCHEMA)
+GRANT CREATE ON DATABASE <DATABASE_NAME> TO rmhpgflexadmin;
 
--- 3. Grant CREATEROLE (needed to create pgstac_admin, pgstac_ingest, pgstac_read roles)
-ALTER ROLE migeoetldbadminqa CREATEROLE;
+-- 3. Grant CREATEROLE (required for pypgstac to create pgstac_admin/ingest/read roles)
+ALTER ROLE rmhpgflexadmin CREATEROLE;
 
--- 4. Grant usage on public schema (for PostGIS functions)
-GRANT USAGE ON SCHEMA public TO migeoetldbadminqa;
-GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO migeoetldbadminqa;
+-- 4. Grant PostGIS access
+GRANT USAGE ON SCHEMA public TO rmhpgflexadmin;
+GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO rmhpgflexadmin;
 ```
 
 ---
 
-## Step 2: Register Azure AD Principal (Azure CLI - After Step 1)
+## Step 2: Register Azure AD Principal (Azure CLI)
 
-**IMPORTANT**: Step 1 (CREATE USER) must be completed BEFORE this step.
-
-### Find the Managed Identity Object ID
+**IMPORTANT**: Run AFTER Step 1 completes.
 
 ```bash
+# Get the managed identity's Object ID
 az identity show \
   --resource-group <RESOURCE_GROUP> \
-  --name migeoetldbadminqa \
+  --name rmhpgflexadmin \
   --query principalId -o tsv
-```
 
-### Register as Azure AD Admin on PostgreSQL Server
-
-```bash
+# Register as Azure AD admin on PostgreSQL server
 az postgres flexible-server ad-admin create \
   --resource-group <RESOURCE_GROUP> \
   --server-name <SERVER_NAME> \
-  --display-name "migeoetldbadminqa" \
-  --object-id <MANAGED_IDENTITY_OBJECT_ID> \
+  --display-name "rmhpgflexadmin" \
+  --object-id <OBJECT_ID_FROM_ABOVE> \
   --type ServicePrincipal
 ```
 
 ---
 
-## Step 3: Verification Queries
-
-Run these queries to verify the setup is correct:
+## Step 3: Verify Setup
 
 ```sql
--- Verify user exists and has correct permissions
+-- Check user exists with correct permissions
 SELECT rolname, rolcreaterole, rolcreatedb, rolcanlogin
 FROM pg_roles
-WHERE rolname = 'migeoetldbadminqa';
+WHERE rolname = 'rmhpgflexadmin';
 
--- Expected output:
---     rolname          | rolcreaterole | rolcreatedb | rolcanlogin
--- ---------------------+---------------+-------------+-------------
---  migeoetldbadminqa   | t             | f           | t
+-- Expected: rolcreaterole=t, rolcreatedb=f, rolcanlogin=t
 
--- Verify CREATE ON DATABASE permission
-SELECT has_database_privilege('migeoetldbadminqa', 'ddhgeodb', 'CREATE');
--- Expected: t
-
--- Verify public schema access
-SELECT has_schema_privilege('migeoetldbadminqa', 'public', 'USAGE');
+-- Check CREATE ON DATABASE
+SELECT has_database_privilege('rmhpgflexadmin', current_database(), 'CREATE');
 -- Expected: t
 ```
 
@@ -93,116 +80,105 @@ SELECT has_schema_privilege('migeoetldbadminqa', 'public', 'USAGE');
 
 ## Permissions Summary
 
-| Permission | SQL Command | Purpose |
-|------------|-------------|---------|
-| Login | `CREATE USER migeoetldbadminqa WITH LOGIN` | Allow connection |
-| Create schemas | `GRANT CREATE ON DATABASE ddhgeodb TO migeoetldbadminqa` | Create `app` and `pgstac` schemas |
-| Create roles | `ALTER ROLE migeoetldbadminqa CREATEROLE` | Create `pgstac_admin`, `pgstac_ingest`, `pgstac_read` roles |
-| PostGIS access | `GRANT USAGE ON SCHEMA public` | Access PostGIS spatial functions |
+| Permission | SQL | Purpose |
+|------------|-----|---------|
+| Login | `CREATE USER rmhpgflexadmin WITH LOGIN` | Allow token-based connection |
+| Create/Drop Schemas | `GRANT CREATE ON DATABASE` | IaC: `DROP SCHEMA app CASCADE`, `CREATE SCHEMA app` |
+| Create Roles | `ALTER ROLE rmhpgflexadmin CREATEROLE` | pypgstac creates `pgstac_admin`, `pgstac_ingest`, `pgstac_read` |
+| PostGIS Functions | `GRANT USAGE ON SCHEMA public` | Spatial operations |
 
 ---
 
-## What This User Will Do
+## What This Enables
 
-The `migeoetldbadminqa` managed identity will:
+With these permissions, the Function App can:
 
-1. **Create `app` schema** - CoreMachine job/task tables (via Pydantic → SQL generator)
-2. **Create `pgstac` schema** - STAC metadata catalog (via `pypgstac migrate`)
-3. **Create pgstac roles** - `pgstac_admin`, `pgstac_ingest`, `pgstac_read`
-4. **Execute PostGIS functions** - Spatial queries on `geo` schema data
+1. **Full-rebuild endpoint** (`/api/dbadmin/maintenance/full-rebuild?confirm=yes`)
+   - `DROP SCHEMA app CASCADE`
+   - `DROP SCHEMA pgstac CASCADE`
+   - `CREATE SCHEMA app` + deploy tables from Pydantic
+   - `pypgstac migrate` to deploy pgstac schema
+   - Create pgstac roles
 
----
-
-## How Authentication Works
-
-```
-Azure Function App (QA)
-    │
-    │ 1. ManagedIdentityCredential.get_token()
-    │    → Gets Azure AD token for "migeoetldbadminqa" identity
-    ▼
-PostgreSQL Flexible Server
-    │
-    │ 2. Validates token against Azure AD
-    │ 3. Looks up: "Is migeoetldbadminqa registered as AD principal?" → YES
-    │ 4. Looks up: "Does PostgreSQL user migeoetldbadminqa exist?" → YES
-    │ 5. Grants session as that user with all its GRANTs
-    ▼
-Connected as migeoetldbadminqa
-```
-
----
-
-## Alternative: Pre-Create Everything (More Restrictive)
-
-If InfoSec won't grant CREATEROLE or CREATE ON DATABASE, have the DBA pre-create everything:
-
-```sql
--- DBA creates schemas and roles BEFORE app deployment
-CREATE SCHEMA IF NOT EXISTS app;
-CREATE SCHEMA IF NOT EXISTS pgstac;
-
-CREATE ROLE pgstac_admin NOLOGIN;
-CREATE ROLE pgstac_ingest NOLOGIN;
-CREATE ROLE pgstac_read NOLOGIN;
-
--- Then grant ownership to the app identity
-ALTER SCHEMA app OWNER TO migeoetldbadminqa;
-ALTER SCHEMA pgstac OWNER TO migeoetldbadminqa;
-GRANT pgstac_admin TO migeoetldbadminqa;
-GRANT pgstac_ingest TO migeoetldbadminqa;
-GRANT pgstac_read TO migeoetldbadminqa;
-
--- Now the app can manage everything WITHOUT CREATEROLE or CREATE ON DATABASE
-```
-
-This approach gives schema ownership without database-level privileges.
+2. **Schema-specific rebuilds**
+   - `/api/dbadmin/maintenance/redeploy?confirm=yes` (app schema)
+   - `/api/dbadmin/maintenance/pgstac/redeploy?confirm=yes` (pgstac schema)
 
 ---
 
 ## Function App Environment Variables
 
-The QA Function App needs these environment variables:
+```bash
+MANAGED_IDENTITY_CLIENT_ID=<client-id-of-rmhpgflexadmin>
+MANAGED_IDENTITY_NAME=rmhpgflexadmin
+POSTGIS_HOST=<server>.postgres.database.azure.com
+POSTGIS_DATABASE=<database_name>
+POSTGIS_PORT=5432
+USE_MANAGED_IDENTITY=true
+```
 
-| Variable | Value | Purpose |
-|----------|-------|---------|
-| `MANAGED_IDENTITY_CLIENT_ID` | `<client-id-of-migeoetldbadminqa>` | User-assigned identity client ID |
-| `MANAGED_IDENTITY_NAME` | `migeoetldbadminqa` | PostgreSQL user name |
-| `POSTGIS_HOST` | `<server>.postgres.database.azure.com` | PostgreSQL server hostname |
-| `POSTGIS_DATABASE` | `ddhgeodb` | Database name |
-| `POSTGIS_PORT` | `5432` | PostgreSQL port |
-
-**Note**: No password is needed - authentication uses Azure AD tokens.
-
----
-
-## Troubleshooting
-
-### Error: "User does not exist"
-- Step 1 (CREATE USER) was not completed
-- User name doesn't match exactly (case-sensitive)
-
-### Error: "Token validation failed"
-- Step 2 (Azure AD registration) was not completed
-- Object ID is incorrect
-- Managed identity is not assigned to the Function App
-
-### Error: "Permission denied for schema"
-- Missing `GRANT CREATE ON DATABASE` permission
-- Missing schema ownership for pre-created schemas
-
-### Error: "Cannot create role"
-- Missing `CREATEROLE` privilege
-- Use pre-create alternative if InfoSec won't grant this
+No password required - authentication uses Azure AD tokens.
 
 ---
 
-## Related Documentation
+## Alternate Workflow: SQL Function Approach
 
-- [WIKI_API_DATABASE.md](WIKI_API_DATABASE.md) - General database setup guide
-- [WIKI_SCHEMA_REBUILD_SQL.md](WIKI_SCHEMA_REBUILD_SQL.md) - Manual schema rebuild SQL
-- [docs_claude/SCHEMA_ARCHITECTURE.md](docs_claude/SCHEMA_ARCHITECTURE.md) - Schema architecture overview
+Instead of using Azure CLI (Step 2 above), you can use the built-in `pgaadauth_create_principal` function directly in SQL. This is convenient when you're already in a SQL session.
+
+### Prerequisites
+
+Ensure the `azure_ad` extension is enabled (usually enabled by default on Azure PostgreSQL Flexible Server):
+
+```sql
+-- Check if extension is available
+SELECT * FROM pg_available_extensions WHERE name = 'azure_ad';
+
+-- Enable if needed (requires azure_pg_admin role)
+CREATE EXTENSION IF NOT EXISTS azure_ad;
+```
+
+### Complete SQL-Only Workflow
+
+```sql
+-- ============================================================
+-- Create PostgreSQL user for Azure Managed Identity (SQL-Only)
+-- User: rmhpgflexadmin (must match Azure Managed Identity name exactly)
+-- ============================================================
+
+-- 1. Create user AND register as AAD principal in one step
+-- Parameters: (principal_name, is_admin, is_mfa)
+SELECT * FROM pgaadauth_create_principal('rmhpgflexadmin', false, false);
+
+-- 2. Grant CREATE ON DATABASE (required for CREATE/DROP SCHEMA)
+GRANT CREATE ON DATABASE <DATABASE_NAME> TO rmhpgflexadmin;
+
+-- 3. Grant CREATEROLE (required for pypgstac to create pgstac_admin/ingest/read roles)
+ALTER ROLE rmhpgflexadmin CREATEROLE;
+
+-- 4. Grant PostGIS access
+GRANT USAGE ON SCHEMA public TO rmhpgflexadmin;
+GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO rmhpgflexadmin;
+```
+
+### Function Parameters Explained
+
+```sql
+pgaadauth_create_principal(
+    'rmhpgflexadmin',  -- Principal name (must match Azure Managed Identity name)
+    false,              -- is_admin: false = regular user, true = azure_pg_admin member
+    false               -- is_mfa: MFA requirement (not applicable for managed identities)
+)
+```
+
+### When to Use Each Approach
+
+| Approach | Best For |
+|----------|----------|
+| **Azure CLI** (Step 2) | Automation scripts, Terraform/Bicep, CI/CD pipelines |
+| **SQL Function** | Interactive setup, already in psql/DBeaver session |
+
+Both approaches achieve the same result - the managed identity can authenticate via Azure AD token.
 
 ---
 
-**Last Updated**: 26 NOV 2025
+**Last Updated**: 30 NOV 2025

@@ -439,6 +439,170 @@ class IDuckDBRepository(ABC):
 
 
 # ============================================================================
+# DATA FACTORY REPOSITORY INTERFACE (29 NOV 2025)
+# ============================================================================
+
+class IDataFactoryRepository(ABC):
+    """
+    Azure Data Factory repository interface for pipeline orchestration.
+
+    Enables triggering ADF pipelines from CoreMachine jobs,
+    monitoring execution status, and retrieving run outputs.
+
+    Key Use Cases:
+    - Database-to-database ETL operations
+    - Production data promotion (staging → business)
+    - Scheduled/recurring data pipelines
+    - Cross-environment data movement
+
+    Implementation Notes:
+    - Uses DefaultAzureCredential for authentication
+    - Follows singleton pattern for credential reuse
+    - All operations are logged for Application Insights
+    """
+
+    @abstractmethod
+    def trigger_pipeline(
+        self,
+        pipeline_name: str,
+        parameters: Optional[Dict[str, Any]] = None,
+        reference_name: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Trigger an ADF pipeline execution.
+
+        Args:
+            pipeline_name: Name of the pipeline to execute
+            parameters: Pipeline parameters to pass (e.g., table_name, job_id)
+            reference_name: Optional correlation ID for tracing (usually job_id)
+
+        Returns:
+            Dict containing:
+            - run_id: Pipeline run identifier
+            - pipeline_name: Name of triggered pipeline
+            - status: Initial status (usually "Queued")
+
+        Raises:
+            RuntimeError: If pipeline trigger fails
+            ValueError: If pipeline_name not found
+        """
+        pass
+
+    @abstractmethod
+    def get_pipeline_run_status(
+        self,
+        run_id: str
+    ) -> Dict[str, Any]:
+        """
+        Get current status of a pipeline run.
+
+        Args:
+            run_id: Pipeline run ID from trigger_pipeline
+
+        Returns:
+            Dict containing:
+            - run_id: Pipeline run identifier
+            - pipeline_name: Name of pipeline
+            - status: Current status (Queued, InProgress, Succeeded, Failed, Cancelled)
+            - message: Status message or error details
+            - start_time: Run start timestamp (ISO format)
+            - end_time: Run end timestamp if completed (ISO format)
+            - duration_ms: Elapsed time in milliseconds
+
+        Raises:
+            RuntimeError: If status check fails
+        """
+        pass
+
+    @abstractmethod
+    def wait_for_pipeline_completion(
+        self,
+        run_id: str,
+        timeout_seconds: int = 3600,
+        poll_interval_seconds: int = 30
+    ) -> Dict[str, Any]:
+        """
+        Block until pipeline completes or times out.
+
+        Polls pipeline status at regular intervals until a terminal state
+        (Succeeded, Failed, Cancelled) is reached or timeout expires.
+
+        Args:
+            run_id: Pipeline run ID from trigger_pipeline
+            timeout_seconds: Maximum wait time (default: 1 hour)
+            poll_interval_seconds: Polling frequency (default: 30 seconds)
+
+        Returns:
+            Final pipeline run status (same format as get_pipeline_run_status)
+
+        Raises:
+            TimeoutError: If pipeline doesn't complete within timeout
+            RuntimeError: If polling fails
+        """
+        pass
+
+    @abstractmethod
+    def get_activity_runs(
+        self,
+        run_id: str
+    ) -> List[Dict[str, Any]]:
+        """
+        Get individual activity runs within a pipeline.
+
+        Useful for debugging pipeline failures or understanding
+        which step of the pipeline is currently executing.
+
+        Args:
+            run_id: Pipeline run ID
+
+        Returns:
+            List of activity run dictionaries containing:
+            - activity_name: Name of the activity
+            - activity_type: Type (Copy, Lookup, StoredProcedure, etc.)
+            - status: Activity status
+            - start_time: Activity start timestamp
+            - end_time: Activity end timestamp
+            - duration_ms: Elapsed time
+            - error: Error details if failed
+
+        Raises:
+            RuntimeError: If retrieval fails
+        """
+        pass
+
+    @abstractmethod
+    def list_pipelines(self) -> List[Dict[str, Any]]:
+        """
+        List all pipelines in the Data Factory.
+
+        Returns:
+            List of pipeline info dictionaries containing:
+            - name: Pipeline name
+            - description: Pipeline description
+            - parameters: Pipeline parameters schema
+
+        Raises:
+            RuntimeError: If listing fails
+        """
+        pass
+
+    @abstractmethod
+    def health_check(self) -> Dict[str, Any]:
+        """
+        Check ADF connectivity and configuration.
+
+        Returns:
+            Dict containing:
+            - status: "healthy" or "unhealthy"
+            - factory_name: Configured factory name
+            - subscription_id: Azure subscription ID
+            - pipeline_count: Number of pipelines available
+            - error: Error message if unhealthy
+        """
+        pass
+
+
+# ============================================================================
 # PROTOCOL DEFINITIONS - For type checking
 # ============================================================================
 

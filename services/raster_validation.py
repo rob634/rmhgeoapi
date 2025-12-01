@@ -338,6 +338,45 @@ def validate_raster(params: dict) -> dict:
             warnings = []
 
             # ================================================================
+            # STEP 4b: MEMORY FOOTPRINT ESTIMATION (30 NOV 2025)
+            # ================================================================
+            # Estimate uncompressed size and peak memory to determine
+            # processing strategy and GDAL configuration
+            try:
+                logger.info("🔄 STEP 4b: Estimating memory footprint...")
+                memory_estimation = _estimate_memory_footprint(
+                    width=shape[1],
+                    height=shape[0],
+                    band_count=band_count,
+                    dtype=dtype
+                )
+                logger.info(
+                    f"✅ STEP 4b: Memory estimation complete - "
+                    f"uncompressed: {memory_estimation['uncompressed_gb']:.2f}GB, "
+                    f"peak: {memory_estimation['estimated_peak_gb']:.2f}GB, "
+                    f"strategy: {memory_estimation['processing_strategy']}"
+                )
+                logger.info(
+                    f"   System: {memory_estimation['system_ram_gb']:.1f}GB RAM, "
+                    f"{memory_estimation['cpu_count']} CPUs, "
+                    f"safe threshold: {memory_estimation['safe_threshold_gb']:.2f}GB"
+                )
+
+                # Add any memory warnings to the main warnings list
+                for mem_warning in memory_estimation.get("warnings", []):
+                    warnings.append(mem_warning)
+                    severity = mem_warning.get("severity", "INFO")
+                    logger.warning(f"   ⚠️  Memory warning ({severity}): {mem_warning.get('message', 'unknown')}")
+
+            except Exception as e:
+                logger.warning(f"⚠️  STEP 4b: Memory estimation failed (non-fatal): {e}")
+                memory_estimation = {
+                    "error": str(e),
+                    "uncompressed_gb": None,
+                    "processing_strategy": "unknown"
+                }
+
+            # ================================================================
             # STEP 5: CRS VALIDATION
             # ================================================================
             try:
@@ -533,6 +572,9 @@ def validate_raster(params: dict) -> dict:
                             "current_dtype": str(dtype),
                             "reason": bit_depth_result.get("reason", "Unknown")
                         },
+
+                        # Memory footprint estimation (30 NOV 2025)
+                        "memory_estimation": memory_estimation,
 
                         # Warnings
                         "warnings": warnings
@@ -1058,3 +1100,140 @@ def _get_optimal_cog_settings(raster_type: str) -> dict:
     }
 
     return settings.get(raster_type, settings[RasterType.UNKNOWN.value])
+
+
+# ============================================================================
+# MEMORY FOOTPRINT ESTIMATION (30 NOV 2025)
+# ============================================================================
+
+def _estimate_memory_footprint(width: int, height: int, band_count: int, dtype: str) -> dict:
+    """
+    Estimate memory footprint for raster processing operations.
+
+    Calculates uncompressed size and estimates peak memory usage during
+    COG creation (which includes warp buffers, overview generation, etc.).
+
+    Args:
+        width: Raster width in pixels
+        height: Raster height in pixels
+        band_count: Number of bands
+        dtype: Data type string (e.g., 'uint8', 'float32')
+
+    Returns:
+        dict: Memory estimation with processing strategy recommendation
+        {
+            "uncompressed_gb": float,
+            "estimated_peak_gb": float,
+            "system_ram_gb": float,
+            "cpu_count": int,
+            "safe_threshold_gb": float,
+            "processing_strategy": "single_pass" | "chunked" | "reject",
+            "gdal_config": {...},
+            "warnings": []
+        }
+    """
+    import numpy as np
+
+    # Get bytes per pixel from dtype
+    try:
+        bytes_per_pixel = np.dtype(dtype).itemsize
+    except TypeError:
+        # Fallback for unknown dtypes
+        bytes_per_pixel = 4  # Assume float32
+
+    # Calculate uncompressed size
+    total_pixels = width * height * band_count
+    uncompressed_bytes = total_pixels * bytes_per_pixel
+    uncompressed_gb = uncompressed_bytes / (1024 ** 3)
+
+    # Estimate peak memory during processing
+    # COG creation involves: source + dest + warp buffers + overview pyramid
+    # Rule of thumb: 2.5x uncompressed size for peak memory
+    # Add extra for reprojection buffers if CRS change needed
+    peak_multiplier = 2.5
+    estimated_peak_gb = uncompressed_gb * peak_multiplier
+
+    # Detect system resources
+    system_ram_gb = 16.0  # Default fallback
+    cpu_count = 4  # Default fallback
+    warnings = []
+
+    try:
+        import psutil
+        system_ram_gb = psutil.virtual_memory().total / (1024 ** 3)
+        cpu_count = psutil.cpu_count(logical=True) or 4
+    except ImportError:
+        warnings.append({
+            "type": "PSUTIL_UNAVAILABLE",
+            "message": "psutil not available, using default system specs (16GB RAM, 4 CPUs)"
+        })
+    except Exception as e:
+        warnings.append({
+            "type": "SYSTEM_DETECTION_ERROR",
+            "message": f"Could not detect system resources: {e}"
+        })
+
+    # Calculate safe threshold (60% of RAM to leave room for OS, other processes)
+    # Also account for concurrent processing (maxConcurrentCalls=2)
+    concurrent_jobs = 2  # From host.json
+    safe_threshold_gb = (system_ram_gb * 0.6) / concurrent_jobs
+
+    # Determine processing strategy
+    if estimated_peak_gb <= safe_threshold_gb:
+        processing_strategy = "single_pass"
+        gdal_cachemax = 1024  # 1GB cache
+        gdal_num_threads = min(2, cpu_count)
+        gdal_swath_size = 134217728  # 128MB
+    elif estimated_peak_gb <= system_ram_gb * 0.8:
+        processing_strategy = "single_pass_conservative"
+        gdal_cachemax = 512  # 512MB cache
+        gdal_num_threads = 1  # Single thread for predictable memory
+        gdal_swath_size = 67108864  # 64MB
+        warnings.append({
+            "type": "MEMORY_WARNING",
+            "severity": "MEDIUM",
+            "message": f"Raster may use up to {estimated_peak_gb:.1f}GB during processing. "
+                       f"Using conservative GDAL settings."
+        })
+    else:
+        processing_strategy = "chunked"
+        gdal_cachemax = 256  # 256MB cache
+        gdal_num_threads = 1
+        gdal_swath_size = 33554432  # 32MB
+        warnings.append({
+            "type": "MEMORY_WARNING",
+            "severity": "HIGH",
+            "message": f"Raster estimated peak memory ({estimated_peak_gb:.1f}GB) exceeds safe "
+                       f"threshold ({safe_threshold_gb:.1f}GB). Consider chunked processing."
+        })
+
+    # Build GDAL config recommendation
+    gdal_config = {
+        "GDAL_CACHEMAX": gdal_cachemax,
+        "GDAL_NUM_THREADS": gdal_num_threads,
+        "GDAL_SWATH_SIZE": gdal_swath_size,
+        "GDAL_TIFF_INTERNAL_MASK": True,
+        "GDAL_TIFF_OVR_BLOCKSIZE": 512,
+        "BIGTIFF": "IF_SAFER",
+        "GDAL_DISABLE_READDIR_ON_OPEN": "EMPTY_DIR"
+    }
+
+    return {
+        "uncompressed_gb": round(uncompressed_gb, 2),
+        "estimated_peak_gb": round(estimated_peak_gb, 2),
+        "system_ram_gb": round(system_ram_gb, 1),
+        "cpu_count": cpu_count,
+        "safe_threshold_gb": round(safe_threshold_gb, 2),
+        "concurrent_jobs": concurrent_jobs,
+        "processing_strategy": processing_strategy,
+        "gdal_config": gdal_config,
+        "calculation_details": {
+            "width": width,
+            "height": height,
+            "band_count": band_count,
+            "dtype": dtype,
+            "bytes_per_pixel": bytes_per_pixel,
+            "peak_multiplier": peak_multiplier
+        },
+        "warnings": warnings
+    }

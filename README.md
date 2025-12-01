@@ -8,15 +8,15 @@
 
 ```bash
 # 1. Health Check
-curl https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/health
+curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/health
 
 # 2. Submit Test Job
-curl -X POST https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/jobs/submit/hello_world \
+curl -X POST https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/jobs/submit/hello_world \
   -H "Content-Type: application/json" \
-  -d '{"n": 5, "message": "Testing the pipeline"}'
+  -d '{"message": "Testing the pipeline"}'
 
 # 3. Check Status (use job_id from step 2)
-curl https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/jobs/status/{job_id}
+curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/jobs/status/{job_id}
 ```
 
 ---
@@ -89,8 +89,8 @@ rmhgeoapi/
 │   ├── __init__.py             # ALL_JOBS explicit registry
 │   ├── base.py                 # JobBase ABC (5-method contract)
 │   ├── hello_world.py          # Example: 2-stage greeting workflow
-│   ├── ingest_vector.py        # Vector ETL to PostGIS
-│   └── process_raster.py       # Raster → COG pipeline
+│   ├── process_vector.py       # Vector ETL to PostGIS (idempotent)
+│   └── process_raster_v2.py    # Raster → COG pipeline (mixin pattern)
 │
 ├── services/                    # Task handlers (HOW)
 │   ├── __init__.py             # ALL_HANDLERS explicit registry
@@ -457,13 +457,13 @@ ALL_HANDLERS = {
 
 ```bash
 # 1. Deploy to Azure
-func azure functionapp publish rmhgeoapibeta --python --build remote
+func azure functionapp publish rmhazuregeoapi --python --build remote
 
 # 2. Redeploy schema (if database changes needed)
-curl -X POST https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/db/schema/redeploy?confirm=yes
+curl -X POST https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/db/schema/redeploy?confirm=yes
 
 # 3. Submit job
-curl -X POST https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/jobs/submit/process_csv \
+curl -X POST https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/jobs/submit/process_csv \
   -H "Content-Type: application/json" \
   -d '{
     "blob_name": "data/customers.csv",
@@ -473,10 +473,10 @@ curl -X POST https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/
   }'
 
 # 4. Check status
-curl https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/jobs/status/{job_id}
+curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/jobs/status/{job_id}
 
 # 5. Query database
-curl "https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/db/jobs?job_type=process_csv&limit=10"
+curl "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/db/jobs?job_type=process_csv&limit=10"
 ```
 
 ---
@@ -612,13 +612,13 @@ PostgreSQL (rmhpgflex.postgres.database.azure.com):
 **Query database without DBeaver:**
 ```bash
 # All jobs
-curl "https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/db/jobs?limit=100"
+curl "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/db/jobs?limit=100"
 
 # All tasks for a job
-curl "https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/db/tasks/{job_id}"
+curl "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/db/tasks/{job_id}"
 
 # Database stats
-curl "https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/db/stats"
+curl "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/db/stats"
 ```
 
 ---
@@ -691,7 +691,7 @@ curl "https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/db/
 
 ### Health Check
 ```bash
-curl https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/health
+curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/health
 ```
 
 Returns:
@@ -744,13 +744,13 @@ traces | where message contains "Processing task" | take 50
 ### Database Debugging
 ```bash
 # All jobs with filters
-curl "https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/db/jobs?status=failed&hours=24"
+curl "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/db/jobs?status=failed&hours=24"
 
 # Tasks for specific job
-curl "https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/db/tasks/{job_id}"
+curl "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/db/tasks/{job_id}"
 
 # Complete debug dump
-curl "https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/db/debug/all?limit=100"
+curl "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/db/debug/all?limit=100"
 ```
 
 ---
@@ -761,13 +761,13 @@ curl "https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/db/
 
 ```bash
 # Clear all schema objects and redeploy
-curl -X POST "https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/db/schema/redeploy?confirm=yes"
+curl -X POST "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/db/schema/redeploy?confirm=yes"
 
 # Clear STAC items/collections (preserves schema)
-curl -X POST "https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/stac/nuke?confirm=yes&mode=all"
+curl -X POST "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/stac/nuke?confirm=yes&mode=all"
 
 # Clear Service Bus queue
-curl -X POST "https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/servicebus/queues/geospatial-jobs/nuke?confirm=yes&target=all"
+curl -X POST "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/servicebus/queues/geospatial-jobs/nuke?confirm=yes&target=all"
 ```
 
 ---
@@ -822,7 +822,7 @@ curl -X POST "https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net
 ## 🏷️ Version & Status
 
 - **Epoch**: 4 (Declarative Job→Stage→Task)
-- **Active Function App**: `rmhgeoapibeta`
+- **Active Function App**: `rmhazuregeoapi`
 - **Database**: PostgreSQL Flexible Server (`rmhpgflex.postgres.database.azure.com`)
 - **Messaging**: Azure Service Bus (Storage Queues deprecated)
 - **Python**: 3.11

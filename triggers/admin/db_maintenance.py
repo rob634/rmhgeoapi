@@ -419,6 +419,42 @@ class AdminDbMaintenanceTrigger:
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
 
+        # Step 0: Clear Service Bus queues (30 NOV 2025)
+        # Prevents stale job/task messages from blocking new jobs after schema rebuild
+        logger.info("🧹 Step 0: Clearing Service Bus queues...")
+        try:
+            from infrastructure.service_bus import ServiceBusRepository
+            from config import get_config
+
+            config = get_config()
+            service_bus = ServiceBusRepository.instance()
+
+            queues_cleared = {}
+            queue_names = [config.service_bus_jobs_queue, config.queues.tasks_queue]
+
+            for queue_name in queue_names:
+                try:
+                    deleted_count = service_bus.clear_queue(queue_name)
+                    queues_cleared[queue_name] = {"deleted": deleted_count, "status": "success"}
+                    logger.info(f"   ✅ Cleared {deleted_count} messages from {queue_name}")
+                except Exception as e:
+                    queues_cleared[queue_name] = {"error": str(e), "status": "failed"}
+                    logger.warning(f"   ⚠️ Failed to clear {queue_name}: {e}")
+
+            results["steps"].append({
+                "step": "clear_queues",
+                "status": "success",
+                "queues": queues_cleared
+            })
+        except Exception as e:
+            logger.warning(f"⚠️ Queue clearing failed (continuing with rebuild): {e}")
+            results["steps"].append({
+                "step": "clear_queues",
+                "status": "failed",
+                "error": str(e)
+            })
+            # Continue with schema rebuild even if queue clear fails
+
         try:
             # Step 1: Nuke existing schema (call internal nuke method)
             logger.info("📥 Step 1: Nuking existing schema...")

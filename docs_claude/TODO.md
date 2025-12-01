@@ -1,107 +1,494 @@
 # Active Tasks - Geospatial ETL Pipelines
 
-**Last Updated**: 28 NOV 2025 (UTC)
+**Last Updated**: 30 NOV 2025 (UTC) - Moved Dual Database Architecture to HISTORY.md
 **Author**: Robert and Geospatial Claude Legion
 
 ---
 
-## ✅ COMPLETED: PROCESS_RASTER_V2 - JobBaseMixin Implementation (28 NOV 2025)
+## 🚨 HIGH PRIORITY: Azure Data Factory Integration (29 NOV 2025)
 
-**Status**: ✅ **COMPLETED AND TESTED**
-**Priority**: **HIGH** - Clean slate raster workflow using JobBaseMixin pattern
-**Impact**: 73% code reduction, proper config integration, resource validators
+**Status**: 📋 **PLANNING COMPLETE - READY FOR IMPLEMENTATION**
+**Priority**: **HIGH** - Enterprise ETL orchestration and audit logging
+**Impact**: Production data movement, audit compliance, cross-database operations
 **Author**: Robert and Geospatial Claude Legion
-**Completed**: 28 NOV 2025
+**Created**: 29 NOV 2025
+**Depends On**: Dual Database Architecture (Phase 1 Configuration - COMPLETE)
 
-### Summary
+---
 
-Created `process_raster_v2` job using JobBaseMixin pattern with resource validators. Clean slate design - no deprecated parameters, proper config integration.
+### Executive Summary
 
-### Implementation Results
+Integrate Azure Data Factory (ADF) into the application through a new repository layer, enabling:
+1. **Triggering ADF pipelines** from CoreMachine jobs
+2. **Database-to-database ETL** with enterprise logging and audit trails
+3. **Production data promotion** from staging (app db) to production (business db)
 
-| Metric | Value |
-|--------|-------|
-| Lines of code | 280 (vs 743 for process_raster) |
-| Code reduction | 73% |
-| Boilerplate eliminated | 4 methods via JobBaseMixin |
-| Pre-flight validation | blob_exists resource validator |
+### Architectural Fit
 
-### Files Created/Modified
+ADF integrates as a new repository following existing patterns:
+
+```
+IRepository (ABC Interface)
+    ↓
+BaseRepository (abstract operations)
+    ↓
+Concrete Implementations:
+├── PostgreSQLRepository (jobs, tasks)
+├── ServiceBusRepository (messaging)
+├── BlobRepository (blob storage)
+├── DuckDBRepository (analytics)
+└── [NEW] AzureDataFactoryRepository (ADF pipelines)
+```
+
+### Data Flow with ADF
+
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│  CURRENT: Direct Write via process_vector                            │
+│                                                                      │
+│  Bronze Blob → process_vector → VectorToPostGISHandler → geo schema │
+│                 (CoreMachine)              (app database)            │
+└──────────────────────────────────────────────────────────────────────┘
+                              ↓
+┌──────────────────────────────────────────────────────────────────────┐
+│  FUTURE: ADF for Production Data Movement                            │
+│                                                                      │
+│  process_vector → app.staging_* (app database, ETL output)           │
+│        ↓                                                             │
+│  Azure Data Factory Pipeline:                                        │
+│    1. Validation activity (SQL script - row count, schema check)     │
+│    2. Copy activity (app.staging → geodata.geo)                      │
+│    3. Audit logging activity (write to app.data_movements)           │
+│    4. Notification activity (webhook/email on failure)               │
+│        ↓                                                             │
+│  geodata.geo.{table_name} (business database, protected)             │
+└──────────────────────────────────────────────────────────────────────┘
+```
+
+### When to Use Each Approach
+
+| Scenario | Use CoreMachine | Use ADF |
+|----------|----------------|---------|
+| Geospatial transformations | ✅ Reprojection, COG creation | ❌ |
+| Complex business logic | ✅ Validation, enrichment | ❌ |
+| File-based operations | ✅ Blob → PostGIS | ❌ |
+| Small/medium data (<1M rows) | ✅ | ❌ |
+| **Database-to-database copy** | ❌ | ✅ Native optimized |
+| **Large data volumes (>1M rows)** | ❌ | ✅ Parallel copy |
+| **Cross-environment data movement** | ❌ | ✅ Dev→Prod |
+| **Audit compliance** | ❌ | ✅ Full lineage |
+| **Scheduled/recurring ETL** | ❌ | ✅ Built-in scheduler |
+
+---
+
+### Implementation Phases
+
+#### Phase 1: Repository Layer (infrastructure/)
+
+**Goal**: Create `AzureDataFactoryRepository` following existing singleton/factory patterns
+
+**Files to Create/Modify**:
 
 | File | Action | Description |
 |------|--------|-------------|
-| `jobs/process_raster_v2.py` | CREATED | ~280 lines, JobBaseMixin implementation |
-| `jobs/__init__.py` | EDITED | +2 lines (import + registration) |
-| `services/raster_cog.py` | EDITED | Fixed JPEG INTERLEAVE for visualization tier |
-| `WIKI_JOB_PROCESS_RASTER_V2.md` | CREATED | Full documentation |
+| `infrastructure/data_factory.py` | CREATE | ADF repository implementation (~300 lines) |
+| `infrastructure/interface_repository.py` | EDIT | Add `IDataFactoryRepository` interface |
+| `infrastructure/__init__.py` | EDIT | Export `AzureDataFactoryRepository` |
+| `infrastructure/factory.py` | EDIT | Add `create_data_factory_repository()` |
+| `config/app_config.py` | EDIT | Add ADF configuration fields |
 
-### Bug Fix: JPEG Visualization Tier (28 NOV 2025)
+**Step 1.1: Add Configuration** (`config/app_config.py`)
 
-**Problem**: JPEG encoding failed with "Can't process input with band interleaving"
-**Root Cause**: Unconditional `INTERLEAVE = "BAND"` setting incompatible with YCbCr encoding
-**Fix**: Conditional interleave based on compression type:
-- JPEG/WebP: `INTERLEAVE = "PIXEL"` (required for YCbCr encoding)
-- DEFLATE/LZW/LERC: `INTERLEAVE = "BAND"` (cloud-native selective band access)
-
-### Test Results
-
-```bash
-# Visualization tier (JPEG) - WORKING
-curl -X POST '.../api/jobs/submit/process_raster_v2' \
-  -d '{"blob_name": "dctest.tif", "container_name": "rmhazuregeobronze", "output_tier": "visualization"}'
-# Result: 11.08 MB JPEG COG, STAC item created, TiTiler URLs generated
-
-# Analysis tier (DEFLATE) - WORKING
-curl -X POST '.../api/jobs/submit/process_raster_v2' \
-  -d '{"blob_name": "dctest.tif", "container_name": "rmhazuregeobronze"}'
-# Result: COG with DEFLATE compression, STAC metadata in pgstac
+```python
+# Add to AppConfig class
+adf_subscription_id: Optional[str] = Field(
+    default_factory=lambda: os.environ.get("ADF_SUBSCRIPTION_ID"),
+    description="Azure subscription ID for ADF"
+)
+adf_resource_group: Optional[str] = Field(
+    default_factory=lambda: os.environ.get("ADF_RESOURCE_GROUP", "rmhazure_rg"),
+    description="Resource group containing ADF"
+)
+adf_factory_name: Optional[str] = Field(
+    default_factory=lambda: os.environ.get("ADF_FACTORY_NAME"),
+    description="Data Factory instance name"
+)
 ```
 
-### Output URLs Structure
+**Step 1.2: Create Interface** (`infrastructure/interface_repository.py`)
 
-Job result_data now includes:
-- `stac_urls`: item_url, collection_url, items_url, catalog_url (using rmhogcstac)
-- `titiler_urls`: viewer_url, preview_url, tile_url, etc. (using rmhtitiler)
-- `share_url`: Quick viewer link
+```python
+class IDataFactoryRepository(ABC):
+    """
+    Azure Data Factory repository interface for pipeline orchestration.
+    """
 
-### Documentation
+    @abstractmethod
+    def trigger_pipeline(
+        self,
+        pipeline_name: str,
+        parameters: Optional[Dict[str, Any]] = None,
+        reference_name: Optional[str] = None
+    ) -> PipelineRunResult:
+        """Trigger an ADF pipeline execution."""
+        pass
 
-See: `WIKI_JOB_PROCESS_RASTER_V2.md` for full API documentation
+    @abstractmethod
+    def get_pipeline_run_status(self, run_id: str) -> PipelineRunResult:
+        """Get current status of a pipeline run."""
+        pass
+
+    @abstractmethod
+    def wait_for_pipeline_completion(
+        self,
+        run_id: str,
+        timeout_seconds: int = 3600,
+        poll_interval_seconds: int = 30
+    ) -> PipelineRunResult:
+        """Block until pipeline completes or times out."""
+        pass
+
+    @abstractmethod
+    def get_activity_runs(self, run_id: str) -> List[ActivityRunResult]:
+        """Get individual activity runs within a pipeline."""
+        pass
+```
+
+**Step 1.3: Create Repository** (`infrastructure/data_factory.py`)
+
+Key implementation details:
+- Singleton pattern (same as ServiceBusRepository)
+- DefaultAzureCredential authentication
+- Structured logging for Application Insights
+- Explicit error handling (no silent fallbacks)
+- `PipelineRunResult` and `ActivityRunResult` dataclasses
+
+**Step 1.4: Add Factory Method** (`infrastructure/factory.py`)
+
+```python
+@staticmethod
+def create_data_factory_repository() -> 'AzureDataFactoryRepository':
+    """Create Azure Data Factory repository for pipeline orchestration."""
+    from .data_factory import AzureDataFactoryRepository
+    logger.info("🏭 Creating Azure Data Factory repository")
+    return AzureDataFactoryRepository.instance()
+```
+
+**Checklist Phase 1** ✅ **COMPLETE** (29 NOV 2025):
+- [x] Add ADF config fields to `config/app_config.py`
+- [x] Add `IDataFactoryRepository` interface to `infrastructure/interface_repository.py`
+- [x] Create `PipelineRunResult` and `ActivityRunResult` dataclasses
+- [x] Implement `AzureDataFactoryRepository` class (~500 lines)
+- [x] Add factory method to `infrastructure/factory.py`
+- [x] Export from `infrastructure/__init__.py`
+- [x] Add `azure-mgmt-datafactory` to `requirements.txt`
+- [ ] Test: `RepositoryFactory.create_data_factory_repository()` returns singleton (requires ADF instance)
 
 ---
 
-## ✅ COMPLETED: Exception Context Loss in Nested Error Handlers (28 NOV 2025)
+#### Phase 2: Azure Infrastructure Setup
 
-**Status**: ✅ **COMPLETED**
-**Priority**: **HIGH** - Critical for debugging production failures
-**Impact**: Preserves original exception context for root cause analysis
-**Author**: Robert and Geospatial Claude Legion
-**Completed**: 28 NOV 2025
+**Goal**: Create ADF instance and configure pipelines
 
-### Solution Implemented
+**Step 2.1: Create Azure Data Factory**
 
-Created `log_nested_error()` helper function in `core/error_handler.py` that logs both primary and cleanup errors with structured context for Application Insights filtering.
+```bash
+# Create ADF instance
+az datafactory create \
+  --resource-group rmhazure_rg \
+  --factory-name rmhgeodatafactory \
+  --location eastus
 
-### Fixed Locations in CoreMachine
+# Assign managed identity permissions
+az role assignment create \
+  --assignee-object-id $(az datafactory show -g rmhazure_rg -n rmhgeodatafactory --query identity.principalId -o tsv) \
+  --role "Data Factory Contributor" \
+  --scope /subscriptions/{sub}/resourceGroups/rmhazure_rg
+```
 
-| File | Lines | Pattern | Fix Applied |
-|------|-------|---------|-------------|
-| `core/machine.py` | ~617-636 | Status update failure cleanup | ✅ `log_nested_error()` |
-| `core/machine.py` | ~652-670 | Status update exception cleanup | ✅ `log_nested_error()` |
-| `core/machine.py` | ~885-904 | Stage advancement failure cleanup | ✅ `log_nested_error()` |
-| `core/machine.py` | ~935-943 | Task completion SQL failure cleanup | ✅ `log_nested_error()` |
+**Step 2.2: Create Linked Services**
 
-### Application Insights Filtering
+| Linked Service | Type | Description |
+|----------------|------|-------------|
+| `AppDatabase` | Azure PostgreSQL | Connection to geopgflex (app database) |
+| `BusinessDatabase` | Azure PostgreSQL | Connection to geodata (business database) |
 
-In Application Insights, you can now search for:
-- `customDimensions.nested_error = true` - Find all nested errors
-- `customDimensions.primary_error_type` - Filter by root cause type
-- `customDimensions.cleanup_error_type` - Filter by cleanup failure type
+**Step 2.3: Create Datasets**
 
-### Files Modified
+| Dataset | Linked Service | Description |
+|---------|----------------|-------------|
+| `AppStagingTable` | AppDatabase | Dynamic table reference: `app.staging_@{dataset().table_name}` |
+| `BusinessGeoTable` | BusinessDatabase | Dynamic table reference: `geo.@{dataset().table_name}` |
 
-- `core/error_handler.py` - Added `log_nested_error()` helper function (~80 lines)
-- `core/machine.py` - Updated 4 nested error handlers to use `log_nested_error()`
+**Step 2.4: Create Pipeline: `CopyStagingToBusinessData`**
+
+Pipeline activities:
+1. **Lookup**: Validate source data exists and get row count
+2. **Copy**: Copy from app.staging_* to geodata.geo.*
+3. **StoredProcedure**: Log data movement to app.data_movements
+4. **WebActivity** (on failure): Call webhook for alerting
+
+**Checklist Phase 2**:
+- [ ] Create ADF instance `rmhgeodatafactory`
+- [ ] Configure managed identity for PostgreSQL access
+- [ ] Create linked services (AppDatabase, BusinessDatabase)
+- [ ] Create datasets with parameterized table names
+- [ ] Create `CopyStagingToBusinessData` pipeline
+- [ ] Create `app.data_movements` audit table in app database
+- [ ] Test pipeline manually via ADF Studio
+
+---
+
+#### Phase 3: CoreMachine Integration
+
+**Goal**: Create job type that triggers ADF for production data promotion
+
+**Files to Create/Modify**:
+
+| File | Action | Description |
+|------|--------|-------------|
+| `jobs/promote_to_production.py` | CREATE | New job type using ADF |
+| `jobs/__init__.py` | EDIT | Register new job |
+| `services/service_data_promotion.py` | CREATE | ADF trigger handler |
+| `services/__init__.py` | EDIT | Register handler |
+
+**Step 3.1: Create Job Definition** (`jobs/promote_to_production.py`)
+
+```python
+class PromoteToProductionJob(JobBaseMixin, JobBase):
+    """
+    Promotes staging data to production business database via ADF.
+
+    Stages:
+    1. validate_staging: Verify staging table exists and has data
+    2. trigger_adf_copy: Trigger ADF pipeline, wait for completion
+    3. verify_and_cleanup: Verify rows in business db, cleanup staging
+    """
+
+    job_type = "promote_to_production"
+    description = "Copy validated staging data to production business database"
+
+    stages = [
+        {"number": 1, "name": "validate", "task_type": "validate_staging_data", "parallelism": "single"},
+        {"number": 2, "name": "copy_via_adf", "task_type": "trigger_adf_copy", "parallelism": "single"},
+        {"number": 3, "name": "verify", "task_type": "verify_copy_cleanup", "parallelism": "single"}
+    ]
+
+    parameters_schema = {
+        'table_name': {'type': 'str', 'required': True},
+        'source_schema': {'type': 'str', 'default': 'app'},
+        'staging_prefix': {'type': 'str', 'default': 'staging_'},
+        'target_schema': {'type': 'str', 'default': 'geo'},
+        'cleanup_staging': {'type': 'bool', 'default': True},
+        'adf_pipeline': {'type': 'str', 'default': 'CopyStagingToBusinessData'}
+    }
+```
+
+**Step 3.2: Create Handler** (`services/service_data_promotion.py`)
+
+```python
+def trigger_adf_copy(params: dict) -> dict:
+    """Trigger ADF pipeline and wait for completion."""
+    from infrastructure import RepositoryFactory
+
+    adf_repo = RepositoryFactory.create_data_factory_repository()
+
+    result = adf_repo.trigger_pipeline(
+        pipeline_name=params['adf_pipeline'],
+        parameters={
+            "table_name": params['table_name'],
+            "job_id": params['job_id']
+        },
+        reference_name=params['job_id']
+    )
+
+    final_result = adf_repo.wait_for_pipeline_completion(
+        run_id=result.run_id,
+        timeout_seconds=1800
+    )
+
+    return {
+        'success': final_result.status == 'Succeeded',
+        'result': {
+            'adf_run_id': result.run_id,
+            'adf_status': final_result.status,
+            'duration_ms': final_result.duration_ms
+        }
+    }
+```
+
+**Checklist Phase 3**:
+- [ ] Create `jobs/promote_to_production.py` job definition
+- [ ] Create `services/service_data_promotion.py` with handlers
+- [ ] Register job in `jobs/__init__.py`
+- [ ] Register handlers in `services/__init__.py`
+- [ ] Test: Submit `promote_to_production` job via API
+- [ ] Verify audit trail in `app.data_movements` table
+
+---
+
+#### Phase 4: Integration with Dual Database Workflow
+
+**Goal**: Connect process_vector staging output to ADF promotion pipeline
+
+**Workflow Integration**:
+
+```
+1. process_vector (existing job, modified)
+   └── target_database: "app" (default during migration)
+   └── writes to: app.staging_{table_name}
+
+2. [Manual QA step or automated validation]
+
+3. promote_to_production (new job)
+   └── table_name: "{table_name}"
+   └── triggers: ADF CopyStagingToBusinessData pipeline
+   └── result: geodata.geo.{table_name}
+```
+
+**Step 4.1: Modify process_vector for Staging Output**
+
+Update `ProcessVectorJob` to support staging table prefix:
+- Add `staging_mode` parameter (bool, default: False)
+- When `staging_mode=True`, writes to `app.staging_{table_name}` instead of `geo.{table_name}`
+
+**Step 4.2: Create End-to-End Workflow Documentation**
+
+Document the complete workflow:
+1. User uploads data to Bronze blob
+2. User submits `process_vector` with `staging_mode: true`
+3. Data lands in `app.staging_{table_name}`
+4. User/admin reviews data quality
+5. User submits `promote_to_production` job
+6. ADF copies to `geodata.geo.{table_name}` with audit log
+7. Staging table cleaned up (optional)
+
+**Checklist Phase 4**:
+- [ ] Add `staging_mode` parameter to `process_vector` job
+- [ ] Update `VectorToPostGISHandler` to support staging prefix
+- [ ] Create workflow documentation in `WIKI_DATA_PROMOTION.md`
+- [ ] Test end-to-end: process_vector → staging → promote_to_production → business db
+
+---
+
+### Environment Variables
+
+Add to Azure Functions Application Settings:
+
+```bash
+# ADF Configuration
+ADF_SUBSCRIPTION_ID=<your-subscription-id>
+ADF_RESOURCE_GROUP=rmhazure_rg
+ADF_FACTORY_NAME=rmhgeodatafactory
+```
+
+Add to `local.settings.json`:
+
+```json
+{
+  "Values": {
+    "ADF_SUBSCRIPTION_ID": "<your-subscription-id>",
+    "ADF_RESOURCE_GROUP": "rmhazure_rg",
+    "ADF_FACTORY_NAME": "rmhgeodatafactory"
+  }
+}
+```
+
+---
+
+### Dependencies
+
+Add to `requirements.txt`:
+
+```
+azure-mgmt-datafactory>=4.0.0
+```
+
+---
+
+### Testing Checklist
+
+**Phase 1 Tests** (Repository Layer):
+- [ ] `from infrastructure.data_factory import AzureDataFactoryRepository` imports successfully
+- [ ] `RepositoryFactory.create_data_factory_repository()` returns singleton
+- [ ] `adf_repo.trigger_pipeline("test_pipeline")` triggers pipeline (mock or real)
+- [ ] `adf_repo.get_pipeline_run_status(run_id)` returns status
+
+**Phase 2 Tests** (Azure Infrastructure):
+- [ ] ADF instance accessible via Azure Portal
+- [ ] Linked services connect successfully
+- [ ] Pipeline runs manually with test parameters
+
+**Phase 3 Tests** (CoreMachine Integration):
+- [ ] `curl POST /api/jobs/submit/promote_to_production` returns job_id
+- [ ] Job progresses through all 3 stages
+- [ ] ADF pipeline triggered and completes
+- [ ] Audit record created in app.data_movements
+
+**Phase 4 Tests** (End-to-End):
+- [ ] process_vector with staging_mode=True writes to app.staging_*
+- [ ] promote_to_production copies to geodata.geo.*
+- [ ] Staging table cleaned up after promotion
+- [ ] Full audit trail exists
+
+---
+
+### Success Criteria
+
+- [ ] ADF repository integrated following existing patterns (singleton, factory, interfaces)
+- [ ] `promote_to_production` job type operational
+- [ ] Database-to-database copy with audit logging working
+- [ ] Integration with dual database architecture complete
+- [ ] No breaking changes to existing workflows
+- [ ] Documentation complete
+
+---
+
+### Files Changed Summary
+
+| File | Phase | Action | Description |
+|------|-------|--------|-------------|
+| `config/app_config.py` | 1 | EDIT | Add ADF config fields |
+| `infrastructure/interface_repository.py` | 1 | EDIT | Add IDataFactoryRepository |
+| `infrastructure/data_factory.py` | 1 | CREATE | ADF repository (~300 lines) |
+| `infrastructure/factory.py` | 1 | EDIT | Add factory method |
+| `infrastructure/__init__.py` | 1 | EDIT | Export ADF repository |
+| `requirements.txt` | 1 | EDIT | Add azure-mgmt-datafactory |
+| `local.settings.json` | 1 | EDIT | Add ADF env vars |
+| `jobs/promote_to_production.py` | 3 | CREATE | New job type |
+| `services/service_data_promotion.py` | 3 | CREATE | ADF trigger handlers |
+| `jobs/__init__.py` | 3 | EDIT | Register job |
+| `services/__init__.py` | 3 | EDIT | Register handlers |
+| `jobs/process_vector.py` | 4 | EDIT | Add staging_mode parameter |
+| `WIKI_DATA_PROMOTION.md` | 4 | CREATE | Workflow documentation |
+
+---
+
+### Relationship to Dual Database Architecture
+
+This ADF integration **depends on and extends** the Dual Database Architecture:
+
+```
+Dual Database Architecture (CRITICAL)    →    ADF Integration (HIGH)
+├── Phase 1: Config Layer ✅ COMPLETE         ├── Phase 1: Repository Layer
+├── Phase 2: Repository Layer                 ├── Phase 2: Azure Infrastructure
+├── Phase 3: Service Layer                    ├── Phase 3: CoreMachine Integration
+└── Phase 4: Azure Infrastructure             └── Phase 4: Workflow Integration
+```
+
+**Dependency Chain**:
+1. Dual DB Phase 1 (Config) → ✅ **COMPLETE** - BusinessDatabaseConfig exists
+2. Dual DB Phase 2 (Repository) → ✅ **COMPLETE** - PostgreSQLRepository supports target_database="business"
+3. ADF Phase 1 (Repository) → ✅ **COMPLETE** (29 NOV 2025)
+4. ADF Phases 2-4 → Ready to proceed
+
+**Implementation Status** (Updated 29 NOV 2025):
+1. ✅ Dual DB Phase 1 - COMPLETE (BusinessDatabaseConfig)
+2. ✅ Dual DB Phase 2 - COMPLETE (PostgreSQLRepository with target_database parameter)
+3. ✅ ADF Phase 1 - COMPLETE (AzureDataFactoryRepository)
+4. 🔲 ADF Phase 2 (Azure Infrastructure) - NEXT
+5. 🔲 Dual DB Phase 3 (Service Layer - VectorToPostGISHandler)
+6. 🔲 ADF Phase 3-4 (CoreMachine Integration)
 
 ---
 
@@ -422,180 +809,6 @@ Check for Epoch 3 code that was superseded by Epoch 4:
 | `jobs/hello_world_original_backup.py` | Backup file - archive candidate |
 | `core/logic/*.py` | May contain unused calculations |
 | `core/contracts/*.py` | Check if contracts are enforced anywhere |
-
----
-
-## ✅ COMPLETED: Service Bus Specific Exception Handling (28 NOV 2025)
-
-**Status**: ✅ **COMPLETED**
-**Priority**: **MEDIUM** - Improved debugging by distinguishing error types
-**Completed**: 28 NOV 2025
-**Author**: Robert and Geospatial Claude Legion
-
-### Summary
-
-Replaced generic `except Exception` blocks with Azure SDK specific exception handling in `infrastructure/service_bus.py`. Now distinguishes between:
-- **Permanent errors** (auth, config, quota, message size) - fail immediately, no retry
-- **Transient errors** (timeout, server busy, connection) - retry with backoff
-
-### Changes Made
-
-| Method | Lines Changed | Exceptions Handled |
-|--------|---------------|-------------------|
-| `send_message()` | 360-477 | Auth, MessageSize, EntityNotFound, Quota, Timeout, ServerBusy, Connection |
-| `batch_send_messages()` | 801-913 | Same categories with batch-specific behavior |
-| `receive_messages()` | 601-673 | Auth, EntityNotFound, Timeout, ServerBusy, Connection |
-| `peek_messages()` | 739-796 | Same as receive_messages |
-
-### Exception Categories
-
-```python
-# PERMANENT (never retry):
-ServiceBusAuthenticationError, ServiceBusAuthorizationError
-MessageSizeExceededError
-MessagingEntityNotFoundError
-ServiceBusQuotaExceededError
-
-# TRANSIENT (retry with backoff):
-OperationTimeoutError
-ServiceBusServerBusyError
-ServiceBusConnectionError
-ServiceBusCommunicationError
-```
-
-### Structured Logging
-
-All exceptions now include `extra={}` with:
-- `error_type`: Specific exception class name
-- `retryable`: Boolean for retry decisions
-- `error_category`: Category for Application Insights filtering (auth, config, quota, transient, connection, unexpected)
-
----
-
-## 🟡 LOW PRIORITY: Inconsistent Logging Levels (28 NOV 2025)
-
-**Status**: 🟡 **NOT STARTED**
-**Priority**: **LOW** - Code quality improvement
-**Impact**: Consistent log severity for better alerting
-**Author**: Robert and Geospatial Claude Legion
-
-### Problem Statement
-
-Same severity events are logged at different levels across the codebase:
-- Some failures logged as `logger.error()`
-- Similar failures logged as `logger.warning()`
-
-### Examples Found
-
-| File | Line | Current | Should Be |
-|------|------|---------|-----------|
-| `core/machine.py` | ~360 | `logger.error()` for registry lookup | ERROR (correct) |
-| `core/machine.py` | ~405-407 | `logger.warning()` for fetch failure | ERROR (should match) |
-
-### Guidelines to Establish
-
-| Level | When to Use |
-|-------|-------------|
-| ERROR | Operation failed, job/task will fail |
-| WARNING | Recoverable issue, graceful degradation |
-| INFO | Normal operations, milestones |
-| DEBUG | Detailed troubleshooting |
-
-### Implementation Steps
-
-1. [ ] Audit `core/machine.py` for logging level consistency
-2. [ ] Audit `core/state_manager.py` for logging level consistency
-3. [ ] Document logging level guidelines in CLAUDE.md
-4. [ ] Apply consistent levels across CoreMachine
-
----
-
-## 🟡 LOW PRIORITY: Missing Error Source Field (28 NOV 2025)
-
-**Status**: 🟡 **NOT STARTED**
-**Priority**: **LOW** - Debugging improvement
-**Impact**: Easier error triage in Application Insights
-**Author**: Robert and Geospatial Claude Legion
-
-### Problem Statement
-
-Hard to distinguish where errors originate:
-- Orchestration layer (CoreMachine)
-- Execution layer (task handlers)
-- Infrastructure layer (database, blob, queue)
-
-### Solution
-
-Add `error_source` field to structured logging:
-
-```python
-logger.error(
-    "Operation failed",
-    extra={
-        'error_source': 'orchestration',  # or 'execution', 'infrastructure'
-        'error_type': type(e).__name__,
-        ...
-    }
-)
-```
-
-### Application Insights Query
-
-```kql
-traces
-| where customDimensions.error_source == "infrastructure"
-| summarize count() by customDimensions.error_type
-```
-
-### Implementation Steps
-
-1. [ ] Define error_source enum/constants
-2. [ ] Add to `CoreMachineErrorHandler.handle_operation()`
-3. [ ] Add to `log_nested_error()`
-4. [ ] Update infrastructure layer error logging
-
----
-
-## 🟢 NICE-TO-HAVE: Retry Telemetry (28 NOV 2025)
-
-**Status**: 🟢 **NOT STARTED**
-**Priority**: **NICE-TO-HAVE** - Enhanced monitoring
-**Impact**: Track retry patterns for optimization
-**Author**: Robert and Geospatial Claude Legion
-
-### Problem Statement
-
-Retry attempts are not fully tracked in structured logging. Cannot answer:
-- How many retries are typical?
-- Which tasks retry most?
-- What's the retry success rate?
-
-### Location
-
-`core/machine.py` lines ~938-949 - retry logic
-
-### Solution
-
-Add retry telemetry to structured logging:
-
-```python
-logger.info(
-    "Task retry scheduled",
-    extra={
-        'retry_attempt': current_retry + 1,
-        'max_retries': max_retries,
-        'error_type': type(e).__name__,
-        'task_type': task_type,
-        'retryable': is_retryable
-    }
-)
-```
-
-### Implementation Steps
-
-1. [ ] Add retry metrics to task retry path
-2. [ ] Add retry outcome tracking (success after N retries)
-3. [ ] Create Application Insights dashboard query
 
 ---
 

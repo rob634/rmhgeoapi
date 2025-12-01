@@ -35,6 +35,8 @@ from typing import Optional, List
 from enum import Enum
 from pydantic import BaseModel, Field
 
+from .defaults import StorageDefaults, AzureDefaults, RasterDefaults
+
 
 # ============================================================================
 # COG TIER CONFIGURATION
@@ -405,18 +407,18 @@ class MultiAccountStorageConfig(BaseModel):
         default_factory=lambda: StorageAccountConfig(
             account_name=os.getenv(
                 "BRONZE_STORAGE_ACCOUNT",
-                os.getenv("STORAGE_ACCOUNT_NAME", "rmhazuregeo")
+                os.getenv("STORAGE_ACCOUNT_NAME", AzureDefaults.STORAGE_ACCOUNT_NAME)
             ),
             container_prefix="bronze",
-            vectors=os.getenv("BRONZE_VECTORS_CONTAINER", "bronze-vectors"),
-            rasters=os.getenv("BRONZE_RASTERS_CONTAINER", "bronze-rasters"),
-            misc=os.getenv("BRONZE_MISC_CONTAINER", "bronze-misc"),
-            temp=os.getenv("BRONZE_TEMP_CONTAINER", "bronze-temp"),
+            vectors=os.getenv("BRONZE_VECTORS_CONTAINER", StorageDefaults.BRONZE_VECTORS),
+            rasters=os.getenv("BRONZE_RASTERS_CONTAINER", StorageDefaults.BRONZE_RASTERS),
+            misc=os.getenv("BRONZE_MISC_CONTAINER", StorageDefaults.BRONZE_MISC),
+            temp=os.getenv("BRONZE_TEMP_CONTAINER", StorageDefaults.BRONZE_TEMP),
             # Not used in Bronze (no processed outputs):
-            cogs=os.getenv("BRONZE_COGS_CONTAINER", "bronze-notused"),
-            tiles=os.getenv("BRONZE_TILES_CONTAINER", "bronze-notused"),
-            mosaicjson=os.getenv("BRONZE_MOSAICJSON_CONTAINER", "bronze-notused"),
-            stac_assets=os.getenv("BRONZE_STAC_ASSETS_CONTAINER", "bronze-notused")
+            cogs=os.getenv("BRONZE_COGS_CONTAINER", StorageDefaults.NOT_USED),
+            tiles=os.getenv("BRONZE_TILES_CONTAINER", StorageDefaults.NOT_USED),
+            mosaicjson=os.getenv("BRONZE_MOSAICJSON_CONTAINER", StorageDefaults.NOT_USED),
+            stac_assets=os.getenv("BRONZE_STAC_ASSETS_CONTAINER", StorageDefaults.NOT_USED)
         )
     )
 
@@ -425,17 +427,17 @@ class MultiAccountStorageConfig(BaseModel):
         default_factory=lambda: StorageAccountConfig(
             account_name=os.getenv(
                 "SILVER_STORAGE_ACCOUNT",
-                os.getenv("STORAGE_ACCOUNT_NAME", "rmhazuregeo")
+                os.getenv("STORAGE_ACCOUNT_NAME", AzureDefaults.STORAGE_ACCOUNT_NAME)
             ),
             container_prefix="silver",
-            vectors=os.getenv("SILVER_VECTORS_CONTAINER", "silver-vectors"),
-            rasters=os.getenv("SILVER_RASTERS_CONTAINER", "silver-rasters"),
-            cogs=os.getenv("SILVER_COGS_CONTAINER", "silver-cogs"),
-            tiles=os.getenv("SILVER_TILES_CONTAINER", "silver-tiles"),
-            mosaicjson=os.getenv("SILVER_MOSAICJSON_CONTAINER", "silver-mosaicjson"),
-            stac_assets=os.getenv("SILVER_STAC_ASSETS_CONTAINER", "silver-stac-assets"),
-            misc=os.getenv("SILVER_MISC_CONTAINER", "silver-misc"),
-            temp=os.getenv("SILVER_TEMP_CONTAINER", "silver-temp")
+            vectors=os.getenv("SILVER_VECTORS_CONTAINER", StorageDefaults.SILVER_VECTORS),
+            rasters=os.getenv("SILVER_RASTERS_CONTAINER", StorageDefaults.SILVER_RASTERS),
+            cogs=os.getenv("SILVER_COGS_CONTAINER", StorageDefaults.SILVER_COGS),
+            tiles=os.getenv("SILVER_TILES_CONTAINER", StorageDefaults.SILVER_TILES),
+            mosaicjson=os.getenv("SILVER_MOSAICJSON_CONTAINER", StorageDefaults.SILVER_MOSAICJSON),
+            stac_assets=os.getenv("SILVER_STAC_ASSETS_CONTAINER", StorageDefaults.SILVER_STAC_ASSETS),
+            misc=os.getenv("SILVER_MISC_CONTAINER", StorageDefaults.SILVER_MISC),
+            temp=os.getenv("SILVER_TEMP_CONTAINER", StorageDefaults.SILVER_TEMP)
         )
     )
 
@@ -444,17 +446,17 @@ class MultiAccountStorageConfig(BaseModel):
         default_factory=lambda: StorageAccountConfig(
             account_name=os.getenv(
                 "SILVEREXT_STORAGE_ACCOUNT",
-                os.getenv("STORAGE_ACCOUNT_NAME", "rmhazuregeo")
+                os.getenv("STORAGE_ACCOUNT_NAME", AzureDefaults.STORAGE_ACCOUNT_NAME)
             ),
             container_prefix="silverext",
-            vectors=os.getenv("SILVEREXT_VECTORS_CONTAINER", "silverext-vectors"),
-            rasters=os.getenv("SILVEREXT_RASTERS_CONTAINER", "silverext-rasters"),
-            cogs=os.getenv("SILVEREXT_COGS_CONTAINER", "silverext-cogs"),
-            tiles=os.getenv("SILVEREXT_TILES_CONTAINER", "silverext-tiles"),
-            mosaicjson=os.getenv("SILVEREXT_MOSAICJSON_CONTAINER", "silverext-mosaicjson"),
-            stac_assets=os.getenv("SILVEREXT_STAC_ASSETS_CONTAINER", "silverext-stac-assets"),
-            misc=os.getenv("SILVEREXT_MISC_CONTAINER", "silverext-misc"),
-            temp=os.getenv("SILVEREXT_TEMP_CONTAINER", "silverext-temp")
+            vectors=os.getenv("SILVEREXT_VECTORS_CONTAINER", StorageDefaults.SILVEREXT_VECTORS),
+            rasters=os.getenv("SILVEREXT_RASTERS_CONTAINER", StorageDefaults.SILVEREXT_RASTERS),
+            cogs=os.getenv("SILVEREXT_COGS_CONTAINER", StorageDefaults.SILVEREXT_COGS),
+            tiles=os.getenv("SILVEREXT_TILES_CONTAINER", StorageDefaults.SILVEREXT_TILES),
+            mosaicjson=os.getenv("SILVEREXT_MOSAICJSON_CONTAINER", StorageDefaults.SILVEREXT_MOSAICJSON),
+            stac_assets=os.getenv("SILVEREXT_STAC_ASSETS_CONTAINER", StorageDefaults.SILVEREXT_STAC_ASSETS),
+            misc=os.getenv("SILVEREXT_MISC_CONTAINER", StorageDefaults.SILVEREXT_MISC),
+            temp=os.getenv("SILVEREXT_TEMP_CONTAINER", StorageDefaults.SILVEREXT_TEMP)
         )
     )
 
@@ -463,17 +465,17 @@ class MultiAccountStorageConfig(BaseModel):
         default_factory=lambda: StorageAccountConfig(
             account_name=os.getenv(
                 "GOLD_STORAGE_ACCOUNT",
-                os.getenv("STORAGE_ACCOUNT_NAME", "rmhazuregeo")
+                os.getenv("STORAGE_ACCOUNT_NAME", AzureDefaults.STORAGE_ACCOUNT_NAME)
             ),
             container_prefix="gold",
-            vectors=os.getenv("GOLD_GEOPARQUET_CONTAINER", "gold-geoparquet"),
-            rasters=os.getenv("GOLD_RASTERS_CONTAINER", "gold-notused"),
-            cogs=os.getenv("GOLD_COGS_CONTAINER", "gold-notused"),
-            tiles=os.getenv("GOLD_TILES_CONTAINER", "gold-notused"),
-            mosaicjson=os.getenv("GOLD_MOSAICJSON_CONTAINER", "gold-notused"),
-            stac_assets=os.getenv("GOLD_STAC_ASSETS_CONTAINER", "gold-notused"),
-            misc=os.getenv("GOLD_H3_GRIDS_CONTAINER", "gold-h3-grids"),
-            temp=os.getenv("GOLD_TEMP_CONTAINER", "gold-temp")
+            vectors=os.getenv("GOLD_GEOPARQUET_CONTAINER", StorageDefaults.GOLD_GEOPARQUET),
+            rasters=os.getenv("GOLD_RASTERS_CONTAINER", StorageDefaults.NOT_USED),
+            cogs=os.getenv("GOLD_COGS_CONTAINER", StorageDefaults.NOT_USED),
+            tiles=os.getenv("GOLD_TILES_CONTAINER", StorageDefaults.NOT_USED),
+            mosaicjson=os.getenv("GOLD_MOSAICJSON_CONTAINER", StorageDefaults.NOT_USED),
+            stac_assets=os.getenv("GOLD_STAC_ASSETS_CONTAINER", StorageDefaults.NOT_USED),
+            misc=os.getenv("GOLD_H3_GRIDS_CONTAINER", StorageDefaults.GOLD_H3_GRIDS),
+            temp=os.getenv("GOLD_TEMP_CONTAINER", StorageDefaults.GOLD_TEMP)
         )
     )
 

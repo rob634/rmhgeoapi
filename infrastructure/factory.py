@@ -334,6 +334,46 @@ class RepositoryFactory:
         return duckdb_repo
 
     @staticmethod
+    def create_data_factory_repository() -> 'AzureDataFactoryRepository':
+        """
+        Create Azure Data Factory repository for pipeline orchestration.
+
+        Use this to trigger ADF pipelines from CoreMachine jobs for
+        database-to-database ETL operations with audit logging.
+
+        Configuration (via environment variables):
+        - ADF_SUBSCRIPTION_ID: Azure subscription ID (required)
+        - ADF_RESOURCE_GROUP: Resource group (default: rmhazure_rg)
+        - ADF_FACTORY_NAME: Data Factory instance name (required)
+
+        Returns:
+            AzureDataFactoryRepository singleton instance
+
+        Raises:
+            RuntimeError: If ADF SDK not installed or configuration missing
+
+        Example:
+            # Get repository
+            adf_repo = RepositoryFactory.create_data_factory_repository()
+
+            # Trigger pipeline
+            result = adf_repo.trigger_pipeline(
+                "CopyStagingToBusinessData",
+                parameters={"table_name": "my_table", "job_id": "abc123"}
+            )
+
+            # Wait for completion
+            final = adf_repo.wait_for_pipeline_completion(result['run_id'])
+        """
+        from .data_factory import AzureDataFactoryRepository
+
+        logger.info("🏭 Creating Azure Data Factory repository")
+        adf_repo = AzureDataFactoryRepository.instance()
+        logger.info("✅ Azure Data Factory repository created successfully")
+
+        return adf_repo
+
+    @staticmethod
     def create_cosmos_repository(
         account_url: Optional[str] = None,
         database_name: Optional[str] = None

@@ -972,7 +972,17 @@ class CoreMachine:
                     'permanent_failure': True
                 }
 
-            self.logger.warning(f"🔄 RETRY LOGIC STARTING for task {task_message.task_id[:16]} (error_type: {error_type})")
+            self.logger.info(
+                f"🔄 RETRY LOGIC STARTING for task {task_message.task_id[:16]} (error_type: {error_type})",
+                extra={
+                    'checkpoint': 'RETRY_LOGIC_START',
+                    'error_source': 'orchestration',
+                    'task_id': task_message.task_id,
+                    'job_id': task_message.parent_job_id,
+                    'error_type': error_type,
+                    'retry_event': 'start'
+                }
+            )
 
             # DEBUGGING: Update error_details to confirm we reached retry logic
             try:
@@ -1000,7 +1010,19 @@ class CoreMachine:
                 self.logger.info(f"📋 Task found: retry_count={task_record.retry_count}, max={config.task_max_retries}")
 
             if task_record and task_record.retry_count < config.task_max_retries:
-                self.logger.warning(f"🔄 RETRY CONDITION MET: retry_count ({task_record.retry_count}) < max_retries ({config.task_max_retries})")
+                self.logger.info(
+                    f"🔄 RETRY CONDITION MET: retry_count ({task_record.retry_count}) < max_retries ({config.task_max_retries})",
+                    extra={
+                        'checkpoint': 'RETRY_CONDITION_MET',
+                        'error_source': 'orchestration',
+                        'task_id': task_message.task_id,
+                        'job_id': task_message.parent_job_id,
+                        'current_retry_count': task_record.retry_count,
+                        'max_retries': config.task_max_retries,
+                        'retries_remaining': config.task_max_retries - task_record.retry_count,
+                        'retry_event': 'condition_met'
+                    }
+                )
                 # Retry needed - calculate exponential backoff delay
                 retry_attempt = task_record.retry_count + 1
                 delay_seconds = min(
@@ -1008,9 +1030,21 @@ class CoreMachine:
                     config.task_retry_max_delay
                 )
 
-                self.logger.warning(
+                self.logger.info(
                     f"🔄 RETRY SCHEDULED - Task {task_message.task_id[:16]} failed (attempt {retry_attempt}/"
-                    f"{config.task_max_retries}) - will retry in {delay_seconds}s"
+                    f"{config.task_max_retries}) - will retry in {delay_seconds}s",
+                    extra={
+                        'checkpoint': 'RETRY_SCHEDULED',
+                        'error_source': 'orchestration',
+                        'task_id': task_message.task_id,
+                        'job_id': task_message.parent_job_id,
+                        'task_type': task_message.task_type,
+                        'retry_attempt': retry_attempt,
+                        'max_retries': config.task_max_retries,
+                        'delay_seconds': delay_seconds,
+                        'base_delay': config.task_retry_base_delay,
+                        'retry_event': 'scheduled'
+                    }
                 )
 
                 try:
@@ -1020,15 +1054,27 @@ class CoreMachine:
                     self.logger.debug(f"✅ retry_count incremented successfully")
 
                     # Re-queue with delay using Service Bus scheduled delivery
+                    # Modern pattern (30 NOV 2025): config.queues.tasks_queue
                     message_id = self.service_bus.send_message_with_delay(
-                        config.service_bus_tasks_queue,
+                        config.queues.tasks_queue,
                         task_message,
                         delay_seconds
                     )
 
                     self.logger.info(
                         f"✅ Task retry scheduled - attempt {retry_attempt}, "
-                        f"delay: {delay_seconds}s, message_id: {message_id}"
+                        f"delay: {delay_seconds}s, message_id: {message_id}",
+                        extra={
+                            'checkpoint': 'RETRY_QUEUED_SUCCESS',
+                            'error_source': 'orchestration',
+                            'task_id': task_message.task_id,
+                            'job_id': task_message.parent_job_id,
+                            'task_type': task_message.task_type,
+                            'retry_attempt': retry_attempt,
+                            'delay_seconds': delay_seconds,
+                            'message_id': message_id,
+                            'retry_event': 'queued'
+                        }
                     )
 
                     return {
@@ -1054,7 +1100,18 @@ class CoreMachine:
                 if task_record and task_record.retry_count >= config.task_max_retries:
                     self.logger.error(
                         f"❌ Task {task_message.task_id[:16]} exceeded max retries "
-                        f"({config.task_max_retries}) - marking task and job as FAILED"
+                        f"({config.task_max_retries}) - marking task and job as FAILED",
+                        extra={
+                            'checkpoint': 'RETRY_MAX_EXCEEDED',
+                            'error_source': 'orchestration',
+                            'task_id': task_message.task_id,
+                            'job_id': task_message.parent_job_id,
+                            'task_type': task_message.task_type,
+                            'final_retry_count': task_record.retry_count,
+                            'max_retries': config.task_max_retries,
+                            'error_details': result.error_details,
+                            'retry_event': 'max_exceeded'
+                        }
                     )
 
                     # Mark the parent job as FAILED since task cannot be recovered
@@ -1068,7 +1125,16 @@ class CoreMachine:
                     )
                     self.logger.error(
                         f"❌ Job {task_message.parent_job_id[:16]} marked as FAILED "
-                        f"due to task failure"
+                        f"due to task failure",
+                        extra={
+                            'checkpoint': 'JOB_FAILED_MAX_RETRIES',
+                            'error_source': 'orchestration',
+                            'job_id': task_message.parent_job_id,
+                            'task_id': task_message.task_id,
+                            'task_type': task_message.task_type,
+                            'final_retry_count': task_record.retry_count,
+                            'retry_event': 'job_failed'
+                        }
                     )
                 else:
                     self.logger.info(f"✅ Task {task_message.task_id[:16]} marked as FAILED in database")
@@ -1164,8 +1230,8 @@ class CoreMachine:
         successful_batches = []
         failed_batches = []
 
-        # Get queue name
-        queue_name = self.config.task_processing_queue
+        # Get queue name (modern pattern - 30 NOV 2025)
+        queue_name = self.config.queues.tasks_queue
 
         # Process in batches of 100
         for i in range(0, total_tasks, self.BATCH_SIZE):
@@ -1231,8 +1297,8 @@ class CoreMachine:
         tasks_queued = 0
         tasks_failed = 0
 
-        # Get queue name
-        queue_name = self.config.task_processing_queue
+        # Get queue name (modern pattern - 30 NOV 2025)
+        queue_name = self.config.queues.tasks_queue
 
         for idx, task_def in enumerate(task_defs):
             try:
@@ -1437,17 +1503,17 @@ class CoreMachine:
             )
 
             self.logger.debug(
-                f"📝 [STAGE_ADVANCE] Step 4: Sending message to Service Bus queue '{self.config.job_processing_queue}'... (core/machine.py:_advance_stage)",
+                f"📝 [STAGE_ADVANCE] Step 4: Sending message to Service Bus queue '{self.config.queues.jobs_queue}'... (core/machine.py:_advance_stage)",
                 extra={
                     'checkpoint': 'STAGE_ADVANCE_QUEUE_MESSAGE',
                     'job_id': job_id,
-                    'queue_name': self.config.job_processing_queue,
+                    'queue_name': self.config.queues.jobs_queue,
                     'stage': next_stage
                 }
             )
-            # Send to job queue
+            # Send to job queue (modern pattern - 30 NOV 2025)
             self.service_bus.send_message(
-                self.config.job_processing_queue,
+                self.config.queues.jobs_queue,
                 next_message
             )
             self.logger.info(
@@ -1455,7 +1521,7 @@ class CoreMachine:
                 extra={
                     'checkpoint': 'STAGE_ADVANCE_QUEUE_MESSAGE_SUCCESS',
                     'job_id': job_id,
-                    'queue_name': self.config.job_processing_queue,
+                    'queue_name': self.config.queues.jobs_queue,
                     'stage': next_stage,
                     'message_queued': True
                 }
@@ -1466,6 +1532,7 @@ class CoreMachine:
                 f"❌ [STAGE_ADVANCE] Failed to advance stage: {e} (core/machine.py:_advance_stage)",
                 extra={
                     'checkpoint': 'STAGE_ADVANCE_FAILED',
+                    'error_source': 'orchestration',  # 29 NOV 2025: For Application Insights filtering
                     'job_id': job_id,
                     'job_type': job_type,
                     'next_stage': next_stage,
@@ -1552,6 +1619,8 @@ class CoreMachine:
                 self.logger.error(
                     f"❌ finalize_job() failed for {job_type}: {finalize_error}",
                     extra={
+                        'checkpoint': 'JOB_FINALIZE_FAILED',
+                        'error_source': 'orchestration',  # 29 NOV 2025: For Application Insights filtering
                         'job_id': job_id,
                         'job_type': job_type,
                         'finalization_error': str(finalize_error),
@@ -1633,6 +1702,7 @@ class CoreMachine:
                 f"❌ CRITICAL: Job completion failed: {e}",
                 extra={
                     'checkpoint': 'JOB_COMPLETE_FAILED',
+                    'error_source': 'orchestration',  # 29 NOV 2025: For Application Insights filtering
                     'job_id': job_id,
                     'job_type': job_type,
                     'error_type': type(e).__name__,

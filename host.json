@@ -1,5 +1,9 @@
 {
   "version": "2.0",
+  "concurrency": {
+    "dynamicConcurrencyEnabled": false,
+    "snapshotPersistenceEnabled": false
+  },
   "logging": {
     "logLevel": {
       "default": "Debug",
@@ -28,19 +32,19 @@
   "functionTimeout": "00:30:00",
   "extensions": {
     "serviceBus": {
-      "prefetchCount": 8,
+      "prefetchCount": 1,
       "messageHandlerOptions": {
         "autoComplete": true,
-        "maxConcurrentCalls": 8,
+        "maxConcurrentCalls": 2,
         "maxAutoLockRenewalDuration": "00:30:00"
       }
     },
     "queues": {
       "maxPollingInterval": "00:00:02",
       "visibilityTimeout": "00:00:30",
-      "batchSize": 16,
+      "batchSize": 2,
       "maxDequeueCount": 1,
-      "newBatchThreshold": 8,
+      "newBatchThreshold": 1,
       "messageEncoding": "none"
     }
   }

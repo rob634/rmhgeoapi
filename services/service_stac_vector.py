@@ -8,6 +8,8 @@
 # PATTERNS: Service Layer, DRY (leverage PostGIS for metadata extraction)
 # ENTRY_POINTS: StacVectorService().extract_item_from_table()
 # INDEX: StacVectorService:40, extract_item_from_table:55, _get_table_extent:150
+# UPDATED: 29 NOV 2025 - Added target_database parameter for dual database support
+# DUAL_DATABASE: Vector tables in business db (ddhgeodb), STAC catalog in app db (geopgflex)
 # ============================================================================
 
 """
@@ -23,7 +25,7 @@ Strategy: DRY - Leverage PostGIS for spatial operations
 
 """
 
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Literal
 from datetime import datetime, timezone
 import logging
 import psycopg
@@ -50,12 +52,27 @@ class StacVectorService:
 
     Uses PostGIS spatial queries for extent and metadata extraction.
     Creates STAC Items with postgis:// asset links for table access.
+
+    Dual Database Architecture (29 NOV 2025):
+        - Vector tables: Default to app database (geopgflex) geo schema
+        - STAC catalog: Stored in app database (geopgflex) pgstac schema
+        - Business database (ddhgeodb): Available for future dedicated ETL database
     """
 
-    def __init__(self):
-        """Initialize STAC vector service."""
+    def __init__(self, target_database: Literal["app", "business"] = "app"):
+        """
+        Initialize STAC vector service.
+
+        Args:
+            target_database: Which database contains the vector tables (29 NOV 2025):
+                - "app" (default): App database (geopgflex) - ETL vector outputs in geo schema
+                - "business": Business database (ddhgeodb) - for future dedicated ETL database
+
+        Note: STAC items are always inserted into app database (pgstac schema).
+        """
         self.config = get_config()
-        self.stac = PgStacBootstrap()
+        self.stac = PgStacBootstrap()  # Always uses app database for pgstac
+        self.target_database = target_database
 
     def extract_item_from_table(
         self,
@@ -158,8 +175,14 @@ class StacVectorService:
             # Non-fatal: Log warning but continue - STAC item can exist without enrichment
             logger.warning(f"Metadata enrichment failed (non-fatal): {e}")
 
-        # Build asset with postgis:// link
-        asset_href = f"postgis://{self.config.postgis_host}/{self.config.postgis_database}/{schema}.{table_name}"
+        # Build asset with postgis:// link (29 NOV 2025: use correct database based on target)
+        if self.target_database == "business" and self.config.is_business_database_configured():
+            db_host = self.config.business_database.host
+            db_name = self.config.business_database.database
+        else:
+            db_host = self.config.postgis_host
+            db_name = self.config.postgis_database
+        asset_href = f"postgis://{db_host}/{db_name}/{schema}.{table_name}"
 
         assets = {
             'data': Asset(
@@ -209,8 +232,10 @@ class StacVectorService:
 
         # Use PostgreSQLRepository for managed identity support (18 NOV 2025)
         # Note: Removed dead code calling get_postgres_connection_string() - 24 NOV 2025
+        # Use target_database to route to correct database (29 NOV 2025)
         from infrastructure.postgresql import PostgreSQLRepository
-        repo = PostgreSQLRepository()
+        repo = PostgreSQLRepository(target_database=self.target_database)
+        logger.debug(f"Using target_database={self.target_database} for table metadata query")
 
         with repo._get_connection() as conn:
             with conn.cursor() as cur:

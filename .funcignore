@@ -45,6 +45,7 @@ htmlcov/
 reference/
 ancient_code/
 scripts/
+test/
 tests/
 testing/
 backup/

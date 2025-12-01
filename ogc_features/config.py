@@ -121,6 +121,13 @@ class OGCFeaturesConfig(BaseModel):
         description="Enable table optimization validation checks (spatial indexes, primary keys, etc.)"
     )
 
+    # Managed Identity Settings (29 NOV 2025)
+    # Single source of truth for default is config/database_config.py
+    managed_identity_name: str = Field(
+        default_factory=lambda: os.getenv("MANAGED_IDENTITY_NAME", "rmhpgflexadmin"),
+        description="PostgreSQL user name matching the Azure managed identity"
+    )
+
     @field_validator("postgis_host", "postgis_database", "postgis_user", "postgis_password")
     @classmethod
     def validate_required(cls, v: str, info) -> str:
@@ -156,16 +163,17 @@ class OGCFeaturesConfig(BaseModel):
 
         # Priority 1: User-Assigned Managed Identity
         if client_id:
-            identity_name = os.getenv("MANAGED_IDENTITY_NAME", "rmhpgflexadmin")
-            logger.info(f"🔐 [OGC AUTH] Using USER-ASSIGNED managed identity: {identity_name}")
+            # Use config value - single source of truth for default
+            logger.info(f"🔐 [OGC AUTH] Using USER-ASSIGNED managed identity: {self.managed_identity_name}")
             return self._build_managed_identity_connection_string(
                 client_id=client_id,
-                identity_name=identity_name
+                identity_name=self.managed_identity_name
             )
 
         # Priority 2: System-Assigned Managed Identity (running in Azure)
         if website_name:
-            identity_name = os.getenv("MANAGED_IDENTITY_NAME", website_name)
+            # For system-assigned, use website name as fallback if MANAGED_IDENTITY_NAME not set
+            identity_name = self.managed_identity_name if os.getenv("MANAGED_IDENTITY_NAME") else website_name
             logger.info(f"🔐 [OGC AUTH] Using SYSTEM-ASSIGNED managed identity: {identity_name}")
             return self._build_managed_identity_connection_string(
                 client_id=None,
@@ -198,7 +206,7 @@ class OGCFeaturesConfig(BaseModel):
     def _build_managed_identity_connection_string(
         self,
         client_id: str = None,
-        identity_name: str = "rmhpgflexadmin"
+        identity_name: str = None  # Required - caller must provide from config
     ) -> str:
         """
         Build PostgreSQL connection string using Azure Managed Identity.
@@ -210,7 +218,7 @@ class OGCFeaturesConfig(BaseModel):
             client_id: Client ID for user-assigned managed identity.
                       If None, uses system-assigned identity.
             identity_name: PostgreSQL user name matching the managed identity.
-                          Defaults to 'rmhpgflexadmin' for user-assigned identity.
+                          Required - caller must provide (default in config).
 
         Returns:
             PostgreSQL connection string with managed identity token.

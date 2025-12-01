@@ -80,8 +80,9 @@ def create_vector_stac(params: dict) -> dict[str, Any]:
 
     try:
         # STEP 1: Extract STAC Item from PostGIS table
+        # Use app database geo schema (default behavior)
         logger.info(f"📊 STEP 1: Extracting STAC metadata from {schema}.{table_name}...")
-        stac_service = StacVectorService()
+        stac_service = StacVectorService(target_database="app")
 
         # Build additional properties for ETL tracking
         additional_properties = {
@@ -234,8 +235,10 @@ def extract_vector_stac_metadata(params: dict) -> dict[str, Any]:
 
     try:
         # STEP 1: Initialize STAC service
-        logger.info(f"📦 STEP 1: Initializing StacVectorService...")
-        stac_service = StacVectorService()
+        # Use target_database param if provided, default to app (original behavior)
+        target_database = params.get("target_database", "app")
+        logger.info(f"📦 STEP 1: Initializing StacVectorService (target_database={target_database})...")
+        stac_service = StacVectorService(target_database=target_database)
         logger.info(f"✅ STEP 1: StacVectorService initialized")
 
         # STEP 2: Extract STAC Item from PostGIS table

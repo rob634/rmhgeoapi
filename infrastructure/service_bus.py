@@ -363,6 +363,7 @@ class ServiceBusRepository(IQueueRepository):
                 logger.error(
                     f"❌ Authentication/Authorization failed for {queue_name}: {e}",
                     extra={
+                        'error_source': 'infrastructure',  # 29 NOV 2025: For Application Insights filtering
                         'queue': queue_name,
                         'error_type': type(e).__name__,
                         'retryable': False,
@@ -376,6 +377,7 @@ class ServiceBusRepository(IQueueRepository):
                 logger.error(
                     f"❌ Message too large for {queue_name}: {e}",
                     extra={
+                        'error_source': 'infrastructure',  # 29 NOV 2025: For Application Insights filtering
                         'queue': queue_name,
                         'error_type': 'MessageSizeExceededError',
                         'retryable': False,
@@ -390,6 +392,7 @@ class ServiceBusRepository(IQueueRepository):
                 logger.error(
                     f"❌ Queue '{queue_name}' not found: {e}",
                     extra={
+                        'error_source': 'infrastructure',  # 29 NOV 2025: For Application Insights filtering
                         'queue': queue_name,
                         'error_type': 'MessagingEntityNotFoundError',
                         'retryable': False,
@@ -403,6 +406,7 @@ class ServiceBusRepository(IQueueRepository):
                 logger.error(
                     f"❌ Service Bus quota exceeded for {queue_name}: {e}",
                     extra={
+                        'error_source': 'infrastructure',  # 29 NOV 2025: For Application Insights filtering
                         'queue': queue_name,
                         'error_type': 'ServiceBusQuotaExceededError',
                         'retryable': False,
@@ -429,6 +433,7 @@ class ServiceBusRepository(IQueueRepository):
                     logger.error(
                         f"❌ Failed to send message after {self.max_retries} attempts (transient errors)",
                         extra={
+                            'error_source': 'infrastructure',  # 29 NOV 2025: For Application Insights filtering
                             'queue': queue_name,
                             'error_type': error_type,
                             'final_error': str(e)
@@ -468,6 +473,7 @@ class ServiceBusRepository(IQueueRepository):
                 logger.error(
                     f"❌ Unexpected error sending to {queue_name}: {error_type}: {e}",
                     extra={
+                        'error_source': 'infrastructure',  # 29 NOV 2025: For Application Insights filtering
                         'queue': queue_name,
                         'error_type': error_type,
                         'retryable': False,
@@ -569,6 +575,7 @@ class ServiceBusRepository(IQueueRepository):
                         logger.error(
                             f"❌ Failed to deserialize Service Bus message: {e}",
                             extra={
+                                'error_source': 'infrastructure',  # 29 NOV 2025: For Application Insights filtering
                                 'queue': queue_name,
                                 'message_id': msg.message_id,
                                 'error_type': 'JSONDecodeError',
@@ -603,6 +610,7 @@ class ServiceBusRepository(IQueueRepository):
             logger.error(
                 f"❌ Auth failed receiving from {queue_name}: {e}",
                 extra={
+                    'error_source': 'infrastructure',  # 29 NOV 2025: For Application Insights filtering
                     'queue': queue_name,
                     'error_type': type(e).__name__,
                     'retryable': False,
@@ -615,6 +623,7 @@ class ServiceBusRepository(IQueueRepository):
             logger.error(
                 f"❌ Queue '{queue_name}' not found: {e}",
                 extra={
+                    'error_source': 'infrastructure',  # 29 NOV 2025: For Application Insights filtering
                     'queue': queue_name,
                     'error_type': 'MessagingEntityNotFoundError',
                     'retryable': False,
@@ -641,6 +650,7 @@ class ServiceBusRepository(IQueueRepository):
             logger.error(
                 f"❌ Connection error receiving from {queue_name}: {e}",
                 extra={
+                    'error_source': 'infrastructure',  # 29 NOV 2025: For Application Insights filtering
                     'queue': queue_name,
                     'error_type': type(e).__name__,
                     'retryable': True,
@@ -654,6 +664,7 @@ class ServiceBusRepository(IQueueRepository):
             logger.error(
                 f"❌ ServiceBusError receiving from {queue_name}: {type(e).__name__}: {e}",
                 extra={
+                    'error_source': 'infrastructure',  # 29 NOV 2025: For Application Insights filtering
                     'queue': queue_name,
                     'error_type': type(e).__name__,
                     'error_category': 'service_bus_other'
@@ -665,6 +676,7 @@ class ServiceBusRepository(IQueueRepository):
             logger.error(
                 f"❌ Unexpected error receiving from {queue_name}: {type(e).__name__}: {e}",
                 extra={
+                    'error_source': 'infrastructure',  # 29 NOV 2025: For Application Insights filtering
                     'queue': queue_name,
                     'error_type': type(e).__name__,
                     'error_category': 'unexpected'
@@ -718,6 +730,7 @@ class ServiceBusRepository(IQueueRepository):
                         logger.error(
                             f"❌ Failed to deserialize peeked message: {e}",
                             extra={
+                                'error_source': 'infrastructure',  # 29 NOV 2025: For Application Insights filtering
                                 'queue': queue_name,
                                 'message_id': msg.message_id,
                                 'error_type': 'JSONDecodeError',
@@ -741,6 +754,7 @@ class ServiceBusRepository(IQueueRepository):
             logger.error(
                 f"❌ Auth failed peeking {queue_name}: {e}",
                 extra={
+                    'error_source': 'infrastructure',  # 29 NOV 2025: For Application Insights filtering
                     'queue': queue_name,
                     'error_type': type(e).__name__,
                     'retryable': False,
@@ -753,6 +767,7 @@ class ServiceBusRepository(IQueueRepository):
             logger.error(
                 f"❌ Queue '{queue_name}' not found for peek: {e}",
                 extra={
+                    'error_source': 'infrastructure',  # 29 NOV 2025: For Application Insights filtering
                     'queue': queue_name,
                     'error_type': 'MessagingEntityNotFoundError',
                     'retryable': False,
@@ -777,6 +792,7 @@ class ServiceBusRepository(IQueueRepository):
             logger.error(
                 f"❌ ServiceBusError peeking {queue_name}: {type(e).__name__}: {e}",
                 extra={
+                    'error_source': 'infrastructure',  # 29 NOV 2025: For Application Insights filtering
                     'queue': queue_name,
                     'error_type': type(e).__name__,
                     'error_category': 'service_bus_other'
@@ -788,6 +804,7 @@ class ServiceBusRepository(IQueueRepository):
             logger.error(
                 f"❌ Unexpected error peeking {queue_name}: {type(e).__name__}: {e}",
                 extra={
+                    'error_source': 'infrastructure',  # 29 NOV 2025: For Application Insights filtering
                     'queue': queue_name,
                     'error_type': type(e).__name__,
                     'error_category': 'unexpected'
@@ -938,6 +955,7 @@ class ServiceBusRepository(IQueueRepository):
                         logger.error(
                             f"❌ Auth failed on batch {batch_count}: {e}",
                             extra={
+                                'error_source': 'infrastructure',  # 29 NOV 2025: For Application Insights filtering
                                 'queue': queue_name,
                                 'error_type': type(e).__name__,
                                 'retryable': False,
@@ -953,6 +971,7 @@ class ServiceBusRepository(IQueueRepository):
                         logger.error(
                             f"❌ Queue '{queue_name}' not found during batch: {e}",
                             extra={
+                                'error_source': 'infrastructure',  # 29 NOV 2025: For Application Insights filtering
                                 'queue': queue_name,
                                 'error_type': 'MessagingEntityNotFoundError',
                                 'retryable': False,
@@ -965,6 +984,7 @@ class ServiceBusRepository(IQueueRepository):
                         logger.error(
                             f"❌ Quota exceeded at batch {batch_count}: {e}",
                             extra={
+                                'error_source': 'infrastructure',  # 29 NOV 2025: For Application Insights filtering
                                 'queue': queue_name,
                                 'error_type': 'ServiceBusQuotaExceededError',
                                 'retryable': False,
@@ -980,6 +1000,7 @@ class ServiceBusRepository(IQueueRepository):
                         logger.error(
                             f"❌ Batch {batch_count} message too large: {e}",
                             extra={
+                                'error_source': 'infrastructure',  # 29 NOV 2025: For Application Insights filtering
                                 'queue': queue_name,
                                 'error_type': 'MessageSizeExceededError',
                                 'retryable': False,
@@ -1027,6 +1048,7 @@ class ServiceBusRepository(IQueueRepository):
                         logger.error(
                             f"❌ Unexpected error on batch {batch_count}: {error_type}: {e}",
                             extra={
+                                'error_source': 'infrastructure',  # 29 NOV 2025: For Application Insights filtering
                                 'queue': queue_name,
                                 'error_type': error_type,
                                 'retryable': False,

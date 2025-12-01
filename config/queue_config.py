@@ -36,6 +36,8 @@ import os
 from typing import Optional
 from pydantic import BaseModel, Field
 
+from .defaults import QueueDefaults
+
 
 # ============================================================================
 # QUEUE NAMES
@@ -43,8 +45,8 @@ from pydantic import BaseModel, Field
 
 class QueueNames:
     """Queue name constants for easy access."""
-    JOBS = "geospatial-jobs"
-    TASKS = "geospatial-tasks"
+    JOBS = QueueDefaults.JOBS_QUEUE
+    TASKS = QueueDefaults.TASKS_QUEUE
 
 
 # ============================================================================
@@ -72,25 +74,25 @@ class QueueConfig(BaseModel):
 
     # Queue names
     jobs_queue: str = Field(
-        default=QueueNames.JOBS,
+        default=QueueDefaults.JOBS_QUEUE,
         description="Service Bus queue name for job messages"
     )
 
     tasks_queue: str = Field(
-        default=QueueNames.TASKS,
+        default=QueueDefaults.TASKS_QUEUE,
         description="Service Bus queue name for task messages"
     )
 
     # Batch processing
     max_batch_size: int = Field(
-        default=100,
+        default=QueueDefaults.MAX_BATCH_SIZE,
         ge=1,
         le=1000,
         description="Maximum batch size for Service Bus messages"
     )
 
     batch_threshold: int = Field(
-        default=50,
+        default=QueueDefaults.BATCH_THRESHOLD,
         ge=1,
         le=500,
         description="Threshold for triggering batch send (messages)"
@@ -98,25 +100,15 @@ class QueueConfig(BaseModel):
 
     # Retry configuration
     retry_count: int = Field(
-        default=3,
+        default=QueueDefaults.RETRY_COUNT,
         ge=0,
         le=10,
         description="Number of retry attempts for Service Bus operations"
     )
 
-    # Legacy Storage Queue names (DEPRECATED - NOT SUPPORTED)
-    # These exist only for backward compatibility during migration
-    job_processing_queue: str = Field(
-        default="geospatial-jobs",
-        deprecated="Storage Queues not supported - use Service Bus only",
-        description="DEPRECATED: Azure Storage Queue for job orchestration messages"
-    )
-
-    task_processing_queue: str = Field(
-        default="geospatial-tasks",
-        deprecated="Storage Queues not supported - use Service Bus only",
-        description="DEPRECATED: Azure Storage Queue for individual task processing"
-    )
+    # NOTE: Legacy Storage Queue fields REMOVED (30 NOV 2025)
+    # Storage Queues are NOT supported - Service Bus only.
+    # Use jobs_queue and tasks_queue properties instead.
 
     @classmethod
     def from_environment(cls):
@@ -125,12 +117,9 @@ class QueueConfig(BaseModel):
             connection_string=os.environ.get("ServiceBusConnection"),
             # Check both SERVICE_BUS_NAMESPACE and Azure Functions binding variable
             namespace=os.environ.get("SERVICE_BUS_NAMESPACE") or os.environ.get("ServiceBusConnection__fullyQualifiedNamespace"),
-            jobs_queue=os.environ.get("SERVICE_BUS_JOBS_QUEUE", QueueNames.JOBS),
-            tasks_queue=os.environ.get("SERVICE_BUS_TASKS_QUEUE", QueueNames.TASKS),
-            max_batch_size=int(os.environ.get("SERVICE_BUS_MAX_BATCH_SIZE", "100")),
-            batch_threshold=int(os.environ.get("SERVICE_BUS_BATCH_THRESHOLD", "50")),
-            retry_count=int(os.environ.get("SERVICE_BUS_RETRY_COUNT", "3")),
-            # Legacy fields
-            job_processing_queue=os.environ.get("JOB_PROCESSING_QUEUE", "geospatial-jobs"),
-            task_processing_queue=os.environ.get("TASK_PROCESSING_QUEUE", "geospatial-tasks")
+            jobs_queue=os.environ.get("SERVICE_BUS_JOBS_QUEUE", QueueDefaults.JOBS_QUEUE),
+            tasks_queue=os.environ.get("SERVICE_BUS_TASKS_QUEUE", QueueDefaults.TASKS_QUEUE),
+            max_batch_size=int(os.environ.get("SERVICE_BUS_MAX_BATCH_SIZE", str(QueueDefaults.MAX_BATCH_SIZE))),
+            batch_threshold=int(os.environ.get("SERVICE_BUS_BATCH_THRESHOLD", str(QueueDefaults.BATCH_THRESHOLD))),
+            retry_count=int(os.environ.get("SERVICE_BUS_RETRY_COUNT", str(QueueDefaults.RETRY_COUNT))),
         )

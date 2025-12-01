@@ -35,6 +35,8 @@ import os
 from typing import Optional
 from pydantic import BaseModel, Field
 
+from .defaults import RasterDefaults
+
 
 # ============================================================================
 # RASTER CONFIGURATION
@@ -47,10 +49,24 @@ class RasterConfig(BaseModel):
     Controls COG creation, validation, and processing settings.
     """
 
-    # Pipeline selection
+    # Pipeline selection and size limits
     size_threshold_mb: int = Field(
-        default=1000,  # 1 GB
-        description="File size threshold (MB) for pipeline selection (small vs large file)"
+        default=RasterDefaults.SIZE_THRESHOLD_MB,
+        description="File size threshold (MB) for pipeline selection (small vs large file). "
+                    "Files smaller than this use in-memory processing, larger files use chunked."
+    )
+
+    max_file_size_mb: int = Field(
+        default=RasterDefaults.MAX_FILE_SIZE_MB,
+        description="Maximum allowed file size in MB for raster processing. "
+                    "Files larger than this are rejected at pre-flight validation. "
+                    "Set to 0 to disable size limit."
+    )
+
+    in_memory_threshold_mb: int = Field(
+        default=RasterDefaults.IN_MEMORY_THRESHOLD_MB,
+        description="Files smaller than this threshold use in-memory processing by default. "
+                    "Files larger use disk-based temp storage. Can be overridden per-job."
     )
 
     # Intermediate storage
@@ -61,65 +77,74 @@ class RasterConfig(BaseModel):
     )
 
     intermediate_prefix: str = Field(
-        default="temp/raster_etl",
+        default=RasterDefaults.INTERMEDIATE_PREFIX,
         description="Blob path prefix for raster ETL intermediate files (large file tiles)",
         examples=["temp/raster_etl", "intermediate/raster"]
     )
 
     # COG creation settings
     cog_compression: str = Field(
-        default="deflate",
+        default=RasterDefaults.COG_COMPRESSION,
         description="Default compression algorithm for COG creation",
         examples=["deflate", "lzw", "zstd", "jpeg", "webp", "lerc_deflate"]
     )
 
     cog_jpeg_quality: int = Field(
-        default=85,
+        default=RasterDefaults.COG_JPEG_QUALITY,
         ge=1,
         le=100,
         description="JPEG quality for lossy compression (1-100, only applies to jpeg/webp)"
     )
 
     cog_tile_size: int = Field(
-        default=512,
+        default=RasterDefaults.COG_TILE_SIZE,
         description="Internal tile size for COG (pixels)"
     )
 
     cog_in_memory: bool = Field(
-        default=True,
-        description="Default setting for COG processing mode (in-memory vs disk-based). "
-                    "Can be overridden per-job via 'in_memory' parameter. "
-                    "In-memory (True) is faster for small files (<1GB) but uses more RAM. "
-                    "Disk-based (False) uses local SSD temp storage, better for large files."
+        default=RasterDefaults.COG_IN_MEMORY,
+        description="""Default setting for COG processing mode (in-memory vs disk-based).
+
+        WHY FALSE (29 NOV 2025):
+        - With maxConcurrentCalls=4, multiple raster jobs can run simultaneously
+        - Each in-memory raster can use 2+ GB RAM during reprojection
+        - 4 concurrent × 2 GB = 8 GB = OOM risk on 8 GB plan
+        - Disk-based uses Azure Functions SSD-backed /tmp (fast, safe)
+        - 10-20% speed penalty is worth the stability
+
+        Can be overridden per-job via 'in_memory' parameter.
+        In-memory (True) is faster for small files (<500MB) but risky with concurrency.
+        Disk-based (False) uses local SSD temp storage, handles any file size safely.
+        """
     )
 
     # Validation settings
     target_crs: str = Field(
-        default="EPSG:4326",
+        default=RasterDefaults.TARGET_CRS,
         description="Target CRS for reprojection (WGS84)",
         examples=["EPSG:4326", "EPSG:3857"]
     )
 
     overview_resampling: str = Field(
-        default="average",
+        default=RasterDefaults.OVERVIEW_RESAMPLING,
         description="Resampling method for overview generation",
         examples=["average", "bilinear", "cubic", "nearest"]
     )
 
     reproject_resampling: str = Field(
-        default="bilinear",
+        default=RasterDefaults.REPROJECT_RESAMPLING,
         description="Resampling method for reprojection",
         examples=["bilinear", "cubic", "nearest", "lanczos"]
     )
 
     strict_validation: bool = Field(
-        default=True,
+        default=RasterDefaults.STRICT_VALIDATION,
         description="Enable strict validation (fails on warnings)"
     )
 
     # MosaicJSON settings
     mosaicjson_maxzoom: int = Field(
-        default=19,
+        default=RasterDefaults.MOSAICJSON_MAXZOOM,
         ge=0,
         le=24,
         description="Default maximum zoom level for MosaicJSON tile serving. "
@@ -133,7 +158,7 @@ class RasterConfig(BaseModel):
 
     # STAC configuration
     stac_default_collection: str = Field(
-        default="system-rasters",
+        default=RasterDefaults.STAC_DEFAULT_COLLECTION,
         description="""Default STAC collection for standalone raster processing.
 
         Purpose:
@@ -158,17 +183,24 @@ class RasterConfig(BaseModel):
     def from_environment(cls):
         """Load from environment variables."""
         return cls(
-            size_threshold_mb=int(os.environ.get("RASTER_SIZE_THRESHOLD_MB", "1000")),
+            # Size thresholds and limits
+            size_threshold_mb=int(os.environ.get("RASTER_SIZE_THRESHOLD_MB", str(RasterDefaults.SIZE_THRESHOLD_MB))),
+            max_file_size_mb=int(os.environ.get("RASTER_MAX_FILE_SIZE_MB", str(RasterDefaults.MAX_FILE_SIZE_MB))),
+            in_memory_threshold_mb=int(os.environ.get("RASTER_IN_MEMORY_THRESHOLD_MB", str(RasterDefaults.IN_MEMORY_THRESHOLD_MB))),
+            # Intermediate storage
             intermediate_tiles_container=os.environ.get("INTERMEDIATE_TILES_CONTAINER"),
-            intermediate_prefix=os.environ.get("RASTER_INTERMEDIATE_PREFIX", "temp/raster_etl"),
-            cog_compression=os.environ.get("RASTER_COG_COMPRESSION", "deflate"),
-            cog_jpeg_quality=int(os.environ.get("RASTER_COG_JPEG_QUALITY", "85")),
-            cog_tile_size=int(os.environ.get("RASTER_COG_TILE_SIZE", "512")),
-            cog_in_memory=os.environ.get("RASTER_COG_IN_MEMORY", "true").lower() == "true",
-            target_crs=os.environ.get("RASTER_TARGET_CRS", "EPSG:4326"),
-            overview_resampling=os.environ.get("RASTER_OVERVIEW_RESAMPLING", "average"),
-            reproject_resampling=os.environ.get("RASTER_REPROJECT_RESAMPLING", "bilinear"),
-            strict_validation=os.environ.get("RASTER_STRICT_VALIDATION", "true").lower() == "true",
-            mosaicjson_maxzoom=int(os.environ.get("RASTER_MOSAICJSON_MAXZOOM", "19")),
-            stac_default_collection=os.environ.get("STAC_DEFAULT_COLLECTION", "system-rasters")
+            intermediate_prefix=os.environ.get("RASTER_INTERMEDIATE_PREFIX", RasterDefaults.INTERMEDIATE_PREFIX),
+            # COG settings
+            cog_compression=os.environ.get("RASTER_COG_COMPRESSION", RasterDefaults.COG_COMPRESSION),
+            cog_jpeg_quality=int(os.environ.get("RASTER_COG_JPEG_QUALITY", str(RasterDefaults.COG_JPEG_QUALITY))),
+            cog_tile_size=int(os.environ.get("RASTER_COG_TILE_SIZE", str(RasterDefaults.COG_TILE_SIZE))),
+            cog_in_memory=os.environ.get("RASTER_COG_IN_MEMORY", str(RasterDefaults.COG_IN_MEMORY).lower()).lower() == "true",
+            # Validation settings
+            target_crs=os.environ.get("RASTER_TARGET_CRS", RasterDefaults.TARGET_CRS),
+            overview_resampling=os.environ.get("RASTER_OVERVIEW_RESAMPLING", RasterDefaults.OVERVIEW_RESAMPLING),
+            reproject_resampling=os.environ.get("RASTER_REPROJECT_RESAMPLING", RasterDefaults.REPROJECT_RESAMPLING),
+            strict_validation=os.environ.get("RASTER_STRICT_VALIDATION", str(RasterDefaults.STRICT_VALIDATION).lower()).lower() == "true",
+            # MosaicJSON and STAC
+            mosaicjson_maxzoom=int(os.environ.get("RASTER_MOSAICJSON_MAXZOOM", str(RasterDefaults.MOSAICJSON_MAXZOOM))),
+            stac_default_collection=os.environ.get("STAC_DEFAULT_COLLECTION", RasterDefaults.STAC_DEFAULT_COLLECTION)
         )

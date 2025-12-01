@@ -506,7 +506,16 @@ class StateManager:
                 raise RuntimeError("Failed to mark job as completed")
 
         except Exception as e:
-            self.logger.error(f"Failed to complete job: {e}")
+            self.logger.error(
+                f"Failed to complete job: {e}",
+                extra={
+                    'checkpoint': 'STATE_JOB_COMPLETE_FAILED',
+                    'error_source': 'state',  # 29 NOV 2025: For Application Insights filtering
+                    'job_id': job_id,
+                    'error_type': type(e).__name__,
+                    'error_message': str(e)
+                }
+            )
             raise RuntimeError(f"Job completion failed: {e}")
 
     # ========================================================================
@@ -582,7 +591,17 @@ class StateManager:
                     raise RuntimeError(f"Failed to advance stage: {job_id}")
 
         except Exception as e:
-            self.logger.error(f"Stage completion handling failed: {e}")
+            self.logger.error(
+                f"Stage completion handling failed: {e}",
+                extra={
+                    'checkpoint': 'STATE_STAGE_COMPLETE_FAILED',
+                    'error_source': 'state',  # 29 NOV 2025: For Application Insights filtering
+                    'job_id': job_id,
+                    'stage': stage,
+                    'error_type': type(e).__name__,
+                    'error_message': str(e)
+                }
+            )
             raise RuntimeError(f"Stage completion failed: {e}")
 
     # ========================================================================
@@ -673,7 +692,18 @@ class StateManager:
             return stage_completion
 
         except Exception as e:
-            self.logger.error(f"Task completion SQL failed: {e}")
+            self.logger.error(
+                f"Task completion SQL failed: {e}",
+                extra={
+                    'checkpoint': 'STATE_TASK_COMPLETE_SQL_FAILED',
+                    'error_source': 'state',  # 29 NOV 2025: For Application Insights filtering
+                    'task_id': task_id,
+                    'job_id': job_id,
+                    'stage': stage,
+                    'error_type': type(e).__name__,
+                    'error_message': str(e)
+                }
+            )
             raise RuntimeError(f"Task SQL completion failed: {e}")
 
     # ========================================================================
@@ -823,7 +853,16 @@ class StateManager:
             return True
 
         except Exception as e:
-            self.logger.error(f"Failed to mark job as failed: {e}")
+            self.logger.error(
+                f"Failed to mark job as failed: {e}",
+                extra={
+                    'checkpoint': 'STATE_MARK_JOB_FAILED_ERROR',
+                    'error_source': 'state',  # 29 NOV 2025: For Application Insights filtering
+                    'job_id': job_id,
+                    'error_type': type(e).__name__,
+                    'error_message': str(e)
+                }
+            )
             return False
 
     def mark_task_failed(
@@ -850,5 +889,14 @@ class StateManager:
             return True
 
         except Exception as e:
-            self.logger.error(f"Failed to mark task as failed: {e}")
+            self.logger.error(
+                f"Failed to mark task as failed: {e}",
+                extra={
+                    'checkpoint': 'STATE_MARK_TASK_FAILED_ERROR',
+                    'error_source': 'state',  # 29 NOV 2025: For Application Insights filtering
+                    'task_id': task_id,
+                    'error_type': type(e).__name__,
+                    'error_message': str(e)
+                }
+            )
             return False

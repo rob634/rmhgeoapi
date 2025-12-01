@@ -70,6 +70,9 @@ from .process_large_raster import ProcessLargeRasterWorkflow
 from .process_fathom import ProcessFathomWorkflow
 from .process_vector import ProcessVectorJob  # Idempotent vector ETL (26 NOV 2025)
 from .process_raster_v2 import ProcessRasterV2Job  # Mixin pattern raster ETL (28 NOV 2025)
+from .raster_mixin import RasterMixin  # Shared raster infrastructure (30 NOV 2025)
+from .process_raster_collection_v2 import ProcessRasterCollectionV2Job  # Mixin pattern collection ETL (30 NOV 2025)
+from .process_large_raster_v2 import ProcessLargeRasterV2Job  # Mixin pattern large raster ETL (30 NOV 2025)
 
 # ============================================================================
 # EXPLICIT JOB REGISTRY
@@ -98,6 +101,8 @@ ALL_JOBS = {
     "process_fathom": ProcessFathomWorkflow,  # Fathom flood hazard consolidation (26 NOV 2025)
     "process_vector": ProcessVectorJob,  # Idempotent vector ETL with DELETE+INSERT pattern (26 NOV 2025)
     "process_raster_v2": ProcessRasterV2Job,  # Mixin pattern raster ETL - clean slate (28 NOV 2025)
+    "process_raster_collection_v2": ProcessRasterCollectionV2Job,  # Mixin pattern collection ETL (30 NOV 2025)
+    "process_large_raster_v2": ProcessLargeRasterV2Job,  # Mixin pattern large raster tiling (30 NOV 2025)
 
     # Test/Diagnostic Workflows
     "list_container_contents_diamond": ListContainerContentsDiamondWorkflow,  # TEST ONLY - Fan-in demo (16 OCT 2025)

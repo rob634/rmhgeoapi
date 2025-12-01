@@ -1,9 +1,364 @@
 # Project History
 
-**Last Updated**: 28 NOV 2025 - process_raster_v2 with JobBaseMixin + JPEG Fix ✅
+**Last Updated**: 30 NOV 2025 - Dual Database Architecture Complete ✅
 **Note**: For project history prior to September 11, 2025, see **OLDER_HISTORY.md**
 
 This document tracks completed architectural changes and improvements to the Azure Geospatial ETL Pipeline from September 11, 2025 onwards.
+
+---
+
+## 30 NOV 2025: Dual Database Architecture - App vs Business Data 🗄️
+
+**Status**: ✅ **COMPLETE** - Foundation for production data separation
+**Impact**: Security, data protection, operational isolation
+**Author**: Robert and Geospatial Claude Legion
+
+### Achievement
+
+Split database architecture separating **app infrastructure** (can nuke/rebuild) from **business data** (protected, persistent):
+
+```
+APP DATABASE (geopgflex) - Full DDL permissions
+├── app schema      (jobs, tasks, api_requests) - IaC, can nuke
+├── pgstac schema   (STAC metadata catalog) - IaC, can nuke
+├── geo schema      (admin0 countries, app reference data)
+└── h3 schema       (H3 grids)
+Identity: rmhpgflexadmin (CREATE/DROP SCHEMA, ALL PRIVILEGES)
+
+BUSINESS DATABASE (geodata) - Restricted CRUD permissions
+└── geo schema      (ETL outputs from process_vector)
+Identity: rmhpgflexadmin (CREATE TABLE, INSERT, UPDATE, DELETE)
+         Same identity, RESTRICTED permissions - NO DROP SCHEMA allowed
+```
+
+### Implementation Summary
+
+| Phase | Description | Files Changed |
+|-------|-------------|---------------|
+| Phase 1 | Configuration Layer | `config/database_config.py`, `config/app_config.py`, `local.settings.json` |
+| Phase 2 | Repository Layer | `infrastructure/postgresql.py`, `infrastructure/__init__.py` |
+| Phase 3 | Service Layer | `services/vector/postgis_handler.py`, `services/vector/process_vector_tasks.py`, `jobs/process_vector.py` |
+| Phase 4 | Azure Infrastructure | Created `geodata` database, configured restricted permissions |
+| Phase 5 | Testing & Validation | Verified connections, permissions, backward compatibility |
+
+### Key Decisions
+
+- **Single managed identity** (`rmhpgflexadmin`) with different permission grants per database
+- **Default target**: `app` (geo schema) - backward compatible during migration
+- **`process_vector`**: Accepts `target_database: "business"` parameter for ETL outputs
+- **Rollback**: Remove `BUSINESS_DB_*` env vars → system falls back to app database
+
+### Success Criteria Met
+
+- [x] `process_vector` jobs write to business database by default
+- [x] Existing jobs (process_raster, hello_world) unaffected
+- [x] Business database identity cannot DROP SCHEMA
+- [x] App database can still be nuked/rebuilt without affecting business data
+- [x] No breaking changes to existing API contracts
+
+---
+
+## 28 NOV 2025: PROCESS_RASTER_V2 - JobBaseMixin Implementation 🎯
+
+**Status**: ✅ **COMPLETE**
+**Impact**: 73% code reduction, proper config integration, resource validators
+
+Created `process_raster_v2` job using JobBaseMixin pattern with resource validators. Clean slate design - no deprecated parameters.
+
+| Metric | Value |
+|--------|-------|
+| Lines of code | 280 (vs 743 for process_raster) |
+| Code reduction | 73% |
+| Pre-flight validation | blob_exists resource validator |
+
+**Bug Fix**: JPEG Visualization Tier - Fixed INTERLEAVE setting for YCbCr encoding (PIXEL vs BAND).
+
+**DEM Visualization Enhancement**: Automatic colorized viewer URLs with terrain/viridis/gist_earth colormaps.
+
+---
+
+## 28 NOV 2025: Exception Context Loss in Nested Error Handlers ✅
+
+**Status**: ✅ **COMPLETE** - Critical for debugging production failures
+
+Created `log_nested_error()` helper in `core/error_handler.py` - logs both primary and cleanup errors with structured context.
+
+**Fixed Locations**: 4 nested error handlers in `core/machine.py`
+
+**Application Insights Filter**: `customDimensions.nested_error = true`
+
+---
+
+## 28 NOV 2025: JSON Deserialization Error Handling ✅
+
+**Status**: ✅ **COMPLETE** - Data corruption prevention
+
+**Solution**: Added explicit error handling to 50+ existing Pydantic models:
+- Service Bus: try/except with dead-letter routing for malformed messages
+- PostgreSQL: `_parse_jsonb_column()` helper that raises `DatabaseError`
+
+---
+
+## 28 NOV 2025: Service Bus Specific Exception Handling ✅
+
+**Status**: ✅ **COMPLETE**
+
+Added `_is_transient_error()` helper to distinguish retryable vs permanent failures.
+
+---
+
+## 28 NOV 2025: Missing Error Source Field ✅
+
+**Status**: ✅ **COMPLETE**
+
+Added `error_source` to 28+ structured logs:
+- `orchestration`: Job/Task coordination (core/machine.py)
+- `state`: State management (core/state_manager.py)
+- `infrastructure`: External services (infrastructure/service_bus.py)
+
+---
+
+## 28 NOV 2025: Retry Telemetry ✅
+
+**Status**: ✅ **COMPLETE**
+
+Added 6 retry event checkpoints with full metrics:
+- `RETRY_LOGIC_START`, `RETRY_CONDITION_MET`, `RETRY_SCHEDULED`
+- `RETRY_QUEUED_SUCCESS`, `RETRY_MAX_EXCEEDED`, `JOB_FAILED_MAX_RETRIES`
+
+---
+
+## 27 NOV 2025: Pre-Flight Resource Validation Architecture 🚀
+
+**Status**: ✅ **IMPLEMENTED**
+
+Jobs can now declare `resource_validators` for early failure before queue submission:
+- `blob_exists`: Validate blob container + name
+- `blob_exists_with_size`: Combined existence + size check
+- `collection_exists`: Validate STAC collection existence
+
+**Files**: `infrastructure/validators.py`, `triggers/platform_submit.py`, all job classes
+
+---
+
+## 26 NOV 2025: Platform Schema Consolidation & DDH Metadata ✅
+
+**Status**: ✅ **RESOLVED**
+
+Consolidated Platform schema for DDH Application metadata integration.
+
+---
+
+## 25 NOV 2025: Refactor config.py God Object ✅
+
+**Status**: ✅ **COMPLETE**
+
+Split monolithic 1200-line `config.py` into dedicated config modules:
+- `config/__init__.py` - Central entry point
+- `config/app_config.py` - AppConfig class
+- `config/database_config.py` - DatabaseConfig, BusinessDatabaseConfig
+- `config/storage_config.py` - StorageConfig
+- `config/queue_config.py` - QueueConfig
+- `config/raster_config.py` - RasterConfig
+
+**Phase 4**: Deleted old `config.py` (25 NOV 2025)
+
+---
+
+## 25 NOV 2025: STAC Metadata Encapsulation ✅
+
+**Status**: ✅ **RESOLVED**
+
+Proper encapsulation of STAC metadata generation.
+
+---
+
+## 25 NOV 2025: pgSTAC search_tohash() Function Failure ✅
+
+**Status**: ✅ **RESOLVED**
+
+Fixed pgSTAC function deployment issues.
+
+---
+
+## 25 NOV 2025: Fix STAC Collection Description Validation Error ✅
+
+**Status**: ✅ **RESOLVED**
+
+Fixed STAC collection description validation.
+
+---
+
+## 25 NOV 2025: ISO3 Country Attribution in STAC Items ✅
+
+**Status**: ✅ **RESOLVED**
+
+Added ISO3 country attribution to STAC items.
+
+---
+
+## 24 NOV 2025: SQL Generator Invalid Index Bug ✅
+
+**Status**: ✅ **RESOLVED**
+
+Fixed SQL generator index bug.
+
+---
+
+## 22 NOV 2025: MANAGED IDENTITY - USER-ASSIGNED PATTERN ✅
+
+**Status**: ✅ **COMPLETE**
+
+Implemented user-assigned managed identity pattern for Azure resources.
+
+---
+
+## 19 NOV 2025: STAC API Fixed & Validated ✅
+
+**Status**: ✅ **COMPLETE**
+
+STAC API fully operational and validated.
+
+---
+
+## 29 NOV 2025: Inconsistent Logging Levels ✅
+
+**Status**: ✅ **COMPLETE**
+
+Fixed retry logs from `warning` → `info` (3 locations).
+
+---
+
+## 29 NOV 2025: Pre-flight Blob Size Validation 📏
+
+**Status**: ✅ **COMPLETE** - Blob size checks with conditional processing logic
+**Impact**: Reject oversized files early, auto-select processing strategy
+**Author**: Robert and Geospatial Claude Legion
+
+### 🎯 Achievement: Size-Based Pre-flight Validation
+
+New validators added to `infrastructure/validators.py`:
+
+| Validator | Purpose |
+|-----------|---------|
+| `blob_size_check` | Check blob size against min/max limits |
+| `blob_exists_with_size` | Combined existence + size check (single API call) |
+
+### 📊 Features
+
+1. **Size limits from config**: `RASTER_MAX_FILE_SIZE_MB` env var (default: 20GB)
+2. **Automatic in-memory selection**: Files <= `RASTER_IN_MEMORY_THRESHOLD_MB` use in-memory processing
+3. **Size stored in params**: `_blob_size_bytes` and `_blob_size_mb` available for downstream logic
+
+### 🔧 Implementation
+
+```python
+# In job class
+resource_validators = [
+    {
+        'type': 'blob_exists_with_size',
+        'container_param': 'container_name',
+        'blob_param': 'blob_name',
+        'max_size_env': 'RASTER_MAX_FILE_SIZE_MB',
+        'error_too_large': 'File exceeds maximum size limit.'
+    }
+]
+
+# Downstream, size is available:
+blob_size_mb = params.get('_blob_size_mb')  # From pre-flight
+```
+
+### New Config Fields (`config/raster_config.py`)
+
+| Field | Default | Env Var | Description |
+|-------|---------|---------|-------------|
+| `max_file_size_mb` | 20000 | `RASTER_MAX_FILE_SIZE_MB` | Reject files larger than this |
+| `in_memory_threshold_mb` | 500 | `RASTER_IN_MEMORY_THRESHOLD_MB` | Auto in-memory below this |
+
+---
+
+## 29 NOV 2025: Error Handling Review Complete ✅
+
+**Status**: ✅ **COMPLETE** - All LOW priority items implemented
+**Impact**: Better observability and debugging in Application Insights
+**Author**: Robert and Geospatial Claude Legion
+
+### Completed Items
+
+| Task | Description |
+|------|-------------|
+| **Inconsistent Logging Levels** | Fixed retry logs from `warning` → `info` (3 locations) |
+| **Missing Error Source Field** | Added `error_source` to 28+ structured logs |
+| **Retry Telemetry** | Added 6 retry event checkpoints with full metrics |
+
+### Error Source Values
+
+| error_source | Layer | Files |
+|--------------|-------|-------|
+| `orchestration` | Job/Task coordination | `core/machine.py` |
+| `state` | State management | `core/state_manager.py` |
+| `infrastructure` | External services | `infrastructure/service_bus.py` |
+
+### Retry Telemetry Checkpoints
+
+| Checkpoint | retry_event | Description |
+|------------|-------------|-------------|
+| `RETRY_LOGIC_START` | `start` | Retry logic triggered |
+| `RETRY_CONDITION_MET` | `condition_met` | Task eligible for retry |
+| `RETRY_SCHEDULED` | `scheduled` | Retry prepared with delay |
+| `RETRY_QUEUED_SUCCESS` | `queued` | Message sent to queue |
+| `RETRY_MAX_EXCEEDED` | `max_exceeded` | Permanent failure |
+| `JOB_FAILED_MAX_RETRIES` | `job_failed` | Parent job marked failed |
+
+### Documentation
+
+Updated `WIKI_API_ERRORS.md` with comprehensive internal error handling docs.
+
+---
+
+## 29 NOV 2025: DEM Visualization Enhancement 🗺️
+
+**Status**: ✅ **COMPLETE** - Automatic colorized viewer URLs for detected DEMs
+**Impact**: Better user experience for elevation data visualization
+**Timeline**: Single session enhancement
+**Author**: Robert and Geospatial Claude Legion
+
+### 🎯 Achievement: Automatic DEM Colorization
+
+For detected DEMs, `process_raster_v2` now automatically includes colorized TiTiler viewer URLs:
+
+| URL Field | Description |
+|-----------|-------------|
+| `share_url` | Now uses `&colormap_name=terrain` for DEMs |
+| `dem_terrain_viewer` | Terrain colormap (topographic) |
+| `dem_viridis_viewer` | Viridis colormap (scientific) |
+| `dem_gist_earth_viewer` | Gist Earth colormap (natural) |
+| `dem_terrain_preview` | Terrain preview image |
+
+### 📊 Test Results
+
+```bash
+# DEM job returns colorized viewer URLs automatically
+curl -X POST '.../api/jobs/submit/process_raster_v2' \
+  -d '{"blob_name": "USGS_one_meter_x32y431_MD_VA_Sandy_NCR_2014.tif", "container_name": "rmhazuregeobronze"}'
+
+# Result: Detected as "dem", share_url includes &colormap_name=terrain
+# Statistics: min=-6.26m, max=90.16m elevation
+```
+
+### 🔧 Implementation
+
+Added DEM-specific URL generation in `finalize_job()` when `raster_type == "dem"`:
+- Appends `&colormap_name=terrain|viridis|gist_earth` to viewer URLs
+- Sets `share_url` to terrain colormap for instant visualization
+
+### TiTiler Rescale Tip
+
+For custom stretch visualization, use the statistics endpoint:
+```
+GET /cog/statistics?url=...  → returns min, max, percentiles
+GET /cog/preview.png?url=...&rescale=-6,90&colormap_name=terrain
+```
 
 ---
 

@@ -2,38 +2,47 @@
 # CLAUDE CONTEXT - DATABASE CONFIGURATION
 # ============================================================================
 # EPOCH: 4 - ACTIVE ✅
-# STATUS: New module - Phase 1 of config.py refactoring (20 NOV 2025)
+# STATUS: Dual database support - App + Business databases (29 NOV 2025)
 # PURPOSE: PostgreSQL/PostGIS database configuration with managed identity support
-# LAST_REVIEWED: 20 NOV 2025
-# EXPORTS: DatabaseConfig, get_postgres_connection_string
+# LAST_REVIEWED: 29 NOV 2025
+# EXPORTS: DatabaseConfig, BusinessDatabaseConfig, get_postgres_connection_string
 # INTERFACES: Pydantic BaseModel
-# PYDANTIC_MODELS: DatabaseConfig
+# PYDANTIC_MODELS: DatabaseConfig, BusinessDatabaseConfig
 # DEPENDENCIES: pydantic, os, typing
-# SOURCE: Environment variables (POSTGIS_HOST, POSTGIS_USER, POSTGIS_PASSWORD, USE_MANAGED_IDENTITY, etc.)
+# SOURCE: Environment variables (POSTGIS_HOST, BUSINESS_DB_HOST, etc.)
 # SCOPE: Database-specific configuration
 # VALIDATION: Pydantic v2 validation
 # PATTERNS: Value objects, factory methods
-# ENTRY_POINTS: from config import DatabaseConfig, get_postgres_connection_string
-# INDEX: DatabaseConfig:45, get_postgres_connection_string:160
+# ENTRY_POINTS: from config import DatabaseConfig, BusinessDatabaseConfig
+# INDEX: DatabaseConfig:45, BusinessDatabaseConfig:340, get_postgres_connection_string:450
 # ============================================================================
 
 """
 PostgreSQL/PostGIS Database Configuration
 
 Provides configuration for:
-- PostgreSQL connection settings
-- Managed identity authentication
-- Schema names (geo, app, platform, pgstac, h3)
-- Connection pooling
-- STAC configuration
+- App Database (DatabaseConfig): Full DDL permissions for app infrastructure
+  - jobs, tasks, api_requests tables
+  - pgSTAC metadata catalog
+  - App-owned geo data (admin0 countries)
+  - H3 grids
+- Business Database (BusinessDatabaseConfig): Restricted CRUD for ETL outputs
+  - process_vector ETL outputs only
+  - Same managed identity, different permissions (NO DROP SCHEMA)
+
+Architecture (29 NOV 2025):
+    App Database (geopgflex) - Can nuke/rebuild schemas
+    Business Database (ddhgeodb) - Protected from accidental destruction
 
 This module was extracted from config.py (lines 660-773) as part of the
-god object refactoring (20 NOV 2025).
+god object refactoring (20 NOV 2025). BusinessDatabaseConfig added 29 NOV 2025.
 """
 
 import os
 from typing import Optional
 from pydantic import BaseModel, Field
+
+from .defaults import DatabaseDefaults, AzureDefaults
 
 
 # ============================================================================
@@ -55,7 +64,7 @@ class DatabaseConfig(BaseModel):
     )
 
     port: int = Field(
-        default=5432,
+        default=DatabaseDefaults.PORT,
         description="PostgreSQL server port number"
     )
 
@@ -99,12 +108,12 @@ class DatabaseConfig(BaseModel):
 
     # Schema names
     postgis_schema: str = Field(
-        default="geo",
+        default=DatabaseDefaults.POSTGIS_SCHEMA,
         description="PostgreSQL schema name for STAC collections and items"
     )
 
     app_schema: str = Field(
-        default="app",
+        default=DatabaseDefaults.APP_SCHEMA,
         description="PostgreSQL schema name for application tables (jobs, tasks, api_requests, janitor_runs)"
     )
 
@@ -113,12 +122,12 @@ class DatabaseConfig(BaseModel):
     # This eliminates schema sprawl and ensures Platform tables are cleaned with full-rebuild.
 
     pgstac_schema: str = Field(
-        default="pgstac",
+        default=DatabaseDefaults.PGSTAC_SCHEMA,
         description="PostgreSQL schema name for pgSTAC (STAC catalog)"
     )
 
     h3_schema: str = Field(
-        default="h3",
+        default=DatabaseDefaults.H3_SCHEMA,
         description="PostgreSQL schema name for H3 hexagonal grids"
     )
 
@@ -158,7 +167,7 @@ class DatabaseConfig(BaseModel):
     )
 
     managed_identity_name: Optional[str] = Field(
-        default=None,
+        default=AzureDefaults.MANAGED_IDENTITY_NAME,
         description="""Managed identity name for PostgreSQL authentication.
 
         Purpose:
@@ -171,8 +180,8 @@ class DatabaseConfig(BaseModel):
             - 'rmhpgflexreader' for read-only access (TiTiler, OGC/STAC apps)
 
         Behavior:
-            - If specified: Uses this exact name as PostgreSQL user
-            - If None: Defaults to 'rmhpgflexadmin' (user-assigned identity)
+            - If specified via env var: Uses that value
+            - If not specified: Uses default 'rmhpgflexadmin' (user-assigned identity)
 
         Environment Variable: MANAGED_IDENTITY_NAME
 
@@ -224,17 +233,17 @@ class DatabaseConfig(BaseModel):
 
     # Connection pooling (reserved for future use)
     min_connections: int = Field(
-        default=1,
+        default=DatabaseDefaults.MIN_CONNECTIONS,
         description="Minimum connections in pool (future)"
     )
 
     max_connections: int = Field(
-        default=20,
+        default=DatabaseDefaults.MAX_CONNECTIONS,
         description="Maximum connections in pool (future)"
     )
 
     connection_timeout_seconds: int = Field(
-        default=30,
+        default=DatabaseDefaults.CONNECTION_TIMEOUT_SECONDS,
         description="Connection timeout in seconds"
     )
 
@@ -286,18 +295,170 @@ class DatabaseConfig(BaseModel):
         """
         return cls(
             host=os.environ["POSTGIS_HOST"],
-            port=int(os.environ.get("POSTGIS_PORT", "5432")),
+            port=int(os.environ.get("POSTGIS_PORT", str(DatabaseDefaults.PORT))),
             user=os.environ.get("POSTGIS_USER"),  # Optional - only for password auth
             password=os.environ.get("POSTGIS_PASSWORD"),
             database=os.environ["POSTGIS_DATABASE"],
-            postgis_schema=os.environ.get("POSTGIS_SCHEMA", "geo"),
-            app_schema=os.environ.get("APP_SCHEMA", "app"),
-            pgstac_schema=os.environ.get("PGSTAC_SCHEMA", "pgstac"),
-            h3_schema=os.environ.get("H3_SCHEMA", "h3"),
+            postgis_schema=os.environ.get("POSTGIS_SCHEMA", DatabaseDefaults.POSTGIS_SCHEMA),
+            app_schema=os.environ.get("APP_SCHEMA", DatabaseDefaults.APP_SCHEMA),
+            pgstac_schema=os.environ.get("PGSTAC_SCHEMA", DatabaseDefaults.PGSTAC_SCHEMA),
+            h3_schema=os.environ.get("H3_SCHEMA", DatabaseDefaults.H3_SCHEMA),
             use_managed_identity=os.environ.get("USE_MANAGED_IDENTITY", "false").lower() == "true",
-            managed_identity_name=os.environ.get("MANAGED_IDENTITY_NAME"),
+            managed_identity_name=os.environ.get("MANAGED_IDENTITY_NAME", AzureDefaults.MANAGED_IDENTITY_NAME),
             managed_identity_client_id=os.environ.get("MANAGED_IDENTITY_CLIENT_ID"),
-            connection_timeout_seconds=int(os.environ.get("DB_CONNECTION_TIMEOUT", "30"))
+            connection_timeout_seconds=int(os.environ.get("DB_CONNECTION_TIMEOUT", str(DatabaseDefaults.CONNECTION_TIMEOUT_SECONDS)))
+        )
+
+
+# ============================================================================
+# BUSINESS DATABASE CONFIGURATION (29 NOV 2025)
+# ============================================================================
+
+class BusinessDatabaseConfig(BaseModel):
+    """
+    Business data database configuration for ETL pipeline outputs.
+
+    This is a SEPARATE database from the app database, used exclusively for
+    process_vector ETL outputs. Uses the SAME managed identity (rmhpgflexadmin)
+    but with RESTRICTED permissions - specifically NO DROP SCHEMA.
+
+    Architecture:
+        App Database (geopgflex):
+            - Full DDL: CREATE/DROP SCHEMA, ALL PRIVILEGES
+            - Contains: app, pgstac, geo (app reference), h3 schemas
+            - Can be nuked/rebuilt for development
+
+        Business Database (ddhgeodb):
+            - Restricted: CREATE TABLE, INSERT, UPDATE, DELETE, SELECT
+            - NO DROP SCHEMA permission
+            - Contains: geo schema (ETL outputs only)
+            - Protected from accidental destruction
+
+    Environment Variables:
+        BUSINESS_DB_HOST: PostgreSQL host (defaults to POSTGIS_HOST if not set)
+        BUSINESS_DB_PORT: Port (default: 5432)
+        BUSINESS_DB_NAME: Database name (default: "geodata")
+        BUSINESS_DB_SCHEMA: Schema for ETL outputs (default: "geo")
+        BUSINESS_DB_MANAGED_IDENTITY_NAME: Identity name (default: "rmhpgflexadmin")
+        BUSINESS_DB_MANAGED_IDENTITY_CLIENT_ID: Client ID (optional, uses app db client_id if not set)
+
+    Usage:
+        from config import get_config
+        config = get_config()
+
+        # Check if business database is configured
+        if config.business_database and config.business_database.is_configured:
+            # Use business database for ETL outputs
+            business_config = config.business_database
+        else:
+            # Fall back to app database geo schema
+            business_config = config.database
+    """
+
+    # Connection settings
+    host: str = Field(
+        ...,
+        description="PostgreSQL server hostname for business database"
+    )
+
+    port: int = Field(
+        default=DatabaseDefaults.PORT,
+        description="PostgreSQL server port number"
+    )
+
+    database: str = Field(
+        default="ddhgeodb",
+        description="Business database name (separate from app database)"
+    )
+
+    db_schema: str = Field(
+        default=DatabaseDefaults.POSTGIS_SCHEMA,
+        description="Schema for ETL outputs (process_vector results)"
+    )
+
+    # Managed identity settings (same identity as app database, different permissions)
+    use_managed_identity: bool = Field(
+        default=True,
+        description="Enable Azure Managed Identity (should match app database setting)"
+    )
+
+    managed_identity_name: str = Field(
+        default=AzureDefaults.MANAGED_IDENTITY_NAME,
+        description="""Managed identity name - uses SAME identity as app database.
+
+        The key difference is not the identity, but the PERMISSIONS granted
+        to this identity on the business database:
+        - App database: Full DDL (CREATE/DROP SCHEMA)
+        - Business database: Restricted CRUD (NO DROP SCHEMA)
+        """
+    )
+
+    managed_identity_client_id: Optional[str] = Field(
+        default=None,
+        description="Client ID of user-assigned managed identity (optional)"
+    )
+
+    # Connection settings
+    connection_timeout_seconds: int = Field(
+        default=DatabaseDefaults.CONNECTION_TIMEOUT_SECONDS,
+        description="Connection timeout in seconds"
+    )
+
+    @property
+    def is_configured(self) -> bool:
+        """
+        Check if business database is explicitly configured.
+
+        Returns True if BUSINESS_DB_HOST or BUSINESS_DB_NAME environment
+        variables are set. This allows the system to fall back to app
+        database when business database is not configured.
+        """
+        return (
+            os.environ.get("BUSINESS_DB_HOST") is not None or
+            os.environ.get("BUSINESS_DB_NAME") is not None
+        )
+
+    def debug_dict(self) -> dict:
+        """Debug output for logging."""
+        return {
+            "host": self.host,
+            "port": self.port,
+            "database": self.database,
+            "db_schema": self.db_schema,
+            "use_managed_identity": self.use_managed_identity,
+            "managed_identity_name": self.managed_identity_name,
+            "managed_identity_client_id": self.managed_identity_client_id[:8] + "..." if self.managed_identity_client_id else None,
+            "is_configured": self.is_configured
+        }
+
+    @classmethod
+    def from_environment(cls) -> "BusinessDatabaseConfig":
+        """
+        Load BusinessDatabaseConfig from environment variables.
+
+        Falls back to app database values when business database
+        environment variables are not set.
+        """
+        return cls(
+            # Host: Use BUSINESS_DB_HOST, fall back to POSTGIS_HOST
+            host=os.environ.get("BUSINESS_DB_HOST", os.environ.get("POSTGIS_HOST", "")),
+            port=int(os.environ.get("BUSINESS_DB_PORT", str(DatabaseDefaults.PORT))),
+            database=os.environ.get("BUSINESS_DB_NAME", "ddhgeodb"),
+            db_schema=os.environ.get("BUSINESS_DB_SCHEMA", DatabaseDefaults.POSTGIS_SCHEMA),
+            use_managed_identity=os.environ.get(
+                "BUSINESS_DB_USE_MANAGED_IDENTITY",
+                os.environ.get("USE_MANAGED_IDENTITY", "true")
+            ).lower() == "true",
+            # managed_identity_name: Use env vars, fall back to AzureDefaults
+            managed_identity_name=os.environ.get(
+                "BUSINESS_DB_MANAGED_IDENTITY_NAME",
+                os.environ.get("MANAGED_IDENTITY_NAME", AzureDefaults.MANAGED_IDENTITY_NAME)
+            ),
+            managed_identity_client_id=os.environ.get(
+                "BUSINESS_DB_MANAGED_IDENTITY_CLIENT_ID",
+                os.environ.get("MANAGED_IDENTITY_CLIENT_ID")
+            ),
+            connection_timeout_seconds=int(os.environ.get("BUSINESS_DB_CONNECTION_TIMEOUT", str(DatabaseDefaults.CONNECTION_TIMEOUT_SECONDS)))
         )
 
 

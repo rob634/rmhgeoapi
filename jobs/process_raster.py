@@ -596,7 +596,8 @@ class ProcessRasterWorkflow(JobBase):
             # Get COG blob path and container from Stage 2
             cog_blob = cog_result.get('output_blob') or cog_result.get('cog_blob')
             # CRITICAL: Stage 2 returns 'cog_container' (not 'container') - see tasks/create_cog.py result structure
-            cog_container = cog_result.get('cog_container') or config.silver_container_name
+            # Modern pattern (30 NOV 2025): config.storage.silver.cogs
+            cog_container = cog_result.get('cog_container') or config.storage.silver.cogs
 
             if not cog_blob:
                 raise ValueError("Stage 2 results missing COG blob path (expected 'output_blob' or 'cog_blob')")

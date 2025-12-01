@@ -2,19 +2,20 @@
 # CLAUDE CONTEXT - POSTGRESQL REPOSITORIES
 # ============================================================================
 # EPOCH: 4 - ACTIVE ✅
-# STATUS: Infrastructure - PostgreSQL database repositories
+# STATUS: Infrastructure - PostgreSQL database repositories with dual database support
 # PURPOSE: PostgreSQL-specific repository implementation with direct database access and atomic operations
-# LAST_REVIEWED: 29 OCT 2025
+# LAST_REVIEWED: 29 NOV 2025
 # EXPORTS: PostgreSQLRepository, PostgreSQLJobRepository, PostgreSQLTaskRepository, PostgreSQLStageCompletionRepository
 # INTERFACES: BaseRepository, IJobRepository, ITaskRepository, IStageCompletionRepository
 # PYDANTIC_MODELS: JobRecord, TaskRecord, StageAdvancementResult, TaskCompletionResult, JobCompletionResult
 # DEPENDENCIES: psycopg, psycopg.sql, config, core.models, infrastructure.base
-# SOURCE: PostgreSQL database (app schema: jobs, tasks tables)
+# SOURCE: PostgreSQL database (app schema: jobs, tasks tables; business schema: ETL outputs)
 # SCOPE: Database operations for job/task persistence and atomic completion detection
 # VALIDATION: SQL injection prevention via psycopg.sql composition, transaction atomicity
 # PATTERNS: Repository pattern, Unit of Work (transactions), Template Method, Connection pooling
-# ENTRY_POINTS: repo = PostgreSQLJobRepository(); job = repo.get_job(job_id)
+# ENTRY_POINTS: repo = PostgreSQLJobRepository(); repo = PostgreSQLRepository(target_database="business")
 # INDEX: PostgreSQLRepository:61, PostgreSQLJobRepository:514, PostgreSQLTaskRepository:736, PostgreSQLStageCompletionRepository:949
+# DUAL_DATABASE: target_database parameter ("app" | "business") routes to geopgflex or ddhgeodb (29 NOV 2025)
 # ============================================================================
 
 """
@@ -45,12 +46,12 @@ import json
 import psycopg
 from psycopg import sql
 from psycopg.rows import dict_row
-from typing import Dict, Any, Optional, List, Tuple
+from typing import Dict, Any, Optional, List, Tuple, Literal
 from datetime import datetime, timezone
 from contextlib import contextmanager
 import logging
 
-from config import AppConfig, get_config
+from config import AppConfig, get_config, BusinessDatabaseConfig
 from core.models import (
     JobRecord, TaskRecord, JobStatus, TaskStatus,
     StageAdvancementResult, TaskResult
@@ -162,7 +163,8 @@ class PostgreSQLRepository(BaseRepository):
     
     def __init__(self, connection_string: Optional[str] = None,
                  schema_name: Optional[str] = None,
-                 config: Optional[AppConfig] = None):
+                 config: Optional[AppConfig] = None,
+                 target_database: Literal["app", "business"] = "app"):
         """
         Initialize PostgreSQL repository with configuration.
 
@@ -228,6 +230,15 @@ class PostgreSQLRepository(BaseRepository):
             Configuration object. If not provided, uses get_config().
             This allows for dependency injection in testing.
 
+        target_database : Literal["app", "business"]
+            Which database to connect to (29 NOV 2025):
+            - "app" (default): App database (geopgflex) - jobs, tasks, pgstac, h3
+            - "business": Business database (ddhgeodb) - ETL outputs only
+
+            When "business" is specified and BusinessDatabaseConfig is configured,
+            connects to the business database with restricted permissions.
+            Falls back to app database if business database not configured.
+
         Raises:
         ------
         ValueError
@@ -242,8 +253,11 @@ class PostgreSQLRepository(BaseRepository):
         Example:
         -------
         ```python
-        # Use global configuration
+        # Use global configuration (app database)
         repo = PostgreSQLRepository()
+
+        # Connect to business database for ETL outputs
+        repo = PostgreSQLRepository(target_database="business")
 
         # Override with specific connection
         repo = PostgreSQLRepository(
@@ -254,23 +268,36 @@ class PostgreSQLRepository(BaseRepository):
         """
         # Initialize base class for validation and logging
         super().__init__()
-        
+
         # Get configuration (use provided or global)
         self.config = config or get_config()
-        
-        # Set schema name (priority: parameter > config > default)
-        self.schema_name = schema_name or self.config.app_schema
-        
+
+        # Store target database for connection string building (29 NOV 2025)
+        self.target_database = target_database
+
+        # Determine schema name based on target database
+        if schema_name:
+            self.schema_name = schema_name
+        elif target_database == "business" and self.config.is_business_database_configured():
+            self.schema_name = self.config.business_database.db_schema
+        else:
+            self.schema_name = self.config.app_schema
+
         # Set connection string (priority: parameter > config > env)
         if connection_string:
             self.conn_string = connection_string
         else:
             self.conn_string = self._get_connection_string()
-        
+
         # Validate that schema exists (non-blocking warning if missing)
         self._ensure_schema_exists()
-        
-        logger.info(f"✅ PostgreSQLRepository initialized with schema: {self.schema_name}")
+
+        # Log which database we're connected to
+        if target_database == "business" and self.config.is_business_database_configured():
+            db_name = self.config.business_database.database
+            logger.info(f"✅ PostgreSQLRepository initialized with BUSINESS database: {db_name}, schema: {self.schema_name}")
+        else:
+            logger.info(f"✅ PostgreSQLRepository initialized with APP database, schema: {self.schema_name}")
     
     def _get_connection_string(self) -> str:
         """
@@ -288,6 +315,12 @@ class PostgreSQLRepository(BaseRepository):
         - Azure Functions with system-assigned identity (simpler setup)
         - Local development with password (developer machines)
 
+        Database Selection (29 NOV 2025):
+        ---------------------------------
+        Uses self.target_database to determine which database to connect to:
+        - "app": Uses config.database (geopgflex) - default
+        - "business": Uses config.business_database (ddhgeodb) if configured
+
         Returns:
         -------
         str
@@ -301,36 +334,63 @@ class PostgreSQLRepository(BaseRepository):
         RuntimeError
             If managed identity token acquisition fails.
         """
+        # Determine which database config to use (29 NOV 2025)
+        use_business_db = (
+            self.target_database == "business" and
+            self.config.is_business_database_configured()
+        )
+
+        if use_business_db:
+            db_config = self.config.business_database
+            logger.debug(f"🔌 Building connection string for BUSINESS database: {db_config.database}")
+        else:
+            db_config = None  # Will use legacy app database properties
+            logger.debug("🔌 Building connection string for APP database")
+
         logger.debug("🔌 Detecting PostgreSQL authentication method...")
 
         # Get environment variables for detection
-        client_id = os.getenv("MANAGED_IDENTITY_CLIENT_ID") or self.config.database.managed_identity_client_id
+        # For business database, prefer its specific managed identity config
+        if use_business_db and db_config:
+            client_id = db_config.managed_identity_client_id or os.getenv("MANAGED_IDENTITY_CLIENT_ID")
+            identity_name = db_config.managed_identity_name
+        else:
+            client_id = os.getenv("MANAGED_IDENTITY_CLIENT_ID") or self.config.database.managed_identity_client_id
+            # Use config value - single source of truth for default in database_config.py
+            identity_name = self.config.database.managed_identity_name or os.getenv("MANAGED_IDENTITY_NAME")
+
         website_name = os.getenv("WEBSITE_SITE_NAME")
         password = self.config.postgis_password
 
         # Priority 1: User-Assigned Managed Identity
         if client_id:
-            identity_name = os.getenv("MANAGED_IDENTITY_NAME", "rmhpgflexadmin")
             logger.info(f"🔐 [AUTH] Using USER-ASSIGNED managed identity: {identity_name} (client_id: {client_id[:8]}...)")
             return self._build_managed_identity_connection_string(
                 client_id=client_id,
-                identity_name=identity_name
+                identity_name=identity_name,
+                db_config=db_config
             )
 
         # Priority 2: System-Assigned Managed Identity (running in Azure)
         if website_name:
             # Use website name as identity name for system-assigned identity
-            identity_name = os.getenv("MANAGED_IDENTITY_NAME", website_name)
+            if not use_business_db:
+                identity_name = os.getenv("MANAGED_IDENTITY_NAME", website_name)
             logger.info(f"🔐 [AUTH] Using SYSTEM-ASSIGNED managed identity: {identity_name} (detected Azure environment)")
             return self._build_managed_identity_connection_string(
                 client_id=None,
-                identity_name=identity_name
+                identity_name=identity_name,
+                db_config=db_config
             )
 
         # Priority 3: Password Authentication
         if password:
             logger.info("🔑 [AUTH] Using PASSWORD authentication (local development mode)")
-            conn_str = self.config.postgis_connection_string
+            if use_business_db and db_config:
+                # Build password connection string for business database
+                conn_str = self._build_password_connection_string(db_config)
+            else:
+                conn_str = self.config.postgis_connection_string
             logger.debug(f"✅ Password-based connection string built successfully")
             return conn_str
 
@@ -350,10 +410,35 @@ class PostgreSQLRepository(BaseRepository):
         logger.error(error_msg)
         raise ValueError(error_msg)
 
+    def _build_password_connection_string(self, db_config: BusinessDatabaseConfig) -> str:
+        """
+        Build password-based connection string for business database (29 NOV 2025).
+
+        Used for local development when connecting to business database with password auth.
+
+        Args:
+            db_config: BusinessDatabaseConfig with host, port, database settings
+
+        Returns:
+            PostgreSQL connection string with password authentication
+        """
+        # Use the same password as the app database (same server, different database)
+        password = self.config.postgis_password
+        user = self.config.postgis_user
+
+        conn_str = (
+            f"postgresql://{user}:{password}@"
+            f"{db_config.host}:{db_config.port}/"
+            f"{db_config.database}?sslmode=require"
+        )
+        logger.debug(f"🔗 Password connection string built for business database: {db_config.database}")
+        return conn_str
+
     def _build_managed_identity_connection_string(
         self,
         client_id: Optional[str] = None,
-        identity_name: str = "rmhpgflexadmin"
+        identity_name: str = None,  # Required - caller must provide from config
+        db_config: Optional[BusinessDatabaseConfig] = None
     ) -> str:
         """
         Build PostgreSQL connection string using Azure Managed Identity.
@@ -370,7 +455,12 @@ class PostgreSQLRepository(BaseRepository):
 
         identity_name : str
             PostgreSQL user name matching the managed identity.
-            Defaults to 'rmhpgflexadmin' for user-assigned identity.
+            Required - caller must provide from config (default in database_config.py).
+
+        db_config : Optional[BusinessDatabaseConfig]
+            Business database configuration (29 NOV 2025).
+            If provided, uses business database host/port/database.
+            If None, uses app database from self.config.
 
         Connection String Format:
         ------------------------
@@ -394,6 +484,16 @@ class PostgreSQLRepository(BaseRepository):
         from azure.identity import ManagedIdentityCredential
         from azure.core.exceptions import ClientAuthenticationError
 
+        # Determine database connection parameters (29 NOV 2025)
+        if db_config:
+            db_host = db_config.host
+            db_port = db_config.port
+            db_name = db_config.database
+        else:
+            db_host = self.config.postgis_host
+            db_port = self.config.postgis_port
+            db_name = self.config.postgis_database
+
         try:
             if client_id:
                 logger.debug(f"🔑 Acquiring token for user-assigned identity (client_id: {client_id[:8]}...)")
@@ -402,7 +502,7 @@ class PostgreSQLRepository(BaseRepository):
                 logger.debug("🔑 Acquiring token for system-assigned identity")
                 credential = ManagedIdentityCredential()
 
-            logger.info(f"👤 PostgreSQL user: {identity_name}")
+            logger.info(f"👤 PostgreSQL user: {identity_name}, database: {db_name}")
 
             # Get access token for PostgreSQL
             # Scope is fixed for all Azure PostgreSQL Flexible Servers
@@ -416,9 +516,9 @@ class PostgreSQLRepository(BaseRepository):
             # Build connection string with token as password
             # Use psycopg3 format (key=value pairs)
             conn_str = (
-                f"host={self.config.postgis_host} "
-                f"port={self.config.postgis_port} "
-                f"dbname={self.config.postgis_database} "
+                f"host={db_host} "
+                f"port={db_port} "
+                f"dbname={db_name} "
                 f"user={identity_name} "
                 f"password={token} "
                 f"sslmode=require"
@@ -426,9 +526,9 @@ class PostgreSQLRepository(BaseRepository):
 
             # Log connection details (with token masked)
             masked_str = (
-                f"host={self.config.postgis_host} "
-                f"port={self.config.postgis_port} "
-                f"dbname={self.config.postgis_database} "
+                f"host={db_host} "
+                f"port={db_port} "
+                f"dbname={db_name} "
                 f"user={identity_name} "
                 f"password=***TOKEN({len(token)} chars)*** "
                 f"sslmode=require"

@@ -372,8 +372,8 @@ class PgStacBootstrap:
                 logger.info("🔐 Using managed identity for pypgstac migrate...")
                 from azure.identity import ManagedIdentityCredential, DefaultAzureCredential
 
-                # Get the identity name for PostgreSQL user
-                identity_name = os.getenv("MANAGED_IDENTITY_NAME", "rmhpgflexadmin")
+                # Get the identity name from config - single source of truth for default
+                identity_name = self.config.database.managed_identity_name or os.getenv("MANAGED_IDENTITY_NAME")
 
                 # Acquire token
                 if client_id:

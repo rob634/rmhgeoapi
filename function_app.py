@@ -225,7 +225,8 @@ from triggers.stac_nuke import stac_nuke_trigger
 from stac_api import get_stac_triggers
 
 # ingest_vector REMOVED (27 NOV 2025) - Platform now uses process_vector
-from triggers.test_raster_create import test_raster_create_trigger
+# test_raster_create excluded by funcignore (30 NOV 2025) - *test* files not deployed
+# from triggers.test_raster_create import test_raster_create_trigger
 
 # Admin API triggers (10 NOV 2025) - Consolidated under /api/admin/*
 from triggers.admin.db_schemas import admin_db_schemas_trigger
@@ -1750,26 +1751,14 @@ def web_interface_unified(req: func.HttpRequest) -> func.HttpResponse:
 # ============================================================================
 # TEST UTILITIES - DEVELOPMENT ONLY
 # ============================================================================
-
-@app.route(route="test/create-rasters", methods=["POST"])
-def test_create_rasters(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    Create test raster files in Azure Blob Storage for pipeline testing.
-
-    TESTING/DEVELOPMENT ONLY - Should not be exposed in production.
-
-    POST /api/test/create-rasters
-    POST /api/test/create-rasters?raster_type=rgb
-
-    Query Parameters:
-        raster_type: Optional - Create single raster type
-                     (rgb, rgba, dem, categorical_64bit, no_crs, sentinel2, wgs84)
-                     If not specified, creates ALL test rasters
-
-    Returns:
-        Upload results with blob URLs
-    """
-    return test_raster_create_trigger.handle_request(req)
+# test/create-rasters endpoint DISABLED (30 NOV 2025)
+# test_raster_create trigger excluded by funcignore (*test* pattern)
+# Uncomment locally if needed for development testing
+#
+# @app.route(route="test/create-rasters", methods=["POST"])
+# def test_create_rasters(req: func.HttpRequest) -> func.HttpResponse:
+#     """Create test raster files in Azure Blob Storage for pipeline testing."""
+#     return test_raster_create_trigger.handle_request(req)
 
 
 

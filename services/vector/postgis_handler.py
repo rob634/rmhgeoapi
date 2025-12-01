@@ -21,7 +21,8 @@
 #   - _create_table_if_not_exists (line 270): Create PostGIS table
 #   - _insert_features (line 320): Insert GeoDataFrame rows
 #   - create_table_with_metadata (line NEW): Create table with GeoTableBuilder + metadata
-# UPDATED: 24 NOV 2025 - Added GeoTableBuilder integration for ArcGIS compatibility
+# UPDATED: 29 NOV 2025 - Added target_database parameter for dual database support
+# DUAL_DATABASE: target_database="business" routes to ddhgeodb business database
 # ============================================================================
 
 """
@@ -33,7 +34,7 @@ Handles the complete workflow of preparing and uploading vector data to PostGIS:
 3. upload_chunk: Create table and insert features into PostGIS geo schema
 """
 
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Literal
 import logging
 import geopandas as gpd
 import pandas as pd
@@ -52,15 +53,31 @@ logger = LoggerFactory.create_logger(
 class VectorToPostGISHandler:
     """Handles GeoDataFrame → PostGIS operations."""
 
-    def __init__(self):
-        """Initialize with PostgreSQL repository for managed identity support."""
+    def __init__(self, target_database: Literal["app", "business"] = "app"):
+        """
+        Initialize with PostgreSQL repository for managed identity support.
+
+        Args:
+            target_database: Which database to connect to (29 NOV 2025):
+                - "app" (default): App database (geopgflex) - geo schema for ETL outputs
+                - "business": Business database (ddhgeodb) - for future dedicated ETL database
+
+                Default is "app" to maintain backward compatibility with existing behavior.
+        """
         from infrastructure.postgresql import PostgreSQLRepository
 
         config = get_config()
-        # Use PostgreSQLRepository for managed identity support (18 NOV 2025)
-        self._pg_repo = PostgreSQLRepository()
+        # Use PostgreSQLRepository with target_database for dual database support (29 NOV 2025)
+        self._pg_repo = PostgreSQLRepository(target_database=target_database)
+        self.target_database = target_database
         # Keep conn_string for backward compatibility (deprecated)
         self.conn_string = self._pg_repo.conn_string
+
+        # Log which database we're using
+        if target_database == "business" and config.is_business_database_configured():
+            logger.info(f"📊 VectorToPostGISHandler: Using BUSINESS database ({config.business_database.database})")
+        else:
+            logger.info(f"📊 VectorToPostGISHandler: Using APP database (fallback or explicit)")
 
     def prepare_gdf(self, gdf: gpd.GeoDataFrame, geometry_params: dict = None) -> gpd.GeoDataFrame:
         """

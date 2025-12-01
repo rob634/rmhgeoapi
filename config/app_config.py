@@ -47,13 +47,14 @@ from typing import Optional
 from pydantic import BaseModel, Field
 
 from .storage_config import StorageConfig
-from .database_config import DatabaseConfig
+from .database_config import DatabaseConfig, BusinessDatabaseConfig
 from .raster_config import RasterConfig
 from .vector_config import VectorConfig
 from .queue_config import QueueConfig
 from .analytics_config import AnalyticsConfig
 from .h3_config import H3Config
 from .platform_config import PlatformConfig
+from .defaults import AzureDefaults, AppDefaults, KeyVaultDefaults
 
 
 # ============================================================================
@@ -73,7 +74,7 @@ class AppConfig(BaseModel):
     # ========================================================================
 
     debug_mode: bool = Field(
-        default=False,
+        default=AppDefaults.DEBUG_MODE,
         description="Enable debug mode for verbose diagnostics. "
                     "WARNING: Increases logging overhead and log volume. "
                     "Features enabled: memory tracking, detailed timing, payload logging. "
@@ -82,7 +83,7 @@ class AppConfig(BaseModel):
     )
 
     environment: str = Field(
-        default="dev",
+        default=AppDefaults.ENVIRONMENT,
         description="Environment name (dev, qa, prod)",
         examples=["dev", "qa", "prod"]
     )
@@ -92,28 +93,10 @@ class AppConfig(BaseModel):
     # ========================================================================
 
     storage_account_name: str = Field(
-        default="rmhazuregeo",
+        default=AzureDefaults.STORAGE_ACCOUNT_NAME,
         description="DEPRECATED: Use storage.bronze.account_name instead. Azure Storage Account name for managed identity authentication",
         examples=["rmhazuregeo"],
         deprecated="Use storage.bronze.account_name, storage.silver.account_name, etc."
-    )
-
-    bronze_container_name: str = Field(
-        default="rmhazuregeobronze",
-        description="DEPRECATED: Use storage.bronze.get_container('rasters') instead",
-        deprecated="Use storage.bronze.get_container() instead"
-    )
-
-    silver_container_name: str = Field(
-        default="rmhazuregeosilver",
-        description="DEPRECATED: Use storage.silver.get_container('cogs') instead",
-        deprecated="Use storage.silver.get_container() instead"
-    )
-
-    gold_container_name: str = Field(
-        default="rmhazuregeogold",
-        description="DEPRECATED: Use storage.gold.get_container('vectors') instead",
-        deprecated="Use storage.gold.get_container() instead"
     )
 
     # ========================================================================
@@ -121,33 +104,33 @@ class AppConfig(BaseModel):
     # ========================================================================
 
     function_timeout_minutes: int = Field(
-        default=30,
+        default=AppDefaults.FUNCTION_TIMEOUT_MINUTES,
         description="Function timeout in minutes (must match host.json functionTimeout)"
     )
 
     task_max_retries: int = Field(
-        default=3,
+        default=AppDefaults.TASK_MAX_RETRIES,
         ge=0,
         le=10,
         description="Maximum retry attempts for failed tasks (0 = no retries)"
     )
 
     task_retry_base_delay: int = Field(
-        default=5,
+        default=AppDefaults.TASK_RETRY_BASE_DELAY,
         ge=1,
         le=60,
         description="Base delay in seconds for exponential backoff (first retry)"
     )
 
     task_retry_max_delay: int = Field(
-        default=300,
+        default=AppDefaults.TASK_RETRY_MAX_DELAY,
         ge=10,
         le=3600,
         description="Maximum delay in seconds between retries (caps exponential growth)"
     )
 
     max_retries: int = Field(
-        default=3,
+        default=AppDefaults.MAX_RETRIES,
         ge=1,
         le=10,
         description="Maximum retry attempts for failed operations (general)"
@@ -158,7 +141,7 @@ class AppConfig(BaseModel):
     # ========================================================================
 
     log_level: str = Field(
-        default="INFO",
+        default=AppDefaults.LOG_LEVEL,
         description="Logging level for application diagnostics",
         examples=["DEBUG", "INFO", "WARNING", "ERROR"]
     )
@@ -168,29 +151,29 @@ class AppConfig(BaseModel):
     # ========================================================================
 
     enable_database_health_check: bool = Field(
-        default=True,
+        default=AppDefaults.ENABLE_DATABASE_HEALTH_CHECK,
         description="Enable PostgreSQL connectivity checks in health endpoint"
     )
 
     enable_duckdb_health_check: bool = Field(
-        default=False,
+        default=AppDefaults.ENABLE_DUCKDB_HEALTH_CHECK,
         description="Enable DuckDB analytical engine checks in health endpoint. "
                     "Adds ~200-500ms overhead. Disable for faster health pings (B3 tier)."
     )
 
     enable_vsi_health_check: bool = Field(
-        default=False,
+        default=AppDefaults.ENABLE_VSI_HEALTH_CHECK,
         description="Enable VSI (Virtual File System) /vsicurl/ checks in health endpoint. "
                     "Adds ~500-1000ms overhead (SAS token + file open). Disable for faster health pings (B3 tier)."
     )
 
     vsi_test_file: str = Field(
-        default="dctest.tif",
+        default=AppDefaults.VSI_TEST_FILE,
         description="Test file name for VSI /vsicurl/ capability check in health endpoint"
     )
 
     vsi_test_container: str = Field(
-        default="rmhazuregeobronze",
+        default=AppDefaults.VSI_TEST_CONTAINER,
         description="Container name for VSI test file (legacy flat name)"
     )
 
@@ -207,7 +190,7 @@ class AppConfig(BaseModel):
     titiler_base_url: str = Field(
         default_factory=lambda: os.getenv(
             "TITILER_BASE_URL",
-            "https://rmhtitiler-ghcyd7g0bxdvc2hc.eastus-01.azurewebsites.net"
+            AzureDefaults.TITILER_BASE_URL
         ),
         description="Base URL for TiTiler-PgSTAC tile server (raster visualization)"
     )
@@ -215,7 +198,7 @@ class AppConfig(BaseModel):
     ogc_features_base_url: str = Field(
         default_factory=lambda: os.getenv(
             "OGC_STAC_APP_URL",
-            "https://rmhogcstac-b4f5ccetf0a7hwe9.eastus-01.azurewebsites.net"
+            AzureDefaults.OGC_STAC_APP_URL
         ) + "/api/features",
         description="Base URL for OGC API - Features (vector data access) - Dedicated OGC/STAC function app"
     )
@@ -223,7 +206,7 @@ class AppConfig(BaseModel):
     stac_api_base_url: str = Field(
         default_factory=lambda: os.getenv(
             "OGC_STAC_APP_URL",
-            "https://rmhogcstac-b4f5ccetf0a7hwe9.eastus-01.azurewebsites.net"
+            AzureDefaults.OGC_STAC_APP_URL
         ) + "/api/stac",
         description="Base URL for STAC API (metadata catalog) - Currently co-located with OGC Features"
     )
@@ -231,13 +214,13 @@ class AppConfig(BaseModel):
     etl_app_base_url: str = Field(
         default_factory=lambda: os.getenv(
             "ETL_APP_URL",
-            "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net"
+            AzureDefaults.ETL_APP_URL
         ),
         description="Base URL for ETL/Admin Function App (rmhazuregeoapi) - Hosts viewer, job submission, admin endpoints"
     )
 
     titiler_mode: str = Field(
-        default_factory=lambda: os.getenv("TITILER_MODE", "pgstac"),
+        default_factory=lambda: os.getenv("TITILER_MODE", AppDefaults.TITILER_MODE),
         description="TiTiler deployment mode (vanilla, pgstac, xarray)",
         examples=["vanilla", "pgstac", "xarray"]
     )
@@ -248,14 +231,14 @@ class AppConfig(BaseModel):
 
     key_vault_name: Optional[str] = Field(
         default=None,
-        description="DEPRECATED: Azure Key Vault name (using environment variables instead)",
-        deprecated="Using environment variables for secrets instead of Key Vault"
+        description="Azure Key Vault name - kept for future use when Key Vault integration is re-enabled",
+        examples=["rmh-keyvault-prod"]
     )
 
     key_vault_database_secret: str = Field(
-        default="postgis-password",
-        description="DEPRECATED: Key Vault secret name for PostgreSQL password",
-        deprecated="Using POSTGIS_PASSWORD environment variable"
+        default=KeyVaultDefaults.DATABASE_SECRET_NAME,
+        description="Key Vault secret name for PostgreSQL password - kept for future use",
+        examples=["postgis-password"]
     )
 
     # ========================================================================
@@ -269,7 +252,24 @@ class AppConfig(BaseModel):
 
     database: DatabaseConfig = Field(
         default_factory=DatabaseConfig.from_environment,
-        description="PostgreSQL/PostGIS configuration with managed identity support"
+        description="PostgreSQL/PostGIS configuration for app database (full DDL permissions)"
+    )
+
+    business_database: Optional[BusinessDatabaseConfig] = Field(
+        default=None,
+        description="""Business database configuration for ETL pipeline outputs.
+
+        Separate database from app database with RESTRICTED permissions:
+        - App Database (geopgflex): Full DDL (CREATE/DROP SCHEMA) - can nuke/rebuild
+        - Business Database (geodata): CRUD only (NO DROP SCHEMA) - protected
+
+        If not configured (BUSINESS_DB_* env vars not set), falls back to app database
+        geo schema for backward compatibility during migration.
+
+        Environment Variables:
+            BUSINESS_DB_HOST, BUSINESS_DB_NAME, BUSINESS_DB_SCHEMA,
+            BUSINESS_DB_MANAGED_IDENTITY_NAME (all optional - uses app db if not set)
+        """
     )
 
     raster: RasterConfig = Field(
@@ -301,6 +301,34 @@ class AppConfig(BaseModel):
         default_factory=PlatformConfig.from_environment,
         description="Platform layer configuration (DDH integration, anti-corruption layer)"
     )
+
+    # ========================================================================
+    # Azure Data Factory Configuration (29 NOV 2025)
+    # ========================================================================
+
+    adf_subscription_id: Optional[str] = Field(
+        default_factory=lambda: os.environ.get("ADF_SUBSCRIPTION_ID"),
+        description="Azure subscription ID for Data Factory operations"
+    )
+
+    adf_resource_group: Optional[str] = Field(
+        default_factory=lambda: os.environ.get("ADF_RESOURCE_GROUP", "rmhazure_rg"),
+        description="Resource group containing the Data Factory instance"
+    )
+
+    adf_factory_name: Optional[str] = Field(
+        default_factory=lambda: os.environ.get("ADF_FACTORY_NAME"),
+        description="Azure Data Factory instance name"
+    )
+
+    def is_adf_configured(self) -> bool:
+        """
+        Check if Azure Data Factory is configured.
+
+        Returns:
+            True if ADF_SUBSCRIPTION_ID and ADF_FACTORY_NAME are set
+        """
+        return bool(self.adf_subscription_id and self.adf_factory_name)
 
     # ========================================================================
     # Legacy Compatibility Properties (During Migration)
@@ -514,6 +542,50 @@ class AppConfig(BaseModel):
         return self.titiler_base_url
 
     # ========================================================================
+    # Business Database Helper Methods (29 NOV 2025)
+    # ========================================================================
+
+    def get_business_database_config(self) -> DatabaseConfig | BusinessDatabaseConfig:
+        """
+        Get configuration for business data operations.
+
+        Returns BusinessDatabaseConfig if explicitly configured (BUSINESS_DB_* env vars set),
+        otherwise falls back to app database for backward compatibility.
+
+        This allows gradual migration:
+        - Phase 1: No BUSINESS_DB_* vars → uses app database geo schema
+        - Phase 2: Set BUSINESS_DB_* vars → uses dedicated business database
+
+        Usage:
+            from config import get_config
+            config = get_config()
+
+            # Get appropriate config for ETL outputs
+            business_config = config.get_business_database_config()
+
+            # Check if using dedicated business database
+            if isinstance(business_config, BusinessDatabaseConfig):
+                logger.info(f"Using business database: {business_config.database}")
+            else:
+                logger.info("Using app database geo schema (fallback)")
+
+        Returns:
+            BusinessDatabaseConfig if configured, DatabaseConfig otherwise
+        """
+        if self.business_database and self.business_database.is_configured:
+            return self.business_database
+        return self.database
+
+    def is_business_database_configured(self) -> bool:
+        """
+        Check if dedicated business database is configured.
+
+        Returns:
+            True if BUSINESS_DB_HOST or BUSINESS_DB_NAME environment variables are set
+        """
+        return self.business_database is not None and self.business_database.is_configured
+
+    # ========================================================================
     # URL Generation Methods (Legacy Compatibility)
     # ========================================================================
 
@@ -666,19 +738,20 @@ class AppConfig(BaseModel):
     def from_environment(cls):
         """Load all configs from environment."""
         return cls(
-            # Core settings
-            debug_mode=os.environ.get("DEBUG_MODE", "false").lower() == "true",
-            environment=os.environ.get("ENVIRONMENT", "dev"),
-            storage_account_name=os.environ.get("STORAGE_ACCOUNT_NAME", "rmhazuregeo"),
-            bronze_container_name=os.environ.get("BRONZE_CONTAINER_NAME", "rmhazuregeobronze"),
-            silver_container_name=os.environ.get("SILVER_CONTAINER_NAME", "rmhazuregeosilver"),
-            gold_container_name=os.environ.get("GOLD_CONTAINER_NAME", "rmhazuregeogold"),
-            function_timeout_minutes=int(os.environ.get("FUNCTION_TIMEOUT_MINUTES", "30")),
-            log_level=os.environ.get("LOG_LEVEL", "INFO"),
+            # Core settings (using defaults from config/defaults.py)
+            debug_mode=os.environ.get("DEBUG_MODE", str(AppDefaults.DEBUG_MODE).lower()).lower() == "true",
+            environment=os.environ.get("ENVIRONMENT", AppDefaults.ENVIRONMENT),
+            storage_account_name=os.environ.get("STORAGE_ACCOUNT_NAME", AzureDefaults.STORAGE_ACCOUNT_NAME),
+            function_timeout_minutes=int(os.environ.get("FUNCTION_TIMEOUT_MINUTES", str(AppDefaults.FUNCTION_TIMEOUT_MINUTES))),
+            log_level=os.environ.get("LOG_LEVEL", AppDefaults.LOG_LEVEL),
 
             # Domain configs
             storage=StorageConfig.from_environment(),
             database=DatabaseConfig.from_environment(),
+            # Business database: only instantiate if explicitly configured
+            business_database=BusinessDatabaseConfig.from_environment()
+                if (os.environ.get("BUSINESS_DB_HOST") or os.environ.get("BUSINESS_DB_NAME"))
+                else None,
             raster=RasterConfig.from_environment(),
             vector=VectorConfig.from_environment(),
             queues=QueueConfig.from_environment(),

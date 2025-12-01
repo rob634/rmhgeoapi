@@ -141,7 +141,7 @@ from datetime import datetime, timezone
 
 import azure.functions as func
 from .http_base import SystemMonitoringTrigger
-from config import get_config
+from config import get_config, AzureDefaults
 from core.schema.deployer import SchemaManagerFactory
 from utils import validator
 
@@ -178,6 +178,14 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
             "errors": []
         }
         
+        # Check deployment configuration (critical for new tenant deployment)
+        deployment_health = self._check_deployment_config()
+        health_data["components"]["deployment_config"] = deployment_health
+        # Note: Deployment config using defaults is a WARNING, not a failure
+        # This allows the dev environment to work while alerting on production deployments
+        if deployment_health.get("details", {}).get("config_status") == "using_defaults":
+            health_data["errors"].append("Configuration using development defaults - set environment variables for production")
+
         # Check import validation (critical for application startup)
         import_health = self._check_import_validation()
         health_data["components"]["imports"] = import_health
@@ -1514,6 +1522,130 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                 }
 
         return self.check_component_health("system_reference_tables", check_system_tables)
+
+    def _check_deployment_config(self) -> Dict[str, Any]:
+        """
+        Check if deployment configuration is properly set for this Azure tenant.
+
+        Validates that tenant-specific values (storage accounts, URLs, managed identities)
+        have been overridden from their development defaults. Uses AzureDefaults class
+        from config/defaults.py to detect default values.
+
+        This check helps identify when deploying to a new Azure tenant whether
+        all required environment variables have been properly configured.
+
+        Returns:
+            Dict with deployment configuration validation status including:
+            - config_status: "configured" | "using_defaults" | "partial"
+            - issues: List of configuration issues detected
+            - defaults_detected: Dict of fields still using development defaults
+            - environment_vars_set: Dict of which env vars were found
+            - deployment_ready: Boolean indicating readiness for production
+        """
+        def check_deployment():
+            config = get_config()
+
+            issues = []
+            defaults_detected = {}
+            env_vars_set = {}
+
+            # Check storage account name
+            storage_account = config.storage_account_name
+            if storage_account == AzureDefaults.STORAGE_ACCOUNT_NAME:
+                defaults_detected['storage_account_name'] = {
+                    'current_value': storage_account,
+                    'default_value': AzureDefaults.STORAGE_ACCOUNT_NAME,
+                    'env_var': 'STORAGE_ACCOUNT_NAME'
+                }
+                issues.append(f"Storage account using development default: {storage_account}")
+            env_vars_set['STORAGE_ACCOUNT_NAME'] = bool(os.getenv('STORAGE_ACCOUNT_NAME'))
+
+            # Check TiTiler URL
+            titiler_url = config.titiler_base_url
+            if titiler_url == AzureDefaults.TITILER_BASE_URL:
+                defaults_detected['titiler_base_url'] = {
+                    'current_value': titiler_url,
+                    'default_value': AzureDefaults.TITILER_BASE_URL,
+                    'env_var': 'TITILER_BASE_URL'
+                }
+                issues.append(f"TiTiler URL using development default")
+            env_vars_set['TITILER_BASE_URL'] = bool(os.getenv('TITILER_BASE_URL'))
+
+            # Check OGC/STAC URL
+            ogc_stac_url = os.getenv('OGC_STAC_APP_URL', AzureDefaults.OGC_STAC_APP_URL)
+            if ogc_stac_url == AzureDefaults.OGC_STAC_APP_URL:
+                defaults_detected['ogc_stac_app_url'] = {
+                    'current_value': ogc_stac_url,
+                    'default_value': AzureDefaults.OGC_STAC_APP_URL,
+                    'env_var': 'OGC_STAC_APP_URL'
+                }
+                issues.append(f"OGC/STAC URL using development default")
+            env_vars_set['OGC_STAC_APP_URL'] = bool(os.getenv('OGC_STAC_APP_URL'))
+
+            # Check ETL App URL
+            etl_url = config.etl_app_base_url
+            if etl_url == AzureDefaults.ETL_APP_URL:
+                defaults_detected['etl_app_base_url'] = {
+                    'current_value': etl_url,
+                    'default_value': AzureDefaults.ETL_APP_URL,
+                    'env_var': 'ETL_APP_URL'
+                }
+                issues.append(f"ETL App URL using development default")
+            env_vars_set['ETL_APP_URL'] = bool(os.getenv('ETL_APP_URL'))
+
+            # Check Managed Identity name (if using managed identity)
+            use_managed_identity = os.getenv('USE_MANAGED_IDENTITY', 'false').lower() == 'true'
+            if use_managed_identity:
+                mi_name = config.database.managed_identity_name
+                if mi_name == AzureDefaults.MANAGED_IDENTITY_NAME:
+                    defaults_detected['managed_identity_name'] = {
+                        'current_value': mi_name,
+                        'default_value': AzureDefaults.MANAGED_IDENTITY_NAME,
+                        'env_var': 'MANAGED_IDENTITY_NAME'
+                    }
+                    issues.append(f"Managed Identity using development default: {mi_name}")
+                env_vars_set['MANAGED_IDENTITY_NAME'] = bool(os.getenv('MANAGED_IDENTITY_NAME'))
+            else:
+                env_vars_set['USE_MANAGED_IDENTITY'] = False
+
+            # Check database host (required for any deployment)
+            db_host = config.database.host
+            env_vars_set['POSTGIS_HOST'] = bool(os.getenv('POSTGIS_HOST'))
+            if not os.getenv('POSTGIS_HOST'):
+                issues.append("Database host (POSTGIS_HOST) not set via environment variable")
+
+            # Determine overall status
+            defaults_count = len(defaults_detected)
+            total_azure_configs = 5  # storage, titiler, ogc_stac, etl, managed_identity
+
+            if defaults_count == 0:
+                config_status = "configured"
+                deployment_ready = True
+            elif defaults_count == total_azure_configs:
+                config_status = "using_defaults"
+                deployment_ready = False
+            else:
+                config_status = "partial"
+                deployment_ready = False
+
+            return {
+                "config_status": config_status,
+                "deployment_ready": deployment_ready,
+                "azure_tenant_specific_configs": {
+                    "total_checked": total_azure_configs,
+                    "properly_configured": total_azure_configs - defaults_count,
+                    "using_defaults": defaults_count
+                },
+                "issues": issues if issues else None,
+                "defaults_detected": defaults_detected if defaults_detected else None,
+                "environment_vars_set": env_vars_set,
+                "recommendation": None if deployment_ready else (
+                    "Set tenant-specific environment variables before deploying to production. "
+                    "See config/defaults.py for the list of AzureDefaults values that should be overridden."
+                )
+            }
+
+        return self.check_component_health("deployment_config", check_deployment)
 
 
 # Create singleton instance for use in function_app.py

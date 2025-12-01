@@ -4,14 +4,30 @@
     "AzureWebJobsStorage": "__AzureWebJobsStorage__",
     "FUNCTIONS_WORKER_RUNTIME": "python",
     "AZURE_FUNCTIONS_ENVIRONMENT": "Development",
-    
-    "_comment_storage": "=== Azure Storage Configuration ===",
+
+    "_comment_required_azure": "============================================================",
+    "_comment_required_azure_1": "=== REQUIRED: Azure Tenant-Specific Configuration ===",
+    "_comment_required_azure_2": "These MUST be set for new tenant deployment. If using defaults,",
+    "_comment_required_azure_3": "health endpoint will show 'using_defaults' warning.",
+    "_comment_required_azure_4": "See config/defaults.py for default values used if not set.",
+    "_comment_required_azure_5": "============================================================",
+
     "STORAGE_ACCOUNT_NAME": "your-storage-account-name",
-    "BRONZE_CONTAINER_NAME": "your-bronze-container",
-    "SILVER_CONTAINER_NAME": "your-silver-container",
-    "GOLD_CONTAINER_NAME": "your-gold-container",
-    
-    "_comment_postgres": "=== PostgreSQL Configuration ===",
+    "_comment_storage_note": "Azure Storage account name for blob storage (managed identity auth)",
+
+    "TITILER_BASE_URL": "https://your-titiler-app.azurewebsites.net",
+    "_comment_titiler_note": "TiTiler-PgSTAC tile server URL for raster visualization",
+
+    "OGC_STAC_APP_URL": "https://your-ogcstac-app.azurewebsites.net",
+    "_comment_ogc_note": "OGC Features API and STAC API function app URL",
+
+    "ETL_APP_URL": "https://your-etl-app.azurewebsites.net",
+    "_comment_etl_note": "ETL/Admin function app URL (this app if self-referencing)",
+
+    "_comment_database": "============================================================",
+    "_comment_database_1": "=== REQUIRED: PostgreSQL Database Configuration ===",
+    "_comment_database_2": "============================================================",
+
     "POSTGIS_HOST": "your-postgres-server.postgres.database.azure.com",
     "POSTGIS_PORT": "5432",
     "POSTGIS_USER": "your-db-user",
@@ -19,34 +35,46 @@
     "POSTGIS_SCHEMA": "geo",
     "APP_SCHEMA": "app",
 
-    "_comment_managed_identity": "=== Managed Identity Configuration (Passwordless Auth) ===",
+    "_comment_auth": "============================================================",
+    "_comment_auth_1": "=== Authentication Configuration (Choose ONE method) ===",
+    "_comment_auth_2": "============================================================",
+
+    "_comment_managed_identity": "--- Option 1: Managed Identity (Recommended for Azure) ---",
     "USE_MANAGED_IDENTITY": "false",
     "MANAGED_IDENTITY_NAME": "your-function-app-name-identity",
-    "_comment_mi_notes": "For Azure: Set USE_MANAGED_IDENTITY=true and enable managed identity on Function App. For local dev: Use 'az login' or set POSTGIS_PASSWORD below.",
+    "_comment_mi_notes": "Set USE_MANAGED_IDENTITY=true and enable managed identity on Function App",
 
-    "_comment_security": "=== Security Configuration (Password Fallback) ===",
+    "_comment_password": "--- Option 2: Password Authentication (Local dev or no MI) ---",
     "POSTGIS_PASSWORD": "your-database-password",
-    "_comment_password_notes": "Optional: Only needed if USE_MANAGED_IDENTITY=false or for local development. In Azure with managed identity, this can be removed.",
+    "_comment_password_notes": "Only needed if USE_MANAGED_IDENTITY=false. For local dev, use 'az login' or set this.",
+
+    "_comment_keyvault": "--- Option 3: Key Vault (Future use) ---",
     "KEY_VAULT_NAME": "your-key-vault-name",
     "KEY_VAULT_DATABASE_SECRET": "postgis-password",
-    "_comment_keyvault_notes": "Legacy: Key Vault no longer required with managed identity. Can be deprecated after migration.",
-    
-    "_comment_queues": "=== Queue Configuration ===",
-    "JOB_PROCESSING_QUEUE": "geospatial-jobs",
-    "TASK_PROCESSING_QUEUE": "geospatial-tasks",
+    "_comment_keyvault_notes": "Key Vault integration available but not currently enabled",
 
-    "_comment_service_bus": "=== Service Bus Configuration (Parallel Pipeline) ===",
+    "_comment_service_bus": "============================================================",
+    "_comment_service_bus_1": "=== REQUIRED: Service Bus Configuration ===",
+    "_comment_service_bus_2": "This is a SERVICE BUS ONLY application. Storage Queues not supported.",
+    "_comment_service_bus_3": "============================================================",
+
     "SERVICE_BUS_NAMESPACE": "your-servicebus-namespace",
     "SERVICE_BUS_CONNECTION_STRING": "Endpoint=sb://your-namespace.servicebus.windows.net/;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=...",
-    "SERVICE_BUS_JOB_QUEUE": "sb-jobs",
-    "SERVICE_BUS_TASK_QUEUE": "sb-tasks",
+    "SERVICE_BUS_JOB_QUEUE": "geospatial-jobs",
+    "SERVICE_BUS_TASK_QUEUE": "geospatial-tasks",
     "SERVICE_BUS_MAX_BATCH_SIZE": "100",
-    "ENABLE_SERVICE_BUS": "false",
-    
-    "_comment_app": "=== Application Configuration ===",
-    "FUNCTION_TIMEOUT_MINUTES": "5",
-    "MAX_RETRY_ATTEMPTS": "3",
+
+    "_comment_app": "============================================================",
+    "_comment_app_1": "=== OPTIONAL: Application Configuration ===",
+    "_comment_app_2": "These have sensible defaults in config/defaults.py",
+    "_comment_app_3": "============================================================",
+
+    "DEBUG_MODE": "false",
+    "ENVIRONMENT": "dev",
+    "FUNCTION_TIMEOUT_MINUTES": "30",
     "LOG_LEVEL": "INFO",
-    "ENABLE_DATABASE_HEALTH_CHECK": "true"
+    "ENABLE_DATABASE_HEALTH_CHECK": "true",
+    "ENABLE_DUCKDB_HEALTH_CHECK": "false",
+    "ENABLE_VSI_HEALTH_CHECK": "false"
   }
 }

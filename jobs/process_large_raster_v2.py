@@ -131,8 +131,13 @@ class ProcessLargeRasterV2Job(RasterMixin, RasterWorkflowsBase, JobBaseMixin, Jo
 
         if stage == 1:
             # Stage 1: Generate tiling scheme (single task)
+            # Auto-detection happens in tiling_scheme.py - no hardcoded band_names default
             container = job_params.get("container_name") or config.storage.bronze.get_container('rasters')
-            band_names = job_params.get("band_names") or {"5": "Red", "3": "Green", "2": "Blue"}
+
+            # Pass user's band_names if provided, otherwise None triggers auto-detection
+            # FIX (01 DEC 2025): Removed hardcoded {"5": "Red", "3": "Green", "2": "Blue"} default
+            # that broke standard RGB images like antigua.tif
+            user_band_names = job_params.get("band_names")
 
             return [{
                 "task_id": f"{job_id[:8]}-s1-tiling",
@@ -143,7 +148,7 @@ class ProcessLargeRasterV2Job(RasterMixin, RasterWorkflowsBase, JobBaseMixin, Jo
                     "tile_size": job_params.get("tile_size"),  # None = auto-calculate
                     "overlap": job_params.get("overlap", 512),
                     "output_container": config.storage.silver.get_container('cogs'),
-                    "band_names": band_names,
+                    "band_names": user_band_names,  # None = auto-detect in tiling_scheme.py
                     "target_crs": job_params.get("target_crs") or config.raster.target_crs
                 }
             }]
@@ -157,7 +162,13 @@ class ProcessLargeRasterV2Job(RasterMixin, RasterWorkflowsBase, JobBaseMixin, Jo
             tiling_scheme_blob = stage1_result["tiling_scheme_blob"]
 
             container = job_params.get("container_name") or config.storage.bronze.get_container('rasters')
-            band_names = job_params.get("band_names") or {"5": "Red", "3": "Green", "2": "Blue"}
+
+            # FIX (01 DEC 2025): Use auto-detected band_names from Stage 1, fall back to user param
+            # Priority: user param > Stage 1 auto-detected > None (process all bands)
+            raster_metadata = stage1_result.get("raster_metadata", {})
+            band_names = job_params.get("band_names") or raster_metadata.get("used_band_names")
+
+            logger.info(f"Stage 2: Using band_names={band_names} (detected_type: {raster_metadata.get('detected_type', 'unknown')})")
 
             return [{
                 "task_id": f"{job_id[:8]}-s2-extract",

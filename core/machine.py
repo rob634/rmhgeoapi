@@ -685,12 +685,19 @@ class CoreMachine:
 
             # Inject job context into parameters (underscore prefix = system-injected)
             # This allows handlers to access job_id, job_type, stage without modifying every job definition
+            #
+            # NOTE: _heartbeat_fn DISABLED (2 DEC 2025) - Token expiration issues
+            # When re-enabling, add this to enriched_params:
+            #   '_heartbeat_fn': lambda tid=task_id: self.repos['task_repo'].update_task_heartbeat(tid),
+            # See services/raster_cog.py HeartbeatWrapper class for usage
+            task_id = task_message.task_id
             enriched_params = {
                 **task_message.parameters,
                 '_job_id': task_message.parent_job_id,
                 '_job_type': task_message.job_type,
                 '_stage': task_message.stage,
-                '_task_id': task_message.task_id,
+                '_task_id': task_id,
+                # '_heartbeat_fn': DISABLED - see note above
             }
 
             # Execute handler (returns dict or TaskResult)

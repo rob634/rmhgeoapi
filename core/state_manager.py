@@ -644,15 +644,60 @@ class StateManager:
             # Get repositories
             stage_completion_repo = self.repos['stage_completion_repo']
 
-            # Verify task is in PROCESSING state
+            # Verify task exists and check status
             task = self.repos['task_repo'].get_task(task_id)
             if not task:
                 raise ValueError(f"Task not found: {task_id}")
 
+            # Handle idempotent completion - already completed is OK (duplicate message delivery)
+            # This handles the race condition where Azure Service Bus message lock expires
+            # during long-running tasks (>5 min), causing duplicate message delivery.
+            if task.status == TaskStatus.COMPLETED:
+                self.logger.info(
+                    f"Task {task_id} already completed (idempotent - duplicate message delivery). "
+                    f"Returning existing completion status.",
+                    extra={
+                        'checkpoint': 'STATE_TASK_ALREADY_COMPLETED',
+                        'task_id': task_id,
+                        'job_id': job_id,
+                        'stage': stage
+                    }
+                )
+                # Return a "no-op" result - task was already done
+                from core.models.results import TaskCompletionResult
+                return TaskCompletionResult(
+                    task_updated=False,  # We didn't update it
+                    stage_complete=False,  # Don't trigger stage advancement again
+                    job_id=job_id,
+                    stage_number=stage,
+                    remaining_tasks=0  # Already counted in original completion
+                )
+
+            if task.status == TaskStatus.FAILED:
+                self.logger.info(
+                    f"Task {task_id} already marked as failed (idempotent - duplicate message delivery). "
+                    f"Returning existing failure status.",
+                    extra={
+                        'checkpoint': 'STATE_TASK_ALREADY_FAILED',
+                        'task_id': task_id,
+                        'job_id': job_id,
+                        'stage': stage
+                    }
+                )
+                from core.models.results import TaskCompletionResult
+                return TaskCompletionResult(
+                    task_updated=False,
+                    stage_complete=False,
+                    job_id=job_id,
+                    stage_number=stage,
+                    remaining_tasks=0
+                )
+
             if task.status != TaskStatus.PROCESSING:
+                # Only raise for truly unexpected states (PENDING, QUEUED, etc.)
                 raise RuntimeError(
                     f"Task {task_id} has unexpected status: {task.status} "
-                    f"(expected: PROCESSING)"
+                    f"(expected: PROCESSING, COMPLETED, or FAILED)"
                 )
 
             # Call PostgreSQL function with advisory lock

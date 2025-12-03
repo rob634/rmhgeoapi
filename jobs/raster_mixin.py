@@ -331,6 +331,65 @@ class RasterMixin:
         return tasks
 
     @staticmethod
+    def _get_default_band_names(detected_type: str, band_count: int) -> Optional[Dict[int, str]]:
+        """
+        Get default band_names mapping based on detected raster type.
+
+        Returns None for single-band types (DEM, categorical) or unknown types,
+        since no band selection is needed - all bands are processed.
+
+        This enables auto-detection to work correctly across:
+        - Standard RGB images (bands 1, 2, 3)
+        - RGBA with alpha (bands 1, 2, 3, 4)
+        - RGB + NIR (bands 1, 2, 3, 4)
+        - Multispectral Landsat/Sentinel (bands 5, 3, 2 → RGB)
+
+        Args:
+            detected_type: Type detected by _detect_raster_type() (e.g., "rgb", "multispectral")
+            band_count: Actual number of bands in the raster file
+
+        Returns:
+            Dict mapping band indices to names, or None if all bands should be processed
+
+        Example:
+            >>> RasterMixin._get_default_band_names("rgb", 3)
+            {1: "Red", 2: "Green", 3: "Blue"}
+
+            >>> RasterMixin._get_default_band_names("multispectral", 8)
+            {5: "Red", 3: "Green", 2: "Blue"}
+
+            >>> RasterMixin._get_default_band_names("dem", 1)
+            None  # Process all bands
+        """
+        logger = LoggerFactory.create_logger(ComponentType.CONTROLLER, "raster_mixin")
+
+        # Default band mappings by raster type
+        BAND_NAMES_BY_TYPE = {
+            "rgb": {1: "Red", 2: "Green", 3: "Blue"},
+            "rgba": {1: "Red", 2: "Green", 3: "Blue", 4: "Alpha"},
+            "nir": {1: "Red", 2: "Green", 3: "Blue", 4: "NIR"},
+            "multispectral": {5: "Red", 3: "Green", 2: "Blue"},  # Landsat/Sentinel B5,B3,B2 → RGB
+            "dem": None,
+            "categorical": None,
+            "unknown": None,
+        }
+
+        default = BAND_NAMES_BY_TYPE.get(detected_type)
+
+        # Validate band_names against actual band count
+        if default and isinstance(default, dict):
+            # Filter out bands that don't exist in the file
+            valid_bands = {k: v for k, v in default.items() if k <= band_count}
+            if len(valid_bands) < len(default):
+                logger.warning(
+                    f"⚠️ Band mismatch: {detected_type} expects bands {list(default.keys())} "
+                    f"but file has only {band_count} bands. Using {list(valid_bands.keys())}"
+                )
+            return valid_bands if valid_bands else None
+
+        return default
+
+    @staticmethod
     def _resolve_in_memory(job_params: Dict[str, Any], config, default_threshold_mb: int = 500) -> bool:
         """
         Resolve in_memory setting based on file size and config.

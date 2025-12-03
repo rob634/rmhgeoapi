@@ -1,6 +1,6 @@
 # Active Tasks - Geospatial ETL Pipelines
 
-**Last Updated**: 30 NOV 2025 (UTC) - Moved Dual Database Architecture to HISTORY.md
+**Last Updated**: 02 DEC 2025 (UTC) - Added Sensor Metadata Extraction & Provenance System (MEDIUM PRIORITY)
 **Author**: Robert and Geospatial Claude Legion
 
 ---
@@ -809,6 +809,681 @@ Check for Epoch 3 code that was superseded by Epoch 4:
 | `jobs/hello_world_original_backup.py` | Backup file - archive candidate |
 | `core/logic/*.py` | May contain unused calculations |
 | `core/contracts/*.py` | Check if contracts are enforced anywhere |
+
+---
+
+## 🟡 MEDIUM PRIORITY: Heartbeat Mechanism for Long-Running Operations (30 NOV 2025)
+
+**Status**: 📋 **PLANNING COMPLETE - READY FOR IMPLEMENTATION**
+**Priority**: **MEDIUM** - System resilience and timeout prevention
+**Impact**: Prevents task stuck in "processing" forever, enables timeout detection
+**Author**: Robert and Geospatial Claude Legion
+**Created**: 30 NOV 2025
+**Root Cause**: DTM file (2.9GB) timed out at 30 minutes during `cog_translate()` - reprojection took too long
+
+---
+
+### Problem Statement
+
+**What Happened (30 NOV 2025)**:
+1. DTM file (2.9GB) submitted for COG creation with reprojection EPSG:32648 → EPSG:4326
+2. Memory estimation correctly predicted 7.24GB peak (within safe threshold)
+3. `cog_translate()` blocked the thread for >30 minutes during reprojection
+4. Azure Function timeout (30 min) killed the function silently
+5. Task stuck in "processing" status forever - no cleanup, no failure record
+6. App became unresponsive (health checks failing)
+
+**Two Issues Identified**:
+1. **No heartbeat during blocking operations** - can't detect stalled tasks
+2. **No time estimation** - memory is fine, but processing time exceeded function timeout
+
+---
+
+### Solution Architecture
+
+#### Part 1: HeartbeatWrapper (Threading Pattern)
+
+Background thread updates task heartbeat every 30 seconds while `cog_translate()` blocks.
+
+**Why Threading (not async)**:
+- `cog_translate()` is a blocking C library call (GDAL)
+- Cannot use async/await - must use threads
+- Daemon thread auto-cleanup if main thread crashes
+
+#### Part 2: Processing Time Estimation
+
+Estimate COG creation time based on empirical data:
+- **With reprojection**: ~1.5 MB/second (your DTM: 2.9GB → ~32 min)
+- **Without reprojection**: ~10 MB/second
+
+#### Part 3: Threshold-Based Routing
+
+Combined decision for chunked vs single-pass processing:
+
+| Check | Threshold | Route to Chunked |
+|-------|-----------|------------------|
+| **Estimated time** | > 25 min | ✅ Yes (5-min buffer before 30-min timeout) |
+| **Memory strategy** | `chunked` | ✅ Yes |
+| **File size** | > 1 GB (`size_threshold_mb`) | ✅ Yes |
+| **Reprojection + Size** | Needs reproject AND > 2 GB | ✅ Yes (your DTM case) |
+
+---
+
+### Implementation Phases
+
+#### Phase 1: HeartbeatWrapper Class (Immediate Resilience)
+
+**Goal**: Prevent tasks stuck in "processing" forever
+
+**Files to Create/Modify**:
+
+| File | Action | Description |
+|------|--------|-------------|
+| `services/raster_cog.py` | EDIT | Add `HeartbeatWrapper` class (~60 lines) |
+| `services/raster_cog.py` | EDIT | Wrap `cog_translate()` call with heartbeat |
+
+**Step 1.1: Create HeartbeatWrapper Class** (`services/raster_cog.py`)
+
+Add at top of file after imports:
+
+```python
+import threading
+from datetime import datetime, timezone
+from typing import Callable, Optional
+
+class HeartbeatWrapper:
+    """
+    Wraps blocking operations with periodic heartbeat updates.
+
+    Uses a background thread to update heartbeat while the main operation runs.
+    Thread-safe and handles cleanup on completion or error.
+
+    Usage:
+        with HeartbeatWrapper(task_id, heartbeat_fn, interval_seconds=30, logger=logger):
+            cog_translate(...)  # Blocking operation
+    """
+
+    def __init__(
+        self,
+        task_id: str,
+        heartbeat_fn: Callable[[str], bool],
+        interval_seconds: int = 30,
+        logger = None
+    ):
+        self.task_id = task_id
+        self.heartbeat_fn = heartbeat_fn
+        self.interval = interval_seconds
+        self.logger = logger
+        self._stop_event = threading.Event()
+        self._thread: Optional[threading.Thread] = None
+        self._heartbeat_count = 0
+        self._last_heartbeat: Optional[datetime] = None
+
+    def _heartbeat_loop(self):
+        """Background thread loop - updates heartbeat every interval."""
+        while not self._stop_event.wait(timeout=self.interval):
+            try:
+                success = self.heartbeat_fn(self.task_id)
+                self._heartbeat_count += 1
+                self._last_heartbeat = datetime.now(timezone.utc)
+                if self.logger:
+                    self.logger.debug(
+                        f"💓 Heartbeat #{self._heartbeat_count} for task {self.task_id[:8]}",
+                        extra={"task_id": self.task_id}
+                    )
+            except Exception as e:
+                if self.logger:
+                    self.logger.warning(f"Heartbeat update failed: {e}")
+
+    def __enter__(self):
+        """Start heartbeat thread."""
+        self._stop_event.clear()
+        self._thread = threading.Thread(target=self._heartbeat_loop, daemon=True)
+        self._thread.start()
+        if self.logger:
+            self.logger.info(
+                f"💓 Started heartbeat thread (interval={self.interval}s) for task {self.task_id[:8]}"
+            )
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Stop heartbeat thread and cleanup."""
+        self._stop_event.set()
+        if self._thread:
+            self._thread.join(timeout=5)
+        if self.logger:
+            self.logger.info(
+                f"💓 Stopped heartbeat thread after {self._heartbeat_count} updates"
+            )
+        return False  # Don't suppress exceptions
+```
+
+**Step 1.2: Integrate with cog_translate() Call** (`services/raster_cog.py` ~line 393)
+
+Find the `cog_translate()` call and wrap it:
+
+```python
+# Get task_id from context (passed through parameters)
+task_id = context.get("task_id") if context else None
+heartbeat_fn = None
+
+if task_id:
+    try:
+        from infrastructure.jobs_tasks import TaskRepository
+        task_repo = TaskRepository.instance()
+        heartbeat_fn = task_repo.update_task_heartbeat
+    except Exception as e:
+        logger.warning(f"Could not initialize heartbeat: {e}")
+
+# Wrap the blocking operation with heartbeat
+if task_id and heartbeat_fn:
+    logger.info(f"🔄 Starting COG creation with heartbeat for task {task_id[:8]}")
+    with HeartbeatWrapper(
+        task_id=task_id,
+        heartbeat_fn=heartbeat_fn,
+        interval_seconds=30,
+        logger=logger
+    ):
+        cog_translate(
+            src,
+            output_memfile.name,
+            cog_profile,
+            config=config,
+            overview_level=None,
+            overview_resampling=overview_resampling_name,
+            in_memory=in_memory,
+            quiet=False,
+        )
+else:
+    # No heartbeat available, run directly
+    logger.info("🔄 Starting COG creation (no heartbeat - no task_id in context)")
+    cog_translate(
+        src,
+        output_memfile.name,
+        cog_profile,
+        config=config,
+        overview_level=None,
+        overview_resampling=overview_resampling_name,
+        in_memory=in_memory,
+        quiet=False,
+    )
+```
+
+**Checklist Phase 1**:
+- [ ] Add `HeartbeatWrapper` class to `services/raster_cog.py`
+- [ ] Wrap `cog_translate()` call with heartbeat
+- [ ] Ensure `task_id` is passed through context to COG creation
+- [ ] Deploy and test with small file (should see heartbeat logs)
+- [ ] Test with medium file (verify multiple heartbeats)
+
+---
+
+#### Phase 2: Processing Time Estimation
+
+**Goal**: Predict how long COG creation will take
+
+**Files to Modify**:
+
+| File | Action | Description |
+|------|--------|-------------|
+| `services/raster_validation.py` | EDIT | Add `_estimate_processing_time()` method |
+
+**Step 2.1: Add Time Estimation** (`services/raster_validation.py`)
+
+Add after `_estimate_memory_footprint()` method (~line 1240):
+
+```python
+def _estimate_processing_time(
+    self,
+    file_size_bytes: int,
+    needs_reproject: bool,
+    source_crs: str,
+    target_crs: str,
+) -> dict:
+    """
+    Estimate COG creation processing time based on empirical data.
+
+    Empirical baseline (from DTM testing 30 NOV 2025):
+    - 2.9 GB file with reprojection (EPSG:32648 → EPSG:4326): >30 minutes
+    - Processing rate with reprojection: ~1.5 MB/second
+    - Processing rate without reprojection: ~10 MB/second
+
+    Returns:
+        dict with estimated_minutes, processing_rate_mbps, confidence, recommendation
+    """
+    file_size_mb = file_size_bytes / (1024 * 1024)
+
+    # Base processing rates (MB/second) - conservative estimates
+    if needs_reproject:
+        # Reprojection is expensive, especially for large files
+        # Empirical: 2.9GB took >30 min = ~1.6 MB/s
+        base_rate_mbps = 1.5
+
+        # Adjust for projection complexity
+        if "4326" in str(target_crs) and "326" in str(source_crs):
+            # UTM to WGS84 - moderate complexity
+            rate_multiplier = 1.0
+        elif "3857" in str(target_crs):
+            # Web Mercator - slightly faster
+            rate_multiplier = 1.1
+        else:
+            # Unknown projection - be conservative
+            rate_multiplier = 0.8
+    else:
+        # No reprojection - much faster
+        base_rate_mbps = 10.0
+        rate_multiplier = 1.0
+
+    effective_rate = base_rate_mbps * rate_multiplier
+    estimated_seconds = file_size_mb / effective_rate
+    estimated_minutes = estimated_seconds / 60
+
+    # Add overhead for overview generation (10-20%)
+    estimated_minutes *= 1.15
+
+    # Determine recommendation
+    if estimated_minutes > 25:
+        recommendation = "chunked"
+        reason = f"Estimated {estimated_minutes:.1f} min exceeds 25-min safe threshold"
+    elif needs_reproject and file_size_mb > 2048:  # 2GB
+        recommendation = "chunked"
+        reason = f"Reprojection + large file ({file_size_mb:.0f} MB) - using chunked for safety"
+    else:
+        recommendation = "single_pass"
+        reason = f"Estimated {estimated_minutes:.1f} min within safe threshold"
+
+    return {
+        "estimated_minutes": round(estimated_minutes, 1),
+        "processing_rate_mbps": round(effective_rate, 2),
+        "file_size_mb": round(file_size_mb, 1),
+        "needs_reproject": needs_reproject,
+        "confidence": "medium" if needs_reproject else "high",
+        "recommendation": recommendation,
+        "reason": reason
+    }
+```
+
+**Step 2.2: Integrate with full_validation()** (`services/raster_validation.py`)
+
+Add time estimation call in `full_validation()` method, after memory estimation:
+
+```python
+# After memory estimation
+time_estimation = self._estimate_processing_time(
+    file_size_bytes=file_size,
+    needs_reproject=needs_reproject,
+    source_crs=crs_info.get("crs_wkt", ""),
+    target_crs=self.config.target_crs
+)
+validation_result["time_estimation"] = time_estimation
+logger.info(f"⏱️ TIME ESTIMATION: {time_estimation['estimated_minutes']} min, "
+           f"recommendation: {time_estimation['recommendation']} ({time_estimation['reason']})")
+```
+
+**Checklist Phase 2**:
+- [ ] Add `_estimate_processing_time()` method to `RasterValidationService`
+- [ ] Integrate with `full_validation()` to include time estimation
+- [ ] Add logging for time estimation results
+- [ ] Test with DTM file - should show ~32 min estimate
+
+---
+
+#### Phase 3: Configuration Updates
+
+**Goal**: Make thresholds configurable
+
+**Files to Modify**:
+
+| File | Action | Description |
+|------|--------|-------------|
+| `config/raster_config.py` | EDIT | Add threshold config fields |
+
+**Step 3.1: Add Config Fields** (`config/raster_config.py`)
+
+```python
+# Add to RasterConfig class
+chunked_threshold_minutes: int = Field(
+    default=25,
+    ge=5,
+    le=60,
+    description="If estimated processing time exceeds this (minutes), use chunked processing. "
+                "Default 25 gives 5-minute buffer before 30-minute function timeout."
+)
+
+heartbeat_interval_seconds: int = Field(
+    default=30,
+    ge=10,
+    le=120,
+    description="Interval between heartbeat updates during long-running operations."
+)
+```
+
+**Checklist Phase 3**:
+- [ ] Add `chunked_threshold_minutes` to `RasterConfig`
+- [ ] Add `heartbeat_interval_seconds` to `RasterConfig`
+- [ ] Update `HeartbeatWrapper` to use config value
+
+---
+
+#### Phase 4: Apply GDAL Config from Memory Estimation
+
+**Goal**: Use the GDAL config recommendations from memory estimation
+
+**Files to Modify**:
+
+| File | Action | Description |
+|------|--------|-------------|
+| `services/raster_service.py` | EDIT | Apply GDAL config from validation |
+
+**Step 4.1: Apply Config** (`services/raster_service.py`)
+
+After calling validation, apply the GDAL config:
+
+```python
+# After validation
+validation_result = validator.full_validation(...)
+
+# Extract and apply GDAL config from memory estimation
+if "memory_estimation" in validation_result:
+    mem_est = validation_result["memory_estimation"]
+    gdal_config = mem_est.get("recommended_gdal_config", {})
+
+    # Apply to environment for GDAL operations
+    import os
+    for key, value in gdal_config.items():
+        os.environ[key] = str(value)
+        logger.debug(f"Applied GDAL config: {key}={value}")
+```
+
+**Checklist Phase 4**:
+- [ ] Add GDAL config application to `raster_service.py`
+- [ ] Test that GDAL respects the config values
+- [ ] Verify memory usage is controlled
+
+---
+
+#### Phase 5: Automatic Routing Logic (Future)
+
+**Goal**: Automatically route large files to chunked processing
+
+**Combined Decision Function**:
+
+```python
+def should_use_chunked_processing(
+    file_size_bytes: int,
+    memory_estimation: dict,
+    time_estimation: dict,
+    config: RasterConfig
+) -> tuple[bool, str]:
+    """
+    Determine if file should use chunked processing.
+
+    Returns:
+        (should_chunk: bool, reason: str)
+    """
+    file_size_gb = file_size_bytes / (1024**3)
+
+    # Time-based check (most important for timeout prevention)
+    if time_estimation["estimated_minutes"] > config.chunked_threshold_minutes:
+        return True, f"Estimated time {time_estimation['estimated_minutes']} min > {config.chunked_threshold_minutes} min threshold"
+
+    # Memory-based check
+    if memory_estimation["processing_strategy"] == "chunked":
+        return True, f"Memory strategy recommends chunked: {memory_estimation.get('reason', 'peak memory too high')}"
+
+    # Size-based check (hard cutoff)
+    size_threshold_gb = config.size_threshold_mb / 1024  # Convert MB to GB
+    if file_size_gb > size_threshold_gb:
+        return True, f"File size {file_size_gb:.1f} GB > {size_threshold_gb} GB threshold"
+
+    # Reprojection + large file check (your DTM case)
+    if time_estimation.get("needs_reproject") and file_size_gb > 2.0:
+        return True, f"Reprojection needed for {file_size_gb:.1f} GB file - using chunked for safety"
+
+    return False, "Single-pass processing appropriate"
+```
+
+**Note**: Phase 5 depends on chunked processing infrastructure being production-ready.
+
+---
+
+### Testing Plan
+
+```bash
+# 1. Deploy with heartbeat wrapper
+func azure functionapp publish rmhazuregeoapi --python --build remote
+
+# 2. Full schema rebuild
+curl -X POST "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/dbadmin/maintenance/full-rebuild?confirm=yes"
+
+# 3. Test with small file (verify heartbeat logging)
+curl -X POST "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/jobs/submit/process_raster" \
+  -H "Content-Type: application/json" \
+  -d '{"blob_name": "small_test.tif", "collection_id": "heartbeat-test"}'
+
+# 4. Monitor Application Insights for heartbeat logs
+# Look for: "💓 Heartbeat #1 for task..."
+# Look for: "💓 Started heartbeat thread..."
+
+# 5. Test time estimation with DTM file
+curl -X POST "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/jobs/submit/process_raster" \
+  -H "Content-Type: application/json" \
+  -d '{"blob_name": "2021_Luang_Prabang_DTM.tif", "collection_id": "dtm-time-test"}'
+
+# Should see: "⏱️ TIME ESTIMATION: ~32 min, recommendation: chunked"
+```
+
+---
+
+### Key Design Decisions
+
+1. **30-second heartbeat interval**: Provides visibility without excessive DB writes
+2. **25-minute threshold**: 5-minute buffer before 30-minute function timeout
+3. **Daemon thread**: Auto-cleanup if main thread crashes
+4. **Context manager pattern**: Clean start/stop semantics for heartbeat
+5. **Conservative time estimates**: Better to route to chunked than timeout
+6. **Empirical baseline**: Based on real DTM processing (2.9GB → 32 min with reprojection)
+
+---
+
+### Existing Infrastructure Used
+
+| Component | Location | Status |
+|-----------|----------|--------|
+| `TaskRepository.update_task_heartbeat()` | `infrastructure/jobs_tasks.py:518-529` | ✅ Exists |
+| `Task.heartbeat` field | `core/models/task.py:81` | ✅ Exists |
+| `RasterConfig` | `config/raster_config.py` | ✅ Exists (extend) |
+| `_estimate_memory_footprint()` | `services/raster_validation.py:1109-1239` | ✅ Exists |
+
+---
+
+### Files Changed Summary
+
+| File | Phase | Action | Lines Changed |
+|------|-------|--------|---------------|
+| `services/raster_cog.py` | 1 | EDIT | +80 (HeartbeatWrapper + integration) |
+| `services/raster_validation.py` | 2 | EDIT | +60 (time estimation) |
+| `config/raster_config.py` | 3 | EDIT | +15 (config fields) |
+| `services/raster_service.py` | 4 | EDIT | +20 (GDAL config application) |
+
+---
+
+### Success Criteria
+
+- [ ] Heartbeat updates visible in Application Insights during COG creation
+- [ ] Time estimation logged during validation
+- [ ] DTM file correctly identified as requiring chunked processing
+- [ ] No more tasks stuck in "processing" forever
+- [ ] GDAL config from memory estimation applied downstream
+
+---
+
+## 🟡 MEDIUM PRIORITY: Sensor Metadata Extraction & Provenance System (02 DEC 2025)
+
+**Status**: 📋 **PLANNING COMPLETE - READY FOR IMPLEMENTATION**
+**Priority**: **MEDIUM** - Data governance and audit trails
+**Impact**: Complete provenance tracking, human QA workflow for band mapping verification
+**Author**: Robert and Geospatial Claude Legion
+**Created**: 02 DEC 2025
+**Depends On**: V2 raster jobs with auto-detection (process_large_raster_v2, process_raster_collection_v2)
+**Full Plan**: `/Users/robertharrison/.claude/plans/zesty-weaving-hennessy.md`
+
+---
+
+### Problem Statement
+
+**Current State**:
+- Band mappings determined by user `band_names` parameter OR heuristic auto-detection
+- No traceable provenance: "where did this data come from?"
+- No audit trail linking source metadata → band mapping decision → output COG → STAC item
+
+**What's Missing**:
+1. **GeoTIFF metadata extraction** - GDAL tags contain sensor/product info (Maxar, Planet, etc.)
+2. **Sensor profile lookup** - Known sensors have standard band configurations
+3. **Provenance storage** - STAC items should contain complete audit trail
+4. **Human QA workflow** - Warnings when confidence is LOW so humans can verify bands
+
+---
+
+### Architecture: Three-Layer Metadata System
+
+```
+LAYER 1: RAW EXTRACTION (raster_validation.py)
+├── extract_sensor_metadata(src) → SensorMetadata dataclass
+├── Reads src.tags() (all GDAL metadata)
+├── Reads src.descriptions (band names)
+├── Identifies vendor from tag patterns
+└── Stores RAW metadata for audit trail
+        │
+        ▼
+LAYER 2: SENSOR PROFILES (config/sensor_profiles.py)
+├── lookup_sensor_profile(vendor, sensor_name, band_count)
+├── Returns SensorProfile with rgb_bands mapping
+├── Known sensors: WV2, WV3, WV4, GeoEye-1, QuickBird, IKONOS
+└── Records confidence: "HIGH" (from metadata), "LOW" (heuristic)
+        │
+        ▼
+LAYER 3: PROVENANCE (stac_metadata_helper.py)
+├── SensorMetadata.to_stac_properties() → sensor:* namespace
+├── sensor:vendor, sensor:name, sensor:detection_confidence
+├── sensor:rgb_bands, sensor:rgb_bands_source
+├── sensor:raw_metadata_href (link to full JSON dump)
+└── sensor:warning (if confidence LOW)
+```
+
+---
+
+### Integration with RasterMixin
+
+All raster workflows inherit from `RasterMixin`, so changes automatically apply to:
+- `ProcessRasterV2Job` (single file)
+- `ProcessRasterCollectionV2Job` (multi-tile)
+- `ProcessLargeRasterV2Job` (large file tiling)
+- Future raster workflows
+
+**New Schema Fields in COMMON_RASTER_SCHEMA**:
+```python
+'sensor_profile': {'type': 'str', 'default': None},  # e.g., "wv2", "wv3"
+'metadata_blobs': {'type': 'list', 'default': None},  # Sidecar files (future)
+```
+
+**New Helper Method**:
+```python
+@staticmethod
+def _resolve_band_names(detected_type, band_count, params, sensor_metadata):
+    """
+    Band mapping priority chain:
+    1. User-provided band_names (explicit override)
+    2. sensor_profile parameter → lookup SENSOR_PROFILES
+    3. sensor_metadata from GDAL tags (if HIGH confidence)
+    4. Fall back to _get_default_band_names() (heuristic)
+    """
+```
+
+---
+
+### Design Decisions (Confirmed)
+
+| Decision | Choice | Rationale |
+|----------|--------|-----------|
+| Raw metadata storage | Key props in STAC, full dump in linked JSON | Discover "key" fields through usage |
+| Sidecar files | Interface ready, "pending_implementation" | Future-proof without scope creep |
+| Unknown sensor handling | Proceed + show warnings in 3 places | Human QA can verify and fix |
+
+**Warning Visibility Points**:
+1. **Job Result Data** - `warnings[]` array with `SENSOR_NOT_DETECTED` code
+2. **STAC Properties** - `sensor:warning` visible in titiler viewer
+3. **Application Insights** - Logger warning for debugging
+
+**Human QA Workflow**:
+```
+User opens titiler viewer → sees warning in properties →
+if bands look wrong → specify sensor_profile parameter OR report bug
+if bands look correct → proceed (and maybe identify the sensor for us!)
+```
+
+---
+
+### Implementation Phases
+
+#### Phase 1: Foundation (~100 lines)
+**Files**: `services/stac_metadata_helper.py`, `config/sensor_profiles.py`
+
+- [ ] Add `SensorMetadata` dataclass to `stac_metadata_helper.py`
+- [ ] Create `config/sensor_profiles.py` with Maxar sensor profiles (WV2, WV3, WV4, GeoEye-1, QuickBird, IKONOS)
+- [ ] Add `lookup_sensor_profile()` function with alias matching
+- [ ] Export from `config/__init__.py`
+
+#### Phase 2: Extraction (~80 lines)
+**Files**: `services/raster_validation.py`
+
+- [ ] Add `extract_sensor_metadata(src)` function
+- [ ] Implement vendor detection: Maxar, Planet, Landsat, Sentinel-2 from GDAL tags
+- [ ] Store raw metadata as linked JSON asset in `silver-stac-assets/{job_id}/`
+
+#### Phase 3: Integration (~60 lines)
+**Files**: `services/raster_validation.py`, `jobs/raster_mixin.py`
+
+- [ ] Wire `extract_sensor_metadata()` into `validate_raster()` after raster type detection
+- [ ] Add `_resolve_band_names()` helper to RasterMixin with priority chain
+- [ ] Add `sensor_profile` and `metadata_blobs` to `COMMON_RASTER_SCHEMA`
+- [ ] Add `metadata_blobs` stub: log warning "pending_implementation" if provided
+
+#### Phase 4: Output & Warnings (~50 lines)
+**Files**: `services/stac_metadata_helper.py`, job finalize methods
+
+- [ ] Update `augment_item()` to accept optional `SensorMetadata` parameter
+- [ ] Add `sensor:warning` property when `detection_confidence == "LOW"`
+- [ ] Add `warnings[]` array to job result structure
+
+#### Phase 5: Testing
+- [ ] Test with WV2 file (should detect from GDAL tags, HIGH confidence)
+- [ ] Test with antigua.tif (should auto-detect RGB, LOW confidence, show warning)
+- [ ] Test with explicit `sensor_profile="wv2"` override
+- [ ] Verify linked JSON asset created in blob storage
+
+---
+
+### Files Summary
+
+| File | Action | Est. Lines |
+|------|--------|------------|
+| `services/stac_metadata_helper.py` | Add SensorMetadata dataclass, update augment_item() | +60 |
+| `services/raster_validation.py` | Add extract_sensor_metadata(), integrate | +80 |
+| `config/sensor_profiles.py` | NEW: Sensor profile registry | +100 |
+| `config/__init__.py` | Export sensor profiles | +5 |
+| `jobs/raster_mixin.py` | Add sensor_profile, metadata_blobs, _resolve_band_names() | +30 |
+| **Total** | | ~275 lines |
+
+---
+
+### Success Criteria
+
+- [ ] WV2 multispectral file auto-detected with HIGH confidence, correct band mapping
+- [ ] Standard RGB file (antigua.tif) shows LOW confidence warning in STAC
+- [ ] `sensor_profile="wv2"` parameter overrides auto-detection
+- [ ] Linked JSON asset with raw GDAL tags created in blob storage
+- [ ] Warnings visible in job result AND STAC properties
 
 ---
 

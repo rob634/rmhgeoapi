@@ -398,6 +398,30 @@ def generate_tiling_scheme_from_raster(
         actual_band_count = src.count
         dtype = src.dtypes[0]  # First band dtype (all bands usually same)
 
+        # =================================================================
+        # AUTO-DETECTION: Detect raster type to determine optimal band_names
+        # Added 01 DEC 2025 - Fixes issue where RGB images got wrong bands
+        # =================================================================
+        from services.raster_validation import _detect_raster_type
+        from jobs.raster_mixin import RasterMixin
+
+        raster_type_result = _detect_raster_type(src, user_type="auto")
+        detected_type = raster_type_result.get("detected_type", "unknown")
+        detection_confidence = raster_type_result.get("confidence", "LOW")
+
+        # Auto-determine band_names if not provided
+        auto_band_names = RasterMixin._get_default_band_names(detected_type, actual_band_count)
+
+        # If user didn't provide band_names, use auto-detected
+        if not band_names or (isinstance(band_names, dict) and len(band_names) == 0):
+            band_names = auto_band_names
+            if band_names:
+                logger.info(f"🎯 Auto-detected raster type: {detected_type} ({detection_confidence}) → band_names: {band_names}")
+            else:
+                logger.info(f"🎯 Auto-detected raster type: {detected_type} ({detection_confidence}) → processing all {actual_band_count} bands")
+        else:
+            logger.info(f"📋 Using user-provided band_names: {band_names} (auto-detected: {detected_type})")
+
         # Determine bit depth from dtype for tile size calculation
         dtype_str = str(dtype).lower()
         if 'uint8' in dtype_str or 'int8' in dtype_str:
@@ -485,10 +509,15 @@ def generate_tiling_scheme_from_raster(
                 "total_tiles": len(features),
 
                 # Raster metadata for COG creation (Stage 3)
+                # Auto-detection added 01 DEC 2025
                 "raster_metadata": {
                     "band_count": band_count,
+                    "actual_band_count": actual_band_count,
                     "data_type": str(dtype),
-                    "detected_type": "unknown"  # No auto-detection in tiling stage
+                    "detected_type": detected_type,
+                    "detection_confidence": detection_confidence,
+                    "auto_band_names": auto_band_names,
+                    "used_band_names": band_names,
                 },
 
                 "architecture": {
@@ -645,7 +674,9 @@ def generate_tiling_scheme(params: dict) -> dict:
                 "target_bounds": geojson['metadata']['target_bounds'],
                 "target_dimensions": geojson['metadata']['target_dimensions'],
                 "target_resolution": geojson['metadata']['target_resolution'],
-                "processing_time_seconds": round(processing_time, 2)
+                "processing_time_seconds": round(processing_time, 2),
+                # Raster metadata with auto-detection (01 DEC 2025)
+                "raster_metadata": geojson['metadata']['raster_metadata']
             }
         }
 

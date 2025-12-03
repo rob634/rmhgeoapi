@@ -61,12 +61,13 @@ from .stac_catalog_container import StacCatalogContainerWorkflow
 from .stac_catalog_vectors import StacCatalogVectorsWorkflow
 # ingest_vector REMOVED (27 NOV 2025) - Replaced by process_vector (idempotent DELETE+INSERT)
 from .validate_raster_job import ValidateRasterJob
-from .process_raster import ProcessRasterWorkflow
+# V1 RASTER JOBS ARCHIVED (03 DEC 2025) - See docs/archive/jobs/v1_raster_2025_12/
+# from .process_raster import ProcessRasterWorkflow           # Archived → process_raster_v2
+# from .process_raster_collection import ProcessRasterCollectionWorkflow  # Archived → process_raster_collection_v2
+# from .process_large_raster import ProcessLargeRasterWorkflow  # Archived → process_large_raster_v2
 from .generate_h3_level4 import GenerateH3Level4Job
 from .create_h3_base import CreateH3BaseJob
 from .bootstrap_h3_land_grid_pyramid import BootstrapH3LandGridPyramidJob
-from .process_raster_collection import ProcessRasterCollectionWorkflow
-from .process_large_raster import ProcessLargeRasterWorkflow
 from .process_fathom import ProcessFathomWorkflow
 from .process_vector import ProcessVectorJob  # Idempotent vector ETL (26 NOV 2025)
 from .process_raster_v2 import ProcessRasterV2Job  # Mixin pattern raster ETL (28 NOV 2025)
@@ -92,9 +93,10 @@ ALL_JOBS = {
     "stac_catalog_vectors": StacCatalogVectorsWorkflow,
     # "ingest_vector" REMOVED (27 NOV 2025) - Platform now routes to process_vector
     "validate_raster_job": ValidateRasterJob,
-    "process_raster": ProcessRasterWorkflow,
-    "process_raster_collection": ProcessRasterCollectionWorkflow,  # Multi-tile COG + MosaicJSON (20 OCT 2025)
-    "process_large_raster": ProcessLargeRasterWorkflow,  # Large raster tiling (1-30 GB) → COG mosaic (24 OCT 2025)
+    # V1 RASTER JOBS ARCHIVED (03 DEC 2025) - Use v2 versions instead
+    # "process_raster": ProcessRasterWorkflow,           # Archived → process_raster_v2
+    # "process_raster_collection": ProcessRasterCollectionWorkflow,  # Archived → process_raster_collection_v2
+    # "process_large_raster": ProcessLargeRasterWorkflow,  # Archived → process_large_raster_v2
     "generate_h3_level4": GenerateH3Level4Job,
     "create_h3_base": CreateH3BaseJob,
     "bootstrap_h3_land_grid_pyramid": BootstrapH3LandGridPyramidJob,  # H3 land pyramid bootstrap (res 2-7) - 14 NOV 2025

@@ -25,7 +25,7 @@ No business logic - just data structures.
 
 from datetime import datetime
 from typing import Dict, Any, Optional, List
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, ConfigDict
 
 from .enums import TaskStatus
 
@@ -36,6 +36,10 @@ class TaskResult(BaseModel):
 
     Pure data structure - success/failure logic is in core.logic.
     """
+
+    model_config = ConfigDict(
+        json_encoders={datetime: lambda v: v.isoformat()}
+    )
 
     task_id: str = Field(..., description="Task identifier")
     task_type: str = Field(..., description="Type of task")
@@ -51,13 +55,6 @@ class TaskResult(BaseModel):
         """Check if task completed successfully."""
         return self.status == TaskStatus.COMPLETED
 
-    class Config:
-        """Pydantic configuration."""
-        # Removed use_enum_values - enums should remain as enums for type safety
-        json_encoders = {
-            datetime: lambda v: v.isoformat()
-        }
-
 
 class StageResultContract(BaseModel):
     """
@@ -65,6 +62,10 @@ class StageResultContract(BaseModel):
 
     Ensures consistent structure for stage results stored in the database.
     """
+
+    model_config = ConfigDict(
+        json_encoders={datetime: lambda v: v.isoformat()}
+    )
 
     stage: int = Field(..., ge=1, description="Stage number")
     status: str = Field(..., description="Stage completion status")
@@ -84,12 +85,6 @@ class StageResultContract(BaseModel):
             raise ValueError(f"Invalid status: {v}. Must be one of {valid_statuses}")
         return v
 
-    class Config:
-        """Pydantic configuration."""
-        json_encoders = {
-            datetime: lambda v: v.isoformat()
-        }
-
 
 class StageAdvancementResult(BaseModel):
     """
@@ -98,17 +93,15 @@ class StageAdvancementResult(BaseModel):
     Returned by PostgreSQL function or stage advancement logic.
     """
 
+    model_config = ConfigDict(
+        json_encoders={datetime: lambda v: v.isoformat()}
+    )
+
     job_updated: bool = Field(..., description="Whether job was updated")
     new_stage: int = Field(..., description="New stage number")
     is_final_stage: bool = Field(..., description="Whether this is the final stage")
     all_tasks_complete: Optional[bool] = Field(default=None, description="Whether all tasks completed")
     timestamp: datetime = Field(default_factory=datetime.utcnow, description="Advancement timestamp")
-
-    class Config:
-        """Pydantic configuration."""
-        json_encoders = {
-            datetime: lambda v: v.isoformat()
-        }
 
 
 class TaskCompletionResult(BaseModel):
@@ -117,15 +110,14 @@ class TaskCompletionResult(BaseModel):
 
     Represents the contract between SQL and Python layers.
     """
+
+    model_config = ConfigDict(extra="forbid")
+
     task_updated: bool = Field(..., description="Whether task was updated")
     stage_complete: bool = Field(..., description="Whether stage is complete")
     job_id: Optional[str] = Field(default=None, description="Job ID")
     stage_number: Optional[int] = Field(default=None, description="Stage number")
     remaining_tasks: int = Field(default=0, description="Remaining tasks in stage")
-
-    class Config:
-        """Pydantic configuration."""
-        extra = "forbid"
 
 
 class JobCompletionResult(BaseModel):
@@ -135,12 +127,10 @@ class JobCompletionResult(BaseModel):
     Used to track final job state and aggregated results.
     """
 
+    model_config = ConfigDict(extra="forbid")
+
     job_complete: bool = Field(..., description="Whether job is complete")
     final_stage: int = Field(..., description="Final stage number")
     total_tasks: int = Field(..., description="Total tasks across all stages")
     completed_tasks: int = Field(..., description="Number of completed tasks")
     task_results: Optional[Dict[str, Any]] = Field(default=None, description="Aggregated task results")
-
-    class Config:
-        """Pydantic configuration."""
-        extra = "forbid"

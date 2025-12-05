@@ -72,7 +72,7 @@ Philosophy: "Favor composition over inheritance"
 
 from datetime import datetime
 from typing import Dict, Any
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, ConfigDict
 
 
 # ============================================================================
@@ -166,17 +166,15 @@ class TaskData(BaseModel):
         description="Task input parameters (passed to TaskExecutor.execute())"
     )
 
+    model_config = ConfigDict(
+        json_encoders={datetime: lambda v: v.isoformat()}
+    )
+
     @field_validator('task_type')
     @classmethod
     def normalize_task_type(cls, v: str) -> str:
         """Normalize task type to lowercase with underscores."""
         return v.lower().replace('-', '_')
-
-    class Config:
-        """Pydantic configuration."""
-        json_encoders = {
-            datetime: lambda v: v.isoformat()
-        }
 
 
 # ============================================================================
@@ -253,17 +251,15 @@ class JobData(BaseModel):
             raise ValueError(f"job_id must be hexadecimal, got: {v}")
         return v
 
+    model_config = ConfigDict(
+        json_encoders={datetime: lambda v: v.isoformat()}
+    )
+
     @field_validator('job_type')
     @classmethod
     def normalize_job_type(cls, v: str) -> str:
         """Normalize job type to lowercase with underscores."""
         return v.lower().replace('-', '_')
-
-    class Config:
-        """Pydantic configuration."""
-        json_encoders = {
-            datetime: lambda v: v.isoformat()
-        }
 
 
 # Export all public classes

@@ -25,7 +25,7 @@ No business logic - just data structures.
 
 from datetime import datetime
 from typing import Dict, Any, Optional, List
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, ConfigDict
 
 from .enums import JobStatus, TaskStatus
 
@@ -37,6 +37,8 @@ class JobExecutionContext(BaseModel):
     Contains all information needed during job processing.
     Business logic for stage results is in core.logic.
     """
+
+    model_config = ConfigDict(extra="forbid")
 
     job_id: str = Field(..., description="Job identifier")
     job_type: str = Field(..., description="Type of job")
@@ -54,10 +56,6 @@ class JobExecutionContext(BaseModel):
             raise ValueError("job_id cannot be empty")
         return v
 
-    class Config:
-        """Pydantic configuration."""
-        extra = "forbid"
-
 
 class StageExecutionContext(BaseModel):
     """
@@ -65,6 +63,8 @@ class StageExecutionContext(BaseModel):
 
     Contains information about the current stage being processed.
     """
+
+    model_config = ConfigDict(extra="forbid")
 
     job_id: str = Field(..., description="Job identifier")
     stage_number: int = Field(..., ge=1, description="Current stage number")
@@ -74,10 +74,6 @@ class StageExecutionContext(BaseModel):
     task_results: List[Dict[str, Any]] = Field(default_factory=list, description="Task results")
     stage_parameters: Optional[Dict[str, Any]] = Field(default=None, description="Stage-specific parameters")
 
-    class Config:
-        """Pydantic configuration."""
-        extra = "forbid"
-
 
 class TaskExecutionContext(BaseModel):
     """
@@ -85,6 +81,8 @@ class TaskExecutionContext(BaseModel):
 
     Contains all information available to a task during execution.
     """
+
+    model_config = ConfigDict(extra="forbid")
 
     task_id: str = Field(..., description="Task identifier")
     parent_job_id: str = Field(..., description="Parent job ID")
@@ -96,7 +94,3 @@ class TaskExecutionContext(BaseModel):
     max_retries: int = Field(default=3, ge=0, description="Maximum retries allowed")
     metadata: Optional[Dict[str, Any]] = Field(default=None, description="Task metadata")
     predecessor_results: Optional[Dict[str, Any]] = Field(default=None, description="Results from predecessor")
-
-    class Config:
-        """Pydantic configuration."""
-        extra = "forbid"

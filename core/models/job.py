@@ -41,7 +41,7 @@ See core/contracts/__init__.py for full architecture explanation.
 
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional
-from pydantic import Field
+from pydantic import Field, ConfigDict
 
 from core.contracts import JobData
 from .enums import JobStatus
@@ -68,6 +68,10 @@ class JobRecord(JobData):
     The BEHAVIOR half is Workflow (services/workflow.py).
     They collaborate via composition in CoreMachine.
     """
+
+    model_config = ConfigDict(
+        json_encoders={datetime: lambda v: v.isoformat()}
+    )
 
     # Status tracking (Database-specific)
     status: JobStatus = Field(default=JobStatus.QUEUED, description="Current job status")
@@ -138,9 +142,3 @@ class JobRecord(JobData):
             return True  # Can restart from any terminal state
 
         return False
-
-    class Config:
-        """Pydantic configuration."""
-        json_encoders = {
-            datetime: lambda v: v.isoformat()
-        }

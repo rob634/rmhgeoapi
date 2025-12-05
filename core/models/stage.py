@@ -76,7 +76,7 @@ This file is kept as reference documentation to show the expected structure
 of stage definitions, and could be used for future runtime validation.
 """
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from typing import List, Optional
 
 
@@ -95,6 +95,8 @@ class Stage(BaseModel):
         )
     """
 
+    model_config = ConfigDict(frozen=True)
+
     stage_num: int = Field(..., ge=1, description="Stage number (1-based)")
     stage_name: str = Field(..., description="Human-readable stage name")
     task_types: List[str] = Field(..., description="Task types for this stage")
@@ -103,7 +105,3 @@ class Stage(BaseModel):
         default=False,
         description="True if this stage dynamically determines task count for next stage"
     )
-
-    class Config:
-        """Pydantic configuration"""
-        frozen = True  # Immutable after creation

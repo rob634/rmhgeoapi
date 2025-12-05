@@ -26,7 +26,7 @@ maintenance operations for audit and monitoring purposes.
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional, List
 from enum import Enum
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 import uuid
 
 
@@ -63,6 +63,10 @@ class JanitorRun(BaseModel):
     - error_details: Error message if run failed
     - duration_ms: Run duration in milliseconds
     """
+
+    model_config = ConfigDict(
+        json_encoders={datetime: lambda v: v.isoformat()}
+    )
 
     # Primary key
     run_id: str = Field(
@@ -117,12 +121,6 @@ class JanitorRun(BaseModel):
         default=None,
         description="Error message if the run failed"
     )
-
-    class Config:
-        """Pydantic configuration."""
-        json_encoders = {
-            datetime: lambda v: v.isoformat()
-        }
 
 
 # Module exports

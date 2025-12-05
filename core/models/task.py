@@ -40,7 +40,7 @@ See core/contracts/__init__.py for full architecture explanation.
 
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 from core.contracts import TaskData
 from .enums import TaskStatus
@@ -67,6 +67,10 @@ class TaskRecord(TaskData):
     The BEHAVIOR half is TaskExecutor (services/task.py).
     They collaborate via composition in TaskExecutionService.
     """
+
+    model_config = ConfigDict(
+        json_encoders={datetime: lambda v: v.isoformat()}
+    )
 
     # Status tracking (Database-specific)
     status: TaskStatus = Field(default=TaskStatus.QUEUED, description="Current task status")
@@ -126,12 +130,6 @@ class TaskRecord(TaskData):
 
         return False
 
-    class Config:
-        """Pydantic configuration."""
-        json_encoders = {
-            datetime: lambda v: v.isoformat()
-        }
-
 
 class TaskDefinition(BaseModel):
     """
@@ -141,6 +139,8 @@ class TaskDefinition(BaseModel):
     It contains the minimal information needed to create a TaskRecord.
     """
 
+    model_config = ConfigDict(extra="forbid")
+
     task_id: str = Field(..., description="Unique task identifier")
     task_type: str = Field(..., description="Type of task to execute")
     parameters: Dict[str, Any] = Field(default_factory=dict, description="Task parameters")
@@ -149,7 +149,3 @@ class TaskDefinition(BaseModel):
     job_type: Optional[str] = Field(default=None, description="Job type")
     stage: Optional[int] = Field(default=None, description="Stage number")
     task_index: Optional[str] = Field(default=None, description="Task index")
-
-    class Config:
-        """Pydantic configuration."""
-        extra = "forbid"  # Don't allow extra fields

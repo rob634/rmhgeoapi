@@ -39,8 +39,6 @@ docs/archive/docs_claude/                  # 📦 ARCHIVED (83 files, 25 NOV 202
 └── execution_traces/                      # Historical execution traces
 
 Root Documentation:
-├── JOB_CREATION_QUICKSTART.md             # 🚀 START HERE FOR NEW JOBS - JobBaseMixin pattern (14 NOV 2025)
-│                                          #     77% less code, 30 min instead of 2 hours
 ├── FUNCTION_REVIEW.md                     # 📋 Complete 80-function inventory (13 NOV 2025)
 │                                          #     Development monolith → Production microservices plan
 ```
@@ -127,10 +125,9 @@ Co-Authored-By: Claude <noreply@anthropic.com>
 ### Essential Files
 ```
 📂 Key Documentation:
-├── JOB_CREATION_QUICKSTART.md    # 🎯 START HERE - 5-step guide (15 minutes)
-├── jobs/mixins.py                # JobBaseMixin implementation (670 lines)
-├── jobs/hello_world.py           # Reference implementation (uses mixin)
-└── jobs/hello_world_mixin.py     # Test version (kept for reference)
+├── docs_claude/JOB_CREATION_QUICKSTART.md  # 🎯 START HERE - 5-step guide (15 minutes)
+├── jobs/mixins.py                          # JobBaseMixin implementation (670 lines)
+└── jobs/hello_world.py                     # Reference implementation (uses mixin)
 ```
 
 ### Creating a New Job (5 Steps)
@@ -207,7 +204,7 @@ class MyJob(JobBaseMixin, JobBase):
 **Leave working code alone** - JobBaseMixin is for NEW jobs!
 
 ### See Full Documentation
-- **Quickstart Guide**: `JOB_CREATION_QUICKSTART.md` (complete 5-step guide)
+- **Quickstart Guide**: `docs_claude/JOB_CREATION_QUICKSTART.md` (complete 5-step guide)
 - **Mixin Source**: `jobs/mixins.py` (lines 1-670, comprehensive docstring)
 - **Working Example**: `jobs/hello_world.py` (production-verified implementation)
 

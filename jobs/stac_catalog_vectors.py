@@ -38,6 +38,7 @@ import hashlib
 import json
 
 from jobs.base import JobBase
+from config.defaults import STACDefaults
 
 
 class StacCatalogVectorsWorkflow(JobBase):
@@ -68,7 +69,7 @@ class StacCatalogVectorsWorkflow(JobBase):
     parameters_schema: Dict[str, Any] = {
         "schema": {"type": "str", "required": True, "default": "geo"},
         "table_name": {"type": "str", "required": True},
-        "collection_id": {"type": "str", "required": True, "default": "vectors"},
+        "collection_id": {"type": "str", "required": True, "default": STACDefaults.VECTORS_COLLECTION},
         "source_file": {"type": "str", "default": None}
     }
 
@@ -109,12 +110,12 @@ class StacCatalogVectorsWorkflow(JobBase):
         validated["table_name"] = table_name.strip()
 
         # Validate collection_id (optional)
-        collection_id = params.get("collection_id", "vectors")
+        collection_id = params.get("collection_id", STACDefaults.VECTORS_COLLECTION)
         if not isinstance(collection_id, str) or not collection_id.strip():
             raise ValueError("collection_id must be a non-empty string")
 
         # Validate collection_id is valid
-        valid_collections = ["dev", "cogs", "vectors", "geoparquet"]
+        valid_collections = STACDefaults.VALID_USER_COLLECTIONS
         if collection_id not in valid_collections:
             raise ValueError(f"collection_id must be one of {valid_collections}, got '{collection_id}'")
 
@@ -171,7 +172,7 @@ class StacCatalogVectorsWorkflow(JobBase):
                     "parameters": {
                         "schema": job_params["schema"],
                         "table_name": job_params["table_name"],
-                        "collection_id": job_params.get("collection_id", "vectors"),
+                        "collection_id": job_params.get("collection_id", STACDefaults.VECTORS_COLLECTION),
                         "source_file": job_params.get("source_file")
                     }
                 }
@@ -208,7 +209,7 @@ class StacCatalogVectorsWorkflow(JobBase):
                 "created_by": "StacCatalogVectorsWorkflow",
                 "schema": params.get("schema", "geo"),
                 "table_name": params.get("table_name"),
-                "collection_id": params.get("collection_id", "vectors")
+                "collection_id": params.get("collection_id", STACDefaults.VECTORS_COLLECTION)
             }
         )
 
@@ -305,7 +306,7 @@ class StacCatalogVectorsWorkflow(JobBase):
             "job_type": "stac_catalog_vectors",
             "schema": params.get("schema", "geo"),
             "table_name": params.get("table_name"),
-            "collection_id": params.get("collection_id", "vectors"),
+            "collection_id": params.get("collection_id", STACDefaults.VECTORS_COLLECTION),
             "summary": {
                 "item_id": task_data.get("item_id"),
                 "row_count": task_data.get("row_count", 0),

@@ -54,6 +54,7 @@ import psycopg
 from psycopg import sql
 
 from infrastructure import RepositoryFactory, PostgreSQLRepository
+from config.defaults import STACDefaults
 from util_logger import LoggerFactory, ComponentType
 
 logger = LoggerFactory.create_logger(ComponentType.TRIGGER, "AdminDbMaintenance")
@@ -1059,16 +1060,15 @@ class AdminDbMaintenanceTrigger:
             results["steps"].append(step5)
 
             # ================================================================
-            # STEP 5b: Grant geo schema permissions to rmhpgflexreader
+            # STEP 5b: Ensure geo schema exists and grant permissions
             # ================================================================
-            # ARCHITECTURE PRINCIPLE (27 NOV 2025):
+            # ARCHITECTURE PRINCIPLE (27 NOV 2025, updated 04 DEC 2025):
+            # The geo schema stores vector data created by process_vector jobs.
+            # Unlike app/pgstac (rebuilt from code), geo contains USER DATA and is never dropped.
+            # We must CREATE IF NOT EXISTS to ensure it exists on fresh deployments.
             # rmhpgflexreader needs SELECT on geo schema tables for OGC Features API.
-            # Unlike pgstac (which has the pgstac_read role), geo schema tables
-            # are created dynamically by process_vector jobs. We:
-            # 1. Grant SELECT on ALL existing geo tables
-            # 2. Set DEFAULT PRIVILEGES so future tables auto-grant SELECT
-            logger.info("🔐 Step 5b/8: Granting geo schema permissions to rmhpgflexreader...")
-            step5b = {"step": "5b", "action": "grant_geo_schema_permissions", "status": "pending"}
+            logger.info("🔐 Step 5b/8: Ensuring geo schema exists and granting permissions to rmhpgflexreader...")
+            step5b = {"step": "5b", "action": "ensure_geo_schema_and_grant_permissions", "status": "pending"}
 
             try:
                 from infrastructure.postgresql import PostgreSQLRepository
@@ -1076,6 +1076,11 @@ class AdminDbMaintenanceTrigger:
 
                 with geo_repo._get_connection() as conn:
                     with conn.cursor() as cur:
+                        # 0. Create geo schema if it doesn't exist (04 DEC 2025)
+                        # This is idempotent and safe - preserves existing data
+                        cur.execute("CREATE SCHEMA IF NOT EXISTS geo")
+                        logger.info("✅ Ensured geo schema exists")
+
                         # 1. Grant USAGE on geo schema
                         cur.execute("GRANT USAGE ON SCHEMA geo TO rmhpgflexreader")
 
@@ -1086,7 +1091,12 @@ class AdminDbMaintenanceTrigger:
                         # This ensures process_vector created tables auto-grant SELECT
                         cur.execute("ALTER DEFAULT PRIVILEGES IN SCHEMA geo GRANT SELECT ON TABLES TO rmhpgflexreader")
 
-                        # 4. Also grant on h3 schema (static bootstrap data)
+                        # 4. Create h3 schema if it doesn't exist (04 DEC 2025)
+                        # h3 schema stores static bootstrap H3 grid data
+                        cur.execute("CREATE SCHEMA IF NOT EXISTS h3")
+                        logger.info("✅ Ensured h3 schema exists")
+
+                        # 5. Grant on h3 schema (static bootstrap data)
                         cur.execute("GRANT USAGE ON SCHEMA h3 TO rmhpgflexreader")
                         cur.execute("GRANT SELECT ON ALL TABLES IN SCHEMA h3 TO rmhpgflexreader")
                         cur.execute("ALTER DEFAULT PRIVILEGES IN SCHEMA h3 GRANT SELECT ON TABLES TO rmhpgflexreader")
@@ -1095,6 +1105,7 @@ class AdminDbMaintenanceTrigger:
                         logger.info("✅ Granted geo+h3 schema permissions to rmhpgflexreader (existing + future tables)")
 
                 step5b["status"] = "success"
+                step5b["schema_created"] = "geo, h3 (if not exists)"
                 step5b["grants"] = [
                     "USAGE ON SCHEMA geo",
                     "SELECT ON ALL TABLES IN SCHEMA geo",
@@ -1129,7 +1140,9 @@ class AdminDbMaintenanceTrigger:
                 # Create system collections directly via PgStacBootstrap
                 # This bypasses the HTTP trigger which requires route_params
                 bootstrap = PgStacBootstrap()
-                system_collection_types = ['system-vectors', 'system-rasters']
+                # Use first 2 system collections (vectors and rasters)
+                # system-h3-grids is created on-demand by H3 jobs
+                system_collection_types = STACDefaults.SYSTEM_COLLECTIONS[:2]
 
                 for collection_type in system_collection_types:
                     try:

@@ -47,7 +47,8 @@ from ..models import (
     DataType,
     JanitorRun,
     JanitorRunType,
-    JanitorRunStatus
+    JanitorRunStatus,
+    EtlFathomRecord  # ETL tracking (05 DEC 2025)
 )
 
 
@@ -541,6 +542,86 @@ class PydanticToSQL:
                 )
             )
 
+        elif table_name == "etl_fathom":
+            # ETL Fathom tracking table indexes (05 DEC 2025)
+            # UNIQUE constraint on source_blob_path
+            indexes.append(
+                sql.SQL("CREATE UNIQUE INDEX IF NOT EXISTS {} ON {}.{} ({})").format(
+                    sql.Identifier("idx_etl_fathom_source_blob_path"),
+                    sql.Identifier(self.schema_name),
+                    sql.Identifier("etl_fathom"),
+                    sql.Identifier("source_blob_path")
+                )
+            )
+            # Tile index for grouping
+            indexes.append(
+                sql.SQL("CREATE INDEX IF NOT EXISTS {} ON {}.{} ({})").format(
+                    sql.Identifier("idx_etl_fathom_tile"),
+                    sql.Identifier(self.schema_name),
+                    sql.Identifier("etl_fathom"),
+                    sql.Identifier("tile")
+                )
+            )
+            # Phase 1 group key index
+            indexes.append(
+                sql.SQL("CREATE INDEX IF NOT EXISTS {} ON {}.{} ({})").format(
+                    sql.Identifier("idx_etl_fathom_phase1_group"),
+                    sql.Identifier(self.schema_name),
+                    sql.Identifier("etl_fathom"),
+                    sql.Identifier("phase1_group_key")
+                )
+            )
+            # Phase 2 group key index
+            indexes.append(
+                sql.SQL("CREATE INDEX IF NOT EXISTS {} ON {}.{} ({})").format(
+                    sql.Identifier("idx_etl_fathom_phase2_group"),
+                    sql.Identifier(self.schema_name),
+                    sql.Identifier("etl_fathom"),
+                    sql.Identifier("phase2_group_key")
+                )
+            )
+            # Flood type + defense compound index
+            indexes.append(
+                sql.SQL("CREATE INDEX IF NOT EXISTS {} ON {}.{} ({}, {})").format(
+                    sql.Identifier("idx_etl_fathom_flood_type"),
+                    sql.Identifier(self.schema_name),
+                    sql.Identifier("etl_fathom"),
+                    sql.Identifier("flood_type"),
+                    sql.Identifier("defense")
+                )
+            )
+            # Year + SSP compound index
+            indexes.append(
+                sql.SQL("CREATE INDEX IF NOT EXISTS {} ON {}.{} ({}, {})").format(
+                    sql.Identifier("idx_etl_fathom_year_ssp"),
+                    sql.Identifier(self.schema_name),
+                    sql.Identifier("etl_fathom"),
+                    sql.Identifier("year"),
+                    sql.Identifier("ssp")
+                )
+            )
+            # Partial index for phase 1 pending records
+            indexes.append(
+                sql.SQL("CREATE INDEX IF NOT EXISTS {} ON {}.{} ({}) WHERE {} IS NULL").format(
+                    sql.Identifier("idx_etl_fathom_p1_pending"),
+                    sql.Identifier(self.schema_name),
+                    sql.Identifier("etl_fathom"),
+                    sql.Identifier("phase1_group_key"),
+                    sql.Identifier("phase1_processed_at")
+                )
+            )
+            # Partial index for phase 2 pending records (phase 1 done, phase 2 not)
+            indexes.append(
+                sql.SQL("CREATE INDEX IF NOT EXISTS {} ON {}.{} ({}) WHERE {} IS NOT NULL AND {} IS NULL").format(
+                    sql.Identifier("idx_etl_fathom_p2_pending"),
+                    sql.Identifier(self.schema_name),
+                    sql.Identifier("etl_fathom"),
+                    sql.Identifier("phase2_group_key"),
+                    sql.Identifier("phase1_processed_at"),
+                    sql.Identifier("phase2_processed_at")
+                )
+            )
+
         self.logger.debug(f"✅ Generated {len(indexes)} indexes for table {table_name}")
         return indexes
     
@@ -927,12 +1008,14 @@ $$""").format(
         composed.append(self.generate_table_composed(TaskRecord, "tasks"))
         composed.append(self.generate_table_composed(ApiRequest, "api_requests"))
         composed.append(self.generate_table_composed(JanitorRun, "janitor_runs"))
+        composed.append(self.generate_table_composed(EtlFathomRecord, "etl_fathom"))  # ETL tracking (05 DEC 2025)
 
         # Indexes - now using composed SQL
         composed.extend(self.generate_indexes_composed("jobs", JobRecord))
         composed.extend(self.generate_indexes_composed("tasks", TaskRecord))
         composed.extend(self.generate_indexes_composed("api_requests", ApiRequest))
         composed.extend(self.generate_indexes_composed("janitor_runs", JanitorRun))
+        composed.extend(self.generate_indexes_composed("etl_fathom", EtlFathomRecord))  # ETL tracking (05 DEC 2025)
             
         # Functions - already sql.Composed objects
         composed.extend(self.generate_static_functions())

@@ -43,6 +43,7 @@ import logging
 
 from jobs.base import JobBase
 from jobs.mixins import JobBaseMixin
+from config.defaults import STACDefaults
 from util_logger import LoggerFactory, ComponentType
 
 # Component-specific logger
@@ -268,7 +269,7 @@ class ProcessVectorJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
                 'parameters': {
                     'schema': stage_1_result.get('schema', 'geo'),
                     'table_name': stage_1_result.get('table_name'),
-                    'collection_id': 'system-vectors',
+                    'collection_id': STACDefaults.VECTOR_COLLECTION,
                     'source_file': job_params.get('blob_name'),
                     'source_format': job_params.get('file_extension'),
                     'job_id': job_id,

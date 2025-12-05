@@ -4,7 +4,7 @@
 # EPOCH: 4 - ACTIVE ✅
 # STATUS: QA/Deployment Documentation - Quick reference for creating new jobs
 # PURPOSE: Step-by-step guide for creating new geospatial data processing jobs
-# LAST_REVIEWED: 14 NOV 2025
+# LAST_REVIEWED: 05 DEC 2025
 # EXPORTS: Job creation patterns (JobBaseMixin recommended, manual fallback)
 # INTERFACES: JobBase ABC, JobBaseMixin (boilerplate elimination)
 # PYDANTIC_MODELS: JobRecord, TaskRecord, JobQueueMessage
@@ -38,7 +38,7 @@
 - Declarative validation: Define schema, get validation automatically
 - No boilerplate: 4 methods provided automatically
 - Maintainable: Bug fixes apply to all jobs
-- Production tested: Used in `hello_world_mixin` job (14 NOV 2025)
+- Production tested: Used in `hello_world` job (14 NOV 2025)
 
 ---
 
@@ -395,12 +395,12 @@ def queue_job(cls, job_id: str, params: dict) -> dict:
 - **Pattern**: Single stage, minimal parameters
 
 ### Multi-Stage (JobBaseMixin)
-- **File**: [jobs/hello_world_mixin.py](jobs/hello_world_mixin.py)
-- **Lines**: ~208 lines (vs 347 without mixin)
+- **File**: [jobs/hello_world.py](jobs/hello_world.py)
+- **Lines**: ~219 lines (vs 347 without mixin)
 - **Pattern**: Two stages, parameter defaults, custom job ID override
 
 ### Complex (Fan-Out/Fan-In)
-- **File**: [jobs/process_large_raster.py](jobs/process_large_raster.py)
+- **File**: [jobs/process_large_raster_v2.py](jobs/process_large_raster_v2.py)
 - **Lines**: Variable (hundreds of tasks)
 - **Pattern**: Dynamic fan-out based on file size, stage result passing
 
@@ -523,5 +523,5 @@ If you must migrate an existing job:
 ---
 
 **Author**: Robert and Geospatial Claude Legion
-**Date**: 14 NOV 2025
+**Date**: 05 DEC 2025
 **Status**: Production-Ready QA/Deployment Documentation

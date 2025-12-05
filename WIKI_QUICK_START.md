@@ -202,8 +202,9 @@ GET /api/dbadmin/stats
 | Job Type | Purpose | Required Parameters |
 |----------|---------|---------------------|
 | `hello_world` | Test system | `message` (optional) |
-| `ingest_vector` | Load vector data to PostGIS | `blob_name`, `file_extension`, `table_name` |
-| `process_raster` | Convert raster to COG | `blob_name`, `container_name` |
+| `process_vector` | Load vector data to PostGIS | `blob_name`, `file_extension`, `table_name` |
+| `process_raster_v2` | Convert raster to COG (recommended) | `blob_name`, `container_name` |
+| `process_raster` | Convert raster to COG (legacy) | `blob_name`, `container_name` |
 | `process_raster_collection` | Process multiple rasters | `blob_list`, `collection_id`, `container_name` |
 
 For complete parameter documentation, see [WIKI_API_JOB_SUBMISSION.md](WIKI_API_JOB_SUBMISSION.md).
@@ -282,4 +283,4 @@ After completing this quick start:
 
 ---
 
-**Last Updated**: 24 NOV 2025
+**Last Updated**: 03 DEC 2025

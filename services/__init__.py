@@ -93,7 +93,29 @@ from .raster_mosaicjson import create_mosaicjson
 from .stac_collection import create_stac_collection
 from .tiling_scheme import generate_tiling_scheme
 from .tiling_extraction import extract_tiles
-from .fathom_etl import fathom_inventory, fathom_merge_stack, fathom_stac_register
+from .fathom_etl import (
+    # Phase 1: Band stacking (03 DEC 2025)
+    fathom_tile_inventory,
+    fathom_band_stack,
+    # Phase 2: Spatial merge (03 DEC 2025)
+    fathom_grid_inventory,
+    fathom_spatial_merge,
+    # Shared
+    fathom_stac_register,
+    # Legacy (deprecated - too memory intensive)
+    fathom_inventory,
+    fathom_merge_stack,
+)
+from .geospatial_inventory import (
+    classify_geospatial_file,
+    aggregate_geospatial_inventory,
+)
+from .fathom_inventory import (
+    fathom_generate_scan_prefixes,
+    fathom_scan_prefix,
+    fathom_assign_grid_cells,
+    fathom_inventory_summary,
+)
 
 # ============================================================================
 # STAC METADATA HELPER (25 NOV 2025)
@@ -149,14 +171,30 @@ ALL_HANDLERS = {
     # Big Raster ETL handlers (24 OCT 2025)
     "generate_tiling_scheme": generate_tiling_scheme,  # Stage 1: Generate tiling scheme in EPSG:4326
     "extract_tiles": extract_tiles,                   # Stage 2: Extract tiles sequentially
-    # Fathom ETL handlers (26 NOV 2025)
-    "fathom_inventory": fathom_inventory,             # Stage 1: Parse CSV, create merge groups
-    "fathom_merge_stack": fathom_merge_stack,         # Stage 2: Merge tiles + stack bands
+    # Fathom ETL handlers - Two-Phase Architecture (03 DEC 2025)
+    # Phase 1: Band stacking (~500MB/task, 16+ concurrent)
+    "fathom_tile_inventory": fathom_tile_inventory,   # Stage 1: Group by tile + scenario
+    "fathom_band_stack": fathom_band_stack,           # Stage 2: Stack 8 RPs into multi-band COG
+    # Phase 2: Spatial merge (~2-3GB/task, 4-5 concurrent)
+    "fathom_grid_inventory": fathom_grid_inventory,   # Stage 1: Group by NxN grid cell
+    "fathom_spatial_merge": fathom_spatial_merge,     # Stage 2: Merge tiles band-by-band
+    # Shared handler (both phases)
     "fathom_stac_register": fathom_stac_register,     # Stage 3: STAC collection/items
+    # Legacy handlers (deprecated - too memory intensive ~12GB/task)
+    "fathom_inventory": fathom_inventory,             # DEPRECATED: Country-wide grouping
+    "fathom_merge_stack": fathom_merge_stack,         # DEPRECATED: Country-wide spatial merge
     # Idempotent Vector ETL handlers (26 NOV 2025)
     "process_vector_prepare": process_vector_prepare,  # Stage 1: Load, validate, chunk, create table
     "process_vector_upload": process_vector_upload,    # Stage 2: DELETE+INSERT idempotent upload
     # Note: create_vector_stac already registered above - reused for Stage 3
+    # Geospatial Container Inventory handlers (03 DEC 2025)
+    "classify_geospatial_file": classify_geospatial_file,  # Stage 2: Per-blob classification
+    "aggregate_geospatial_inventory": aggregate_geospatial_inventory,  # Stage 3: Group into collections
+    # Fathom Container Inventory handlers (05 DEC 2025)
+    "fathom_generate_scan_prefixes": fathom_generate_scan_prefixes,  # Stage 1: Generate prefix list
+    "fathom_scan_prefix": fathom_scan_prefix,  # Stage 2: Parallel scan + batch insert
+    "fathom_assign_grid_cells": fathom_assign_grid_cells,  # Stage 3: Calculate grid assignments
+    "fathom_inventory_summary": fathom_inventory_summary,  # Stage 4: Generate statistics
 }
 
 # ============================================================================

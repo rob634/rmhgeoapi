@@ -41,6 +41,7 @@ import hashlib
 import json
 
 from jobs.base import JobBase
+from config.defaults import STACDefaults
 
 
 class StacCatalogContainerWorkflow(JobBase):
@@ -78,7 +79,7 @@ class StacCatalogContainerWorkflow(JobBase):
     # Parameter schema
     parameters_schema: Dict[str, Any] = {
         "container_name": {"type": "str", "required": True},
-        "collection_id": {"type": "str", "required": True, "default": "dev"},
+        "collection_id": {"type": "str", "required": True, "default": STACDefaults.DEV_COLLECTION},
         "extension_filter": {"type": "str", "default": ".tif"},
         "file_limit": {"type": "int", "min": 1, "max": 10000, "default": None},
         "prefix": {"type": "str", "default": ""}
@@ -117,12 +118,12 @@ class StacCatalogContainerWorkflow(JobBase):
         validated["container_name"] = container_name.strip()
 
         # Validate collection_id (required)
-        collection_id = params.get("collection_id", "dev")
+        collection_id = params.get("collection_id", STACDefaults.DEV_COLLECTION)
         if not isinstance(collection_id, str) or not collection_id.strip():
             raise ValueError("collection_id must be a non-empty string")
 
         # Validate collection_id is one of the valid production collections
-        valid_collections = ["dev", "cogs", "vectors", "geoparquet"]
+        valid_collections = STACDefaults.VALID_USER_COLLECTIONS
         if collection_id not in valid_collections:
             raise ValueError(f"collection_id must be one of {valid_collections}, got '{collection_id}'")
 
@@ -239,7 +240,7 @@ class StacCatalogContainerWorkflow(JobBase):
                     "parameters": {
                         "container_name": job_params["container_name"],
                         "blob_name": raster_file,
-                        "collection_id": job_params.get("collection_id", "dev")
+                        "collection_id": job_params.get("collection_id", STACDefaults.DEV_COLLECTION)
                     }
                 })
 
@@ -275,7 +276,7 @@ class StacCatalogContainerWorkflow(JobBase):
             metadata={
                 "description": "Bulk STAC metadata extraction and cataloging",
                 "created_by": "StacCatalogContainerWorkflow",
-                "collection_id": params.get("collection_id", "dev"),
+                "collection_id": params.get("collection_id", STACDefaults.DEV_COLLECTION),
                 "extension_filter": params.get("extension_filter", ".tif")
             }
         )
@@ -384,7 +385,7 @@ class StacCatalogContainerWorkflow(JobBase):
         # Build aggregated result
         return {
             "job_type": "stac_catalog_container",
-            "collection_id": params.get("collection_id", "dev"),
+            "collection_id": params.get("collection_id", STACDefaults.DEV_COLLECTION),
             "container_name": params.get("container_name"),
             "extension_filter": params.get("extension_filter", ".tif"),
             "prefix": params.get("prefix", ""),

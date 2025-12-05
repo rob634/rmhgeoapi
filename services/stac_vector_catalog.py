@@ -11,6 +11,7 @@ from typing import Any
 from datetime import datetime
 import logging
 from util_logger import LoggerFactory, ComponentType
+from config.defaults import STACDefaults
 
 # Component-specific logger for structured logging (Application Insights)
 logger = LoggerFactory.create_logger(
@@ -62,7 +63,7 @@ def create_vector_stac(params: dict) -> dict[str, Any]:
     # Extract parameters
     schema = params.get("schema")
     table_name = params.get("table_name")
-    collection_id = params.get("collection_id", "system-vectors")
+    collection_id = params.get("collection_id", STACDefaults.VECTOR_COLLECTION)
     source_file = params.get("source_file")
     source_format = params.get("source_format")
     job_id = params.get("job_id")
@@ -218,7 +219,7 @@ def extract_vector_stac_metadata(params: dict) -> dict[str, Any]:
     # Extract parameters
     schema = params.get("schema")
     table_name = params.get("table_name")
-    collection_id = params.get("collection_id", "vectors")
+    collection_id = params.get("collection_id", STACDefaults.VECTORS_COLLECTION)
     source_file = params.get("source_file")
 
     if not schema or not table_name:

@@ -32,6 +32,7 @@ import azure.functions as func
 from typing import Dict, Any
 import json
 import logging
+from config.defaults import STACDefaults
 
 # LAZY LOADING: Import heavy dependencies INSIDE function, not at module level
 # This prevents GDAL/rasterio from loading during Azure Functions cold start
@@ -134,7 +135,7 @@ def handle_request(req: func.HttpRequest) -> func.HttpResponse:
         logger.debug(f"   Request body keys: {list(body.keys())}")
         container = body.get('container')
         blob_name = body.get('blob_name')
-        collection_id = body.get('collection_id', 'dev')
+        collection_id = body.get('collection_id', STACDefaults.DEV_COLLECTION)
         should_insert = body.get('insert', True)
         logger.info(f"✅ STEP 3: Request parsed - container={container}, blob={blob_name}, collection={collection_id}")
     except Exception as e:

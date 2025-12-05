@@ -32,6 +32,7 @@ import logging
 
 from services.service_stac_vector import StacVectorService
 from infrastructure.pgstac_bootstrap import PgStacBootstrap
+from config.defaults import STACDefaults
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +64,7 @@ def handle_request(req: func.HttpRequest) -> func.HttpResponse:
         body = req.get_json()
         schema = body.get('schema')
         table_name = body.get('table_name')
-        collection_id = body.get('collection_id', 'vectors')
+        collection_id = body.get('collection_id', STACDefaults.VECTORS_COLLECTION)
         source_file = body.get('source_file')
         should_insert = body.get('insert', True)
         custom_properties = body.get('properties', {})

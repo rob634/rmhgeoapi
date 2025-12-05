@@ -120,7 +120,7 @@ class ProcessRasterV2Job(JobBaseMixin, JobBase):
             'blob_param': 'blob_name',
             'max_size_env': 'RASTER_MAX_FILE_SIZE_MB',  # From config/raster_config.py
             'error_not_found': 'Source raster file does not exist. Verify blob_name and container_name.',
-            'error_too_large': 'Raster file exceeds maximum size limit. Use process_raster_collection for large files.'
+            'error_too_large': 'Raster file too_large for direct processing. Use process_large_raster_v2 for files over size limit.'
         }
     ]
 

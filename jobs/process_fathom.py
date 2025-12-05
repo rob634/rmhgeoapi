@@ -54,6 +54,7 @@ import json
 
 from jobs.base import JobBase
 from jobs.mixins import JobBaseMixin
+from config import FathomDefaults
 
 
 class ProcessFathomWorkflow(JobBaseMixin, JobBase):
@@ -113,7 +114,7 @@ class ProcessFathomWorkflow(JobBaseMixin, JobBase):
         "source_container": {
             "type": "str",
             "required": False,
-            "default": "bronze-fathom",
+            "default": FathomDefaults.SOURCE_CONTAINER,
             "description": "Source container with Fathom flood tiles"
         },
         "file_list_csv": {
@@ -125,13 +126,13 @@ class ProcessFathomWorkflow(JobBaseMixin, JobBase):
         "output_container": {
             "type": "str",
             "required": False,
-            "default": "silver-cogs",
+            "default": FathomDefaults.PHASE2_OUTPUT_CONTAINER,
             "description": "Output container for consolidated COGs"
         },
         "output_prefix": {
             "type": "str",
             "required": False,
-            "default": "fathom",
+            "default": FathomDefaults.PHASE2_OUTPUT_PREFIX,
             "description": "Output folder prefix in silver container"
         },
         "flood_types": {
@@ -155,7 +156,7 @@ class ProcessFathomWorkflow(JobBaseMixin, JobBase):
         "collection_id": {
             "type": "str",
             "required": False,
-            "default": "fathom-flood",
+            "default": FathomDefaults.PHASE2_COLLECTION_ID,
             "description": "STAC collection ID for metadata registration"
         },
         "dry_run": {
@@ -225,7 +226,7 @@ class ProcessFathomWorkflow(JobBaseMixin, JobBase):
                 "parameters": {
                     "region_code": job_params["region_code"],
                     "region_name": job_params.get("region_name"),
-                    "source_container": job_params.get("source_container", "bronze-fathom"),
+                    "source_container": job_params.get("source_container", FathomDefaults.SOURCE_CONTAINER),
                     "file_list_csv": job_params.get("file_list_csv"),
                     "flood_types": job_params.get("flood_types"),
                     "years": job_params.get("years"),
@@ -263,9 +264,9 @@ class ProcessFathomWorkflow(JobBaseMixin, JobBase):
                     "task_type": "fathom_merge_stack",
                     "parameters": {
                         "merge_group": group,
-                        "source_container": job_params.get("source_container", "bronze-fathom"),
-                        "output_container": job_params.get("output_container", "silver-cogs"),
-                        "output_prefix": job_params.get("output_prefix", "fathom"),
+                        "source_container": job_params.get("source_container", FathomDefaults.SOURCE_CONTAINER),
+                        "output_container": job_params.get("output_container", FathomDefaults.PHASE2_OUTPUT_CONTAINER),
+                        "output_prefix": job_params.get("output_prefix", FathomDefaults.PHASE2_OUTPUT_PREFIX),
                         "region_code": job_params["region_code"],
                         "force_reprocess": job_params.get("force_reprocess", False)
                     }
@@ -294,7 +295,7 @@ class ProcessFathomWorkflow(JobBaseMixin, JobBase):
                         "parameters": {
                             "dry_run": True,
                             "region_code": job_params["region_code"],
-                            "collection_id": job_params.get("collection_id", "fathom-flood")
+                            "collection_id": job_params.get("collection_id", FathomDefaults.PHASE2_COLLECTION_ID)
                         }
                     }]
                 raise ValueError("Stage 2 failed - no COGs created")
@@ -305,8 +306,8 @@ class ProcessFathomWorkflow(JobBaseMixin, JobBase):
                 "parameters": {
                     "cog_results": successful_cogs,
                     "region_code": job_params["region_code"],
-                    "collection_id": job_params.get("collection_id", "fathom-flood"),
-                    "output_container": job_params.get("output_container", "silver-cogs")
+                    "collection_id": job_params.get("collection_id", FathomDefaults.PHASE2_COLLECTION_ID),
+                    "output_container": job_params.get("output_container", FathomDefaults.PHASE2_OUTPUT_CONTAINER)
                 }
             }]
 

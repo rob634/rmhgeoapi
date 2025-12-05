@@ -44,6 +44,7 @@ Design Pattern:
 from typing import Dict, Any, List
 from util_logger import LoggerFactory, ComponentType
 from core.models import TaskStatus
+from config.defaults import STACDefaults
 
 
 class RasterWorkflowsBase:
@@ -174,7 +175,7 @@ class RasterWorkflowsBase:
             # OLD BUG: stac_result = stac_tasks[0].result_data.get("result", {})  # Returns {} because no "result" key.
             # CORRECT: result_data IS the result
             stac_result = stac_tasks[0].result_data
-            collection_id = stac_result.get("collection_id", "cogs")
+            collection_id = stac_result.get("collection_id", STACDefaults.COGS_COLLECTION)
             item_id = stac_result.get("stac_id") or stac_result.get("pgstac_id")
 
             # Extract pgSTAC search URLs (16 NOV 2025 - Option B: pgSTAC search for visualization)

@@ -68,12 +68,16 @@ from .validate_raster_job import ValidateRasterJob
 from .generate_h3_level4 import GenerateH3Level4Job
 from .create_h3_base import CreateH3BaseJob
 from .bootstrap_h3_land_grid_pyramid import BootstrapH3LandGridPyramidJob
-from .process_fathom import ProcessFathomWorkflow
+from .process_fathom import ProcessFathomWorkflow  # LEGACY - too memory intensive
+from .process_fathom_stack import ProcessFathomStackJob  # Phase 1: Band stacking (03 DEC 2025)
+from .process_fathom_merge import ProcessFathomMergeJob  # Phase 2: Spatial merge (03 DEC 2025)
 from .process_vector import ProcessVectorJob  # Idempotent vector ETL (26 NOV 2025)
 from .process_raster_v2 import ProcessRasterV2Job  # Mixin pattern raster ETL (28 NOV 2025)
 from .raster_mixin import RasterMixin  # Shared raster infrastructure (30 NOV 2025)
 from .process_raster_collection_v2 import ProcessRasterCollectionV2Job  # Mixin pattern collection ETL (30 NOV 2025)
 from .process_large_raster_v2 import ProcessLargeRasterV2Job  # Mixin pattern large raster ETL (30 NOV 2025)
+from .inventory_container_geospatial import InventoryContainerGeospatialJob  # Container geospatial inventory (03 DEC 2025)
+from .inventory_fathom_container import InventoryFathomContainerJob  # Fathom ETL inventory (05 DEC 2025)
 
 # ============================================================================
 # EXPLICIT JOB REGISTRY
@@ -100,7 +104,10 @@ ALL_JOBS = {
     "generate_h3_level4": GenerateH3Level4Job,
     "create_h3_base": CreateH3BaseJob,
     "bootstrap_h3_land_grid_pyramid": BootstrapH3LandGridPyramidJob,  # H3 land pyramid bootstrap (res 2-7) - 14 NOV 2025
-    "process_fathom": ProcessFathomWorkflow,  # Fathom flood hazard consolidation (26 NOV 2025)
+    # Fathom ETL - Two-Phase Architecture (03 DEC 2025)
+    "process_fathom_stack": ProcessFathomStackJob,   # Phase 1: Band stacking (~500MB/task, 16+ concurrent)
+    "process_fathom_merge": ProcessFathomMergeJob,   # Phase 2: Spatial merge with grid_size param (~2-3GB/task)
+    "process_fathom": ProcessFathomWorkflow,         # LEGACY: Country-wide merge (~12GB/task) - DO NOT USE
     "process_vector": ProcessVectorJob,  # Idempotent vector ETL with DELETE+INSERT pattern (26 NOV 2025)
     "process_raster_v2": ProcessRasterV2Job,  # Mixin pattern raster ETL - clean slate (28 NOV 2025)
     "process_raster_collection_v2": ProcessRasterCollectionV2Job,  # Mixin pattern collection ETL (30 NOV 2025)
@@ -108,6 +115,12 @@ ALL_JOBS = {
 
     # Test/Diagnostic Workflows
     "list_container_contents_diamond": ListContainerContentsDiamondWorkflow,  # TEST ONLY - Fan-in demo (16 OCT 2025)
+
+    # Container Analysis (03 DEC 2025)
+    "inventory_container_geospatial": InventoryContainerGeospatialJob,  # Discovery-only geospatial inventory
+
+    # Fathom ETL Infrastructure (05 DEC 2025)
+    "inventory_fathom_container": InventoryFathomContainerJob,  # Populate etl_fathom from blob storage
 
     # Add new jobs here explicitly
 }

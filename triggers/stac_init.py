@@ -31,6 +31,7 @@ import json
 import logging
 
 from infrastructure.pgstac_bootstrap import PgStacBootstrap
+from config.defaults import STACDefaults
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +53,7 @@ def handle_request(req: func.HttpRequest) -> func.HttpResponse:
     try:
         # Parse request
         body = req.get_json() if req.get_body() else {}
-        collections_to_create = body.get('collections', ['dev', 'cogs', 'vectors', 'geoparquet'])
+        collections_to_create = body.get('collections', STACDefaults.VALID_USER_COLLECTIONS)
 
         stac = PgStacBootstrap()
         results = {}

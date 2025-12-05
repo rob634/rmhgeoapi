@@ -37,6 +37,7 @@ Last Updated: 29 OCT 2025
 from typing import List, Dict, Any
 
 from jobs.base import JobBase
+from config.defaults import STACDefaults
 
 
 class CreateH3BaseJob(JobBase):
@@ -176,7 +177,7 @@ class CreateH3BaseJob(JobBase):
                 "table_name": table_name,
                 "bbox": bbox,
                 "resolution": resolution,
-                "collection_id": "system-h3-grids",
+                "collection_id": STACDefaults.H3_COLLECTION,
                 "source_blob": ""  # No GeoParquet intermediate file in Phase 3
             }
 

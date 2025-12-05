@@ -7,7 +7,7 @@
 # LAST_REVIEWED: 30 NOV 2025
 # EXPORTS: AzureDefaults, DatabaseDefaults, StorageDefaults, QueueDefaults,
 #          RasterDefaults, VectorDefaults, AnalyticsDefaults, H3Defaults,
-#          PlatformDefaults, AppDefaults
+#          PlatformDefaults, FathomDefaults, STACDefaults, AppDefaults
 # INTERFACES: Pure Python classes (no Pydantic - just constants)
 # PYDANTIC_MODELS: None - consumed by Pydantic config classes
 # DEPENDENCIES: None (intentionally dependency-free)
@@ -195,9 +195,6 @@ class RasterDefaults:
     # MosaicJSON
     MOSAICJSON_MAXZOOM = 19
 
-    # STAC
-    STAC_DEFAULT_COLLECTION = "system-rasters"
-
     # Intermediate storage
     INTERMEDIATE_PREFIX = "temp/raster_etl"
 
@@ -294,6 +291,154 @@ class PlatformDefaults:
 
 
 # =============================================================================
+# FATHOM ETL DEFAULTS
+# =============================================================================
+
+class FathomDefaults:
+    """
+    Fathom flood hazard ETL pipeline defaults.
+
+    Controls containers, prefixes, and STAC collection IDs for the
+    two-phase Fathom processing architecture.
+
+    Phase 1: Band stacking (8M → 1M files, 8× reduction)
+    Phase 2: Spatial merge (1M → 40K files with 5×5 grid)
+    """
+
+    # Source data (Fathom Global Flood Maps v3)
+    SOURCE_CONTAINER = "bronze-fathom"
+
+    # Phase 1 outputs (band-stacked 1×1 tiles)
+    PHASE1_OUTPUT_CONTAINER = "silver-fathom"
+    PHASE1_OUTPUT_PREFIX = "fathom-stacked"
+    PHASE1_COLLECTION_ID = "fathom-flood-stacked"
+
+    # Phase 2 outputs (spatially merged NxN tiles)
+    PHASE2_OUTPUT_CONTAINER = "silver-fathom"
+    PHASE2_OUTPUT_PREFIX = "fathom"
+    PHASE2_COLLECTION_ID = "fathom-flood"
+
+    # Merge configuration
+    DEFAULT_GRID_SIZE = 5  # 5×5 degree grid cells
+
+    # Return periods (bands in output COGs)
+    RETURN_PERIODS = ["1in5", "1in10", "1in20", "1in50", "1in100", "1in200", "1in500", "1in1000"]
+
+    # Flood types supported
+    FLOOD_TYPES = ["COASTAL_DEFENDED", "COASTAL_UNDEFENDED", "FLUVIAL_DEFENDED", "FLUVIAL_UNDEFENDED", "PLUVIAL_DEFENDED"]
+
+
+# =============================================================================
+# STAC DEFAULTS (Catalog configuration)
+# =============================================================================
+
+class STACDefaults:
+    """
+    STAC catalog configuration defaults.
+
+    Controls collection IDs, metadata, media types, and tier descriptions
+    for the pgstac-based STAC catalog system.
+
+    All STAC-related hardcoded values should live here.
+    """
+
+    # ==========================================================================
+    # LICENSE
+    # ==========================================================================
+    DEFAULT_LICENSE = "proprietary"
+
+    # ==========================================================================
+    # DEFAULT COLLECTION IDs BY DATA TYPE
+    # ==========================================================================
+    VECTOR_COLLECTION = "system-vectors"      # PostGIS vector tables
+    RASTER_COLLECTION = "system-rasters"      # COG files
+    H3_COLLECTION = "system-h3-grids"         # H3 hexagonal grids
+    DEV_COLLECTION = "dev"                    # Development/testing
+    COGS_COLLECTION = "cogs"                  # User-submitted COGs
+    VECTORS_COLLECTION = "vectors"            # User-submitted vectors
+    GEOPARQUET_COLLECTION = "geoparquet"      # GeoParquet exports
+
+    # ==========================================================================
+    # VALID COLLECTIONS (for job parameter validation)
+    # ==========================================================================
+    VALID_USER_COLLECTIONS = ["dev", "cogs", "vectors", "geoparquet"]
+    SYSTEM_COLLECTIONS = ["system-vectors", "system-rasters", "system-h3-grids"]
+
+    # ==========================================================================
+    # MEDIA TYPES
+    # ==========================================================================
+    MEDIA_TYPE_COG = "image/tiff; application=geotiff; profile=cloud-optimized"
+    MEDIA_TYPE_GEOTIFF = "image/tiff; application=geotiff"
+    MEDIA_TYPE_GEOJSON = "application/geo+json"
+    MEDIA_TYPE_GEOPARQUET = "application/x-parquet"
+    MEDIA_TYPE_GENERIC = "application/octet-stream"
+
+    # ==========================================================================
+    # ASSET TYPES
+    # ==========================================================================
+    ASSET_TYPE_RASTER = "raster"
+    ASSET_TYPE_VECTOR = "vector"
+    ASSET_TYPE_MIXED = "mixed"
+
+    # ==========================================================================
+    # TIER DESCRIPTIONS
+    # ==========================================================================
+    TIER_DESCRIPTIONS = {
+        "bronze": "Raw geospatial data from Azure Storage container",
+        "silver": "Cloud-optimized GeoTIFFs (COGs) with validated metadata and PostGIS integration",
+        "gold": "GeoParquet exports optimized for analytical queries",
+    }
+
+    # ==========================================================================
+    # COLLECTION METADATA (titles and descriptions)
+    # ==========================================================================
+    COLLECTION_METADATA = {
+        "system-vectors": {
+            "title": "System STAC - Vector Tables",
+            "description": "Operational tracking of PostGIS vector tables created by ETL",
+            "asset_type": "vector",
+            "media_type": "application/geo+json",
+        },
+        "system-rasters": {
+            "title": "System STAC - Raster Files",
+            "description": "Operational tracking of COG files created by ETL",
+            "asset_type": "raster",
+            "media_type": "image/tiff; application=geotiff; profile=cloud-optimized",
+        },
+        "cogs": {
+            "title": "Cloud-Optimized GeoTIFFs",
+            "description": "Raster data converted to COG format in EPSG:4326 for cloud-native access",
+            "asset_type": "raster",
+            "media_type": "image/tiff; application=geotiff; profile=cloud-optimized",
+        },
+        "vectors": {
+            "title": "Vector Features (PostGIS)",
+            "description": "Vector data stored in PostGIS tables, queryable via OGC API - Features",
+            "asset_type": "vector",
+            "media_type": "application/geo+json",
+        },
+        "geoparquet": {
+            "title": "GeoParquet Analytical Datasets",
+            "description": "Cloud-optimized columnar vector data for analytical queries",
+            "asset_type": "vector",
+            "media_type": "application/x-parquet",
+        },
+        "dev": {
+            "title": "Development & Testing",
+            "description": "Generic collection for development and testing (not for production)",
+            "asset_type": "mixed",
+            "media_type": "application/octet-stream",
+        },
+        "system-h3-grids": {
+            "title": "H3 Hexagonal Grids",
+            "description": "Pre-computed H3 spatial index grids for analytical queries",
+            "asset_type": "vector",
+            "media_type": "application/geo+json",
+        },
+    }
+
+
+# =============================================================================
 # APPLICATION DEFAULTS
 # =============================================================================
 
@@ -356,6 +501,8 @@ __all__ = [
     "AnalyticsDefaults",
     "H3Defaults",
     "PlatformDefaults",
+    "FathomDefaults",
+    "STACDefaults",
     "AppDefaults",
     "KeyVaultDefaults",
 ]

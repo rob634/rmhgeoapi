@@ -39,6 +39,7 @@ from psycopg import sql
 
 from infrastructure.pgstac_bootstrap import PgStacBootstrap
 from config import get_config
+from config.defaults import STACDefaults
 from util_logger import LoggerFactory, ComponentType
 
 
@@ -90,7 +91,7 @@ def create_h3_stac(task_params: dict) -> dict:
         table_name = task_params.get('table_name', 'geo.h3_grids')
         bbox = task_params.get('bbox')
         resolution = task_params.get('resolution')
-        collection_id = task_params.get('collection_id', 'system-h3-grids')
+        collection_id = task_params.get('collection_id', STACDefaults.H3_COLLECTION)
         source_blob = task_params.get('source_blob')
 
         logger.info(f"📋 Parameters:")

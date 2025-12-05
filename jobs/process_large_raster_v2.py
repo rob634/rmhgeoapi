@@ -50,6 +50,7 @@ from jobs.base import JobBase
 from jobs.mixins import JobBaseMixin
 from jobs.raster_workflows_base import RasterWorkflowsBase
 from jobs.raster_mixin import RasterMixin
+from config.defaults import STACDefaults
 
 
 class ProcessLargeRasterV2Job(RasterMixin, RasterWorkflowsBase, JobBaseMixin, JobBase):
@@ -91,7 +92,7 @@ class ProcessLargeRasterV2Job(RasterMixin, RasterWorkflowsBase, JobBaseMixin, Jo
         'blob_name': {'type': 'str', 'required': True},
 
         # Override collection_id to not be required (has default)
-        'collection_id': {'type': 'str', 'default': 'system-rasters'},
+        'collection_id': {'type': 'str', 'default': STACDefaults.RASTER_COLLECTION},
 
         # Tiling-specific parameters
         'tile_size': {'type': 'int', 'default': None},  # None = auto-calculate

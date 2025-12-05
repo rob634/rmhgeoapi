@@ -21,12 +21,13 @@ This document provides setup and configuration instructions for the PostgreSQL d
 ## Table of Contents
 
 1. [Database Architecture](#database-architecture)
-2. [Component Details](#component-details)
-3. [Setup Instructions](#setup-instructions)
-4. [Schema Reference](#schema-reference)
-5. [Connection Configuration](#connection-configuration)
-6. [Maintenance Operations](#maintenance-operations)
-7. [Troubleshooting](#troubleshooting)
+2. [Managed Identity Authentication](#managed-identity-authentication)
+3. [Component Details](#component-details)
+4. [Setup Instructions](#setup-instructions)
+5. [Schema Reference](#schema-reference)
+6. [Connection Configuration](#connection-configuration)
+7. [Maintenance Operations](#maintenance-operations)
+8. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -96,11 +97,161 @@ Max Connections: Depends on tier (B1ms: 50, GP: 100+)
 
 ### 3. Required Extensions
 
-| Extension | Version | Purpose |
-|-----------|---------|---------|
-| postgis | 3.4+ | Spatial data types and functions |
-| pgstac | 0.8+ | STAC metadata storage |
-| uuid-ossp | - | UUID generation |
+**⚠️ IMPORTANT**: Extensions must be created by `azure_pg_admin` role (requires Azure Portal allowlist + SQL installation).
+
+| Extension | Version | Purpose | Required For |
+|-----------|---------|---------|--------------|
+| **postgis** | 3.4+ | Spatial data types and functions | All geospatial operations |
+| **btree_gist** | - | GiST indexes with B-tree behavior | pypgstac (exclusion constraints) |
+| **unaccent** | - | Accent-insensitive text search | pypgstac (search functionality) |
+| uuid-ossp | - | UUID generation | App schema |
+
+**Installation Process** (two steps required):
+
+1. **Azure Portal**: Add to `azure.extensions` server parameter (allowlist)
+2. **SQL**: Run as `azure_pg_admin` member:
+   ```sql
+   CREATE EXTENSION IF NOT EXISTS postgis;
+   CREATE EXTENSION IF NOT EXISTS btree_gist;
+   CREATE EXTENSION IF NOT EXISTS unaccent;
+   CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+   ```
+
+**Note**: `pgstac` is not a PostgreSQL extension - it's deployed via `pypgstac migrate` CLI tool.
+
+---
+
+## Managed Identity Authentication
+
+Azure PostgreSQL Flexible Server supports Microsoft Entra ID (Azure AD) authentication using User-Assigned Managed Identities. This eliminates the need to store database passwords in application settings.
+
+### Identity Types
+
+The platform uses two managed identities with different permission levels:
+
+| Identity Type | Purpose | Permissions | Assigned To |
+|---------------|---------|-------------|-------------|
+| **Admin Identity** | ETL operations, schema management | Full DDL + DML (CREATE, DROP, INSERT, UPDATE, DELETE) | ETL Function Apps |
+| **Reader Identity** | Read-only API access | SELECT only | OGC API, TiTiler, other read-only services |
+
+### How Managed Identity Authentication Works
+
+```
+┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
+│  Function App   │────>│    Azure AD     │────>│   PostgreSQL    │
+│                 │     │                 │     │                 │
+│ 1. Request      │     │ 2. Validate     │     │ 3. Authenticate │
+│    AD token     │     │    identity     │     │    with token   │
+└─────────────────┘     └─────────────────┘     └─────────────────┘
+```
+
+1. **Function App** requests an Azure AD token using its assigned managed identity
+2. **Azure AD** validates the identity and returns a short-lived token (~1 hour)
+3. **PostgreSQL** accepts the token as the password, authenticating the connection
+
+### Setup Requirements
+
+To configure managed identity authentication:
+
+#### 1. Create User-Assigned Managed Identity in Azure
+
+```bash
+az identity create \
+  --name <IDENTITY_NAME> \
+  --resource-group <YOUR_RG>
+```
+
+#### 2. Enable Entra ID Authentication on PostgreSQL Server
+
+- In Azure Portal: PostgreSQL Server → Authentication → Enable Microsoft Entra authentication
+- Set an Entra ID Administrator for the server
+
+#### 3. Create PostgreSQL Role for the Identity
+
+Connect to the `postgres` database (NOT your application database) as the Entra ID Administrator:
+
+```sql
+-- For Admin identity (full access)
+SELECT * FROM pgaadauth_create_principal('<ADMIN_IDENTITY_NAME>', true, false);
+
+-- For Reader identity (read-only)
+SELECT * FROM pgaadauth_create_principal('<READER_IDENTITY_NAME>', false, false);
+```
+
+**Parameters**:
+- First parameter: Role name (must match the managed identity name exactly)
+- Second parameter (`is_admin`): `true` grants azure_pg_admin membership
+- Third parameter (`is_mfa`): `false` for service accounts
+
+#### 4. Grant Schema Permissions
+
+Connect to your application database and grant appropriate permissions:
+
+**For Admin Identity**:
+```sql
+GRANT ALL PRIVILEGES ON SCHEMA <schema_name> TO <admin_identity>;
+GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA <schema_name> TO <admin_identity>;
+ALTER DEFAULT PRIVILEGES IN SCHEMA <schema_name>
+    GRANT ALL PRIVILEGES ON TABLES TO <admin_identity>;
+```
+
+**For Reader Identity**:
+```sql
+GRANT USAGE ON SCHEMA <schema_name> TO <reader_identity>;
+GRANT SELECT ON ALL TABLES IN SCHEMA <schema_name> TO <reader_identity>;
+ALTER DEFAULT PRIVILEGES IN SCHEMA <schema_name>
+    GRANT SELECT ON TABLES TO <reader_identity>;
+```
+
+#### 5. Assign Identity to Function App
+
+```bash
+IDENTITY_ID=$(az identity show \
+    --name <IDENTITY_NAME> \
+    --resource-group <YOUR_RG> \
+    --query id --output tsv)
+
+az functionapp identity assign \
+    --name <YOUR_FUNCTION_APP> \
+    --resource-group <YOUR_RG> \
+    --identities "$IDENTITY_ID"
+```
+
+#### 6. Configure Application Settings
+
+```bash
+az functionapp config appsettings set \
+    --name <YOUR_FUNCTION_APP> \
+    --resource-group <YOUR_RG> \
+    --settings \
+        "USE_MANAGED_IDENTITY=true" \
+        "AZURE_CLIENT_ID=<CLIENT_ID_OF_IDENTITY>" \
+        "POSTGIS_USER=<IDENTITY_NAME>"
+```
+
+### Application Code Pattern
+
+```python
+from azure.identity import ManagedIdentityCredential
+
+# Acquire token using the assigned identity
+credential = ManagedIdentityCredential(client_id="<CLIENT_ID>")
+token = credential.get_token("https://ossrdbms-aad.database.windows.net/.default")
+
+# Use token as password
+conn_string = f"postgresql://<identity_name>:{token.token}@<server>.postgres.database.azure.com:5432/<database>?sslmode=require"
+```
+
+### Security Benefits
+
+- **No stored passwords**: Tokens are acquired at runtime, no secrets in configuration
+- **Automatic rotation**: Tokens expire after ~1 hour, automatically refreshed
+- **Audit trail**: All access logged through Azure AD
+- **Least privilege**: Separate identities for different access patterns
+
+### Operational Runbook
+
+For environment-specific values (Client IDs, Principal IDs, exact GRANT statements), see the internal operational runbook: `DATABASE_IDENTITY_RUNBOOK.md`
 
 ---
 
@@ -438,4 +589,4 @@ EXPLAIN ANALYZE SELECT * FROM app.jobs WHERE status = 'processing';
 
 ---
 
-**Last Updated**: 24 NOV 2025
+**Last Updated**: 03 DEC 2025

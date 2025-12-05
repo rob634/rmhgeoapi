@@ -42,6 +42,7 @@ from psycopg import sql
 
 from util_logger import LoggerFactory, ComponentType
 from config import get_config
+from config.defaults import STACDefaults
 
 logger = LoggerFactory.create_logger(ComponentType.SERVICE, "PgStacBootstrap")
 
@@ -84,56 +85,15 @@ class PgStacBootstrap:
     # Development: Use "dev" collection for testing with Bronze container
     # =========================================================================
 
-    PRODUCTION_COLLECTIONS = {
-        # === SYSTEM STAC (Layer 1 - Operational Tracking) ===
-        'system-vectors': {
-            'title': 'System STAC - Vector Tables',
-            'description': 'Operational tracking of PostGIS vector tables created by ETL',
-            'asset_type': 'vector',
-            'media_type': 'application/geo+json'
-        },
-        'system-rasters': {
-            'title': 'System STAC - Raster Files',
-            'description': 'Operational tracking of COG files created by ETL',
-            'asset_type': 'raster',
-            'media_type': 'image/tiff; application=geotiff; profile=cloud-optimized'
-        },
-
-        # === LEGACY COLLECTIONS (Pre-System STAC) ===
-        'cogs': {
-            'title': 'Cloud-Optimized GeoTIFFs',
-            'description': 'Raster data converted to COG format in EPSG:4326 for cloud-native access',
-            'asset_type': 'raster',
-            'media_type': 'image/tiff; application=geotiff; profile=cloud-optimized'
-        },
-        'vectors': {
-            'title': 'Vector Features (PostGIS)',
-            'description': 'Vector data stored in PostGIS tables, queryable via OGC API - Features',
-            'asset_type': 'vector',
-            'media_type': 'application/geo+json'
-        },
-        'geoparquet': {
-            'title': 'GeoParquet Analytical Datasets',
-            'description': 'Cloud-optimized columnar vector data for analytical queries',
-            'asset_type': 'vector',
-            'media_type': 'application/x-parquet'
-        },
-        'dev': {
-            'title': 'Development & Testing',
-            'description': 'Generic collection for development and testing (not for production)',
-            'asset_type': 'mixed',
-            'media_type': 'application/octet-stream'
-        }
-    }
+    # Collection metadata imported from config.defaults.STACDefaults
+    # Single source of truth for collection definitions
+    PRODUCTION_COLLECTIONS = STACDefaults.COLLECTION_METADATA
 
     # Legacy tier constants (deprecated - kept for backward compatibility during migration)
     VALID_TIERS = ['bronze', 'silver', 'gold']
 
-    TIER_DESCRIPTIONS = {
-        'bronze': 'Raw geospatial data from Azure Storage container',
-        'silver': 'Cloud-optimized GeoTIFFs (COGs) with validated metadata and PostGIS integration',
-        'gold': 'GeoParquet exports optimized for analytical queries'
-    }
+    # Tier descriptions imported from config.defaults.STACDefaults
+    TIER_DESCRIPTIONS = STACDefaults.TIER_DESCRIPTIONS
 
     def __init__(self, connection_string: Optional[str] = None):
         """
@@ -696,7 +656,7 @@ class PgStacBootstrap:
             "stac_version": "1.0.0",
             "title": title,
             "description": description,
-            "license": "proprietary",
+            "license": STACDefaults.DEFAULT_LICENSE,
             "extent": {
                 "spatial": {"bbox": [[-180, -90, 180, 90]]},
                 "temporal": {"interval": [[None, None]]}
@@ -787,7 +747,7 @@ class PgStacBootstrap:
             "stac_version": "1.0.0",
             "title": coll_config['title'],
             "description": coll_config['description'],
-            "license": "proprietary",
+            "license": STACDefaults.DEFAULT_LICENSE,
             "extent": {
                 "spatial": {"bbox": [[-180, -90, 180, 90]]},
                 "temporal": {"interval": [[None, None]]}
@@ -947,6 +907,133 @@ class PgStacBootstrap:
             logger.warning(f"Error checking if item exists: {e}")
             # On error, assume item doesn't exist (will fail on insert if it does)
             return False
+
+    def get_existing_item_ids(
+        self,
+        collection_id: str,
+        bbox: Optional[List[float]] = None,
+        item_id_prefix: Optional[str] = None
+    ) -> set:
+        """
+        Get set of existing STAC item IDs in a collection, optionally filtered by bbox.
+
+        This enables STAC-driven idempotency: query which items already exist
+        before processing, so we can skip already-completed work.
+
+        Args:
+            collection_id: STAC collection ID to query
+            bbox: Optional bounding box [west, south, east, north] in EPSG:4326
+            item_id_prefix: Optional prefix to filter item IDs (e.g., "n04w006_")
+
+        Returns:
+            Set of existing item IDs in the collection matching the filters
+
+        Example:
+            # Get all items in collection
+            existing = stac.get_existing_item_ids("fathom-flood-stacked-ci")
+
+            # Get items within a bbox
+            existing = stac.get_existing_item_ids(
+                "fathom-flood-stacked-ci",
+                bbox=[-8, 4, -2, 10]
+            )
+
+            # Get items with ID prefix
+            existing = stac.get_existing_item_ids(
+                "fathom-flood-stacked-ci",
+                item_id_prefix="n04w006_"
+            )
+        """
+        try:
+            with self._pg_repo._get_connection() as conn:
+                with conn.cursor() as cur:
+                    # Build query with optional filters
+                    if bbox:
+                        # Spatial query using ST_Intersects with bbox
+                        # pgstac stores geometry in 'geometry' column
+                        query = """
+                            SELECT id FROM pgstac.items
+                            WHERE collection = %s
+                            AND ST_Intersects(
+                                geometry,
+                                ST_MakeEnvelope(%s, %s, %s, %s, 4326)
+                            )
+                        """
+                        params = [collection_id, bbox[0], bbox[1], bbox[2], bbox[3]]
+
+                        if item_id_prefix:
+                            query += " AND id LIKE %s"
+                            params.append(f"{item_id_prefix}%")
+
+                        cur.execute(query, params)
+                    elif item_id_prefix:
+                        cur.execute(
+                            "SELECT id FROM pgstac.items WHERE collection = %s AND id LIKE %s",
+                            (collection_id, f"{item_id_prefix}%")
+                        )
+                    else:
+                        cur.execute(
+                            "SELECT id FROM pgstac.items WHERE collection = %s",
+                            (collection_id,)
+                        )
+
+                    rows = cur.fetchall()
+                    item_ids = {row[0] for row in rows}
+
+                    logger.debug(
+                        f"Found {len(item_ids)} existing items in '{collection_id}'"
+                        f"{f' within bbox {bbox}' if bbox else ''}"
+                        f"{f' with prefix {item_id_prefix}' if item_id_prefix else ''}"
+                    )
+
+                    return item_ids
+
+        except (psycopg.Error, OSError) as e:
+            logger.warning(f"Error querying existing items: {e}")
+            # On error, return empty set (will reprocess - safe fallback)
+            return set()
+
+    def get_items_by_bbox(
+        self,
+        collection_id: str,
+        bbox: List[float],
+        limit: int = 1000
+    ) -> List[Dict[str, Any]]:
+        """
+        Get STAC items within a bounding box.
+
+        Args:
+            collection_id: STAC collection ID
+            bbox: Bounding box [west, south, east, north] in EPSG:4326
+            limit: Maximum number of items to return
+
+        Returns:
+            List of STAC item dicts
+        """
+        try:
+            with self._pg_repo._get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT content FROM pgstac.items
+                        WHERE collection = %s
+                        AND ST_Intersects(
+                            geometry,
+                            ST_MakeEnvelope(%s, %s, %s, %s, 4326)
+                        )
+                        LIMIT %s
+                        """,
+                        (collection_id, bbox[0], bbox[1], bbox[2], bbox[3], limit)
+                    )
+                    rows = cur.fetchall()
+                    items = [row[0] for row in rows]
+
+                    logger.info(f"Retrieved {len(items)} items from '{collection_id}' within bbox {bbox}")
+                    return items
+
+        except (psycopg.Error, OSError) as e:
+            logger.warning(f"Error querying items by bbox: {e}")
+            return []
 
     def insert_item(self, item, collection_id: str) -> Dict[str, Any]:
         """
@@ -2028,7 +2115,7 @@ def get_all_collections(repo: Optional['PostgreSQLRepository'] = None) -> Dict[s
                     "title": "System Rasters",
                     "description": "...",
                     "stac_version": "1.0.0",
-                    "license": "proprietary",
+                    "license": STACDefaults.DEFAULT_LICENSE,
                     "extent": {
                         "spatial": {"bbox": [...]},
                         "temporal": {"interval": [...]}
@@ -2174,7 +2261,9 @@ def get_system_stac_collections() -> List[Dict[str, Any]]:
 
     # Only create system collections (system-vectors, system-rasters)
     # Other collections (cogs, vectors, geoparquet, dev) are created on-demand
-    system_collection_types = ['system-vectors', 'system-rasters']
+    # Use only the first 2 system collections (vectors and rasters)
+    # system-h3-grids is created on-demand by H3 jobs
+    system_collection_types = STACDefaults.SYSTEM_COLLECTIONS[:2]
 
     for collection_type in system_collection_types:
         if collection_type in PgStacBootstrap.PRODUCTION_COLLECTIONS:
@@ -2186,7 +2275,7 @@ def get_system_stac_collections() -> List[Dict[str, Any]]:
                 "stac_version": "1.0.0",
                 "title": config['title'],
                 "description": config['description'],
-                "license": "proprietary",
+                "license": STACDefaults.DEFAULT_LICENSE,
                 "extent": {
                     "spatial": {"bbox": [[-180, -90, 180, 90]]},
                     "temporal": {"interval": [[None, None]]}

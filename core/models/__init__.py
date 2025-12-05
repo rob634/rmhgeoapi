@@ -72,6 +72,11 @@ from .janitor import (
     JanitorRunStatus
 )
 
+# ETL tracking models (05 DEC 2025)
+from .etl import (
+    EtlFathomRecord
+)
+
 __all__ = [
     # Enums
     'JobStatus',
@@ -110,5 +115,8 @@ __all__ = [
     # Janitor models (21 NOV 2025)
     'JanitorRun',
     'JanitorRunType',
-    'JanitorRunStatus'
+    'JanitorRunStatus',
+
+    # ETL tracking models (05 DEC 2025)
+    'EtlFathomRecord'
 ]

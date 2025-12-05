@@ -51,6 +51,7 @@ Updated: 15 OCT 2025 - Phase 2: Migrated to JobBase ABC
 from typing import Dict, Any, List
 
 from jobs.base import JobBase
+from config.defaults import STACDefaults
 
 
 class GenerateH3Level4Job(JobBase):
@@ -168,7 +169,7 @@ class GenerateH3Level4Job(JobBase):
                     "table_name": "geo.h3_grids",
                     "bbox": bbox,
                     "resolution": 4,
-                    "collection_id": "system-h3-grids",
+                    "collection_id": STACDefaults.H3_COLLECTION,
                     "source_blob": ""  # No GeoParquet intermediate file in Phase 3
                 }
             }]

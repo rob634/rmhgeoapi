@@ -73,6 +73,7 @@ except Exception as e:
 
 from infrastructure.blob import BlobRepository
 from infrastructure.pgstac_repository import PgStacRepository
+from config.defaults import STACDefaults
 
 # Component-specific logger for structured logging (Application Insights)
 logger = LoggerFactory.create_logger(
@@ -98,7 +99,7 @@ class StacMetadataService:
         self,
         container: str,
         blob_name: str,
-        collection_id: str = 'dev',
+        collection_id: str = STACDefaults.DEV_COLLECTION,
         existing_metadata: Optional[Dict[str, Any]] = None,
         item_id: Optional[str] = None,
         platform_meta: Optional['PlatformMetadata'] = None,
@@ -229,7 +230,7 @@ class StacMetadataService:
                         input_datetime=item_datetime,
                         asset_name="data",
                         asset_roles=["data"],
-                        asset_media_type="image/tiff; application=geotiff",
+                        asset_media_type=STACDefaults.MEDIA_TYPE_GEOTIFF,
                         with_proj=True,
                         with_raster=extract_statistics,
                         with_eo=False

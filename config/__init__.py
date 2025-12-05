@@ -63,6 +63,8 @@ from .defaults import (
     AnalyticsDefaults,
     H3Defaults,
     PlatformDefaults,
+    FathomDefaults,
+    STACDefaults,
     AppDefaults,
     KeyVaultDefaults,
 )
@@ -192,6 +194,8 @@ __all__ = [
     'AnalyticsDefaults',
     'H3Defaults',
     'PlatformDefaults',
+    'FathomDefaults',
+    'STACDefaults',
     'AppDefaults',
     'KeyVaultDefaults',
 

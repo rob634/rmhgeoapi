@@ -359,24 +359,22 @@ def _translate_to_coremachine(
 
         # Check if this is a raster collection (multiple files)
         if request.is_raster_collection:
-            # Multiple rasters → process_raster_collection
-            return 'process_raster_collection', {
-                # File location
+            # Multiple rasters → process_raster_collection_v2 (mixin pattern, 04 DEC 2025)
+            return 'process_raster_collection_v2', {
+                # File location (required)
                 'container_name': request.container_name,
                 'blob_list': request.file_name,  # Already a list
 
                 # Output location
                 'output_folder': output_folder,
 
-                # STAC metadata
+                # STAC metadata (MosaicJSON schema)
                 'collection_id': collection_id,
                 'stac_item_id': stac_item_id,
-                'service_name': request.service_name,
-                'description': request.description,
-                'tags': request.tags,
+                'collection_description': request.description,
                 'access_level': request.access_level,
 
-                # DDH identifiers
+                # DDH identifiers (Platform passthrough)
                 'dataset_id': request.dataset_id,
                 'resource_id': request.resource_id,
                 'version_id': request.version_id,
@@ -430,6 +428,14 @@ def _translate_to_coremachine(
 # JOB CREATION & SUBMISSION
 # ============================================================================
 
+# Size-based job fallback routing (04 DEC 2025)
+# When validator fails with size error, automatically try alternate job type
+RASTER_JOB_FALLBACKS = {
+    'process_raster_v2': 'process_large_raster_v2',
+    'process_large_raster_v2': 'process_raster_v2',
+}
+
+
 def _create_and_submit_job(
     job_type: str,
     parameters: Dict[str, Any],
@@ -440,9 +446,13 @@ def _create_and_submit_job(
 
     Uses the job class's validation method to:
     1. Validate parameters against schema
-    2. Run pre-flight resource validators (e.g., blob_exists)
+    2. Run pre-flight resource validators (e.g., blob_exists_with_size)
     3. Generate deterministic job ID
     4. Create job record and queue message
+
+    Supports automatic fallback for size-based routing (04 DEC 2025):
+    If validator fails with size-related error (too_large/too_small),
+    automatically retries with fallback job type from RASTER_JOB_FALLBACKS.
 
     Args:
         job_type: CoreMachine job type (e.g., 'process_vector', 'process_raster_v2')
@@ -459,6 +469,90 @@ def _create_and_submit_job(
     import uuid
     from jobs import ALL_JOBS
 
+    def _try_create_job(current_job_type: str, job_params: Dict[str, Any], allow_fallback: bool = True) -> str:
+        """
+        Attempt to create and submit job, with optional fallback on size validation failure.
+
+        Args:
+            current_job_type: Job type to attempt
+            job_params: Parameters including platform tracking
+            allow_fallback: Whether to try fallback job on size error (prevents infinite recursion)
+
+        Returns:
+            job_id if successful
+
+        Raises:
+            ValueError: If validation fails and no fallback available/applicable
+        """
+        job_class = ALL_JOBS.get(current_job_type)
+        if not job_class:
+            raise ValueError(f"Unknown job type: {current_job_type}")
+
+        try:
+            # Run validation (includes resource validators like blob_exists_with_size)
+            # This will raise ValueError if validation fails
+            validated_params = job_class.validate_job_parameters(job_params)
+            logger.info(f"✅ Pre-flight validation passed for {current_job_type}")
+
+            # Generate deterministic job ID
+            # Remove platform metadata for ID generation (so same CoreMachine params = same job)
+            clean_params = {k: v for k, v in validated_params.items() if not k.startswith('_')}
+            canonical = f"{current_job_type}:{json.dumps(clean_params, sort_keys=True)}"
+            job_id = hashlib.sha256(canonical.encode()).hexdigest()
+
+            # Create job record
+            job_record = JobRecord(
+                job_id=job_id,
+                job_type=current_job_type,
+                status=JobStatus.QUEUED,
+                parameters=validated_params,
+                metadata={
+                    'platform_request': platform_request_id,
+                    'created_by': 'platform_trigger'
+                }
+            )
+
+            # Store in database
+            job_repo = JobRepository()
+            job_repo.create_job(job_record)
+
+            # Submit to Service Bus
+            service_bus = ServiceBusRepository()
+            queue_message = JobQueueMessage(
+                job_id=job_id,
+                job_type=current_job_type,
+                parameters=validated_params,
+                stage=1,
+                correlation_id=str(uuid.uuid4())[:8]
+            )
+
+            message_id = service_bus.send_message(
+                config.service_bus_jobs_queue,
+                queue_message
+            )
+
+            logger.info(f"Submitted job {job_id[:16]} to queue (message_id: {message_id})")
+            return job_id
+
+        except ValueError as e:
+            error_msg = str(e).lower()
+
+            # Check if this is a size-related validation failure
+            is_size_error = any(pattern in error_msg for pattern in [
+                'too_large', 'too large', 'exceeds maximum size',
+                'too_small', 'too small', '< 100mb'
+            ])
+
+            fallback_job = RASTER_JOB_FALLBACKS.get(current_job_type)
+
+            if is_size_error and fallback_job and allow_fallback:
+                logger.info(f"📐 Size validation failed for {current_job_type}, trying fallback: {fallback_job}")
+                # Retry with fallback job type (allow_fallback=False prevents infinite loop)
+                return _try_create_job(fallback_job, job_params, allow_fallback=False)
+
+            # Re-raise if not a size error, no fallback available, or already tried fallback
+            raise
+
     try:
         # Add platform tracking to parameters
         job_params = {
@@ -466,59 +560,7 @@ def _create_and_submit_job(
             '_platform_request_id': platform_request_id
         }
 
-        # ====================================================================
-        # FIX (29 NOV 2025): Run job class validation BEFORE creating job
-        # This ensures pre-flight resource validators run (e.g., blob_exists)
-        # Previously Platform bypassed validation, allowing jobs with missing files
-        # ====================================================================
-        job_class = ALL_JOBS.get(job_type)
-        if not job_class:
-            raise ValueError(f"Unknown job type: {job_type}")
-
-        # Run validation (includes resource validators like blob_exists)
-        # This will raise ValueError if validation fails
-        validated_params = job_class.validate_job_parameters(job_params)
-        logger.info(f"✅ Pre-flight validation passed for {job_type}")
-
-        # Generate deterministic job ID
-        # Remove platform metadata for ID generation (so same CoreMachine params = same job)
-        clean_params = {k: v for k, v in validated_params.items() if not k.startswith('_')}
-        canonical = f"{job_type}:{json.dumps(clean_params, sort_keys=True)}"
-        job_id = hashlib.sha256(canonical.encode()).hexdigest()
-
-        # Create job record
-        job_record = JobRecord(
-            job_id=job_id,
-            job_type=job_type,
-            status=JobStatus.QUEUED,
-            parameters=validated_params,
-            metadata={
-                'platform_request': platform_request_id,
-                'created_by': 'platform_trigger'
-            }
-        )
-
-        # Store in database
-        job_repo = JobRepository()
-        job_repo.create_job(job_record)
-
-        # Submit to Service Bus
-        service_bus = ServiceBusRepository()
-        queue_message = JobQueueMessage(
-            job_id=job_id,
-            job_type=job_type,
-            parameters=validated_params,
-            stage=1,
-            correlation_id=str(uuid.uuid4())[:8]
-        )
-
-        message_id = service_bus.send_message(
-            config.service_bus_jobs_queue,
-            queue_message
-        )
-
-        logger.info(f"Submitted job {job_id[:16]} to queue (message_id: {message_id})")
-        return job_id
+        return _try_create_job(job_type, job_params, allow_fallback=True)
 
     except ValueError as e:
         # Re-raise validation errors - caller will handle as 400 Bad Request

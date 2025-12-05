@@ -35,7 +35,7 @@ import os
 from typing import Optional
 from pydantic import BaseModel, Field
 
-from .defaults import RasterDefaults
+from .defaults import RasterDefaults, STACDefaults
 
 
 # ============================================================================
@@ -158,7 +158,7 @@ class RasterConfig(BaseModel):
 
     # STAC configuration
     stac_default_collection: str = Field(
-        default=RasterDefaults.STAC_DEFAULT_COLLECTION,
+        default=STACDefaults.RASTER_COLLECTION,
         description="""Default STAC collection for standalone raster processing.
 
         Purpose:
@@ -202,5 +202,5 @@ class RasterConfig(BaseModel):
             strict_validation=os.environ.get("RASTER_STRICT_VALIDATION", str(RasterDefaults.STRICT_VALIDATION).lower()).lower() == "true",
             # MosaicJSON and STAC
             mosaicjson_maxzoom=int(os.environ.get("RASTER_MOSAICJSON_MAXZOOM", str(RasterDefaults.MOSAICJSON_MAXZOOM))),
-            stac_default_collection=os.environ.get("STAC_DEFAULT_COLLECTION", RasterDefaults.STAC_DEFAULT_COLLECTION)
+            stac_default_collection=os.environ.get("STAC_DEFAULT_COLLECTION", STACDefaults.RASTER_COLLECTION)
         )

@@ -30,12 +30,37 @@ curl -X POST "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.ne
 | **Admin User** | `rob634` (or Entra ID admin) |
 | **SSL Mode** | `require` |
 
+### Required Extensions (MUST be created first!)
+
+**⚠️ CRITICAL**: These extensions must be created by an `azure_pg_admin` member BEFORE running schema rebuild. The managed identity admin user cannot create extensions.
+
+| Extension | Required For | Error if Missing |
+|-----------|--------------|------------------|
+| **postgis** | All geospatial operations | `type "geometry" does not exist` |
+| **btree_gist** | pypgstac exclusion constraints | `operator class "gist_timestamptz_ops" does not exist` |
+| **unaccent** | pypgstac text search | `function unaccent() does not exist` |
+
+**Verify extensions exist**:
+```sql
+SELECT extname, extversion FROM pg_extension
+WHERE extname IN ('postgis', 'btree_gist', 'unaccent');
+```
+
+**If missing, have `azure_pg_admin` run**:
+```sql
+CREATE EXTENSION IF NOT EXISTS postgis;
+CREATE EXTENSION IF NOT EXISTS btree_gist;
+CREATE EXTENSION IF NOT EXISTS unaccent;
+```
+
 ### Required Permissions
 
 The executing user needs:
 - `CREATE` on database
 - `DROP` privilege on existing schemas
-- Superuser OR member of `azure_pg_admin` role (for `pypgstac migrate`)
+- `CREATEROLE` privilege (for pypgstac to create pgstac_admin, pgstac_ingest, pgstac_read roles)
+
+**Note**: Superuser or `azure_pg_admin` is NOT required if extensions are pre-created.
 
 ---
 

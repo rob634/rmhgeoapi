@@ -1,35 +1,16 @@
-# ============================================================================
-# CLAUDE CONTEXT - STAC COLLECTION SERVICE
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: Service - STAC collection creation and management
-# PURPOSE: Create STAC collections for raster tile sets with MosaicJSON assets
-# LAST_REVIEWED: 20 OCT 2025
-# EXPORTS: create_stac_collection
-# INTERFACES: PgSTAC collections table, pystac.Collection
-# PYDANTIC_MODELS: None (uses pystac models)
-# DEPENDENCIES: pystac, psycopg (pool), azure-storage-blob
-# SOURCE: MosaicJSON blobs, collection metadata, spatial extents
-# SCOPE: Multi-tile raster collections
-# VALIDATION: pystac built-in validation
-# PATTERNS: Service layer, PgSTAC integration
-# ENTRY_POINTS: create_stac_collection()
-# INDEX: create_stac_collection:50, _calculate_collection_extent:150
-# ============================================================================
-
 """
-STAC Collection Service
+STAC Collection Service.
 
 Creates STAC collections for multi-tile raster datasets with MosaicJSON assets.
-Similar to raster_stac.py but creates collection-level STAC items instead of
-individual raster items.
 
 Key Features:
-- Collection-level STAC items with MosaicJSON as primary asset
-- Spatial/temporal extent calculation from constituent tiles
-- PgSTAC collections table integration
-- Azure Blob Storage URL generation for assets
+    - Collection-level STAC items with MosaicJSON as primary asset
+    - Spatial/temporal extent calculation from constituent tiles
+    - PgSTAC collections table integration
+    - Azure Blob Storage URL generation for assets
 
+Exports:
+    create_stac_collection: Create STAC collection from raster tiles
 """
 
 import os

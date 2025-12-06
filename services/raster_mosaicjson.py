@@ -1,37 +1,19 @@
-# ============================================================================
-# CLAUDE CONTEXT - MOSAICJSON SERVICE
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: Service - MosaicJSON generation from COG collections
-# PURPOSE: Create virtual mosaics from multiple COG tiles for dynamic tiling
-# LAST_REVIEWED: 20 OCT 2025
-# EXPORTS: create_mosaicjson
-# INTERFACES: None (service function)
-# PYDANTIC_MODELS: None (returns dict)
-# DEPENDENCIES: cogeo-mosaic, azure-storage-blob, tempfile
-# SOURCE: COG blob URLs from Stage 2 (create_cog tasks)
-# SCOPE: Service-level utility for mosaic creation
-# VALIDATION: URL validation, bounds calculation
-# PATTERNS: Pure function, tempfile cleanup, blob upload
-# ENTRY_POINTS: Called from process_raster_collection Stage 3
-# INDEX:
-#   - create_mosaicjson: Line 45
-# ============================================================================
-
 """
-MosaicJSON Service - Create virtual mosaics from COG collections
+MosaicJSON Service - Virtual Mosaics from COG Collections.
 
 Creates MosaicJSON files that enable:
-- Client-side tile selection (no server-side processing)
-- Dynamic mosaics from multiple COGs
-- Integration with Titiler, QGIS, GDAL
+    - Client-side tile selection (no server-side processing)
+    - Dynamic mosaics from multiple COGs
+    - Integration with TiTiler, QGIS, GDAL
 
 MosaicJSON Format:
-- Standards-compliant JSON file
-- Quadkey-based spatial indexing
-- COG URL references for each tile
-- Automatic zoom level calculation
+    - Standards-compliant JSON file
+    - Quadkey-based spatial indexing
+    - COG URL references for each tile
+    - Automatic zoom level calculation
 
+Exports:
+    create_mosaicjson: Generate MosaicJSON from COG collection
 """
 
 from typing import List, Dict, Any

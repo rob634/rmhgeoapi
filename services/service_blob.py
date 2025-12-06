@@ -1,45 +1,23 @@
-# ============================================================================
-# CLAUDE CONTEXT - SERVICE
-# ============================================================================
-# EPOCH: SHARED - BOTH EPOCHS
-# STATUS: Used by Epoch 3 and Epoch 4
-# NOTE: Careful migration required
-# PURPOSE: Blob storage service implementing task handlers for container operations
-# EXPORTS: Handler factory functions - create_analyze_handler, create_extract_handler, create_summary_handler
-# INTERFACES: Task handlers receive params dict and TaskContext, return result dict
-# PYDANTIC_MODELS: BlobMetadata, ContainerSummary, OrchestrationData from schema_blob
-# DEPENDENCIES: repository_factory (BlobRepository), task_factory (TaskContext), schema_blob
-# SOURCE: Task parameters from queue messages via TaskHandlerFactory
-# SCOPE: Task-level business logic for container analysis and metadata extraction
-# VALIDATION: Parameter validation within handler functions, size limit checks
-# PATTERNS: Handler factory pattern, Explicit Registration (via function_app.py), Dynamic orchestration
-# ENTRY_POINTS: Registered in function_app.py via task_catalog.register_handler()
-# INDEX: analyze_and_orchestrate:100, extract_metadata:250, summarize_container:400
-# ============================================================================
-
 """
-Blob Storage Service - Task Handler Implementation
+Blob Storage Service - Task Handler Implementation.
 
-Service layer implementation for blob storage operations within the
-Job→Stage→Task architecture. Implements the "Analyze & Orchestrate" pattern
-for dynamic task generation based on container content.
+Service layer for blob storage operations within the Job→Stage→Task architecture.
+Implements the "Analyze & Orchestrate" pattern for dynamic task generation.
 
 Key Handlers:
-- analyze_and_orchestrate: Stage 1 orchestrator for dynamic task creation
-- extract_metadata: Stage 2 processor for individual file metadata
-- summarize_container: Single-stage container summary operation
-
-Architecture Position:
-    - Job Layer: Container controllers orchestrate stages
-    - Stage Layer: Creates parallel tasks for execution  
-    - Task Layer: THIS MODULE - Business logic execution
-    - Repository Layer: BlobRepository handles Azure Storage
+    analyze_and_orchestrate: Stage 1 orchestrator for dynamic task creation
+    extract_metadata: Stage 2 processor for individual file metadata
+    summarize_container: Single-stage container summary operation
 
 Dynamic Orchestration Pattern:
     Stage 1: Single orchestrator analyzes container
     Stage 2: N parallel tasks process individual files
     Stage 3: Optional aggregation of results
 
+Exports:
+    create_analyze_handler: Factory for analyze handler
+    create_extract_handler: Factory for extract handler
+    create_summary_handler: Factory for summary handler
 """
 
 # ============================================================================

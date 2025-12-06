@@ -1,50 +1,18 @@
-# ============================================================================
-# CLAUDE CONTEXT - ISO3 COUNTRY ATTRIBUTION SERVICE
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: Service - Geographic attribution via PostGIS spatial queries
-# PURPOSE: Extract ISO3 country codes for geometries (bbox or GeoJSON)
-# LAST_REVIEWED: 25 NOV 2025
-# EXPORTS: ISO3Attribution, ISO3AttributionService
-# INTERFACES: None (standalone service)
-# PYDANTIC_MODELS: None (uses dataclasses)
-# DEPENDENCIES: psycopg (via PostgreSQLRepository), config
-# SOURCE: PostGIS geo.system_admin0 table
-# SCOPE: Global - used by all STAC metadata generation
-# VALIDATION: Graceful degradation if admin0 table unavailable
-# PATTERNS: Repository pattern, Dataclass for results
-# ENTRY_POINTS: ISO3AttributionService.get_attribution_for_bbox()
-# INDEX:
-#   - ISO3Attribution dataclass: line 40
-#   - ISO3AttributionService: line 60
-#   - get_attribution_for_bbox(): line 85
-#   - get_attribution_for_geometry(): line 220
-# ============================================================================
 """
-ISO3 Country Attribution Service
+ISO3 Country Attribution Service.
 
 Provides geographic attribution for STAC items by querying PostGIS admin0
 boundaries to determine which countries a geometry intersects.
 
-This service is extracted from duplicated implementations in:
-- service_stac_metadata.py (raster STAC)
-- service_stac_vector.py (vector STAC)
-
-Usage:
-    from services.iso3_attribution import ISO3AttributionService, ISO3Attribution
-
-    service = ISO3AttributionService()
-    attribution = service.get_attribution_for_bbox([-70.7, -56.3, -70.6, -56.2])
-
-    if attribution.available:
-        print(f"Primary country: {attribution.primary_iso3}")
-        print(f"All countries: {attribution.iso3_codes}")
-
 Features:
-- Centroid-based primary country detection
-- Fallback to first intersecting country
-- Graceful degradation when admin0 table unavailable
-- Support for both bbox and GeoJSON geometry inputs
+    - Centroid-based primary country detection
+    - Fallback to first intersecting country
+    - Graceful degradation when admin0 table unavailable
+    - Support for both bbox and GeoJSON geometry inputs
+
+Exports:
+    ISO3Attribution: Result dataclass
+    ISO3AttributionService: Attribution query service
 """
 
 import logging

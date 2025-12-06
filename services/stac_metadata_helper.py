@@ -1,66 +1,17 @@
-# ============================================================================
-# CLAUDE CONTEXT - STAC METADATA HELPER
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: Service - Centralized STAC metadata enrichment
-# PURPOSE: Unified API for adding platform, app, geographic, and visualization
-#          metadata to STAC collections and items
-# LAST_REVIEWED: 25 NOV 2025
-# EXPORTS: STACMetadataHelper, PlatformMetadata, AppMetadata, VisualizationMetadata
-# INTERFACES: None (utility class)
-# PYDANTIC_MODELS: None (uses dataclasses for performance)
-# DEPENDENCIES: config, iso3_attribution, pgstac_search_registration
-# SOURCE: Job parameters, PostGIS queries, TiTiler config
-# SCOPE: Global - used by all STAC creation workflows
-# VALIDATION: Type-safe dataclasses with factory methods
-# PATTERNS: Facade pattern, Dataclass with factory methods, Composition
-# ENTRY_POINTS: STACMetadataHelper.augment_item(), augment_collection()
-# INDEX:
-#   - PlatformMetadata dataclass: line 55
-#   - AppMetadata dataclass: line 110
-#   - VisualizationMetadata dataclass: line 150
-#   - STACMetadataHelper class: line 200
-#   - augment_item(): line 280
-#   - augment_collection(): line 350
-# ============================================================================
 """
-STAC Metadata Helper - Centralized Metadata Enrichment
+STAC Metadata Helper - Centralized Metadata Enrichment.
 
 Consolidates scattered metadata generation into a clean, type-safe architecture:
-- Platform metadata (DDH identifiers) → platform:* properties
-- App metadata (job linkage) → app:* properties
-- Geographic metadata (ISO3 codes) → geo:* properties
-- Visualization metadata (TiTiler URLs) → links and assets
+    - Platform metadata (DDH identifiers) → platform:* properties
+    - App metadata (job linkage) → app:* properties
+    - Geographic metadata (ISO3 codes) → geo:* properties
+    - Visualization metadata (TiTiler URLs) → links and assets
 
-Usage:
-    from services.stac_metadata_helper import (
-        STACMetadataHelper, PlatformMetadata, AppMetadata
-    )
-
-    helper = STACMetadataHelper()
-
-    # Extract platform metadata from job params
-    platform = PlatformMetadata.from_job_params(params)
-
-    # Create app metadata with job linkage
-    app = AppMetadata(job_id=params.get('job_id'), job_type='process_large_raster')
-
-    # Augment STAC item with all metadata
-    item_dict = helper.augment_item(
-        item_dict=base_item,
-        bbox=base_item.get('bbox'),
-        container='silver-cogs',
-        blob_name='collection/tile.tif',
-        platform=platform,
-        app=app
-    )
-
-Benefits:
-- DRY: Eliminates duplicated ISO3 code across services
-- Type Safety: Dataclasses catch errors at construction time
-- Job Linkage: Every STAC item traces back via app:job_id
-- Platform Tracking: DDH identifiers preserved for auditing
-- Extensibility: Add new metadata types by creating new dataclasses
+Exports:
+    STACMetadataHelper: Main helper class for augmenting STAC items
+    PlatformMetadata: Platform identifier dataclass
+    AppMetadata: Job linkage dataclass
+    VisualizationMetadata: TiTiler URL dataclass
 """
 
 import logging

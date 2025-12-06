@@ -1,39 +1,17 @@
-# ============================================================================
-# CLAUDE CONTEXT - VENDOR DELIVERY DISCOVERY SERVICE
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: Service - Vendor delivery folder structure analysis
-# PURPOSE: Detect manifest files, tile patterns, and vendor delivery types
-# LAST_REVIEWED: 20 OCT 2025
-# EXPORTS: detect_manifest_files, detect_tile_pattern, analyze_delivery_structure
-# INTERFACES: None (utility functions)
-# PYDANTIC_MODELS: None (returns dicts)
-# DEPENDENCIES: re (regex), typing
-# SOURCE: Blob file lists from container analysis
-# SCOPE: Service-level utility functions
-# VALIDATION: Pattern matching with regex
-# PATTERNS: Pure functions, no I/O
-# ENTRY_POINTS: Called from analyze_delivery_structure()
-# INDEX:
-#   - detect_manifest_files: Line 30
-#   - detect_tile_pattern: Line 120
-#   - analyze_delivery_structure: Line 250
-# ============================================================================
-
 """
-Vendor Delivery Discovery Service
+Vendor Delivery Discovery Service.
 
 Analyzes vendor delivery folder structures to detect:
-- Manifest files (.MAN, .json, .xml, delivery.txt, .til)
-- Tile patterns (R{row}C{col}, X{x}_Y{y}, tile_0001)
-- Vendor delivery types (Maxar, Vivid, custom)
-- Data validation (CRS consistency, band count, dtype)
+    - Manifest files (.MAN, .json, .xml, delivery.txt, .til)
+    - Tile patterns (R{row}C{col}, X{x}_Y{y}, tile_0001)
+    - Vendor delivery types (Maxar, Vivid, custom)
 
-Design:
-- Pure Python functions (no I/O)
-- Returns structured dicts for JSON serialization
-- Built to extend ContainerAnalysisService patterns
+Pure Python functions (no I/O) returning structured dicts.
 
+Exports:
+    detect_manifest_files: Find manifest files in blob list
+    detect_tile_pattern: Analyze tile naming conventions
+    analyze_delivery_structure: Full delivery analysis
 """
 
 from typing import Dict, List, Any, Optional, Tuple

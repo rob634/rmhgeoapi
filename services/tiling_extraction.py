@@ -1,59 +1,22 @@
-# ============================================================================
-# CLAUDE CONTEXT - SERVICE - TILING EXTRACTION
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: Service - Sequential tile extraction with VSI + BytesIO (zero /tmp usage)
-# PURPOSE: Extract tiles from large rasters following tiling scheme (Stage 2)
-# LAST_REVIEWED: 27 OCT 2025
-# EXPORTS: extract_tiles() - Main handler function
-# INTERFACES: Handler pattern for task execution (Stage 2 of raster tiling)
-# PYDANTIC_MODELS: None (returns dict)
-# DEPENDENCIES: rasterio (VSI), azure-storage-blob, config
-# SOURCE: Azure Blob Storage via VSI (/vsicurl/), tiling scheme GeoJSON from Stage 1
-# SCOPE: Stage 2 of Big Raster ETL workflow (sequential extraction)
-# VALIDATION: Input validation via rasterio, bounds validation
-# PATTERNS: VSI cloud-native access, BytesIO in-memory processing, job-scoped folders
-# ENTRY_POINTS: Called by task processor with parameters dict
-# ARCHITECTURE: VSI /vsicurl/ + BytesIO eliminates /tmp disk usage (500MB limit)
-# STORAGE_PATTERN: Job-scoped folders ({job_id[:8]}/tiles/) for intermediate tiles
-# ============================================================================
-
 """
-Tiling Extraction Service - Stage 2 of Big Raster ETL
+Tiling Extraction Service - Stage 2 of Big Raster ETL.
 
-Extracts tiles from large rasters following the tiling scheme generated in Stage 1.
+Extracts tiles from large rasters following the tiling scheme from Stage 1.
 
-Critical Architectural Pattern:
-- Stage 1 creates ONE task (generate tiling scheme)
-- Stage 2 is ONE LONG-RUNNING task that extracts ALL tiles sequentially
-- Stage 3 creates N tasks (one per tile) for parallel COG conversion + reprojection
-- Stage 4 creates MosaicJSON + STAC metadata
+Architectural Pattern:
+    Stage 1: Generate tiling scheme (1 task)
+    Stage 2: Sequential tile extraction via VSI + BytesIO (1 long task)
+    Stage 3: Parallel COG conversion (N tasks)
+    Stage 4: MosaicJSON + STAC metadata
 
-Why Sequential Extraction?:
-1. **Azure Functions Constraint**: 10-minute timeout
-2. **Sequential Reads**: Sequential disk I/O is MUCH faster than random access
-3. **Progress Reporting**: Single task can update metadata with progress
-4. **Simplicity**: No coordination needed between tasks
+VSI Architecture:
+    - Zero /tmp disk usage: Reads via /vsicurl/ from Azure Blob
+    - In-memory processing: BytesIO for tile buffers
+    - Eliminates 500MB /tmp limit constraint
+    - Job-scoped folders for intermediate tiles
 
-VSI Architecture (NEW - 25 OCT 2025):
-- **ZERO /tmp disk usage**: Reads directly from Azure Blob via /vsicurl/
-- **In-memory processing**: BytesIO for tile buffers (no disk writes)
-- **Eliminates 500MB /tmp limit**: Can process unlimited-size rasters
-- **Faster**: No download time, no disk I/O overhead
-
-Example:
-    A 11 GB raster (job ID: 598fc149...) with 204 tiles:
-    - Stage 1: Generate tiling scheme via VSI (1 task, ~0MB /tmp)
-    - Stage 2: Extract 204 tiles via VSI + BytesIO (~3 minutes, ~0MB /tmp)
-      Writes to: 598fc149/tiles/17apr2024wv2_tile_0_0.tif (job-scoped folder)
-    - Stage 3: Convert 204 tiles to COG in parallel (204 tasks)
-      Reads from: 598fc149/tiles/ (temporary intermediate storage)
-      Writes to: cogs/17apr2024wv2/ (permanent COG storage)
-    - Stage 4: Generate MosaicJSON + STAC (1 task)
-
-Cleanup: Intermediate tiles (598fc149/tiles/) cleaned by SEPARATE timer trigger
-         (NOT part of ETL workflow stages)
-
+Exports:
+    extract_tiles: Main handler function
 """
 
 import json

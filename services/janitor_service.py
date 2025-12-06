@@ -1,31 +1,16 @@
-# ============================================================================
-# CLAUDE CONTEXT - JANITOR SERVICE
-# ============================================================================
-# EPOCH: 4 - ACTIVE
-# STATUS: Service - Janitor maintenance business logic
-# PURPOSE: Business logic for janitor maintenance operations
-# LAST_REVIEWED: 21 NOV 2025
-# EXPORTS: JanitorService
-# INTERFACES: Uses JanitorRepository for database access
-# PYDANTIC_MODELS: JanitorRunResult (dataclass)
-# DEPENDENCIES: infrastructure.janitor_repository, util_logger, datetime
-# SOURCE: Timer triggers call this service
-# SCOPE: Maintenance operations for detecting and fixing stale/failed records
-# VALIDATION: Business rule validation
-# PATTERNS: Service pattern, Strategy pattern (different detection strategies)
-# ENTRY_POINTS: from services.janitor_service import JanitorService
-# ============================================================================
-
 """
-Janitor Service - Maintenance Business Logic
+Janitor Service - Maintenance Business Logic.
 
 Coordinates janitor operations between timer triggers and the repository:
+    Task Watchdog: Detect and fix stale PROCESSING tasks
+    Job Health Monitor: Detect jobs with failed tasks, capture partial results
+    Orphan Detector: Find and handle orphaned tasks and zombie jobs
 
-1. Task Watchdog: Detect and fix stale PROCESSING tasks
-2. Job Health Monitor: Detect jobs with failed tasks, capture partial results
-3. Orphan Detector: Find and handle orphaned tasks and zombie jobs
+This service runs via standalone timer triggers (not CoreMachine).
 
-This service does NOT use CoreMachine - it runs via standalone timer triggers.
+Exports:
+    JanitorService: Maintenance operations coordinator
+    JanitorConfig: Configuration dataclass
 """
 
 from typing import List, Dict, Any, Optional, Tuple

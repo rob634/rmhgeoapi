@@ -173,13 +173,14 @@ def _verify_cell_counts(
         grid_id = f"{grid_id_prefix}_res{resolution}"
 
         # Query actual cell count from h3.grids
+        # NOTE: H3Repository uses dict_row - access by column alias
         with h3_repo._get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    "SELECT COUNT(*) FROM h3.grids WHERE grid_id = %s",
+                    "SELECT COUNT(*) as count FROM h3.grids WHERE grid_id = %s",
                     (grid_id,)
                 )
-                actual_count = cur.fetchone()[0]
+                actual_count = cur.fetchone()['count']
 
         # Get expected count (with tolerance)
         expected_count = expected_cells.get(resolution, 0)

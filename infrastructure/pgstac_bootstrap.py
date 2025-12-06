@@ -1285,7 +1285,8 @@ ORDER BY r.rolname;""")
                         )
 
                     rows = cur.fetchall()
-                    item_ids = {row[0] for row in rows}
+                    # NOTE: PostgreSQLRepository uses dict_row - access by column name
+                    item_ids = {row['id'] for row in rows}
 
                     logger.debug(
                         f"Found {len(item_ids)} existing items in '{collection_id}'"
@@ -1333,7 +1334,8 @@ ORDER BY r.rolname;""")
                         (collection_id, bbox[0], bbox[1], bbox[2], bbox[3], limit)
                     )
                     rows = cur.fetchall()
-                    items = [row[0] for row in rows]
+                    # NOTE: PostgreSQLRepository uses dict_row - access by column name
+                    items = [row['content'] for row in rows]
 
                     logger.info(f"Retrieved {len(items)} items from '{collection_id}' within bbox {bbox}")
                     return items

@@ -294,9 +294,9 @@ def extract_stac_metadata(params: dict) -> dict[str, Any]:
 
             # Write JSON to blob storage
             blob_repo = BlobRepository.instance()
-            blob_repo.upload_blob(
-                container_name=container_name,
-                blob_name=json_blob_name,
+            blob_repo.write_blob(
+                container=container_name,
+                blob_path=json_blob_name,
                 data=json_content.encode('utf-8'),
                 content_type='application/json',
                 overwrite=True
@@ -306,10 +306,9 @@ def extract_stac_metadata(params: dict) -> dict[str, Any]:
             logger.info(f"✅ STEP 3.5: STAC JSON written: {container_name}/{json_blob_name}")
 
         except Exception as e:
-            # JSON write failure is non-fatal - log warning and continue
-            logger.warning(f"⚠️ STEP 3.5: Failed to write JSON fallback (non-fatal): {e}")
-            json_blob_name = None
-            json_blob_url = None
+            # JSON write failure IS a real error - don't swallow it
+            logger.error(f"❌ STEP 3.5 FAILED: Failed to write JSON fallback: {e}\n{traceback.format_exc()}")
+            raise
 
         # =====================================================================
         # STEPS 4, 4.5, 5: pgSTAC operations (conditional on availability)

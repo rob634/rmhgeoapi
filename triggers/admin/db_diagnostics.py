@@ -338,11 +338,13 @@ class AdminDbDiagnosticsTrigger:
                         })
 
                     # Check current search_path
+                    # NOTE: SHOW returns a dict with 'search_path' key due to dict_row
                     cursor.execute("SHOW search_path")
                     search_path_row = cursor.fetchone()
-                    diagnostics["current_search_path"] = search_path_row[0] if search_path_row else "unknown"
+                    diagnostics["current_search_path"] = search_path_row['search_path'] if search_path_row else "unknown"
 
                     # Check if app schema exists
+                    # NOTE: Access by column alias due to dict_row
                     cursor.execute("""
                         SELECT EXISTS (
                             SELECT 1 FROM information_schema.schemata
@@ -350,7 +352,7 @@ class AdminDbDiagnosticsTrigger:
                         ) as app_schema_exists
                     """, (self.config.app_schema,))
                     schema_row = cursor.fetchone()
-                    diagnostics["app_schema_exists"] = schema_row[0] if schema_row else False
+                    diagnostics["app_schema_exists"] = schema_row['app_schema_exists'] if schema_row else False
 
                     # Check current user privileges
                     cursor.execute(f"""

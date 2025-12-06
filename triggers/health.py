@@ -207,6 +207,14 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
             if system_tables_health["status"] == "error":
                 health_data["errors"].append("System reference tables unavailable (ISO3 country attribution disabled)")
 
+            # Check geo.table_metadata registry (06 DEC 2025)
+            # This is the source of truth for vector table metadata
+            table_metadata_health = self._check_table_metadata_registry()
+            health_data["components"]["table_metadata_registry"] = table_metadata_health
+            # Note: table_metadata is important but not critical - don't fail overall health
+            if table_metadata_health["status"] == "error":
+                health_data["errors"].append("geo.table_metadata unavailable (OGC collection properties will be limited)")
+
         return health_data
     
     def handle_request(self, req: func.HttpRequest) -> func.HttpResponse:
@@ -1538,6 +1546,129 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
             }
 
         return self.check_component_health("deployment_config", check_deployment)
+
+
+    def _check_table_metadata_registry(self) -> Dict[str, Any]:
+        """
+        Check geo.table_metadata registry table status (06 DEC 2025).
+
+        The geo.table_metadata table is the SOURCE OF TRUTH for vector table metadata.
+        It stores ETL traceability (job IDs, source files), STAC linkage, and cached
+        bounding boxes for OGC Features API performance optimization.
+
+        Created during schema rebuild (Step 5b in db_maintenance.py).
+        Populated during process_vector Stage 1.
+        STAC backlinks added during process_vector Stage 3.
+
+        Returns:
+            Dict with table_metadata registry health status including:
+            - exists: Whether geo.table_metadata table exists
+            - row_count: Number of registered tables
+            - sample_entries: Last 5 registered tables (for verification)
+            - columns: Required column availability check
+            - ready: Boolean indicating registry is ready for use
+        """
+        def check_table_metadata():
+            from infrastructure.postgresql import PostgreSQLRepository
+            from config import get_config
+
+            config = get_config()
+            repo = PostgreSQLRepository(schema_name='geo')
+
+            try:
+                with repo._get_connection() as conn:
+                    with conn.cursor() as cur:
+                        # Check if table exists
+                        cur.execute("""
+                            SELECT EXISTS (
+                                SELECT FROM information_schema.tables
+                                WHERE table_schema = 'geo'
+                                AND table_name = 'table_metadata'
+                            ) as table_exists
+                        """)
+                        table_exists = cur.fetchone()['table_exists']
+
+                        if not table_exists:
+                            return {
+                                "exists": False,
+                                "error": "geo.table_metadata table not found",
+                                "impact": "OGC collection properties will not include ETL traceability or cached bbox",
+                                "fix": "Run full-rebuild: POST /api/dbadmin/maintenance/full-rebuild?confirm=yes"
+                            }
+
+                        # Check required columns
+                        cur.execute("""
+                            SELECT column_name
+                            FROM information_schema.columns
+                            WHERE table_schema = 'geo' AND table_name = 'table_metadata'
+                        """)
+                        columns = [row['column_name'] for row in cur.fetchall()]
+
+                        required_columns = ['table_name', 'etl_job_id', 'source_file', 'source_format',
+                                          'source_crs', 'feature_count', 'bbox_minx', 'bbox_miny',
+                                          'bbox_maxx', 'bbox_maxy', 'stac_item_id', 'stac_collection_id']
+
+                        missing_columns = [col for col in required_columns if col not in columns]
+
+                        # Get row count
+                        cur.execute("SELECT COUNT(*) as count FROM geo.table_metadata")
+                        row_count = cur.fetchone()['count']
+
+                        # Get sample entries (last 5 registered)
+                        sample_entries = []
+                        try:
+                            cur.execute("""
+                                SELECT table_name, source_file, feature_count, created_at
+                                FROM geo.table_metadata
+                                ORDER BY created_at DESC
+                                LIMIT 5
+                            """)
+                            for row in cur.fetchall():
+                                sample_entries.append({
+                                    "table_name": row['table_name'],
+                                    "source_file": row['source_file'],
+                                    "feature_count": row['feature_count'],
+                                    "created_at": row['created_at'].isoformat() if row['created_at'] else None
+                                })
+                        except Exception:
+                            sample_entries = "error fetching samples"
+
+                        # Build result
+                        ready = len(missing_columns) == 0
+
+                        result = {
+                            "exists": True,
+                            "row_count": row_count,
+                            "sample_entries": sample_entries,
+                            "columns": {
+                                "total": len(columns),
+                                "required_present": len(required_columns) - len(missing_columns),
+                                "missing": missing_columns if missing_columns else None
+                            },
+                            "ready": ready
+                        }
+
+                        if missing_columns:
+                            result["warnings"] = [f"Missing columns: {', '.join(missing_columns)}"]
+                            result["impact"] = "Some metadata fields may not be available in OGC collections"
+                            result["fix"] = "Run full-rebuild to recreate table with all columns"
+
+                        if row_count == 0:
+                            result["note"] = "Registry is empty - will be populated when process_vector jobs run"
+
+                        return result
+
+            except Exception as e:
+                import traceback
+                return {
+                    "exists": False,
+                    "error": str(e)[:200],
+                    "error_type": type(e).__name__,
+                    "traceback": traceback.format_exc()[:500],
+                    "impact": "Table metadata registry check failed"
+                }
+
+        return self.check_component_health("table_metadata_registry", check_table_metadata)
 
 
 # Create singleton instance for use in function_app.py

@@ -256,9 +256,10 @@ class OGCFeaturesRepository:
                             SELECT 1 FROM information_schema.tables
                             WHERE table_schema = 'geo'
                             AND table_name = 'table_metadata'
-                        )
+                        ) as table_exists
                     """)
-                    table_exists = cur.fetchone()[0]
+                    result = cur.fetchone()
+                    table_exists = result['table_exists'] if result else False
 
                     if not table_exists:
                         logger.debug(f"geo.table_metadata table does not exist - returning None for {collection_id}")
@@ -291,30 +292,31 @@ class OGCFeaturesRepository:
                         logger.debug(f"No metadata found in geo.table_metadata for {collection_id}")
                         return None
 
-                    # Build result dict
-                    # Row is a tuple: (etl_job_id, source_file, source_format, source_crs,
-                    #                  stac_item_id, stac_collection_id, feature_count,
-                    #                  geometry_type, created_at, updated_at,
-                    #                  bbox_minx, bbox_miny, bbox_maxx, bbox_maxy)
+                    # Build result dict (row is a dict due to dict_row factory)
                     result = {
-                        "etl_job_id": row[0],
-                        "source_file": row[1],
-                        "source_format": row[2],
-                        "source_crs": row[3],
-                        "stac_item_id": row[4],
-                        "stac_collection_id": row[5],
-                        "feature_count": row[6],
-                        "geometry_type": row[7],
-                        "created_at": row[8].isoformat() if row[8] else None,
-                        "updated_at": row[9].isoformat() if row[9] else None,
+                        "etl_job_id": row.get('etl_job_id'),
+                        "source_file": row.get('source_file'),
+                        "source_format": row.get('source_format'),
+                        "source_crs": row.get('source_crs'),
+                        "stac_item_id": row.get('stac_item_id'),
+                        "stac_collection_id": row.get('stac_collection_id'),
+                        "feature_count": row.get('feature_count'),
+                        "geometry_type": row.get('geometry_type'),
+                        "created_at": row['created_at'].isoformat() if row.get('created_at') else None,
+                        "updated_at": row['updated_at'].isoformat() if row.get('updated_at') else None,
                         "cached_bbox": None
                     }
 
                     # Build cached_bbox if all coordinates present
-                    if row[10] is not None and row[11] is not None and row[12] is not None and row[13] is not None:
-                        result["cached_bbox"] = [row[10], row[11], row[12], row[13]]
+                    bbox_minx = row.get('bbox_minx')
+                    bbox_miny = row.get('bbox_miny')
+                    bbox_maxx = row.get('bbox_maxx')
+                    bbox_maxy = row.get('bbox_maxy')
+                    if bbox_minx is not None and bbox_miny is not None and bbox_maxx is not None and bbox_maxy is not None:
+                        result["cached_bbox"] = [bbox_minx, bbox_miny, bbox_maxx, bbox_maxy]
 
-                    logger.debug(f"Retrieved table metadata for {collection_id}: job={row[0][:8] if row[0] else 'N/A'}...")
+                    etl_job_id = row.get('etl_job_id')
+                    logger.debug(f"Retrieved table metadata for {collection_id}: job={etl_job_id[:8] if etl_job_id else 'N/A'}...")
                     return result
 
         except psycopg.Error as e:

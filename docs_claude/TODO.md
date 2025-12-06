@@ -181,6 +181,292 @@ with psycopg.connect(conn_str) as conn:
 
 ## 📋 BACKLOG
 
+### 8. Unpublish Workflows - Surgical Data Removal (05 DEC 2025)
+
+**Status**: 📋 **PLANNING COMPLETE** - Ready for Implementation
+**Priority**: 🟡 MEDIUM - Future Enhancement
+**Purpose**: Reverse raster/vector processing - remove STAC items and referenced data surgically
+**Designed By**: Robert and Geospatial Claude Legion
+
+#### Overview
+
+Create `unpublish_raster` and `unpublish_vector` jobs that:
+- Remove STAC items from pgstac catalog
+- Delete associated blobs (COGs, MosaicJSON, tiles) from Silver storage
+- Optionally drop PostGIS tables (vectors)
+- Track deletions in audit table for idempotency management
+- **Never** delete Bronze source files (separate archive process)
+- Protect system collections (`system-rasters`, `system-vectors`, `system-h3-grids`)
+
+#### Key Design Decisions
+
+| Decision | Choice | Rationale |
+|----------|--------|-----------|
+| Pattern | JobBaseMixin | 77% less boilerplate, declarative validation |
+| Default behavior | `dry_run: True` | Safety-first for destructive operations |
+| Collection cleanup | Delete empty (except system-*) | `STACDefaults.SYSTEM_COLLECTIONS` protected |
+| Bronze files | Never delete | Separate archive process handles these |
+| Batch unpublish | Future enhancement | Design handlers to accept lists now |
+| Audit table | `app.unpublished_jobs` | Track deletions + fix job idempotency |
+
+#### Data Artifacts by Workflow
+
+| Workflow | Storage Artifacts | Database Artifacts |
+|----------|-------------------|-------------------|
+| `process_raster_v2` | `silver-cogs/{name}_cog.tif` | STAC item in `pgstac.items` |
+| `process_large_raster_v2` | `silver-cogs/tile_*.tif` + `silver-mosaicjson/{id}_mosaic.json` | STAC item |
+| `process_raster_collection_v2` | `silver-cogs/tile_*.tif` + `silver-mosaicjson/{id}_mosaic.json` | STAC item |
+| `stac_catalog_container` | (none - just catalogs existing COGs) | STAC items |
+| `process_vector` | (none - data in PostGIS) | PostGIS table `geo.{table}` + STAC item |
+
+#### Files to Create
+
+**1. `infrastructure/validators.py` - Add new validators:**
+```python
+@register_validator("stac_item_exists")
+def validate_stac_item_exists(params, config) -> ValidatorResult:
+    """Validates STAC item exists before unpublish."""
+    # Query pgstac.items WHERE id = item_id AND collection = collection_id
+    # Store item metadata in params['_stac_item'] for downstream use
+
+@register_validator("stac_collection_exists")
+def validate_stac_collection_exists(params, config) -> ValidatorResult:
+    """Validates collection exists."""
+    # Query pgstac.collections WHERE id = collection_id
+```
+
+**2. `core/models/unpublished.py` (~50 lines):**
+```python
+class UnpublishedJob(BaseModel):
+    """Audit record for unpublished jobs."""
+    id: str                          # UUID
+    original_job_id: str             # Job that created the deleted item
+    original_job_type: str           # e.g., "process_raster_v2"
+    original_parameters: Dict        # Preserved for audit
+    unpublish_job_id: str            # The unpublish job that deleted it
+    stac_item_id: str                # Deleted STAC item
+    collection_id: str               # Collection item was in
+    artifacts_deleted: Dict          # {"blobs": [...], "table": "...", "stac_item": "..."}
+    collection_deleted: bool         # Whether empty collection was removed
+    unpublished_at: datetime
+```
+
+**3. `jobs/unpublish_raster.py` (~120 lines):**
+```python
+class UnpublishRasterJob(JobBaseMixin, JobBase):
+    job_type = "unpublish_raster"
+    description = "Remove raster STAC item and associated COG/MosaicJSON blobs"
+
+    stages = [
+        {"number": 1, "name": "inventory", "task_type": "inventory_raster_item", "parallelism": "single"},
+        {"number": 2, "name": "delete_blobs", "task_type": "delete_blob", "parallelism": "fan_out"},
+        {"number": 3, "name": "cleanup", "task_type": "delete_stac_and_audit", "parallelism": "single"}
+    ]
+
+    parameters_schema = {
+        'stac_item_id': {'type': 'str', 'required': True},
+        'collection_id': {'type': 'str', 'required': True},
+        'dry_run': {'type': 'bool', 'default': True},  # Safety default!
+    }
+
+    resource_validators = [
+        {'type': 'stac_item_exists', 'item_param': 'stac_item_id', 'collection_param': 'collection_id',
+         'error': 'STAC item not found in collection'}
+    ]
+```
+
+**4. `jobs/unpublish_vector.py` (~100 lines):**
+```python
+class UnpublishVectorJob(JobBaseMixin, JobBase):
+    job_type = "unpublish_vector"
+    description = "Remove vector STAC item and optionally drop PostGIS table"
+
+    stages = [
+        {"number": 1, "name": "inventory", "task_type": "inventory_vector_item", "parallelism": "single"},
+        {"number": 2, "name": "drop_table", "task_type": "drop_postgis_table", "parallelism": "single"},
+        {"number": 3, "name": "cleanup", "task_type": "delete_stac_and_audit", "parallelism": "single"}
+    ]
+
+    parameters_schema = {
+        'stac_item_id': {'type': 'str', 'required': True},
+        'collection_id': {'type': 'str', 'required': True},
+        'drop_table': {'type': 'bool', 'default': True},
+        'dry_run': {'type': 'bool', 'default': True},  # Safety default!
+    }
+
+    resource_validators = [
+        {'type': 'stac_item_exists', 'item_param': 'stac_item_id', 'collection_param': 'collection_id',
+         'error': 'STAC item not found in collection'}
+    ]
+```
+
+**5. `services/unpublish_handlers.py` (~300 lines):**
+```python
+def inventory_raster_item(params: dict) -> dict:
+    """Query STAC item, extract asset hrefs, find original job.
+
+    Uses get_item_by_id() from infrastructure/pgstac_bootstrap.py (lines 1867-1939)
+    Extracts: COG blobs, MosaicJSON, tile COGs from item['assets']
+    Finds original job via item['properties']['app:job_id']
+    """
+
+def inventory_vector_item(params: dict) -> dict:
+    """Query STAC item, extract PostGIS table reference.
+
+    Parses asset href like "postgis://geo.table_name"
+    """
+
+def delete_blob(params: dict) -> dict:
+    """Delete single blob from Azure Storage (idempotent).
+
+    Uses BlobRepository.delete_blob()
+    Returns success even if blob already deleted
+    """
+
+def drop_postgis_table(params: dict) -> dict:
+    """Drop PostGIS table (idempotent).
+
+    DROP TABLE IF EXISTS geo.{table_name} CASCADE
+    Respects dry_run parameter
+    """
+
+def delete_stac_and_audit(params: dict) -> dict:
+    """Delete STAC item, cleanup empty collection, record audit.
+
+    1. DELETE FROM pgstac.items WHERE id = ? AND collection = ?
+    2. Check if collection empty: COUNT(*) FROM pgstac.items WHERE collection = ?
+    3. If empty AND NOT IN STACDefaults.SYSTEM_COLLECTIONS: DELETE FROM pgstac.collections
+    4. Record to app.unpublished_jobs audit table
+    5. Mark original job as unpublished (for idempotency fix)
+    """
+```
+
+#### Files to Modify
+
+1. **`infrastructure/validators.py`** - Add `stac_item_exists` and `stac_collection_exists` validators
+2. **`core/models/__init__.py`** - Export `UnpublishedJob`
+3. **`core/schema/sql_generator.py`** - Import `UnpublishedJob`, add to schema generation
+4. **`jobs/__init__.py`** - Register `UnpublishRasterJob`, `UnpublishVectorJob` in `ALL_JOBS`
+5. **`services/__init__.py`** - Register handlers in `ALL_HANDLERS`
+
+#### Workflow Diagrams
+
+**Unpublish Raster Flow:**
+```
+Stage 1: Inventory (single task)
+├── Query STAC item by ID (get_item_by_id from pgstac_bootstrap.py:1867)
+├── Extract asset hrefs (COGs, MosaicJSON, tiles)
+├── Find original job via item['properties']['app:job_id']
+└── Return blob list for Stage 2 fan-out
+
+Stage 2: Delete Blobs (fan-out, one task per blob)
+├── Task per blob: delete from silver-cogs/
+├── Delete MosaicJSON from silver-mosaicjson/
+└── Delete tile COGs if present (large raster/collection workflows)
+
+Stage 3: Cleanup (single task)
+├── DELETE FROM pgstac.items WHERE id = ? AND collection = ?
+├── Check if collection empty
+├── Delete collection if empty AND NOT in SYSTEM_COLLECTIONS
+└── Record to app.unpublished_jobs audit table
+```
+
+**Unpublish Vector Flow:**
+```
+Stage 1: Inventory (single task)
+├── Query STAC item by ID
+├── Parse "postgis://geo.table_name" from asset href
+└── Find original job via item['properties']['app:job_id']
+
+Stage 2: Drop Table (single task, if drop_table=True)
+└── DROP TABLE IF EXISTS geo.{table_name} CASCADE
+
+Stage 3: Cleanup (single task)
+├── DELETE FROM pgstac.items WHERE id = ? AND collection = ?
+├── Check if collection empty
+├── Delete collection if empty AND NOT in SYSTEM_COLLECTIONS
+└── Record to app.unpublished_jobs audit table
+```
+
+#### Protected Collections (config/defaults.py line 365)
+
+```python
+STACDefaults.SYSTEM_COLLECTIONS = ["system-vectors", "system-rasters", "system-h3-grids"]
+```
+These collections are NEVER deleted even when empty.
+
+#### Critical File References
+
+| File | Purpose | Key Lines |
+|------|---------|-----------|
+| `jobs/mixins.py` | JobBaseMixin pattern | 1-670 |
+| `infrastructure/validators.py` | Resource validators registry | All |
+| `infrastructure/pgstac_bootstrap.py` | STAC query/delete functions | 1485-1600, 1867-1939 |
+| `config/defaults.py` | STACDefaults.SYSTEM_COLLECTIONS | 365 |
+| `core/schema/sql_generator.py` | Database schema generation | All |
+| `services/stac_metadata_helper.py` | AppMetadata with job_id linkage | 163-197 |
+
+#### Job-to-STAC Item Linkage
+
+STAC items track which job created them via `app:` prefixed properties:
+```python
+item['properties']['app:job_id']   # Original job ID that created item
+item['properties']['app:job_type'] # e.g., "process_raster_v2"
+```
+This allows unpublish to find and mark the original job as unpublished.
+
+#### Implementation Order
+
+1. Add validators to `infrastructure/validators.py`
+2. Create `core/models/unpublished.py` audit model
+3. Update `core/schema/sql_generator.py` for `app.unpublished_jobs` table
+4. Create `services/unpublish_handlers.py` with 5 handlers
+5. Create `jobs/unpublish_raster.py`
+6. Create `jobs/unpublish_vector.py`
+7. Register in `jobs/__init__.py` and `services/__init__.py`
+8. Deploy and rebuild schema (`/api/dbadmin/maintenance/full-rebuild?confirm=yes`)
+9. Test with `dry_run=true` first
+
+#### Testing Commands
+
+```bash
+# 1. Dry-run unpublish raster (preview only - SAFE)
+curl -X POST .../api/jobs/submit/unpublish_raster \
+  -H "Content-Type: application/json" \
+  -d '{"stac_item_id": "my-cog-item", "collection_id": "cogs", "dry_run": true}'
+
+# 2. Actually unpublish raster (dry_run=false)
+curl -X POST .../api/jobs/submit/unpublish_raster \
+  -H "Content-Type: application/json" \
+  -d '{"stac_item_id": "my-cog-item", "collection_id": "cogs", "dry_run": false}'
+
+# 3. Unpublish vector but keep PostGIS table
+curl -X POST .../api/jobs/submit/unpublish_vector \
+  -H "Content-Type: application/json" \
+  -d '{"stac_item_id": "countries", "collection_id": "vectors", "drop_table": false, "dry_run": false}'
+
+# 4. Unpublish vector AND drop table
+curl -X POST .../api/jobs/submit/unpublish_vector \
+  -H "Content-Type: application/json" \
+  -d '{"stac_item_id": "countries", "collection_id": "vectors", "drop_table": true, "dry_run": false}'
+```
+
+#### Future Enhancement: Batch Unpublish
+
+Design already supports future batch operations:
+```python
+# Future parameters_schema addition:
+'item_ids': {'type': 'list', 'required': False},  # Alternative to single stac_item_id
+
+# Handlers designed to work with lists
+def inventory_raster_item(params):
+    item_id = params.get('stac_item_id')
+    # OR batch mode:
+    item_ids = params.get('item_ids', [item_id] if item_id else [])
+```
+
+---
+
 ### Multispectral Band Combination URLs in STAC
 
 **Status**: 🎨 **LOW PRIORITY**

@@ -1,23 +1,7 @@
-# ============================================================================
-# CLAUDE CONTEXT - SERVICE - RASTER VALIDATION
-# ============================================================================
-# PURPOSE: Validate raster files for COG pipeline processing
-# EXPORTS: validate_raster() handler function
-# INTERFACES: Handler pattern for task execution
-# PYDANTIC_MODELS: None (returns dict)
-# DEPENDENCIES: rasterio, numpy, config, core.models.enums
-# SOURCE: Bronze container raster files via Azure Blob Storage
-# SCOPE: Stage 1 of raster processing pipeline
-# VALIDATION: CRS, bit-depth, bounds, raster type detection
-# PATTERNS: Handler pattern, validation chain
-# ENTRY_POINTS: Called by task processor with parameters dict
-# ============================================================================
-
 """
-Raster Validation Service - Stage 1 of Raster Pipeline
+Raster Validation Service - Stage 1 of Raster Pipeline.
 
-Validates raster files before expensive COG processing and determines applicable
-COG output tiers based on raster characteristics.
+Validates raster files before COG processing and determines applicable output tiers.
 
 Validation Steps:
     1. File readability check
@@ -25,81 +9,17 @@ Validation Steps:
     3. Bit-depth efficiency analysis (flag 64-bit data as CRITICAL)
     4. Raster type detection (RGB, RGBA, DEM, categorical, multispectral)
     5. Type mismatch validation (user-specified vs detected)
-    6. Bounds sanity checks (catch obviously wrong coordinates)
+    6. Bounds sanity checks
     7. Optimal COG settings recommendation
-    8. COG tier compatibility detection (NEW 19 OCT 2025)
+    8. COG tier compatibility detection
 
-COG Tier Detection (Step 8b):
-    Automatically determines which output tiers are compatible with raster:
-    - VISUALIZATION (JPEG): RGB only (3 bands, uint8)
-    - ANALYSIS (DEFLATE): Universal (all raster types)
-    - ARCHIVE (LZW): Universal (all raster types)
+COG Tier Detection:
+    VISUALIZATION (JPEG): RGB only (3 bands, uint8)
+    ANALYSIS (DEFLATE): Universal (all raster types)
+    ARCHIVE (LZW): Universal (all raster types)
 
-    Examples:
-        RGB aerial photo (3 bands, uint8) → all 3 tiers
-        DEM elevation (1 band, float32) → analysis + archive only
-        Landsat (8 bands, uint16) → analysis + archive only
-
-    Result includes 'cog_tiers' field:
-        {
-            "applicable_tiers": ["analysis", "archive"],
-            "total_compatible": 2,
-            "incompatible_reason": "JPEG requires RGB (3 bands, uint8)"
-        }
-
-Validation Philosophy: Garbage In = Error Out
-    - Data owners are responsible for clean data
-    - 64-bit data types flagged as organizational policy violation
-    - Detailed error messages force data owners to fix problems
-    - _skip_validation override for controlled testing only
-
-Validation Result Structure:
-    {
-        "success": True/False,
-        "result": {
-            "valid": True,
-            "source_blob": "sample.tif",
-            "band_count": 3,
-            "dtype": "uint8",
-            "data_type": "uint8",  # Alias for tier detection
-
-            "source_crs": "EPSG:4326",
-            "crs_source": "file_metadata",
-            "bounds": [-180, -90, 180, 90],
-            "shape": [1000, 1000],
-
-            "raster_type": {
-                "detected_type": "rgb",
-                "confidence": "HIGH",
-                "evidence": ["3 bands, uint8 (standard RGB)"],
-                "band_count": 3,
-                "data_type": "uint8",
-                "optimal_cog_settings": {
-                    "compression": "jpeg",
-                    "jpeg_quality": 85,
-                    "overview_resampling": "cubic"
-                }
-            },
-
-            "cog_tiers": {
-                "applicable_tiers": ["visualization", "analysis", "archive"],
-                "total_compatible": 3,
-                "incompatible_reason": null
-            },
-
-            "bit_depth_check": {
-                "efficient": true,
-                "current_dtype": "uint8"
-            },
-
-            "warnings": []
-        }
-    }
-
-See Also:
-    - config.py → determine_applicable_tiers(): Tier detection logic
-    - services/raster_cog.py: Uses tier metadata in Stage 2
-    - docs_claude/TIER_DETECTION_GUIDE.md: Complete tier detection guide
+Exports:
+    validate_raster: Validation handler function
 """
 
 import sys

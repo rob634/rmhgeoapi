@@ -1,43 +1,21 @@
-# ============================================================================
-# CLAUDE CONTEXT - PROCESS RASTER V2 (MIXIN PATTERN)
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: New job - Clean slate JobBaseMixin implementation (28 NOV 2025)
-# PURPOSE: Small file raster processing (<= 1GB) - COG creation with STAC metadata
-# LAST_REVIEWED: 28 NOV 2025
-# EXPORTS: ProcessRasterV2Job
-# INTERFACES: JobBase, JobBaseMixin
-# PYDANTIC_MODELS: None (uses declarative parameters_schema)
-# DEPENDENCIES: jobs.base, jobs.mixins, config, infrastructure.blob
-# SOURCE: User job submission via /api/jobs/submit/process_raster_v2
-# SCOPE: Raster ETL pipeline
-# VALIDATION: JobBaseMixin declarative schema + resource validators
-# PATTERNS: Mixin pattern (77% less boilerplate), Resource validators
-# ENTRY_POINTS: from jobs import ALL_JOBS; ALL_JOBS["process_raster_v2"]
-# INDEX: ProcessRasterV2Job:40, create_tasks_for_stage:105, finalize_job:183
-# ============================================================================
-
 """
-Process Raster V2 - Clean Slate JobBaseMixin Implementation
+Process Raster V2 - Raster to COG Pipeline.
 
-Uses JobBaseMixin pattern for 77% less boilerplate code:
-- validate_job_parameters: Declarative via parameters_schema
-- generate_job_id: Automatic SHA256 from params
-- create_job_record: Automatic via mixin
-- queue_job: Automatic via mixin
+Small file raster processing (<= 1GB) using JobBaseMixin pattern.
 
 Three-stage workflow:
-1. Validate: CRS detection, bit-depth, raster type classification
-2. Create COG: Reproject + COG in single operation
-3. Create STAC: Generate STAC metadata and insert to pgstac
+    Stage 1: Validate - CRS detection, bit-depth, raster type classification
+    Stage 2: Create COG - Reproject + COG in single operation
+    Stage 3: Create STAC - Generate STAC metadata and insert to pgstac
 
-Key improvements over process_raster.py:
-- Clean slate parameters (no deprecated fields)
-- Config integration for defaults (env vars → fallback defaults)
-- Pre-flight resource validation (blob_exists)
-- 200 lines vs 743 lines (73% reduction)
+Features:
+    - Declarative parameter validation via parameters_schema
+    - Pre-flight resource validation (blob exists, size check)
+    - Config integration for defaults (env vars → fallback defaults)
+    - DEM-specific TiTiler visualization URLs
 
-Created: 28 NOV 2025
+Exports:
+    ProcessRasterV2Job: Three-stage raster to COG job
 """
 
 from typing import Dict, Any, List, Optional

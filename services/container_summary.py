@@ -1,37 +1,18 @@
-# ============================================================================
-# CLAUDE CONTEXT - CONTAINER SUMMARY SERVICE
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: Service - Memory-efficient container scanning and statistics generation
-# PURPOSE: Scan blob containers and generate aggregate statistics using streaming implementation
-# LAST_REVIEWED: 29 OCT 2025
-# EXPORTS: analyze_container_summary
-# INTERFACES: Task handler function for summarize_container job
-# PYDANTIC_MODELS: None (uses dict-based parameters and results)
-# DEPENDENCIES: infrastructure.blob.BlobRepository, collections.defaultdict
-# SOURCE: Azure Blob Storage via BlobRepository streaming
-# SCOPE: Container-wide statistics aggregation with optional filtering
-# VALIDATION: Filter criteria validation, extension matching, size/date range filters
-# PATTERNS: Streaming aggregation, Memory-efficient iteration
-# ENTRY_POINTS: Called by jobs/container_summary.py task handler
-# INDEX: analyze_container_summary:14, _matches_filter:169, _get_extension:206
-# ============================================================================
-
 """
-Container Summary Service
+Container Summary Service - Container Statistics.
 
 Scans a blob container and generates aggregate statistics.
-Memory-efficient streaming implementation using generator pattern
-to avoid loading entire container contents into memory.
+Memory-efficient streaming implementation using generator pattern.
 
 Features:
-- File type distribution (by extension)
-- Size distribution buckets (0-10MB, 10-100MB, etc.)
-- Date range analysis (oldest/newest files)
-- Largest/smallest file tracking
-- Flexible filtering (extension, size, date range, prefix)
+    - File type distribution (by extension)
+    - Size distribution buckets
+    - Date range analysis (oldest/newest files)
+    - Largest/smallest file tracking
+    - Flexible filtering (extension, size, date range, prefix)
 
-Last Updated: 29 OCT 2025
+Exports:
+    analyze_container_summary: Generate container statistics
 """
 
 from typing import Any

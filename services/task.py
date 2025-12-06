@@ -1,47 +1,16 @@
-# ============================================================================
-# CLAUDE CONTEXT - TASK EXECUTOR ABC
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: Core component of new architecture
-# CATEGORY: BUSINESS LOGIC CONTRACTS - BEHAVIOR
-# PURPOSE: Abstract base class defining task execution behavior
-# EXPORTS: TaskExecutor - ABC for task business logic
-# INTERFACES: Defines contract that all task implementations must follow
-# PYDANTIC_MODELS: TaskExecutor receives/returns dicts (validated by framework)
-# DEPENDENCIES: abc, typing
-# SOURCE: Framework pattern from epoch4_framework.md
-# SCOPE: All task implementations inherit from this (or use @register_task decorator)
-# VALIDATION: Input/output validation handled by framework (Pydantic)
-# PATTERNS: Abstract Base Class, Strategy Pattern, Separation of Concerns
-# ENTRY_POINTS: Subclass TaskExecutor or use @register_task decorator on functions
-# ARCHITECTURE: TaskExecutor (behavior) + TaskData (data) = "Task" entity (composition)
-# INDEX: TaskExecutor:40, execute:65
-# ============================================================================
-
 """
-TaskExecutor ABC - Task Behavior Contract
+TaskExecutor ABC - Task Behavior Contract.
 
 Defines the BEHAVIOR contract for task implementations.
-This is the BEHAVIOR half of the "Task" conceptual entity.
-The DATA half is defined by TaskData (core/contracts).
+TaskData (core/contracts) defines what a task IS (identity, parameters).
+TaskExecutor defines what a task DOES (business logic).
 
-Architecture:
-    TaskData (core/contracts) - What a task IS (identity, parameters)
-    TaskExecutor (this file) - What a task DOES (business logic)
+Usage patterns:
+    Class-based: Subclass TaskExecutor and implement execute()
+    Function-based: Use @register_task decorator on functions
 
-    They collaborate via composition:
-    ```python
-    task_record = TaskRecord(task_type="greet", parameters={...})  # DATA
-    executor = TASK_REGISTRY[task_record.task_type]()              # BEHAVIOR
-    result = executor.execute(task_record.parameters)              # COMPOSITION
-    ```
-
-Two usage patterns:
-    1. Class-based: Subclass TaskExecutor and implement execute()
-    2. Function-based: Use @register_task decorator on functions
-
-See core/contracts/__init__.py for full architecture explanation.
-
+Exports:
+    TaskExecutor: Abstract base class for task implementations
 """
 
 from abc import ABC, abstractmethod

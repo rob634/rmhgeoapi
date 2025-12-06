@@ -1,30 +1,17 @@
-# ============================================================================
-# CLAUDE CONTEXT - CONTAINER LISTING SERVICE
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: Service - Three-stage diamond pattern for container analysis
-# PURPOSE: List and analyze blob container contents using fan-out/fan-in workflow pattern
-# LAST_REVIEWED: 29 OCT 2025
-# EXPORTS: list_container_blobs, analyze_single_blob, aggregate_blob_analysis
-# INTERFACES: Task handler functions for list_container_contents job
-# PYDANTIC_MODELS: None (uses dict-based parameters and results)
-# DEPENDENCIES: infrastructure.blob.BlobRepository, util_logger.LoggerFactory
-# SOURCE: Azure Blob Storage via BlobRepository
-# SCOPE: Container-wide blob listing and metadata aggregation
-# VALIDATION: Container name validation via BlobRepository decorators
-# PATTERNS: Diamond workflow (Fan-out/Fan-in), Three-stage processing
-# ENTRY_POINTS: Called by jobs/container_list.py task handlers
-# INDEX: list_container_blobs:40, analyze_single_blob:85, aggregate_blob_analysis:130
-# ============================================================================
-
 """
-Container List Services - Three-Stage Diamond Pattern Support
+Container List Services - Three-Stage Diamond Pattern.
 
-Stage 1: list_container_blobs - Returns list of blob names
-Stage 2: analyze_single_blob - Analyzes and stores individual blob metadata (fan-out)
-Stage 3: aggregate_blob_analysis - Aggregates all blob metadata into summary (fan-in)
+Task handlers for list_container_contents job.
 
-Last Updated: 29 OCT 2025
+Stages:
+    list_container_blobs: Returns list of blob names
+    analyze_single_blob: Analyzes individual blob metadata (fan-out)
+    aggregate_blob_analysis: Aggregates all metadata into summary (fan-in)
+
+Exports:
+    list_container_blobs: Stage 1 handler
+    analyze_single_blob: Stage 2 handler
+    aggregate_blob_analysis: Stage 3 handler
 """
 
 from typing import Any

@@ -1,38 +1,8 @@
-# ============================================================================
-# 🚧 UNDER DEVELOPMENT - DO NOT USE IN PRODUCTION
-# ============================================================================
-# PURPOSE: H3 land grid pyramid generation (experimental)
-# STATUS: Experimental - H3 grid system in development
-# ============================================================================
-
-# ============================================================================
-# CLAUDE CONTEXT - JOB DEFINITION
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: Job - H3 Land Grid Pyramid Bootstrap (3-stage cascade workflow)
-# PURPOSE: Generate complete H3 land-filtered grid pyramid from resolution 2-7
-# LAST_REVIEWED: 26 NOV 2025
-# EXPORTS: BootstrapH3LandGridPyramidJob (JobBase + JobBaseMixin implementation)
-# INTERFACES: JobBase (2 methods), JobBaseMixin (provides 4 methods)
-# PYDANTIC_MODELS: Uses declarative parameters_schema
-# DEPENDENCIES: jobs.base.JobBase, jobs.mixins.JobBaseMixin, infrastructure.h3_batch_tracking.H3BatchTracker, services.handler_generate_h3_grid, services.handler_cascade_h3_descendants
-# SOURCE: HTTP job submission for H3 bootstrap workflow
-# SCOPE: Land-filtered H3 grids for World Bank Agricultural Geography Platform
-# VALIDATION: Declarative schema via JobBaseMixin
-# PATTERNS: Mixin pattern, 3-stage cascade, Batched fan-out, Batch-level idempotency (26 NOV 2025)
-# ENTRY_POINTS: Registered in jobs/__init__.py ALL_JOBS as "bootstrap_h3_land_grid_pyramid"
-# INDEX: BootstrapH3LandGridPyramidJob:60, stages:108, parameters_schema:135, create_tasks_for_stage:180
-# ============================================================================
-
 """
-H3 Land Grid Pyramid Bootstrap Job - 3-Stage Cascade Architecture
+H3 Land Grid Pyramid Bootstrap Job - 3-Stage Cascade Architecture.
 
 Generates complete H3 land-filtered grid pyramid for resolutions 2-7 using
 optimized 3-stage cascade approach with batched parallelism.
-
-Architecture Optimization (15 NOV 2025):
-    OLD: 7 stages (res 2, then res 3, 4, 5, 6, 7 sequentially) → 30+ minute timeout
-    NEW: 3 stages (res 2 base, cascade ALL descendants res 3-7, finalize) → <15 minutes
 
 3-Stage Workflow:
     Stage 1: Generate filtered res 2 base (~2,000 land cells, 1 task)
@@ -41,55 +11,20 @@ Architecture Optimization (15 NOV 2025):
 
 Cascade Mathematics:
     1 res 2 cell → 7^5 = 16,807 descendants to res 7
-    10 res 2 cells → 168,070 descendants to res 7
     2,000 res 2 cells → 33.6M descendants to res 7
 
-Batching Strategy:
-    - Configurable batch size (default: 10 parent cells per task)
-    - 2,000 parents ÷ 10 = 200 parallel tasks in Stage 2
-    - Each task: 10 parents × 16,807 descendants = 168,070 cells
-    - Memory: ~33.6 MB per task (well within Azure Functions limits)
-
-Expected Cell Counts (land-filtered, approximate):
-    Res 2: ~2,000 cells (base)
-    Res 3: ~14,000 cells (7^1 multiplier)
-    Res 4: ~98,000 cells (7^2 multiplier)
-    Res 5: ~686,000 cells (7^3 multiplier)
-    Res 6: ~4.8M cells (7^4 multiplier)
-    Res 7: ~33.6M cells (7^5 multiplier)
+Expected Cell Counts (land-filtered):
+    Res 2: ~2,000 | Res 3: ~14,000 | Res 4: ~98,000
+    Res 5: ~686,000 | Res 6: ~4.8M | Res 7: ~33.6M
     Total: ~39.2M cells
 
-Albania Test Support:
-    - Parameter: country_filter="ALB" (ISO3 country code)
-    - Parameter: bbox_filter=[19.3, 39.6, 21.1, 42.7]
-    - Expected: ~10-20 res 2 cells → ~168K res 7 cells
-    - Success Criteria: Complete in <15 minutes with correct parent relationships
+Features:
+    - Batch-level idempotency (jobs can resume from partial failures)
+    - Country/bbox filtering for testing (e.g., country_filter="ALB")
+    - Cell-level idempotency via ON CONFLICT DO NOTHING
 
-Idempotency (26 NOV 2025):
-    - Batch-level tracking via H3BatchTracker (h3.batch_progress table)
-    - Jobs can resume from partial failures - only incomplete batches re-execute
-    - Handler early-exit if batch already completed
-    - Cell-level idempotency via ON CONFLICT (h3_index, grid_id) DO NOTHING
-
-PREREQUISITE - H3 Schema Tables (MUST exist before running this job):
-    The h3 schema and its tables are NOT created by the full-rebuild endpoint.
-    Before running H3 bootstrap jobs, ensure these SQL scripts have been executed:
-
-    1. sql/init/00_create_h3_schema.sql      - Creates h3 schema
-    2. sql/init/01_create_h3_grids.sql       - Creates h3.grids table
-    3. sql/init/02_create_h3_reference_filters.sql - Reference filter storage
-    4. sql/init/03_create_h3_grid_metadata.sql - Grid metadata tracking
-    5. sql/init/07_create_h3_batch_progress.sql - Batch-level idempotency (26 NOV 2025)
-
-    Run manually via psql:
-        PGPASSWORD='...' psql -h rmhpgflex.postgres.database.azure.com -U rob634 -d geopgflex \\
-            -f sql/init/00_create_h3_schema.sql
-        # ... repeat for each file
-
-    The h3 schema is intentionally preserved by full-rebuild because it contains
-    static bootstrap data that takes hours to regenerate.
-
-Last Updated: 26 NOV 2025 - Added batch-level idempotency framework
+Exports:
+    BootstrapH3LandGridPyramidJob: 3-stage cascade H3 pyramid job
 """
 
 from typing import List, Dict, Any

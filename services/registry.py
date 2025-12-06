@@ -1,46 +1,25 @@
-# ============================================================================
-# CLAUDE CONTEXT - TASK REGISTRY
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: Core component of new architecture
-# PURPOSE: Task handler registration system with decorator pattern
-# EXPORTS: TASK_REGISTRY dict, register_task decorator, get_task function
-# INTERFACES: Works with Task ABC or plain functions
-# PYDANTIC_MODELS: None directly, works with Task subclasses and functions
-# DEPENDENCIES: typing, services.task
-# SOURCE: Framework pattern from epoch4_framework.md
-# SCOPE: Application-wide task registration
-# VALIDATION: Validates task_type uniqueness
-# PATTERNS: Registry Pattern, Decorator Pattern, Adapter Pattern
-# ENTRY_POINTS: @register_task decorator, get_task()
-# INDEX: TASK_REGISTRY:30, register_task:50, get_task:100
-# ============================================================================
-
 """
-Task Registry - Task Handler Registration System
+Task Registry - Task Handler Registration System.
 
 Provides decorator-based registration for task handlers.
-Maps task_type strings to Task classes or functions for dynamic execution.
+Maps task_type strings to Task classes or functions.
 
-Supports two patterns:
-    1. Class-based tasks (Task subclasses)
-    2. Function-based tasks (plain functions)
+Supports:
+    - Class-based tasks (TaskExecutor subclasses)
+    - Function-based tasks (plain functions)
 
 Usage:
-    # Class-based
-    @register_task("greet")
-    class GreetTask(Task):
-        def execute(self, params): ...
-
-    # Function-based (simpler)
     @register_task("greet")
     def greet_handler(params: dict) -> dict:
-        ...
+        return {"success": True, "result": {"message": "Hello"}}
 
-    # Later:
     handler = get_task("greet")
     result = handler(params)
 
+Exports:
+    TASK_REGISTRY: Global registry dict
+    register_task: Registration decorator
+    get_task: Retrieve registered handler
 """
 
 from typing import Dict, Callable, Any, Union, Type

@@ -1,40 +1,22 @@
-# ============================================================================
-# CLAUDE CONTEXT - SERVICE - RASTER COG CREATION
-# ============================================================================
-# PURPOSE: Create Cloud Optimized GeoTIFFs with optional reprojection
-# EXPORTS: create_cog() handler function
-# INTERFACES: Handler pattern for task execution
-# PYDANTIC_MODELS: None (returns dict)
-# DEPENDENCIES: rio-cogeo, rasterio, azure blob storage, config
-# SOURCE: Bronze container rasters, validation results from Stage 1
-# SCOPE: Stage 2 of raster processing pipeline
-# VALIDATION: Uses validation results to auto-select COG settings
-# PATTERNS: Handler pattern, single-pass reproject + COG
-# ENTRY_POINTS: Called by task processor with parameters dict
-# ============================================================================
-
 """
-Raster COG Creation Service - Stage 2 of Raster Pipeline
+Raster COG Creation Service - Stage 2 of Raster Pipeline.
 
 Creates Cloud Optimized GeoTIFFs with optional reprojection using rio-cogeo.
 
 Key Innovation: Single-pass reprojection + COG creation
-- rio-cogeo.cog_translate() does both operations in one pass
-- No intermediate storage needed for small files
-- Auto-selects optimal compression and resampling based on raster type
-- BAND interleave for cloud-native selective band access (not legacy PIXEL)
+    - rio-cogeo.cog_translate() does both operations in one pass
+    - Auto-selects optimal compression and resampling based on raster type
+    - BAND interleave for cloud-native selective band access
 
 Type-Specific Optimizations:
-- RGB: JPEG compression (97% reduction), cubic resampling
-- RGBA (drones): WebP compression (supports alpha), cubic resampling
-- DEM: LERC+DEFLATE (lossless scientific), average overviews, bilinear reproject
-- Categorical: DEFLATE, mode overviews (preserves classes), nearest reproject
-- Multispectral: DEFLATE (lossless), average overviews, bilinear reproject
+    RGB: JPEG compression (97% reduction), cubic resampling
+    RGBA: WebP compression (supports alpha), cubic resampling
+    DEM: LERC+DEFLATE (lossless), average overviews, bilinear reproject
+    Categorical: DEFLATE, mode overviews (preserves classes), nearest reproject
+    Multispectral: DEFLATE (lossless), average overviews, bilinear reproject
 
-Cloud-Native Pattern:
-- BAND interleave: Read only bands needed via HTTP range requests
-- Optimized for: Multi-spectral analysis, selective band access, FATHOM flood data
-- Legacy PIXEL interleave: Display-oriented, reads all bands even when querying one
+Exports:
+    create_cog: COG creation handler function
 """
 
 import sys

@@ -1,51 +1,16 @@
-# ============================================================================
-# 🚧 UNDER DEVELOPMENT - DO NOT USE IN PRODUCTION
-# ============================================================================
-# PURPOSE: H3 Level 4 land grid generation (experimental)
-# STATUS: Experimental - H3 grid system in development
-# ============================================================================
-
-# ============================================================================
-# CLAUDE CONTEXT - JOB DEFINITION
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: Job - Single-stage H3 Level 4 land grid generation
-# PURPOSE: Generate global Level 4 H3 land grid and save to gold container
-# LAST_REVIEWED: 22 NOV 2025
-# EXPORTS: GenerateH3Level4Job (JobBase implementation)
-# INTERFACES: JobBase (implements 5-method contract)
-# PYDANTIC_MODELS: None (uses dict parameters)
-# DEPENDENCIES: jobs.base.JobBase, services.handler_h3_level4
-# SOURCE: HTTP POST requests to /api/jobs/generate_h3_level4
-# SCOPE: Global H3 Level 4 grid generation (~875 land cells filtered)
-# VALIDATION: Parameter validation in handler service
-# PATTERNS: Single-stage job workflow, Land filtering, GeoParquet output
-# ENTRY_POINTS: Registered in jobs/__init__.py ALL_JOBS as "generate_h3_level4"
-# INDEX: GenerateH3Level4Job:29, stages:41, create_tasks_for_stage:61
-# ============================================================================
-
 """
 Generate H3 Level 4 Land Grid Job.
 
-Single-stage workflow to generate global Level 4 H3 grid filtered by land.
+Two-stage workflow to generate global Level 4 H3 grid filtered by land.
 
-Stage 1: Generate + Filter + Save
-    - Generate global Level 4 grid (~3,500 cells)
-    - Filter by Overture Divisions land boundaries
-    - Save to gold container as GeoParquet (~875 cells)
+Workflow:
+    Stage 1: Generate land grid using h3-py and stream to PostGIS
+    Stage 2: Create STAC item for H3 land grid
 
-Output:
-    gold/h3/grids/land_h3_level4.parquet
+Output: PostGIS geo.h3_grids table + STAC metadata
 
-Example:
-    POST /api/jobs/submit/generate_h3_level4
-    {
-        "overture_release": "2024-11-13.0",
-        "output_folder": "h3/grids",
-        "output_filename": "land_h3_level4.parquet"
-    }
-
-Updated: 15 OCT 2025 - Phase 2: Migrated to JobBase ABC
+Exports:
+    GenerateH3Level4Job: Two-stage H3 Level 4 land grid job
 """
 
 from typing import Dict, Any, List

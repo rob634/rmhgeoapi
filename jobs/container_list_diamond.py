@@ -1,58 +1,21 @@
-# ============================================================================
-# 🔧 TESTING INFRASTRUCTURE - Not for Production Use
-# ============================================================================
-# PURPOSE: Diamond pattern (fan-out/fan-in) testing tool
-# STATUS: Test only - Validates CoreMachine aggregation patterns
-# ============================================================================
-
-# ============================================================================
-# CLAUDE CONTEXT - JOB DEFINITION (TEST/DIAGNOSTIC TOOL)
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅ (DIAGNOSTIC/TEST ONLY)
-# STATUS: Test/Diagnostic - Three-stage diamond pattern (1→N→1) for container analysis
-# PURPOSE: TEST TOOL - Demonstrates fan-in aggregation pattern, validates CoreMachine fan-in logic
-# LAST_REVIEWED: 22 NOV 2025
-# EXPORTS: ListContainerContentsDiamondWorkflow (JobBase implementation)
-# INTERFACES: JobBase (implements 6-method contract)
-# PYDANTIC_MODELS: None (uses dict-based validation)
-# DEPENDENCIES: jobs.base.JobBase, hashlib, json
-# SOURCE: HTTP job submission for container analysis with aggregation (diagnostic use only)
-# SCOPE: Test/diagnostic tool for fan-in pattern validation, NOT production workflow
-# VALIDATION: Container name validation, blob count limits
-# PATTERNS: Diamond pattern (1→N→1), Fan-out then fan-in, CoreMachine auto-aggregation
-# ENTRY_POINTS: Registered in jobs/__init__.py ALL_JOBS as "list_container_contents_diamond"
-# INDEX: ListContainerContentsDiamondWorkflow:26, stages:38, create_tasks_for_stage:75
-# NOTE: This is a TEST/DIAGNOSTIC tool created 16 OCT 2025 to validate fan-in pattern.
-#       Production workflow is "list_container_contents" (2-stage without aggregation).
-#       See docs/archive/completed/DIAMOND_PATTERN_TEST.md for testing guide.
-# ============================================================================
-
 """
-Container List Diamond Job Declaration - TEST/DIAGNOSTIC TOOL
+Container List Diamond Job - Test/Diagnostic Tool.
 
-⚠️ THIS IS A TEST/DIAGNOSTIC TOOL - NOT A PRODUCTION WORKFLOW ⚠️
+Tests and validates CoreMachine's fan-in aggregation pattern.
+Demonstrates the complete diamond pattern (1→N→1) with automatic aggregation.
 
-This job was created on 16 OCT 2025 to test and validate CoreMachine's fan-in
-aggregation pattern. It demonstrates the complete diamond pattern (1→N→1) with
-automatic aggregation.
-
-Production Use Case:
-- For production container listing, use "list_container_contents" (2-stage job)
-- This diamond variant adds Stage 3 aggregation for testing purposes only
+Note: For production container listing, use "list_container_contents" (2-stage job).
+This diamond variant adds Stage 3 aggregation for testing purposes only.
 
 Three-Stage Diamond Pattern:
-- Stage 1 (single): Lists all blobs in a container (1 task)
-- Stage 2 (fan_out): Analyzes each blob individually (N parallel tasks)
-- Stage 3 (fan_in): Aggregates all analysis results into summary (1 task - CoreMachine auto-creates)
+    Stage 1 (single): Lists all blobs in a container (1 task)
+    Stage 2 (fan_out): Analyzes each blob individually (N parallel tasks)
+    Stage 3 (fan_in): Aggregates all results into summary (1 task - auto-created)
 
-Pattern Flow:
-    Single → Fan-Out → Fan-In → Summary
-    (1)   →   (N)   →  (1)
+Pattern Flow: Single → Fan-Out → Fan-In → Summary (1 → N → 1)
 
-Testing Guide:
-See docs/archive/completed/DIAMOND_PATTERN_TEST.md for complete testing instructions
-
-Last Updated: 3 NOV 2025 - Marked as test/diagnostic tool
+Exports:
+    ListContainerContentsDiamondWorkflow: Three-stage diamond pattern job
 """
 
 from typing import List, Dict, Any

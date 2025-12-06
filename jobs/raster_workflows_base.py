@@ -1,44 +1,23 @@
-# ============================================================================
-# CLAUDE CONTEXT - RASTER WORKFLOWS BASE CLASS
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: Base class - Shared logic for raster collection workflows
-# PURPOSE: DRY principle - Extract common COG/MosaicJSON/STAC finalization logic
-# LAST_REVIEWED: 24 NOV 2025
-# EXPORTS: RasterWorkflowsBase (abstract base class)
-# INTERFACES: None (provides shared implementation methods)
-# PYDANTIC_MODELS: Uses core.models.TaskStatus
-# DEPENDENCIES: util_logger, core.models
-# SOURCE: Extracted from process_raster_collection.py (PRODUCTION READY)
-# SCOPE: Shared across process_raster_collection, process_large_raster
-# VALIDATION: None (relies on calling workflow validation)
-# PATTERNS: Mixin pattern, DRY principle, template method
-# ENTRY_POINTS: Inherited by raster workflow classes
-# INDEX: _finalize_cog_mosaicjson_stac_stages:85
-# ============================================================================
-
 """
-Raster Workflows Base Class
+Raster Workflows Base Class.
 
 Shared logic for raster collection workflows (multi-tile processing).
 
 Used by:
-- ProcessRasterCollectionWorkflow (4 stages: validate, COG, MosaicJSON, STAC)
-- ProcessLargeRasterWorkflow (5 stages: tile, extract, COG, MosaicJSON, STAC)
+    ProcessRasterCollectionWorkflow: 4 stages (validate, COG, MosaicJSON, STAC)
+    ProcessLargeRasterWorkflow: 5 stages (tile, extract, COG, MosaicJSON, STAC)
 
 Key Features:
-- DRY principle: Common finalization logic in one place
-- Bug fixes propagate to all workflows automatically
-- Stages 3-4 (or 4-5) converge to same COG→MosaicJSON→STAC pattern
-
-Extracted from:
-- process_raster_collection.py (lines 783-905) - PRODUCTION READY 21 NOV 2025
-- Verified working with multi-tile vendor deliveries
+    DRY principle: Common finalization logic in one place
+    Bug fixes propagate to all workflows automatically
+    Stages converge to same COG→MosaicJSON→STAC pattern
 
 Design Pattern:
-- Mixin class providing shared implementation methods
-- Workflows inherit and call _finalize_cog_mosaicjson_stac_stages()
-- Workflows pass stage numbers as parameters (flexible for different stage counts)
+    Mixin class providing shared implementation methods
+    Workflows inherit and call _finalize_cog_mosaicjson_stac_stages()
+
+Exports:
+    RasterWorkflowsBase: Mixin with shared finalization logic
 """
 
 from typing import Dict, Any, List

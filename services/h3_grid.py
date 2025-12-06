@@ -1,47 +1,20 @@
-# ============================================================================
-# CLAUDE CONTEXT - SERVICE
-# ============================================================================
-# PURPOSE: H3 hierarchical grid generation service using DuckDB
-# EXPORTS: H3GridService (main service class)
-# INTERFACES: None - concrete service implementation
-# PYDANTIC_MODELS: None (uses DataFrames for grid data)
-# DEPENDENCIES: infrastructure.duckdb (DuckDBRepository), infrastructure.blob (BlobRepository), infrastructure.duckdb_query (safe SQL)
-# SOURCE: DuckDB H3 extension, Overture Maps Divisions (Azure Blob Storage)
-# SCOPE: Global H3 grid generation (levels 4-7), land filtering, GeoParquet export
-# VALIDATION: H3 cell validation, geometry validation, SQL injection prevention
-# PATTERNS: Service layer pattern, repository composition, safe SQL composition
-# ENTRY_POINTS: generate_level4_grid(), filter_by_land(), generate_children()
-# INDEX: H3GridService:45, generate_level4_grid:110, filter_by_land:170, generate_children:270, save_to_gold:350
-# ============================================================================
-
 """
-H3 Grid Generation Service with Safe SQL Composition.
+H3 Grid Generation Service.
 
 Generates hierarchical hexagonal grids using DuckDB H3 extension.
 Supports land-based filtering using Overture Maps Divisions.
 Exports grids as GeoParquet to gold container.
 
-**SECURITY NOTE**: This service uses safe SQL composition via QueryBuilder
-to prevent SQL injection, similar to PostgreSQL's psycopg.sql pattern.
-
 Architecture:
     1. Generate coarse grid (Level 4: ~3,500 cells globally)
     2. Filter by land boundaries (Overture Divisions via DuckDB)
     3. Generate fine grid (Level 6: ~300K cells for land only)
-    4. Export to GeoParquet in gold/h3/grids/
+    4. Export to GeoParquet
 
-Example:
-    service = H3GridService(duckdb_repo, blob_repo, gold_container)
+Uses safe SQL composition via QueryBuilder to prevent SQL injection.
 
-    # Generate Level 4 land grid
-    l4_df = service.generate_level4_grid()
-    land_l4_df = service.filter_by_land(l4_df)
-    service.save_to_gold(land_l4_df, "land_h3_level4.parquet")
-
-    # Generate Level 6 children
-    l6_df = service.generate_children(land_l4_df, target_resolution=6)
-    service.save_to_gold(l6_df, "land_h3_level6.parquet")
-
+Exports:
+    H3GridService: Main service class for H3 grid operations
 """
 
 import pandas as pd

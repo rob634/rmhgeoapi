@@ -1,43 +1,15 @@
-# ============================================================================
-# 🔧 TESTING INFRASTRUCTURE - Not for Production Use
-# ============================================================================
-# PURPOSE: Infrastructure validation and workflow testing
-# STATUS: Working - Used for testing Job->Stage->Task patterns
-# ============================================================================
-
-# ============================================================================
-# CLAUDE CONTEXT - JOB DEFINITION
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: Job - Two-stage greeting workflow using JobBaseMixin
-# PURPOSE: HelloWorld job with JobBaseMixin pattern (77% line reduction)
-# LAST_REVIEWED: 22 NOV 2025
-# EXPORTS: HelloWorldJob (JobBase + JobBaseMixin implementation)
-# INTERFACES: JobBase (implements 2 methods), JobBaseMixin (provides 4 methods)
-# PYDANTIC_MODELS: None (uses declarative parameters_schema)
-# DEPENDENCIES: jobs.base.JobBase, jobs.mixins.JobBaseMixin
-# SOURCE: HTTP job submission via POST /api/jobs/hello_world
-# SCOPE: Test job for validating Job→Stage→Task workflow patterns
-# VALIDATION: Declarative schema (n, message, failure_rate) via JobBaseMixin
-# PATTERNS: Mixin pattern (composition over inheritance), Declarative config
-# ENTRY_POINTS: Registered in jobs/__init__.py ALL_JOBS as "hello_world"
-# INDEX: HelloWorldJob:40, stages:52, parameters_schema:80, create_tasks_for_stage:93
-# ============================================================================
-
 """
-HelloWorld Job - JobBaseMixin Pattern
+HelloWorld Job - Test/Infrastructure Validation.
 
-Two-stage greeting workflow demonstrating JobBaseMixin boilerplate elimination.
-
-Migrated from manual implementation (347 lines) to mixin pattern (219 lines).
-Line reduction: 128 lines eliminated (37% reduction).
+Two-stage greeting workflow for testing Job→Stage→Task patterns.
+Uses JobBaseMixin for declarative configuration.
 
 Two-Stage Workflow:
-1. Stage 1 (greeting): Creates N parallel tasks with greetings (N from params)
-2. Stage 2 (reply): Creates N parallel tasks with replies (matches stage 1 count)
+    Stage 1 (greeting): Creates N parallel tasks with greetings
+    Stage 2 (reply): Creates N parallel tasks with replies
 
-Updated: 15 OCT 2025 - Phase 2: Migrated to JobBase ABC
-Last Updated: 14 NOV 2025 - Migrated to JobBaseMixin pattern
+Exports:
+    HelloWorldJob: Two-stage greeting workflow implementation
 """
 
 from typing import List, Dict, Any

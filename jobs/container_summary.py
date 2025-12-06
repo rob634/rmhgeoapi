@@ -1,36 +1,11 @@
-# ============================================================================
-# 🚧 UNDER DEVELOPMENT - DO NOT USE IN PRODUCTION
-# ============================================================================
-# PURPOSE: Container statistics and monitoring utility
-# STATUS: Functional - Pending production testing
-# ============================================================================
-
-# ============================================================================
-# CLAUDE CONTEXT - JOB DEFINITION
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: Job - Single-stage container statistics generation
-# PURPOSE: Generate aggregate statistics about blob container (fast, lightweight)
-# LAST_REVIEWED: 22 NOV 2025
-# EXPORTS: ContainerSummaryWorkflow (JobBase implementation)
-# INTERFACES: JobBase (implements 5-method contract)
-# PYDANTIC_MODELS: None (uses dict-based validation)
-# DEPENDENCIES: jobs.base.JobBase, hashlib, json
-# SOURCE: HTTP job submission for container statistics
-# SCOPE: Container-wide aggregate statistics (file types, sizes, counts)
-# VALIDATION: Container name validation, filter criteria validation
-# PATTERNS: Single-stage job, Streaming aggregation (memory-efficient)
-# ENTRY_POINTS: Registered in jobs/__init__.py ALL_JOBS as "summarize_container"
-# INDEX: ContainerSummaryWorkflow:17, stages:26, create_tasks_for_stage:52
-# ============================================================================
-
 """
-Container Summary Job Declaration
+Container Summary Job - Container Statistics.
 
 Single-stage job that generates aggregate statistics about a blob container.
 Fast, lightweight operation suitable for dashboards and monitoring.
 
-Last Updated: 29 OCT 2025
+Exports:
+    ContainerSummaryWorkflow: Single-stage container summary job
 """
 
 from typing import List, Dict, Any

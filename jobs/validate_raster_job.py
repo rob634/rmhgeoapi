@@ -1,47 +1,18 @@
-# ============================================================================
-# 🚧 UNDER DEVELOPMENT - DO NOT USE IN PRODUCTION
-# ============================================================================
-# PURPOSE: Standalone raster validation utility
-# STATUS: Functional - Supports production workflows, not standalone production use
-# ============================================================================
-
-# ============================================================================
-# CLAUDE CONTEXT - JOB DEFINITION
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: Job - Single-stage raster validation (no processing)
-# PURPOSE: Single-stage workflow for validating rasters without processing
-# LAST_REVIEWED: 22 NOV 2025
-# EXPORTS: ValidateRasterJob (JobBase implementation)
-# INTERFACES: JobBase (implements 5-method contract)
-# PYDANTIC_MODELS: None (uses dict-based validation)
-# DEPENDENCIES: jobs.base.JobBase
-# SOURCE: HTTP job submission for raster validation (Bronze container)
-# SCOPE: Standalone raster validation for any raster file
-# VALIDATION: CRS, bit-depth, data type detection, bounds checking, NoData value
-# PATTERNS: Single-stage workflow, Read-only validation, No file modification
-# ENTRY_POINTS: Registered in jobs/__init__.py ALL_JOBS as "validate_raster"
-# INDEX: ValidateRasterJob:28, stages:40, create_tasks_for_stage:60
-# ============================================================================
-
 """
-Validate Raster Job - Standalone Validation
+Validate Raster Job - Standalone Validation.
 
 Single-stage workflow for validating raster files without COG processing.
 
 Use Cases:
-- Quick validation check before committing to COG pipeline
-- Testing raster files for CRS, bit-depth, type issues
-- Batch validation of multiple files
-- Pre-flight checks for large datasets
+    - Quick validation check before committing to COG pipeline
+    - Testing raster files for CRS, bit-depth, type issues
+    - Batch validation of multiple files
+    - Pre-flight checks for large datasets
 
-Stage 1 (Only): Validate Raster
-- Check CRS (file metadata, user override, or fail)
-- Analyze bit-depth efficiency (flag 64-bit as CRITICAL)
-- Auto-detect raster type (RGB, RGBA, DEM, categorical, etc.)
-- Validate type match if user specified
-- Return validation results without processing
+Validation checks: CRS, bit-depth, data type detection, bounds, NoData value.
 
+Exports:
+    ValidateRasterJob: Single-stage raster validation job
 """
 
 from typing import List, Dict, Any

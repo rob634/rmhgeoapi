@@ -1,35 +1,13 @@
-# ============================================================================
-# CLAUDE CONTEXT - STAC ITEM CREATION SERVICE
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: Service - Create STAC Items with raster statistics
-# PURPOSE: Package COG mosaics with metadata for web serving
-# LAST_REVIEWED: 23 OCT 2025
-# EXPORTS: create_stac_item, add_titiler_asset, calculate_bounds_from_tiles
-# INTERFACES: None (standalone service)
-# PYDANTIC_MODELS: None (returns STAC-compliant dict)
-# DEPENDENCIES: rasterio (for bounds calculation)
-# SOURCE: Statistics from service_statistics.py, job metadata
-# SCOPE: Job-specific (runs during Stage 4 completion)
-# VALIDATION: STAC 1.0.0 specification compliance
-# PATTERNS: Service layer, STAC best practices
-# ENTRY_POINTS: Called by controller_stage_raster.py during Stage 4
-# INDEX:
-#   - create_stac_item: Line 45
-#   - add_titiler_asset: Line 165
-#   - calculate_bounds_from_tiles: Line 220
-# ============================================================================
-
 """
-STAC Item Creation Service
+STAC Item Creation Service.
 
-Creates STAC (SpatioTemporal Asset Catalog) Items with raster statistics
-for COG mosaics. This enables clients to discover optimal rendering parameters
-without runtime computation.
+Creates STAC Items with raster statistics for COG mosaics.
+Enables clients to discover optimal rendering parameters.
 
-STAC Extensions Used:
-- raster: https://github.com/stac-extensions/raster (band statistics)
-
+Exports:
+    create_stac_item: Create a STAC item
+    add_titiler_asset: Add TiTiler visualization asset
+    calculate_bounds_from_tiles: Calculate bounds from COG tiles
 """
 
 from datetime import datetime, timezone

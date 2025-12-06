@@ -1,40 +1,15 @@
-# ============================================================================
-# CLAUDE CONTEXT - GEOSPATIAL INVENTORY SERVICE
-# ============================================================================
-# EPOCH: 4 - ACTIVE
-# STATUS: Service - Geospatial file classification and collection grouping
-# PURPOSE: Classify container blobs by geospatial type and group into processing units
-# LAST_REVIEWED: 03 DEC 2025
-# EXPORTS: classify_geospatial_file, aggregate_geospatial_inventory
-# INTERFACES: Task handler functions for inventory_container_geospatial job
-# PYDANTIC_MODELS: None (uses dict-based parameters and results)
-# DEPENDENCIES: util_logger.LoggerFactory, re for pattern matching
-# SOURCE: Azure Blob Storage metadata from container_list.py Stage 1
-# SCOPE: Container-wide geospatial file classification and collection detection
-# VALIDATION: Extension-based classification, pattern matching for vendor deliveries
-# PATTERNS: Fan-out classification, Fan-in aggregation, Extensible file type registry
-# ENTRY_POINTS: Called by jobs/inventory_container_geospatial.py task handlers
-# INDEX:
-#   - GEOSPATIAL_EXTENSIONS: line 45
-#   - VENDOR_PATTERNS: line 65
-#   - classify_geospatial_file: line 95
-#   - aggregate_geospatial_inventory: line 180
-#   - _detect_vendor_pattern: line 300
-#   - _group_by_folder: line 350
-#   - _group_by_manifest: line 400
-# ============================================================================
-
 """
-Geospatial Inventory Service - Classification and Collection Grouping
+Geospatial Inventory Service.
+
+Classification and collection grouping for container blobs.
 
 Provides handlers for inventory_container_geospatial job:
-- Stage 2 (fan-out): classify_geospatial_file - Per-blob classification
-- Stage 3 (fan-in): aggregate_geospatial_inventory - Group into collections
+    - classify_geospatial_file: Per-blob classification
+    - aggregate_geospatial_inventory: Group into collections
 
-Extensibility:
-    - Add new file types via GEOSPATIAL_EXTENSIONS
-    - Add new vendor patterns via VENDOR_PATTERNS
-    - Designed for future vector, GeoParquet, Zarr support
+Exports:
+    classify_geospatial_file: Classify individual geospatial files
+    aggregate_geospatial_inventory: Aggregate files into collections
 """
 
 import re

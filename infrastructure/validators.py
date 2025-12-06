@@ -1,61 +1,16 @@
-# ============================================================================
-# CLAUDE CONTEXT - RESOURCE VALIDATORS
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: Infrastructure - Pre-flight resource validation
-# PURPOSE: Centralized validators for blob/container/table existence checks
-# LAST_REVIEWED: 28 NOV 2025
-# EXPORTS: RESOURCE_VALIDATORS registry, run_validators, individual validators
-# INTERFACES: ValidatorResult TypedDict
-# PYDANTIC_MODELS: None (uses TypedDict for lightweight validation results)
-# DEPENDENCIES: infrastructure.blob.BlobRepository, infrastructure.postgresql.PostgreSQLRepository
-# SOURCE: Called by JobBaseMixin.validate_job_parameters() during job submission
-# SCOPE: ALL job types that declare resource_validators
-# VALIDATION: Blob existence, container existence, PostGIS table existence
-# PATTERNS: Registry pattern, Strategy pattern (validators are interchangeable)
-# ENTRY_POINTS: JobBaseMixin calls run_validators(cls.resource_validators, params)
-# INDEX:
-#   - ValidatorResult TypedDict: line 55
-#   - RESOURCE_VALIDATORS registry: line 65
-#   - run_validators: line 85
-#   - validate_blob_exists: line 120
-#   - validate_container_exists: line 175
-#   - validate_table_exists: line 220
-#   - validate_table_not_exists: line 275
-#   - _get_zone_from_container: line 310 (helper)
-# ============================================================================
-
 """
-Pre-Flight Resource Validators
+Pre-Flight Resource Validators.
 
-This module provides a registry of validation functions for checking external
-resource existence BEFORE job creation. This prevents wasted database records
-and queue messages for jobs that would fail immediately.
+Registry of validation functions for checking external resource existence
+BEFORE job creation. Prevents wasted resources for jobs that would fail.
 
-Usage in Job Classes:
-    class ProcessVectorJob(JobBaseMixin, JobBase):
-        resource_validators = [
-            {
-                'type': 'blob_exists',
-                'container_param': 'container_name',
-                'blob_param': 'blob_name',
-                'error': 'Source file does not exist in Bronze storage'
-            }
-        ]
-
-The JobBaseMixin.validate_job_parameters() method automatically runs these
-validators after schema validation passes.
-
-Validator Interface:
-    def validator_fn(params: dict, config: dict) -> ValidatorResult:
-        '''
-        Args:
-            params: Validated job parameters (after schema validation)
-            config: Validator config from resource_validators declaration
-
-        Returns:
-            ValidatorResult with 'valid' bool and 'message' str
-        '''
+Exports:
+    RESOURCE_VALIDATORS: Registry of validator functions
+    run_validators: Execute validators against job parameters
+    validate_blob_exists: Check blob existence
+    validate_container_exists: Check container existence
+    validate_table_exists: Check PostGIS table existence
+    validate_table_not_exists: Check PostGIS table does not exist
 """
 
 from typing import Dict, Any, Callable, Optional, List

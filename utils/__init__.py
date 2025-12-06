@@ -1,27 +1,12 @@
-# ============================================================================
-# CLAUDE CONTEXT - UTILS PACKAGE INITIALIZATION
-# ============================================================================
-# CATEGORY: CROSS-CUTTING UTILITIES
-# PURPOSE: Validation and diagnostic utilities used throughout codebase
-# EPOCH: Shared by all epochs (utilities)# PURPOSE: Initialize the utils package for Azure Functions compatibility
-# EXPORTS: Import validator and logger utilities
-# INTERFACES: None
-# PYDANTIC_MODELS: None
-# DEPENDENCIES: None
-# SOURCE: Package initialization
-# SCOPE: Package-level
-# VALIDATION: None
-# PATTERNS: Package initialization
-# ENTRY_POINTS: from utils import *
-# INDEX: N/A
-# ============================================================================
-
 """
-Utilities package for rmhgeoapi Azure Functions.
+Utilities Package.
 
-This package contains utility modules that are used across the application:
-- import_validator: Validates module imports and dependencies
-- logger: Centralized logging functionality (future)
+Cross-cutting utilities used throughout the application.
+
+Exports:
+    ImportValidator: Module import validation
+    validator: Singleton ImportValidator instance
+    enforce_contract: Contract validation decorator
 """
 
 # Make imports available at package level for convenience

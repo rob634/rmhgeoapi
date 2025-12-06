@@ -1,32 +1,18 @@
-# ============================================================================
-# CLAUDE CONTEXT - EXCEPTIONS
-# ============================================================================
-# EPOCH: SHARED - BOTH EPOCHS
-# STATUS: Used by Epoch 3 and Epoch 4
-# NOTE: Careful migration required
-# PURPOSE: Custom exception hierarchy for distinguishing contract violations from business failures
-# EXPORTS: ContractViolationError, BusinessLogicError, ServiceBusError, DatabaseError, TaskExecutionError
-# INTERFACES: Standard Python exception hierarchy
-# PYDANTIC_MODELS: None
-# DEPENDENCIES: None (standard library only)
-# SOURCE: Clean architecture error handling strategy
-# SCOPE: Application-wide exception handling
-# VALIDATION: Type checking and contract enforcement
-# PATTERNS: Exception hierarchy for error categorization
-# ENTRY_POINTS: Raised at component boundaries for contract violations
-# INDEX: ContractViolationError:30, BusinessLogicError:50, Specific errors:70
-# ============================================================================
-
 """
-Custom Exception Hierarchy
+Custom Exception Hierarchy.
 
 Distinguishes between:
-1. Contract Violations (programming bugs that need fixing)
-2. Business Logic Failures (expected runtime issues)
+    1. Contract Violations (programming bugs)
+    2. Business Logic Failures (expected runtime issues)
 
-This separation ensures bugs are found quickly while the system
-remains robust to expected failures.
-
+Exports:
+    ContractViolationError: Programming bugs that need fixing
+    BusinessLogicError: Base class for business failures
+    ServiceBusError: Service Bus communication failures
+    DatabaseError: Database operation failures
+    TaskExecutionError: Task execution failures
+    ResourceNotFoundError: Missing resource errors
+    ValidationError: Business validation failures
 """
 
 

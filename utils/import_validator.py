@@ -1,51 +1,18 @@
-# ============================================================================
-# CLAUDE CONTEXT - UTILITY
-# ============================================================================
-# CATEGORY: CROSS-CUTTING UTILITIES
-# PURPOSE: Validation and diagnostic utilities used throughout codebase
-# EPOCH: Shared by all epochs (utilities)# PURPOSE: Zero-configuration import validation with auto-discovery of application modules
-# EXPORTS: ImportValidator, validator (singleton instance)
-# INTERFACES: None - utility class for import validation
-# PYDANTIC_MODELS: None - uses dict for validation results
-# DEPENDENCIES: os, sys, time, traceback, json, glob, importlib, pathlib, typing, datetime
-# SOURCE: Filesystem scanning for *.py files, predefined critical modules list, environment variables
-# SCOPE: Global application health monitoring with persistent registry tracking
-# VALIDATION: Two-tier system (critical external deps + auto-discovered app modules), import testing
-# PATTERNS: Singleton pattern, Registry pattern, Auto-discovery pattern, Health Check pattern
-# ENTRY_POINTS: validator.ensure_startup_ready(); health = validator.get_health_status()
-# INDEX: ImportValidator:59, validate_all_imports:390, ensure_startup_ready:604, get_health_status:644
-# ============================================================================
-
 """
-Import Validation System for Azure Geospatial ETL Pipeline.
+Import Validation System.
 
-This module provides fail-first import validation that ensures all critical dependencies
-are available before the Azure Function app starts processing requests. It combines
-startup validation with ongoing health monitoring through cached validation results.
+Provides fail-first import validation that ensures all critical dependencies
+are available before the Azure Function app starts processing requests.
 
 Key Features:
-    - Fail-fast startup validation prevents silent import failures
-    - Cached validation results (5-minute TTL) for performance
-    - Structured logging with visual indicators for debugging
-    - Environment-based activation (auto-detects Azure Functions)
-    - Detailed error reporting for missing dependencies
-    - Health check integration for ongoing monitoring
+    - Fail-fast startup validation
+    - Cached validation results (5-minute TTL)
+    - Environment-based activation
+    - Health check integration
 
-Architecture:
-    ImportValidator (Singleton) → Cached Results → Structured Logging
-                    ↓
-    Startup Validation (function_app.py) + Health Monitoring (trigger_health.py)
-
-Usage:
-    # Automatic startup validation
-    from utils import validator
-    validator.ensure_startup_ready()  # Raises ImportError if critical deps missing
-    
-    # Health check integration  
-    health_status = validator.get_health_status()  # Returns detailed status dict
-
-Version: 1.0.0
-Last Updated: September 2025
+Exports:
+    ImportValidator: Import validation class
+    validator: Singleton ImportValidator instance
 """
 
 import os

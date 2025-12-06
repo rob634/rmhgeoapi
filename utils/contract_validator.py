@@ -1,46 +1,17 @@
-# ============================================================================
-# CLAUDE CONTEXT - UTILITY
-# ============================================================================
-# CATEGORY: CROSS-CUTTING UTILITIES
-# PURPOSE: Validation and diagnostic utilities used throughout codebase
-# EPOCH: Shared by all epochs (utilities)# PURPOSE: Runtime type contract enforcement decorator for boundary methods ensuring fail-fast behavior
-# EXPORTS: enforce_contract decorator for automatic type validation
-# INTERFACES: Decorator pattern for method validation
-# PYDANTIC_MODELS: None (works with any types including Pydantic models)
-# DEPENDENCIES: functools, typing, inspect, logging
-# SOURCE: Python runtime type information
-# SCOPE: Application-wide boundary validation
-# VALIDATION: isinstance checks with detailed error messages
-# PATTERNS: Decorator pattern, Fail-fast principle
-# ENTRY_POINTS: @enforce_contract(params={...}, returns=Type)
-# INDEX: enforce_contract:65, validate_params:150, validate_return:200
-# ============================================================================
-
 """
-Contract Validator - Runtime Type Enforcement
+Contract Validator - Runtime Type Enforcement.
 
-This module provides a decorator for enforcing type contracts at method boundaries,
-ensuring that methods receive and return the expected types. This is critical for
-maintaining the fail-fast principle and catching contract violations immediately
-at boundaries rather than deep in business logic.
+Provides a decorator for enforcing type contracts at method boundaries.
+Ensures fail-fast behavior by catching contract violations at boundaries.
 
 Key Features:
-- Parameter type validation before method execution
-- Return type validation after method execution
-- Clear error messages indicating exact contract violations
-- Support for Union types and None values
-- Minimal performance overhead
-- Can be disabled via environment variable for production
+    - Parameter type validation before execution
+    - Return type validation after execution
+    - Support for Union types and None values
+    - Can be disabled via environment variable
 
-Usage:
-    @enforce_contract(
-        params={'job_record': JobRecord, 'stage': int},
-        returns=Dict[str, Any]
-    )
-    def process_job_stage(self, job_record, stage):
-        # Method implementation
-        return results
-
+Exports:
+    enforce_contract: Decorator for type contract enforcement
 """
 
 import os

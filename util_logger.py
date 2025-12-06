@@ -1,37 +1,23 @@
-# ============================================================================
-# CLAUDE CONTEXT - LOGGING
-# ============================================================================
-# EPOCH: SHARED - BOTH EPOCHS
-# STATUS: Used by Epoch 3 and Epoch 4
-# NOTE: Careful migration required
-# PURPOSE: JSON-only structured logging for Azure Functions with Application Insights
-# EXPORTS: ComponentType, LogLevel, LogContext, LogEvent, LoggerFactory, log_exceptions, get_memory_stats, log_memory_checkpoint
-# INTERFACES: Dataclass models, enums, factory, JSON formatter, exception decorator, DEBUG_MODE memory tracking
-# DEPENDENCIES: enum, dataclasses, typing, datetime, logging, json, traceback (stdlib only!)
-# SOURCE: Application architecture layers define component types
-# SCOPE: Foundation and factory layers for all logging in the application
-# VALIDATION: Simple type checking via dataclasses
-# PATTERNS: JSON-only output, Azure Functions integration, Exception decorator pattern
-# ENTRY_POINTS: LoggerFactory.create_logger(), @log_exceptions decorator
-# INDEX: ComponentType:50, LogLevel:70, LogContext:95, LogEvent:165, JSONFormatter:255, LoggerFactory:305, log_exceptions:510
-# ============================================================================
-
 """
-Unified Logger System - Combined Schemas and Factory
+Unified Logger System.
 
-Combines the foundation layer (schemas) and factory layer into a single
-module for simplified imports while maintaining pyramid architecture principles.
-
-This file replaces the previous logger_schemas.py and logger_factories.py
-with a unified implementation.
+JSON-only structured logging for Azure Functions with Application Insights.
 
 Design Principles:
-- Strong typing with dataclasses (stdlib only)
-- Enum safety for categories
-- Component-specific loggers
-- Clean factory pattern
-- No external dependencies
+    - Strong typing with dataclasses (stdlib only)
+    - Enum safety for categories
+    - Component-specific loggers
+    - Clean factory pattern
 
+Exports:
+    ComponentType: Enum for component types
+    LogLevel: Enum for log levels
+    LogContext: Logging context dataclass
+    LogEvent: Log event dataclass
+    LoggerFactory: Factory for creating loggers
+    log_exceptions: Exception logging decorator
+    get_memory_stats: Memory statistics helper
+    log_memory_checkpoint: Memory checkpoint logger
 """
 
 from enum import Enum

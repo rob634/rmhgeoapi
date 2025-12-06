@@ -1,35 +1,12 @@
-# ============================================================================
-# CLAUDE CONTEXT - GLOBAL STATISTICS SERVICE
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: Service - Calculate global min/max/mean/stddev for COG mosaics
-# PURPOSE: Pre-compute statistics for consistent TiTiler rendering
-# LAST_REVIEWED: 23 OCT 2025
-# EXPORTS: calculate_mosaic_statistics, calculate_percentile_statistics
-# INTERFACES: None (standalone service)
-# PYDANTIC_MODELS: None (returns plain dict)
-# DEPENDENCIES: numpy, rasterio (GDAL)
-# SOURCE: COG tiles from blob storage or local filesystem
-# SCOPE: Job-specific (runs during Stage 4 completion)
-# VALIDATION: Input validation via type hints and runtime checks
-# PATTERNS: Service layer, single responsibility
-# ENTRY_POINTS: Called by controller_stage_raster.py during Stage 4
-# INDEX:
-#   - calculate_mosaic_statistics: Line 50
-#   - calculate_percentile_statistics: Line 180
-# ============================================================================
-
 """
-Global Statistics Service
+Global Statistics Service.
 
 Calculates global min/max/mean/stddev across COG tile mosaics for consistent
-rendering. Uses COG internal overviews for fast sampling (same technique as
-GDAL/QGIS when opening VRT files).
+rendering. Uses COG internal overviews for fast sampling.
 
-This solves the "VRT seamless rendering" problem for MosaicJSON:
-- VRT: QGIS samples on-demand, caches in .qgs project file
-- Our approach: Pre-compute in Stage 4, store in STAC metadata
-
+Exports:
+    calculate_mosaic_statistics: Calculate statistics from COG tiles
+    calculate_percentile_statistics: Calculate percentile-based statistics
 """
 
 import numpy as np

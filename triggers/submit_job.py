@@ -1,132 +1,16 @@
-# ============================================================================
-# CLAUDE CONTEXT - HTTP TRIGGER
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: HTTP Trigger - Primary job submission endpoint for Job→Stage→Task architecture
-# PURPOSE: Primary job submission HTTP trigger handling POST /api/jobs/{job_type} requests
-# LAST_REVIEWED: 29 OCT 2025
-# EXPORTS: JobSubmissionTrigger, submit_job_trigger (singleton instance)
-# INTERFACES: JobManagementTrigger (inherited from http_base)
-# PYDANTIC_MODELS: None directly - uses job controller validation for parameters
-# DEPENDENCIES: http_base.JobManagementTrigger, azure.functions, jobs.ALL_JOBS, infrastructure.factory.RepositoryFactory
-# SOURCE: HTTP POST requests with JSON body containing job parameters
-# SCOPE: HTTP endpoint for job creation, validation, idempotency checks, and queue submission
-# VALIDATION: Job type validation (ALL_JOBS registry), parameter schema validation (via job controllers), DDH parameter checks
-# PATTERNS: Template Method (base class), Strategy (job controller routing), Idempotency (SHA256-based deduplication)
-# ENTRY_POINTS: POST /api/jobs/{job_type} - Used by function_app.py via submit_job_trigger singleton
-# INDEX: JobSubmissionTrigger:98, process_request:108, _get_controller_for_job_type:272
-# ============================================================================
-
 """
-Job Submission HTTP Trigger - Azure Geospatial ETL Pipeline
+Job Submission HTTP Trigger.
 
-HTTP endpoint implementation for job submission using BaseHttpTrigger pattern.
-Handles creation of new processing jobs with idempotent behavior, parameter validation,
-and job controller orchestration for the Job→Stage→Task architecture.
+HTTP endpoint for POST /api/jobs/{job_type} requests.
 
 Key Features:
-- Idempotent job creation with SHA256-based deduplication
-- Parameter validation using job controller-specific schemas
-- Explicit registry routing (jobs.ALL_JOBS) - no magic, crystal clear
-- Comprehensive error handling with detailed messages
-- Service Bus queue integration for asynchronous processing
-- DDH parameter validation for ETL operations
-- Service Bus toggle support (use_service_bus parameter) for migration flexibility
+    - Idempotent job creation with SHA256-based deduplication
+    - Parameter validation using job controller schemas
+    - Service Bus queue integration
 
-Job Creation Flow:
-1. Extract job_type from URL path parameter
-2. Extract and validate JSON request body parameters
-3. Route to appropriate job controller based on job_type (via ALL_JOBS registry)
-4. Validate parameters using controller's validate_job_parameters() method
-5. Generate deterministic job ID via controller's generate_job_id() method (SHA256)
-6. Check for existing job (idempotency) - return existing if already completed/in-progress
-7. Create job record via controller's create_job_record() method
-8. Queue job message via controller's queue_job() method (Service Bus)
-9. Return job creation response with queue information
-
-5-Method Job Interface Contract (enforced at import time):
-1. validate_job_parameters(params: dict) -> dict - Validate and normalize parameters
-2. generate_job_id(params: dict) -> str - SHA256 hash for idempotency
-3. create_job_record(job_id: str, params: dict) -> dict - Persist JobRecord
-4. queue_job(job_id: str, params: dict) -> dict - Send to Service Bus
-5. get_workflow_definition() -> WorkflowDefinition - Return workflow spec
-
-Supported Job Types (from jobs.ALL_JOBS):
-- hello_world: Multi-stage greeting workflow
-- sb_hello_world: Service Bus variant
-- process_vector: Idempotent PostGIS vector ingestion (DELETE+INSERT pattern)
-- process_raster_v2: Single raster ETL with COG conversion
-- process_large_raster_v2: Big raster tiling ETL (1-30 GB files)
-- process_raster_collection_v2: Multi-tile raster collection ETL
-- Additional job types via jobs/__init__.py ALL_JOBS registry
-
-Parameter Categories:
-- Standard DDH Parameters: dataset_id, resource_id, version_id, system
-- Job-specific Parameters: Varies by job_type (validated by job controller)
-- System Parameters: use_service_bus (toggle Service Bus vs Storage Queue routing)
-
-Integration Points:
-- JobManagementTrigger base class (http_base.py) - Common HTTP patterns
-- Job controllers (jobs/*.py) - Job-specific orchestration logic
-- RepositoryFactory - Database persistence
-- Service Bus - Asynchronous job/task processing
-- CoreMachine (core/machine.py) - Job orchestration engine
-
-API Endpoint:
-    POST /api/jobs/{job_type}
-
-Request Body:
-    {
-        "dataset_id": "container_name",     # Required for ETL operations
-        "resource_id": "file_or_folder",    # Required for ETL operations
-        "version_id": "v1.0",               # Required for ETL operations
-        "system": false,                    # Optional: bypass DDH validation
-        "use_service_bus": true,            # Optional: force Service Bus routing
-        ...additional_job_specific_params   # Varies by job_type
-    }
-
-Response (Success - New Job):
-    {
-        "job_id": "sha256_hash_of_parameters",
-        "status": "created",
-        "job_type": "operation_type",
-        "message": "Job created and queued for processing",
-        "parameters": {...validated_parameters},
-        "queue_info": {...queue_details},
-        "idempotent": false
-    }
-
-Response (Idempotent - Existing Completed Job):
-    {
-        "job_id": "sha256_hash_of_parameters",
-        "status": "already_completed",
-        "job_type": "operation_type",
-        "message": "Job already completed with identical parameters...",
-        "parameters": {...validated_parameters},
-        "result_data": {...existing_results},
-        "created_at": "2025-10-29T12:00:00Z",
-        "completed_at": "2025-10-29T12:05:00Z",
-        "idempotent": true
-    }
-
-Response (Idempotent - Existing In-Progress Job):
-    {
-        "job_id": "sha256_hash_of_parameters",
-        "status": "processing",
-        "job_type": "operation_type",
-        "message": "Job already exists with status: processing (not re-queued)",
-        "parameters": {...validated_parameters},
-        "current_stage": 2,
-        "total_stages": 3,
-        "idempotent": true
-    }
-
-Error Responses:
-- 400: Invalid parameters or missing required fields
-- 404: Unsupported job_type (not in ALL_JOBS registry)
-- 500: Internal server error during job creation or queue submission
-
-Last Updated: 29 OCT 2025
+Exports:
+    JobSubmissionTrigger: Job submission trigger class
+    submit_job_trigger: Singleton trigger instance
 """
 
 from typing import Dict, Any, List

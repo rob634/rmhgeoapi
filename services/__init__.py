@@ -102,15 +102,13 @@ from .fathom_etl import (
     fathom_spatial_merge,
     # Shared
     fathom_stac_register,
-    # Legacy (deprecated - too memory intensive)
-    fathom_inventory,
-    fathom_merge_stack,
+    # Legacy handlers ARCHIVED (05 DEC 2025) → docs/archive/jobs/fathom_legacy_dec2025/
 )
 from .geospatial_inventory import (
     classify_geospatial_file,
     aggregate_geospatial_inventory,
 )
-from .fathom_inventory import (
+from .fathom_container_inventory import (
     fathom_generate_scan_prefixes,
     fathom_scan_prefix,
     fathom_assign_grid_cells,
@@ -180,9 +178,7 @@ ALL_HANDLERS = {
     "fathom_spatial_merge": fathom_spatial_merge,     # Stage 2: Merge tiles band-by-band
     # Shared handler (both phases)
     "fathom_stac_register": fathom_stac_register,     # Stage 3: STAC collection/items
-    # Legacy handlers (deprecated - too memory intensive ~12GB/task)
-    "fathom_inventory": fathom_inventory,             # DEPRECATED: Country-wide grouping
-    "fathom_merge_stack": fathom_merge_stack,         # DEPRECATED: Country-wide spatial merge
+    # Legacy handlers ARCHIVED (05 DEC 2025) → docs/archive/jobs/fathom_legacy_dec2025/
     # Idempotent Vector ETL handlers (26 NOV 2025)
     "process_vector_prepare": process_vector_prepare,  # Stage 1: Load, validate, chunk, create table
     "process_vector_upload": process_vector_upload,    # Stage 2: DELETE+INSERT idempotent upload

@@ -1,10 +1,12 @@
 # Deployment Guide
 
-**Date**: 11 SEP 2025  
-**Author**: Robert and Geospatial Claude Legion  
-**Purpose**: Complete deployment procedures and monitoring guide
+**Date**: 05 DEC 2025
+**Author**: Robert and Geospatial Claude Legion
+**Purpose**: Complete deployment, monitoring, and authentication guide
 
-## 🚀 Quick Deployment
+---
+
+## Quick Deployment
 
 ### Primary Command
 ```bash
@@ -13,27 +15,24 @@ func azure functionapp publish rmhazuregeoapi --python --build remote
 
 ### Post-Deployment Verification
 ```bash
-# 1. Health Check (should return OK with component status)
+# 1. Health Check
 curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/health
 
-# 2. Redeploy Database Schema (REQUIRED after code changes!)
-curl -X POST https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/db/schema/redeploy?confirm=yes
+# 2. Full Schema Rebuild (REQUIRED after deployment!)
+curl -X POST "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/dbadmin/maintenance/full-rebuild?confirm=yes"
 
 # 3. Submit Test Job
 curl -X POST https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/jobs/submit/hello_world \
   -H "Content-Type: application/json" \
-  -d '{"message": "deployment test", "n": 3}'
+  -d '{"message": "deployment test"}'
 
 # 4. Check Job Status (use job_id from step 3)
 curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/jobs/status/{JOB_ID}
-
-# 5. Verify Tasks Created
-curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/db/tasks/{JOB_ID}
 ```
 
 ---
 
-## 📊 Azure Resources
+## Azure Resources
 
 ### Function App
 - **Name**: rmhazuregeoapi
@@ -42,12 +41,11 @@ curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/db/
 - **Plan**: Basic B3 (App Service Plan: ASP-rmhazure)
 - **Tier**: Basic (4 vCPU, 7 GB RAM)
 - **Region**: East US
-- **Migrated**: 12 NOV 2025 from rmhgeoapibeta (EP1 Premium → B3 Basic)
 
 ### Database
 - **Server**: rmhpgflex.postgres.database.azure.com
-- **Database**: postgres
-- **Schema**: geo
+- **Database**: geopgflex
+- **Schemas**: app, pgstac, geo, h3, platform
 - **Version**: PostgreSQL 14
 - **Extensions**: PostGIS 3.4
 
@@ -55,7 +53,7 @@ curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/db/
 - **Name**: rmhazuregeo
 - **Containers**:
   - `rmhazuregeobronze` - Raw input data
-  - `rmhazuregeosilver` - Processed data
+  - `rmhazuregeosilver` - Processed COGs
   - `rmhazuregeogold` - Published datasets (future)
 - **Queues**:
   - `geospatial-jobs` - Job orchestration
@@ -63,117 +61,242 @@ curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/db/
   - `*-poison` - Failed messages
 
 ### Resource Group
-- **Name**: rmhazure_rg (NOT rmhresourcegroup)
+- **Name**: rmhazure_rg
 - **Location**: East US
 
 ---
 
-## 🔍 Monitoring & Debugging
+## Managed Identity Authentication
 
-### Application Insights Logs
+### Overview
+The Function App uses User-Assigned Managed Identity for passwordless PostgreSQL authentication.
 
-#### Setup Bearer Token
-1. Go to Azure Portal → rmhgeoapibeta → Application Insights
-2. Navigate to API Access
-3. Create API Key with Read telemetry permission
-4. Copy the Application ID and API Key
+### Quick Setup (Production)
 
-#### Stream Logs via curl
+**1. Enable Managed Identity**
 ```bash
-# Set your credentials
-APP_ID="your-application-insights-id"
-API_KEY="your-api-key"
-
-# Stream recent logs
-curl -H "x-api-key: ${API_KEY}" \
-  "https://api.applicationinsights.io/v1/apps/${APP_ID}/events/traces?\$top=100"
-
-# Filter by operation
-curl -H "x-api-key: ${API_KEY}" \
-  "https://api.applicationinsights.io/v1/apps/${APP_ID}/events/traces?\$filter=operation/name eq 'ProcessJobQueue'"
-
-# Get exceptions
-curl -H "x-api-key: ${API_KEY}" \
-  "https://api.applicationinsights.io/v1/apps/${APP_ID}/events/exceptions?\$top=50"
+az functionapp identity assign \
+  --name rmhazuregeoapi \
+  --resource-group rmhazure_rg
 ```
 
-#### Using Azure CLI
+**2. Setup PostgreSQL User**
 ```bash
-# Login to Azure
+psql "host=rmhpgflex.postgres.database.azure.com dbname=geopgflex sslmode=require" \
+  < scripts/setup_managed_identity_postgres.sql
+```
+
+**3. Configure Function App**
+```bash
+az functionapp config appsettings set \
+  --name rmhazuregeoapi \
+  --resource-group rmhazure_rg \
+  --settings \
+    USE_MANAGED_IDENTITY=true \
+    MANAGED_IDENTITY_NAME=rmhazuregeoapi-identity
+```
+
+**4. Deploy & Test**
+```bash
+func azure functionapp publish rmhazuregeoapi --python --build remote
+curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/health
+```
+
+### Local Development
+
+**Option 1: Azure CLI (Recommended)**
+```bash
 az login
+# Your code works unchanged - no config needed!
+```
 
-# Set subscription
-az account set --subscription "your-subscription-id"
+**Option 2: Password Fallback**
+```json
+// local.settings.json
+{
+  "Values": {
+    "USE_MANAGED_IDENTITY": "false",
+    "POSTGIS_PASSWORD": "your-dev-password"
+  }
+}
+```
 
-# Stream live logs
-az webapp log tail --name rmhazuregeoapi --resource-group rmhazure_rg
-
-# Download logs
-az webapp log download --name rmhazuregeoapi --resource-group rmhazure_rg --log-file webapp_logs.zip
+### Verify Managed Identity
+```bash
+# Check logs for managed identity message
+# Should show: "Using Azure Managed Identity for PostgreSQL authentication"
+curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/health | jq .database
 ```
 
 ---
 
-## 🗄️ Database Management
+## Application Insights Logging
+
+### Prerequisites
+```bash
+# Must be logged in to Azure CLI
+az login
+
+# Verify login
+az account show --query "{subscription:name, user:user.name}" -o table
+```
+
+### Quick Query Pattern (Copy-Paste Ready)
+```bash
+cat > /tmp/query_ai.sh << 'EOF'
+#!/bin/bash
+TOKEN=$(az account get-access-token --resource https://api.applicationinsights.io --query accessToken -o tsv)
+curl -s -H "Authorization: Bearer $TOKEN" \
+  "https://api.applicationinsights.io/v1/apps/829adb94-5f5c-46ae-9f00-18e731529222/query" \
+  --data-urlencode "query=traces | where timestamp >= ago(15m) | order by timestamp desc | take 10" \
+  -G
+EOF
+chmod +x /tmp/query_ai.sh && /tmp/query_ai.sh | python3 -m json.tool
+```
+
+### Key Identifiers
+| Component | Value |
+|-----------|-------|
+| **App ID** | `829adb94-5f5c-46ae-9f00-18e731529222` |
+| **Resource Group** | `rmhazure_rg` |
+| **Function App** | `rmhazuregeoapi` |
+
+### Common KQL Queries
+
+**Recent Errors (Severity 3+)**
+```kql
+traces
+| where timestamp >= ago(1h)
+| where severityLevel >= 3
+| project timestamp, message, severityLevel, operation_Name
+| order by timestamp desc
+| limit 20
+```
+
+**Retry-Related Logs**
+```kql
+traces
+| where timestamp >= ago(15m)
+| where message contains "RETRY" or message contains "retry"
+| project timestamp, message, severityLevel
+| order by timestamp desc
+```
+
+**Task Processing**
+```kql
+traces
+| where timestamp >= ago(15m)
+| where message contains "Processing task" or message contains "task_id"
+| project timestamp, message, severityLevel
+| order by timestamp desc
+```
+
+**Health Endpoint**
+```kql
+union requests, traces
+| where timestamp >= ago(30m)
+| where operation_Name contains "health"
+| project timestamp, itemType, message, operation_Name
+| take 20
+```
+
+**Managed Identity Status**
+```kql
+traces
+| where timestamp >= ago(15m)
+| where message contains "managed identity"
+| take 10
+```
+
+### Azure Functions Severity Mapping Bug
+
+**Problem**: Azure SDK incorrectly maps `logging.DEBUG` to severity 1 (INFO) instead of 0 (DEBUG).
+
+**Workaround**: Query by message content, not severity level:
+```kql
+# DON'T use: where severityLevel == 0  (returns nothing)
+# DO use: where message contains '"level": "DEBUG"'
+
+traces
+| where timestamp >= ago(15m)
+| where message contains '"level": "DEBUG"'
+| order by timestamp desc
+```
+
+### Why Script Files Work
+
+The script file pattern works because:
+1. Token acquisition happens in script's own shell environment
+2. Variable properly scoped within script execution
+3. Curl inherits correct environment from script
+4. `--data-urlencode` handles URL encoding automatically
+
+**Token expiration**: Tokens expire after 1 hour. The script regenerates automatically.
+
+---
+
+## Database Management
 
 ### Schema Management Endpoints
 
-#### Redeploy Schema (Recommended)
+**Full Rebuild (Recommended)**
 ```bash
-# Drops and recreates all tables, enums, and functions
-curl -X POST https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/db/schema/redeploy?confirm=yes
+curl -X POST "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/dbadmin/maintenance/full-rebuild?confirm=yes"
 ```
 
-#### Nuclear Option - Drop Everything
+**Redeploy App Only**
 ```bash
-# WARNING: Destroys all data!
-curl -X POST https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/db/schema/nuke?confirm=yes
+curl -X POST "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/dbadmin/maintenance/redeploy?confirm=yes"
+```
+
+**Redeploy pgSTAC Only**
+```bash
+curl -X POST "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/dbadmin/maintenance/pgstac/redeploy?confirm=yes"
 ```
 
 ### Database Query Endpoints
 
-#### Get All Jobs
+**Query Jobs**
 ```bash
-# Basic query
-curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/db/jobs
+# All jobs
+curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/dbadmin/jobs
 
-# With filters
-curl "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/db/jobs?status=failed&limit=10"
+# Failed jobs
+curl "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/dbadmin/jobs?status=failed&limit=10"
 
 # Recent jobs (last 24 hours)
-curl "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/db/jobs?hours=24"
+curl "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/dbadmin/jobs?hours=24"
 ```
 
-#### Get Tasks for Job
+**Query Tasks**
 ```bash
-# All tasks for a specific job
-curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/db/tasks/{JOB_ID}
+# Tasks for specific job
+curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/dbadmin/tasks/{JOB_ID}
 
-# Failed tasks only
-curl "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/db/tasks?status=failed"
+# Failed tasks
+curl "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/dbadmin/tasks?status=failed"
 ```
 
-#### Database Statistics
+**Database Statistics**
 ```bash
-# Get counts and health metrics
-curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/db/stats
-
-# Test PostgreSQL functions
-curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/db/functions/test
-
-# Check enum types
-curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/db/enums/diagnostic
+curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/dbadmin/stats
 ```
 
-#### Comprehensive Debug Dump
+**Diagnostics**
 ```bash
-# Get all jobs and tasks in one call
-curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/db/debug/all?limit=100
+# Test functions
+curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/dbadmin/diagnostics/functions
+
+# Check enums
+curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/dbadmin/diagnostics/enums
+
+# All diagnostics
+curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/dbadmin/diagnostics/all
 ```
 
 ---
 
-## 🔧 Local Development Setup
+## Local Development
 
 ### Prerequisites
 ```bash
@@ -196,132 +319,203 @@ Create `local.settings.json`:
     "AzureWebJobsStorage": "UseDevelopmentStorage=true",
     "FUNCTIONS_WORKER_RUNTIME": "python",
     "STORAGE_ACCOUNT_NAME": "rmhazuregeo",
-    "STORAGE_ACCOUNT_KEY": "[REDACTED - See Azure Portal or Key Vault for actual key]",
+    "STORAGE_ACCOUNT_KEY": "[See Azure Portal]",
     "POSTGRES_HOST": "rmhpgflex.postgres.database.azure.com",
-    "POSTGRES_DB": "postgres",
-    "POSTGRES_USER": "your_username",
-    "POSTGRES_PASSWORD": "your_password",
-    "POSTGRES_SCHEMA": "geo"
+    "POSTGRES_DB": "geopgflex",
+    "USE_MANAGED_IDENTITY": "false",
+    "POSTGIS_PASSWORD": "your-password"
   }
 }
 ```
 
 ### Run Locally
 ```bash
-# Install dependencies
 pip install -r requirements.txt
-
-# Start function app
 func start
-
-# Test local endpoint
 curl http://localhost:7071/api/health
 ```
 
 ---
 
-## 🚨 Troubleshooting
+## Troubleshooting
 
 ### Common Issues
 
-#### 1. Jobs Stuck in QUEUED
-**Check**: Queue connection and poison queue
-```bash
-# Check poison queue
-curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/monitor/poison
+| Problem | Solution |
+|---------|----------|
+| Jobs stuck in QUEUED | Check poison queue: `curl .../api/monitor/poison` |
+| Tasks not completing | Check task details: `curl .../api/dbadmin/tasks/{JOB_ID}` |
+| Schema mismatch errors | Redeploy schema: `POST .../api/dbadmin/maintenance/full-rebuild?confirm=yes` |
+| "No credentials available" (local) | Run `az login` |
+| "Authentication failed" (Azure) | Re-run PostgreSQL managed identity setup |
+| Import errors | Check health endpoint for module status |
 
-# Check queue metrics
-az storage queue show --name geospatial-jobs --account-name rmhazuregeo
-```
+### Debugging Workflow
 
-#### 2. Tasks Not Completing
-**Check**: Database transactions and logs
-```bash
-# Get task details
-curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/db/tasks/{JOB_ID}
-
-# Check Application Insights for errors
-az webapp log tail --name rmhazuregeoapi --resource-group rmhazure_rg
-```
-
-#### 3. Schema Mismatch Errors
-**Solution**: Redeploy schema
-```bash
-curl -X POST https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/db/schema/redeploy?confirm=yes
-```
-
-#### 4. Import Errors
-**Check**: Health endpoint for module status
+**Step 1: Verify Function App is Running**
 ```bash
 curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/health
 ```
 
+**Step 2: Check Recent Activity**
+```bash
+# Use the query_ai.sh script with:
+union requests, traces | where timestamp >= ago(10m) | summarize count() by itemType
+```
+
+**Step 3: Find Errors**
+```bash
+traces | where timestamp >= ago(30m) | where severityLevel >= 3 | take 10
+```
+
 ---
 
-## 📋 Deployment Checklist
+## Deployment Checklist
 
 ### Pre-Deployment
 - [ ] Run tests locally with `func start`
-- [ ] Verify all environment variables in Azure Portal
+- [ ] Verify environment variables in Azure Portal
 - [ ] Check resource group and subscription
 
 ### Deployment
-- [ ] Run deployment command: `func azure functionapp publish rmhazuregeoapi --python --build remote`
+- [ ] Run: `func azure functionapp publish rmhazuregeoapi --python --build remote`
 - [ ] Wait for "Deployment successful" message
 - [ ] Check deployment logs for errors
 
 ### Post-Deployment
 - [ ] Run health check endpoint
-- [ ] Redeploy database schema
+- [ ] Run full schema rebuild
 - [ ] Submit test job
 - [ ] Verify job completes successfully
 - [ ] Check Application Insights for errors
 
-### Rollback Procedure
-```bash
-# If deployment fails, restore previous version
-az functionapp deployment list-publishing-profiles \
-  --name rmhazuregeoapi \
-  --resource-group rmhazure_rg
-
-# Redeploy specific version
-az functionapp deployment source config-zip \
-  --resource-group rmhazure_rg \
-  --name rmhazuregeoapi \
-  --src previous_deployment.zip
-```
-
 ---
 
-## 🔐 Security Notes
-
-### Managed Identity
-- Function App uses managed identity for storage access
-- No connection strings in code
-- RBAC permissions configured in Azure Portal
-
-### Key Vault (Future)
-- Currently disabled, using environment variables
-- Will store PostgreSQL credentials
-- Requires RBAC setup completion
-
-### Storage Access
-```
-Account: rmhazuregeo
-Key: [REDACTED - See Azure Portal or Key Vault for actual key]
-```
-**Note**: This key is for development only. Production will use managed identity.
-
----
-
-## ⚠️ Critical Warnings
+## Critical Warnings
 
 1. **NEVER** deploy to deprecated apps (rmhazurefn, rmhgeoapi, rmhgeoapifn, rmhgeoapibeta)
-2. **ALWAYS** redeploy schema after code changes affecting models
+2. **ALWAYS** run full-rebuild after deployment
 3. **NEVER** use production credentials in local development
 4. **ALWAYS** check poison queues after deployment
-5. **NOTE**: Migrated from EP1 Premium (rmhgeoapibeta) to B3 Basic (rmhazuregeoapi) on 12 NOV 2025
 
 ---
 
-*For architecture details, see ARCHITECTURE_REFERENCE.md. For current issues, see TODO_ACTIVE.md.*
+## Corporate/QA Environment: DBA Prerequisites (5 DEC 2025)
+
+### Problem
+
+In restricted corporate environments, the managed identity (e.g., `migeoetldbadminqa`) may not have:
+- `CREATEROLE` privilege to create new database roles
+- Permission to run `GRANT ... TO current_user`
+
+pypgstac migrate attempts these operations:
+```sql
+CREATE ROLE pgstac_admin;
+GRANT pgstac_admin TO current_user;  -- FAILS without CREATEROLE
+```
+
+### Solution: DBA Pre-requisites
+
+**A DBA must run the following SQL ONCE before first deployment:**
+
+```sql
+-- ========================================
+-- DBA Prerequisites for pypgstac migrate
+-- Run as superuser/DBA BEFORE application deployment
+-- ========================================
+
+-- Step 1: Check if roles already exist
+SELECT rolname FROM pg_roles WHERE rolname IN ('pgstac_admin', 'pgstac_ingest', 'pgstac_read');
+
+-- Step 2: Create roles (SKIP any roles returned by Step 1)
+CREATE ROLE pgstac_admin;
+CREATE ROLE pgstac_ingest;
+CREATE ROLE pgstac_read;
+
+-- Step 3: Grant roles WITH ADMIN OPTION to managed identity
+-- CRITICAL: WITH ADMIN OPTION is required (see explanation below)
+-- Replace 'migeoetldbadminqa' with your managed identity name
+GRANT pgstac_admin TO migeoetldbadminqa WITH ADMIN OPTION;
+GRANT pgstac_ingest TO migeoetldbadminqa WITH ADMIN OPTION;
+GRANT pgstac_read TO migeoetldbadminqa WITH ADMIN OPTION;
+
+-- Step 4: Verify configuration (screenshot this for service ticket)
+SELECT r.rolname AS role_name,
+       m.rolname AS granted_to,
+       am.admin_option AS has_admin_option
+FROM pg_auth_members am
+JOIN pg_roles r ON am.roleid = r.oid
+JOIN pg_roles m ON am.member = m.oid
+WHERE r.rolname IN ('pgstac_admin', 'pgstac_ingest', 'pgstac_read')
+AND m.rolname = 'migeoetldbadminqa'
+ORDER BY r.rolname;
+-- Expected: 3 rows, all with has_admin_option = true
+```
+
+**Why WITH ADMIN OPTION?**
+
+pypgstac's migration SQL unconditionally runs `GRANT pgstac_admin TO current_user`, even if the user is already a member. To execute a GRANT statement for a role, you must either:
+- Be a superuser
+- Have ADMIN OPTION on that role
+
+Simple role membership is NOT sufficient. WITH ADMIN OPTION grants only the narrow privilege to manage membership in these specific roles - it does NOT grant superuser or CREATEROLE privileges.
+
+### Timing: Roles Can Be Created BEFORE pgstac Schema
+
+PostgreSQL roles are **cluster-level objects** stored in `pg_roles`, completely independent of any schema. The DBA can run these commands:
+- On a fresh database with no schemas
+- Before the application is ever deployed
+- At any time before `pypgstac migrate` runs
+
+The roles won't have permissions until pypgstac creates the schema and applies grants to tables/functions, but they just need to **exist** and be **granted to the identity** beforehand.
+
+### Pre-flight Check Endpoint
+
+The application provides a pre-flight check to verify DBA prerequisites:
+
+```python
+# In your code
+from infrastructure.pgstac_bootstrap import PgStacBootstrap
+
+bootstrap = PgStacBootstrap()
+prereqs = bootstrap.check_dba_prerequisites(identity_name='migeoetldbadminqa')
+
+if not prereqs['ready']:
+    print("DBA must run:")
+    print(prereqs['dba_sql'])
+```
+
+### Error Detection
+
+If pypgstac migrate fails due to permission errors, the response includes:
+- `dba_action_required: True`
+- `dba_sql`: The exact SQL for the DBA to run
+- `missing_roles`: Roles that don't exist
+- `missing_grants`: Grants that are missing
+
+### Deployment Workflow (QA Environment)
+
+1. **DBA runs prerequisites** (once, before first deployment)
+2. **Deploy application**: `func azure functionapp publish ...`
+3. **Run full-rebuild**: `POST /api/dbadmin/maintenance/full-rebuild?confirm=yes`
+4. **pypgstac migrate succeeds** (roles already exist and granted)
+
+### Verification
+
+After DBA runs prerequisites, verify with:
+```sql
+-- Check roles exist
+SELECT rolname FROM pg_roles WHERE rolname LIKE 'pgstac_%';
+
+-- Check grants (replace with your identity name)
+SELECT r.rolname as role, m.rolname as member
+FROM pg_auth_members am
+JOIN pg_roles r ON am.roleid = r.oid
+JOIN pg_roles m ON am.member = m.oid
+WHERE r.rolname LIKE 'pgstac_%'
+AND m.rolname = 'migeoetldbadminqa';
+```
+
+---
+
+**Last Updated**: 05 DEC 2025

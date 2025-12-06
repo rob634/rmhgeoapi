@@ -1,43 +1,23 @@
-# ============================================================================
-# CLAUDE CONTEXT - JOB BASE MIXIN (START HERE FOR NEW PIPELINES!)
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: Core Infrastructure - Boilerplate elimination for job creation
-# PURPOSE: Provides default implementations of repetitive job methods to reduce
-#          new pipeline creation from 350 lines → 80 lines (77% reduction)
-# LAST_REVIEWED: 14 NOV 2025
-# EXPORTS: JobBaseMixin (inherit this for all new jobs!)
-# INTERFACES: None (this IS the interface jobs should use)
-# PYDANTIC_MODELS: Uses JobRecord, JobQueueMessage from core.models
-# DEPENDENCIES: hashlib, json, uuid, infrastructure.RepositoryFactory
-# SOURCE: Jobs inherit from this mixin to get default method implementations
-# SCOPE: All job types - provides universal boilerplate elimination
-# VALIDATION: Schema-based parameter validation (declarative)
-# PATTERNS: Mixin pattern (multiple inheritance), Template Method pattern
-# ENTRY_POINTS: class MyJob(JobBase, JobBaseMixin): ...
-# INDEX:
-#   - JobBaseMixin class definition: Line 75
-#   - validate_job_parameters(): Line 145
-#   - generate_job_id(): Line 280
-#   - create_job_record(): Line 330
-#   - queue_job(): Line 385
-# ============================================================================
-
 """
-JobBaseMixin - Default Implementations for Job Boilerplate
+JobBaseMixin - Default implementations for job boilerplate.
 
-╔══════════════════════════════════════════════════════════════════════════╗
-║                                                                          ║
-║  🚀 START HERE FOR NEW GEOSPATIAL DATA PIPELINES! 🚀                    ║
-║                                                                          ║
-║  This mixin eliminates 185 lines of boilerplate per job.                ║
-║  New pipelines: 30 minutes instead of 2 hours.                          ║
-║                                                                          ║
-╚══════════════════════════════════════════════════════════════════════════╝
+This mixin eliminates boilerplate code when creating new data pipelines.
+Provides default implementations of repetitive job methods.
 
-═══════════════════════════════════════════════════════════════════════════
-QUICK START: Create a New Pipeline in 5 Minutes
-═══════════════════════════════════════════════════════════════════════════
+Exports:
+    JobBaseMixin: Mixin class to inherit for all new jobs
+
+Dependencies:
+    hashlib, json, uuid: Standard library for ID generation
+    infrastructure.RepositoryFactory: Database access
+
+Usage:
+    class MyJob(JobBaseMixin, JobBase):
+        job_type = "my_job"
+        ...
+
+Quick Start: Create a New Pipeline
+-----------------------------------
 
 Example: Process flood risk raster data
 

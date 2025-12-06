@@ -1,30 +1,11 @@
-# ============================================================================
-# CLAUDE CONTEXT - PLATFORM CONFIGURATION
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: New module - Platform layer configuration (22 NOV 2025)
-# PURPOSE: DDH integration and Platform layer configuration
-# LAST_REVIEWED: 22 NOV 2025
-# EXPORTS: PlatformConfig, generate_platform_request_id
-# INTERFACES: Pydantic BaseModel
-# PYDANTIC_MODELS: PlatformConfig
-# DEPENDENCIES: pydantic, os, hashlib, re
-# SOURCE: Environment variables (PLATFORM_*)
-# SCOPE: Platform layer (DDH integration, anti-corruption layer)
-# VALIDATION: Pydantic v2 validation
-# PATTERNS: Value objects, factory methods, idempotent ID generation
-# ENTRY_POINTS: from config import PlatformConfig, generate_platform_request_id
-# INDEX: PlatformConfig:60, generate_platform_request_id:180
-# ============================================================================
-
 """
-Platform Layer Configuration - DDH Integration Anti-Corruption Layer
+Platform Layer Configuration.
 
-This module provides configuration for the Platform layer which acts as an
-Anti-Corruption Layer (ACL) between DDH (Data Discovery Hub) and CoreMachine.
+Provides configuration for the Platform layer which acts as an Anti-Corruption
+Layer (ACL) between DDH (Data Discovery Hub) and CoreMachine.
 
 Architecture:
-    DDH (external, unstable API) → Platform (translator) → CoreMachine (internal, stable)
+    DDH (external, unstable API) -> Platform (translator) -> CoreMachine (internal, stable)
 
 Key Responsibilities:
     1. Translate DDH identifiers to CoreMachine parameters
@@ -38,9 +19,6 @@ DDH Core Identifiers:
     - version_id: Version control (e.g., "v1.0", "2024-10-29")
 
     Combined: SHA256(dataset_id + resource_id + version_id)[:32] = idempotent request_id
-
-Created: 22 NOV 2025
-Author: Robert and Geospatial Claude Legion
 """
 
 import os

@@ -1,36 +1,19 @@
-# ============================================================================
-# CLAUDE CONTEXT - UPDATE MODEL SCHEMAS
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: Core schema - Repository update contracts
-# PURPOSE: Strongly-typed Pydantic models for repository update operations
-# LAST_REVIEWED: 16 OCT 2025
-# EXPORTS: TaskUpdateModel, JobUpdateModel, StageCompletionUpdateModel
-# INTERFACES: None - pure data models for contract enforcement
-# PYDANTIC_MODELS: TaskUpdateModel, JobUpdateModel, StageCompletionUpdateModel
-# DEPENDENCIES: pydantic, typing, datetime, enum
-# SOURCE: Controller and service layers creating updates
-# SCOPE: Repository layer contract enforcement
-# VALIDATION: Pydantic automatic validation with enum handling
-# PATTERNS: Data Transfer Object, Contract Enforcement, Type Safety
-# ENTRY_POINTS: from core.schema.updates import TaskUpdateModel, JobUpdateModel
-# ============================================================================
-
 """
-Repository Update Models - Contract Enforcement
+Repository Update Models - Contract Enforcement.
 
-This module provides strongly-typed Pydantic models for all repository
-update operations, replacing Dict[str, Any] with type-safe contracts.
+Strongly-typed Pydantic models for repository update operations,
+replacing Dict[str, Any] with type-safe contracts.
 
-These models ensure:
-1. Type safety at repository boundaries
-2. Automatic enum to string conversion
-3. Clear contracts about what fields can be updated
-4. Validation of update parameters
+Benefits:
+    - Type safety at repository boundaries
+    - Automatic enum to string conversion
+    - Clear contracts about updatable fields
+    - Validation of update parameters
 
-Critical for the clean architecture that replaces BaseController's
-accidental type protection with intentional contract enforcement.
-
+Exports:
+    TaskUpdateModel: Task update contract
+    JobUpdateModel: Job update contract
+    StageCompletionUpdateModel: Stage completion update contract
 """
 
 from typing import Dict, Any, Optional

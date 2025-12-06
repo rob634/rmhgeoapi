@@ -1,76 +1,22 @@
-# ============================================================================
-# CLAUDE CONTEXT - H3 BATCH TRACKING REPOSITORY
-# ============================================================================
-# EPOCH: 4 - ACTIVE
-# STATUS: Infrastructure - Batch-level idempotency tracking for H3 operations
-# PURPOSE: Track batch completion status for resumable H3 jobs
-# LAST_REVIEWED: 26 NOV 2025
-# EXPORTS: H3BatchTracker
-# INTERFACES: PostgreSQLRepository (inherits connection mgmt, transactions)
-# PYDANTIC_MODELS: None (uses simple dicts)
-# DEPENDENCIES: psycopg, psycopg.sql, infrastructure.postgresql.PostgreSQLRepository
-# SOURCE: PostgreSQL database (h3.batch_progress table)
-# SCOPE: Batch-level idempotency for H3 cascade and future aggregation jobs
-# VALIDATION: SQL injection prevention via psycopg.sql.Identifier() composition
-# PATTERNS: Repository pattern, UPSERT for retry handling, Safe SQL composition
-# ENTRY_POINTS: tracker = H3BatchTracker(); tracker.is_batch_completed(job_id, batch_id)
-# INDEX:
-#   - H3BatchTracker:55
-#   - is_batch_completed:85
-#   - get_completed_batch_ids:120
-#   - start_batch:160
-#   - complete_batch:210
-#   - fail_batch:260
-#   - get_batch_summary:300
-# ============================================================================
-
 """
-H3 Batch Tracking Repository - Batch-level idempotency for H3 operations
+H3 Batch Tracking Repository - Batch-Level Idempotency for H3 Operations.
 
-This module provides batch completion tracking to enable resumable H3 jobs.
-When a job fails partway through Stage 2 (cascade fan-out with ~200 batches),
-only incomplete batches are re-executed on retry instead of all batches.
-
-Architecture:
-    PostgreSQLRepository (base class - connection mgmt, transactions)
-        ↓
-    H3BatchTracker (this class - batch progress operations)
+Provides batch completion tracking to enable resumable H3 jobs. When a job fails
+partway through a fan-out stage, only incomplete batches are re-executed on retry.
 
 Idempotency Pattern:
-    LAYER 1: Database Constraints (Data Integrity)
-        h3.grids: ON CONFLICT (h3_index, grid_id) DO NOTHING
-
-    LAYER 2: Batch Tracking (Workflow Orchestration) - THIS CLASS
-        h3.batch_progress table tracks completion
-        Job queries completed before creating tasks
-        Handler checks before processing
-
-    LAYER 3: Defensive Coding (Edge Cases)
-        Handler early-exit if batch already in DB
+    LAYER 1: Database constraints (ON CONFLICT DO NOTHING)
+    LAYER 2: Batch tracking (this class) - h3.batch_progress table
+    LAYER 3: Defensive handler early-exit checks
 
 Workflow:
-    1. Job creates N batch tasks (each gets a unique batch_id)
-    2. Handler calls start_batch() → creates row with status='processing'
+    1. Job creates N batch tasks with unique batch_ids
+    2. Handler calls start_batch() → status='processing'
     3. Handler completes → complete_batch() sets status='completed'
-    4. On job restart, create_tasks_for_stage() queries completed batches
-    5. Only incomplete batches get new tasks created
+    4. On restart, only incomplete batches get new tasks
 
-Usage:
-    tracker = H3BatchTracker()
-
-    # Check if batch already done (handler early-exit)
-    if tracker.is_batch_completed(job_id, batch_id):
-        return {"success": True, "result": {"skipped": True}}
-
-    # Record batch start
-    tracker.start_batch(job_id, batch_id, stage=2, operation_type="cascade_h3_descendants")
-
-    try:
-        # ... do work ...
-        tracker.complete_batch(job_id, batch_id, items_processed=100, items_inserted=95)
-    except Exception as e:
-        tracker.fail_batch(job_id, batch_id, str(e))
-        raise
+Exports:
+    H3BatchTracker: Repository for batch progress tracking
 """
 
 import logging

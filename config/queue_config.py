@@ -1,35 +1,17 @@
-# ============================================================================
-# CLAUDE CONTEXT - QUEUE CONFIGURATION
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: New module - Phase 1 of config.py refactoring (20 NOV 2025)
-# PURPOSE: Azure Service Bus queue configuration
-# LAST_REVIEWED: 20 NOV 2025
-# EXPORTS: QueueConfig, QueueNames
-# INTERFACES: Pydantic BaseModel
-# PYDANTIC_MODELS: QueueConfig
-# DEPENDENCIES: pydantic, os, typing
-# SOURCE: Environment variables (ServiceBusConnection, SERVICE_BUS_*)
-# SCOPE: Queue-specific configuration
-# VALIDATION: Pydantic v2 validation
-# PATTERNS: Value objects, constants
-# ENTRY_POINTS: from config import QueueConfig, QueueNames
-# INDEX: QueueNames:37, QueueConfig:48
-# ============================================================================
-
 """
-Azure Service Bus Queue Configuration
+Azure Service Bus Queue Configuration.
 
 Provides configuration for:
-- Service Bus connection settings
-- Queue names (jobs, tasks)
-- Batch processing settings
-- Retry configuration
-
-This module was extracted from config.py (lines 865-907, 1622-1626) as part of the
-god object refactoring (20 NOV 2025).
+    - Service Bus connection settings
+    - Queue names (jobs, tasks)
+    - Batch processing settings
+    - Retry configuration
 
 Note: This is a SERVICE BUS ONLY application - Storage Queues are NOT supported.
+
+Exports:
+    QueueConfig: Pydantic queue configuration model
+    QueueNames: Queue name constants
 """
 
 import os

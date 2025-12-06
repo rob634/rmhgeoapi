@@ -1,38 +1,19 @@
-# ============================================================================
-# CLAUDE CONTEXT - VAULT REPOSITORY
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: Infrastructure - Azure Key Vault repository (disabled pending RBAC)
-# PURPOSE: Azure Key Vault repository for secure credential management (currently disabled pending RBAC setup)
-# LAST_REVIEWED: 29 OCT 2025
-# EXPORTS: VaultRepository, VaultRepositoryFactory, VaultAccessError
-# INTERFACES: None - standalone repository for Key Vault operations
-# PYDANTIC_MODELS: None - uses dict for vault information
-# DEPENDENCIES: azure.keyvault.secrets, azure.identity, azure.core, util_logger, typing, datetime, config
-# SOURCE: Azure Key Vault via DefaultAzureCredential, environment variables for vault name
-# SCOPE: Global credential management for database passwords and application secrets
-# VALIDATION: Secret name validation, credential authentication, vault access permissions
-# PATTERNS: Repository pattern, Factory pattern, Caching pattern (with TTL), Singleton (via factory)
-# ENTRY_POINTS: VaultRepositoryFactory.create_with_config() - Currently disabled
-# INDEX: VaultRepository:46, get_secret:83, get_database_password:128, VaultRepositoryFactory:223
-# ============================================================================
-
 """
-Azure Key Vault Repository - Secure Credential Management
+Azure Key Vault Repository - Secure Credential Management.
 
 Provides secure access to sensitive configuration values like database passwords
-following the same repository pattern as other data access layers.
+following the repository pattern.
 
 Security Features:
-- DefaultAzureCredential for managed identity authentication
-- Credential caching for performance 
-- Explicit error handling for vault access failures
-- Type-safe credential retrieval with validation
+    - DefaultAzureCredential for managed identity authentication
+    - Credential caching with TTL for performance
+    - Explicit error handling for vault access failures
+    - Type-safe credential retrieval with validation
 
-Integration with Database Repository:
-- PostgresAdapter will use VaultRepository to retrieve POSTGIS_PASSWORD
-- Eliminates hardcoded credentials in connection strings
-- Supports Azure Functions managed identity authentication
+Exports:
+    VaultRepository: Key Vault access repository
+    VaultRepositoryFactory: Factory for creating vault repositories
+    VaultAccessError: Custom exception for vault access failures
 """
 
 from typing import Optional, Dict, Any

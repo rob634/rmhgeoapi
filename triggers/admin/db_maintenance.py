@@ -151,6 +151,8 @@ class AdminDbMaintenanceTrigger:
                 return self._redeploy_schema(req)
             elif path == 'pgstac/redeploy' or path == 'redeploy-pgstac':
                 return self._redeploy_pgstac_schema(req)
+            elif path == 'pgstac/check-prerequisites' or path == 'check-prerequisites':
+                return self._check_pgstac_prerequisites(req)
             elif path == 'full-rebuild':
                 return self._full_rebuild(req)
             elif path == 'cleanup':
@@ -1381,6 +1383,70 @@ class AdminDbMaintenanceTrigger:
             return func.HttpResponse(
                 body=json.dumps({
                     'error': str(e),
+                    'timestamp': datetime.now(timezone.utc).isoformat()
+                }),
+                status_code=500,
+                mimetype='application/json'
+            )
+
+    def _check_pgstac_prerequisites(self, req: func.HttpRequest) -> func.HttpResponse:
+        """
+        Check if DBA prerequisites for pypgstac are in place (5 DEC 2025).
+
+        GET /api/dbadmin/maintenance/pgstac/check-prerequisites
+        GET /api/dbadmin/maintenance/pgstac/check-prerequisites?identity=migeoetldbadminqa
+
+        In corporate/QA environments, a DBA must:
+        1. Create pgstac roles (pgstac_admin, pgstac_ingest, pgstac_read)
+        2. Grant those roles to the managed identity
+
+        This endpoint verifies these prerequisites BEFORE running pypgstac migrate.
+
+        Query Parameters:
+            identity: Optional managed identity name to check (defaults to config value)
+
+        Returns:
+            {
+                "ready": true/false,
+                "roles_exist": {"pgstac_admin": true, ...},
+                "roles_granted": {"pgstac_admin": true, ...},
+                "identity_name": "rmhpgflexadmin",
+                "missing_roles": [],
+                "missing_grants": [],
+                "dba_sql": "-- SQL for DBA to run if not ready"
+            }
+        """
+        logger.info("🔍 Checking pgSTAC DBA prerequisites...")
+
+        try:
+            # Get optional identity parameter
+            identity_name = req.params.get('identity')
+
+            from infrastructure.pgstac_bootstrap import PgStacBootstrap
+            bootstrap = PgStacBootstrap()
+
+            # Run prerequisite check
+            result = bootstrap.check_dba_prerequisites(identity_name=identity_name)
+
+            result["timestamp"] = datetime.now(timezone.utc).isoformat()
+
+            status_code = 200 if result.get('ready') else 200  # Always 200, ready status in body
+
+            logger.info(f"✅ DBA prerequisites check: ready={result.get('ready')}")
+
+            return func.HttpResponse(
+                body=json.dumps(result, indent=2),
+                status_code=status_code,
+                mimetype='application/json'
+            )
+
+        except Exception as e:
+            logger.error(f"❌ Error checking DBA prerequisites: {e}")
+            logger.error(traceback.format_exc())
+            return func.HttpResponse(
+                body=json.dumps({
+                    'error': str(e),
+                    'error_type': type(e).__name__,
                     'timestamp': datetime.now(timezone.utc).isoformat()
                 }),
                 status_code=500,

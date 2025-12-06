@@ -1,35 +1,17 @@
-# ============================================================================
-# CLAUDE CONTEXT - CORE MODELS - ETL TRACKING
-# ============================================================================
-# EPOCH: 4 - ACTIVE
-# STATUS: Core data models - ETL tracking records
-# PURPOSE: Pydantic models for ETL pipeline tracking tables
-# LAST_REVIEWED: 05 DEC 2025
-# EXPORTS: EtlFathomRecord
-# INTERFACES: Pure data model for database persistence
-# PYDANTIC_MODELS: EtlFathomRecord
-# DEPENDENCIES: pydantic, datetime, typing
-# SOURCE: Created for Fathom flood hazard ETL pipeline
-# SCOPE: Tracking source files → processed outputs for multi-phase ETL
-# VALIDATION: Field validation via Pydantic, max_length constraints
-# PATTERNS: Data model pattern
-# ENTRY_POINTS: from core.models.etl import EtlFathomRecord
-# ============================================================================
-
 """
-ETL Tracking Models
+ETL Tracking Models.
 
-Pydantic models for ETL pipeline tracking tables. These tables track
-source files through multi-phase processing pipelines, enabling:
-- Inventory of source files from blob storage
-- Tracking phase 1 outputs (e.g., band stacking)
-- Tracking phase 2 outputs (e.g., spatial merging)
-- Idempotent processing (skip already-processed files)
-- Progress monitoring and resumption
+Pydantic models for ETL pipeline tracking tables. Tracks source files
+through multi-phase processing pipelines for idempotent processing.
 
-EtlFathomRecord: Tracks Fathom flood hazard files through 2-phase ETL
-- Phase 1: Stack 8 return period TIFs → 1 multi-band COG per tile+scenario
-- Phase 2: Merge NxN tiles → 1 merged COG per grid cell
+Features:
+    - Inventory of source files from blob storage
+    - Phase 1/2 output tracking
+    - Idempotent processing (skip already-processed files)
+    - Progress monitoring and resumption
+
+Exports:
+    EtlFathomRecord: Tracks Fathom flood hazard files through 2-phase ETL
 """
 
 from datetime import datetime, timezone

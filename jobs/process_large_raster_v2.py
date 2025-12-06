@@ -33,14 +33,11 @@ Five-stage workflow:
 4. Create MosaicJSON (Fan-in): Aggregate into virtual mosaic
 5. Create STAC Collection (Fan-in): Collection-level STAC item
 
-Key improvements over process_large_raster.py:
-- Clean slate parameters (no deprecated fields)
-- Preflight validation with blob_exists_with_size (size + existence check)
-- Size range enforcement (min 100MB, max 30GB)
-- ~200 lines vs 790 lines (75% reduction)
-
-Created: 30 NOV 2025
-Author: Robert and Geospatial Claude Legion
+Key improvements:
+    - Clean slate parameters (no deprecated fields)
+    - Preflight validation with blob_exists_with_size
+    - Size range enforcement (min 100MB, max 30GB)
+    - Reduced boilerplate via mixin pattern
 """
 
 from typing import Dict, Any, List, Optional

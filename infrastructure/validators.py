@@ -56,9 +56,6 @@ Validator Interface:
         Returns:
             ValidatorResult with 'valid' bool and 'message' str
         '''
-
-Author: Robert and Geospatial Claude Legion
-Created: 28 NOV 2025
 """
 
 from typing import Dict, Any, Callable, Optional, List

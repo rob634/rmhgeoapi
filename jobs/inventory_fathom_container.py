@@ -30,13 +30,10 @@ Parallelization Strategy:
 - Stage 4: Generate summary statistics
 
 Benefits:
-- Ground truth from actual blob storage (not CSV)
-- Idempotent (ON CONFLICT DO UPDATE)
-- Enables resumable processing
-- SQL-queryable progress tracking
-
-Author: Robert and Geospatial Claude Legion
-Date: 05 DEC 2025
+    - Ground truth from actual blob storage (not CSV)
+    - Idempotent (ON CONFLICT DO UPDATE)
+    - Enables resumable processing
+    - SQL-queryable progress tracking
 """
 
 from typing import List, Dict, Any

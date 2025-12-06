@@ -28,14 +28,11 @@ Architecture:
 - Stage 2 (process_vector_upload): Fan-out DELETE+INSERT for each chunk
 - Stage 3 (create_vector_stac): Reuse existing idempotent STAC handler
 
-Key Differences from ingest_vector:
-- Uses JobBaseMixin (77% less code, declarative validation)
-- Stage 2 uses DELETE+INSERT pattern (not plain INSERT)
-- etl_batch_id column tracks chunks for idempotent retry
-- No duplicate rows possible on task retry
-
-Created: 26 NOV 2025
-Author: Robert and Geospatial Claude Legion
+Key Features:
+    - Uses JobBaseMixin for declarative validation
+    - Stage 2 uses DELETE+INSERT pattern (idempotent)
+    - etl_batch_id column tracks chunks for retry
+    - No duplicate rows possible on task retry
 """
 
 from typing import Dict, Any, List, Optional

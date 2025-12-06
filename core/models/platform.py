@@ -1,48 +1,23 @@
-# ============================================================================
-# CLAUDE CONTEXT - PLATFORM MODELS (THIN TRACKING LAYER)
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: Core Models - Platform API request thin tracking (22 NOV 2025)
-# PURPOSE: Pydantic models for Platform layer - SIMPLIFIED to thin tracking only
-# LAST_REVIEWED: 22 NOV 2025
-# EXPORTS: ApiRequest, PlatformRequestStatus, DataType, OperationType, PlatformRequest
-# INTERFACES: BaseModel (Pydantic)
-# PYDANTIC_MODELS: All models in this file define database schema via Infrastructure-as-Code
-# DEPENDENCIES: pydantic, typing, datetime, enum, config
-# SOURCE: These models ARE the schema - database DDL auto-generated from field definitions
-# SCOPE: Platform layer - Anti-Corruption Layer between DDH and CoreMachine
-# VALIDATION: Pydantic field validation + config-based validation
-# PATTERNS: Infrastructure-as-Code, Anti-Corruption Layer, Thin Tracking
-# ENTRY_POINTS: from core.models.platform import ApiRequest, PlatformRequest
-# INDEX:
-#   - Enums: Line 60
-#   - PlatformRequest (DTO): Line 95
-#   - ApiRequest (DB): Line 210
-# ============================================================================
-
 """
-Platform Layer Data Models - Thin Tracking Pattern (22 NOV 2025)
+Platform Layer Data Models - Thin Tracking Pattern.
 
-SIMPLIFIED ARCHITECTURE:
-    Platform is an Anti-Corruption Layer (ACL) that translates DDH API to CoreMachine.
-    It does NOT contain orchestration logic - that belongs in CoreMachine.
+Platform is an Anti-Corruption Layer (ACL) that translates DDH API to CoreMachine.
+Uses thin tracking with 1:1 mapping: api_requests → job_id.
 
-    OLD (Complex Orchestration):
-        api_requests → orchestration_jobs → jobs (many-to-many tracking)
-        - Job chaining logic in Platform
-        - Completion callbacks from CoreMachine
-        - Multi-job tracking per request
-
-    NEW (Thin Tracking):
-        api_requests → job_id (1:1 mapping)
-        - Platform translates DDH params → CoreMachine params
-        - Creates ONE CoreMachine job per request
-        - Stores request_id → job_id for DDH status lookups
-        - No orchestration - CoreMachine handles job internals
+Architecture:
+    - Platform translates DDH params → CoreMachine params
+    - Creates ONE CoreMachine job per request
+    - Stores request_id → job_id for DDH status lookups
+    - No orchestration - CoreMachine handles job internals
 
 Request ID Generation:
     SHA256(dataset_id + resource_id + version_id)[:32]
-    - Idempotent: same inputs = same ID
+    Idempotent: same inputs = same ID
+
+Exports:
+    ApiRequest: Database model for request tracking
+    PlatformRequest: DTO for incoming requests
+    PlatformRequestStatus, DataType, OperationType: Enums
     - Natural deduplication of resubmitted requests
 
 Database Tables Auto-Generated (stored in app schema with jobs/tasks):

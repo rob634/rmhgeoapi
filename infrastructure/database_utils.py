@@ -1,49 +1,17 @@
-# ============================================================================
-# CLAUDE CONTEXT - DATABASE UTILITIES
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: Infrastructure - Shared PostgreSQL bulk operation utilities
-# PURPOSE: Reusable batching patterns for efficient database operations
-# LAST_REVIEWED: 9 NOV 2025
-# EXPORTS: batched_executemany (sync), batched_executemany_async (async)
-# INTERFACES: Works with psycopg (sync) and asyncpg (async)
-# DEPENDENCIES: psycopg[binary], asyncpg (optional)
-# SOURCE: Used by H3, vector, and raster workflows
-# SCOPE: All PostgreSQL bulk insert/update operations
-# VALIDATION: Type hints, batch size validation
-# PATTERNS: Generator pattern, batch processing, progress logging
-# ENTRY_POINTS: Import and use in service handlers
-# INDEX:
-#   - Lines 50-115: batched_executemany (sync psycopg version)
-#   - Lines 120-185: batched_executemany_async (async asyncpg version)
-# ============================================================================
-
 """
-Shared PostgreSQL Bulk Operation Utilities
+Shared PostgreSQL Bulk Operation Utilities.
 
 Provides reusable, optimized patterns for bulk database operations
 using batched executemany() for maximum performance.
 
 Performance Comparison:
-- Row-by-row: ~100-500 rows/second (1 round-trip per row)
-- Batched executemany(): ~10,000-50,000 rows/second (1 round-trip per batch)
-- PostgreSQL COPY: ~50,000-100,000 rows/second (bulk binary protocol)
+    Row-by-row: ~100-500 rows/second
+    Batched executemany(): ~10,000-50,000 rows/second
+    PostgreSQL COPY: ~50,000-100,000 rows/second
 
-Usage:
-    Sync (psycopg):
-        from infrastructure.database_utils import batched_executemany
-
-        stmt = sql.SQL("INSERT INTO geo.features VALUES (%s, %s)")
-        rows = [(1, 'a'), (2, 'b'), (3, 'c')]
-        total = batched_executemany(cur, stmt, iter(rows), batch_size=1000)
-
-    Async (asyncpg):
-        from infrastructure.database_utils import batched_executemany_async
-
-        stmt = "INSERT INTO geo.h3_grids VALUES ($1, $2, $3)"
-        rows = [(1, 4, 'POLYGON(...)'), ...]
-        total = await batched_executemany_async(conn, stmt, iter(rows), 1000)
-
+Exports:
+    batched_executemany: Sync bulk insert using psycopg
+    batched_executemany_async: Async bulk insert using asyncpg
 """
 
 from typing import Iterator, Tuple, Any, Optional

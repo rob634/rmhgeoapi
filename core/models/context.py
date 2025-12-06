@@ -1,26 +1,13 @@
-# ============================================================================
-# CLAUDE CONTEXT - CORE MODELS - CONTEXT
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: Core models - Execution context data structures
-# PURPOSE: Pure data models for execution contexts
-# LAST_REVIEWED: 16 OCT 2025
-# EXPORTS: JobExecutionContext, StageExecutionContext, TaskExecutionContext
-# INTERFACES: Pydantic BaseModel
-# PYDANTIC_MODELS: Various execution context models
-# DEPENDENCIES: pydantic, datetime, typing
-# SOURCE: Extracted from schema_base.py (data structure only)
-# SCOPE: Execution context data models
-# VALIDATION: Field validation via Pydantic
-# PATTERNS: Data model pattern, no business logic
-# ENTRY_POINTS: from core.models.context import JobExecutionContext
-# ============================================================================
-
 """
-Pure data models for execution contexts.
+Execution Context Data Models.
 
-These models represent the context in which jobs, stages, and tasks execute.
-No business logic - just data structures.
+Represents context in which jobs, stages, and tasks execute.
+No business logic - pure data structures.
+
+Exports:
+    JobExecutionContext: Context for job execution
+    StageExecutionContext: Context for stage execution
+    TaskExecutionContext: Context for task execution
 """
 
 from datetime import datetime

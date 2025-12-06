@@ -54,9 +54,10 @@ Job Creation Flow:
 Supported Job Types (from jobs.ALL_JOBS):
 - hello_world: Multi-stage greeting workflow
 - sb_hello_world: Service Bus variant
-- ingest_vector: PostGIS vector ingestion
-- process_large_raster: Big Raster ETL with COG conversion
-- list_container_contents: Container blob analysis (diamond pattern)
+- process_vector: Idempotent PostGIS vector ingestion (DELETE+INSERT pattern)
+- process_raster_v2: Single raster ETL with COG conversion
+- process_large_raster_v2: Big raster tiling ETL (1-30 GB files)
+- process_raster_collection_v2: Multi-tile raster collection ETL
 - Additional job types via jobs/__init__.py ALL_JOBS registry
 
 Parameter Categories:

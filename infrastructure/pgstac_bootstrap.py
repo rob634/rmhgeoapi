@@ -1,35 +1,18 @@
-# ============================================================================
-# CLAUDE CONTEXT - STAC INFRASTRUCTURE
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: Infrastructure - PgSTAC setup and management
-# PURPOSE: STAC (SpatioTemporal Asset Catalog) infrastructure for PgSTAC setup and management
-# LAST_REVIEWED: 29 OCT 2025
-# EXPORTS: StacInfrastructure class with schema detection, installation, and verification
-# INTERFACES: None - concrete infrastructure class
-# PYDANTIC_MODELS: None - uses dict responses for status
-# DEPENDENCIES: pypgstac (0.8.5), psycopg, typing, subprocess, config
-# SOURCE: PostgreSQL database connection from config, environment variables for pypgstac
-# SCOPE: One-time PgSTAC installation, idempotent schema checks, version management
-# VALIDATION: Schema existence checks, version verification, role validation
-# PATTERNS: Infrastructure pattern, Idempotent operations
-# ENTRY_POINTS: StacInfrastructure().check_installation(), install_pgstac(), verify_installation()
-# INDEX: StacInfrastructure:50, check_installation:90, install_pgstac:150, verify_installation:250
-# ============================================================================
-
 """
-STAC Infrastructure Management
+STAC Infrastructure Management.
 
 Handles PgSTAC installation, schema detection, and configuration.
 PgSTAC controls its own schema naming and structure - this module
 provides safe, idempotent installation and verification.
 
 Key Design Principles:
-- PgSTAC owns the 'pgstac' schema (cannot be changed)
-- Installation is idempotent (safe to run multiple times)
-- Separate from app schema (app.jobs, app.tasks)
-- Production-safe: preserves data, only updates functions
+    - PgSTAC owns the 'pgstac' schema (cannot be changed)
+    - Installation is idempotent (safe to run multiple times)
+    - Separate from app schema (app.jobs, app.tasks)
+    - Production-safe: preserves data, only updates functions
 
+Exports:
+    PgStacBootstrap: Infrastructure class for schema setup and management
 """
 
 from typing import Dict, Any, Optional, List
@@ -94,6 +77,32 @@ class PgStacBootstrap:
 
     # Tier descriptions imported from config.defaults.STACDefaults
     TIER_DESCRIPTIONS = STACDefaults.TIER_DESCRIPTIONS
+
+    # =========================================================================
+    # CORPORATE/QA ENVIRONMENT ROLE PREREQUISITES (5 DEC 2025)
+    # =========================================================================
+    # In restricted environments, the DBA must pre-create roles and grant them
+    # WITH ADMIN OPTION to the managed identity. This is because:
+    #
+    # 1. pypgstac migrate unconditionally runs: GRANT pgstac_admin TO current_user
+    # 2. Even if already granted, executing GRANT requires ADMIN OPTION on the role
+    # 3. Without ADMIN OPTION, pypgstac fails with "permission denied to grant role"
+    #
+    # DBA Prerequisites SQL (run once by DBA before first deployment):
+    # ```sql
+    # -- Create pgSTAC roles (if not exists - idempotent)
+    # DO $$ BEGIN CREATE ROLE pgstac_admin; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+    # DO $$ BEGIN CREATE ROLE pgstac_ingest; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+    # DO $$ BEGIN CREATE ROLE pgstac_read; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+    #
+    # -- Grant roles WITH ADMIN OPTION (required for pypgstac migrate)
+    # GRANT pgstac_admin TO <managed_identity_name> WITH ADMIN OPTION;
+    # GRANT pgstac_ingest TO <managed_identity_name> WITH ADMIN OPTION;
+    # GRANT pgstac_read TO <managed_identity_name> WITH ADMIN OPTION;
+    # ```
+    #
+    # Use check_dba_prerequisites() to verify before running pypgstac migrate.
+    # =========================================================================
 
     def __init__(self, connection_string: Optional[str] = None):
         """
@@ -216,7 +225,6 @@ class PgStacBootstrap:
 
         except (psycopg.Error, OSError) as e:
             logger.error(f"❌ Failed to check PgSTAC installation: {e}")
-            logger.error(f"   Connection string: {self.connection_string}")
             logger.error(f"   Error type: {type(e).__name__}")
             return {
                 'installed': False,
@@ -227,6 +235,192 @@ class PgStacBootstrap:
                 'needs_migration': True,
                 'error': str(e)
             }
+
+    def check_dba_prerequisites(self, identity_name: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Check if DBA prerequisites for pypgstac are in place (5 DEC 2025).
+
+        In restricted corporate/QA environments, a DBA must:
+        1. Create pgstac roles (pgstac_admin, pgstac_ingest, pgstac_read)
+        2. Grant those roles to the managed identity
+
+        This method verifies these prerequisites BEFORE running pypgstac migrate,
+        which would fail with permission errors otherwise.
+
+        Args:
+            identity_name: Managed identity name to check grants for.
+                          If not provided, uses config.database.managed_identity_name
+
+        Returns:
+            Dict with prerequisite check results:
+            {
+                'ready': bool,           # True if all prerequisites met
+                'roles_exist': {         # Role existence check
+                    'pgstac_admin': bool,
+                    'pgstac_ingest': bool,
+                    'pgstac_read': bool
+                },
+                'roles_granted': {       # Role grant check (to identity)
+                    'pgstac_admin': bool,
+                    'pgstac_ingest': bool,
+                    'pgstac_read': bool
+                },
+                'identity_name': str,    # Identity checked
+                'missing_roles': [...],  # Roles that don't exist
+                'missing_grants': [...], # Grants that are missing
+                'dba_sql': str           # SQL for DBA to run if not ready
+            }
+
+        Usage:
+            >>> bootstrap = PgStacBootstrap()
+            >>> prereqs = bootstrap.check_dba_prerequisites()
+            >>> if not prereqs['ready']:
+            ...     print("DBA must run:", prereqs['dba_sql'])
+        """
+        # Get identity name from config if not provided
+        if identity_name is None:
+            identity_name = (
+                self.config.database.managed_identity_name or
+                os.getenv("MANAGED_IDENTITY_NAME") or
+                os.getenv("PGUSER") or
+                "rmhpgflexadmin"  # Default fallback
+            )
+
+        logger.info(f"🔍 Checking DBA prerequisites for identity: {identity_name}")
+
+        result = {
+            'ready': False,
+            'roles_exist': {},
+            'roles_granted': {},
+            'admin_option': {},  # NEW: Check if ADMIN OPTION is granted (required for pypgstac)
+            'identity_name': identity_name,
+            'missing_roles': [],
+            'missing_grants': [],
+            'missing_admin_option': [],  # NEW: Grants missing ADMIN OPTION
+            'dba_sql': ''
+        }
+
+        try:
+            with self._pg_repo._get_connection() as conn:
+                with conn.cursor() as cur:
+                    # Check 1: Do the pgstac roles exist?
+                    for role in self.PGSTAC_ROLES:
+                        cur.execute(
+                            "SELECT EXISTS(SELECT 1 FROM pg_roles WHERE rolname = %s) as exists",
+                            [role]
+                        )
+                        exists = cur.fetchone()['exists']
+                        result['roles_exist'][role] = exists
+                        if not exists:
+                            result['missing_roles'].append(role)
+                            logger.warning(f"⚠️ Role '{role}' does not exist")
+
+                    # Check 2: Are the roles granted to the identity WITH ADMIN OPTION?
+                    # IMPORTANT (5 DEC 2025): pypgstac migrate runs GRANT pgstac_admin TO current_user
+                    # even if already granted. This requires ADMIN OPTION on the role.
+                    # Simple membership is NOT enough - must have ADMIN OPTION.
+                    for role in self.PGSTAC_ROLES:
+                        cur.execute("""
+                            SELECT
+                                EXISTS(
+                                    SELECT 1
+                                    FROM pg_auth_members m
+                                    JOIN pg_roles r ON m.roleid = r.oid
+                                    JOIN pg_roles member ON m.member = member.oid
+                                    WHERE r.rolname = %s
+                                    AND member.rolname = %s
+                                ) as granted,
+                                COALESCE((
+                                    SELECT m.admin_option
+                                    FROM pg_auth_members m
+                                    JOIN pg_roles r ON m.roleid = r.oid
+                                    JOIN pg_roles member ON m.member = member.oid
+                                    WHERE r.rolname = %s
+                                    AND member.rolname = %s
+                                    LIMIT 1
+                                ), false) as has_admin_option
+                        """, [role, identity_name, role, identity_name])
+                        row = cur.fetchone()
+                        granted = row['granted']
+                        has_admin = row['has_admin_option']
+
+                        result['roles_granted'][role] = granted
+                        result['admin_option'][role] = has_admin
+
+                        if not granted:
+                            result['missing_grants'].append(role)
+                            logger.warning(f"⚠️ Role '{role}' not granted to '{identity_name}'")
+                        elif not has_admin:
+                            result['missing_admin_option'].append(role)
+                            logger.warning(f"⚠️ Role '{role}' granted but WITHOUT ADMIN OPTION (required for pypgstac)")
+
+                    # Generate DBA SQL if not ready
+                    # IMPORTANT: Need ADMIN OPTION for pypgstac to work
+                    if result['missing_roles'] or result['missing_grants'] or result['missing_admin_option']:
+                        dba_sql_lines = [
+                            "-- ========================================",
+                            "-- DBA Prerequisites for pypgstac migrate",
+                            "-- Run as superuser/DBA BEFORE application deployment",
+                            "-- ========================================",
+                            ""
+                        ]
+
+                        # Step 1: Check existing roles
+                        dba_sql_lines.append("-- Step 1: Check if roles already exist")
+                        dba_sql_lines.append("SELECT rolname FROM pg_roles WHERE rolname IN ('pgstac_admin', 'pgstac_ingest', 'pgstac_read');")
+                        dba_sql_lines.append("")
+
+                        # Step 2: Role creation
+                        if result['missing_roles']:
+                            dba_sql_lines.append("-- Step 2: Create roles (SKIP any roles returned by Step 1)")
+                            for role in result['missing_roles']:
+                                dba_sql_lines.append(f"CREATE ROLE {role};")
+                            dba_sql_lines.append("")
+
+                        # Step 3: Role grants WITH ADMIN OPTION
+                        roles_needing_grant = set(result['missing_grants']) | set(result['missing_admin_option'])
+                        if roles_needing_grant:
+                            step_num = "3" if result['missing_roles'] else "2"
+                            dba_sql_lines.append(f"-- Step {step_num}: Grant roles WITH ADMIN OPTION to managed identity")
+                            dba_sql_lines.append("-- CRITICAL: WITH ADMIN OPTION is required (pypgstac runs GRANT ... TO current_user)")
+                            for role in sorted(roles_needing_grant):
+                                dba_sql_lines.append(f"GRANT {role} TO {identity_name} WITH ADMIN OPTION;")
+                            dba_sql_lines.append("")
+
+                        # Step 4: Verification query
+                        final_step = "4" if result['missing_roles'] else "3"
+                        dba_sql_lines.append(f"-- Step {final_step}: Verify configuration (screenshot this for service ticket)")
+                        dba_sql_lines.append(f"""SELECT r.rolname AS role_name,
+       m.rolname AS granted_to,
+       am.admin_option AS has_admin_option
+FROM pg_auth_members am
+JOIN pg_roles r ON am.roleid = r.oid
+JOIN pg_roles m ON am.member = m.oid
+WHERE r.rolname IN ('pgstac_admin', 'pgstac_ingest', 'pgstac_read')
+AND m.rolname = '{identity_name}'
+ORDER BY r.rolname;""")
+                        dba_sql_lines.append("-- Expected: 3 rows, all with has_admin_option = true")
+
+                        result['dba_sql'] = '\n'.join(dba_sql_lines)
+                        result['ready'] = False
+                        logger.warning(
+                            f"❌ DBA prerequisites NOT met. "
+                            f"Missing roles: {result['missing_roles']}, "
+                            f"Missing grants: {result['missing_grants']}, "
+                            f"Missing ADMIN OPTION: {result['missing_admin_option']}"
+                        )
+                    else:
+                        result['ready'] = True
+                        result['dba_sql'] = '-- All prerequisites met, no DBA action required'
+                        logger.info(f"✅ DBA prerequisites met for identity: {identity_name}")
+
+                    return result
+
+        except (psycopg.Error, OSError) as e:
+            logger.error(f"❌ Failed to check DBA prerequisites: {e}")
+            result['error'] = str(e)
+            result['ready'] = False
+            return result
 
     # =========================================================================
     # INSTALLATION - One-time setup (idempotent)
@@ -309,12 +503,33 @@ class PgStacBootstrap:
                 conn.commit()
                 logger.info("✅ pgstac schema dropped")
 
-    def _run_pypgstac_migrate(self) -> Dict[str, Any]:
+    def _run_pypgstac_migrate(self, skip_prereq_check: bool = False) -> Dict[str, Any]:
         """
         Run pypgstac migrate using subprocess.
 
+        IMPORTANT (5 DEC 2025): In corporate/QA environments with restricted permissions,
+        pypgstac migrate may fail with "permission denied" on GRANT statements.
+
+        The migration attempts: GRANT pgstac_admin TO current_user
+        This fails if:
+        1. The role doesn't exist yet (DBA didn't pre-create)
+        2. The current user doesn't have CREATEROLE privilege
+        3. The role wasn't pre-granted to the current user by DBA
+
+        Solution: DBA must run prerequisites BEFORE deployment. Use check_dba_prerequisites()
+        to verify readiness.
+
+        Args:
+            skip_prereq_check: If True, skip DBA prerequisite check (default: False)
+                              Use with caution - only if you know prerequisites are met.
+
         Returns:
-            Dict with migration results
+            Dict with migration results including:
+            - success: bool
+            - output: stdout from pypgstac
+            - error: error message if failed
+            - dba_action_required: True if failure is due to missing DBA prerequisites
+            - dba_sql: SQL for DBA to run (only if dba_action_required)
         """
         logger.info("📦 Running pypgstac migrate...")
 
@@ -382,12 +597,44 @@ class PgStacBootstrap:
                 }
             else:
                 logger.error(f"❌ pypgstac migrate failed: {result.stderr}")
-                return {
+
+                # Check if this is a GRANT permission error (DBA prerequisites not met)
+                error_text = result.stderr.lower()
+                is_grant_error = (
+                    'permission denied' in error_text or
+                    'must have admin option' in error_text or
+                    'grant' in error_text and 'pgstac' in error_text
+                )
+
+                response = {
                     'success': False,
                     'error': result.stderr,
                     'output': result.stdout,
                     'returncode': result.returncode
                 }
+
+                if is_grant_error:
+                    # This is likely a DBA prerequisite failure
+                    logger.warning("⚠️ GRANT permission error detected - DBA prerequisites may not be met")
+                    response['dba_action_required'] = True
+                    response['hint'] = (
+                        "pypgstac migrate failed due to permission errors. "
+                        "In corporate/QA environments, a DBA must pre-create pgstac roles "
+                        "and grant them to the managed identity. "
+                        "Call check_dba_prerequisites() to get the required SQL."
+                    )
+
+                    # Try to get DBA SQL for convenience
+                    try:
+                        prereqs = self.check_dba_prerequisites()
+                        if not prereqs['ready']:
+                            response['dba_sql'] = prereqs['dba_sql']
+                            response['missing_roles'] = prereqs['missing_roles']
+                            response['missing_grants'] = prereqs['missing_grants']
+                    except Exception as e:
+                        logger.warning(f"Could not check DBA prerequisites: {e}")
+
+                return response
 
         except subprocess.TimeoutExpired:
             logger.error("❌ pypgstac migrate timed out after 5 minutes")

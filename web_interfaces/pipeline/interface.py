@@ -25,13 +25,10 @@ Web interface for browsing Bronze container files. Provides:
     - Prefix/folder filter input
     - Load buttons (10, 50, All)
     - Files table (Name, Size, Modified, Type)
-    - Click file → Detail panel with metadata
+    - Click file -> Detail panel with metadata
     - Placeholder for job submission (future)
 
 Route: /api/interface/pipeline
-
-Author: Robert and Geospatial Claude Legion
-Date: 21 NOV 2025
 """
 
 import azure.functions as func

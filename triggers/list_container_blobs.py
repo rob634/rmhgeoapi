@@ -49,9 +49,6 @@ Returns:
             ...
         ]
     }
-
-Last Updated: 21 NOV 2025
-Author: Robert and Geospatial Claude Legion
 """
 
 import azure.functions as func

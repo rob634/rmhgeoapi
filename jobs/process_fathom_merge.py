@@ -26,11 +26,8 @@ PHASE 2 of Two-Phase Fathom ETL Architecture:
 - Memory: ~2-3GB per task (band-by-band processing)
 
 The grid_size parameter allows easy experimentation:
-- grid_size=5: 25 tiles merged → 40K output files
-- grid_size=4: 16 tiles merged → 62K output files
-
-Author: Robert and Geospatial Claude Legion
-Date: 03 DEC 2025
+    - grid_size=5: 25 tiles merged -> 40K output files
+    - grid_size=4: 16 tiles merged -> 62K output files
 """
 
 from typing import List, Dict, Any

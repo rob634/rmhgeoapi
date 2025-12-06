@@ -1,44 +1,18 @@
-# ============================================================================
-# CLAUDE CONTEXT - ERROR CODES AND CLASSIFICATION
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: Core component - Centralized error code definitions
-# PURPOSE: Define all error codes with retry classification for Phase 3
-# LAST_REVIEWED: 11 NOV 2025
-# EXPORTS: ErrorCode enum, ErrorClassification enum, is_retryable()
-# INTERFACES: Used by all services and handlers for consistent error reporting
-# PYDANTIC_MODELS: None (enum definitions)
-# DEPENDENCIES: enum
-# SOURCE: Consolidated from Phase 1-3 validation implementation
-# SCOPE: Application-wide error code standards
-# VALIDATION: Enum types ensure type safety
-# PATTERNS: Enum pattern for error classification
-# ENTRY_POINTS: from core.errors import ErrorCode, is_retryable
-# INDEX: ErrorCode:30, ErrorClassification:80, is_retryable:110
-# ============================================================================
-
 """
-Error Code Definitions and Classification
+Error Code Definitions and Classification.
 
-Centralized error code management for Phase 3 retry logic and consistent
+Centralized error code management with retry logic and consistent
 error responses across all endpoints.
 
 Key Features:
-- Explicit error codes for all failure modes
-- Retry classification (PERMANENT, TRANSIENT, THROTTLING)
-- Helper function to determine if error should retry
-- Documentation of HTTP status codes for each error
+    - Explicit error codes for all failure modes
+    - Retry classification (PERMANENT, TRANSIENT, THROTTLING)
+    - Helper function to determine if error should retry
 
-Usage:
-    from core.errors import ErrorCode, is_retryable
-
-    # In validation handler
-    return {
-        "success": False,
-        "error": ErrorCode.FILE_NOT_FOUND,
-        "message": "File 'test.tif' not found",
-        "retryable": is_retryable(ErrorCode.FILE_NOT_FOUND)
-    }
+Exports:
+    ErrorCode: Standardized error codes enum
+    ErrorClassification: Error category enum
+    is_retryable: Helper to check if error should be retried
 """
 
 from enum import Enum

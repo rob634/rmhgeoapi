@@ -1,25 +1,11 @@
-# ============================================================================
-# CLAUDE CONTEXT - CORE UTILITIES
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: Core utilities - Helper functions
-# PURPOSE: Core utility functions and exceptions
-# LAST_REVIEWED: 16 OCT 2025
-# EXPORTS: generate_job_id, SchemaValidationError
-# INTERFACES: None
-# PYDANTIC_MODELS: None
-# DEPENDENCIES: hashlib, json, typing
-# SOURCE: Extracted from schema_base.py
-# SCOPE: Core utility functions
-# VALIDATION: None
-# PATTERNS: Utility functions pattern
-# ENTRY_POINTS: from core.utils import generate_job_id, SchemaValidationError
-# ============================================================================
-
 """
-Core utility functions and exceptions.
+Core Utility Functions and Exceptions.
 
-Extracted from schema_base.py for Epoch 4 architecture.
+Provides deterministic job ID generation and validation exceptions.
+
+Exports:
+    generate_job_id: Generate deterministic job ID from type and parameters
+    SchemaValidationError: Exception for schema validation errors
 """
 
 import hashlib

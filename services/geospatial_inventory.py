@@ -32,12 +32,9 @@ Provides handlers for inventory_container_geospatial job:
 - Stage 3 (fan-in): aggregate_geospatial_inventory - Group into collections
 
 Extensibility:
-- Add new file types via GEOSPATIAL_EXTENSIONS
-- Add new vendor patterns via VENDOR_PATTERNS
-- Designed for future vector, GeoParquet, Zarr support
-
-Created: 03 DEC 2025
-Author: Robert and Geospatial Claude Legion
+    - Add new file types via GEOSPATIAL_EXTENSIONS
+    - Add new vendor patterns via VENDOR_PATTERNS
+    - Designed for future vector, GeoParquet, Zarr support
 """
 
 import re

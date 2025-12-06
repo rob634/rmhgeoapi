@@ -8,7 +8,6 @@
 # EXPORTS: Phase 1 (band stack): fathom_tile_inventory, fathom_band_stack
 #          Phase 2 (spatial merge): fathom_grid_inventory, fathom_spatial_merge
 #          Shared: fathom_stac_register
-#          Legacy: fathom_inventory, fathom_merge_stack (deprecated - too memory intensive)
 # INTERFACES: Standard handler contract (params, context) -> dict
 # PYDANTIC_MODELS: None
 # DEPENDENCIES: pandas, rasterio, GDAL, azure.storage.blob, pgstac
@@ -54,12 +53,7 @@ Usage Examples:
     curl -X POST .../api/jobs/submit/process_fathom_stack \\
       -d '{"region_code": "CI"}'  # No bbox = process all, STAC skips completed
 
-Legacy (deprecated - too memory intensive for Azure Functions):
-- fathom_inventory: Country-wide grouping
-- fathom_merge_stack: Country-wide spatial merge + band stack (~12GB/task)
-
-Author: Robert and Geospatial Claude Legion
-Date: 03 DEC 2025
+See docs/archive/jobs/fathom_legacy_dec2025/ for legacy handlers.
 """
 
 import re
@@ -93,207 +87,15 @@ FLOOD_TYPE_MAP = {
 }
 
 
-def fathom_inventory(params: dict, context: dict = None) -> dict:
-    """
-    Parse Fathom file list CSV and create merge groups.
-
-    Groups files by: flood_type + year + ssp_scenario
-    Each group will be merged spatially with return periods as bands.
-
-    Args:
-        params: Task parameters
-            - region_code: ISO country code (e.g., "CI")
-            - region_name: Human-readable name (optional)
-            - source_container: Container with source files
-            - file_list_csv: Path to CSV file (optional, auto-detected if None)
-            - flood_types: List of flood types to process (optional, all if None)
-            - years: List of years to process (optional, all if None)
-            - ssp_scenarios: List of SSP scenarios (optional, all if None)
-            - dry_run: If True, only create inventory
-
-    Returns:
-        dict with merge_groups and summary statistics
-    """
-    import pandas as pd
-    from infrastructure import BlobRepository
-
-    logger = LoggerFactory.create_logger(
-        ComponentType.SERVICE,
-        "fathom_inventory"
-    )
-
-    region_code = params["region_code"].upper()
-    region_name = params.get("region_name")
-    source_container = params.get("source_container", FathomDefaults.SOURCE_CONTAINER)
-    file_list_csv = params.get("file_list_csv")
-    filter_flood_types = params.get("flood_types")
-    filter_years = params.get("years")
-    filter_ssp = params.get("ssp_scenarios")
-    dry_run = params.get("dry_run", False)
-
-    logger.info(f"📋 Starting Fathom inventory for region: {region_code}")
-
-    # Auto-detect CSV filename if not provided
-    if not file_list_csv:
-        # Pattern: CI_Côte_d'Ivoire_file_list.csv
-        blob_repo = BlobRepository.instance()
-
-        # List blobs to find CSV
-        all_blobs = blob_repo.list_blobs(source_container)
-        csv_blobs = [b for b in all_blobs if b.endswith('_file_list.csv')]
-        matching = [c for c in csv_blobs if c.startswith(f"{region_code}_")]
-
-        if not matching:
-            return {
-                "success": False,
-                "error": f"No file list CSV found for region {region_code}. Available: {csv_blobs}"
-            }
-
-        file_list_csv = matching[0]
-        if region_name is None:
-            # Extract region name from CSV filename
-            # "CI_Côte_d'Ivoire_file_list.csv" → "Côte d'Ivoire"
-            parts = file_list_csv.replace("_file_list.csv", "").split("_", 1)
-            if len(parts) > 1:
-                region_name = parts[1].replace("_", " ")
-
-    logger.info(f"   Using file list: {file_list_csv}")
-
-    # Download and parse CSV
-    blob_repo = BlobRepository.instance()
-    csv_bytes = blob_repo.read_blob(source_container, file_list_csv)
-
-    with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as tmp:
-        tmp.write(csv_bytes)
-        tmp_path = tmp.name
-
-    df = pd.read_csv(tmp_path)
-    Path(tmp_path).unlink()  # Clean up
-
-    logger.info(f"   Loaded {len(df)} file paths from CSV")
-
-    # Parse file paths to extract metadata
-    # Pattern: FLOOD_TYPE/YEAR/RETURN_PERIOD[_or_SSP]/filename.tif
-    # Filename: 1in100-COASTAL-DEFENDED-2020_n04w006.tif
-    # or: 1in100-COASTAL-DEFENDED-2050-SSP2_4.5_n04w006.tif
-
-    parsed_files = []
-    for path in df.iloc[:, 0]:  # First column is path
-        parsed = _parse_fathom_path(path)
-        if parsed:
-            parsed_files.append(parsed)
-
-    logger.info(f"   Parsed {len(parsed_files)} valid file records")
-
-    # Apply filters
-    if filter_flood_types:
-        parsed_files = [f for f in parsed_files if f["flood_type_raw"] in filter_flood_types]
-        logger.info(f"   After flood_type filter: {len(parsed_files)} files")
-
-    if filter_years:
-        parsed_files = [f for f in parsed_files if f["year"] in filter_years]
-        logger.info(f"   After year filter: {len(parsed_files)} files")
-
-    if filter_ssp:
-        parsed_files = [f for f in parsed_files if f["ssp_raw"] in filter_ssp or f["ssp_raw"] is None]
-        logger.info(f"   After SSP filter: {len(parsed_files)} files")
-
-    # Group files by output target (flood_type + year + ssp)
-    groups = defaultdict(lambda: {
-        "flood_type_raw": None,
-        "flood_type": None,
-        "defense": None,
-        "year": None,
-        "ssp_raw": None,
-        "ssp": None,
-        "return_period_files": defaultdict(list),  # return_period → [file_paths]
-        "tiles": set()
-    })
-
-    for f in parsed_files:
-        # Group key: flood_type_raw + year + ssp
-        key = (f["flood_type_raw"], f["year"], f["ssp_raw"])
-        group = groups[key]
-
-        group["flood_type_raw"] = f["flood_type_raw"]
-        group["flood_type"] = f["flood_type"]
-        group["defense"] = f["defense"]
-        group["year"] = f["year"]
-        group["ssp_raw"] = f["ssp_raw"]
-        group["ssp"] = f["ssp"]
-        group["return_period_files"][f["return_period"]].append(f["path"])
-        group["tiles"].add(f["tile"])
-
-    # Convert to output format
-    merge_groups = []
-    for key, group in groups.items():
-        # Generate output filename
-        flood_type_slug = f"{group['flood_type']}-{group['defense']}"
-        year = group["year"]
-
-        if group["ssp"]:
-            output_name = f"fathom_{region_code.lower()}_{flood_type_slug}_{year}_{group['ssp']}"
-        else:
-            output_name = f"fathom_{region_code.lower()}_{flood_type_slug}_{year}"
-
-        # Verify we have all 8 return periods
-        rp_files = group["return_period_files"]
-        missing_rps = [rp for rp in RETURN_PERIODS if rp not in rp_files]
-
-        if missing_rps:
-            logger.warning(f"   ⚠️ {output_name}: Missing return periods: {missing_rps}")
-
-        merge_groups.append({
-            "output_name": output_name,
-            "flood_type_raw": group["flood_type_raw"],
-            "flood_type": group["flood_type"],
-            "defense": group["defense"],
-            "year": group["year"],
-            "ssp_raw": group["ssp_raw"],
-            "ssp": group["ssp"],
-            "tile_count": len(group["tiles"]),
-            "tiles": sorted(group["tiles"]),
-            "return_period_files": {rp: sorted(files) for rp, files in rp_files.items()},
-            "file_count": sum(len(files) for files in rp_files.values())
-        })
-
-    # Sort by output name for consistent ordering
-    merge_groups.sort(key=lambda x: x["output_name"])
-
-    # Summary statistics
-    all_flood_types = sorted(set(g["flood_type_raw"] for g in merge_groups))
-    all_years = sorted(set(g["year"] for g in merge_groups))
-    total_files = sum(g["file_count"] for g in merge_groups)
-
-    logger.info(f"✅ Inventory complete:")
-    logger.info(f"   Total source files: {total_files}")
-    logger.info(f"   Merge groups: {len(merge_groups)}")
-    logger.info(f"   Flood types: {all_flood_types}")
-    logger.info(f"   Years: {all_years}")
-
-    if dry_run:
-        logger.info("   🔍 DRY RUN - no files will be processed")
-
-    return {
-        "success": True,
-        "result": {
-            "region_code": region_code,
-            "region_name": region_name,
-            "total_files": total_files,
-            "merge_group_count": len(merge_groups),
-            "merge_groups": merge_groups,
-            "flood_types": all_flood_types,
-            "years": all_years,
-            "dry_run": dry_run
-        }
-    }
-
+# =============================================================================
+# INTERNAL HELPER FUNCTIONS
+# =============================================================================
 
 def _parse_fathom_path(path: str) -> Optional[Dict[str, Any]]:
     """
-    Parse Fathom file path to extract metadata.
+    Parse Fathom file path from CSV file lists to extract metadata.
 
-    Handles full paths from Fathom CSV file lists:
+    Handles full paths from Fathom CSV file lists which include a prefix:
     - SSBN Flood Hazard Maps/Global flood hazard maps v3 2023/{region}/{flood_type}/...
 
     Supports two path structures after the prefix:
@@ -302,6 +104,9 @@ def _parse_fathom_path(path: str) -> Optional[Dict[str, Any]]:
 
     2. Future projection (with SSP): flood_type/year/ssp/return_period/filename.tif
        COASTAL_DEFENDED/2030/SSP2_4.5/1in100/1in100-COASTAL-DEFENDED-2030-SSP2_4.5_n05w004.tif
+
+    Note: This parses CSV paths (with prefix). For blob paths, use
+    _parse_fathom_blob_path() in fathom_container_inventory.py instead.
 
     Returns:
         Parsed metadata dict or None if parsing fails
@@ -1318,233 +1123,8 @@ def fathom_spatial_merge(params: dict, context: dict = None) -> dict:
 
 
 # =============================================================================
-# LEGACY HANDLERS (deprecated - too memory intensive)
+# STAC REGISTRATION (Shared by both Phase 1 and Phase 2)
 # =============================================================================
-
-def fathom_merge_stack(params: dict, context: dict = None) -> dict:
-    """
-    Merge tiles spatially and stack return periods as bands.
-
-    For each merge group:
-    1. Download all source tiles (organized by return period)
-    2. For each return period: build VRT for spatial merge
-    3. Stack 8 VRTs as bands into single multi-band COG
-    4. Upload to silver-cogs container
-
-    Args:
-        params: Task parameters
-            - merge_group: Group definition from inventory
-            - source_container: Container with source tiles
-            - output_container: Container for output COG
-            - output_prefix: Folder prefix in output container
-            - region_code: ISO country code
-
-    Returns:
-        dict with output blob path and metadata
-    """
-    import rasterio
-    from rasterio.merge import merge
-    from rasterio.enums import Resampling
-    import numpy as np
-    from infrastructure import BlobRepository
-    from config import get_config
-
-    logger = LoggerFactory.create_logger(
-        ComponentType.SERVICE,
-        "fathom_merge_stack"
-    )
-
-    merge_group = params["merge_group"]
-    source_container = params.get("source_container", FathomDefaults.SOURCE_CONTAINER)
-    output_container = params.get("output_container", FathomDefaults.PHASE2_OUTPUT_CONTAINER)
-    output_prefix = params.get("output_prefix", FathomDefaults.PHASE2_OUTPUT_PREFIX)
-    region_code = params["region_code"].lower()
-    force_reprocess = params.get("force_reprocess", False)
-
-    output_name = merge_group["output_name"]
-    logger.info(f"🔧 Processing merge group: {output_name}")
-    logger.info(f"   Tiles: {merge_group['tile_count']}, Files: {merge_group['file_count']}")
-
-    config = get_config()
-    blob_repo = BlobRepository.instance()
-
-    # =========================================================================
-    # IDEMPOTENCY CHECK (26 NOV 2025)
-    # Skip processing if output COG already exists (unless force_reprocess=True)
-    # =========================================================================
-    output_blob_path = f"{output_prefix}/{region_code}/{output_name}.tif"
-
-    if not force_reprocess and blob_repo.blob_exists(output_container, output_blob_path):
-        logger.info(f"⏭️ SKIP: Output already exists: {output_container}/{output_blob_path}")
-
-        # Return success with skipped flag for tracking
-        return {
-            "success": True,
-            "skipped": True,
-            "result": {
-                "output_blob": output_blob_path,
-                "output_container": output_container,
-                "output_name": output_name,
-                "flood_type": merge_group["flood_type"],
-                "defense": merge_group["defense"],
-                "year": merge_group["year"],
-                "ssp": merge_group.get("ssp"),
-                "tile_count": merge_group["tile_count"],
-                "file_count": merge_group["file_count"],
-                "message": "Output COG already exists - skipped processing"
-            }
-        }
-
-    # Create temp directory for processing
-    with tempfile.TemporaryDirectory() as tmpdir:
-        tmpdir = Path(tmpdir)
-
-        # Download and process each return period
-        merged_arrays = []
-        transform = None
-        crs = None
-
-        for rp_idx, return_period in enumerate(RETURN_PERIODS):
-            rp_files = merge_group["return_period_files"].get(return_period, [])
-
-            if not rp_files:
-                logger.warning(f"   ⚠️ Missing return period: {return_period}")
-                # Create empty band with nodata
-                if merged_arrays:
-                    empty = np.full_like(merged_arrays[0], -32768, dtype=np.int16)
-                    merged_arrays.append(empty)
-                continue
-
-            logger.info(f"   📥 Downloading {len(rp_files)} files for {return_period}...")
-
-            # Download tiles for this return period
-            local_tiles = []
-            for blob_path in rp_files:
-                local_path = tmpdir / f"{return_period}_{Path(blob_path).name}"
-                blob_bytes = blob_repo.read_blob(source_container, blob_path)
-                with open(local_path, "wb") as f:
-                    f.write(blob_bytes)
-                local_tiles.append(str(local_path))
-
-            # Merge tiles spatially using rasterio
-            datasets = [rasterio.open(p) for p in local_tiles]
-
-            # Get CRS and profile from first dataset
-            if crs is None:
-                crs = datasets[0].crs
-                profile = datasets[0].profile.copy()
-
-            # Merge all tiles for this return period
-            merged_data, merged_transform = merge(
-                datasets,
-                resampling=Resampling.nearest,
-                nodata=-32768
-            )
-
-            # merged_data shape: (1, height, width) - squeeze to (height, width)
-            merged_arrays.append(merged_data[0])
-
-            if transform is None:
-                transform = merged_transform
-
-            # Close datasets
-            for ds in datasets:
-                ds.close()
-
-            # Clean up downloaded tiles to free space
-            for p in local_tiles:
-                Path(p).unlink()
-
-            logger.info(f"   ✅ Merged {return_period}: shape {merged_data[0].shape}")
-
-        # Stack all bands into single array
-        if not merged_arrays:
-            return {
-                "success": False,
-                "error": "No data to merge"
-            }
-
-        stacked = np.stack(merged_arrays, axis=0)
-        logger.info(f"   📦 Stacked array shape: {stacked.shape} (bands, height, width)")
-
-        # Write multi-band COG
-        output_path = tmpdir / f"{output_name}.tif"
-
-        # Update profile for multi-band COG
-        profile.update(
-            driver="GTiff",
-            count=len(RETURN_PERIODS),
-            dtype=np.int16,
-            crs=crs,
-            transform=transform,
-            width=stacked.shape[2],
-            height=stacked.shape[1],
-            compress="DEFLATE",
-            predictor=2,  # Horizontal differencing for int data
-            tiled=True,
-            blockxsize=512,
-            blockysize=512,
-            nodata=-32768
-        )
-
-        # Write COG directly using rasterio
-        # (rasterio with overviews creates a COG-compatible structure)
-        profile.update(
-            BIGTIFF="IF_SAFER",
-        )
-
-        with rasterio.open(output_path, "w", **profile) as dst:
-            dst.write(stacked)
-
-            # Set band descriptions
-            for i, rp in enumerate(RETURN_PERIODS, 1):
-                dst.set_band_description(i, rp)
-
-            # Build overviews for COG (power of 2)
-            dst.build_overviews([2, 4, 8, 16, 32], Resampling.nearest)
-            dst.update_tags(ns='rio_overview', resampling='nearest')
-
-        logger.info(f"   📦 COG created: {output_path}")
-
-        # Get output file size
-        output_size = output_path.stat().st_size
-        output_size_mb = output_size / (1024 * 1024)
-        logger.info(f"   📏 Output size: {output_size_mb:.1f} MB")
-
-        # Upload to silver container
-        output_blob = f"{output_prefix}/{region_code}/{output_name}.tif"
-        with open(output_path, "rb") as f:
-            blob_repo.write_blob(output_container, output_blob, f.read())
-
-        logger.info(f"   ☁️ Uploaded to: {output_container}/{output_blob}")
-
-        # Get bounds for STAC
-        with rasterio.open(output_path) as src:
-            bounds = src.bounds
-
-    return {
-        "success": True,
-        "result": {
-            "output_blob": output_blob,
-            "output_container": output_container,
-            "output_name": output_name,
-            "flood_type": merge_group["flood_type"],
-            "defense": merge_group["defense"],
-            "year": merge_group["year"],
-            "ssp": merge_group.get("ssp"),
-            "tile_count": merge_group["tile_count"],
-            "file_count": merge_group["file_count"],
-            "output_size_mb": output_size_mb,
-            "bands": RETURN_PERIODS,
-            "bounds": {
-                "west": bounds.left,
-                "south": bounds.bottom,
-                "east": bounds.right,
-                "north": bounds.top
-            }
-        }
-    }
-
 
 def fathom_stac_register(params: dict, context: dict = None) -> dict:
     """

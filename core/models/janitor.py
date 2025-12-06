@@ -1,26 +1,13 @@
-# ============================================================================
-# CLAUDE CONTEXT - CORE MODELS - JANITOR
-# ============================================================================
-# EPOCH: 4 - ACTIVE
-# STATUS: Core data models - Janitor audit record
-# PURPOSE: Pydantic model for janitor_runs audit table
-# LAST_REVIEWED: 21 NOV 2025
-# EXPORTS: JanitorRun, JanitorRunType
-# INTERFACES: Pure data model for database persistence
-# PYDANTIC_MODELS: JanitorRun
-# DEPENDENCIES: pydantic, datetime, typing, enum
-# SOURCE: Created for janitor maintenance system
-# SCOPE: Audit logging for janitor maintenance operations
-# VALIDATION: Field validation via Pydantic
-# PATTERNS: Data model pattern
-# ENTRY_POINTS: from core.models.janitor import JanitorRun
-# ============================================================================
-
 """
-Janitor Audit Models
+Janitor Audit Models.
 
-Pydantic model for the janitor_runs table which logs all janitor
+Pydantic models for janitor_runs audit table. Logs all janitor
 maintenance operations for audit and monitoring purposes.
+
+Exports:
+    JanitorRun: Audit record for maintenance operations
+    JanitorRunType: Types of maintenance runs
+    JanitorRunStatus: Run status enumeration
 """
 
 from datetime import datetime, timezone

@@ -1,41 +1,16 @@
-# ============================================================================
-# CLAUDE CONTEXT - CORE MODELS - TASK
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: Core data models - Task database representation
-# PURPOSE: Pydantic models for task records and definitions in PostgreSQL
-# LAST_REVIEWED: 16 OCT 2025
-# EXPORTS: TaskRecord, TaskDefinition - Pydantic models for task data
-# INTERFACES: TaskRecord inherits from TaskData (core.contracts)
-# PYDANTIC_MODELS: TaskRecord (adds persistence fields), TaskDefinition (lightweight orchestration model)
-# DEPENDENCIES: pydantic, datetime, typing, core.contracts.TaskData
-# SOURCE: Extracted from schema_base.py, refactored to inherit from TaskData
-# SCOPE: Task record and definition data models for DATABASE boundary
-# VALIDATION: Field validation via Pydantic, status transition validation
-# PATTERNS: Data model pattern, Inheritance (TaskData), no business logic
-# ENTRY_POINTS: from core.models.task import TaskRecord, TaskDefinition
-# ARCHITECTURE: TaskRecord = TaskData + Database persistence fields
-# ============================================================================
-
 """
-Task Database Models - Persistence Boundary
+Task Database Models - Persistence Boundary.
 
-This module defines TaskRecord, which represents a task in the PostgreSQL database.
-It inherits from TaskData (core.contracts) and adds persistence-specific fields:
-- status, result_data, error_details (execution tracking)
-- retry_count, heartbeat (reliability)
-- created_at, updated_at (audit trail)
+Defines TaskRecord for PostgreSQL database representation.
+Inherits from TaskData and adds persistence-specific fields.
 
 Architecture:
-    TaskData (core.contracts) - Base contract with essential task properties
-         ↓ inherits
+    TaskData (core.contracts) - Base contract
     TaskRecord (this file) - Database boundary specialization
 
-The "Task" conceptual entity is composed of:
-    TaskRecord (data) + TaskExecutor (behavior) = "Task" entity
-
-See core/contracts/__init__.py for full architecture explanation.
-
+Exports:
+    TaskRecord: Task database model with persistence fields
+    TaskDefinition: Lightweight orchestration model for task creation
 """
 
 from datetime import datetime, timezone

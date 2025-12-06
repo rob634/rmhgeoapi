@@ -1,24 +1,16 @@
-# ============================================================================
-# CLAUDE CONTEXT - CORE LOGIC - TRANSITIONS
-# ============================================================================
-# CATEGORY: BUSINESS LOGIC HELPERS
-# PURPOSE: Shared utility functions for calculations and state transitions
-# EPOCH: Shared by all epochs (business logic)# PURPOSE: State transition logic for jobs and tasks
-# EXPORTS: Functions for validating state transitions
-# INTERFACES: Operates on core.models data structures
-# DEPENDENCIES: core.models.enums
-# SOURCE: Business logic extracted from schema_base.py
-# SCOPE: State transition validation
-# VALIDATION: State machine rules
-# PATTERNS: State machine pattern
-# ENTRY_POINTS: from core.logic.transitions import can_job_transition
-# ============================================================================
-
 """
-State transition logic for jobs and tasks.
+State Transition Logic for Jobs and Tasks.
 
-This module contains the business rules for valid state transitions.
-Separated from the data models to maintain clean architecture.
+Contains business rules for valid state transitions.
+Separated from data models for clean architecture.
+
+Exports:
+    can_job_transition: Check if job state transition is valid
+    can_task_transition: Check if task state transition is valid
+    get_job_terminal_states: Get terminal states for jobs
+    get_task_terminal_states: Get terminal states for tasks
+    is_job_terminal: Check if job is in terminal state
+    is_task_terminal: Check if task is in terminal state
 """
 
 from typing import List

@@ -1,33 +1,18 @@
-# ============================================================================
-# CLAUDE CONTEXT - JANITOR REPOSITORY
-# ============================================================================
-# EPOCH: 4 - ACTIVE
-# STATUS: Infrastructure - Janitor maintenance queries
-# PURPOSE: Database queries for janitor maintenance operations (stale tasks, failed jobs, orphans)
-# LAST_REVIEWED: 21 NOV 2025
-# EXPORTS: JanitorRepository
-# INTERFACES: Uses PostgreSQLRepository base
-# PYDANTIC_MODELS: Uses JobRecord, TaskRecord from core.models
-# DEPENDENCIES: infrastructure.postgresql, core.models, psycopg, util_logger
-# SOURCE: PostgreSQL app schema (jobs, tasks tables)
-# SCOPE: Maintenance queries for detecting stale, failed, and orphaned records
-# VALIDATION: Query parameter validation
-# PATTERNS: Repository pattern
-# ENTRY_POINTS: from infrastructure.janitor_repository import JanitorRepository
-# ============================================================================
-
 """
-Janitor Repository - Maintenance Database Queries
+Janitor Repository - Maintenance Database Queries.
 
 Provides database queries for the janitor maintenance system:
-1. Detect stale tasks (PROCESSING > N minutes)
-2. Detect jobs with failed tasks
-3. Detect orphaned tasks and zombie jobs
-4. Batch update operations for marking failures
-5. Audit logging to janitor_runs table
+    - Detect stale tasks (PROCESSING beyond timeout)
+    - Detect jobs with failed tasks
+    - Detect orphaned tasks and zombie jobs
+    - Batch update operations for marking failures
+    - Audit logging to janitor_runs table
 
-This is a standalone repository that does NOT use CoreMachine orchestration.
-Janitor runs via timer triggers with direct database access.
+This is a standalone repository that operates via timer triggers
+with direct database access, independent of CoreMachine orchestration.
+
+Exports:
+    JanitorRepository: Maintenance query repository
 """
 
 from typing import List, Dict, Any, Optional, Tuple

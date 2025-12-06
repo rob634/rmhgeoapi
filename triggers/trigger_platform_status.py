@@ -222,7 +222,7 @@ def _generate_data_access_urls(
     urls = {}
 
     # Vector job → OGC Features URLs
-    if job_type == 'ingest_vector':
+    if job_type == 'process_vector':
         table_name = job_result.get('table_name')
         if table_name:
             urls['postgis'] = {
@@ -236,7 +236,8 @@ def _generate_data_access_urls(
             }
 
     # Raster job → STAC + TiTiler URLs
-    elif job_type in ['process_raster', 'process_raster_collection']:
+    # Updated 04 DEC 2025: Added v2 job names (v1 jobs archived)
+    elif job_type in ['process_raster_v2', 'process_large_raster_v2', 'process_raster_collection_v2']:
         collection_id = job_result.get('collection_id')
         cog_url = job_result.get('cog_url')
 

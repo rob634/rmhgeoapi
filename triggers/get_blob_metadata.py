@@ -46,9 +46,6 @@ Returns:
         "etag": "0x8DC1234567890AB",
         "metadata": {...}
     }
-
-Last Updated: 21 NOV 2025
-Author: Robert and Geospatial Claude Legion
 """
 
 import azure.functions as func

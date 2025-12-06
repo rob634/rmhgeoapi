@@ -1,27 +1,12 @@
-# ============================================================================
-# CLAUDE CONTEXT - SERVICE
-# ============================================================================
-# CATEGORY: SCHEMAS - DATA VALIDATION & TRANSFORMATION
-# PURPOSE: Pydantic models for validation, serialization, and data flow
-# EPOCH: Shared by all epochs (not persisted to database)# PURPOSE: Generate PostgreSQL DDL from Pydantic models ensuring database schema matches Python definitions
-# EXPORTS: PydanticToSQL, main() (generates complete schema SQL)
-# INTERFACES: None - utility class for SQL generation from Pydantic models
-# PYDANTIC_MODELS: JobRecord, TaskRecord (imported from schema_core for SQL generation)
-# DEPENDENCIES: pydantic, psycopg.sql, typing, datetime, enum, schema_core
-# SOURCE: Pydantic model definitions from schema_core.py - single source of truth
-# SCOPE: Database schema generation including tables, enums, indexes, and functions
-# VALIDATION: Type mapping validation, field constraint generation, enum type creation
-# PATTERNS: Builder pattern (SQL generation), Visitor pattern (model introspection), Template Method
-# ENTRY_POINTS: generator = PydanticToSQL(); sql = generator.generate_schema([JobRecord, TaskRecord])
-# INDEX: PydanticToSQL:33, TYPE_MAP:43, generate_create_table:200, generate_schema:550, main:778
-# ============================================================================
-
 """
 Pydantic to PostgreSQL Schema Generator.
 
-This module generates PostgreSQL DDL statements from Pydantic models,
-ensuring that the database schema always matches the Python models.
-The Pydantic models become the single source of truth for the schema.
+Generates PostgreSQL DDL statements from Pydantic models,
+ensuring database schema always matches Python models.
+Pydantic models are the single source of truth for schema.
+
+Exports:
+    PydanticToSQL: Generator class for SQL DDL from Pydantic models
 """
 
 from typing import Dict, List, Optional, Type, get_args, get_origin, Any, Union

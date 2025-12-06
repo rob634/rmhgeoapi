@@ -17,11 +17,8 @@ This configuration module will eventually encompass all analytics-related settin
 5. Analytical query optimization (memory limits, parallelism)
 6. Export formats (Parquet, Arrow, ORC)
 
-Current Status: Phase 1 - DuckDB basics migrated from config.py
+Current Status: Phase 1 - DuckDB basics
 Next Phase: GeoParquet tier configuration (Gold tier exports)
-
-Author: Robert and Geospatial Claude Legion
-Last Updated: 21 NOV 2025
 """
 
 import os

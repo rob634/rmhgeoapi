@@ -1,41 +1,25 @@
-# ============================================================================
-# CLAUDE CONTEXT - QUEUE REPOSITORY
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: Infrastructure - Azure Storage Queue repository
-# PURPOSE: Centralized queue repository with managed authentication and singleton credential reuse
-# LAST_REVIEWED: 29 OCT 2025
-# EXPORTS: QueueRepository - Singleton implementation for all queue operations
-# INTERFACES: IQueueRepository - Implements queue operation interface
-# PYDANTIC_MODELS: Accepts BaseModel instances for message sending
-# DEPENDENCIES: azure.storage.queue, azure.identity, threading, base64, json, config
-# SOURCE: Azure Storage Queues via DefaultAzureCredential
-# SCOPE: All queue operations in the application
-# VALIDATION: Retry logic, error handling, message size validation
-# PATTERNS: Singleton, Repository, Connection pooling, DefaultAzureCredential
-# ENTRY_POINTS: QueueRepository.instance(), RepositoryFactory.create_queue_repository()
-# INDEX: QueueRepository:50, send_message:270, receive_messages:320
-# ============================================================================
-
 """
-Queue Repository Implementation
+Queue Repository Implementation.
 
 Centralized queue repository with managed authentication.
 Uses singleton pattern to ensure DefaultAzureCredential is created
 only once per worker process, providing 100x performance improvement
 over creating credentials for each operation.
 
-CRITICAL: This is THE authentication point for all queue operations.
-- Uses DefaultAzureCredential for seamless auth across environments
-- Singleton pattern ensures connection reuse
-- Connection pooling for queue clients
-- Thread-safe implementation
+Key Features:
+    - Uses DefaultAzureCredential for seamless auth across environments
+    - Singleton pattern ensures connection reuse
+    - Connection pooling for queue clients
+    - Thread-safe implementation
 
 Design Principles:
-- Single source of authentication for all queue operations
-- Automatic retry logic with exponential backoff
-- Consistent error handling and logging
-- Message encoding/decoding handled internally
+    - Single source of authentication for all queue operations
+    - Automatic retry logic with exponential backoff
+    - Consistent error handling and logging
+    - Message encoding/decoding handled internally
+
+Exports:
+    QueueRepository: Singleton implementation for all queue operations
 
 Usage:
     # Get singleton instance (recommended)

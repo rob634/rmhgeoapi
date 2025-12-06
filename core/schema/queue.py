@@ -1,51 +1,16 @@
-# ============================================================================
-# CLAUDE CONTEXT - QUEUE MESSAGE SCHEMAS
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: Core schema - Queue message validation
-# PURPOSE: Pydantic models for Queue boundary validation and serialization
-# LAST_REVIEWED: 16 OCT 2025
-# EXPORTS: JobQueueMessage, TaskQueueMessage
-# INTERFACES: Inherits from JobData, TaskData (core.contracts)
-# PYDANTIC_MODELS: JobQueueMessage, TaskQueueMessage (adds transport fields)
-# DEPENDENCIES: pydantic, typing, datetime, core.contracts
-# SOURCE: Queue messages from Azure Storage Queues AND Service Bus
-# SCOPE: Queue message validation for TRANSPORT boundary (Queue ↔ Python)
-# VALIDATION: Pydantic v2 field validators (inherits from TaskData/JobData)
-# PATTERNS: Data model pattern, Message pattern, Inheritance (TaskData/JobData)
-# ENTRY_POINTS: from core.schema.queue import JobQueueMessage, TaskQueueMessage
-# ARCHITECTURE: TaskQueueMessage = TaskData + Transport fields
-# ============================================================================
-
 """
-Queue Message Schemas - Transport Boundary
+Queue Message Schemas - Transport Boundary.
 
-This module defines message formats for Azure Storage Queues and Service Bus.
-Messages inherit from TaskData/JobData and add transport-specific fields:
-- retry_count, timestamp (message delivery tracking)
+Message formats for Azure Storage Queues and Service Bus.
+Inherits from TaskData/JobData and adds transport-specific fields.
 
 Architecture:
-    TaskData (core.contracts) - Base contract with essential task properties
-         ↓ inherits
-    TaskQueueMessage (this file) - Queue boundary specialization
+    TaskData → TaskQueueMessage (adds transport fields)
+    JobData → JobQueueMessage (adds transport fields)
 
-    JobData (core.contracts) - Base contract with essential job properties
-         ↓ inherits
-    JobQueueMessage (this file) - Queue boundary specialization
-
-Philosophy: "Queue messages are transient contracts between services"
-
-The separation from database models ensures:
-1. Queue schemas evolve independently from database schemas
-2. Clear distinction between persistent (DB) and transient (queue) data
-3. Smaller, focused modules
-4. Consistent message format across Storage Queue and Service Bus
-
-The "Task" conceptual entity is composed of:
-    TaskQueueMessage (data in motion) + TaskExecutor (behavior) = "Task" entity
-
-See core/contracts/__init__.py for full architecture explanation.
-
+Exports:
+    JobQueueMessage: Job message for queue transport
+    TaskQueueMessage: Task message for queue transport
 """
 
 from datetime import datetime

@@ -111,7 +111,7 @@ JOB (Complete workflow, e.g., "ingest vector data")
 -- Jobs Table (app schema)
 CREATE TABLE jobs (
     job_id VARCHAR PRIMARY KEY,      -- SHA256 hash of parameters (idempotency)
-    job_type VARCHAR,                -- 'ingest_vector', 'process_raster', etc.
+    job_type VARCHAR,                -- 'process_vector', 'process_raster_v2', etc.
     status VARCHAR,                  -- 'Queued', 'Processing', 'Completed', 'Failed'
     stage INTEGER,                   -- Current stage (1 to n)
     total_stages INTEGER,            -- Total number of stages

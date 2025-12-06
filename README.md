@@ -778,7 +778,7 @@ curl -X POST "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.ne
 - **Job Examples**:
   - Simple: `jobs/create_h3_base.py`
   - Multi-stage: `jobs/hello_world.py`
-  - Complex: `jobs/process_raster.py`
+  - Complex: `jobs/process_raster_v2.py`
 - **Handler Contract**: `services/__init__.py` lines 32-70
 - **CoreMachine**: `core/machine.py` - Universal orchestrator implementation
 - **Extended Docs**: `/docs_claude/CLAUDE_CONTEXT.md` for comprehensive documentation

@@ -1,34 +1,15 @@
-# ============================================================================
-# CLAUDE CONTEXT - RASTER CONFIGURATION
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: New module - Phase 1 of config.py refactoring (20 NOV 2025)
-# PURPOSE: Raster processing pipeline configuration
-# LAST_REVIEWED: 20 NOV 2025
-# EXPORTS: RasterConfig
-# INTERFACES: Pydantic BaseModel
-# PYDANTIC_MODELS: RasterConfig
-# DEPENDENCIES: pydantic, os, typing
-# SOURCE: Environment variables (RASTER_*)
-# SCOPE: Raster-specific configuration
-# VALIDATION: Pydantic v2 validation with ranges
-# PATTERNS: Value objects, factory methods
-# ENTRY_POINTS: from config import RasterConfig
-# INDEX: RasterConfig:37
-# ============================================================================
-
 """
-Raster Processing Pipeline Configuration
+Raster Processing Pipeline Configuration.
 
 Provides configuration for:
-- COG creation settings (compression, tile size, quality)
-- Raster validation settings
-- Size thresholds for pipeline selection
-- MosaicJSON configuration
-- Intermediate file storage
+    - COG creation settings (compression, tile size, quality)
+    - Raster validation settings
+    - Size thresholds for pipeline selection
+    - MosaicJSON configuration
+    - Intermediate file storage
 
-This module was extracted from config.py (lines 564-641) as part of the
-god object refactoring (20 NOV 2025).
+Exports:
+    RasterConfig: Pydantic configuration model
 """
 
 import os

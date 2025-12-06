@@ -1,24 +1,15 @@
-# ============================================================================
-# CLAUDE CONTEXT - CORE LOGIC - CALCULATIONS
-# ============================================================================
-# CATEGORY: BUSINESS LOGIC HELPERS
-# PURPOSE: Shared utility functions for calculations and state transitions
-# EPOCH: Shared by all epochs (business logic)# PURPOSE: Business calculations for jobs and tasks
-# EXPORTS: Functions for calculating rates, percentages, counts
-# INTERFACES: Operates on core.models data structures
-# DEPENDENCIES: core.models
-# SOURCE: Business logic extracted from schema_base.py
-# SCOPE: Calculation logic
-# VALIDATION: Mathematical operations
-# PATTERNS: Pure functions
-# ENTRY_POINTS: from core.logic.calculations import calculate_success_rate
-# ============================================================================
-
 """
-Business calculations for jobs and tasks.
+Business Calculations for Jobs and Tasks.
 
-This module contains calculation logic separated from the data models.
+Contains calculation logic separated from data models.
 All functions are pure and operate on model data.
+
+Exports:
+    calculate_success_rate: Calculate success rate as percentage
+    calculate_completion_percentage: Calculate overall completion
+    is_stage_complete: Check if all tasks in stage are done
+    aggregate_task_results: Aggregate task results for stage
+    all_tasks_succeeded: Check if all tasks succeeded
 """
 
 from typing import List, Dict, Any, Optional

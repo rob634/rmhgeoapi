@@ -1,51 +1,9 @@
-# ============================================================================
-# CLAUDE CONTEXT - BLOB REPOSITORY
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: Infrastructure - Azure Blob Storage repository with decorator validation
-# PURPOSE: Centralized Azure Blob Storage repository with fail-fast validation
-# LAST_REVIEWED: 28 OCT 2025
-# UPDATES:
-#   - Added container_exists() and validate_container_and_blob() methods
-#   - Implemented @validate_container and @validate_container_and_blob decorators
-#   - All read/delete methods validate container+blob existence before execution
-#   - All write/list methods validate container existence before execution
-#   - Fail-fast pattern prevents cryptic Azure SDK errors deep in call stacks
-# EXPORTS: BlobRepository singleton with DefaultAzureCredential authentication
-# INTERFACES: IBlobRepository for dependency injection
-# PYDANTIC_MODELS: None - operates on raw bytes and streams
-# DEPENDENCIES: azure-storage-blob, azure-identity, decorators_blob, util_logger
-# SOURCE: Azure Blob Storage containers (Bronze/Silver/Gold tiers)
-# SCOPE: ALL blob operations for entire ETL pipeline
-# VALIDATION:
-#   - Decorator-based pre-flight validation (automatic)
-#   - Container existence (before all operations)
-#   - Blob existence (before read/delete operations)
-#   - Manual validation via container_exists(), validate_container_and_blob()
-# PATTERNS:
-#   - Singleton (connection reuse)
-#   - Repository (data access abstraction)
-#   - Decorator (automatic validation)
-#   - DefaultAzureCredential (managed auth)
-#   - Connection pooling (cached container clients)
-# ENTRY_POINTS: BlobRepository.instance(), RepositoryFactory.create_blob_repository()
-# DECORATED_METHODS:
-#   - @validate_container_and_blob: read_blob, read_blob_chunked, delete_blob, get_blob_properties
-#   - @validate_container: write_blob, list_blobs, batch_download
-# INDEX:
-#   - IBlobRepository: line 89
-#   - BlobRepository: line 143
-#   - Validation: container_exists (293), validate_container_and_blob (321)
-#   - Core Operations: read_blob (377), write_blob (457), list_blobs (543)
-#   - Decorators: infrastructure/decorators_blob.py
-# ============================================================================
-
 """
-Blob Storage Repository - Central Authentication Point
+Blob Storage Repository.
 
-This module provides THE centralized blob storage repository with managed
-authentication using DefaultAzureCredential. It serves as the single point
-of authentication for all blob operations across the entire ETL pipeline.
+Centralized blob storage repository with managed authentication using
+DefaultAzureCredential. Serves as the single point of authentication
+for all blob operations across the entire ETL pipeline.
 
 Key Features:
 - DefaultAzureCredential for seamless authentication across environments

@@ -38,13 +38,10 @@ Used by:
 - Future raster workflows
 
 Key Features:
-- Schema composition with ** operator
-- Static helper methods for fan-out task creation
-- Config-aware default resolution
-- Platform passthrough field support
-
-Created: 30 NOV 2025
-Author: Robert and Geospatial Claude Legion
+    - Schema composition with ** operator
+    - Static helper methods for fan-out task creation
+    - Config-aware default resolution
+    - Platform passthrough field support
 """
 
 from typing import Dict, Any, List, Optional

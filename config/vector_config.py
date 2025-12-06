@@ -1,33 +1,14 @@
-# ============================================================================
-# CLAUDE CONTEXT - VECTOR CONFIGURATION
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: New module - Phase 1 of config.py refactoring (20 NOV 2025)
-# PURPOSE: Vector processing pipeline configuration
-# LAST_REVIEWED: 20 NOV 2025
-# EXPORTS: VectorConfig
-# INTERFACES: Pydantic BaseModel
-# PYDANTIC_MODELS: VectorConfig
-# DEPENDENCIES: pydantic, os
-# SOURCE: Environment variables (VECTOR_*)
-# SCOPE: Vector-specific configuration
-# VALIDATION: Pydantic v2 validation
-# PATTERNS: Value objects, factory methods
-# ENTRY_POINTS: from config import VectorConfig
-# INDEX: VectorConfig:35
-# ============================================================================
-
 """
-Vector Processing Pipeline Configuration
+Vector Processing Pipeline Configuration.
 
 Provides configuration for:
-- Pickle file storage for chunked vector processing
-- Chunk size settings
-- PostGIS upload settings
-- Spatial index creation
+    - Pickle file storage for chunked vector processing
+    - Chunk size settings
+    - PostGIS upload settings
+    - Spatial index creation
 
-This module was extracted from config.py (lines 548-558) as part of the
-god object refactoring (20 NOV 2025).
+Exports:
+    VectorConfig: Pydantic vector configuration model
 """
 
 import os

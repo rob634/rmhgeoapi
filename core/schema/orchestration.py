@@ -1,38 +1,20 @@
-# ============================================================================
-# CLAUDE CONTEXT - CORE SCHEMA
-# ============================================================================
-# CATEGORY: SCHEMAS - DATA VALIDATION & TRANSFORMATION
-# PURPOSE: Pydantic models for validation, serialization, and data flow
-# EPOCH: Shared by all epochs (not persisted to database)# PURPOSE: Formal schemas for dynamic orchestration pattern in Job→Stage→Task workflow (both pipelines)
-# EXPORTS: OrchestrationInstruction, DynamicOrchestrationResult, OrchestrationItem, FileOrchestrationItem
-# INTERFACES: None - pure data models
-# PYDANTIC_MODELS: All classes in this file are Pydantic v2 models
-# DEPENDENCIES: pydantic, typing, enum, datetime
-# SOURCE: Stage 1 task results that need to orchestrate Stage 2+ tasks
-# SCOPE: Used by both Storage Queue and Service Bus controllers for dynamic task generation
-# VALIDATION: Pydantic automatic validation with custom validators
-# PATTERNS: Data Transfer Objects for orchestration communication, Dynamic fan-out pattern
-# ENTRY_POINTS: Import and use in controller aggregate_stage_results methods (both pipelines)
-# LOCATION: core/schema/ - Core architecture schema (copied from root schema_orchestration.py)
-# ============================================================================
-
 """
-Universal Dynamic Orchestration Schemas - Dual Pipeline Support
+Dynamic Orchestration Schemas - Dual Pipeline Support.
 
-Formal data models for the "Analyze & Orchestrate" pattern where Stage 1
+Formal data models for "Analyze & Orchestrate" pattern where Stage 1
 analyzes content and dynamically determines what Stage 2+ tasks to create.
-Used by BOTH Azure Storage Queue and Service Bus pipeline controllers.
 
-This pattern is used when:
-1. The number of tasks is not known until runtime
-2. Task parameters depend on analyzed content
-3. Stage 2 might be skipped based on Stage 1 findings
-4. Dynamic fan-out is needed after content discovery
+Use Cases:
+    - Number of tasks not known until runtime
+    - Task parameters depend on analyzed content
+    - Dynamic fan-out after content discovery
+    - Stage 2 might be skipped based on Stage 1 findings
 
-Supports both pipelines:
-- Storage Queue: controller_container.py uses full orchestration
-- Service Bus: controller_service_bus_container.py uses FileOrchestrationItem
-
+Exports:
+    OrchestrationAction: Action type enumeration
+    OrchestrationInstruction: Stage 1 result instructions
+    OrchestrationItem: Generic orchestration item
+    FileOrchestrationItem: File-specific orchestration item
 """
 
 from typing import Dict, List, Any, Optional, Union, Literal

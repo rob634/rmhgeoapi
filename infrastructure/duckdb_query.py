@@ -1,69 +1,29 @@
-# ============================================================================
-# CLAUDE CONTEXT - INFRASTRUCTURE
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: Infrastructure - DuckDB SQL query composition utility
-# PURPOSE: Safe SQL query composition for DuckDB (similar to psycopg.sql)
-# LAST_REVIEWED: 29 OCT 2025
-# EXPORTS: QueryBuilder, Identifier, Literal, QueryParam, OvertureQueryBuilder
-# INTERFACES: None - utility classes for SQL composition
-# PYDANTIC_MODELS: None (uses dataclasses)
-# DEPENDENCIES: re (regex), typing, dataclasses
-# SOURCE: N/A - infrastructure utility
-# SCOPE: DuckDB SQL injection prevention via composition
-# VALIDATION: Identifier format validation, whitelist literals, parameter type checking
-# PATTERNS: Builder pattern, SQL composition (injection-safe), Validation decorators
-# ENTRY_POINTS: qb = QueryBuilder(); qb.append(...); query, params = qb.build()
-# INDEX: QueryParam:40, Identifier:50, Literal:75, QueryBuilder:100, OvertureQueryBuilder:180
-# ============================================================================
-
 """
-DuckDB Safe SQL Query Composition
+DuckDB Safe SQL Query Composition.
 
-This module provides safe SQL composition for DuckDB queries, similar to
-psycopg's sql.SQL() and sql.Identifier() pattern. It prevents SQL injection
-by separating query structure from parameters and validating identifiers.
-
-Architecture:
-    PostgreSQL (psycopg):
-        sql.SQL("SELECT * FROM {}").format(sql.Identifier('table'))
-
-    DuckDB (this module):
-        qb = QueryBuilder()
-        qb.append("SELECT * FROM", Identifier('table'))
-        query, params = qb.build()
+Provides safe SQL composition for DuckDB queries, similar to psycopg's
+sql.SQL() and sql.Identifier() pattern. Prevents SQL injection by
+separating query structure from parameters and validating identifiers.
 
 Key Classes:
-    - QueryParam: Marks values for parameterization (? placeholders)
-    - Identifier: Validates SQL identifiers (tables, columns)
-    - Literal: Validates whitelisted string literals
-    - QueryBuilder: Core composition engine
-    - OvertureQueryBuilder: Domain-specific validation
+    QueryParam: Marks values for parameterization (? placeholders)
+    Identifier: Validates SQL identifiers (tables, columns)
+    Literal: Validates whitelisted string literals
+    QueryBuilder: Core composition engine
+    OvertureQueryBuilder: Domain-specific validation
 
 Safety Guarantees:
-    - Identifiers validated against regex (alphanumeric + underscore)
+    - Identifiers validated against regex
     - Literals validated against whitelists
     - Values automatically parameterized
     - Type checking prevents accidental string concatenation
 
-Example Usage:
-    ```python
-    from infrastructure.duckdb_query import QueryBuilder, Identifier, QueryParam
-
-    qb = QueryBuilder()
-    qb.append(
-        "SELECT * FROM",
-        Identifier('my_table'),
-        "WHERE id =", QueryParam(123),
-        "AND name =", QueryParam('test')
-    )
-    query, params = qb.build()
-    # query = "SELECT * FROM my_table WHERE id = ? AND name = ?"
-    # params = [123, 'test']
-
-    conn.execute(query, params)
-    ```
-
+Exports:
+    QueryBuilder: Safe SQL query composition engine
+    Identifier: SQL identifier validator
+    Literal: Whitelisted literal validator
+    QueryParam: Parameterized value marker
+    OvertureQueryBuilder: Overture Maps-specific validation
 """
 
 import re

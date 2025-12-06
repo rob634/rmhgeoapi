@@ -119,7 +119,7 @@ Response (Completed):
 Response (Failed):
     {
         "jobId": "sha256_hash_of_parameters",
-        "jobType": "ingest_vector",
+        "jobType": "process_vector",
         "status": "failed",
         "stage": 1,
         "totalStages": 2,

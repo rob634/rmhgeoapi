@@ -1,35 +1,15 @@
-# ============================================================================
-# CLAUDE CONTEXT - ORCHESTRATION
-# ============================================================================
-# CATEGORY: STATE MANAGEMENT & ORCHESTRATION
-# PURPOSE: Core architectural component for job/task lifecycle management
-# EPOCH: Shared by all epochs (may evolve with architecture changes)# PURPOSE: Simplified dynamic orchestration optimized for Service Bus batch processing
-# EXPORTS: OrchestrationManager - handles dynamic task creation with batching
-# INTERFACES: Works with CoreController for stage-based task generation
-# PYDANTIC_MODELS: OrchestrationInstruction, FileOrchestrationItem, TaskDefinition
-# DEPENDENCIES: typing, logging, schema_orchestration
-# SOURCE: Extracted and simplified from BaseController for Service Bus optimization
-# SCOPE: Dynamic task creation based on Stage 1 analysis results
-# VALIDATION: Pydantic models ensure data consistency
-# PATTERNS: Strategy pattern for different orchestration actions
-# ENTRY_POINTS: Used by Service Bus controllers for dynamic workflows
-# INDEX: OrchestrationManager:50, parse_stage_results:150, create_batch_tasks:250
-# ============================================================================
-
 """
-Orchestration Manager - Dynamic Task Creation for Service Bus
+Orchestration Manager - Dynamic Task Creation.
 
 Simplified orchestration for Service Bus controllers that need dynamic
 task creation (like container operations). Optimized for batch processing.
 
 Key Pattern:
-- Stage 1: Analyze (e.g., list container files)
-- Stage 2: Process items in batches (e.g., extract metadata)
+    Stage 1: Analyze (e.g., list container files)
+    Stage 2: Process items in batches (e.g., extract metadata)
 
-This is much simpler than BaseController's orchestration because:
-1. No workflow definitions needed
-2. Optimized for batch creation
-3. Direct integration with Service Bus batching
+Exports:
+    OrchestrationManager: Manages dynamic task creation for controllers
 """
 
 from typing import Dict, Any, List, Optional, Tuple

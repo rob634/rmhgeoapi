@@ -471,7 +471,7 @@ curl https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/jobs
 **Reference Implementations:**
 - **Simple single-stage:** [jobs/create_h3_base.py](../jobs/create_h3_base.py) - Minimal working example
 - **Multi-stage workflow:** [jobs/hello_world.py](../jobs/hello_world.py) - Two stages with task lineage
-- **Complex pipeline:** [jobs/process_raster.py](../jobs/process_raster.py) - Dynamic fan-out pattern
+- **Complex pipeline:** [jobs/process_raster_v2.py](../jobs/process_raster_v2.py) - Dynamic fan-out pattern with JobBaseMixin
 
 **Common Pitfalls:**
 - ❌ Forgetting `@staticmethod` decorator on methods
@@ -523,13 +523,14 @@ class HelloWorldJob:
     ]
 ```
 
-**Complex raster pipeline:** `jobs/process_raster.py`
+**Complex raster pipeline:** `jobs/process_raster_v2.py` (v2 mixin pattern, 04 DEC 2025)
 ```python
-class ProcessRasterWorkflow:
-    job_type = "process_raster"
+class ProcessRasterV2Job(RasterMixin, RasterWorkflowsBase, JobBaseMixin, JobBase):
+    job_type = "process_raster_v2"
     stages = [
-        {"number": 1, "name": "validate", "task_type": "validate_raster"},
-        {"number": 2, "name": "create_cog", "task_type": "create_cog"}
+        {"number": 1, "name": "validate", "task_type": "validate_raster", "parallelism": "single"},
+        {"number": 2, "name": "create_cog", "task_type": "create_cog", "parallelism": "single"},
+        {"number": 3, "name": "create_stac", "task_type": "create_stac_raster", "parallelism": "single"}
     ]
 ```
 

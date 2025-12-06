@@ -1,118 +1,90 @@
-# ============================================================================
-# CLAUDE CONTEXT - AZURE FUNCTIONS ENTRY POINT
-# ============================================================================
-# EPOCH: SHARED - BOTH EPOCHS
-# STATUS: Epoch 4
-# NOTE: Careful migration required
-# PURPOSE: Azure Functions entry point orchestrating the geospatial ETL pipeline with HTTP and queue triggers
-# EXPORTS: app (Function App), core_machine (CoreMachine orchestrator)
-# INTERFACES: Azure Functions triggers via @app decorators (http_trigger, queue_trigger, timer_trigger)
-# PYDANTIC_MODELS: JobQueueMessage, TaskQueueMessage, various trigger request/response models
-# DEPENDENCIES: azure.functions, triggers/*, core.machine (CoreMachine), infrastructure.*, util_logger
-# SOURCE: HTTP requests, Azure Storage Queues (geospatial-jobs, geospatial-tasks), timer schedules
-# SCOPE: Global application entry point managing all Azure Function triggers and explicit registration
-# VALIDATION: Request validation via trigger classes, queue message validation via Pydantic models
-# PATTERNS: Explicit Registration pattern (no decorators), Catalog pattern, Dependency Injection
-# ENTRY_POINTS: Azure Functions runtime calls app routes; main entry: /api/jobs/submit/{job_type}, /api/platform/submit
-# INDEX: Registration:170-200, HTTP routes:210-350, Queue processors:400-600, Database queries:278-332
-# LAST_UPDATED: 11 NOV 2025 - Added STAC API v1.0.0 endpoints (6 routes)
-# ============================================================================
-
 """
-Azure Functions App for Geospatial ETL Pipeline - REDESIGN ARCHITECTURE.
+Azure Functions entry point for Geospatial ETL Pipeline.
 
 This module serves as the entry point for the Azure Functions-based geospatial
 ETL pipeline. It provides HTTP endpoints for job submission and status checking,
 queue-based asynchronous processing, and comprehensive health monitoring.
 
-🏗️ EPOCH 4 ARCHITECTURE (1 October 2025):
-    HTTP API or Service Bus → CoreMachine → Workflow (@register_job) → Tasks → Service Bus
-                                   ↓              ↓                        ↓
+Architecture:
+    HTTP API or Service Bus -> CoreMachine -> Workflow -> Tasks -> Service Bus
+                                   |              |                    |
                               Job Record    Pydantic Validation    Task Records
                           (PostgreSQL)      (Strong Typing)    (Service Layer Execution)
-                                                                        ↓
+                                                                        |
                                                                Storage/Database/STAC
                                                            (PostgreSQL/PostGIS/Blob)
 
-Job → Stage → Task Pattern:
-    ✅ CLEAN ARCHITECTURE WITH DECLARATIVE WORKFLOWS
+Job -> Stage -> Task Pattern:
     - CoreMachine: Universal orchestrator (composition over inheritance)
-    - @register_job: Declarative workflow registration
-    - @register_task: Declarative task handler registration
+    - Declarative workflow and task handler registration
     - Sequential stages with parallel tasks within each stage
-    - Data-Behavior Separation: TaskData/JobData (data) + TaskExecutor/Workflow (behavior)  
+    - Data-Behavior Separation: TaskData/JobData (data) + TaskExecutor/Workflow (behavior)
     - "Last task turns out the lights" completion pattern
-    - Strong typing discipline with explicit error handling (no fallbacks)
-    - Clear separation: Controller (orchestration) vs Task (business logic)
+    - Strong typing discipline with explicit error handling
 
 Key Features:
     - Pydantic-based workflow definitions with strong typing discipline
-    - Job→Task architecture with controller pattern
+    - Job->Task architecture with controller pattern
     - Idempotent job processing with SHA256-based deduplication
     - Queue-based async processing with poison queue monitoring
     - Managed identity authentication with user delegation SAS
     - Support for files up to 20GB with smart metadata extraction
     - Comprehensive STAC cataloging with PostGIS integration
-    - Explicit error handling (no legacy fallbacks or compatibility layers)
-    - Enhanced logging with visual indicators for debugging
+
+Exports:
+    app: Azure Function App instance
+    core_machine: CoreMachine orchestrator instance
+
+Dependencies:
+    azure.functions: Azure Functions SDK
+    triggers/*: HTTP and queue trigger implementations
+    core.machine: CoreMachine orchestrator
+    infrastructure.*: Repository implementations
 
 Endpoints:
     Core System:
-    GET  /api/health - System health check with component status
+        GET  /api/health - System health check with component status
 
     CoreMachine Layer:
-    POST /api/jobs/submit/{job_type} - Submit processing job
-    GET  /api/jobs/status/{job_id} - Get job status and results
+        POST /api/jobs/submit/{job_type} - Submit processing job
+        GET  /api/jobs/status/{job_id} - Get job status and results
 
     Platform Layer:
-    POST /api/platform/submit - Submit Platform API request
-    GET  /api/platform/status/{request_id} - Get Platform request status
+        POST /api/platform/submit - Submit Platform API request
+        GET  /api/platform/status/{request_id} - Get Platform request status
 
-    STAC API v1.0.0 (NEW 11 NOV 2025):
-    GET  /api/stac_api - STAC landing page
-    GET  /api/stac_api/conformance - STAC conformance classes
-    GET  /api/stac_api/collections - STAC collections list
-    GET  /api/stac_api/collections/{collection_id} - STAC collection detail
-    GET  /api/stac_api/collections/{collection_id}/items - STAC items (paginated)
-    GET  /api/stac_api/collections/{collection_id}/items/{item_id} - STAC item detail
+    STAC API v1.0.0:
+        GET  /api/stac_api - STAC landing page
+        GET  /api/stac_api/conformance - STAC conformance classes
+        GET  /api/stac_api/collections - STAC collections list
+        GET  /api/stac_api/collections/{collection_id} - STAC collection detail
+        GET  /api/stac_api/collections/{collection_id}/items - STAC items (paginated)
+        GET  /api/stac_api/collections/{collection_id}/items/{item_id} - STAC item detail
 
     Database Queries (DEV/TEST):
-    GET  /api/dbadmin/jobs?status=failed&limit=10 - Query jobs
-    GET  /api/dbadmin/tasks/{job_id} - Query tasks for job
-    GET  /api/dbadmin/stats - Database statistics
-    GET  /api/dbadmin/diagnostics/enums - Enum diagnostics
-    GET  /api/dbadmin/diagnostics/functions - Function tests
-    GET  /api/dbadmin/diagnostics/all - All diagnostics
+        GET  /api/dbadmin/jobs?status=failed&limit=10 - Query jobs
+        GET  /api/dbadmin/tasks/{job_id} - Query tasks for job
+        GET  /api/dbadmin/stats - Database statistics
 
     Monitoring:
-    GET  /api/monitor/poison - Check poison queue status
-    POST /api/monitor/poison - Process poison messages
+        GET  /api/monitor/poison - Check poison queue status
 
     Schema Management (DEV ONLY):
-    POST /api/dbadmin/maintenance/nuke?confirm=yes - Drop app schema objects (dev only)
-    POST /api/dbadmin/maintenance/redeploy?confirm=yes - Nuke and redeploy app schema (dev only)
-    POST /api/dbadmin/maintenance/pgstac/redeploy?confirm=yes - Redeploy pgstac schema (dev only)
-    POST /api/dbadmin/maintenance/full-rebuild?confirm=yes - Atomic rebuild of BOTH app+pgstac (dev only)
+        POST /api/dbadmin/maintenance/full-rebuild?confirm=yes - Atomic schema rebuild
 
-Supported Operations:
-    Pydantic Workflow Definition Pattern (Job→Task Architecture):
-    - hello_world: Fully implemented with controller routing and workflow validation
-
-Processing Pattern - Pydantic Job→Task Queue Architecture:
+Processing Pattern:
     1. HTTP Request Processing:
        - HTTP request triggers workflow definition validation
        - Controller creates job record and stages based on workflow definition
        - Each stage creates parallel tasks with parameter validation
        - Job queued to geospatial-jobs queue for asynchronous processing
-       - Explicit error handling with no fallback compatibility
-       
+
     2. Queue-Based Task Execution:
        - geospatial-jobs queue: Job messages from controllers
        - geospatial-tasks queue: Task messages for atomic work units
        - Tasks processed independently with strong typing discipline
        - Last completing task aggregates results into job result_data
        - Poison queues monitor and recover failed messages
-       - Each queue has dedicated Azure Function triggers for scalability
 
 Environment Variables:
     STORAGE_ACCOUNT_NAME: Azure storage account name
@@ -122,9 +94,6 @@ Environment Variables:
     POSTGIS_DATABASE: PostgreSQL database name
     POSTGIS_USER: PostgreSQL username
     POSTGIS_PASSWORD: PostgreSQL password
-
-Version: 2.1.0
-Last Updated: January 2025
 """
 
 # ========================================================================
@@ -240,7 +209,11 @@ from triggers.admin.servicebus import servicebus_admin_trigger
 from triggers.admin.h3_debug import admin_h3_debug_trigger
 
 # Platform Service Layer triggers (25 OCT 2025)
-from triggers.trigger_platform import platform_request_submit
+from triggers.trigger_platform import (
+    platform_request_submit,
+    platform_raster_submit,
+    platform_raster_collection_submit
+)
 from triggers.trigger_platform_status import platform_request_status
 
 # OGC Features API - Standalone module (29 OCT 2025)
@@ -488,6 +461,17 @@ def db_maintenance_cleanup(req: func.HttpRequest) -> func.HttpResponse:
 @app.route(route="dbadmin/maintenance/pgstac/redeploy", methods=["POST"])
 def db_maintenance_pgstac_redeploy(req: func.HttpRequest) -> func.HttpResponse:
     """⚠️ FCO - Keep for QA, remove before UAT. POST /api/dbadmin/maintenance/pgstac/redeploy?confirm=yes"""
+    return admin_db_maintenance_trigger.handle_request(req)
+
+
+@app.route(route="dbadmin/maintenance/pgstac/check-prerequisites", methods=["GET", "POST"])
+def db_maintenance_pgstac_check_prerequisites(req: func.HttpRequest) -> func.HttpResponse:
+    """Check DBA prerequisites for pypgstac in corporate/QA environments (5 DEC 2025).
+
+    GET /api/dbadmin/maintenance/pgstac/check-prerequisites?identity=rmhpgflexadmin
+
+    Returns whether roles exist and are granted to the managed identity.
+    """
     return admin_db_maintenance_trigger.handle_request(req)
 
 
@@ -995,6 +979,60 @@ def platform_status_list(req: func.HttpRequest) -> func.HttpResponse:
     Returns list of all platform requests with optional filtering.
     """
     return platform_request_status(req)
+
+
+# Dedicated Raster Endpoints (05 DEC 2025)
+# DDH explicitly chooses endpoint based on single vs multiple files
+
+@app.route(route="platform/raster", methods=["POST"])
+def platform_raster(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Submit a single raster file for processing.
+
+    POST /api/platform/raster
+
+    DDH uses this when submitting a single raster file.
+    Platform routes to process_raster_v2, with automatic fallback
+    to process_large_raster_v2 if file exceeds size threshold.
+
+    Body:
+        {
+            "dataset_id": "aerial-imagery-2024",
+            "resource_id": "site-alpha",
+            "version_id": "v1.0",
+            "container_name": "bronze-rasters",
+            "file_name": "aerial-alpha.tif",
+            "service_name": "Aerial Imagery Site Alpha"
+        }
+
+    Note: file_name must be a string (single file), not a list.
+    """
+    return platform_raster_submit(req)
+
+
+@app.route(route="platform/raster-collection", methods=["POST"])
+def platform_raster_collection(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Submit multiple raster files as a collection.
+
+    POST /api/platform/raster-collection
+
+    DDH uses this when submitting multiple raster files to be processed
+    as a single collection with MosaicJSON.
+
+    Body:
+        {
+            "dataset_id": "aerial-tiles-2024",
+            "resource_id": "site-alpha",
+            "version_id": "v1.0",
+            "container_name": "bronze-rasters",
+            "file_name": ["tile1.tif", "tile2.tif", "tile3.tif"],
+            "service_name": "Aerial Tiles Site Alpha"
+        }
+
+    Note: file_name must be a list with at least 2 files.
+    """
+    return platform_raster_collection_submit(req)
 
 
 @app.route(route="stac/vector", methods=["POST"])

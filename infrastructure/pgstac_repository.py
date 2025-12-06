@@ -1,41 +1,17 @@
-# ============================================================================
-# CLAUDE CONTEXT - PGSTAC REPOSITORY
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: Infrastructure - PgSTAC data operations
-# PURPOSE: Repository pattern for PgSTAC collections and items CRUD operations
-# LAST_REVIEWED: 12 NOV 2025
-# EXPORTS: PgStacRepository class
-# INTERFACES: Repository pattern for pgSTAC database operations
-# PYDANTIC_MODELS: pystac.Collection, pystac.Item (consumed)
-# DEPENDENCIES: psycopg (3.2+), pystac (1.13+), typing, config
-# SOURCE: PostgreSQL pgstac schema (collections, items tables)
-# SCOPE: PgSTAC data operations (separate from PgStacBootstrap setup)
-# VALIDATION: Pydantic models for STAC validation
-# PATTERNS: Repository pattern, Separation of Concerns
-# ENTRY_POINTS: PgStacRepository().insert_collection(), insert_item(), etc.
-# INDEX:
-#   - PgStacRepository class: Line 50
-#   - insert_collection: Line 90
-#   - update_collection_metadata: Line 150
-#   - collection_exists: Line 210
-#   - insert_item: Line 250
-#   - get_collection: Line 310
-#   - list_collections: Line 360
-# ============================================================================
-
 """
-PgSTAC Repository - Data Operations for Collections and Items
+PgSTAC Repository - Data Operations for Collections and Items.
 
 Encapsulates all PgSTAC data operations (CRUD) following Repository pattern.
 Separated from PgStacBootstrap (which handles schema setup/installation).
 
 Key Responsibilities:
-- Insert/update/delete collections
-- Insert/update/delete items
-- Query collections and items
-- Update collection metadata (for search_id storage)
+    - Insert/update/delete collections
+    - Insert/update/delete items
+    - Query collections and items
+    - Update collection metadata (for search_id storage)
 
+Exports:
+    PgStacRepository: Repository for pgSTAC database operations
 """
 
 from typing import Dict, Any, Optional, List

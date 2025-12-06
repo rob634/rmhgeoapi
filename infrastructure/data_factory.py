@@ -1,45 +1,26 @@
-# ============================================================================
-# CLAUDE CONTEXT - AZURE DATA FACTORY REPOSITORY
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: Infrastructure - Azure Data Factory pipeline orchestration
-# PURPOSE: Repository for triggering and monitoring ADF pipelines from CoreMachine jobs
-# LAST_REVIEWED: 29 NOV 2025
-# EXPORTS: AzureDataFactoryRepository, PipelineRunResult, ActivityRunResult
-# INTERFACES: IDataFactoryRepository - implements pipeline orchestration interface
-# PYDANTIC_MODELS: None - uses dataclasses for results
-# DEPENDENCIES: azure-mgmt-datafactory, azure-identity, config, threading
-# SOURCE: Azure Data Factory Management API via DefaultAzureCredential
-# SCOPE: Pipeline orchestration for database-to-database ETL operations
-# VALIDATION: ADF configuration validation, pipeline existence checks
-# PATTERNS: Singleton, Repository, Factory Method
-# ENTRY_POINTS: AzureDataFactoryRepository.instance(), RepositoryFactory.create_data_factory_repository()
-# INDEX: PipelineRunResult:45, ActivityRunResult:65, AzureDataFactoryRepository:85
-# ============================================================================
-
 """
-Azure Data Factory Repository Implementation
+Azure Data Factory Repository Implementation.
 
 High-level repository for Azure Data Factory pipeline orchestration.
 Enables CoreMachine jobs to trigger ADF pipelines for database-to-database
 ETL operations with audit logging.
 
 Key Features:
-- Trigger ADF pipelines with parameters
-- Monitor pipeline execution status
-- Wait for pipeline completion with polling
-- Retrieve activity-level execution details
-- Health check for ADF connectivity
+    - Trigger ADF pipelines with parameters
+    - Monitor pipeline execution status
+    - Wait for pipeline completion with polling
+    - Retrieve activity-level execution details
+    - Health check for ADF connectivity
 
 Use Cases:
-- Production data promotion (app.staging_* → geodata.geo.*)
-- Database-to-database copy with audit trail
-- Scheduled/recurring ETL pipelines
+    - Production data promotion
+    - Database-to-database copy with audit trail
+    - Scheduled/recurring ETL pipelines
 
-Authentication:
-- Uses DefaultAzureCredential (same pattern as other repositories)
-- Supports managed identity in Azure Functions
-- Falls back to Azure CLI for local development
+Exports:
+    AzureDataFactoryRepository: ADF pipeline orchestration repository
+    PipelineRunResult: Pipeline execution result dataclass
+    ActivityRunResult: Activity execution result dataclass
 """
 
 from dataclasses import dataclass, field

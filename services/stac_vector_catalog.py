@@ -24,7 +24,7 @@ def create_vector_stac(params: dict) -> dict[str, Any]:
     """
     Create System STAC Item for completed PostGIS table.
 
-    This is the Stage 3 handler for ingest_vector job.
+    This is the Stage 3 handler for process_vector job.
     Creates a STAC Item in the 'system-vectors' collection to track
     the PostGIS table created by ETL.
 

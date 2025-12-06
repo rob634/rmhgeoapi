@@ -1,42 +1,17 @@
-# ============================================================================
-# CLAUDE CONTEXT - CONTROLLER
-# ============================================================================
-# CATEGORY: STATE MANAGEMENT & ORCHESTRATION
-# PURPOSE: Core architectural component for job/task lifecycle management
-# EPOCH: Shared by all epochs (may evolve with architecture changes)# PURPOSE: Minimal abstract base controller with only inherited methods for clean architecture
-# EXPORTS: CoreController - lean base class for composition-based controllers
-# INTERFACES: ABC (Abstract Base Class) - defines minimal controller contract
-# PYDANTIC_MODELS: JobExecutionContext, StageResultContract, TaskDefinition, TaskResult
-# DEPENDENCIES: abc, hashlib, json, logging, typing, pydantic
-# SOURCE: Extracted from BaseController to enable parallel implementation
-# SCOPE: Core controller abstractions without queue-specific logic
-# VALIDATION: Pydantic contracts with @enforce_contract decorator
-# PATTERNS: Abstract Base Class, Template Method, Composition over Inheritance
-# ENTRY_POINTS: Inherited by ServiceBusController and future clean controllers
-# INDEX: CoreController:50, Abstract Methods:100, ID Generation:250, Validation:350
-# ============================================================================
-
 """
-Core Controller - Minimal Abstract Base
+Core Controller - Minimal Abstract Base.
 
-This is the clean abstraction extracted from BaseController, containing only
-the methods that should be inherited. This enables parallel implementation
-of Service Bus controllers without the Queue Storage baggage.
+Clean abstraction containing only the methods that should be inherited.
+Enables parallel implementation of controllers without legacy baggage.
 
 Architecture:
-- 5 abstract methods (core contract)
-- 2 ID generation methods (use controller's job_type)
-- 2 validation methods (controller-specific)
-- Total: approximately 400 lines vs BaseController's 2,290 lines
+    5 abstract methods (core contract)
+    2 ID generation methods
+    2 validation methods
+    Composition over inheritance pattern
 
-Usage:
-    from controller_core import CoreController
-    from state_manager import StateManager
-
-    class ServiceBusController(CoreController):
-        def __init__(self):
-            super().__init__()
-            self.state_manager = StateManager()  # Composition
+Exports:
+    CoreController: Abstract base class for job controllers
 """
 
 from abc import ABC, abstractmethod

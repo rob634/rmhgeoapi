@@ -1,44 +1,35 @@
-# ============================================================================
-# CLAUDE CONTEXT - POSTGRESQL REPOSITORIES
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: Infrastructure - PostgreSQL database repositories with dual database support
-# PURPOSE: PostgreSQL-specific repository implementation with direct database access and atomic operations
-# LAST_REVIEWED: 29 NOV 2025
-# EXPORTS: PostgreSQLRepository, PostgreSQLJobRepository, PostgreSQLTaskRepository, PostgreSQLStageCompletionRepository
-# INTERFACES: BaseRepository, IJobRepository, ITaskRepository, IStageCompletionRepository
-# PYDANTIC_MODELS: JobRecord, TaskRecord, StageAdvancementResult, TaskCompletionResult, JobCompletionResult
-# DEPENDENCIES: psycopg, psycopg.sql, config, core.models, infrastructure.base
-# SOURCE: PostgreSQL database (app schema: jobs, tasks tables; business schema: ETL outputs)
-# SCOPE: Database operations for job/task persistence and atomic completion detection
-# VALIDATION: SQL injection prevention via psycopg.sql composition, transaction atomicity
-# PATTERNS: Repository pattern, Unit of Work (transactions), Template Method, Connection pooling
-# ENTRY_POINTS: repo = PostgreSQLJobRepository(); repo = PostgreSQLRepository(target_database="business")
-# INDEX: PostgreSQLRepository:61, PostgreSQLJobRepository:514, PostgreSQLTaskRepository:736, PostgreSQLStageCompletionRepository:949
-# DUAL_DATABASE: target_database parameter ("app" | "business") routes to geopgflex or ddhgeodb (29 NOV 2025)
-# ============================================================================
-
 """
-PostgreSQL Repository Implementation - Direct Database Access
+PostgreSQL Repository Implementation.
 
-This module provides PostgreSQL-specific repository implementations that inherit
-from the pure BaseRepository abstract class. It consolidates PostgreSQL operations
-previously split between adapter_storage.py and repository_data.py, eliminating
-the unnecessary adapter abstraction layer.
+Provides PostgreSQL-specific repository implementations with direct database access
+and atomic operations. Consolidates PostgreSQL operations into a clean repository
+pattern.
 
 Architecture:
     BaseRepository (abstract)
-        ↓
+        |
     PostgreSQLRepository (PostgreSQL-specific base)
-        ↓
+        |
     JobRepository, TaskRepository, CompletionDetector
 
 Key Features:
-- Direct PostgreSQL access using psycopg3
-- SQL composition for injection safety
-- Atomic operations for race condition prevention
-- Connection pooling and management
-- Transaction support
+    - Direct PostgreSQL access using psycopg3
+    - SQL composition for injection safety
+    - Atomic operations for race condition prevention
+    - Connection pooling and management
+    - Transaction support
+    - Dual database routing (app vs business schemas)
+
+Exports:
+    PostgreSQLRepository: Base PostgreSQL repository
+    PostgreSQLJobRepository: Job persistence operations
+    PostgreSQLTaskRepository: Task persistence operations
+    PostgreSQLStageCompletionRepository: Atomic completion detection
+
+Dependencies:
+    psycopg: PostgreSQL adapter
+    config: Database configuration
+    core.models: Pydantic data models
 """
 
 import os

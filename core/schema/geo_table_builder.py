@@ -1,51 +1,21 @@
-# ============================================================================
-# CLAUDE CONTEXT - GEO TABLE BUILDER
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: Schema Builder - Standardized geo table creation
-# PURPOSE: Generate PostgreSQL DDL for geo schema tables with standard metadata
-# LAST_REVIEWED: 24 NOV 2025
-# EXPORTS: GeoTableBuilder class
-# INTERFACES: None (concrete implementation)
-# PYDANTIC_MODELS: None (operates on GeoDataFrames with dynamic columns)
-# DEPENDENCIES: psycopg.sql, geopandas, config
-# SOURCE: GeoDataFrame column detection + standard metadata columns
-# SCOPE: geo schema table creation with ArcGIS Enterprise compatibility
-# VALIDATION: Geometry type validation, column name cleaning
-# PATTERNS: Builder pattern, Configuration-driven design
-# ENTRY_POINTS: from core.schema.geo_table_builder import GeoTableBuilder
-# INDEX:
-#   - GeoTableBuilder (line 50): Main builder class
-#   - STANDARD_COLUMNS (line 70): Metadata columns added to all tables
-#   - GEOMETRY_COLUMN_CONFIGS (line 85): ArcGIS vs PostGIS naming
-#   - create_table_ddl (line 120): Generate CREATE TABLE statement
-#   - create_indexes_ddl (line 200): Generate index statements
-#   - create_trigger_ddl (line 260): Generate updated_at trigger
-# ============================================================================
-
 """
 GeoTableBuilder - Standardized Geo Schema Table Creation.
 
 Provides consistent table creation for the `geo` schema with:
-1. Standard metadata columns (created_at, updated_at, source tracking)
-2. Dynamic attribute columns detected from GeoDataFrame
-3. Configurable geometry column name (PostGIS 'geom' vs ArcGIS 'shape')
-4. Standard indexes (spatial GIST, attribute B-tree, temporal)
-5. Updated_at trigger for automatic timestamp maintenance
+    - Standard metadata columns (created_at, updated_at, source tracking)
+    - Dynamic attribute columns detected from GeoDataFrame
+    - Configurable geometry column name (PostGIS 'geom' vs ArcGIS 'shape')
+    - Standard indexes (spatial GIST, attribute B-tree, temporal)
+    - Updated_at trigger for automatic timestamp maintenance
 
 Design Philosophy:
-- geo schema tables have UNKNOWN columns at design time (varies by input file)
-- Standard metadata columns are ALWAYS present (traceability, auditing)
-- Geometry column name is configurable for ArcGIS Enterprise compatibility
-- All DDL uses psycopg.sql composition for SQL injection safety
+    - geo schema tables have UNKNOWN columns at design time
+    - Standard metadata columns are ALWAYS present
+    - Geometry column name is configurable for ArcGIS compatibility
+    - All DDL uses psycopg.sql composition for SQL injection safety
 
-ArcGIS Enterprise Geodatabase Compatibility:
-- Set geometry_column='shape' for ArcGIS compatibility
-- ArcGIS expects 'shape' column with specific registration
-- Future: Add sde.* metadata table registration
-
-Date: 24 NOV 2025
-Author: Robert and Geospatial Claude Legion
+Exports:
+    GeoTableBuilder: Builder class for geo schema table DDL generation
 """
 
 from typing import List, Dict, Any, Optional, Literal

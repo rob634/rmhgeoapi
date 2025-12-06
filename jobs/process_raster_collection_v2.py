@@ -32,14 +32,11 @@ Four-stage workflow:
 3. Create MosaicJSON (Fan-in): Aggregate into virtual mosaic
 4. Create STAC Collection (Fan-in): Collection-level STAC item
 
-Key improvements over process_raster_collection.py:
-- Clean slate parameters (no deprecated fields)
-- Preflight validation with blob_list_exists (all files checked before job creation)
-- Validation bypass option (_skip_blob_validation=True) for trusted sources
-- ~150 lines vs 906 lines (83% reduction)
-
-Created: 30 NOV 2025
-Author: Robert and Geospatial Claude Legion
+Key improvements:
+    - Clean slate parameters (no deprecated fields)
+    - Preflight validation with blob_list_exists
+    - Validation bypass option (_skip_blob_validation=True)
+    - Reduced boilerplate via mixin pattern
 """
 
 from typing import Dict, Any, List, Optional

@@ -1,73 +1,23 @@
-# ============================================================================
-# CLAUDE CONTEXT - CORE CONTRACTS
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: Core contracts - Base data definitions
-# PURPOSE: Base Pydantic models that define the essential data structure of entities
-# LAST_REVIEWED: 16 OCT 2025
-# EXPORTS: TaskData, JobData - Base contracts for data hierarchy
-# INTERFACES: Pydantic BaseModel
-# PYDANTIC_MODELS: TaskData (task identity), JobData (job identity)
-# DEPENDENCIES: pydantic, typing, datetime
-# SOURCE: Extracted common fields from TaskRecord/TaskQueueMessage duplication
-# SCOPE: Foundation for all task/job data representations
-# VALIDATION: Field validation via Pydantic (inherited by specializations)
-# PATTERNS: Data Contract Pattern, DRY principle, Composition over Inheritance
-# ENTRY_POINTS:
-#   - from core.contracts import TaskData, JobData
-#   - Inherited by TaskRecord, TaskQueueMessage, JobRecord, JobQueueMessage
-#
-# ARCHITECTURE PHILOSOPHY:
-#   "Task" as a conceptual entity is composed of TWO orthogonal concerns:
-#
-#   1. DATA (this file) - TaskData defines "what a task IS"
-#      - Identity: task_id, parent_job_id
-#      - Classification: job_type, task_type, stage
-#      - Instructions: parameters
-#
-#   2. BEHAVIOR (services/task.py) - TaskExecutor defines "what a task DOES"
-#      - Abstract method: execute(params) -> result
-#      - Concrete implementations: ValidateRasterTask, GreetTask, etc.
-#
-#   These are NOT combined via inheritance (no God class).
-#   They collaborate via composition in TaskExecutionService:
-#
-#   ```python
-#   # The "Task" entity emerges from collaboration:
-#   task_record = TaskRecord(task_type="greet", params={...})  # DATA
-#   executor = TASK_REGISTRY[task_record.task_type]()          # BEHAVIOR
-#   result = executor.execute(task_record.parameters)          # COMPOSITION
-#   ```
-#
-#   The task_type field is the BRIDGE linking data to behavior.
-#
-# WHY SEPARATE DATA AND BEHAVIOR?
-#   ✅ Can swap data format without touching business logic
-#   ✅ Can test behavior without database/queue infrastructure
-#   ✅ Prevents tight coupling (Single Responsibility Principle)
-#   ✅ TaskData crosses boundaries (DB, Queue) - behavior stays internal
-#
-# BOUNDARY SPECIALIZATIONS:
-#   - TaskRecord(TaskData) - Adds persistence fields (status, timestamps, results)
-#   - TaskQueueMessage(TaskData) - Adds transport fields (retry_count, timestamp)
-#
-# INDEX:
-#   - TaskData: line 85
-#   - JobData: line 135
-# ============================================================================
-
 """
-Core Data Contracts - Base Pydantic Models
+Core Data Contracts - Base Pydantic Models.
 
-This module defines the foundational data structures for Task and Job entities.
-These base classes capture the ESSENTIAL identity and classification of entities,
+Defines foundational data structures for Task and Job entities.
+Base classes capture essential identity and classification,
 while specialized subclasses add boundary-specific fields.
 
-Philosophy: "Favor composition over inheritance"
-- Data (this file) and Behavior (services/*.py) are separate pillars
-- They meet in the middle via composition (TaskExecutionService)
-- The conceptual entity emerges from their collaboration
+Architecture:
+    TaskData: Essential task identity (task_id, parent_job_id, parameters)
+    JobData: Essential job identity (job_id, job_type, parameters)
 
+Boundary Specializations:
+    TaskRecord(TaskData): Adds persistence fields (status, timestamps)
+    TaskQueueMessage(TaskData): Adds transport fields (retry_count)
+    JobRecord(JobData): Adds orchestration fields (stage, status)
+    JobQueueMessage(JobData): Adds transport fields
+
+Exports:
+    TaskData: Base contract for task representations
+    JobData: Base contract for job representations
 """
 
 from datetime import datetime

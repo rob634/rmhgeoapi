@@ -1,41 +1,25 @@
-# ============================================================================
-# CLAUDE CONTEXT - BASE REPOSITORY
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: Infrastructure - Abstract base for all repositories
-# PURPOSE: Pure abstract base repository class providing common validation and error handling patterns
-# LAST_REVIEWED: 29 OCT 2025
-# EXPORTS: BaseRepository (abstract base class for all repository implementations)
-# INTERFACES: ABC (Abstract Base Class) - defines repository contract for storage implementations
-# PYDANTIC_MODELS: JobRecord, TaskRecord, JobStatus, TaskStatus (from core.models)
-# DEPENDENCIES: abc, contextlib, typing, logging, core.models, util_logger
-# SOURCE: No data source - pure abstract class providing patterns only
-# SCOPE: Base-level repository operations applicable to all storage backends
-# VALIDATION: State transition validation for jobs/tasks, error handling patterns
-# PATTERNS: Repository pattern, Template Method pattern, Error Context Manager pattern
-# ENTRY_POINTS: class PostgreSQLJobRepository(BaseRepository)
-# INDEX: BaseRepository:50, _error_context:80, _validate_status_transition:120, _validate_stage_progression:180
-# ============================================================================
-
 """
-Base Repository - Pure Abstract Class
+Base Repository - Pure Abstract Class.
 
-This module provides the abstract base repository class that all storage-specific
-repositories inherit from. It contains NO storage implementation details, only
-common validation logic, error handling patterns, and logging infrastructure.
+Abstract base repository class that all storage-specific repositories inherit from.
+Contains NO storage implementation details, only common validation logic,
+error handling patterns, and logging infrastructure.
 
 Architecture:
     BaseRepository (this file - pure abstract)
-        ↓
+        |
     Storage-specific bases (PostgreSQLRepository, ContainerRepository, etc.)
-        ↓
+        |
     Domain-specific repositories (JobRepository, TaskRepository, etc.)
 
 Key Design Principles:
-- NO storage backend dependencies
-- NO connection management
-- NO query execution
-- ONLY common patterns and utilities
+    - NO storage backend dependencies
+    - NO connection management
+    - NO query execution
+    - ONLY common patterns and utilities
+
+Exports:
+    BaseRepository: Abstract base class for repositories
 """
 
 from abc import ABC

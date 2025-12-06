@@ -69,9 +69,6 @@ job = submit_job("raster_to_h3_aggregation", {
     "output_format": "parquet"  # H3 cell ID + statistics
 })
 ```
-
-Author: Robert and Geospatial Claude Legion
-Last Updated: 21 NOV 2025
 """
 
 import os

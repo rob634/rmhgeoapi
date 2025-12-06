@@ -139,8 +139,8 @@ curl -X POST .../api/jobs/submit/hello_world \
   -H 'Content-Type: application/json' \
   -d '{"message": "test"}'
 
-# Example: ingest_vector
-curl -X POST .../api/jobs/submit/ingest_vector \
+# Example: process_vector (idempotent)
+curl -X POST .../api/jobs/submit/process_vector \
   -H 'Content-Type: application/json' \
   -d '{
     "blob_name": "data.geojson",
@@ -216,7 +216,7 @@ For complete parameter documentation, see [WIKI_API_JOB_SUBMISSION.md](WIKI_API_
 ### Workflow 1: Ingest Vector Data
 
 1. Upload file to Bronze container (Azure Storage Explorer or `az storage blob upload`)
-2. Submit `ingest_vector` job with file details
+2. Submit `process_vector` job with file details
 3. Check job status until completed
 4. Query data via OGC Features API
 

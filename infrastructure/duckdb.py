@@ -1,64 +1,25 @@
-# ============================================================================
-# CLAUDE CONTEXT - DUCKDB REPOSITORY
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: Infrastructure - DuckDB analytical database repository
-# PURPOSE: DuckDB repository for analytical queries and GeoParquet operations
-# LAST_REVIEWED: 29 OCT 2025
-# EXPORTS: DuckDBRepository singleton with connection pooling
-# INTERFACES: IDuckDBRepository for dependency injection
-# PYDANTIC_MODELS: None - returns pandas DataFrames and DuckDB relations
-# DEPENDENCIES: duckdb, geopandas, pyarrow, azure-identity, config
-# SOURCE: In-memory or file-based DuckDB connections with Azure Blob integration
-# SCOPE: Analytical queries, GeoParquet exports, spatial analytics, serverless blob queries
-# VALIDATION: Extension availability (spatial, azure, h3, httpfs), connection health
-# PATTERNS: Singleton, Repository, Connection pooling, Lazy initialization
-# ENTRY_POINTS: DuckDBRepository.instance(), RepositoryFactory.create_duckdb_repository()
-# INDEX: IDuckDBRepository:80, DuckDBRepository:130, query:250, read_parquet_from_blob:400
-# ============================================================================
-
 """
-DuckDB Repository - Analytical Query Engine
+DuckDB Repository - Analytical Query Engine.
 
-This module provides THE centralized DuckDB repository for analytical workloads,
-GeoParquet operations, and serverless queries over Azure Blob Storage. It serves
-as the single point for all DuckDB operations across the ETL pipeline.
+Centralized DuckDB repository for analytical workloads, GeoParquet operations,
+and serverless queries over Azure Blob Storage.
 
 Key Features:
-- Connection pooling with singleton pattern
-- Spatial extension for PostGIS-like geometry operations
-- Azure extension for direct blob storage queries (NO DOWNLOAD!)
-- In-memory or persistent database options
-- All analytical services use this for DuckDB access
-- Automatic extension installation and loading
+    - Connection pooling with singleton pattern
+    - Spatial extension for PostGIS-like geometry operations
+    - Azure extension for direct blob storage queries (NO DOWNLOAD!)
+    - In-memory or persistent database options
+    - Automatic extension installation and loading
 
 Extensions Enabled:
-1. spatial - ST_* functions for geometry operations
-2. azure - Direct queries on Azure Blob Storage (public and authenticated)
-3. h3 - H3 hexagonal geospatial indexing
-4. parquet - Native Parquet file support (built-in)
+    spatial - ST_* functions for geometry operations
+    azure - Direct queries on Azure Blob Storage
+    h3 - H3 hexagonal geospatial indexing
+    parquet - Native Parquet file support (built-in)
 
-Performance Benefits:
-- Query Parquet files in blob storage WITHOUT downloading
-- Serverless analytics - no data movement required
-- 10-100x faster than downloading + processing
-- Native columnar storage for efficient queries
-
-Usage:
-    from infrastructure.factory import RepositoryFactory
-
-    # Get authenticated repository
-    duckdb_repo = RepositoryFactory.create_duckdb_repository()
-
-    # Query Parquet files in Azure Blob Storage
-    result = duckdb_repo.query('''
-        SELECT * FROM read_parquet('az://container/path/*.parquet')
-        WHERE ST_Intersects(geometry, ST_GeomFromText(?))
-    ''', [wkt_boundary])
-
-    # Export to GeoParquet
-    duckdb_repo.export_geoparquet(df, 'output.parquet')
-
+Exports:
+    DuckDBRepository: Singleton analytical database repository
+    IDuckDBRepository: Abstract interface for dependency injection
 """
 
 # ============================================================================

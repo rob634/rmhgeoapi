@@ -1,42 +1,24 @@
-# ============================================================================
-# CLAUDE CONTEXT - CORE MODELS - JOB
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: Core data models - Job database representation
-# PURPOSE: Pydantic model for job records in PostgreSQL database
-# LAST_REVIEWED: 16 OCT 2025
-# EXPORTS: JobRecord - Pydantic model for job data
-# INTERFACES: Inherits from JobData (core.contracts)
-# PYDANTIC_MODELS: JobRecord (adds persistence fields to JobData)
-# DEPENDENCIES: pydantic, datetime, typing, core.contracts.JobData
-# SOURCE: Extracted from schema_base.py, refactored to inherit from JobData
-# SCOPE: Job record data model for DATABASE boundary
-# VALIDATION: Field validation via Pydantic, status transition validation
-# PATTERNS: Data model pattern, Inheritance (JobData), no business logic
-# ENTRY_POINTS: from core.models.job import JobRecord
-# ARCHITECTURE: JobRecord = JobData + Database persistence fields
-# ============================================================================
-
 """
-Job Database Models - Persistence Boundary
+Job Database Models.
 
-This module defines JobRecord, which represents a job in the PostgreSQL database.
-It inherits from JobData (core.contracts) and adds persistence-specific fields:
-- status, stage, total_stages (orchestration tracking)
-- stage_results, result_data, error_details (execution tracking)
-- metadata (additional job metadata)
-- created_at, updated_at (audit trail)
+Defines JobRecord, which represents a job in the PostgreSQL database.
+Inherits from JobData (core.contracts) and adds persistence-specific fields:
+    - status, stage, total_stages (orchestration tracking)
+    - stage_results, result_data, error_details (execution tracking)
+    - metadata (additional job metadata)
+    - created_at, updated_at (audit trail)
 
 Architecture:
     JobData (core.contracts) - Base contract with essential job properties
-         ↓ inherits
+         |
     JobRecord (this file) - Database boundary specialization
 
-The "Job" conceptual entity is composed of:
-    JobRecord (data) + Workflow (behavior) = "Job" entity
+Exports:
+    JobRecord: Pydantic model for job database records
 
-See core/contracts/__init__.py for full architecture explanation.
-
+Dependencies:
+    pydantic: Data validation
+    core.contracts.JobData: Base contract
 """
 
 from datetime import datetime, timezone

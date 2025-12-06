@@ -1,36 +1,20 @@
-# ============================================================================
-# CLAUDE CONTEXT - CORE SCHEMA
-# ============================================================================
-# CATEGORY: SCHEMAS - DATA VALIDATION & TRANSFORMATION
-# PURPOSE: Pydantic models for validation, serialization, and data flow
-# EPOCH: Shared by all epochs (not persisted to database)# PURPOSE: Workflow definition system providing declarative multi-stage job orchestration patterns
-# EXPORTS: WorkflowDefinition, WorkflowStageDefinition, StageParameterDefinition, StageParameterType, get_workflow_definition, WORKFLOW_REGISTRY
-# INTERFACES: Pydantic BaseModel for all workflow schemas with validation
-# PYDANTIC_MODELS: WorkflowDefinition, WorkflowStageDefinition, StageParameterDefinition (workflow specifications)
-# DEPENDENCIES: pydantic, typing, enum, datetime
-# SOURCE: No data source - defines workflow patterns and stage sequences declaratively
-# SCOPE: Workflow orchestration layer - defines job types, stages, and parameter validation
-# VALIDATION: Parameter type validation, constraint enforcement, stage dependency validation
-# PATTERNS: Registry pattern (WORKFLOW_REGISTRY), Factory pattern (create_*_workflow), Builder pattern
-# ENTRY_POINTS: workflow = get_workflow_definition('hello_world'); WorkflowDefinition.model_validate(data)
-# LOCATION: core/schema/ - Core architecture schema (copied from root schema_workflow.py)
-# ============================================================================
-
 """
-Workflow Schema Definitions - Job→Stage→Task Architecture Orchestration
+Workflow Schema Definitions - Job→Stage→Task Orchestration.
 
-Comprehensive workflow definition system providing declarative multi-stage job orchestration for
-the Azure Geospatial ETL Pipeline. Implements type-safe workflow specifications with parameter
-validation, stage dependencies, and execution constraints that enable consistent, maintainable,
-and scalable job workflow management across all pipeline operations.
+Declarative multi-stage job orchestration with type-safe workflow specifications,
+parameter validation, stage dependencies, and execution constraints.
 
-Architecture Responsibility:
-    This module defines WORKFLOW ORCHESTRATION within the Job→Stage→Task architecture:
-    - Job Layer: WorkflowDefinition providing complete job specification and validation
-    - Stage Layer: WorkflowStageDefinition providing stage sequence and parameter management
-    - Task Layer: Stage parameter validation ensuring type-safe task execution
-    - Repository Layer: Parameter validation and constraint enforcement integration
+Architecture:
+    Job Layer: WorkflowDefinition for complete job specification
+    Stage Layer: WorkflowStageDefinition for stage sequence management
+    Task Layer: Stage parameter validation for type-safe execution
 
+Exports:
+    WorkflowDefinition: Complete job workflow specification
+    WorkflowStageDefinition: Stage configuration model
+    StageParameterDefinition: Parameter specification model
+    StageParameterType: Parameter type enumeration
+    get_workflow_definition: Registry lookup function
 """
 
 from pydantic import BaseModel, Field, field_validator, model_validator

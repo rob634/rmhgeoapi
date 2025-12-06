@@ -1,26 +1,14 @@
-# ============================================================================
-# CLAUDE CONTEXT - CORE MODELS - RESULTS
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: Core models - Execution result data structures
-# PURPOSE: Pure data models for execution results
-# LAST_REVIEWED: 16 OCT 2025
-# EXPORTS: TaskResult, StageResult, JobResult, StageAdvancementResult, TaskCompletionResult, JobCompletionResult
-# INTERFACES: Pydantic BaseModel
-# PYDANTIC_MODELS: Various result models for atomic operations
-# DEPENDENCIES: pydantic, datetime, typing
-# SOURCE: Extracted from schema_base.py (data structure only)
-# SCOPE: Result data models for task/stage/job completion
-# VALIDATION: Field validation via Pydantic
-# PATTERNS: Data model pattern, no business logic
-# ENTRY_POINTS: from core.models.results import TaskResult, StageAdvancementResult
-# ============================================================================
-
 """
-Pure data models for execution results.
+Execution Result Data Models.
 
-These models represent the results of job, stage, and task execution.
-No business logic - just data structures.
+Represents results of job, stage, and task execution.
+No business logic - pure data structures.
+
+Exports:
+    TaskResult: Result from task execution
+    StageResultContract: Contract for stage results
+    StageAdvancementResult: Result of stage advancement
+    JobCompletionResult: Result of job completion
 """
 
 from datetime import datetime

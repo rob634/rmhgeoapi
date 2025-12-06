@@ -2,10 +2,10 @@
 # CLAUDE CONTEXT - PLATFORM API REQUEST HTTP TRIGGER (THIN TRACKING)
 # ============================================================================
 # EPOCH: 4 - ACTIVE ✅
-# STATUS: HTTP Trigger - Platform Anti-Corruption Layer (simplified 22 NOV 2025)
+# STATUS: HTTP Trigger - Platform Anti-Corruption Layer (updated 05 DEC 2025)
 # PURPOSE: Translate DDH requests to CoreMachine jobs (1:1 mapping, no orchestration)
-# LAST_REVIEWED: 22 NOV 2025
-# EXPORTS: platform_request_submit (HTTP trigger function)
+# LAST_REVIEWED: 05 DEC 2025
+# EXPORTS: platform_request_submit, platform_raster_submit, platform_raster_collection_submit
 # INTERFACES: None
 # PYDANTIC_MODELS: PlatformRequest, ApiRequest
 # DEPENDENCIES: azure-functions, psycopg, azure-servicebus, config
@@ -13,15 +13,20 @@
 # SCOPE: Platform layer - Anti-Corruption Layer between DDH and CoreMachine
 # VALIDATION: Pydantic models + PlatformConfig validation
 # PATTERNS: Anti-Corruption Layer, Thin Tracking, Parameter Translation
-# ENTRY_POINTS: POST /api/platform/submit
+# ENTRY_POINTS:
+#   - POST /api/platform/submit (generic - detects data type)
+#   - POST /api/platform/raster (single raster with size-based fallback)
+#   - POST /api/platform/raster-collection (multiple rasters → MosaicJSON)
 # INDEX:
-#   - Imports: Line 35
-#   - HTTP Handler: Line 80
-#   - Parameter Translation: Line 180
+#   - Imports: Line 45
+#   - Generic HTTP Handler: Line 96
+#   - Raster Endpoints: Line 238
+#   - Parameter Translation: Line 526
+#   - Job Creation: Line 850
 # ============================================================================
 
 """
-Platform Request HTTP Trigger - Thin Tracking Pattern (22 NOV 2025)
+Platform Request HTTP Trigger - Thin Tracking Pattern (Updated 05 DEC 2025)
 
 SIMPLIFIED ARCHITECTURE:
     Platform is an Anti-Corruption Layer (ACL) that:
@@ -35,10 +40,22 @@ SIMPLIFIED ARCHITECTURE:
     NO job chaining - each Platform request = one CoreMachine job.
     NO callbacks - status delegated to CoreMachine.
 
+ENDPOINTS:
+    Generic (auto-detects data type):
+        POST /api/platform/submit
+
+    Dedicated Raster Endpoints (05 DEC 2025):
+        POST /api/platform/raster            → Single file (size-based fallback)
+        POST /api/platform/raster-collection → Multiple files (MosaicJSON pipeline)
+
+    DDH explicitly chooses raster endpoint based on single vs multiple files.
+    Platform handles size-based routing (small vs large) via fallback pattern.
+
 Supported Workflows (CREATE operation):
     - VECTOR: process_vector (3-stage: prepare → upload → finalize) [28 NOV 2025]
     - RASTER (single): process_raster_v2 (3-stage: validate → COG → STAC) [28 NOV 2025]
-    - RASTER (collection): process_raster_collection (4-stage: validate → COGs → MosaicJSON → STAC)
+    - RASTER (single, large): process_large_raster_v2 (auto-fallback for >1GB) [04 DEC 2025]
+    - RASTER (collection): process_raster_collection_v2 (4-stage: validate → COGs → MosaicJSON → STAC) [04 DEC 2025]
 """
 
 import json
@@ -118,7 +135,7 @@ def platform_request_submit(req: func.HttpRequest) -> func.HttpResponse:
         "success": true,
         "request_id": "a3f2c1b8e9d7f6a5...",
         "job_id": "abc123def456...",
-        "job_type": "process_raster",
+        "job_type": "process_raster_v2",
         "monitor_url": "/api/platform/status/a3f2c1b8e9d7f6a5..."
     }
     """
@@ -235,6 +252,294 @@ def platform_request_submit(req: func.HttpRequest) -> func.HttpResponse:
 
 
 # ============================================================================
+# DEDICATED RASTER ENDPOINTS (05 DEC 2025)
+# ============================================================================
+# DDH explicitly chooses endpoint based on single vs multiple files:
+#   - /api/platform/raster → single file (with size-based fallback)
+#   - /api/platform/raster-collection → multiple files
+# ============================================================================
+
+def platform_raster_submit(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    HTTP trigger for single raster submission.
+
+    POST /api/platform/raster
+
+    DDH uses this endpoint when submitting a single raster file.
+    Platform routes to process_raster_v2, with automatic fallback to
+    process_large_raster_v2 if file exceeds size threshold.
+
+    Request Body:
+    {
+        "dataset_id": "aerial-imagery-2024",
+        "resource_id": "site-alpha",
+        "version_id": "v1.0",
+        "container_name": "bronze-rasters",
+        "file_name": "aerial-alpha.tif",
+        "service_name": "Aerial Imagery Site Alpha",
+        "access_level": "OUO"
+    }
+
+    Note: file_name must be a string (single file), not a list.
+    """
+    logger.info("Platform single raster endpoint called")
+
+    try:
+        req_body = req.get_json()
+
+        # Validate file_name is a single file, not a list
+        file_name = req_body.get('file_name')
+        if isinstance(file_name, list):
+            return func.HttpResponse(
+                json.dumps({
+                    "success": False,
+                    "error": "file_name must be a string for single raster endpoint. Use /api/platform/raster-collection for multiple files.",
+                    "error_type": "ValidationError"
+                }),
+                status_code=400,
+                headers={"Content-Type": "application/json"}
+            )
+
+        # Force data_type to RASTER
+        req_body['data_type'] = 'raster'
+
+        platform_req = PlatformRequest(**req_body)
+
+        # Generate deterministic request ID
+        request_id = generate_platform_request_id(
+            platform_req.dataset_id,
+            platform_req.resource_id,
+            platform_req.version_id
+        )
+
+        logger.info(f"Processing single raster request: {request_id[:16]}...")
+
+        # Check for existing request (idempotent)
+        platform_repo = PlatformRepository()
+        existing = platform_repo.get_request(request_id)
+        if existing:
+            logger.info(f"Request already exists: {request_id[:16]} → job {existing.job_id[:16]}")
+            return func.HttpResponse(
+                json.dumps({
+                    "success": True,
+                    "request_id": request_id,
+                    "job_id": existing.job_id,
+                    "message": "Request already submitted (idempotent)",
+                    "monitor_url": f"/api/platform/status/{request_id}"
+                }),
+                status_code=200,
+                headers={"Content-Type": "application/json"}
+            )
+
+        # Translate to CoreMachine job (always single raster path)
+        job_type, job_params = _translate_single_raster(platform_req, config)
+
+        logger.info(f"  Translated to job_type: {job_type}")
+
+        # Create job (with fallback for large files)
+        job_id = _create_and_submit_job(job_type, job_params, request_id)
+
+        if not job_id:
+            raise RuntimeError("Failed to create CoreMachine job")
+
+        # Store tracking record
+        api_request = ApiRequest(
+            request_id=request_id,
+            dataset_id=platform_req.dataset_id,
+            resource_id=platform_req.resource_id,
+            version_id=platform_req.version_id,
+            job_id=job_id,
+            data_type='raster'
+        )
+        platform_repo.create_request(api_request)
+
+        logger.info(f"Single raster request submitted: {request_id[:16]} → job {job_id[:16]}")
+
+        return func.HttpResponse(
+            json.dumps({
+                "success": True,
+                "request_id": request_id,
+                "job_id": job_id,
+                "job_type": job_type,
+                "message": "Single raster request submitted.",
+                "monitor_url": f"/api/platform/status/{request_id}"
+            }),
+            status_code=202,
+            headers={"Content-Type": "application/json"}
+        )
+
+    except ValueError as e:
+        logger.warning(f"Validation error: {e}")
+        return func.HttpResponse(
+            json.dumps({
+                "success": False,
+                "error": str(e),
+                "error_type": "ValidationError"
+            }),
+            status_code=400,
+            headers={"Content-Type": "application/json"}
+        )
+
+    except Exception as e:
+        logger.error(f"Single raster request failed: {e}", exc_info=True)
+        return func.HttpResponse(
+            json.dumps({
+                "success": False,
+                "error": str(e),
+                "error_type": type(e).__name__
+            }),
+            status_code=500,
+            headers={"Content-Type": "application/json"}
+        )
+
+
+def platform_raster_collection_submit(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    HTTP trigger for raster collection submission.
+
+    POST /api/platform/raster-collection
+
+    DDH uses this endpoint when submitting multiple raster files as a collection.
+    Platform routes to process_raster_collection_v2 (MosaicJSON pipeline).
+
+    Request Body:
+    {
+        "dataset_id": "aerial-tiles-2024",
+        "resource_id": "site-alpha",
+        "version_id": "v1.0",
+        "container_name": "bronze-rasters",
+        "file_name": ["tile1.tif", "tile2.tif", "tile3.tif"],
+        "service_name": "Aerial Tiles Site Alpha",
+        "access_level": "OUO"
+    }
+
+    Note: file_name must be a list (multiple files), not a string.
+    """
+    logger.info("Platform raster collection endpoint called")
+
+    try:
+        req_body = req.get_json()
+
+        # Validate file_name is a list
+        file_name = req_body.get('file_name')
+        if not isinstance(file_name, list):
+            return func.HttpResponse(
+                json.dumps({
+                    "success": False,
+                    "error": "file_name must be a list for raster collection endpoint. Use /api/platform/raster for single files.",
+                    "error_type": "ValidationError"
+                }),
+                status_code=400,
+                headers={"Content-Type": "application/json"}
+            )
+
+        if len(file_name) < 2:
+            return func.HttpResponse(
+                json.dumps({
+                    "success": False,
+                    "error": "Raster collection requires at least 2 files. Use /api/platform/raster for single files.",
+                    "error_type": "ValidationError"
+                }),
+                status_code=400,
+                headers={"Content-Type": "application/json"}
+            )
+
+        # Force data_type to RASTER
+        req_body['data_type'] = 'raster'
+
+        platform_req = PlatformRequest(**req_body)
+
+        # Generate deterministic request ID
+        request_id = generate_platform_request_id(
+            platform_req.dataset_id,
+            platform_req.resource_id,
+            platform_req.version_id
+        )
+
+        logger.info(f"Processing raster collection request: {request_id[:16]}...")
+        logger.info(f"  Collection size: {len(file_name)} files")
+
+        # Check for existing request (idempotent)
+        platform_repo = PlatformRepository()
+        existing = platform_repo.get_request(request_id)
+        if existing:
+            logger.info(f"Request already exists: {request_id[:16]} → job {existing.job_id[:16]}")
+            return func.HttpResponse(
+                json.dumps({
+                    "success": True,
+                    "request_id": request_id,
+                    "job_id": existing.job_id,
+                    "message": "Request already submitted (idempotent)",
+                    "monitor_url": f"/api/platform/status/{request_id}"
+                }),
+                status_code=200,
+                headers={"Content-Type": "application/json"}
+            )
+
+        # Translate to CoreMachine job (always collection path)
+        job_type, job_params = _translate_raster_collection(platform_req, config)
+
+        logger.info(f"  Translated to job_type: {job_type}")
+
+        # Create job
+        job_id = _create_and_submit_job(job_type, job_params, request_id)
+
+        if not job_id:
+            raise RuntimeError("Failed to create CoreMachine job")
+
+        # Store tracking record
+        api_request = ApiRequest(
+            request_id=request_id,
+            dataset_id=platform_req.dataset_id,
+            resource_id=platform_req.resource_id,
+            version_id=platform_req.version_id,
+            job_id=job_id,
+            data_type='raster'
+        )
+        platform_repo.create_request(api_request)
+
+        logger.info(f"Raster collection request submitted: {request_id[:16]} → job {job_id[:16]}")
+
+        return func.HttpResponse(
+            json.dumps({
+                "success": True,
+                "request_id": request_id,
+                "job_id": job_id,
+                "job_type": job_type,
+                "file_count": len(file_name),
+                "message": f"Raster collection request submitted ({len(file_name)} files).",
+                "monitor_url": f"/api/platform/status/{request_id}"
+            }),
+            status_code=202,
+            headers={"Content-Type": "application/json"}
+        )
+
+    except ValueError as e:
+        logger.warning(f"Validation error: {e}")
+        return func.HttpResponse(
+            json.dumps({
+                "success": False,
+                "error": str(e),
+                "error_type": "ValidationError"
+            }),
+            status_code=400,
+            headers={"Content-Type": "application/json"}
+        )
+
+    except Exception as e:
+        logger.error(f"Raster collection request failed: {e}", exc_info=True)
+        return func.HttpResponse(
+            json.dumps({
+                "success": False,
+                "error": str(e),
+                "error_type": type(e).__name__
+            }),
+            status_code=500,
+            headers={"Content-Type": "application/json"}
+        )
+
+
+# ============================================================================
 # PARAMETER TRANSLATION (DDH → CoreMachine)
 # ============================================================================
 
@@ -271,7 +576,7 @@ def _translate_to_coremachine(
     platform_cfg = cfg.platform
 
     # ========================================================================
-    # VECTOR CREATE → ingest_vector
+    # VECTOR CREATE → process_vector (idempotent DELETE+INSERT pattern)
     # ========================================================================
     if data_type == DataType.VECTOR:
         # Generate PostGIS table name from DDH IDs
@@ -332,9 +637,11 @@ def _translate_to_coremachine(
         }
 
     # ========================================================================
-    # RASTER CREATE → process_raster_v2 or process_raster_collection
+    # RASTER CREATE → process_raster_v2 or process_raster_collection_v2
     # ========================================================================
-    # Updated 28 NOV 2025: Single rasters now use process_raster_v2 (mixin pattern)
+    # Updated 04 DEC 2025: All raster jobs now use v2 mixin pattern
+    # - Single raster: process_raster_v2 (with auto-fallback to process_large_raster_v2)
+    # - Collection: process_raster_collection_v2
     elif data_type == DataType.RASTER:
         # Generate output paths from DDH IDs
         output_folder = platform_cfg.generate_raster_output_folder(
@@ -381,8 +688,7 @@ def _translate_to_coremachine(
 
                 # Processing options
                 'output_tier': opts.get('output_tier', 'analysis'),
-                'target_crs': opts.get('crs'),
-                'nodata_value': opts.get('nodata_value')
+                'target_crs': opts.get('crs')
             }
         else:
             # Single raster → process_raster_v2 (mixin pattern, 28 NOV 2025)
@@ -422,6 +728,139 @@ def _translate_to_coremachine(
 
     else:
         raise ValueError(f"Unsupported data type: {data_type}")
+
+
+def _translate_single_raster(
+    request: PlatformRequest,
+    cfg
+) -> tuple[str, Dict[str, Any]]:
+    """
+    Translate DDH request to single raster job parameters.
+
+    Used by /api/platform/raster endpoint.
+    Always returns process_raster_v2 (fallback to large handled by _create_and_submit_job).
+
+    Args:
+        request: PlatformRequest from DDH
+        cfg: AppConfig instance
+
+    Returns:
+        Tuple of ('process_raster_v2', job_parameters)
+    """
+    platform_cfg = cfg.platform
+
+    output_folder = platform_cfg.generate_raster_output_folder(
+        request.dataset_id,
+        request.resource_id,
+        request.version_id
+    )
+
+    collection_id = platform_cfg.generate_stac_collection_id(
+        request.dataset_id,
+        request.resource_id,
+        request.version_id
+    )
+
+    stac_item_id = platform_cfg.generate_stac_item_id(
+        request.dataset_id,
+        request.resource_id,
+        request.version_id
+    )
+
+    opts = request.processing_options
+
+    # file_name is guaranteed to be a string by endpoint validation
+    file_name = request.file_name
+    if isinstance(file_name, list):
+        file_name = file_name[0]
+
+    return 'process_raster_v2', {
+        # File location (required)
+        'blob_name': file_name,
+        'container_name': request.container_name,
+
+        # Output location
+        'output_folder': output_folder,
+
+        # STAC metadata
+        'collection_id': collection_id,
+        'stac_item_id': stac_item_id,
+        'access_level': request.access_level,
+
+        # DDH identifiers (Platform passthrough)
+        'dataset_id': request.dataset_id,
+        'resource_id': request.resource_id,
+        'version_id': request.version_id,
+
+        # Processing options
+        'output_tier': opts.get('output_tier', 'analysis'),
+        'target_crs': opts.get('crs'),
+        'raster_type': opts.get('raster_type', 'auto')
+    }
+
+
+def _translate_raster_collection(
+    request: PlatformRequest,
+    cfg
+) -> tuple[str, Dict[str, Any]]:
+    """
+    Translate DDH request to raster collection job parameters.
+
+    Used by /api/platform/raster-collection endpoint.
+    Always returns process_raster_collection_v2 (MosaicJSON pipeline).
+
+    Args:
+        request: PlatformRequest from DDH
+        cfg: AppConfig instance
+
+    Returns:
+        Tuple of ('process_raster_collection_v2', job_parameters)
+    """
+    platform_cfg = cfg.platform
+
+    output_folder = platform_cfg.generate_raster_output_folder(
+        request.dataset_id,
+        request.resource_id,
+        request.version_id
+    )
+
+    collection_id = platform_cfg.generate_stac_collection_id(
+        request.dataset_id,
+        request.resource_id,
+        request.version_id
+    )
+
+    stac_item_id = platform_cfg.generate_stac_item_id(
+        request.dataset_id,
+        request.resource_id,
+        request.version_id
+    )
+
+    opts = request.processing_options
+
+    return 'process_raster_collection_v2', {
+        # File location (required)
+        'container_name': request.container_name,
+        'blob_list': request.file_name,  # Already validated as list by endpoint
+
+        # Output location
+        'output_folder': output_folder,
+
+        # STAC metadata (MosaicJSON schema)
+        'collection_id': collection_id,
+        'stac_item_id': stac_item_id,
+        'collection_description': request.description,
+        'access_level': request.access_level,
+
+        # DDH identifiers (Platform passthrough)
+        'dataset_id': request.dataset_id,
+        'resource_id': request.resource_id,
+        'version_id': request.version_id,
+
+        # Processing options
+        'output_tier': opts.get('output_tier', 'analysis'),
+        'target_crs': opts.get('crs')
+    }
 
 
 # ============================================================================

@@ -1,41 +1,24 @@
-# ============================================================================
-# CLAUDE CONTEXT - SERVICE BUS REPOSITORY
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: Infrastructure - Azure Service Bus repository for high-volume operations
-# PURPOSE: Azure Service Bus repository for high-volume message operations with batch support
-# LAST_REVIEWED: 29 OCT 2025
-# EXPORTS: ServiceBusRepository - Singleton implementation for Service Bus operations
-# INTERFACES: IQueueRepository - Implements queue operation interface for compatibility
-# PYDANTIC_MODELS: Accepts BaseModel instances for message sending, supports batch operations
-# DEPENDENCIES: azure-servicebus, azure-identity, threading, json, asyncio, config
-# SOURCE: Azure Service Bus via DefaultAzureCredential
-# SCOPE: High-volume task messaging operations (thousands to millions of messages)
-# VALIDATION: Batch size limits (100 messages), message size validation, retry logic
-# PATTERNS: Singleton, Repository, Batch Processing, Connection pooling, Scheduled delivery
-# ENTRY_POINTS: ServiceBusRepository.instance(), batch_send_messages(), send_message_with_delay()
-# INDEX: ServiceBusRepository:50, batch_send_messages:300, async_batch_send:450, send_message_with_delay:600
-# ============================================================================
-
 """
-Service Bus Repository Implementation
+Service Bus Repository Implementation.
 
 High-performance message repository for Azure Service Bus with batch support.
 Designed for scenarios where Queue Storage times out (>1000 messages),
 particularly for H3 hexagon processing and container file listing tasks.
 
 Key Features:
-- Batch sending (up to 100 messages per batch)
-- Async support for massive parallelization
-- Automatic retry with exponential backoff
-- Dead letter queue handling
-- Session support for ordered processing
-- Singleton pattern for credential reuse
+    - Batch sending (up to 100 messages per batch)
+    - Async support for massive parallelization
+    - Automatic retry with exponential backoff
+    - Dead letter queue handling
+    - Session support for ordered processing
+    - Singleton pattern for credential reuse
 
 Performance:
-- Queue Storage: 50ms per message × 1000 = 50 seconds (times out)
-- Service Bus: 100 messages in ~200ms × 10 = 2 seconds total
+    - Queue Storage: 50ms per message x 1000 = 50 seconds (times out)
+    - Service Bus: 100 messages in ~200ms x 10 = 2 seconds total
 
+Exports:
+    ServiceBusRepository: Singleton implementation for Service Bus operations
 """
 
 from azure.servicebus import ServiceBusClient, ServiceBusMessage, ServiceBusSender, ServiceBusReceiver

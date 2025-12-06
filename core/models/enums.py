@@ -1,26 +1,14 @@
-# ============================================================================
-# CLAUDE CONTEXT - CORE MODELS - ENUMS
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: Core data models - Enum definitions for state management
-# PURPOSE: Pure enum definitions for job and task states
-# LAST_REVIEWED: 16 OCT 2025
-# EXPORTS: JobStatus, TaskStatus, StageStatus, RasterType enums
-# INTERFACES: Standard Python Enum
-# PYDANTIC_MODELS: None - pure enums only
-# DEPENDENCIES: enum
-# SOURCE: Extracted from schema_base.py
-# SCOPE: Core data model enumerations
-# VALIDATION: Enum membership only
-# PATTERNS: Enum pattern for type safety
-# ENTRY_POINTS: from core.models.enums import JobStatus, TaskStatus
-# ============================================================================
-
 """
-Pure enumeration types for the core framework.
+Pure Enumeration Types for Core Framework.
 
-These enums define valid states for jobs, tasks, and stages.
-No business logic - just pure type definitions.
+Defines valid states for jobs, tasks, and stages.
+No business logic - pure type definitions only.
+
+Exports:
+    JobStatus: Job state enumeration
+    TaskStatus: Task state enumeration
+    StageStatus: Stage state enumeration
+    RasterType: Raster type classification
 """
 
 from enum import Enum

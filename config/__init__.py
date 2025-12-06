@@ -1,24 +1,5 @@
-# ============================================================================
-# CLAUDE CONTEXT - CONFIG PACKAGE INIT
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: New module - Phase 1 of config.py refactoring (20 NOV 2025)
-# PURPOSE: Configuration package exports for backward compatibility
-# LAST_REVIEWED: 20 NOV 2025
-# EXPORTS: All config classes, get_config singleton, debug_config helper
-# INTERFACES: Pydantic BaseModel
-# PYDANTIC_MODELS: AppConfig, StorageConfig, DatabaseConfig, RasterConfig, VectorConfig, QueueConfig
-# DEPENDENCIES: domain config modules
-# SOURCE: Composed from domain configs
-# SCOPE: Global configuration package
-# VALIDATION: Pydantic v2 validation
-# PATTERNS: Singleton, composition, facade
-# ENTRY_POINTS: from config import get_config, CogTier, QueueNames
-# INDEX: Exports:45, get_config:72, debug_config:85
-# ============================================================================
-
 """
-Configuration Package - Domain-Specific Configuration Modules
+Configuration Package.
 
 This package provides application configuration using a composition-based approach.
 
@@ -33,7 +14,6 @@ Structure:
     └── queue_config.py          # Service Bus queues
 
 Usage:
-    # Singleton pattern (preferred)
     from config import get_config
     config = get_config()
     compression = config.raster.cog_compression

@@ -29,9 +29,6 @@ This phase does NO spatial merging - just stacks 8 return period files
 for each tile+scenario combination into a single 8-band COG.
 
 Phase 2 (process_fathom_merge) can then merge these into NxN grid cells.
-
-Author: Robert and Geospatial Claude Legion
-Date: 03 DEC 2025
 """
 
 from typing import List, Dict, Any

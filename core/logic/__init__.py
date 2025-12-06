@@ -1,24 +1,12 @@
-# ============================================================================
-# CLAUDE CONTEXT - CORE LOGIC PACKAGE
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: Core logic - Business logic helpers
-# PURPOSE: Export business logic functions from the core.logic package
-# LAST_REVIEWED: 16 OCT 2025
-# EXPORTS: Transition and calculation functions
-# INTERFACES: Package initialization only
-# PYDANTIC_MODELS: None - operates on data models
-# DEPENDENCIES: Core logic submodules
-# AZURE_FUNCTIONS: Required for package imports
-# PATTERNS: Package initialization, Separation of concerns
-# ENTRY_POINTS: from core.logic import can_job_transition, can_task_transition
-# ============================================================================
-
 """
-Core business logic package.
+Core Business Logic Package.
 
-This package contains business logic that operates on the pure data models.
+Contains business logic that operates on pure data models.
 Separated from models to maintain clean architecture.
+
+Exports:
+    State transitions: can_job_transition, can_task_transition, is_job_terminal, is_task_terminal
+    Calculations: calculate_success_rate, is_stage_complete, aggregate_task_results
 """
 
 # State transitions

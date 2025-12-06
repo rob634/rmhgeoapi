@@ -1,30 +1,12 @@
-# ============================================================================
-# CLAUDE CONTEXT - ERROR HANDLING
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: Core utility - Centralized error handling for CoreMachine
-# PURPOSE: Eliminate duplicate error logging patterns with context manager
-# LAST_REVIEWED: 28 NOV 2025
-# EXPORTS: CoreMachineErrorHandler (context manager), log_nested_error (function)
-# INTERFACES: None (utility class)
-# PYDANTIC_MODELS: None
-# DEPENDENCIES: logging, traceback, contextlib, typing
-# SOURCE: Extracted from core/machine.py duplicate patterns
-# SCOPE: CoreMachine error handling
-# VALIDATION: None
-# PATTERNS: Context Manager, Structured Logging, Nested Error Preservation
-# ENTRY_POINTS: with CoreMachineErrorHandler.handle_operation(...), log_nested_error(...)
-# INDEX: CoreMachineErrorHandler:60, handle_operation:100, log_nested_error:140
-# ============================================================================
-
 """
-CoreMachine Error Handler - Centralized Error Handling
+CoreMachine Error Handler - Centralized Error Handling.
 
 Provides context manager for consistent error logging and handling across
-CoreMachine operations. Eliminates 18 duplicate try-catch patterns.
+CoreMachine operations. Eliminates duplicate try-catch patterns.
 
-Also provides log_nested_error() for preserving exception context when
-cleanup operations fail after a primary error (28 NOV 2025).
+Exports:
+    CoreMachineErrorHandler: Context manager for operation error handling
+    log_nested_error: Helper for preserving exception context in cleanup
 """
 
 from contextlib import contextmanager

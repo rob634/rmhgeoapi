@@ -1,30 +1,21 @@
-# ============================================================================
-# CLAUDE CONTEXT - CORE PACKAGE INITIALIZATION
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: Core package - Entry point for orchestration components
-# PURPOSE: Initialize core orchestration components package
-# LAST_REVIEWED: 16 OCT 2025
-# EXPORTS: CoreController, StateManager, OrchestrationManager, models, logic, schema
-# INTERFACES: Package initialization only
-# PYDANTIC_MODELS: Exported from subpackages
-# DEPENDENCIES: core subpackages (models, logic, schema)
-# AZURE_FUNCTIONS: CRITICAL - This __init__.py is REQUIRED for folder imports
-# PATTERNS: Package initialization pattern
-# ENTRY_POINTS: from core import StateManager, CoreMachine
-# ============================================================================
-
 """
-Core orchestration components for the geospatial ETL pipeline.
+Core Orchestration Components.
 
-This package contains the fundamental building blocks for job orchestration,
+Contains fundamental building blocks for job orchestration,
 separated from job-specific business logic.
 
 Structure:
-- models/: Pure data structures (no business logic)
-- logic/: Business logic separated from models
-- schema/: Database schema management
-- Core orchestration classes
+    models/: Pure data structures (no business logic)
+    logic/: Business logic separated from models
+    schema/: Database schema management
+    Core orchestration classes
+
+Exports:
+    CoreController: Base controller abstraction
+    StateManager: Job/Task state management
+    OrchestrationManager: Orchestration coordination
+    CoreMachine: Core processing machine
+    CoreMachineErrorHandler: Centralized error handling
 """
 
 # Make subpackages available first (no circular dependencies)

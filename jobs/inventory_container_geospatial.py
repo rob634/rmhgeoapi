@@ -39,9 +39,6 @@ Three-stage workflow:
 
 Design Principle: Analysis separate from processing.
 Future orchestration job will consume this output for fire-and-forget processing.
-
-Created: 03 DEC 2025
-Author: Robert and Geospatial Claude Legion
 """
 
 from typing import Dict, Any, List, Optional

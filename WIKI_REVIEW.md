@@ -673,33 +673,44 @@ docs/archive/root_cleanup_dec2025/
 
 **TODO.md** - Massive cleanup:
 - OLD: 4,228 lines (11 completed sections mixed with active tasks)
-- NEW: 221 lines (only active tasks)
+- NEW: 199 lines (only active tasks)
 - **95% reduction** in file size
 
 **HISTORY2.md** - Created:
 - New file for completed work moved from TODO.md
-- Contains 11 completed sections with full details
-- 280 lines of archived completed work
+- Contains 12 completed sections with full details
+- 321 lines of archived completed work
+
+### Phase 6: docs_claude/ Consolidation ✅ DONE (05 DEC 2025)
+
+**DEPLOYMENT_GUIDE.md** - Consolidated from 4 files:
+- OLD: 327 lines (deployment only)
+- NEW: 403 lines (deployment + logging + identity + troubleshooting)
+- Merged in: APPLICATION_INSIGHTS_QUERY_PATTERNS.md, claude_log_access.md, MANAGED_IDENTITY_QUICKSTART.md
+
+**Files Archived** (moved to docs/archive/docs_claude_dec2025/):
+- APPLICATION_INSIGHTS_QUERY_PATTERNS.md (496 lines) - Merged into DEPLOYMENT_GUIDE.md
+- claude_log_access.md (248 lines) - Merged into DEPLOYMENT_GUIDE.md
+- MANAGED_IDENTITY_QUICKSTART.md (103 lines) - Merged into DEPLOYMENT_GUIDE.md
+- FILE_CATALOG.md (541 lines) - Outdated (29 OCT 2025), CLAUDE_CONTEXT.md has structure
 
 ### Final docs_claude/ Structure
 
 ```
-docs_claude/ (13 files, ~4,100 lines - down from ~14,300)
+docs_claude/ (10 files - down from 14)
 ├── CLAUDE_CONTEXT.md          # 264 lines - START HERE
-├── TODO.md                    # 221 lines - Active tasks only
-├── HISTORY.md                 # 4,533 lines - Completed work (pre-DEC 2025)
-├── HISTORY2.md                # 280 lines - Completed work (DEC 2025 cleanup)
+├── TODO.md                    # 199 lines - Active tasks only
+├── HISTORY.md                 # ~172K - Completed work (pre-DEC 2025)
+├── HISTORY2.md                # 321 lines - Completed work (DEC 2025)
 ├── JOB_CREATION_QUICKSTART.md # 526 lines - Job creation guide
-├── ARCHITECTURE_REFERENCE.md  # 1,409 lines - Deep technical specs
-├── SCHEMA_ARCHITECTURE.md     # 578 lines - PostgreSQL design
-├── FILE_CATALOG.md            # 541 lines - File lookup (needs update)
-├── SERVICE_BUS_HARMONIZATION.md # 460 lines - Queue config
-├── COREMACHINE_PLATFORM_ARCHITECTURE.md # 440 lines - Two-layer design
-├── APPLICATION_INSIGHTS_QUERY_PATTERNS.md # 496 lines - Log queries
-├── claude_log_access.md       # 248 lines - Azure log access
-├── MANAGED_IDENTITY_QUICKSTART.md # 103 lines - Identity ops
-└── DEPLOYMENT_GUIDE.md        # 326 lines - Deployment procedures
+├── DEPLOYMENT_GUIDE.md        # 403 lines - Ops, logging, identity, troubleshooting
+├── ARCHITECTURE_REFERENCE.md  # ~45K - Deep technical specs
+├── SCHEMA_ARCHITECTURE.md     # ~21K - PostgreSQL design
+├── SERVICE_BUS_HARMONIZATION.md # ~16K - Queue config
+└── COREMACHINE_PLATFORM_ARCHITECTURE.md # ~17K - Two-layer design
 ```
+
+**Summary**: 14 files → 10 files (29% reduction in file count)
 
 ---
 

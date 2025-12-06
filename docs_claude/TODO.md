@@ -1,6 +1,6 @@
 # Active Tasks - Geospatial ETL Pipelines
 
-**Last Updated**: 05 DEC 2025
+**Last Updated**: 05 DEC 2025 (Janitor blob cleanup update)
 **Author**: Robert and Geospatial Claude Legion
 
 **Note**: Completed tasks have been moved to `HISTORY2.md` (05 DEC 2025 cleanup)
@@ -36,20 +36,32 @@
 
 ---
 
-### 2. Idempotency Fixes for ETL Workflows (25 NOV 2025)
+### 2. Janitor Blob Cleanup (05 DEC 2025)
 
-**Status**: 🔴 **READY FOR IMPLEMENTATION**
-**Priority**: HIGH - Prevents duplicate data on retry
+**Status**: 🟡 **PARTIALLY COMPLETE**
+**Priority**: HIGH - Prevents orphaned intermediate files
 
-**Issue**: Some ETL handlers don't handle retries gracefully:
-- `ingest_vector` Stage 2: Appends rows on retry (should DELETE+INSERT)
-- Job cleanup/retry endpoints not implemented
+**What's Done** (DELETE+INSERT Idempotency):
+- ✅ `ingest_vector` replaced by `process_vector` (27 NOV 2025)
+- ✅ DELETE+INSERT pattern in `process_vector` Stage 2 via `insert_chunk_idempotent()`
+- ✅ Janitor database cleanup (3 timer triggers, comprehensive)
+
+**What's Missing** (Blob Cleanup):
+The Janitor marks jobs as FAILED but doesn't clean up intermediate blob storage:
+
+| Workflow | Container | Prefix Pattern |
+|----------|-----------|----------------|
+| Vector ETL | `rmhazuregeotemp` | `temp/vector_etl/{job_id}/chunk_*.pkl` |
+| Large Raster V2 | `silver-mosaicjson` | `{job_id[:8]}/tiles/*.tif` |
 
 **Tasks**:
-- [ ] Implement DELETE+INSERT pattern in `ingest_vector` Stage 2
-- [ ] Create `/api/jobs/{job_id}/retry` endpoint
-- [ ] Create `/api/jobs/{job_id}/cleanup` endpoint
-- [ ] Add `delete_blobs_by_prefix()` to blob repository
+- [ ] Add `delete_blobs_by_prefix(container, prefix)` to `BlobRepository`
+- [ ] Integrate blob cleanup into `JanitorService.mark_job_as_failed()`
+- [ ] Add job_type detection to determine cleanup pattern
+
+**Deprioritized** (resubmit pattern works for retry):
+- ~~`/api/jobs/{job_id}/retry` endpoint~~ → Lowest priority
+- ~~`/api/jobs/{job_id}/cleanup` endpoint~~ → Consolidated into Janitor
 
 ---
 
@@ -57,18 +69,19 @@
 
 ### 3. Heartbeat Mechanism for Long-Running Operations (30 NOV 2025)
 
-**Status**: 📋 **READY FOR IMPLEMENTATION**
+**Status**: 🟡 **PARTIALLY COMPLETE**
 **Purpose**: Detect stuck tasks, prevent zombie jobs
 
-**Design**:
-- Tasks update `heartbeat` column every 30 seconds
-- Janitor process marks tasks as FAILED if heartbeat > 5 minutes old
-- Uses existing `heartbeat` column in tasks table
+**What's Done**:
+- ✅ Janitor Task Watchdog (5 min timer) - marks stale PROCESSING tasks as FAILED
+- ✅ Janitor Job Health Monitor (10 min timer) - propagates task failures to jobs
+- ✅ Janitor Orphan Detector (15 min timer) - catches zombie jobs, stuck queued jobs
+- ✅ `/api/cleanup/status` endpoint - shows janitor configuration
+- ✅ `/api/cleanup/history` endpoint - shows recent janitor runs
 
-**Tasks**:
-- [ ] Add heartbeat update to task processor loop
-- [ ] Create janitor function (timer trigger, every 5 minutes)
-- [ ] Add `/api/dbadmin/zombie-tasks` diagnostic endpoint
+**What's Missing**:
+- [ ] Active heartbeat updates from tasks (currently uses timestamp-based detection)
+- [ ] `/api/dbadmin/zombie-tasks` diagnostic endpoint (nice-to-have)
 
 ---
 

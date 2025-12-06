@@ -1,33 +1,20 @@
-# ============================================================================
-# CLAUDE CONTEXT - REPOSITORY INTERFACES
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: Infrastructure - Abstract interfaces for repository pattern enforcement
-# PURPOSE: Abstract interfaces defining behavior contracts for repository implementations
-# LAST_REVIEWED: 29 OCT 2025
-# EXPORTS: IJobRepository, ITaskRepository, IQueueRepository, IStageCompletionRepository, IDuckDBRepository, ParamNames
-# INTERFACES: ABC interfaces defining canonical repository contracts for all implementations
-# PYDANTIC_MODELS: JobRecord, TaskRecord, TaskUpdateModel, JobUpdateModel (imported from core.models)
-# DEPENDENCIES: abc, typing, enum, core.models, core.schema.updates
-# SOURCE: No data source - defines abstract interfaces and contracts
-# SCOPE: Global repository pattern enforcement - all repository implementations must follow these interfaces
-# VALIDATION: ABC enforcement ensures method signature compliance, type hints provide compile-time checking
-# PATTERNS: Interface Segregation, Repository pattern, Protocol pattern, Parameter Object pattern
-# ENTRY_POINTS: class PostgreSQLRepository(IJobRepository); must implement all abstract methods
-# INDEX: ParamNames:49, IJobRepository:98, ITaskRepository:125, IStageCompletionRepository:259, IDuckDBRepository:323
-# ============================================================================
-
 """
-Repository Abstract Base Classes - Single Point of Truth
+Repository Abstract Base Classes - Single Point of Truth.
 
-This module enforces EXACT method signatures across all repository implementations,
-preventing parameter name mismatches that have caused bugs. All parameter names,
-return types, and method signatures are defined HERE and nowhere else.
+Enforces exact method signatures across all repository implementations,
+preventing parameter name mismatches. All parameter names, return types,
+and method signatures are defined here and nowhere else.
 
 Philosophy: "Define once, enforce everywhere"
 
-The current bug where advance_job_stage() has different signatures in different
-files would be IMPOSSIBLE with this pattern.
+Exports:
+    IJobRepository: Job repository interface
+    ITaskRepository: Task repository interface
+    IQueueRepository: Queue repository interface
+    IStageCompletionRepository: Stage completion interface
+    IDuckDBRepository: DuckDB repository interface
+    IDataFactoryRepository: Azure Data Factory interface
+    ParamNames: Canonical parameter name constants
 """
 
 from abc import ABC, abstractmethod

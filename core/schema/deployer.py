@@ -1,39 +1,20 @@
-# ============================================================================
-# CLAUDE CONTEXT - SCHEMA
-# ============================================================================
-# CATEGORY: SCHEMAS - DATA VALIDATION & TRANSFORMATION
-# PURPOSE: Pydantic models for validation, serialization, and data flow
-# EPOCH: Shared by all epochs (not persisted to database)# PURPOSE: PostgreSQL schema deployment and management orchestrating database initialization and validation
-# EXPORTS: SchemaManager, SchemaManagerFactory, SchemaManagementError, InsufficientPrivilegesError
-# INTERFACES: None - schema management class that deploys schemas defined in schema_base and schema_sql_generator
-# PYDANTIC_MODELS: None - uses dict returns for schema information
-# DEPENDENCIES: psycopg, psycopg.sql, config, util_logger, typing, os
-# SOURCE: PostgreSQL database via config, schema_postgres.sql file for DDL
-# SCOPE: Database schema operations - creation, validation, table/function management
-# VALIDATION: Schema existence checks, table validation, function availability, permission verification
-# PATTERNS: Factory pattern (SchemaManagerFactory), Service pattern, Exception hierarchy
-# ENTRY_POINTS: manager = SchemaManager(); result = manager.validate_and_initialize_schema()
-# INDEX: SchemaManager:50, validate_and_initialize_schema:130, _execute_schema_file:465, SchemaManagerFactory:611
-# ============================================================================
-
 """
-PostgreSQL Schema Deployment and Management
+PostgreSQL Schema Deployment and Management.
 
-Orchestrates schema deployment for schemas defined in schema_base and schema_sql_generator.
-Ensures APP_SCHEMA exists and has required tables before repository operations.
+Orchestrates schema deployment for database initialization.
+Ensures APP_SCHEMA exists with required tables before operations.
 
 Critical Features:
-- Schema existence validation with automatic creation
-- Table validation and initialization
-- Permission verification for schema operations  
-- Environment-specific schema management (dev, staging, prod)
-- Comprehensive error handling for database governance
+    - Schema existence validation with automatic creation
+    - Table validation and initialization
+    - Permission verification for schema operations
+    - Idempotent operations (safe to run multiple times)
 
-Database Governance:
-- Follows principle of least privilege
-- Graceful degradation when permissions insufficient
-- Clear error messages for admin intervention needed
-- Idempotent operations (safe to run multiple times)
+Exports:
+    SchemaManager: Schema deployment orchestrator
+    SchemaManagerFactory: Factory for creating schema managers
+    SchemaManagementError: Schema operation error
+    InsufficientPrivilegesError: Permission error
 """
 
 import psycopg

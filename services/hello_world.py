@@ -1,32 +1,21 @@
-# ============================================================================
-# CLAUDE CONTEXT - HELLO WORLD TASK HANDLERS
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: Core component of new architecture
-# PURPOSE: Task handlers for HelloWorld workflow (business logic)
-# EXPORTS: greet_handler, process_greeting_handler, finalize_hello_handler
-# INTERFACES: Registered with services.registry
-# PYDANTIC_MODELS: None directly (params/results are dicts)
-# DEPENDENCIES: services.registry, typing
-# SOURCE: Framework pattern from epoch4_framework.md
-# SCOPE: HelloWorld business logic (tests framework)
-# VALIDATION: Framework handles parameter validation
-# PATTERNS: Function-based tasks (simple), Registry pattern
-# ENTRY_POINTS: Auto-registered via @register_task decorator
-# INDEX: greet_handler:30, process_greeting_handler:70, finalize_hello_handler:110
-# ============================================================================
-
 """
-Hello World Task Handlers - Business Logic
+Hello World Task Handlers.
 
-Implements the actual business logic for HelloWorld workflow.
-These are PURE functions with ZERO orchestration code.
+Implements the business logic for HelloWorld workflow.
+Pure functions with zero orchestration code.
 
 Each handler:
-- Receives params dict
-- Returns result dict
-- Framework handles everything else (queuing, state, completion)
+    - Receives params dict
+    - Returns result dict
+    - Framework handles queuing, state, and completion
 
+Exports:
+    greet_handler: Stage 1 greeting task
+    process_greeting_handler: Stage 2 processing task
+    finalize_hello_handler: Stage 3 finalization task
+
+Dependencies:
+    services.registry: Task registration
 """
 
 from typing import Dict, Any

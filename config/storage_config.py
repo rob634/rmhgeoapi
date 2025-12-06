@@ -1,33 +1,16 @@
-# ============================================================================
-# CLAUDE CONTEXT - STORAGE CONFIGURATION
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: New module - Phase 1 of config.py refactoring (20 NOV 2025)
-# PURPOSE: Azure Storage configuration - COG tiers, multi-account trust zones
-# LAST_REVIEWED: 20 NOV 2025
-# EXPORTS: CogTier, CogTierProfile, COG_TIER_PROFILES, StorageAccountConfig, MultiAccountStorageConfig, StorageConfig, determine_applicable_tiers
-# INTERFACES: Pydantic BaseModel
-# PYDANTIC_MODELS: CogTierProfile, StorageAccountConfig, MultiAccountStorageConfig, StorageConfig
-# DEPENDENCIES: pydantic, os, typing, enum
-# SOURCE: Environment variables (STORAGE_ACCOUNT_NAME, SILVEREXT_CONNECTION_STRING)
-# SCOPE: Storage-specific configuration
-# VALIDATION: Pydantic v2 validation
-# PATTERNS: Value objects, composition
-# ENTRY_POINTS: from config import StorageConfig, CogTier, determine_applicable_tiers
-# INDEX: CogTier:40, CogTierProfile:72, COG_TIER_PROFILES:183, determine_applicable_tiers:230, StorageAccountConfig:270, MultiAccountStorageConfig:338
-# ============================================================================
-
 """
-Azure Storage Configuration - COG Tiers and Multi-Account Trust Zones
+Azure Storage Configuration.
 
 Provides configuration for:
-- COG tier profiles (VISUALIZATION, ANALYSIS, ARCHIVE)
-- Multi-account storage pattern (Bronze, Silver, SilverExternal, Gold)
-- Container naming conventions
-- Storage access tiers
+    - COG tier profiles (VISUALIZATION, ANALYSIS, ARCHIVE)
+    - Multi-account storage pattern (Bronze, Silver, SilverExternal, Gold)
+    - Container naming conventions
+    - Storage access tiers
 
-This module was extracted from config.py (lines 59-494) as part of the
-god object refactoring (20 NOV 2025).
+Exports:
+    CogTier: Enum of COG quality tiers
+    StorageConfig: Pydantic storage configuration model
+    determine_applicable_tiers: Helper to select tiers for file sizes
 """
 
 import os

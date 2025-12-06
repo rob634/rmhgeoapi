@@ -1,53 +1,27 @@
-# ============================================================================
-# CLAUDE CONTEXT - INFRASTRUCTURE PACKAGE
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: Infrastructure - Repository and service layer
-# PURPOSE: Package initialization for repository modules with lazy imports
-# LAST_REVIEWED: 29 OCT 2025
-# EXPORTS: Factory and repository classes via lazy loading
-# INTERFACES: All repository interfaces and implementations
-# PYDANTIC_MODELS: None at package level - models in individual modules
-# DEPENDENCIES: Individual repositories loaded on demand
-# SOURCE: Module imports only when requested
-# SCOPE: Application-wide repository access
-# VALIDATION: Import validation handled per module
-# PATTERNS: Lazy loading to prevent premature initialization
-# ENTRY_POINTS: from infrastructure import RepositoryFactory
-# INDEX: Lazy imports prevent module-level code execution
-# ============================================================================
-
 """
-Repository Package - Lazy Loading Implementation
+Infrastructure Package - Lazy Loading Implementation.
 
-This package provides all repository implementations with lazy loading
-to prevent premature initialization of singletons, loggers, and
-environment variable reads.
+Provides all repository implementations with lazy loading to prevent
+premature initialization of singletons, loggers, and environment variable reads.
 
 All imports are deferred until actually needed to avoid:
-- Premature environment variable access
-- Singleton initialization before configuration
-- Logger proliferation
-- Import order dependencies
+    - Premature environment variable access
+    - Singleton initialization before configuration
+    - Logger proliferation
+    - Import order dependencies
 
-========================================================================
-🎯 CRITICAL AZURE FUNCTIONS RUNTIME EXPLANATION (Learning Project Note)
-========================================================================
+Why Lazy Loading is Essential in Azure Functions:
 
-WHY LAZY LOADING IS ESSENTIAL IN AZURE FUNCTIONS:
+The Azure Functions runtime has a specific initialization sequence:
 
-The Azure Functions runtime has a "mysterious" initialization sequence that
-can cause failures if you don't understand it. Here's what actually happens:
+    Cold Start -> Import Modules -> Runtime Init -> Ready for Triggers
+         |              |                |               |
+      ~500ms      NO ENV VARS!     ENV VARS SET    NOW SAFE TO USE
 
-1. COLD START SEQUENCE:
-   Cold Start → Import Modules → Runtime Init → Ready for Triggers
-        ↓             ↓                ↓              ↓
-     ~500ms      NO ENV VARS!    ENV VARS SET   NOW SAFE TO USE
-
-2. THE PROBLEM:
-   - Azure Functions loads function_app.py on EVERY cold start
-   - All top-level imports execute immediately during load
-   - This happens BEFORE environment variables are guaranteed available
+The Problem:
+    - Azure Functions loads function_app.py on EVERY cold start
+    - All top-level imports execute immediately during load
+    - This happens BEFORE environment variables are guaranteed available
    - This happens BEFORE managed identity tokens are ready
    - This happens BEFORE the Functions runtime is fully initialized
 

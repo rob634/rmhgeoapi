@@ -57,7 +57,7 @@ Azure manages:
 @app.route(route="jobs/submit/{job_type}", methods=["POST"])
 def submit_job(req: HttpRequest) -> HttpResponse:
     """
-    This function runs when: POST /api/jobs/submit/ingest_vector
+    This function runs when: POST /api/jobs/submit/process_vector
     Azure automatically:
     - Routes the HTTP request here
     - Provides request object with body/headers

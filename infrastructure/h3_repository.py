@@ -1,47 +1,24 @@
-# ============================================================================
-# CLAUDE CONTEXT - H3 REPOSITORY
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: Infrastructure - H3-specific PostgreSQL repository
-# PURPOSE: Safe SQL operations for h3 schema using psycopg.sql composition
-# LAST_REVIEWED: 10 NOV 2025
-# EXPORTS: H3Repository
-# INTERFACES: PostgreSQLRepository (inherits connection mgmt, transactions, error handling)
-# PYDANTIC_MODELS: None (uses dicts for H3 cell data)
-# DEPENDENCIES: psycopg, psycopg.sql, infrastructure.postgresql.PostgreSQLRepository
-# SOURCE: PostgreSQL database (h3 schema: grids, reference_filters, grid_metadata)
-# SCOPE: H3 grid operations for World Bank Agricultural Geography Platform
-# VALIDATION: SQL injection prevention via psycopg.sql.Identifier() composition
-# PATTERNS: Repository pattern, Safe SQL composition, Connection pooling
-# ENTRY_POINTS: repo = H3Repository(); repo.insert_h3_cells(cells, grid_id)
-# INDEX: H3Repository:45, insert_h3_cells:95, get_parent_ids:165, update_spatial_attributes:215
-# ============================================================================
-
 """
-H3 Repository - Safe PostgreSQL operations for H3 hexagonal grids
+H3 Repository - Safe PostgreSQL Operations for H3 Hexagonal Grids.
 
-This module provides H3-specific repository implementation that inherits
-from PostgreSQLRepository base class. It ensures safe SQL composition
-using psycopg.sql.Identifier() to prevent SQL injection attacks.
-
-Architecture:
-    PostgreSQLRepository (base class - connection mgmt, transactions)
-        ↓
-    H3Repository (this class - H3-specific operations)
+Provides H3-specific repository implementation inheriting from PostgreSQLRepository.
+Ensures safe SQL composition using psycopg.sql.Identifier() to prevent SQL injection.
 
 Key Features:
-- Safe SQL composition using sql.Identifier() for schema/table/column names
-- Bulk insert operations using executemany() for performance
-- Spatial attribute updates via PostGIS ST_Intersects
-- Reference filter management (parent H3 indices for cascading children)
-- Grid metadata tracking for bootstrap progress monitoring
-- Idempotency support (grid_exists checks)
+    - Safe SQL composition using sql.Identifier() for schema/table/column names
+    - Bulk insert operations using executemany() for performance
+    - Spatial attribute updates via PostGIS ST_Intersects
+    - Reference filter management for cascading children generation
+    - Grid metadata tracking for bootstrap progress monitoring
+    - Idempotency support via grid_exists checks
 
 Schema:
-    h3.grids - H3 hexagonal grid cells (resolutions 2-7, ~55.8M land cells)
+    h3.grids - H3 hexagonal grid cells (resolutions 2-7)
     h3.reference_filters - Parent ID sets for child generation
     h3.grid_metadata - Bootstrap progress tracking
 
+Exports:
+    H3Repository: Repository for h3.grids operations
 """
 
 import logging

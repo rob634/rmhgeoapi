@@ -24,13 +24,10 @@ Handlers for the inventory_fathom_container job that scans the bronze-fathom
 container and populates the app.etl_fathom tracking table.
 
 Handler Functions:
-1. fathom_generate_scan_prefixes - Generate list of prefixes to scan in parallel
-2. fathom_scan_prefix - Scan blobs by prefix and batch insert to database
-3. fathom_assign_grid_cells - Calculate 5×5 degree grid cell assignments
-4. fathom_inventory_summary - Generate statistics summary
-
-Author: Robert and Geospatial Claude Legion
-Date: 05 DEC 2025
+    1. fathom_generate_scan_prefixes - Generate prefixes for parallel scanning
+    2. fathom_scan_prefix - Scan blobs by prefix and batch insert to database
+    3. fathom_assign_grid_cells - Calculate 5x5 degree grid cell assignments
+    4. fathom_inventory_summary - Generate statistics summary
 """
 
 import re
@@ -44,6 +41,99 @@ from psycopg import sql
 from config import FathomDefaults
 
 logger = logging.getLogger(__name__)
+
+# Track if table has been ensured this session (avoid repeated checks)
+_table_ensured = False
+
+
+# ============================================================================
+# Database Table Creation (Self-Contained)
+# ============================================================================
+
+def _ensure_etl_fathom_table() -> bool:
+    """
+    Ensure app.etl_fathom table exists, creating it if necessary.
+
+    This allows the Fathom ETL jobs to be self-contained without requiring
+    a full schema rebuild. Uses CREATE TABLE IF NOT EXISTS for idempotency.
+
+    Returns:
+        True if table exists (created or already existed)
+    """
+    global _table_ensured
+    if _table_ensured:
+        return True
+
+    logger.info("🔧 Ensuring app.etl_fathom table exists...")
+
+    repo = PostgreSQLRepository()
+
+    create_table_sql = """
+    CREATE TABLE IF NOT EXISTS app.etl_fathom (
+        -- Primary Key
+        id SERIAL PRIMARY KEY,
+
+        -- Source file identification
+        source_blob_path VARCHAR(512) NOT NULL,
+        source_container VARCHAR(64) NOT NULL DEFAULT 'bronze-fathom',
+        file_size_bytes BIGINT,
+
+        -- Parsed metadata from blob path
+        flood_type VARCHAR(20) NOT NULL,
+        defense VARCHAR(20) NOT NULL,
+        year INTEGER NOT NULL,
+        ssp VARCHAR(10),
+        return_period VARCHAR(10) NOT NULL,
+        tile VARCHAR(20) NOT NULL,
+
+        -- Phase 1 (Band Stacking) tracking
+        phase1_group_key VARCHAR(100),
+        phase1_output_blob VARCHAR(512),
+        phase1_job_id VARCHAR(64),
+        phase1_processed_at TIMESTAMPTZ,
+
+        -- Phase 2 (Spatial Merge) tracking
+        grid_cell VARCHAR(30),
+        phase2_group_key VARCHAR(100),
+        phase2_output_blob VARCHAR(512),
+        phase2_job_id VARCHAR(64),
+        phase2_processed_at TIMESTAMPTZ,
+
+        -- Timestamps
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW(),
+
+        -- Constraints
+        CONSTRAINT etl_fathom_source_blob_path_unique UNIQUE (source_blob_path)
+    );
+
+    -- Create indexes for common queries (IF NOT EXISTS for idempotency)
+    CREATE INDEX IF NOT EXISTS idx_etl_fathom_tile ON app.etl_fathom(tile);
+    CREATE INDEX IF NOT EXISTS idx_etl_fathom_phase1_group ON app.etl_fathom(phase1_group_key);
+    CREATE INDEX IF NOT EXISTS idx_etl_fathom_phase2_group ON app.etl_fathom(phase2_group_key);
+    CREATE INDEX IF NOT EXISTS idx_etl_fathom_flood_type ON app.etl_fathom(flood_type, defense);
+    CREATE INDEX IF NOT EXISTS idx_etl_fathom_year_ssp ON app.etl_fathom(year, ssp);
+
+    -- Partial indexes for finding unprocessed records
+    CREATE INDEX IF NOT EXISTS idx_etl_fathom_p1_pending ON app.etl_fathom(phase1_group_key)
+        WHERE phase1_processed_at IS NULL;
+    CREATE INDEX IF NOT EXISTS idx_etl_fathom_p2_pending ON app.etl_fathom(phase2_group_key)
+        WHERE phase1_processed_at IS NOT NULL AND phase2_processed_at IS NULL;
+    """
+
+    try:
+        with repo.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(create_table_sql)
+                conn.commit()
+
+        _table_ensured = True
+        logger.info("✅ app.etl_fathom table ready")
+        return True
+
+    except Exception as e:
+        logger.error(f"❌ Failed to create etl_fathom table: {e}")
+        raise
 
 
 # ============================================================================
@@ -174,6 +264,9 @@ def fathom_scan_prefix(params: Dict[str, Any]) -> Dict[str, Any]:
         return {"success": False, "error": "Missing required parameter: prefix"}
 
     logger.info(f"🔍 Scanning prefix: {prefix}")
+
+    # Ensure table exists before inserting (self-contained, no schema rebuild needed)
+    _ensure_etl_fathom_table()
 
     # Get blob repository
     blob_repo = BlobRepository.instance()

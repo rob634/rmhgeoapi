@@ -1,41 +1,24 @@
-# ============================================================================
-# CLAUDE CONTEXT - DATABASE CONFIGURATION
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: Dual database support - App + Business databases (29 NOV 2025)
-# PURPOSE: PostgreSQL/PostGIS database configuration with managed identity support
-# LAST_REVIEWED: 29 NOV 2025
-# EXPORTS: DatabaseConfig, BusinessDatabaseConfig, get_postgres_connection_string
-# INTERFACES: Pydantic BaseModel
-# PYDANTIC_MODELS: DatabaseConfig, BusinessDatabaseConfig
-# DEPENDENCIES: pydantic, os, typing
-# SOURCE: Environment variables (POSTGIS_HOST, BUSINESS_DB_HOST, etc.)
-# SCOPE: Database-specific configuration
-# VALIDATION: Pydantic v2 validation
-# PATTERNS: Value objects, factory methods
-# ENTRY_POINTS: from config import DatabaseConfig, BusinessDatabaseConfig
-# INDEX: DatabaseConfig:45, BusinessDatabaseConfig:340, get_postgres_connection_string:450
-# ============================================================================
-
 """
-PostgreSQL/PostGIS Database Configuration
+PostgreSQL/PostGIS Database Configuration.
 
 Provides configuration for:
-- App Database (DatabaseConfig): Full DDL permissions for app infrastructure
-  - jobs, tasks, api_requests tables
-  - pgSTAC metadata catalog
-  - App-owned geo data (admin0 countries)
-  - H3 grids
-- Business Database (BusinessDatabaseConfig): Restricted CRUD for ETL outputs
-  - process_vector ETL outputs only
-  - Same managed identity, different permissions (NO DROP SCHEMA)
+    - App Database (DatabaseConfig): Full DDL permissions for app infrastructure
+      - jobs, tasks, api_requests tables
+      - pgSTAC metadata catalog
+      - App-owned geo data (admin0 countries)
+      - H3 grids
+    - Business Database (BusinessDatabaseConfig): Restricted CRUD for ETL outputs
+      - process_vector ETL outputs only
+      - Same managed identity, different permissions (NO DROP SCHEMA)
 
-Architecture (29 NOV 2025):
+Architecture:
     App Database (geopgflex) - Can nuke/rebuild schemas
     Business Database (ddhgeodb) - Protected from accidental destruction
 
-This module was extracted from config.py (lines 660-773) as part of the
-god object refactoring (20 NOV 2025). BusinessDatabaseConfig added 29 NOV 2025.
+Exports:
+    DatabaseConfig: App database configuration
+    BusinessDatabaseConfig: Business database configuration
+    get_postgres_connection_string: Connection string factory
 """
 
 import os

@@ -1,51 +1,20 @@
-# ============================================================================
-# CLAUDE CONTEXT - BLOB VALIDATION DECORATORS
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: Infrastructure - Validation decorators for blob repository
-# PURPOSE: Pre-flight validation decorators for fail-fast error handling
-# LAST_REVIEWED: 28 OCT 2025
-# EXPORTS: validate_container, validate_blob, validate_container_and_blob
-# INTERFACES: None - Pure decorator functions
-# PYDANTIC_MODELS: None
-# DEPENDENCIES: functools, typing, azure.core.exceptions, util_logger
-# SOURCE: Applied to BlobRepository methods via decorator syntax
-# SCOPE: ALL blob repository methods requiring validation
-# VALIDATION: Container existence, blob existence before operations
-# PATTERNS: Decorator pattern, fail-fast validation, DRY principle
-# ENTRY_POINTS: @validate_container, @validate_blob, @validate_container_and_blob
-# INDEX: validate_container:60, validate_blob:95, validate_container_and_blob:130
-# ============================================================================
-
 """
-Blob Validation Decorators - Fail-Fast Pre-Flight Checks
+Blob Validation Decorators - Fail-Fast Pre-Flight Checks.
 
-This module provides decorators for automatic container and blob validation
-before repository method execution. Designed for ETL pipelines where blob
-reads are numerous but one-time by nature.
+Provides decorators for automatic container and blob validation before
+repository method execution. Designed for ETL pipelines where blob reads
+are numerous but one-time by nature.
 
 Design Philosophy:
-- Fail fast with clear error messages
-- Avoid cryptic Azure SDK errors deep in call stacks
-- DRY - define validation logic once, apply everywhere
-- Declarative - method signatures clearly show what's validated
-- ETL-optimized - validate once before expensive operations
+    - Fail fast with clear error messages
+    - DRY - define validation logic once, apply everywhere
+    - Declarative - method signatures clearly show what's validated
+    - ETL-optimized - validate once before expensive operations
 
-Key Features:
-- @validate_container: Ensures container exists before operation
-- @validate_blob: Ensures blob exists before read/delete operations
-- @validate_container_and_blob: Combined validation (more efficient)
-
-Usage:
-    from infrastructure.decorators_blob import validate_container_and_blob
-
-    class BlobRepository:
-        @validate_container_and_blob
-        def read_blob(self, container: str, blob_path: str) -> bytes:
-            # Container and blob guaranteed to exist here
-            # No validation boilerplate needed
-            pass
-
+Exports:
+    validate_container: Ensures container exists before operation
+    validate_blob: Ensures blob exists before read/delete operations
+    validate_container_and_blob: Combined validation (more efficient)
 """
 
 # ============================================================================

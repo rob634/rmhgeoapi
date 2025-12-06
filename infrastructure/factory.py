@@ -1,38 +1,21 @@
-# ============================================================================
-# CLAUDE CONTEXT - REPOSITORY FACTORY
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: Infrastructure - Central factory for all repository instances
-# PURPOSE: Central factory for creating all repository instances across different storage backends
-# LAST_REVIEWED: 29 OCT 2025
-# EXPORTS: RepositoryFactory (static class with factory methods for all repository types)
-# INTERFACES: Creates instances implementing IJobRepository, ITaskRepository, IQueueRepository, IDuckDBRepository
-# PYDANTIC_MODELS: None - returns repository instances that use Pydantic models internally
-# DEPENDENCIES: repositories/*, interfaces/repository, config, typing
-# SOURCE: Configuration from AppConfig for connection strings and settings
-# SCOPE: Global repository creation for entire application
-# VALIDATION: Connection validation handled by individual repositories
-# PATTERNS: Factory pattern, Dependency Injection, Interface segregation, Singleton
-# ENTRY_POINTS: RepositoryFactory.create_repositories(), create_service_bus_repository(), create_duckdb_repository()
-# INDEX: RepositoryFactory:53, create_repositories:69, create_service_bus:200, create_duckdb:270
-# ============================================================================
-
 """
-Repository Factory - Central Creation Point
+Repository Factory.
 
-This module provides the factory for creating all repository instances.
-It serves as the single point for repository instantiation, allowing
-easy extension to support multiple storage backends in the future.
+Central factory for creating all repository instances. Serves as the single
+point for repository instantiation, allowing easy extension to support
+multiple storage backends.
 
 Current Support:
-- PostgreSQL repositories (jobs, tasks, completion detection)
-- Vault repository (when enabled)
+    - PostgreSQL repositories (jobs, tasks, completion detection)
+    - Vault repository (when enabled)
 
 Future Support:
-- Blob storage repositories
-- Cosmos DB repositories
-- Redis cache repositories
+    - Blob storage repositories
+    - Cosmos DB repositories
+    - Redis cache repositories
 
+Exports:
+    RepositoryFactory: Static class with factory methods for all repository types
 """
 
 # Imports at top for fast failure

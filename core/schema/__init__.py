@@ -1,26 +1,14 @@
-# ============================================================================
-# CLAUDE CONTEXT - CORE SCHEMA PACKAGE
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: Core schema - Database schema management and validation
-# PURPOSE: Database schema management and message validation for core framework
-# LAST_REVIEWED: 16 OCT 2025
-# EXPORTS: SQL generation, schema deployment, queue messages, update models
-# INTERFACES: Package initialization only
-# PYDANTIC_MODELS: Exported from submodules (queue, updates, workflow)
-# DEPENDENCIES: Core schema submodules
-# AZURE_FUNCTIONS: Required for package imports
-# PATTERNS: Package initialization, Schema management
-# ENTRY_POINTS: from core.schema import JobQueueMessage, TaskUpdateModel
-# ============================================================================
-
 """
-Core database schema management package.
+Core Database Schema Management Package.
 
-This package contains:
-- SQL DDL generation from Pydantic models
-- Schema deployment and management
-- PostgreSQL function definitions
+Contains SQL DDL generation, schema deployment, and PostgreSQL functions.
+
+Exports:
+    PydanticToSQL: SQL DDL generator from Pydantic models
+    SchemaManager, SchemaManagerFactory: Schema deployment utilities
+    WorkflowDefinition, WorkflowStageDefinition: Workflow schema models
+    JobQueueMessage, TaskQueueMessage: Queue message schemas
+    TaskUpdateModel, JobUpdateModel: Database update models
 """
 
 # Export schema management utilities

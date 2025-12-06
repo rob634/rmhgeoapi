@@ -1,40 +1,18 @@
-# ============================================================================
-# CLAUDE CONTEXT - STATE MANAGEMENT
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: Core component - Database state management with advisory locks
-# PURPOSE: Manages all database state operations with advisory locks for atomic operations
-# LAST_REVIEWED: 16 OCT 2025
-# EXPORTS: StateManager - handles job/task state transitions and completion logic
-# INTERFACES: Uses repositories for database access, provides atomic state management
-# PYDANTIC_MODELS: JobRecord, TaskRecord, JobExecutionContext, StageAdvancementResult (from core.models)
-# DEPENDENCIES: core.models, repositories, schema_updates, util_logger, typing
-# SOURCE: Extracted from BaseController to enable composition-based architecture
-# SCOPE: All database state mutations and advisory lock operations
-# VALIDATION: Database constraints and atomic operations via PostgreSQL
-# PATTERNS: Repository pattern, Unit of Work, Advisory Locks for race prevention
-# ENTRY_POINTS: Used by controllers via composition for state management
-# INDEX: StateManager:100, Job Operations:300, Stage Completion:600, Task Completion:900
-# ============================================================================
-
 """
-State Manager - Database State Management with Advisory Locks
+State Manager - Database State Management with Advisory Locks.
 
 Manages all database state operations including the critical "last task turns
-out the lights" pattern using PostgreSQL advisory locks. This component is
-essential for both Queue Storage and Service Bus to prevent race conditions.
+out the lights" pattern using PostgreSQL advisory locks.
 
 Key Responsibilities:
-- Job state transitions (QUEUED → PROCESSING → COMPLETED/FAILED)
-- Task state transitions with atomic completion checks
-- Stage advancement with advisory locks
-- Job completion and result aggregation
-- Database record creation and updates
+    - Job state transitions (QUEUED → PROCESSING → COMPLETED/FAILED)
+    - Task state transitions with atomic completion checks
+    - Stage advancement with advisory locks
+    - Job completion and result aggregation
+    - Database record creation and updates
 
-Critical Pattern:
-The "last task turns out the lights" pattern uses PostgreSQL advisory locks
-to atomically determine when all tasks in a stage are complete, preventing
-race conditions when multiple tasks complete simultaneously.
+Exports:
+    StateManager: Handles job/task state transitions and completion logic
 """
 
 from datetime import datetime, timezone

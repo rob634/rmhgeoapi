@@ -1,39 +1,19 @@
-# ============================================================================
-# CLAUDE CONTEXT - APPLICATION CONFIGURATION
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: New module - Phase 1 of config.py refactoring (20 NOV 2025)
-# PURPOSE: Main application configuration - composes domain-specific configs
-# LAST_REVIEWED: 20 NOV 2025
-# EXPORTS: AppConfig
-# INTERFACES: Pydantic BaseModel
-# PYDANTIC_MODELS: AppConfig
-# DEPENDENCIES: pydantic, os, typing, domain config modules
-# SOURCE: Environment variables + composed domain configs
-# SCOPE: Application-wide configuration
-# VALIDATION: Pydantic v2 validation
-# PATTERNS: Composition over inheritance
-# ENTRY_POINTS: from config import AppConfig, get_config
-# INDEX: AppConfig:50
-# ============================================================================
-
 """
-Main Application Configuration - Composition Pattern
+Main Application Configuration.
 
 Composes domain-specific configuration modules:
-- StorageConfig (COG tiers, multi-account storage)
-- DatabaseConfig (PostgreSQL/PostGIS)
-- RasterConfig (Raster pipeline)
-- VectorConfig (Vector pipeline)
-- QueueConfig (Service Bus queues)
+    - StorageConfig (COG tiers, multi-account storage)
+    - DatabaseConfig (PostgreSQL/PostGIS)
+    - RasterConfig (Raster pipeline)
+    - VectorConfig (Vector pipeline)
+    - QueueConfig (Service Bus queues)
 
-This module was created as part of the config.py god object refactoring (20 NOV 2025).
-It replaces the monolithic AppConfig class (1,090 lines, 63+ fields) with a
-composition-based approach (150 lines, 5 domain configs).
+Exports:
+    AppConfig: Main configuration class
+    get_config: Singleton accessor
 
 Pattern:
-    OLD: AppConfig with 63+ fields (god object)
-    NEW: AppConfig composes 5 domain configs (composition)
+    Composition over inheritance - domain configs are composed, not inherited.
 
 Benefits:
     - Clear separation of concerns

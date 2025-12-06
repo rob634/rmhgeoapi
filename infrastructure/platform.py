@@ -1,40 +1,13 @@
-# ============================================================================
-# CLAUDE CONTEXT - PLATFORM REPOSITORY (THIN TRACKING)
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: Infrastructure - Simplified thin tracking repository (22 NOV 2025)
-# PURPOSE: PostgreSQL repository for Platform layer thin tracking (request_id → job_id)
-# LAST_REVIEWED: 22 NOV 2025
-# EXPORTS: ApiRequestRepository, PlatformRepository (alias)
-# INTERFACES: PostgreSQLRepository (from infrastructure.postgresql)
-# PYDANTIC_MODELS: ApiRequest
-# DEPENDENCIES: psycopg, psycopg.sql, infrastructure.postgresql
-# SOURCE: PostgreSQL database (app.api_requests) - Platform tables live in app schema
-# SCOPE: Platform layer - thin tracking for DDH status lookups
-# VALIDATION: SQL injection prevention via psycopg.sql composition
-# PATTERNS: Repository pattern, SQL composition, thin tracking
-# ENTRY_POINTS: repo = ApiRequestRepository(); request = repo.create_request(record)
-# INDEX:
-#   - Imports: Line 38
-#   - ApiRequestRepository: Line 55
-# ============================================================================
-
 """
-Platform Repository Implementation - Thin Tracking Pattern (22 NOV 2025)
+Platform Repository - Thin Tracking Pattern.
 
-SIMPLIFIED ARCHITECTURE:
-    This repository provides thin tracking for Platform → CoreMachine mapping.
-    Platform creates ONE CoreMachine job per request and stores the mapping.
+Provides thin tracking for Platform → CoreMachine mapping. Platform creates
+one CoreMachine job per request and stores the 1:1 mapping.
 
-    OLD (Complex Orchestration):
-        - Multiple tables (api_requests, orchestration_jobs)
-        - Job chaining and completion callbacks
-        - Multi-job tracking per request
-
-    NEW (Thin Tracking):
-        - Single table (api_requests)
-        - 1:1 mapping: request_id → job_id
-        - Status delegated to CoreMachine
+Architecture:
+    - Single table (app.api_requests)
+    - 1:1 mapping: request_id → job_id
+    - Status delegated to CoreMachine
 
 Methods:
     create_request(request) - Store request → job mapping
@@ -42,11 +15,9 @@ Methods:
     get_request_by_job(job_id) - Reverse lookup by CoreMachine job ID
     get_all_requests(limit, dataset_id) - List requests with filtering
 
-REMOVED (22 NOV 2025):
-    - PlatformStatusRepository (merged into ApiRequestRepository)
-    - add_job_to_request() (1:1 mapping, no multi-job)
-    - check_and_update_completion() (no orchestration)
-    - orchestration_jobs table operations
+Exports:
+    ApiRequestRepository: Platform request tracking repository
+    PlatformRepository: Alias for ApiRequestRepository
 """
 
 import json

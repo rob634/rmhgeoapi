@@ -1,29 +1,5 @@
-# ============================================================================
-# CLAUDE CONTEXT - CONFIGURATION DEFAULTS
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: New module - Single source of truth for all defaults (30 NOV 2025)
-# PURPOSE: Centralize ALL hardcoded default values in one file
-# LAST_REVIEWED: 30 NOV 2025
-# EXPORTS: AzureDefaults, DatabaseDefaults, StorageDefaults, QueueDefaults,
-#          RasterDefaults, VectorDefaults, AnalyticsDefaults, H3Defaults,
-#          PlatformDefaults, FathomDefaults, STACDefaults, AppDefaults
-# INTERFACES: Pure Python classes (no Pydantic - just constants)
-# PYDANTIC_MODELS: None - consumed by Pydantic config classes
-# DEPENDENCIES: None (intentionally dependency-free)
-# SOURCE: Static values - no env vars read here
-# SCOPE: Global defaults for entire application
-# VALIDATION: None - config classes handle validation
-# PATTERNS: Constants classes, single source of truth
-# ENTRY_POINTS: from config.defaults import AzureDefaults, DatabaseDefaults, ...
-# INDEX: AzureDefaults:40, DatabaseDefaults:60, StorageDefaults:80,
-#        QueueDefaults:120, RasterDefaults:140, VectorDefaults:180,
-#        AnalyticsDefaults:200, H3Defaults:220, PlatformDefaults:240,
-#        AppDefaults:280
-# ============================================================================
-
 """
-SINGLE SOURCE OF TRUTH for all default values.
+Configuration Defaults - Single source of truth for all default values.
 
 When deploying to a new Azure tenant, review this file to understand
 what environment variables must be set vs what can use defaults.
@@ -41,9 +17,6 @@ Usage:
     # In deployment validation:
     if config.storage_account_name == AzureDefaults.STORAGE_ACCOUNT_NAME:
         issues.append("Storage account not configured for this tenant")
-
-Created: 30 NOV 2025 as part of config centralization refactor
-Author: Robert and Geospatial Claude Legion
 """
 
 

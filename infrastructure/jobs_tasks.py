@@ -1,43 +1,21 @@
-# ============================================================================
-# CLAUDE CONTEXT - JOB/TASK REPOSITORIES
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: Infrastructure - Business logic repositories for job and task operations
-# PURPOSE: Business logic repository layer for job and task management with validation and orchestration
-# LAST_REVIEWED: 29 OCT 2025
-# EXPORTS: JobRepository, TaskRepository, StageCompletionRepository
-# INTERFACES: Extends PostgreSQLJobRepository, PostgreSQLTaskRepository, PostgreSQLStageCompletionRepository
-# PYDANTIC_MODELS: JobRecord, TaskRecord, TaskDefinition, JobStatus, TaskStatus (from core.models)
-# DEPENDENCIES: infrastructure.postgresql, core.models, util_logger, typing, datetime
-# SOURCE: PostgreSQL database via inherited base classes, adds business logic
-# SCOPE: Business-level job and task operations with validation and workflow orchestration
-# VALIDATION: Business rule validation, idempotency checks, status transition validation
-# PATTERNS: Repository pattern, Template Method, Facade (for complex workflows), Batch operations
-# ENTRY_POINTS: from infrastructure.jobs_tasks import JobRepository; job_repo = JobRepository()
-# INDEX: JobRepository:73, TaskRepository:326, StageCompletionRepository:791
-# ============================================================================
-
 """
-Job and Task Repository Implementation
+Job and Task Repository Implementation.
 
-This module provides business logic repositories for job and task management,
-extending the PostgreSQL base implementations with validation and orchestration:
+Business logic repositories for job and task management, extending PostgreSQL
+base implementations with validation and orchestration.
 
-    PostgreSQLJobRepository (from repository_postgresql.py)
-        ↓
-    JobRepository (this file - adds business logic)
-    
-    PostgreSQLTaskRepository (from repository_postgresql.py)
-        ↓
-    TaskRepository (this file - adds business logic)
-    
-    PostgreSQLCompletionDetector (from repository_postgresql.py)
-        ↓
-    CompletionDetector (this file - adds business logic)
+Architecture:
+    PostgreSQLJobRepository → JobRepository (adds business logic)
+    PostgreSQLTaskRepository → TaskRepository (adds business logic)
+    PostgreSQLStageCompletionRepository → StageCompletionRepository
 
-These repositories handle all job and task persistence operations,
-including idempotency checks, status transitions, and completion detection.
+Handles all job and task persistence operations including idempotency checks,
+status transitions, and completion detection.
 
+Exports:
+    JobRepository: Extended job repository with business logic
+    TaskRepository: Extended task repository with business logic
+    StageCompletionRepository: Atomic stage completion operations
 """
 
 # Imports at top for fast failure

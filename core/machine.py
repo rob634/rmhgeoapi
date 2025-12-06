@@ -1,39 +1,27 @@
-# ============================================================================
-# CLAUDE CONTEXT - CORE ORCHESTRATOR
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: Core component - Universal orchestrator for all workflows
-# PURPOSE: Universal job orchestrator using composition to avoid God Class
-# LAST_REVIEWED: 16 OCT 2025
-# EXPORTS: CoreMachine - coordinates all workflows without job-specific logic
-# INTERFACES: Uses Workflow ABC, Task ABC, StateManager, repositories
-# PYDANTIC_MODELS: TaskQueueMessage, JobQueueMessage, TaskResult
-# DEPENDENCIES: jobs.registry, services.registry, core, infrastructure
-# SOURCE: Extracted from controller_service_bus_hello.py (1,019 lines → 450)
-# SCOPE: Universal coordination for ALL jobs via delegation
-# VALIDATION: Contract enforcement for type safety
-# PATTERNS: Coordinator pattern, Composition over Inheritance
-# ENTRY_POINTS: process_job_message(), process_task_message()
-# INDEX: CoreMachine:50, Job Processing:150, Task Processing:350
-# ============================================================================
-
 """
-CoreMachine - Universal Job Orchestrator
+CoreMachine - Universal Job Orchestrator.
 
-This is the heart of Epoch 4's declarative architecture. It avoids the God Class
-anti-pattern by using composition and delegation instead of inheritance.
+Universal job orchestrator using composition to avoid the God Class anti-pattern.
+Coordinates all workflows without containing job-specific logic.
 
 Key Principles:
-1. Composition: All dependencies injected, none created internally
-2. Single Responsibility: Only coordinate, never execute business logic
-3. Delegation: Specialized components handle all actual work
-4. Stateless: No job-specific state stored in CoreMachine
+    1. Composition: All dependencies injected, none created internally
+    2. Single Responsibility: Only coordinate, never execute business logic
+    3. Delegation: Specialized components handle all actual work
+    4. Stateless: No job-specific state stored in CoreMachine
 
-Size Comparison:
-- BaseController (God Class): 2,290 lines, 34 methods
-- CoreMachine (Coordinator): approximately 450 lines, 6 methods (80% reduction)
+Exports:
+    CoreMachine: Universal orchestrator class
 
-The difference: BaseController does everything, CoreMachine coordinates everything.
+Dependencies:
+    jobs.registry: Job workflow definitions
+    services.registry: Task handler implementations
+    core: StateManager, OrchestrationManager
+    infrastructure: Repository implementations
+
+Entry Points:
+    process_job_message(): Process job queue messages
+    process_task_message(): Process task queue messages
 """
 
 from typing import Dict, Any, Optional

@@ -1,31 +1,11 @@
-# ============================================================================
-# CLAUDE CONTEXT - HTTP TRIGGER
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: HTTP Trigger - STAC metadata extraction from rasters
-# PURPOSE: Extract STAC metadata from raster blobs and insert into PgSTAC
-# LAST_REVIEWED: 29 OCT 2025
-# EXPORTS: handle_request (function-based trigger)
-# INTERFACES: Direct Azure Functions HttpTrigger (func.HttpRequest -> func.HttpResponse)
-# PYDANTIC_MODELS: None (uses dict for request/response)
-# DEPENDENCIES: azure.functions, services.service_stac_metadata.StacMetadataService (lazy import)
-# SOURCE: HTTP POST requests to /api/stac/extract with container/blob parameters
-# SCOPE: STAC metadata extraction from COG/GeoTIFF files in blob storage
-# VALIDATION: Container name, blob name, collection ID validation
-# PATTERNS: Function-based trigger, Lazy loading (GDAL/rasterio imported inside function), Service delegation
-# ENTRY_POINTS: POST /api/stac/extract
-# INDEX: handle_request:21
-# ============================================================================
-
 """
-STAC Metadata Extraction Trigger
+STAC Metadata Extraction Trigger.
 
 HTTP endpoint to extract STAC metadata from raster blobs and insert into PgSTAC.
+Uses lazy loading for GDAL/rasterio to prevent cold start delays.
 
-**IMPORTANT**: Uses lazy loading for GDAL/rasterio to prevent cold start delays.
-Heavy dependencies are imported inside handle_request(), not at module level.
-
-Last Updated: 29 OCT 2025
+Exports:
+    handle_request: HTTP trigger function for POST /api/stac/extract
 """
 
 import azure.functions as func

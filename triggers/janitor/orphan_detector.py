@@ -1,45 +1,10 @@
-# ============================================================================
-# CLAUDE CONTEXT - ORPHAN DETECTOR TIMER TRIGGER
-# ============================================================================
-# EPOCH: 4 - ACTIVE
-# STATUS: Timer Trigger - Orphan and zombie detection
-# PURPOSE: Detect and handle orphaned tasks, zombie jobs, and ancient stale records
-# LAST_REVIEWED: 21 NOV 2025
-# EXPORTS: orphan_detector_handler
-# DEPENDENCIES: services.janitor_service, azure.functions
-# SCHEDULE: Every 15 minutes (0 */15 * * * *)
-# ============================================================================
-
 """
-Orphan Detector Timer Trigger
+Orphan Detector Timer Trigger.
 
-Runs every 15 minutes to detect orphaned tasks and zombie jobs.
+Detects and handles orphaned tasks, zombie jobs, and ancient stale records.
 
-This is a catch-all for edge cases that the task watchdog and job health
-monitor don't cover. It handles scenarios that shouldn't happen but can
-occur due to race conditions, bugs, or infrastructure failures.
-
-Detections:
-1. ORPHANED TASKS: Tasks whose parent job doesn't exist
-   - Can happen if job deleted but task remained
-   - Database consistency issue
-
-2. ZOMBIE JOBS: Jobs stuck in PROCESSING but all tasks are terminal
-   - Stage advancement logic failed
-   - "Last task turns out the lights" didn't fire
-
-3. STUCK QUEUED JOBS: Jobs in QUEUED state with no tasks created
-   - Job processing failed before task creation
-   - Service Bus message was never processed
-
-4. ANCIENT STALE JOBS: Jobs in PROCESSING for > 24 hours
-   - Something is seriously wrong
-   - Even the longest jobs should complete in hours, not days
-
-This trigger:
-1. Queries for each type of anomaly
-2. Marks affected records as FAILED with descriptive messages
-3. Logs all actions to janitor_runs audit table
+Exports:
+    orphan_detector_handler: Timer trigger function (runs every 15 minutes)
 """
 
 import azure.functions as func

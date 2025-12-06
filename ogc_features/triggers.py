@@ -1,52 +1,10 @@
-# ============================================================================
-# CLAUDE CONTEXT - OGC FEATURES TRIGGERS
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: Standalone HTTP Triggers - OGC Features API endpoints
-# PURPOSE: Azure Functions HTTP triggers for OGC API - Features endpoints
-# LAST_REVIEWED: 29 OCT 2025
-# EXPORTS: get_ogc_triggers (returns list of trigger configurations)
-# INTERFACES: Azure Functions HttpRequest/HttpResponse
-# PYDANTIC_MODELS: OGCQueryParameters (for validation)
-# DEPENDENCIES: azure.functions, typing, json, logging, urllib.parse
-# SOURCE: HTTP requests from clients (Leaflet, QGIS, curl)
-# SCOPE: HTTP endpoint handlers for OGC Features API
-# VALIDATION: Query parameter parsing and Pydantic validation
-# PATTERNS: Trigger Pattern, Factory Pattern (get_ogc_triggers)
-# ENTRY_POINTS: Function App route registration via get_ogc_triggers()
-# INDEX: get_ogc_triggers:73, OGCLandingPageTrigger:231, OGCItemsTrigger:382
-# ============================================================================
-
 """
-OGC Features API HTTP Triggers - Azure Functions Handlers
+OGC Features HTTP triggers.
 
-Provides HTTP endpoint handlers for all OGC API - Features Core endpoints:
-- GET /api/features - Landing page
-- GET /api/features/conformance - Conformance classes
-- GET /api/features/collections - List collections
-- GET /api/features/collections/{collection_id} - Collection metadata
-- GET /api/features/collections/{collection_id}/items - Query features
-- GET /api/features/collections/{collection_id}/items/{feature_id} - Single feature
+Azure Functions HTTP endpoint handlers for OGC API - Features Core endpoints.
 
-Each trigger:
-1. Parses HTTP request parameters
-2. Validates inputs (Pydantic)
-3. Calls service layer
-4. Returns OGC-compliant JSON/GeoJSON responses
-5. Handles errors with proper HTTP status codes
-
-Integration:
-    In function_app.py:
-
-    from ogc_features import get_ogc_triggers
-
-    for trigger in get_ogc_triggers():
-        app.route(
-            route=trigger['route'],
-            methods=trigger['methods'],
-            auth_level=func.AuthLevel.ANONYMOUS
-        )(trigger['handler'])
-
+Exports:
+    get_ogc_triggers: Returns list of trigger configurations for route registration
 """
 
 import azure.functions as func

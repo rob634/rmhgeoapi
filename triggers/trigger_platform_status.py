@@ -1,38 +1,10 @@
-# ============================================================================
-# CLAUDE CONTEXT - PLATFORM STATUS TRIGGER (THIN TRACKING)
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: HTTP Trigger - Platform request status with thin tracking (22 NOV 2025)
-# PURPOSE: Query Platform request status by looking up CoreMachine job status
-# LAST_REVIEWED: 22 NOV 2025
-# EXPORTS: platform_request_status (HTTP trigger function)
-# INTERFACES: None
-# PYDANTIC_MODELS: None
-# DEPENDENCIES: azure-functions, psycopg
-# SOURCE: Database queries (app.api_requests → app.jobs delegation)
-# SCOPE: Platform request status monitoring
-# VALIDATION: None
-# PATTERNS: Thin Tracking, Status Delegation
-# ENTRY_POINTS: GET /api/platform/status/{request_id}
-# INDEX:
-#   - Imports: Line 35
-#   - HTTP Handler: Line 60
-# ============================================================================
-
 """
-Platform Request Status HTTP Trigger - Thin Tracking Pattern (22 NOV 2025)
+Platform Request Status HTTP Trigger.
 
-SIMPLIFIED STATUS LOOKUP:
-    Platform stores thin tracking: request_id → job_id
-    Status is delegated to CoreMachine job status.
+Query Platform request status by looking up CoreMachine job status using thin tracking pattern.
 
-    Flow:
-    1. Look up Platform request by request_id
-    2. Get job_id from thin tracking record
-    3. Query CoreMachine job status
-    4. Return combined response with DDH identifiers + job status
-
-No orchestration status tracking - we delegate entirely to CoreMachine.
+Exports:
+    platform_request_status: HTTP trigger function for GET /api/platform/status/{request_id}
 """
 
 import json

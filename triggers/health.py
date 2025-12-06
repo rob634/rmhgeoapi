@@ -187,9 +187,17 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
         if self._should_check_database():
             pgstac_health = self._check_pgstac()
             health_data["components"]["pgstac"] = pgstac_health
-            # Note: PgSTAC is optional - don't fail overall health if unavailable
+            # Note: PgSTAC is optional - don't fail overall health if unavailable (6 DEC 2025)
             if pgstac_health["status"] == "error":
                 health_data["errors"].append("PgSTAC unavailable (impacts STAC collection/item workflows)")
+                # Add degraded capabilities info for clarity
+                health_data["degraded_capabilities"] = ["STAC API", "STAC item discovery", "STAC collection browsing"]
+                health_data["available_capabilities"] = [
+                    "OGC Features API (vector queries)",
+                    "TiTiler COG viewing (raster tiles)",
+                    "Vector ETL (PostGIS)",
+                    "Raster ETL (COG creation)"
+                ]
 
             # Check system reference tables (admin0 boundaries for ISO3 attribution)
             system_tables_health = self._check_system_reference_tables()

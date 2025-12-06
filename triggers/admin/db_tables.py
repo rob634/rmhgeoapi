@@ -1,43 +1,11 @@
-# ============================================================================
-# CLAUDE CONTEXT - DATABASE TABLES ADMIN TRIGGER
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: Admin API - PostgreSQL table inspection
-# PURPOSE: HTTP trigger for table-level database inspection with geometry column support
-# LAST_REVIEWED: 03 NOV 2025
-# EXPORTS: AdminDbTablesTrigger - Singleton trigger for table operations
-# INTERFACES: Azure Functions HTTP trigger
-# PYDANTIC_MODELS: None - uses dict responses
-# DEPENDENCIES: azure.functions, psycopg, infrastructure.postgresql, util_logger
-# SOURCE: PostgreSQL information_schema, pg_catalog, and direct table queries
-# SCOPE: Read-only table inspection with special handling for PostGIS geometry columns
-# VALIDATION: None yet (future APIM authentication)
-# PATTERNS: Singleton trigger, RESTful admin API, Geometry-aware queries
-# ENTRY_POINTS: AdminDbTablesTrigger.instance().handle_request(req)
-# INDEX: AdminDbTablesTrigger:50, get_table_details:150, get_table_sample:300, get_table_columns:450, get_table_indexes:550
-# ============================================================================
-
 """
-Database Tables Admin Trigger
+Database Tables Admin Trigger.
 
-Provides table-level inspection of PostgreSQL tables:
-- Get complete table details (columns, constraints, indexes, sizes)
-- Sample table rows (handles geometry columns via ST_AsGeoJSON)
-- List table columns with data types
-- List table indexes with sizes
+Table-level inspection of PostgreSQL tables with PostGIS support.
 
-Endpoints:
-    GET /api/admin/db/tables/{schema}.{table}
-    GET /api/admin/db/tables/{schema}.{table}/sample
-    GET /api/admin/db/tables/{schema}.{table}/columns
-    GET /api/admin/db/tables/{schema}.{table}/indexes
-
-Special Features:
-- Geometry column detection for geo schema
-- ST_AsGeoJSON conversion for spatial data
-- Pagination for large tables
-- Row count and size metrics
-
+Exports:
+    AdminDbTablesTrigger: HTTP trigger class for table operations
+    admin_db_tables_trigger: Singleton instance of AdminDbTablesTrigger
 """
 
 import azure.functions as func

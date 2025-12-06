@@ -77,6 +77,29 @@ def create_vector_stac(params: dict) -> dict[str, Any]:
             "error_type": "ValidationError"
         }
 
+    # =========================================================================
+    # GRACEFUL DEGRADATION CHECK (6 DEC 2025)
+    # =========================================================================
+    # If pgSTAC is unavailable, skip STAC cataloging but report success with warning.
+    # Vector data is still in PostGIS and queryable via OGC Features API.
+    # Note: PgStacBootstrap already imported at function start (line 59)
+    if not PgStacBootstrap.is_available():
+        logger.warning(f"⚠️ pgSTAC unavailable - skipping STAC cataloging for {schema}.{table_name} (degraded mode)")
+        return {
+            "success": True,
+            "degraded": True,
+            "warning": "pgSTAC schema not available - STAC cataloging skipped",
+            "result": {
+                "stac_item_created": False,
+                "ogc_features_available": True,
+                "table_name": table_name,
+                "schema": schema,
+                "collection_id": collection_id,
+                "degraded_reason": "pgSTAC schema not installed or unavailable",
+                "available_access": f"OGC Features API: /api/features/collections/{table_name}/items"
+            }
+        }
+
     start_time = datetime.utcnow()
 
     try:
@@ -134,6 +157,21 @@ def create_vector_stac(params: dict) -> dict[str, Any]:
         bbox = item.bbox
         geometry_types = item_dict.get('properties', {}).get('postgis:geometry_types', [])
         row_count = item_dict.get('properties', {}).get('postgis:row_count', 0)
+
+        # STEP 3: Update table_metadata with STAC backlink (06 DEC 2025)
+        # This establishes the PostGIS → STAC linkage in the source of truth
+        try:
+            from services.vector.postgis_handler import VectorToPostGISHandler
+            handler = VectorToPostGISHandler()
+            handler.update_table_stac_link(
+                table_name=table_name,
+                stac_item_id=item.id,
+                stac_collection_id=collection_id
+            )
+            logger.info(f"✅ STEP 3: Updated geo.table_metadata with STAC link")
+        except Exception as link_error:
+            # Non-fatal - STAC item was created, just the backlink failed
+            logger.warning(f"⚠️ STEP 3: Failed to update table_metadata STAC link: {link_error}")
 
         duration = (datetime.utcnow() - start_time).total_seconds()
 

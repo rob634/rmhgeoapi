@@ -1,36 +1,10 @@
-# ============================================================================
-# CLAUDE CONTEXT - OGC FEATURES SERVICE
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: Standalone Service - OGC Features API business logic
-# PURPOSE: Business logic orchestration for OGC Features API endpoints
-# LAST_REVIEWED: 29 OCT 2025
-# EXPORTS: OGCFeaturesService
-# INTERFACES: None (standalone implementation)
-# PYDANTIC_MODELS: OGCLandingPage, OGCConformance, OGCCollection, OGCFeatureCollection, OGCLink
-# DEPENDENCIES: typing, datetime, logging, urllib.parse
-# SOURCE: Repository layer (OGCFeaturesRepository)
-# SCOPE: Business logic for OGC API operations
-# VALIDATION: Pydantic model validation
-# PATTERNS: Service Layer, Facade Pattern
-# ENTRY_POINTS: service = OGCFeaturesService(config); features = service.query_features(...)
-# INDEX: OGCFeaturesService:61, get_landing_page:91, list_collections:154, query_features:274
-# ============================================================================
-
 """
-OGC Features Service - Business Logic Layer
+OGC Features service layer.
 
-Orchestrates OGC API - Features operations by coordinating between HTTP triggers
-and the PostGIS repository layer. Handles:
-- Response model creation (Pydantic)
-- Link generation (self, next, prev, alternate)
-- Pagination logic
-- Error handling and validation
-- Base URL management
+Business logic orchestration for OGC API - Features endpoints.
 
-This layer is responsible for implementing OGC API - Features specification
-requirements while delegating database operations to the repository layer.
-
+Exports:
+    OGCFeaturesService: Service coordinating HTTP triggers and repository layer with Pydantic models
 """
 
 import logging
@@ -198,28 +172,90 @@ class OGCFeaturesService:
         """
         Get detailed metadata for a specific collection.
 
+        Enhanced (06 DEC 2025): Now includes custom metadata from geo.table_metadata
+        registry when available (ETL traceability, STAC linkage, pre-computed bbox).
+
         Args:
             collection_id: Collection identifier (table name)
             base_url: Base URL for link generation
 
         Returns:
-            OGCCollection model with full metadata including extent
+            OGCCollection model with full metadata including extent and custom properties
 
         Raises:
             ValueError: If collection not found
         """
-        # Get metadata from repository
+        # Get base metadata from geometry_columns (required - table must exist)
         metadata = self.repository.get_collection_metadata(collection_id)
 
-        # Build extent
+        # Get custom metadata from geo.table_metadata registry (optional)
+        # This contains ETL traceability, STAC linkage, and pre-computed bbox
+        custom_metadata = self.repository.get_table_metadata(collection_id)
+
+        # =====================================================================
+        # BUILD EXTENT - Prefer cached bbox (performance) over ST_Extent
+        # =====================================================================
+        # If we have a cached bbox from ETL, use it to avoid ST_Extent query.
+        # Otherwise, fall back to the computed bbox from get_collection_metadata.
         extent = None
-        if metadata.get('bbox'):
+        bbox = None
+
+        if custom_metadata and custom_metadata.get('cached_bbox'):
+            # Use pre-computed bbox from geo.table_metadata (fast - no query)
+            bbox = custom_metadata['cached_bbox']
+            logger.debug(f"Using cached bbox for {collection_id}")
+        elif metadata.get('bbox'):
+            # Fall back to ST_Extent result (computed during get_collection_metadata)
+            bbox = metadata['bbox']
+
+        if bbox:
             extent = OGCExtent(
                 spatial=OGCSpatialExtent(
-                    bbox=[metadata['bbox']],
+                    bbox=[bbox],
                     crs="http://www.opengis.net/def/crs/OGC/1.3/CRS84"
                 )
             )
+
+        # =====================================================================
+        # BUILD DESCRIPTION - Enhanced with source info when available
+        # =====================================================================
+        feature_count = metadata.get('feature_count', 0)
+        if custom_metadata and custom_metadata.get('feature_count'):
+            feature_count = custom_metadata['feature_count']
+
+        if custom_metadata and custom_metadata.get('source_file'):
+            # Enhanced description with source file info
+            description = (
+                f"Source: {custom_metadata['source_file']} "
+                f"({feature_count:,} features). "
+                f"Format: {custom_metadata.get('source_format', 'unknown')}. "
+                f"Original CRS: {custom_metadata.get('source_crs', 'unknown')}."
+            )
+        else:
+            # Default description
+            description = f"Vector features from {collection_id} table ({feature_count:,} features)"
+
+        # =====================================================================
+        # BUILD CUSTOM PROPERTIES - ETL traceability and STAC linkage
+        # =====================================================================
+        properties = None
+        if custom_metadata:
+            properties = {
+                "etl:job_id": custom_metadata.get('etl_job_id'),
+                "source:file": custom_metadata.get('source_file'),
+                "source:format": custom_metadata.get('source_format'),
+                "source:crs": custom_metadata.get('source_crs'),
+                "stac:item_id": custom_metadata.get('stac_item_id'),
+                "stac:collection_id": custom_metadata.get('stac_collection_id'),
+                "created": custom_metadata.get('created_at'),
+                "updated": custom_metadata.get('updated_at')
+            }
+            # Remove None values for cleaner JSON output
+            properties = {k: v for k, v in properties.items() if v is not None}
+
+            # If properties dict is empty after filtering, set to None
+            if not properties:
+                properties = None
 
         # Build links
         links = [
@@ -250,7 +286,7 @@ class OGCFeaturesService:
         collection = OGCCollection(
             id=collection_id,
             title=collection_id.replace("_", " ").title(),
-            description=f"Vector features from {collection_id} table ({metadata.get('feature_count', 0)} features)",
+            description=description,
             links=links,
             extent=extent,
             itemType="feature",
@@ -258,10 +294,11 @@ class OGCFeaturesService:
                 "http://www.opengis.net/def/crs/OGC/1.3/CRS84",
                 "http://www.opengis.net/def/crs/EPSG/0/4326"
             ],
-            storageCrs=storage_crs
+            storageCrs=storage_crs,
+            properties=properties
         )
 
-        logger.info(f"Retrieved collection metadata for '{collection_id}'")
+        logger.info(f"Retrieved collection metadata for '{collection_id}' (custom_metadata={'yes' if custom_metadata else 'no'})")
 
         return collection
 

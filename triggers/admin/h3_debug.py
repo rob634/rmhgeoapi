@@ -1,61 +1,11 @@
-# ============================================================================
-# CLAUDE CONTEXT - H3 DEBUG ADMIN TRIGGER
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: Admin API - H3 bootstrap monitoring and debugging
-# PURPOSE: HTTP trigger for H3 grid status, cell counts, and bootstrap progress
-# LAST_REVIEWED: 10 NOV 2025
-# EXPORTS: AdminH3DebugTrigger - Singleton trigger for H3 debugging
-# INTERFACES: Azure Functions HTTP trigger
-# PYDANTIC_MODELS: None - uses dict responses
-# DEPENDENCIES: azure.functions, infrastructure.h3_repository, util_logger
-# SOURCE: PostgreSQL h3.grids, h3.grid_metadata, h3.reference_filters
-# SCOPE: Read-only query analysis for debugging H3 bootstrap operations
-# VALIDATION: None yet (future APIM authentication)
-# PATTERNS: Singleton trigger, RESTful admin API
-# ENTRY_POINTS: AdminH3DebugTrigger.instance().handle_request(req)
-# INDEX:
-#   - AdminH3DebugTrigger:50
-#   - schema_status:120 - Check h3 schema exists
-#   - grid_summary:180 - Grid metadata for all resolutions
-#   - grid_details:250 - Detailed cell counts and stats
-#   - reference_filters:320 - Parent ID arrays for cascade
-#   - sample_cells:390 - Sample H3 cells for verification
-#   - parent_child_check:460 - Validate hierarchy
-# ============================================================================
-
 """
-H3 Debug Admin Trigger
+H3 Debug Admin Trigger.
 
-Single consolidated endpoint for all H3 bootstrap monitoring and debugging.
+H3 bootstrap monitoring and debugging endpoints.
 
-Endpoint:
-    GET /api/admin/h3?operation={op}&{params}
-
-Operations:
-    - schema_status: Check h3 schema exists and table status
-    - grid_summary: Grid metadata for all resolutions
-    - grid_details: Detailed stats for specific grid (param: grid_id, include_sample)
-    - reference_filters: List all reference filters
-    - reference_filter_details: Details for specific filter (param: filter_name, include_ids)
-    - sample_cells: Sample cells from grid (params: grid_id, limit, is_land)
-    - parent_child_check: Validate hierarchy (param: parent_id)
-
-Examples:
-    /api/admin/h3?operation=schema_status
-    /api/admin/h3?operation=grid_summary
-    /api/admin/h3?operation=grid_details&grid_id=land_res2&include_sample=true
-    /api/admin/h3?operation=reference_filters
-    /api/admin/h3?operation=sample_cells&grid_id=land_res2&limit=10&is_land=true
-    /api/admin/h3?operation=parent_child_check&parent_id=12345
-
-Critical for:
-- Verifying Phase 1 schema deployment
-- Monitoring Phase 2 bootstrap progress (res 2 spatial filtering)
-- Debugging Phase 3 cascade operations (res 3-7)
-- Validating cell counts match expected values
-- Inspecting parent-child relationships
-
+Exports:
+    AdminH3DebugTrigger: HTTP trigger class for H3 debugging
+    admin_h3_debug_trigger: Singleton instance of AdminH3DebugTrigger
 """
 
 import azure.functions as func

@@ -1,33 +1,10 @@
-# ============================================================================
-# CLAUDE CONTEXT - HOME INTERFACE
-# ============================================================================
-# EPOCH: 4 - ACTIVE
-# STATUS: Web Interface - Landing page for Geospatial API platform
-# PURPOSE: Provide welcome splash screen and navigation overview
-# LAST_REVIEWED: 21 NOV 2025
-# EXPORTS: HomeInterface
-# INTERFACES: BaseInterface (inherited)
-# PYDANTIC_MODELS: None
-# DEPENDENCIES: web_interfaces.base.BaseInterface, InterfaceRegistry
-# SOURCE: HTTP GET requests to /api/interface/home
-# SCOPE: Landing page for all users
-# VALIDATION: None (read-only display)
-# PATTERNS: Template Method (BaseInterface), Registry Pattern
-# ENTRY_POINTS: Registered as 'home' in InterfaceRegistry
-# INDEX: HomeInterface:40, render:60
-# ============================================================================
-
 """
-Home Interface
+Home interface module.
 
-Landing page for Geospatial API platform. Provides:
-    - Welcome message
-    - Platform overview
-    - Quick links to all dashboards
-    - System status summary
+Landing page for Geospatial API platform with welcome message and navigation.
 
-Route: /api/interface/home
-
+Exports:
+    HomeInterface: Landing page interface with platform overview and dashboard links
 """
 
 import azure.functions as func

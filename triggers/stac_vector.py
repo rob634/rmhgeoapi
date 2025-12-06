@@ -1,28 +1,10 @@
-# ============================================================================
-# CLAUDE CONTEXT - HTTP TRIGGER
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: HTTP Trigger - Vector table STAC cataloging
-# PURPOSE: Catalog PostGIS vector tables in STAC (PgSTAC)
-# LAST_REVIEWED: 29 OCT 2025
-# EXPORTS: handle_request (function-based trigger)
-# INTERFACES: Direct Azure Functions HttpTrigger (func.HttpRequest -> func.HttpResponse)
-# PYDANTIC_MODELS: None (uses dict for request/response)
-# DEPENDENCIES: azure.functions, services.service_stac_vector.StacVectorService, infrastructure.stac.StacInfrastructure
-# SOURCE: HTTP POST requests to /api/stac/vector with schema/table parameters
-# SCOPE: STAC metadata generation for PostGIS vector tables
-# VALIDATION: Schema name, table name, collection ID validation
-# PATTERNS: Function-based trigger, Service delegation, STAC Item generation
-# ENTRY_POINTS: POST /api/stac/vector
-# INDEX: handle_request:21
-# ============================================================================
-
 """
-STAC Vector Cataloging Trigger
+STAC Vector Cataloging Trigger.
 
 HTTP endpoint to catalog PostGIS vector tables in STAC.
 
-Last Updated: 29 OCT 2025
+Exports:
+    handle_request: HTTP trigger function for POST /api/stac/vector
 """
 
 import azure.functions as func

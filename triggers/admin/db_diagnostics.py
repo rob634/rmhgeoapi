@@ -1,43 +1,11 @@
-# ============================================================================
-# CLAUDE CONTEXT - DATABASE DIAGNOSTICS ADMIN TRIGGER
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: Admin API - Database diagnostics and system testing
-# PURPOSE: HTTP trigger for database stats, enum diagnostics, and PostgreSQL function testing
-# LAST_REVIEWED: 10 NOV 2025
-# EXPORTS: AdminDbDiagnosticsTrigger - Singleton trigger for diagnostics
-# INTERFACES: Azure Functions HTTP trigger
-# PYDANTIC_MODELS: None - uses dict responses
-# DEPENDENCIES: azure.functions, psycopg, infrastructure.postgresql, util_logger
-# SOURCE: PostgreSQL system catalogs, pg_stat views, custom functions
-# SCOPE: Read-only diagnostics for debugging and system health monitoring
-# VALIDATION: None yet (future APIM authentication)
-# PATTERNS: Singleton trigger, RESTful admin API
-# ENTRY_POINTS: AdminDbDiagnosticsTrigger.instance().handle_request(req)
-# INDEX: AdminDbDiagnosticsTrigger:70, _get_stats:150, _get_enum_diagnostic:300, _test_functions:450
-# ============================================================================
-
 """
-Database Diagnostics Admin Trigger
+Database Diagnostics Admin Trigger.
 
-Provides diagnostic and testing endpoints for database health monitoring:
-- Database statistics (table sizes, index usage, activity summary)
-- Enum diagnostics (enum type locations, search path, privileges)
-- PostgreSQL function testing (CoreMachine functions availability)
+Database diagnostics and system testing endpoints.
 
-Endpoints:
-    GET /api/admin/db/stats
-    GET /api/admin/db/diagnostics/enums
-    GET /api/admin/db/diagnostics/functions
-    GET /api/admin/db/diagnostics/all
-
-Features:
-- Comprehensive database statistics
-- Enum type diagnostics for troubleshooting
-- PostgreSQL function availability testing
-- Execution time tracking
-- Error handling with detailed logging
-
+Exports:
+    AdminDbDiagnosticsTrigger: HTTP trigger class for diagnostics
+    admin_db_diagnostics_trigger: Singleton instance of AdminDbDiagnosticsTrigger
 """
 
 import azure.functions as func

@@ -1,30 +1,10 @@
-# ============================================================================
-# CLAUDE CONTEXT - VECTOR VIEWER SERVICE
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: Service Layer - HTML generation and OGC Features API integration
-# PURPOSE: Generate dynamic HTML viewer pages for PostGIS vector collections
-# LAST_REVIEWED: 13 NOV 2025
-# EXPORTS: VectorViewerService
-# INTERFACES: Standalone service class
-# PYDANTIC_MODELS: None (works with raw JSON)
-# DEPENDENCIES: requests, json, typing
-# SOURCE: OGC Features API endpoints for collection data
-# SCOPE: HTML generation for vector geometry visualization
-# VALIDATION: Basic parameter validation
-# PATTERNS: Service Layer, Template Pattern
-# ENTRY_POINTS: VectorViewerService.generate_viewer_html()
-# INDEX: VectorViewerService:40, generate_viewer_html:80, _generate_html_template:150
-# ============================================================================
-
 """
-Vector Viewer Service - HTML Generation and OGC Features Data Fetching
+Vector viewer service layer.
 
-Responsible for:
-1. Fetching vector collection metadata from OGC Features API
-2. Generating self-contained HTML viewer pages
-3. Embedding collection info and feature query endpoints
+HTML generation and OGC Features API integration for vector collection viewers.
 
+Exports:
+    VectorViewerService: Service for generating self-contained HTML viewer pages with Leaflet maps
 """
 
 import json

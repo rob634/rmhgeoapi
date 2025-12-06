@@ -1,40 +1,10 @@
-# ============================================================================
-# CLAUDE CONTEXT - OGC FEATURES REPOSITORY
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: Standalone Repository - PostGIS vector data access
-# PURPOSE: Direct PostGIS queries for OGC Features API with ST_AsGeoJSON optimization
-# LAST_REVIEWED: 29 OCT 2025
-# EXPORTS: OGCFeaturesRepository
-# INTERFACES: None (standalone implementation)
-# PYDANTIC_MODELS: None (uses plain dicts for SQL safety)
-# DEPENDENCIES: psycopg, psycopg.sql, typing, datetime, logging
-# SOURCE: PostgreSQL/PostGIS database (configurable schema)
-# SCOPE: Vector feature queries with spatial, temporal, and attribute filtering
-# VALIDATION: SQL injection prevention via psycopg.sql composition, feature-flagged optimization checks
-# PATTERNS: Repository Pattern, Query Builder, SQL Composition
-# ENTRY_POINTS: repo = OGCFeaturesRepository(config); features = repo.query_features(...)
-# INDEX: OGCFeaturesRepository:55, query_features:248, _validate_table_optimization:821
-# ============================================================================
-
 """
-OGC Features Repository - PostGIS Direct Access
+OGC Features repository layer.
 
-Provides efficient PostGIS queries for OGC Features API with:
-- ST_AsGeoJSON() for GeoJSON serialization with precision control
-- ST_Simplify() for geometry generalization
-- ST_Intersects() for spatial filtering (bbox)
-- Temporal filtering with flexible column names
-- Simple attribute filtering (key=value equality)
-- OGC standard sorting (sortby syntax)
-- Spatial index optimization (feature-flagged validation)
+PostGIS data access with ST_AsGeoJSON optimization and spatial filtering.
 
-Safety:
-- All queries use psycopg.sql.SQL() composition (NO string concatenation)
-- Dynamic identifiers via sql.Identifier()
-- Values via parameterized queries (%s placeholders)
-- SQL injection prevention guaranteed
-
+Exports:
+    OGCFeaturesRepository: Repository for querying PostGIS vector data with SQL injection prevention
 """
 
 import logging
@@ -238,6 +208,120 @@ class OGCFeaturesRepository:
         except psycopg.Error as e:
             logger.error(f"Error getting metadata for collection '{collection_id}': {e}")
             raise
+
+    # ========================================================================
+    # TABLE METADATA REGISTRY (06 DEC 2025)
+    # ========================================================================
+    # Methods for accessing geo.table_metadata - the source of truth for
+    # vector table metadata populated by ETL (process_vector job).
+    # ========================================================================
+
+    def get_table_metadata(self, collection_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Get custom metadata for a collection from geo.table_metadata registry.
+
+        This registry is the SOURCE OF TRUTH for vector table metadata,
+        populated during ETL (process_vector Stage 1) and updated with
+        STAC linkage (Stage 3).
+
+        Returns None if no metadata exists (table created outside process_vector,
+        or geo.table_metadata table doesn't exist yet).
+
+        Args:
+            collection_id: Collection identifier (table name)
+
+        Returns:
+            Dict with metadata fields, or None if not found:
+            {
+                "etl_job_id": str,           # Full 64-char job ID
+                "source_file": str,          # Original filename
+                "source_format": str,        # File format (shp, gpkg, etc.)
+                "source_crs": str,           # Original CRS before reprojection
+                "stac_item_id": str,         # STAC item ID (if cataloged)
+                "stac_collection_id": str,   # STAC collection (if cataloged)
+                "feature_count": int,        # Number of features
+                "geometry_type": str,        # PostGIS geometry type
+                "created_at": str,           # ISO 8601 timestamp
+                "updated_at": str,           # ISO 8601 timestamp
+                "cached_bbox": [float, ...]  # [minx, miny, maxx, maxy] or None
+            }
+        """
+        try:
+            with self._get_connection() as conn:
+                with conn.cursor() as cur:
+                    # First check if geo.table_metadata exists
+                    # (might not exist on older deployments before full-rebuild)
+                    cur.execute("""
+                        SELECT EXISTS (
+                            SELECT 1 FROM information_schema.tables
+                            WHERE table_schema = 'geo'
+                            AND table_name = 'table_metadata'
+                        )
+                    """)
+                    table_exists = cur.fetchone()[0]
+
+                    if not table_exists:
+                        logger.debug(f"geo.table_metadata table does not exist - returning None for {collection_id}")
+                        return None
+
+                    # Query the metadata
+                    cur.execute("""
+                        SELECT
+                            etl_job_id,
+                            source_file,
+                            source_format,
+                            source_crs,
+                            stac_item_id,
+                            stac_collection_id,
+                            feature_count,
+                            geometry_type,
+                            created_at,
+                            updated_at,
+                            bbox_minx,
+                            bbox_miny,
+                            bbox_maxx,
+                            bbox_maxy
+                        FROM geo.table_metadata
+                        WHERE table_name = %s
+                    """, (collection_id,))
+
+                    row = cur.fetchone()
+
+                    if not row:
+                        logger.debug(f"No metadata found in geo.table_metadata for {collection_id}")
+                        return None
+
+                    # Build result dict
+                    # Row is a tuple: (etl_job_id, source_file, source_format, source_crs,
+                    #                  stac_item_id, stac_collection_id, feature_count,
+                    #                  geometry_type, created_at, updated_at,
+                    #                  bbox_minx, bbox_miny, bbox_maxx, bbox_maxy)
+                    result = {
+                        "etl_job_id": row[0],
+                        "source_file": row[1],
+                        "source_format": row[2],
+                        "source_crs": row[3],
+                        "stac_item_id": row[4],
+                        "stac_collection_id": row[5],
+                        "feature_count": row[6],
+                        "geometry_type": row[7],
+                        "created_at": row[8].isoformat() if row[8] else None,
+                        "updated_at": row[9].isoformat() if row[9] else None,
+                        "cached_bbox": None
+                    }
+
+                    # Build cached_bbox if all coordinates present
+                    if row[10] is not None and row[11] is not None and row[12] is not None and row[13] is not None:
+                        result["cached_bbox"] = [row[10], row[11], row[12], row[13]]
+
+                    logger.debug(f"Retrieved table metadata for {collection_id}: job={row[0][:8] if row[0] else 'N/A'}...")
+                    return result
+
+        except psycopg.Error as e:
+            # Non-fatal - just log and return None
+            # The collection can still be served without custom metadata
+            logger.warning(f"Error querying geo.table_metadata for '{collection_id}': {e}")
+            return None
 
     # ========================================================================
     # FEATURE QUERIES

@@ -1,60 +1,11 @@
-# ============================================================================
-# CLAUDE CONTEXT - HTTP TRIGGER
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: HTTP Trigger - Pydantic-to-PostgreSQL schema deployment
-# PURPOSE: HTTP trigger for deploying Pydantic-generated schema directly to PostgreSQL database
-# LAST_REVIEWED: 29 OCT 2025
-# EXPORTS: PydanticSchemaDeployTrigger, pydantic_schema_deploy_trigger (singleton instance)
-# INTERFACES: Direct Azure Functions HttpTrigger (func.HttpRequest -> func.HttpResponse)
-# PYDANTIC_MODELS: JobRecord, TaskRecord (from core.models for SQL generation)
-# DEPENDENCIES: azure.functions, psycopg, psycopg.sql, core.schema.sql_generator.PydanticToSQL, core.models, config, util_logger
-# SOURCE: HTTP GET/POST requests, Pydantic models for DDL generation
-# SCOPE: Database schema deployment - DDL generation from Pydantic models, execution, verification, rollback
-# VALIDATION: Schema comparison (existing vs generated), deployment confirmation (confirm=yes required), rollback on error
-# PATTERNS: Command pattern (deployment), Builder (SQL generation from Pydantic), SQL Composition (injection-safe)
-# ENTRY_POINTS: GET /api/db/schema/pydantic?action=info|compare, POST /api/db/schema/pydantic?confirm=yes
-# INDEX: PydanticSchemaDeployTrigger:41, handle_request:51, _deploy_schema:230, _verify_deployment:385
-# ============================================================================
-
 """
-Pydantic Schema Deployment Trigger
+Pydantic Schema Deployment Trigger.
 
-Deploys database schema generated directly from Pydantic models (JobRecord, TaskRecord)
-to PostgreSQL using ONLY composed SQL statements for injection safety.
+HTTP trigger for deploying Pydantic-generated schema to PostgreSQL database.
 
-NO BACKWARD COMPATIBILITY - Single deployment path:
-    Pydantic models → PydanticToSQL → psycopg.sql.SQL composition → PostgreSQL
-
-Key Features:
-- Automatic DDL generation from Pydantic field types and constraints
-- SQL injection safety via psycopg.sql composition (NO string concatenation)
-- Schema comparison (existing vs generated) before deployment
-- Transactional deployment with automatic rollback on error
-- Verification after deployment (table existence, column types)
-- Comprehensive error handling and logging
-
-Endpoints:
-    GET /api/db/schema/pydantic?action=info - Show current schema info
-    GET /api/db/schema/pydantic?action=compare - Compare existing vs generated schema
-    POST /api/db/schema/pydantic?confirm=yes - Deploy schema (requires confirmation)
-
-Deployment Flow:
-1. Generate DDL from JobRecord and TaskRecord Pydantic models
-2. Compare generated schema with existing database schema
-3. Require explicit confirmation (confirm=yes) for destructive operations
-4. Execute DDL statements in transaction (CREATE TABLE, indexes, constraints)
-5. Verify deployment (check tables exist, columns match)
-6. Rollback on any error
-
-Safety Measures:
-- Confirmation required for deployment (confirm=yes query parameter)
-- Transactional execution (rollback on error)
-- SQL composition (no string concatenation or f-strings)
-- Schema comparison before deployment
-- Verification after deployment
-
-Last Updated: 29 OCT 2025
+Exports:
+    PydanticSchemaDeployTrigger: HTTP trigger class for schema deployment
+    pydantic_schema_deploy_trigger: Singleton instance of PydanticSchemaDeployTrigger
 """
 
 import azure.functions as func

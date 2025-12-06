@@ -1,32 +1,14 @@
-# ============================================================================
-# CLAUDE CONTEXT - OGC FEATURES MODELS
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: Standalone Models - OGC Features API Pydantic models
-# PURPOSE: OGC API - Features response models (completely standalone)
-# LAST_REVIEWED: 29 OCT 2025
-# EXPORTS: OGCLandingPage, OGCConformance, OGCCollection, OGCFeatureCollection, OGCLink
-# INTERFACES: Pydantic BaseModel
-# PYDANTIC_MODELS: All classes in this file
-# DEPENDENCIES: pydantic, typing
-# SOURCE: OGC API - Features Core 1.0 specification
-# SCOPE: OGC Features API response models
-# VALIDATION: Pydantic v2 validation
-# PATTERNS: Data Transfer Objects (DTOs)
-# ENTRY_POINTS: from ogc_features.models import OGCFeatureCollection
-# INDEX: OGCLink:36, OGCLandingPage:62, OGCConformance:80, OGCCollection:125, OGCExtent:117, OGCFeatureCollection:177
-# ============================================================================
-
 """
-OGC API - Features Core 1.0 Pydantic Models
+OGC API - Features Pydantic models.
 
-Implements response models for OGC API - Features specification.
-These models are completely standalone and follow the official spec.
+Response models implementing OGC API - Features Core 1.0 specification.
 
-References:
-- OGC API - Features Core 1.0: https://docs.ogc.org/is/17-069r4/17-069r4.html
-- GeoJSON RFC 7946: https://tools.ietf.org/html/rfc7946
-
+Exports:
+    OGCLink: Web linking model for resource relationships
+    OGCLandingPage: Landing page response model
+    OGCConformance: Conformance classes declaration model
+    OGCCollection: Collection metadata model
+    OGCFeatureCollection: GeoJSON feature collection response model
 """
 
 from typing import List, Dict, Any, Optional, Literal
@@ -160,6 +142,27 @@ class OGCCollection(BaseModel):
     storageCrs: Optional[str] = Field(
         default=None,
         description="Native storage CRS"
+    )
+    # =========================================================================
+    # CUSTOM METADATA PROPERTIES (06 DEC 2025)
+    # =========================================================================
+    # OGC API - Features allows additional properties beyond the core spec.
+    # This field contains ETL traceability and STAC linkage metadata from
+    # geo.table_metadata registry (the source of truth for vector metadata).
+    #
+    # Properties include:
+    #   - etl:job_id: CoreMachine job ID that created this table
+    #   - source:file: Original filename (e.g., "countries.shp")
+    #   - source:format: File format (shp, gpkg, geojson, csv, etc.)
+    #   - source:crs: Original CRS before reprojection to EPSG:4326
+    #   - stac:item_id: STAC item ID (if cataloged)
+    #   - stac:collection_id: STAC collection ID (if cataloged)
+    #   - created: Timestamp when table was created
+    #   - updated: Timestamp when metadata was last updated
+    # =========================================================================
+    properties: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Custom collection metadata (ETL traceability, STAC linkage)"
     )
 
 

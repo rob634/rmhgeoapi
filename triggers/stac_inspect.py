@@ -1,42 +1,11 @@
-# ============================================================================
-# CLAUDE CONTEXT - HTTP TRIGGER
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: HTTP Trigger - PgSTAC schema inspection and deep query endpoints
-# PURPOSE: Detailed inspection of pgstac schema health, statistics, and item lookup
-# LAST_REVIEWED: 2 NOV 2025
-# EXPORTS: stac_inspect_trigger (StacInspectTrigger instance), StacInspectTrigger
-# INTERFACES: BaseHttpTrigger (inherited from http_base)
-# PYDANTIC_MODELS: None (uses dict responses)
-# DEPENDENCIES: http_base.BaseHttpTrigger, infrastructure.stac, util_logger
-# SOURCE: HTTP GET requests to /api/stac/* inspection endpoints
-# SCOPE: PgSTAC schema inspection - detailed statistics, health metrics, item lookup
-# VALIDATION: Collection ID validation, item ID validation, query parameter validation
-# PATTERNS: Template Method (base class), Infrastructure delegation, Read-only operations
-# ENTRY_POINTS: GET /api/stac/schema/info, GET /api/stac/collections/{id}/stats, etc.
-# INDEX: StacInspectTrigger:50, process_request:80, route handlers:150+
-# ============================================================================
-
 """
-STAC Inspection HTTP Trigger
+STAC Inspection HTTP Trigger.
 
-Provides deep inspection endpoints for pgstac schema analysis and statistics.
-All endpoints are READ-ONLY and safe to call at any time.
+Deep inspection endpoints for pgstac schema analysis and statistics.
 
-Endpoints:
-- GET /api/stac/schema/info                      - Detailed schema structure inspection
-- GET /api/stac/collections/{collection_id}/stats - Collection-level statistics
-- GET /api/stac/items/{item_id}                   - Single item lookup (cross-collection)
-- GET /api/stac/health                            - Overall pgstac health metrics
-- GET /api/stac/collections/summary               - Quick summary of all collections
-
-Key Features:
-- Deep schema inspection (tables, indexes, sizes, row counts)
-- Collection statistics (item counts, spatial/temporal extent, asset types)
-- Item lookup by ID (with optional collection filtering)
-- Health monitoring (status, counts, issues detection)
-- Performance-friendly queries (optimized for read-only access)
-
+Exports:
+    StacInspectTrigger: HTTP trigger class for STAC inspection operations
+    stac_inspect_trigger: Singleton instance of StacInspectTrigger
 """
 
 import azure.functions as func

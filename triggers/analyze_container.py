@@ -1,66 +1,11 @@
-# ============================================================================
-# CLAUDE CONTEXT - HTTP TRIGGER
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: HTTP Trigger - Container analysis endpoint for post-processing
-# PURPOSE: Container analysis HTTP endpoint for post-processing list_container_contents jobs
-# LAST_REVIEWED: 29 OCT 2025
-# EXPORTS: analyze_container_trigger (AnalyzeContainerTrigger instance), AnalyzeContainerTrigger
-# INTERFACES: BaseHttpTrigger (inherited from http_base)
-# PYDANTIC_MODELS: None (uses dict responses)
-# DEPENDENCIES: http_base.BaseHttpTrigger, services.container_analysis, util_logger
-# SOURCE: HTTP GET requests to /api/analysis/container/{job_id}
-# SCOPE: On-demand analysis of completed container listing jobs (read-only, non-destructive)
-# VALIDATION: job_id parameter validation, job existence check, job type validation (must be list_container_contents)
-# PATTERNS: Template Method (base class), Service delegation, Read-only analysis
-# ENTRY_POINTS: GET /api/analysis/container/{job_id}?save=true
-# INDEX: AnalyzeContainerTrigger:50, process_request:80
-# ============================================================================
-
 """
-Container Analysis HTTP Trigger
+Container Analysis HTTP Trigger.
 
-Provides on-demand analysis of list_container_contents job results.
-This is NOT a job submission endpoint - it's a read-only analysis tool
-that processes already-completed job data.
+On-demand analysis of list_container_contents job results.
 
-**IMPORTANT**: This endpoint performs post-processing analysis on completed jobs.
-It does NOT trigger new jobs or modify existing data. Safe for production use.
-
-API Endpoint:
-    GET /api/analysis/container/{job_id}?save=true
-
-Path Parameters:
-    job_id: Job ID of a completed list_container_contents job
-
-Query Parameters:
-    save: If 'true', save analysis results to blob storage (optional, default: false)
-
-Returns comprehensive analysis including:
-- File categorization (vector, raster, metadata, unknown)
-- Pattern detection (Maxar, Vivid, etc.)
-- Duplicate file detection (by size)
-- Size distribution (histogram by file size)
-- Execution timing and statistics
-
-Example Response:
-    {
-        "job_id": "...",
-        "container_name": "bronze",
-        "total_files": 1250,
-        "categorization": {
-            "vector": 450,
-            "raster": 650,
-            "metadata": 100,
-            "unknown": 50
-        },
-        "patterns_detected": ["maxar", "vivid"],
-        "duplicates": [...],
-        "size_distribution": {...},
-        "execution_time_seconds": 2.5
-    }
-
-Last Updated: 29 OCT 2025
+Exports:
+    AnalyzeContainerTrigger: HTTP trigger class for container analysis
+    analyze_container_trigger: Singleton instance of AnalyzeContainerTrigger
 """
 
 import azure.functions as func

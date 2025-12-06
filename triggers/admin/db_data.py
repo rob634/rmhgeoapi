@@ -1,47 +1,11 @@
-# ============================================================================
-# CLAUDE CONTEXT - DATABASE DATA ADMIN TRIGGER
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: Admin API - CoreMachine + Platform data queries
-# PURPOSE: HTTP trigger for querying jobs, tasks, API requests, and orchestration data
-# LAST_REVIEWED: 10 NOV 2025
-# EXPORTS: AdminDbDataTrigger - Singleton trigger for data queries
-# INTERFACES: Azure Functions HTTP trigger
-# PYDANTIC_MODELS: None - uses dict responses
-# DEPENDENCIES: azure.functions, psycopg, infrastructure.postgresql, util_logger
-# SOURCE: PostgreSQL app schema (jobs, tasks, api_requests)
-# SCOPE: Read-only queries for CoreMachine and Platform layer data
-# VALIDATION: None yet (future APIM authentication)
-# PATTERNS: Singleton trigger, RESTful admin API
-# ENTRY_POINTS: AdminDbDataTrigger.instance().handle_request(req)
-# INDEX: AdminDbDataTrigger:70, _get_jobs:150, _get_job:250, _get_tasks:350, _get_api_requests:550
-# ============================================================================
-
 """
-Database Data Admin Trigger
+Database Data Admin Trigger.
 
-Provides read-only access to CoreMachine and Platform layer data:
-- Jobs (CoreMachine orchestration)
-- Tasks (CoreMachine execution)
-- API Requests (Platform layer - thin tracking)
+Read-only access to CoreMachine and Platform layer data.
 
-NOTE (26 NOV 2025): Platform tables now live in app schema (not separate platform schema).
-orchestration_jobs table was REMOVED (22 NOV 2025) - thin tracking pattern.
-
-Endpoints:
-    GET /api/admin/db/jobs?limit=100&status=processing&hours=24
-    GET /api/admin/db/jobs/{job_id}
-    GET /api/admin/db/tasks?limit=50&status=failed
-    GET /api/admin/db/tasks/{job_id}
-    GET /api/admin/db/platform/requests?limit=100&dataset_id=xyz
-    GET /api/admin/db/platform/requests/{request_id}
-
-Features:
-- Query filtering by status, time, job type
-- Pagination with limit parameters
-- JSON result formatting
-- Error handling with detailed logging
-
+Exports:
+    AdminDbDataTrigger: HTTP trigger class for data queries
+    admin_db_data_trigger: Singleton instance of AdminDbDataTrigger
 """
 
 import azure.functions as func

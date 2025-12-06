@@ -262,65 +262,88 @@ class ProcessRasterV2Job(JobBaseMixin, JobBase):
                 "processing_time_seconds": c.get("processing_time_seconds")
             }
 
-        # Build STAC summary and TiTiler URLs
+        # Build STAC summary and TiTiler URLs (with degraded mode detection - 6 DEC 2025)
         stac_summary = {}
         stac_urls = None
         titiler_urls = None
         share_url = None
+        degraded_mode = False
+        degraded_warnings = []
 
         if stage_3 and stage_3[0].result_data:
-            s = stage_3[0].result_data.get("result", {})
-            item_id = s.get("item_id")
-            collection_id = s.get("collection_id")
+            stac_data = stage_3[0].result_data
+            s = stac_data.get("result", {})
 
-            stac_summary = {
-                "item_id": item_id,
-                "collection_id": collection_id,
-                "bbox": s.get("bbox"),
-                "inserted_to_pgstac": s.get("inserted_to_pgstac", True)
-            }
+            # Check for degraded mode (pgSTAC unavailable)
+            if stac_data.get("degraded"):
+                degraded_mode = True
+                degraded_warnings.append(stac_data.get("warning", "STAC cataloging skipped"))
+                stac_summary = {
+                    "degraded": True,
+                    "stac_item_created": True,  # JSON always created now!
+                    "stac_item_json_blob": s.get("stac_item_json_blob"),
+                    "stac_item_json_url": s.get("stac_item_json_url"),
+                    "inserted_to_pgstac": False,
+                    "titiler_available": True,
+                    "degraded_reason": s.get("degraded_reason") or "pgSTAC unavailable - JSON fallback is authoritative"
+                }
+            else:
+                item_id = s.get("item_id")
+                collection_id = s.get("collection_id")
 
-            # Generate STAC API URLs (uses OGC_STAC_APP_URL from config)
-            if item_id and collection_id:
-                stac_base = config.stac_api_base_url.rstrip('/')
-                stac_urls = {
-                    "item_url": f"{stac_base}/collections/{collection_id}/items/{item_id}",
-                    "collection_url": f"{stac_base}/collections/{collection_id}",
-                    "items_url": f"{stac_base}/collections/{collection_id}/items",
-                    "catalog_url": stac_base
+                stac_summary = {
+                    "item_id": item_id,
+                    "collection_id": collection_id,
+                    "bbox": s.get("bbox"),
+                    "stac_item_json_blob": s.get("stac_item_json_blob"),
+                    "stac_item_json_url": s.get("stac_item_json_url"),
+                    "inserted_to_pgstac": s.get("inserted_to_pgstac", True)
                 }
 
-            if cog_summary.get('cog_blob') and cog_summary.get('cog_container'):
-                try:
-                    titiler_urls = config.generate_titiler_urls_unified(
-                        mode="cog",
-                        container=cog_summary['cog_container'],
-                        blob_name=cog_summary['cog_blob']
-                    )
-                    share_url = titiler_urls.get("viewer_url")
+                # Generate STAC API URLs (uses OGC_STAC_APP_URL from config)
+                # Only when STAC is not in degraded mode
+                if item_id and collection_id:
+                    stac_base = config.stac_api_base_url.rstrip('/')
+                    stac_urls = {
+                        "item_url": f"{stac_base}/collections/{collection_id}/items/{item_id}",
+                        "collection_url": f"{stac_base}/collections/{collection_id}",
+                        "items_url": f"{stac_base}/collections/{collection_id}/items",
+                        "catalog_url": stac_base
+                    }
 
-                    # Add DEM-specific visualization URLs with terrain colormap
-                    detected_type = validation_summary.get("raster_type")
-                    if detected_type == "dem" and titiler_urls.get("viewer_url"):
-                        base_url = titiler_urls["viewer_url"]
-                        # Add terrain visualization URLs (rescale will be auto from statistics endpoint)
-                        titiler_urls["dem_terrain_viewer"] = f"{base_url}&colormap_name=terrain"
-                        titiler_urls["dem_viridis_viewer"] = f"{base_url}&colormap_name=viridis"
-                        titiler_urls["dem_gist_earth_viewer"] = f"{base_url}&colormap_name=gist_earth"
+        # Generate TiTiler URLs regardless of STAC status (works in degraded mode)
+        if cog_summary.get('cog_blob') and cog_summary.get('cog_container'):
+            try:
+                titiler_urls = config.generate_titiler_urls_unified(
+                    mode="cog",
+                    container=cog_summary['cog_container'],
+                    blob_name=cog_summary['cog_blob']
+                )
+                share_url = titiler_urls.get("viewer_url")
 
-                        # Set share_url to terrain colormap for DEMs
-                        share_url = titiler_urls["dem_terrain_viewer"]
+                # Add DEM-specific visualization URLs with terrain colormap
+                detected_type = validation_summary.get("raster_type")
+                if detected_type == "dem" and titiler_urls.get("viewer_url"):
+                    base_url = titiler_urls["viewer_url"]
+                    # Add terrain visualization URLs (rescale will be auto from statistics endpoint)
+                    titiler_urls["dem_terrain_viewer"] = f"{base_url}&colormap_name=terrain"
+                    titiler_urls["dem_viridis_viewer"] = f"{base_url}&colormap_name=viridis"
+                    titiler_urls["dem_gist_earth_viewer"] = f"{base_url}&colormap_name=gist_earth"
 
-                        # Add preview URLs with colormaps
-                        if titiler_urls.get("preview_url"):
-                            preview_base = titiler_urls["preview_url"]
-                            titiler_urls["dem_terrain_preview"] = f"{preview_base}&colormap_name=terrain"
-                            titiler_urls["dem_hillshade_note"] = "Use TiTiler /cog/DEM endpoint for hillshade"
+                    # Set share_url to terrain colormap for DEMs
+                    share_url = titiler_urls["dem_terrain_viewer"]
 
-                except Exception:
-                    pass
+                    # Add preview URLs with colormaps
+                    if titiler_urls.get("preview_url"):
+                        preview_base = titiler_urls["preview_url"]
+                        titiler_urls["dem_terrain_preview"] = f"{preview_base}&colormap_name=terrain"
+                        titiler_urls["dem_hillshade_note"] = "Use TiTiler /cog/DEM endpoint for hillshade"
 
-        return {
+            except Exception:
+                pass
+
+        # Build result with degraded mode info if applicable (6 DEC 2025)
+        result = {
             "job_type": "process_raster_v2",
             "source_blob": params.get("blob_name"),
             "source_container": params.get("container_name"),
@@ -337,6 +360,15 @@ class ProcessRasterV2Job(JobBaseMixin, JobBase):
                 "failed": sum(1 for t in task_results if t.status == TaskStatus.FAILED)
             }
         }
+
+        # Add degraded mode info if applicable (6 DEC 2025)
+        if degraded_mode:
+            result["degraded_mode"] = True
+            result["warnings"] = degraded_warnings
+            result["available_capabilities"] = ["TiTiler COG viewing", "COG tile serving"]
+            result["unavailable_capabilities"] = ["STAC API discovery"]
+
+        return result
 
     @staticmethod
     def _resolve_in_memory(job_params: Dict[str, Any], config) -> bool:

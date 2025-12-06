@@ -104,6 +104,66 @@ class PgStacBootstrap:
     # Use check_dba_prerequisites() to verify before running pypgstac migrate.
     # =========================================================================
 
+    # =========================================================================
+    # GRACEFUL DEGRADATION SUPPORT (6 DEC 2025)
+    # =========================================================================
+    # Cached availability status for performance (checked once per process)
+    _availability_cache: Optional[bool] = None
+    _availability_cache_time: Optional[float] = None
+    _AVAILABILITY_CACHE_TTL_SECONDS = 60  # Re-check every 60 seconds
+
+    @classmethod
+    def is_available(cls) -> bool:
+        """
+        Quick check if pgstac schema is usable (for graceful degradation).
+
+        Used by STAC handlers to detect if pgstac is available before attempting
+        operations. Returns cached result for performance (TTL: 60 seconds).
+
+        Returns:
+            True if pgstac schema exists and is functional, False otherwise.
+
+        Usage:
+            if not PgStacBootstrap.is_available():
+                return {"success": True, "degraded": True, "warning": "pgSTAC unavailable"}
+        """
+        import time
+
+        # Check cache validity
+        now = time.time()
+        if (cls._availability_cache is not None and
+            cls._availability_cache_time is not None and
+            (now - cls._availability_cache_time) < cls._AVAILABILITY_CACHE_TTL_SECONDS):
+            return cls._availability_cache
+
+        # Perform actual check
+        try:
+            bootstrap = cls()
+            result = bootstrap.check_installation()
+            is_avail = result.get('installed', False) and result.get('schema_exists', False)
+
+            # Cache result
+            cls._availability_cache = is_avail
+            cls._availability_cache_time = now
+
+            if not is_avail:
+                logger.warning("⚠️ pgSTAC not available - graceful degradation mode active")
+
+            return is_avail
+
+        except Exception as e:
+            logger.warning(f"⚠️ pgSTAC availability check failed: {e} - degraded mode active")
+            cls._availability_cache = False
+            cls._availability_cache_time = now
+            return False
+
+    @classmethod
+    def clear_availability_cache(cls) -> None:
+        """Clear the availability cache (useful after schema rebuild)."""
+        cls._availability_cache = None
+        cls._availability_cache_time = None
+        logger.info("🔄 pgSTAC availability cache cleared")
+
     def __init__(self, connection_string: Optional[str] = None):
         """
         Initialize STAC infrastructure manager.

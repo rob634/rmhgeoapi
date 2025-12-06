@@ -1296,3 +1296,117 @@ class VectorToPostGISHandler:
 
         logger.info(f"✅ Chunk {batch_id}: deleted={rows_deleted}, inserted={rows_inserted}")
         return {'rows_deleted': rows_deleted, 'rows_inserted': rows_inserted}
+
+    # =========================================================================
+    # TABLE METADATA REGISTRY (06 DEC 2025)
+    # =========================================================================
+    # Methods for managing geo.table_metadata - the source of truth for
+    # vector table metadata. STAC copies this for catalog convenience.
+    # =========================================================================
+
+    def register_table_metadata(
+        self,
+        table_name: str,
+        schema: str,
+        etl_job_id: str,
+        source_file: str,
+        source_format: str,
+        source_crs: str,
+        feature_count: int,
+        geometry_type: str,
+        bbox: tuple
+    ) -> None:
+        """
+        Register or update table metadata in geo.table_metadata registry.
+
+        This is the SOURCE OF TRUTH for vector table metadata. STAC items
+        copy this information for catalog convenience.
+
+        Uses INSERT ... ON CONFLICT UPDATE for idempotency - safe to call
+        multiple times (e.g., on job re-run).
+
+        Args:
+            table_name: Target table name (PRIMARY KEY in registry)
+            schema: Target schema (default 'geo')
+            etl_job_id: Full 64-char job ID for traceability
+            source_file: Original filename (e.g., 'countries.shp')
+            source_format: File format (shp, gpkg, geojson, csv, etc.)
+            source_crs: Original CRS string before reprojection (e.g., 'EPSG:32610')
+            feature_count: Total number of features in table
+            geometry_type: PostGIS geometry type (e.g., 'MULTIPOLYGON')
+            bbox: Bounding box tuple (minx, miny, maxx, maxy) for pre-computed extent
+        """
+        # Handle None or invalid bbox gracefully
+        bbox_values = (None, None, None, None)
+        if bbox is not None and len(bbox) >= 4:
+            bbox_values = (bbox[0], bbox[1], bbox[2], bbox[3])
+
+        with self._pg_repo._get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO geo.table_metadata (
+                        table_name, schema_name, etl_job_id, source_file,
+                        source_format, source_crs, feature_count, geometry_type,
+                        bbox_minx, bbox_miny, bbox_maxx, bbox_maxy,
+                        created_at, updated_at
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
+                    ON CONFLICT (table_name) DO UPDATE SET
+                        schema_name = EXCLUDED.schema_name,
+                        etl_job_id = EXCLUDED.etl_job_id,
+                        source_file = EXCLUDED.source_file,
+                        source_format = EXCLUDED.source_format,
+                        source_crs = EXCLUDED.source_crs,
+                        feature_count = EXCLUDED.feature_count,
+                        geometry_type = EXCLUDED.geometry_type,
+                        bbox_minx = EXCLUDED.bbox_minx,
+                        bbox_miny = EXCLUDED.bbox_miny,
+                        bbox_maxx = EXCLUDED.bbox_maxx,
+                        bbox_maxy = EXCLUDED.bbox_maxy,
+                        updated_at = NOW()
+                """, (
+                    table_name, schema, etl_job_id, source_file,
+                    source_format, source_crs, feature_count, geometry_type,
+                    bbox_values[0], bbox_values[1], bbox_values[2], bbox_values[3]
+                ))
+                conn.commit()
+
+        logger.info(f"✅ Registered metadata for {schema}.{table_name} (job: {etl_job_id[:8]}...)")
+
+    def update_table_stac_link(
+        self,
+        table_name: str,
+        stac_item_id: str,
+        stac_collection_id: str
+    ) -> bool:
+        """
+        Update table_metadata with STAC item linkage after Stage 3 completion.
+
+        Called after successful STAC item creation to establish the backlink
+        from PostGIS table → STAC catalog item.
+
+        Args:
+            table_name: Table name (must already exist in registry)
+            stac_item_id: STAC item ID created in pgstac
+            stac_collection_id: STAC collection ID (e.g., 'system-vectors')
+
+        Returns:
+            True if row was updated, False if table_name not found in registry
+        """
+        with self._pg_repo._get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    UPDATE geo.table_metadata
+                    SET stac_item_id = %s,
+                        stac_collection_id = %s,
+                        updated_at = NOW()
+                    WHERE table_name = %s
+                """, (stac_item_id, stac_collection_id, table_name))
+                conn.commit()
+                rows_updated = cur.rowcount
+
+        if rows_updated > 0:
+            logger.info(f"✅ Linked {table_name} → STAC item {stac_item_id}")
+            return True
+        else:
+            logger.warning(f"⚠️ No metadata found for {table_name} - STAC link not recorded")
+            return False

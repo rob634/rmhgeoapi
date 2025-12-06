@@ -1,42 +1,13 @@
-# ============================================================================
-# CLAUDE CONTEXT - WEB INTERFACES REGISTRY
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: Registry System - Dynamic interface loading
-# PURPOSE: Central registry for all web interface modules with decorator pattern
-# LAST_REVIEWED: 14 NOV 2025
-# EXPORTS: BaseInterface, InterfaceRegistry, unified_interface_handler
-# INTERFACES: N/A
-# PYDANTIC_MODELS: None
-# DEPENDENCIES: azure.functions, logging, typing
-# SOURCE: N/A - Registry system
-# SCOPE: All web interfaces register here
-# VALIDATION: Interface name uniqueness check
-# PATTERNS: Registry Pattern, Decorator Pattern, Factory Pattern
-# ENTRY_POINTS: unified_interface_handler() called by function_app.py
-# INDEX: InterfaceRegistry:45, register:70, unified_interface_handler:110
-# ============================================================================
-
 """
-Web Interfaces Registry Module
+Web interfaces registry module.
 
-Central registry for all web interface modules. Provides:
-    - Decorator-based registration (@InterfaceRegistry.register('name'))
-    - Dynamic interface loading by name
-    - Unified HTTP handler for /api/interface/{name} route
+Central registry for all web interface modules with decorator-based registration
+and dynamic interface loading by name.
 
-Usage:
-    # In interface module:
-    @InterfaceRegistry.register('stac')
-    class StacInterface(BaseInterface):
-        def render(self, request):
-            return "<html>...</html>"
-
-    # In function_app.py:
-    @app.route(route="interface/{name}", methods=["GET"])
-    def web_interface(req):
-        return unified_interface_handler(req)
-
+Exports:
+    InterfaceRegistry: Registry class with decorator pattern for interface registration
+    BaseInterface: Base class for all web interfaces
+    unified_interface_handler: HTTP handler for /api/interface/{name} route
 """
 
 from typing import Dict, Type, Optional, List

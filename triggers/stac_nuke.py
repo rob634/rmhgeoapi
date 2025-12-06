@@ -1,74 +1,11 @@
-# ============================================================================
-# CLAUDE CONTEXT - HTTP TRIGGER
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: HTTP Trigger - STAC data clearing endpoint (DEV/TEST ONLY)
-# PURPOSE: Nuclear button endpoint for clearing STAC items and collections without dropping schema
-# LAST_REVIEWED: 29 OCT 2025
-# EXPORTS: StacNukeTrigger, stac_nuke_trigger (instance)
-# INTERFACES: BaseHttpTrigger (inherited from http_base)
-# PYDANTIC_MODELS: None - uses dict for responses
-# DEPENDENCIES: triggers.http_base, infrastructure.stac, azure.functions, typing, json
-# SOURCE: HTTP POST requests with query parameters (confirm, mode)
-# SCOPE: DEV/TEST ONLY - Nuclear button for clearing STAC data without schema drop
-# VALIDATION: Requires confirm=yes query parameter, validates mode parameter
-# PATTERNS: Nuclear Button pattern (follows db_query.py SchemaNukeQueryTrigger)
-# ENTRY_POINTS: POST /api/stac/nuke?confirm=yes&mode=all|items|collections
-# INDEX: StacNukeTrigger:60, process_request:90
-# ============================================================================
-
 """
-STAC Nuclear Button HTTP Trigger - Clear Items and Collections
+STAC Nuclear Button HTTP Trigger.
 
-⚠️ DEVELOPMENT/TESTING ONLY - NOT FOR PRODUCTION USE
+Development/testing endpoint for clearing STAC data without dropping schema.
 
-Provides HTTP endpoint for clearing STAC data from pgstac tables without
-dropping the entire schema. This is much faster than full schema drop/recreate
-and preserves all functions, indexes, and partitions.
-
-Endpoint:
-    POST /api/stac/nuke?confirm=yes&mode=all
-
-Query Parameters:
-    confirm: Must be "yes" (400 error if missing or wrong value)
-    mode: Clearing mode (default: "all")
-          - "items": Delete only items (preserve collections)
-          - "collections": Delete collections (CASCADE deletes items)
-          - "all": Delete both collections and items
-
-Response:
-    {
-        "success": true,
-        "mode": "all",
-        "deleted": {
-            "items": 1234,
-            "collections": 5
-        },
-        "counts_before": {
-            "items": 1234,
-            "collections": 5
-        },
-        "execution_time_ms": 456.78,
-        "warning": "⚠️ DEV/TEST ONLY - STAC data cleared (schema preserved)"
-    }
-
-Key Features:
-- Preserves pgstac schema structure (functions, indexes, partitions)
-- CASCADE automatically handles foreign key relationships
-- Reports counts before and after deletion
-- Execution time tracking
-- Safety confirmation required
-
-Use Cases:
-- Development testing with fresh STAC state
-- Integration test cleanup
-- Demo resets without full schema rebuild
-- Faster than full drop/recreate cycle
-
-Comparison to Full Schema Drop:
-- Nuclear Button: DELETE data, keep schema (fast, preserves structure)
-- Schema Drop: DROP schema, reinstall pgstac (slow, full reset)
-
+Exports:
+    StacNukeTrigger: HTTP trigger class for STAC data clearing
+    stac_nuke_trigger: Singleton instance of StacNukeTrigger
 """
 
 from typing import Dict, Any, List

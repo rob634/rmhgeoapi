@@ -1,35 +1,10 @@
-# ============================================================================
-# CLAUDE CONTEXT - WEB INTERFACES BASE
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: Base Class - Abstract interface for all web UIs
-# PURPOSE: Define common structure and utilities for web interface modules
-# LAST_REVIEWED: 14 NOV 2025
-# EXPORTS: BaseInterface
-# INTERFACES: ABC (Abstract Base Class)
-# PYDANTIC_MODELS: None
-# DEPENDENCIES: abc, azure.functions, typing
-# SOURCE: N/A - Base class
-# SCOPE: All web interface modules inherit from this
-# VALIDATION: Abstract method enforcement via ABC
-# PATTERNS: Template Method, Abstract Base Class
-# ENTRY_POINTS: Inherited by StacInterface, VectorInterface, etc.
-# INDEX: BaseInterface:40, render:60, wrap_html:100, _render_navbar:150
-# ============================================================================
-
 """
-Web Interfaces Base Module
+Web interfaces base module.
 
-Provides abstract base class and common utilities for all web interface modules.
-Each interface (STAC, Vector, Jobs, etc.) inherits from BaseInterface and implements
-the render() method to generate HTML.
+Abstract base class and common utilities for all web interface modules.
 
-Pattern:
-    @InterfaceRegistry.register('myinterface')
-    class MyInterface(BaseInterface):
-        def render(self, request):
-            return self.wrap_html("Title", "<h1>Content</h1>")
-
+Exports:
+    BaseInterface: Abstract base class with common HTML utilities and navigation
 """
 
 from abc import ABC, abstractmethod

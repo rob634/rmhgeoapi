@@ -1,42 +1,10 @@
-# ============================================================================
-# CLAUDE CONTEXT - VECTOR VIEWER TRIGGERS
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: Standalone HTTP Trigger - Vector Collection Viewer endpoint
-# PURPOSE: Azure Functions HTTP trigger for vector collection preview viewer
-# LAST_REVIEWED: 13 NOV 2025
-# EXPORTS: get_vector_viewer_triggers (returns list of trigger configurations)
-# INTERFACES: Azure Functions HttpRequest/HttpResponse
-# PYDANTIC_MODELS: None (simple query parameter parsing)
-# DEPENDENCIES: azure.functions, logging
-# SOURCE: HTTP requests from data curators (browser)
-# SCOPE: HTTP endpoint handler for vector viewer
-# VALIDATION: Query parameter validation
-# PATTERNS: Trigger Pattern, Factory Pattern (get_vector_viewer_triggers)
-# ENTRY_POINTS: Function App route registration via get_vector_viewer_triggers()
-# INDEX: get_vector_viewer_triggers:45, vector_viewer_handler:80
-# ============================================================================
-
 """
-Vector Viewer HTTP Trigger - Azure Functions Handler
+Vector viewer HTTP triggers.
 
-Provides HTTP endpoint for vector collection preview viewer:
-- GET /api/vector/viewer?collection={id}
+Azure Functions HTTP endpoint for vector collection preview viewer.
 
-Returns self-contained HTML page with Leaflet map for visual QA.
-
-Integration:
-    In function_app.py:
-
-    from vector_viewer import get_vector_viewer_triggers
-
-    for trigger in get_vector_viewer_triggers():
-        app.route(
-            route=trigger['route'],
-            methods=trigger['methods'],
-            auth_level=func.AuthLevel.ANONYMOUS
-        )(trigger['handler'])
-
+Exports:
+    get_vector_viewer_triggers: Returns list of trigger configurations for route registration
 """
 
 import logging

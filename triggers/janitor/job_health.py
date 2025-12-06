@@ -1,37 +1,10 @@
-# ============================================================================
-# CLAUDE CONTEXT - JOB HEALTH MONITOR TIMER TRIGGER
-# ============================================================================
-# EPOCH: 4 - ACTIVE
-# STATUS: Timer Trigger - Job health monitoring
-# PURPOSE: Detect jobs with failed tasks and propagate failure upward
-# LAST_REVIEWED: 21 NOV 2025
-# EXPORTS: job_health_handler
-# DEPENDENCIES: services.janitor_service, azure.functions
-# SCHEDULE: Every 10 minutes (0 */10 * * * *)
-# ============================================================================
-
 """
-Job Health Monitor Timer Trigger
+Job Health Monitor Timer Trigger.
 
-Runs every 10 minutes to detect jobs that have failed tasks.
+Detects jobs with failed tasks and propagates failure upward.
 
-In the CoreMachine architecture, jobs are ATOMIC - they either fully succeed
-or fully fail. If any task fails, the entire job should be marked as failed.
-
-However, there are race conditions and edge cases where a task fails but
-the "last task turns out the lights" logic doesn't properly propagate
-the failure to the job level. This monitor catches those cases.
-
-This trigger:
-1. Queries for jobs with status=PROCESSING that have failed tasks
-2. Marks the job as FAILED with descriptive error message
-3. Captures partial results from completed tasks (for debugging)
-4. Logs the action to janitor_runs audit table
-
-WHY CAPTURE PARTIAL RESULTS?
-- Jobs are atomic, but knowing what completed helps debugging
-- Can identify which stage/task caused the failure
-- Enables potential manual recovery if needed
+Exports:
+    job_health_handler: Timer trigger function (runs every 10 minutes)
 """
 
 import azure.functions as func

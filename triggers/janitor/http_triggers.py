@@ -1,27 +1,12 @@
-# ============================================================================
-# CLAUDE CONTEXT - JANITOR HTTP TRIGGERS
-# ============================================================================
-# EPOCH: 4 - ACTIVE
-# STATUS: HTTP Trigger - Janitor manual operations and status
-# PURPOSE: HTTP endpoints for manually triggering janitor and checking status
-# LAST_REVIEWED: 21 NOV 2025
-# EXPORTS: janitor_run_handler, janitor_status_handler, janitor_history_handler
-# DEPENDENCIES: services.janitor_service, azure.functions, json
-# ============================================================================
-
 """
-Janitor HTTP Triggers
+Janitor HTTP Triggers.
 
-Provides HTTP endpoints for manual janitor operations:
+HTTP endpoints for manual janitor operations and status monitoring.
 
-1. POST /api/admin/janitor/run?type={type} - Manually trigger a janitor run
-2. GET /api/admin/janitor/status - Get current janitor status and config
-3. GET /api/admin/janitor/history - Get recent janitor run history
-
-These endpoints complement the timer triggers, allowing:
-- Manual testing and debugging
-- On-demand cleanup after known issues
-- Monitoring janitor health and activity
+Exports:
+    janitor_run_handler: HTTP trigger for POST /api/admin/janitor/run
+    janitor_status_handler: HTTP trigger for GET /api/admin/janitor/status
+    janitor_history_handler: HTTP trigger for GET /api/admin/janitor/history
 """
 
 import azure.functions as func

@@ -1,51 +1,10 @@
-# ============================================================================
-# CLAUDE CONTEXT - HTTP TRIGGER
-# ============================================================================
-# EPOCH: 4 - ACTIVE
-# STATUS: HTTP Trigger - Get single blob metadata (read-only UI operation)
-# PURPOSE: Provide blob details for Pipeline Dashboard file detail view
-# LAST_REVIEWED: 21 NOV 2025
-# EXPORTS: get_blob_metadata_handler
-# INTERFACES: Azure Functions HTTP handler
-# PYDANTIC_MODELS: None (simple JSON response)
-# DEPENDENCIES: infrastructure.blob.BlobRepository
-# SOURCE: HTTP GET requests to /api/containers/{container_name}/blob?path={blob_path}
-# SCOPE: Read-only blob metadata (NO JOBS, NO TASKS - UI operation only)
-# VALIDATION: Container/blob existence validation
-# PATTERNS: Direct repository access, read-only
-# ENTRY_POINTS: GET /api/containers/{container_name}/blob?path={blob_path}
-# INDEX: get_blob_metadata_handler:50
-# NOTE: Changed from route param to query param because Azure Functions v4
-#       does not support the ':path' route constraint (21 NOV 2025)
-# ============================================================================
-
 """
-Get Blob Metadata HTTP Trigger
+Get Blob Metadata HTTP Trigger.
 
-Lightweight single-blob metadata endpoint for Pipeline Dashboard UI.
-This is a READ-ONLY operation that directly queries Azure Blob Storage.
-Does NOT create jobs, tasks, or any database records.
+Single-blob metadata endpoint for Pipeline Dashboard UI.
 
-API Endpoint:
-    GET /api/containers/{container_name}/blob?path=maxar/tile_001.tif
-
-Path Parameters:
-    container_name: Azure Blob Storage container name (e.g., 'bronze-rasters')
-
-Query Parameters:
-    path: Full path to blob within container (e.g., 'maxar/tile_001.tif')
-
-Returns:
-    {
-        "container": "bronze-rasters",
-        "name": "maxar/tile_001.tif",
-        "size": 12500000,
-        "size_mb": 11.92,
-        "last_modified": "2025-11-20T14:30:00Z",
-        "content_type": "image/tiff",
-        "etag": "0x8DC1234567890AB",
-        "metadata": {...}
-    }
+Exports:
+    get_blob_metadata_handler: HTTP trigger function for GET /api/containers/{container_name}/blob
 """
 
 import azure.functions as func

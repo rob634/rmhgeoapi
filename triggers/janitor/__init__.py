@@ -1,31 +1,15 @@
-# ============================================================================
-# CLAUDE CONTEXT - JANITOR TRIGGERS PACKAGE
-# ============================================================================
-# EPOCH: 4 - ACTIVE
-# STATUS: Package - Janitor timer and HTTP triggers
-# PURPOSE: Timer and HTTP triggers for system maintenance (stale tasks, failed jobs, orphans)
-# LAST_REVIEWED: 21 NOV 2025
-# EXPORTS: Timer handlers + HTTP handlers for manual triggering
-# DEPENDENCIES: services.janitor_service
-# ============================================================================
-
 """
-Janitor Triggers Package
+Janitor Triggers Package.
 
-Provides both timer-based AND HTTP-based maintenance operations:
+Timer and HTTP triggers for system maintenance operations.
 
-Timer Triggers (automatic):
-1. Task Watchdog (every 5 min): Detect stale PROCESSING tasks
-2. Job Health Monitor (every 10 min): Detect jobs with failed tasks
-3. Orphan Detector (every 15 min): Detect orphaned/zombie records
-
-HTTP Triggers (manual):
-- POST /api/admin/janitor/run?type={type} - Manually trigger janitor
-- GET /api/admin/janitor/status - Get janitor config and recent stats
-- GET /api/admin/janitor/history - Get janitor run history
-
-These triggers run independently of CoreMachine to avoid circular dependencies.
-A janitor that uses CoreMachine cannot clean up stuck CoreMachine jobs.
+Exports:
+    task_watchdog_handler: Timer trigger for detecting stale tasks
+    job_health_handler: Timer trigger for detecting jobs with failed tasks
+    orphan_detector_handler: Timer trigger for detecting orphaned records
+    janitor_run_handler: HTTP trigger for manual janitor execution
+    janitor_status_handler: HTTP trigger for janitor status
+    janitor_history_handler: HTTP trigger for janitor run history
 """
 
 # Timer trigger handlers

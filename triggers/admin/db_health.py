@@ -1,40 +1,11 @@
-# ============================================================================
-# CLAUDE CONTEXT - DATABASE HEALTH ADMIN TRIGGER
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: Admin API - PostgreSQL health monitoring
-# PURPOSE: HTTP trigger for database health metrics and performance monitoring
-# LAST_REVIEWED: 03 NOV 2025
-# EXPORTS: AdminDbHealthTrigger - Singleton trigger for health operations
-# INTERFACES: Azure Functions HTTP trigger
-# PYDANTIC_MODELS: None - uses dict responses
-# DEPENDENCIES: azure.functions, psycopg, infrastructure.postgresql, util_logger
-# SOURCE: PostgreSQL pg_stat_* views and system catalogs
-# SCOPE: Read-only health monitoring for proactive maintenance
-# VALIDATION: None yet (future APIM authentication)
-# PATTERNS: Singleton trigger, RESTful admin API
-# ENTRY_POINTS: AdminDbHealthTrigger.instance().handle_request(req)
-# INDEX: AdminDbHealthTrigger:50, get_health:150, get_performance:250
-# ============================================================================
-
 """
-Database Health Admin Trigger
+Database Health Admin Trigger.
 
-Provides database health monitoring and performance metrics:
-- Overall database health status
-- Performance metrics (cache hit ratios, query stats)
-- Bloat estimates and vacuum recommendations
+Database health monitoring and performance metrics.
 
-Endpoints:
-    GET /api/admin/db/health
-    GET /api/admin/db/health/performance
-
-Critical for:
-- Proactive maintenance
-- Performance monitoring
-- Capacity planning
-- Health dashboards
-
+Exports:
+    AdminDbHealthTrigger: HTTP trigger class for health monitoring
+    admin_db_health_trigger: Singleton instance of AdminDbHealthTrigger
 """
 
 import azure.functions as func

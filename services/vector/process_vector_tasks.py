@@ -118,7 +118,12 @@ def process_vector_prepare(parameters: Dict[str, Any]) -> Dict[str, Any]:
     total_features = len(gdf)
     logger.info(f"[{job_id[:8]}] Loaded {total_features} features")
 
-    # Step 3: Validate and prepare GeoDataFrame
+    # Capture original CRS before reprojection (06 DEC 2025)
+    # This is stored in table_metadata for data lineage tracking
+    original_crs = str(gdf.crs) if gdf.crs else "unknown"
+    logger.info(f"[{job_id[:8]}] Original CRS: {original_crs}")
+
+    # Step 3: Validate and prepare GeoDataFrame (reprojects to EPSG:4326)
     handler = VectorToPostGISHandler()
     validated_gdf = handler.prepare_gdf(gdf, geometry_params=geometry_params)
 
@@ -145,6 +150,21 @@ def process_vector_prepare(parameters: Dict[str, Any]) -> Dict[str, Any]:
         indexes=indexes
     )
     logger.info(f"[{job_id[:8]}] Created table {schema}.{table_name} with etl_batch_id tracking")
+
+    # Step 4b: Register table metadata in geo.table_metadata (06 DEC 2025)
+    # This is the SOURCE OF TRUTH for vector metadata - STAC copies for convenience
+    # Uses INSERT ON CONFLICT UPDATE for idempotency
+    handler.register_table_metadata(
+        table_name=table_name,
+        schema=schema,
+        etl_job_id=job_id,
+        source_file=blob_name,
+        source_format=file_extension,
+        source_crs=original_crs,
+        feature_count=total_features,
+        geometry_type=geometry_type,
+        bbox=tuple(validated_gdf.total_bounds)  # [minx, miny, maxx, maxy]
+    )
 
     # Step 5: Calculate optimal chunk size and split
     chunks = handler.chunk_gdf(validated_gdf, chunk_size)
@@ -174,7 +194,8 @@ def process_vector_prepare(parameters: Dict[str, Any]) -> Dict[str, Any]:
         'columns': columns,
         'geometry_type': geometry_type,
         'srid': 4326,
-        'source_file': blob_name
+        'source_file': blob_name,
+        'source_crs': original_crs  # Original CRS before reprojection to 4326
     }
 
     # Include skipped columns in result if any were filtered

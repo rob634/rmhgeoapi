@@ -1,34 +1,10 @@
-# ============================================================================
-# CLAUDE CONTEXT - TASK WATCHDOG TIMER TRIGGER
-# ============================================================================
-# EPOCH: 4 - ACTIVE
-# STATUS: Timer Trigger - Stale task detection
-# PURPOSE: Detect and mark stale PROCESSING tasks as FAILED
-# LAST_REVIEWED: 21 NOV 2025
-# EXPORTS: task_watchdog_handler
-# DEPENDENCIES: services.janitor_service, azure.functions
-# SCHEDULE: Every 5 minutes (0 */5 * * * *)
-# ============================================================================
-
 """
-Task Watchdog Timer Trigger
+Task Watchdog Timer Trigger.
 
-Runs every 5 minutes to detect tasks stuck in PROCESSING state.
+Detects and marks stale PROCESSING tasks as FAILED.
 
-Azure Functions have a maximum execution time of 10-30 minutes depending
-on the plan. A task that has been in PROCESSING state for longer than
-30 minutes has silently failed (function timeout, uncaught exception, etc).
-
-This trigger:
-1. Queries for tasks with status=PROCESSING and updated_at > 30 min ago
-2. Marks them as FAILED with descriptive error message
-3. Logs the action to janitor_runs audit table
-
-WHY 30 MINUTES?
-- Consumption plan: 10 min max
-- Premium plan: 30 min default, can be extended
-- Dedicated plan: 30 min default, can be extended
-- 30 minutes is a safe upper bound for any Azure Functions plan
+Exports:
+    task_watchdog_handler: Timer trigger function (runs every 5 minutes)
 """
 
 import azure.functions as func

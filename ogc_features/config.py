@@ -1,44 +1,11 @@
-# ============================================================================
-# CLAUDE CONTEXT - OGC FEATURES CONFIGURATION
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: Standalone Configuration - OGC Features API
-# PURPOSE: Self-contained configuration management for OGC Features API
-# LAST_REVIEWED: 29 OCT 2025
-# EXPORTS: OGCFeaturesConfig, get_ogc_config
-# INTERFACES: Pydantic BaseModel
-# PYDANTIC_MODELS: OGCFeaturesConfig
-# DEPENDENCIES: pydantic, os
-# SOURCE: Environment variables (no dependency on main app config)
-# SCOPE: OGC Features API configuration only
-# VALIDATION: Pydantic v2 validation
-# PATTERNS: Settings Pattern, Singleton via cached function
-# ENTRY_POINTS: from ogc_features.config import get_ogc_config
-# INDEX: OGCFeaturesConfig:48, get_ogc_config:168
-# ============================================================================
-
 """
-OGC Features API Configuration - Standalone
+OGC Features API configuration.
 
-Completely independent configuration system for OGC Features API.
-NO dependencies on main application's config.py.
+Standalone configuration management for OGC Features API with environment-based settings.
 
-Environment Variables:
-    Required:
-    - POSTGIS_HOST: PostgreSQL hostname
-    - POSTGIS_DATABASE: Database name
-    - POSTGIS_USER: Database user
-    - POSTGIS_PASSWORD: Database password
-
-    Optional:
-    - POSTGIS_PORT: PostgreSQL port (default: 5432)
-    - OGC_SCHEMA: Schema containing vector tables (default: "geo")
-    - OGC_GEOMETRY_COLUMN: Default geometry column name (default: "geom")
-    - OGC_DEFAULT_LIMIT: Default feature limit (default: 100)
-    - OGC_MAX_LIMIT: Maximum feature limit (default: 10000)
-    - OGC_DEFAULT_PRECISION: Coordinate precision (default: 6)
-    - OGC_BASE_URL: Base URL for self links (default: auto-detect)
-
+Exports:
+    OGCFeaturesConfig: Pydantic configuration model for OGC Features API settings
+    get_ogc_config: Singleton function for accessing configuration instance
 """
 
 import os

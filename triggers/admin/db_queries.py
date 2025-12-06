@@ -1,43 +1,11 @@
-# ============================================================================
-# CLAUDE CONTEXT - DATABASE QUERIES ADMIN TRIGGER
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: Admin API - PostgreSQL query analysis
-# PURPOSE: HTTP trigger for analyzing running queries, slow queries, locks, and connections
-# LAST_REVIEWED: 03 NOV 2025
-# EXPORTS: AdminDbQueriesTrigger - Singleton trigger for query analysis
-# INTERFACES: Azure Functions HTTP trigger
-# PYDANTIC_MODELS: None - uses dict responses
-# DEPENDENCIES: azure.functions, psycopg, infrastructure.postgresql, util_logger
-# SOURCE: PostgreSQL pg_stat_activity, pg_locks, pg_stat_statements (if available)
-# SCOPE: Read-only query analysis for debugging performance and deadlocks
-# VALIDATION: None yet (future APIM authentication)
-# PATTERNS: Singleton trigger, RESTful admin API
-# ENTRY_POINTS: AdminDbQueriesTrigger.instance().handle_request(req)
-# INDEX: AdminDbQueriesTrigger:50, running_queries:150, slow_queries:250, locks:350, connections:450
-# ============================================================================
-
 """
-Database Queries Admin Trigger
+Database Queries Admin Trigger.
 
-Provides query analysis and connection monitoring:
-- List currently running queries
-- Analyze slow queries (if pg_stat_statements enabled)
-- Show current locks and blocking queries
-- Connection pool statistics
+PostgreSQL query analysis and connection monitoring.
 
-Endpoints:
-    GET /api/admin/db/queries/running
-    GET /api/admin/db/queries/slow
-    GET /api/admin/db/locks
-    GET /api/admin/db/connections
-
-Critical for:
-- Debugging performance issues
-- Identifying deadlocks
-- Monitoring connection pool usage
-- Finding long-running queries
-
+Exports:
+    AdminDbQueriesTrigger: HTTP trigger class for query analysis
+    admin_db_queries_trigger: Singleton instance of AdminDbQueriesTrigger
 """
 
 import azure.functions as func

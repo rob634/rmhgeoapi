@@ -1,46 +1,11 @@
-# ============================================================================
-# CLAUDE CONTEXT - DATABASE MAINTENANCE ADMIN TRIGGER
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: Admin API - PostgreSQL maintenance operations
-# PURPOSE: HTTP trigger for database maintenance operations (vacuum, reindex, cleanup)
-# LAST_REVIEWED: 16 NOV 2025 (SQL injection prevention hardening)
-# EXPORTS: AdminDbMaintenanceTrigger - Singleton trigger for maintenance operations
-# INTERFACES: Azure Functions HTTP trigger
-# PYDANTIC_MODELS: None - uses dict responses
-# DEPENDENCIES: azure.functions, psycopg, psycopg.sql, infrastructure.postgresql, util_logger
-# SOURCE: PostgreSQL database for direct maintenance operations
-# SCOPE: Write operations for database maintenance (requires confirmation)
-# VALIDATION: Requires confirmation parameters for all destructive operations
-# SECURITY: SQL injection prevention via psycopg.sql composition (16 NOV 2025)
-# PATTERNS: Singleton trigger, RESTful admin API, Confirmation-required operations
-# ENTRY_POINTS: AdminDbMaintenanceTrigger.instance().handle_request(req)
-# INDEX: AdminDbMaintenanceTrigger:50, nuke_schema:150, redeploy_schema:250, cleanup:350
-# ============================================================================
-
 """
-Database Maintenance Admin Trigger
+Database Maintenance Admin Trigger.
 
-Provides database maintenance operations:
-- App schema nuke (drop all objects)
-- App schema redeploy (nuke + redeploy)
-- pgSTAC schema redeploy (nuke + pypgstac migrate)
-- Cleanup old records (completed jobs >30 days)
+Database maintenance operations with SQL injection prevention.
 
-Endpoints:
-    POST /api/dbadmin/maintenance/nuke
-    POST /api/dbadmin/maintenance/redeploy
-    POST /api/dbadmin/maintenance/pgstac/redeploy
-    POST /api/dbadmin/maintenance/cleanup
-
-All operations require explicit confirmation parameters.
-
-Critical for:
-- Development/test environment resets
-- Production data cleanup
-- Emergency schema recovery
-- pgSTAC function installation (search_tohash, search_hash)
-
+Exports:
+    AdminDbMaintenanceTrigger: HTTP trigger class for maintenance operations
+    admin_db_maintenance_trigger: Singleton instance of AdminDbMaintenanceTrigger
 """
 
 import azure.functions as func
@@ -844,6 +809,11 @@ class AdminDbMaintenanceTrigger:
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
 
+        # Track pgstac failures - pgstac is optional, app schema is critical
+        # Jobs in app schema populate pgstac (one-way reference: app → pgstac)
+        # System can function without pgstac, STAC features just won't work
+        pgstac_failed = False
+
         try:
             # ================================================================
             # STEP 1: Drop app schema
@@ -902,18 +872,13 @@ class AdminDbMaintenanceTrigger:
                 step2["status"] = "success"
 
             except Exception as e:
-                logger.error(f"❌ Failed to drop pgstac schema: {e}")
+                # NON-FATAL: pgstac drop failure should not block app schema deployment
+                # App schema is critical, pgstac is optional for core system function
+                logger.warning(f"⚠️ Failed to drop pgstac schema (continuing): {e}")
                 step2["status"] = "failed"
                 step2["error"] = str(e)
-                results["steps"].append(step2)
-                results["status"] = "failed"
-                results["failed_at"] = "drop_pgstac_schema"
-                results["execution_time_ms"] = int((time.time() - start_time) * 1000)
-                return func.HttpResponse(
-                    body=json.dumps(results, indent=2),
-                    status_code=500,
-                    mimetype='application/json'
-                )
+                pgstac_failed = True
+                # Continue - don't block app schema deployment
 
             results["steps"].append(step2)
 
@@ -978,50 +943,48 @@ class AdminDbMaintenanceTrigger:
             # ================================================================
             # STEP 4: Redeploy pgstac schema via pypgstac migrate
             # ================================================================
+            # NON-FATAL: pgstac deployment failure should not block system operation
+            # App schema (jobs/tasks) is already deployed - core system is functional
+            # STAC features just won't work until pgstac is fixed
             logger.info("📦 Step 4/8: Running pypgstac migrate...")
             step4 = {"step": 4, "action": "deploy_pgstac_schema", "status": "pending"}
 
-            try:
-                from infrastructure.pgstac_bootstrap import PgStacBootstrap
-                bootstrap = PgStacBootstrap()
+            if pgstac_failed:
+                # Skip if drop already failed - no point trying to deploy
+                logger.warning("⏭️ Skipping pgstac deploy - drop step already failed")
+                step4["status"] = "skipped"
+                step4["reason"] = "pgstac drop failed in step 2"
+            else:
+                try:
+                    from infrastructure.pgstac_bootstrap import PgStacBootstrap
+                    bootstrap = PgStacBootstrap()
 
-                migration_output = bootstrap.install_pgstac(
-                    drop_existing=False,  # Already dropped in Step 2
-                    run_migrations=True
-                )
-
-                if migration_output.get('success'):
-                    step4["status"] = "success"
-                    step4["version"] = migration_output.get('version')
-                    step4["tables_created"] = migration_output.get('tables_created', 0)
-                    logger.info(f"✅ pgstac schema deployed: version {step4['version']}")
-                else:
-                    step4["status"] = "failed"
-                    step4["error"] = migration_output.get('error', 'Unknown migration error')
-                    results["steps"].append(step4)
-                    results["status"] = "failed"
-                    results["failed_at"] = "deploy_pgstac_schema"
-                    results["execution_time_ms"] = int((time.time() - start_time) * 1000)
-                    return func.HttpResponse(
-                        body=json.dumps(results, indent=2),
-                        status_code=500,
-                        mimetype='application/json'
+                    migration_output = bootstrap.install_pgstac(
+                        drop_existing=False,  # Already dropped in Step 2
+                        run_migrations=True
                     )
 
-            except Exception as e:
-                logger.error(f"❌ Exception during pypgstac migrate: {e}")
-                logger.error(traceback.format_exc())
-                step4["status"] = "failed"
-                step4["error"] = str(e)
-                results["steps"].append(step4)
-                results["status"] = "failed"
-                results["failed_at"] = "deploy_pgstac_schema"
-                results["execution_time_ms"] = int((time.time() - start_time) * 1000)
-                return func.HttpResponse(
-                    body=json.dumps(results, indent=2),
-                    status_code=500,
-                    mimetype='application/json'
-                )
+                    if migration_output.get('success'):
+                        step4["status"] = "success"
+                        step4["version"] = migration_output.get('version')
+                        step4["tables_created"] = migration_output.get('tables_created', 0)
+                        logger.info(f"✅ pgstac schema deployed: version {step4['version']}")
+                    else:
+                        # NON-FATAL: migration returned failure but app schema is deployed
+                        logger.warning(f"⚠️ pypgstac migrate failed (continuing): {migration_output.get('error')}")
+                        step4["status"] = "failed"
+                        step4["error"] = migration_output.get('error', 'Unknown migration error')
+                        pgstac_failed = True
+                        # Continue - app schema is deployed, system functional
+
+                except Exception as e:
+                    # NON-FATAL: exception during migration but app schema is deployed
+                    logger.warning(f"⚠️ Exception during pypgstac migrate (continuing): {e}")
+                    logger.error(traceback.format_exc())
+                    step4["status"] = "failed"
+                    step4["error"] = str(e)
+                    pgstac_failed = True
+                    # Continue - app schema is deployed, system functional
 
             results["steps"].append(step4)
 
@@ -1035,29 +998,35 @@ class AdminDbMaintenanceTrigger:
             logger.info("🔐 Step 5/8: Granting pgstac_read role to rmhpgflexreader...")
             step5 = {"step": 5, "action": "grant_pgstac_read_role", "status": "pending"}
 
-            try:
-                from infrastructure.postgresql import PostgreSQLRepository
-                pgstac_repo = PostgreSQLRepository(schema_name='pgstac')
+            if pgstac_failed:
+                # Skip if pgstac deployment failed - role doesn't exist
+                logger.warning("⏭️ Skipping pgstac_read grant - pgstac deployment failed")
+                step5["status"] = "skipped"
+                step5["reason"] = "pgstac deployment failed"
+            else:
+                try:
+                    from infrastructure.postgresql import PostgreSQLRepository
+                    pgstac_repo = PostgreSQLRepository(schema_name='pgstac')
 
-                with pgstac_repo._get_connection() as conn:
-                    with conn.cursor() as cur:
-                        # Grant pgstac_read role to rmhpgflexreader
-                        # This allows the read-only OGC/STAC API to query pgstac tables
-                        cur.execute("GRANT pgstac_read TO rmhpgflexreader")
-                        conn.commit()
-                        logger.info("✅ Granted pgstac_read to rmhpgflexreader")
+                    with pgstac_repo._get_connection() as conn:
+                        with conn.cursor() as cur:
+                            # Grant pgstac_read role to rmhpgflexreader
+                            # This allows the read-only OGC/STAC API to query pgstac tables
+                            cur.execute("GRANT pgstac_read TO rmhpgflexreader")
+                            conn.commit()
+                            logger.info("✅ Granted pgstac_read to rmhpgflexreader")
 
-                step5["status"] = "success"
-                step5["role_granted"] = "pgstac_read"
-                step5["granted_to"] = "rmhpgflexreader"
+                    step5["status"] = "success"
+                    step5["role_granted"] = "pgstac_read"
+                    step5["granted_to"] = "rmhpgflexreader"
 
-            except Exception as e:
-                # Non-fatal error - log warning but continue
-                # The role grant might fail if rmhpgflexreader doesn't exist yet
-                logger.warning(f"⚠️ Failed to grant pgstac_read to rmhpgflexreader: {e}")
-                step5["status"] = "warning"
-                step5["error"] = str(e)
-                step5["note"] = "Role grant failed - OGC/STAC API may not have read access"
+                except Exception as e:
+                    # Non-fatal error - log warning but continue
+                    # The role grant might fail if rmhpgflexreader doesn't exist yet
+                    logger.warning(f"⚠️ Failed to grant pgstac_read to rmhpgflexreader: {e}")
+                    step5["status"] = "warning"
+                    step5["error"] = str(e)
+                    step5["note"] = "Role grant failed - OGC/STAC API may not have read access"
 
             results["steps"].append(step5)
 
@@ -1082,6 +1051,58 @@ class AdminDbMaintenanceTrigger:
                         # This is idempotent and safe - preserves existing data
                         cur.execute("CREATE SCHEMA IF NOT EXISTS geo")
                         logger.info("✅ Ensured geo schema exists")
+
+                        # 0b. Create geo.table_metadata registry table (06 DEC 2025)
+                        # Stores table-level metadata for vector datasets:
+                        # - ETL traceability (job_id, source_file, source_format, source_crs)
+                        # - STAC linkage (stac_item_id, stac_collection_id)
+                        # - Pre-computed bbox for OGC Features performance
+                        # This is the SOURCE OF TRUTH - STAC copies for catalog convenience
+                        cur.execute("""
+                            CREATE TABLE IF NOT EXISTS geo.table_metadata (
+                                table_name VARCHAR(255) PRIMARY KEY,
+                                schema_name VARCHAR(63) DEFAULT 'geo',
+
+                                -- ETL Traceability (populated at Stage 1)
+                                etl_job_id VARCHAR(64),
+                                source_file VARCHAR(500),
+                                source_format VARCHAR(50),
+                                source_crs VARCHAR(50),
+
+                                -- STAC Linkage (populated at Stage 3)
+                                stac_item_id VARCHAR(100),
+                                stac_collection_id VARCHAR(100),
+
+                                -- Statistics (populated at Stage 1)
+                                feature_count INTEGER,
+                                geometry_type VARCHAR(50),
+
+                                -- Timestamps
+                                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                                updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+
+                                -- Pre-computed extent for fast OGC collection response
+                                -- Avoids ST_Extent query on every /collections/{id} request
+                                bbox_minx DOUBLE PRECISION,
+                                bbox_miny DOUBLE PRECISION,
+                                bbox_maxx DOUBLE PRECISION,
+                                bbox_maxy DOUBLE PRECISION
+                            )
+                        """)
+
+                        # Index for job lookups (find all tables from a job)
+                        cur.execute("""
+                            CREATE INDEX IF NOT EXISTS idx_table_metadata_etl_job_id
+                            ON geo.table_metadata(etl_job_id)
+                        """)
+
+                        # Index for STAC linkage lookups
+                        cur.execute("""
+                            CREATE INDEX IF NOT EXISTS idx_table_metadata_stac_item_id
+                            ON geo.table_metadata(stac_item_id)
+                        """)
+
+                        logger.info("✅ Ensured geo.table_metadata registry table exists")
 
                         # 1. Grant USAGE on geo schema
                         cur.execute("GRANT USAGE ON SCHEMA geo TO rmhpgflexreader")
@@ -1108,6 +1129,7 @@ class AdminDbMaintenanceTrigger:
 
                 step5b["status"] = "success"
                 step5b["schema_created"] = "geo, h3 (if not exists)"
+                step5b["tables_created"] = ["geo.table_metadata (vector metadata registry)"]
                 step5b["grants"] = [
                     "USAGE ON SCHEMA geo",
                     "SELECT ON ALL TABLES IN SCHEMA geo",
@@ -1136,38 +1158,44 @@ class AdminDbMaintenanceTrigger:
             logger.info("📚 Step 6/8: Creating system STAC collections...")
             step6 = {"step": 6, "action": "create_system_collections", "status": "pending", "collections": []}
 
-            try:
-                from infrastructure.pgstac_bootstrap import PgStacBootstrap
+            if pgstac_failed:
+                # Skip if pgstac deployment failed - can't create collections without pgstac schema
+                logger.warning("⏭️ Skipping STAC collections creation - pgstac deployment failed")
+                step6["status"] = "skipped"
+                step6["reason"] = "pgstac deployment failed"
+            else:
+                try:
+                    from infrastructure.pgstac_bootstrap import PgStacBootstrap
 
-                # Create system collections directly via PgStacBootstrap
-                # This bypasses the HTTP trigger which requires route_params
-                bootstrap = PgStacBootstrap()
-                # Use first 2 system collections (vectors and rasters)
-                # system-h3-grids is created on-demand by H3 jobs
-                system_collection_types = STACDefaults.SYSTEM_COLLECTIONS[:2]
+                    # Create system collections directly via PgStacBootstrap
+                    # This bypasses the HTTP trigger which requires route_params
+                    bootstrap = PgStacBootstrap()
+                    # Use first 2 system collections (vectors and rasters)
+                    # system-h3-grids is created on-demand by H3 jobs
+                    system_collection_types = STACDefaults.SYSTEM_COLLECTIONS[:2]
 
-                for collection_type in system_collection_types:
-                    try:
-                        result = bootstrap.create_production_collection(collection_type)
+                    for collection_type in system_collection_types:
+                        try:
+                            result = bootstrap.create_production_collection(collection_type)
 
-                        if result.get('success'):
-                            step6["collections"].append(collection_type)
-                            if result.get('existed'):
-                                logger.info(f"⏭️ Collection {collection_type} already exists (idempotent)")
+                            if result.get('success'):
+                                step6["collections"].append(collection_type)
+                                if result.get('existed'):
+                                    logger.info(f"⏭️ Collection {collection_type} already exists (idempotent)")
+                                else:
+                                    logger.info(f"✅ Created collection: {collection_type}")
                             else:
-                                logger.info(f"✅ Created collection: {collection_type}")
-                        else:
-                            logger.warning(f"⚠️ Failed to create collection {collection_type}: {result.get('error')}")
+                                logger.warning(f"⚠️ Failed to create collection {collection_type}: {result.get('error')}")
 
-                    except Exception as col_e:
-                        logger.warning(f"⚠️ Exception creating collection {collection_type}: {col_e}")
+                        except Exception as col_e:
+                            logger.warning(f"⚠️ Exception creating collection {collection_type}: {col_e}")
 
-                step6["status"] = "success" if len(step6["collections"]) >= 2 else "partial"
+                    step6["status"] = "success" if len(step6["collections"]) >= 2 else "partial"
 
-            except Exception as e:
-                logger.error(f"❌ Exception during system collections creation: {e}")
-                step6["status"] = "partial"
-                step6["error"] = str(e)
+                except Exception as e:
+                    logger.error(f"❌ Exception during system collections creation: {e}")
+                    step6["status"] = "partial"
+                    step6["error"] = str(e)
 
             results["steps"].append(step6)
 
@@ -1224,29 +1252,35 @@ class AdminDbMaintenanceTrigger:
             logger.info("🔍 Step 8/8: Verifying pgstac schema...")
             step8 = {"step": 8, "action": "verify_pgstac_schema", "status": "pending"}
 
-            try:
-                from infrastructure.pgstac_bootstrap import PgStacBootstrap
-                bootstrap = PgStacBootstrap()
+            if pgstac_failed:
+                # Skip if pgstac deployment failed - nothing to verify
+                logger.warning("⏭️ Skipping pgstac verification - pgstac deployment failed")
+                step8["status"] = "skipped"
+                step8["reason"] = "pgstac deployment failed"
+            else:
+                try:
+                    from infrastructure.pgstac_bootstrap import PgStacBootstrap
+                    bootstrap = PgStacBootstrap()
 
-                verification = bootstrap.verify_installation()
+                    verification = bootstrap.verify_installation()
 
-                if verification.get('valid'):
-                    step8["status"] = "success"
-                    step8["checks"] = {
-                        "version": verification.get('version'),
-                        "hash_functions": verification.get('search_hash_functions', False),
-                        "tables_count": verification.get('tables_count', 0)
-                    }
-                    logger.info(f"✅ pgstac schema verified: version {step8['checks']['version']}")
-                else:
-                    step8["status"] = "partial"
-                    step8["errors"] = verification.get('errors', [])
-                    logger.warning(f"⚠️ pgstac verification issues: {step8['errors']}")
+                    if verification.get('valid'):
+                        step8["status"] = "success"
+                        step8["checks"] = {
+                            "version": verification.get('version'),
+                            "hash_functions": verification.get('search_hash_functions', False),
+                            "tables_count": verification.get('tables_count', 0)
+                        }
+                        logger.info(f"✅ pgstac schema verified: version {step8['checks']['version']}")
+                    else:
+                        step8["status"] = "partial"
+                        step8["errors"] = verification.get('errors', [])
+                        logger.warning(f"⚠️ pgstac verification issues: {step8['errors']}")
 
-            except Exception as e:
-                logger.error(f"❌ Exception during pgstac verification: {e}")
-                step8["status"] = "failed"
-                step8["error"] = str(e)
+                except Exception as e:
+                    logger.error(f"❌ Exception during pgstac verification: {e}")
+                    step8["status"] = "failed"
+                    step8["error"] = str(e)
 
             results["steps"].append(step8)
 
@@ -1255,16 +1289,36 @@ class AdminDbMaintenanceTrigger:
             # ================================================================
             execution_time_ms = int((time.time() - start_time) * 1000)
             results["execution_time_ms"] = execution_time_ms
-            results["status"] = "success"
-            results["warning"] = "All job/task data and STAC items have been cleared. geo schema (business data) preserved."
 
-            logger.info(f"✅ FULL REBUILD COMPLETE in {execution_time_ms}ms")
+            if pgstac_failed:
+                # Partial success: app schema deployed but pgstac failed
+                # System is functional for job processing, STAC features unavailable
+                results["status"] = "partial_success"
+                results["pgstac_failed"] = True
+                results["warning"] = (
+                    "App schema deployed successfully - core system functional. "
+                    "pgstac deployment FAILED - STAC features unavailable until fixed. "
+                    "geo schema (business data) preserved."
+                )
+                logger.warning(f"⚠️ FULL REBUILD PARTIAL SUCCESS in {execution_time_ms}ms - pgstac failed")
 
-            return func.HttpResponse(
-                body=json.dumps(results, indent=2),
-                status_code=200,
-                mimetype='application/json'
-            )
+                return func.HttpResponse(
+                    body=json.dumps(results, indent=2),
+                    status_code=207,  # Multi-Status - partial success
+                    mimetype='application/json'
+                )
+            else:
+                # Full success: both app and pgstac schemas deployed
+                results["status"] = "success"
+                results["warning"] = "All job/task data and STAC items have been cleared. geo schema (business data) preserved."
+
+                logger.info(f"✅ FULL REBUILD COMPLETE in {execution_time_ms}ms")
+
+                return func.HttpResponse(
+                    body=json.dumps(results, indent=2),
+                    status_code=200,
+                    mimetype='application/json'
+                )
 
         except Exception as e:
             logger.error(f"❌ Unexpected error during full rebuild: {e}")

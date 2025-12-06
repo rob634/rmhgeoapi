@@ -1,33 +1,10 @@
-# ============================================================================
-# CLAUDE CONTEXT - STAC DASHBOARD INTERFACE
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: Web Interface - STAC collections browser
-# PURPOSE: Generate HTML dashboard for browsing STAC collections and items
-# LAST_REVIEWED: 14 NOV 2025
-# EXPORTS: StacInterface
-# INTERFACES: BaseInterface
-# PYDANTIC_MODELS: None
-# DEPENDENCIES: web_interfaces.base, azure.functions
-# SOURCE: STAC API endpoints
-# SCOPE: STAC collections visualization
-# VALIDATION: None (display only)
-# PATTERNS: Template Method (inherits BaseInterface)
-# ENTRY_POINTS: Registered as 'stac' in InterfaceRegistry
-# INDEX: StacInterface:40, render:60, _generate_custom_css:150, _generate_custom_js:200
-# ============================================================================
-
 """
-STAC Dashboard Interface
+STAC dashboard interface module.
 
-Web interface for browsing STAC collections and items. Provides:
-    - Collections grid view with metadata
-    - Collection detail view with items list
-    - Search and filter capabilities
-    - Stats banner
+Web dashboard for browsing STAC collections and items with search and filter capabilities.
 
-Route: /api/interface/stac
-
+Exports:
+    StacInterface: STAC collections browser with grid view and collection detail views
 """
 
 import azure.functions as func

@@ -1,33 +1,10 @@
-# ============================================================================
-# CLAUDE CONTEXT - OGC FEATURES INTERFACE
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: Web Interface - OGC Features collections browser
-# PURPOSE: Generate HTML dashboard for browsing OGC API - Features collections
-# LAST_REVIEWED: 15 NOV 2025
-# EXPORTS: VectorInterface
-# INTERFACES: BaseInterface
-# PYDANTIC_MODELS: None
-# DEPENDENCIES: web_interfaces.base, azure.functions
-# SOURCE: OGC Features API endpoints (/api/features/collections)
-# SCOPE: Vector feature collections visualization
-# VALIDATION: None (display only)
-# PATTERNS: Template Method (inherits BaseInterface)
-# ENTRY_POINTS: Registered as 'vector' in InterfaceRegistry
-# INDEX: VectorInterface:40, render:60, _generate_custom_css:150, _generate_custom_js:300
-# ============================================================================
-
 """
-OGC Features Interface
+OGC Features interface module.
 
-Web interface for browsing OGC API - Features collections. Provides:
-    - Collections grid view with metadata
-    - Clickable cards that open API endpoints
-    - Feature counts and spatial extents
-    - Links to items endpoint
+Web dashboard for browsing OGC API - Features collections with metadata and API endpoints.
 
-Route: /api/interface/vector
-
+Exports:
+    VectorInterface: OGC Features collections browser with clickable cards and spatial extents
 """
 
 import azure.functions as func

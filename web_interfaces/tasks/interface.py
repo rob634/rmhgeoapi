@@ -1,33 +1,10 @@
-# ============================================================================
-# CLAUDE CONTEXT - TASK MONITORING INTERFACE
-# ============================================================================
-# EPOCH: 4 - ACTIVE
-# STATUS: Web Interface - Task monitoring dashboard for individual jobs
-# PURPOSE: Generate HTML dashboard for viewing tasks of a specific job
-# LAST_REVIEWED: 20 NOV 2025
-# EXPORTS: TasksInterface
-# INTERFACES: BaseInterface
-# PYDANTIC_MODELS: None
-# DEPENDENCIES: web_interfaces.base, azure.functions
-# SOURCE: Database admin API endpoints (/api/dbadmin/jobs/{job_id}, /api/dbadmin/tasks/{job_id})
-# SCOPE: Task monitoring for specific job
-# VALIDATION: None (display only)
-# PATTERNS: Template Method (inherits BaseInterface)
-# ENTRY_POINTS: Registered as 'tasks' in InterfaceRegistry
-# INDEX: TasksInterface:40, render:60, _generate_custom_css:150, _generate_custom_js:300
-# ============================================================================
-
 """
-Task Monitoring Interface
+Task monitoring interface module.
 
-Web interface for viewing tasks of a specific job. Provides:
-    - Job metadata header with status and progress
-    - Tasks grouped by stage with expandable sections
-    - Task detail views with result data and error details
-    - Back button to return to Jobs dashboard
+Web dashboard for viewing tasks of a specific job with stage grouping and detail views.
 
-Route: /api/interface/tasks?job_id={job_id}
-
+Exports:
+    TasksInterface: Task monitoring dashboard with job metadata and expandable task sections
 """
 
 import azure.functions as func

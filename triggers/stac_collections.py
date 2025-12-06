@@ -1,32 +1,11 @@
-# ============================================================================
-# CLAUDE CONTEXT - HTTP TRIGGER
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: HTTP Trigger - STAC collection management for data tiers
-# PURPOSE: STAC collection management endpoints for Bronze/Silver/Gold tiers
-# LAST_REVIEWED: 29 OCT 2025
-# EXPORTS: StacCollectionsTrigger, stac_collections_trigger (singleton)
-# INTERFACES: BaseHttpTrigger (inherited from http_base)
-# PYDANTIC_MODELS: None - uses dict responses
-# DEPENDENCIES: http_base.BaseHttpTrigger, infrastructure.stac.StacInfrastructure, util_logger
-# SOURCE: HTTP POST requests with container/collection parameters
-# SCOPE: STAC catalog management - collection creation for data tier organization
-# VALIDATION: Container name validation, JSON request body validation, collection ID validation
-# PATTERNS: Template Method (base class), Lazy initialization (STAC infrastructure), Tier-based organization
-# ENTRY_POINTS: POST /api/stac/collections/bronze
-# INDEX: StacCollectionsTrigger:62, process_request:92, _create_bronze:132
-# ============================================================================
-
 """
-STAC Collection Management Trigger
+STAC Collection Management Trigger.
 
 HTTP endpoints for creating and managing STAC collections.
-Currently supports Bronze tier collections with container parameter.
 
-Endpoints:
-- POST /api/stac/collections/bronze - Create Bronze collection
-
-Last Updated: 29 OCT 2025
+Exports:
+    StacCollectionsTrigger: HTTP trigger class for STAC collection management
+    stac_collections_trigger: Singleton instance of StacCollectionsTrigger
 """
 
 from typing import Dict, Any, List, Optional

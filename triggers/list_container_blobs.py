@@ -1,54 +1,10 @@
-# ============================================================================
-# CLAUDE CONTEXT - HTTP TRIGGER
-# ============================================================================
-# EPOCH: 4 - ACTIVE
-# STATUS: HTTP Trigger - List blobs in container (read-only UI operation)
-# PURPOSE: Provide lightweight blob listing for Pipeline Dashboard browser
-# LAST_REVIEWED: 21 NOV 2025
-# EXPORTS: list_container_blobs_handler
-# INTERFACES: Azure Functions HTTP handler
-# PYDANTIC_MODELS: None (simple JSON response)
-# DEPENDENCIES: infrastructure.blob.BlobRepository
-# SOURCE: HTTP GET requests to /api/containers/{container_name}/blobs
-# SCOPE: Read-only blob listing (NO JOBS, NO TASKS - UI operation only)
-# VALIDATION: Container name validation, limit bounds
-# PATTERNS: Direct repository access, read-only
-# ENTRY_POINTS: GET /api/containers/{container_name}/blobs
-# INDEX: list_container_blobs_handler:50
-# ============================================================================
-
 """
-List Container Blobs HTTP Trigger
+List Container Blobs HTTP Trigger.
 
 Lightweight blob listing endpoint for Pipeline Dashboard UI.
-This is a READ-ONLY operation that directly queries Azure Blob Storage.
-Does NOT create jobs, tasks, or any database records.
 
-API Endpoint:
-    GET /api/containers/{container_name}/blobs?prefix={prefix}&limit={limit}
-
-Path Parameters:
-    container_name: Azure Blob Storage container name (e.g., 'bronze-rasters')
-
-Query Parameters:
-    prefix: Optional path prefix filter (e.g., 'maxar/', 'data/2025/')
-    limit: Maximum number of blobs to return (default: 50, max: 1000)
-
-Returns:
-    {
-        "container": "bronze-rasters",
-        "prefix": "maxar/",
-        "count": 50,
-        "blobs": [
-            {
-                "name": "maxar/file1.tif",
-                "size": 12500000,
-                "last_modified": "2025-11-20T14:30:00Z",
-                "content_type": "image/tiff"
-            },
-            ...
-        ]
-    }
+Exports:
+    list_container_blobs_handler: HTTP trigger function for GET /api/containers/{container_name}/blobs
 """
 
 import azure.functions as func

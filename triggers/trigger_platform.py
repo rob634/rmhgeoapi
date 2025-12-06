@@ -1,61 +1,13 @@
-# ============================================================================
-# CLAUDE CONTEXT - PLATFORM API REQUEST HTTP TRIGGER (THIN TRACKING)
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: HTTP Trigger - Platform Anti-Corruption Layer (updated 05 DEC 2025)
-# PURPOSE: Translate DDH requests to CoreMachine jobs (1:1 mapping, no orchestration)
-# LAST_REVIEWED: 05 DEC 2025
-# EXPORTS: platform_request_submit, platform_raster_submit, platform_raster_collection_submit
-# INTERFACES: None
-# PYDANTIC_MODELS: PlatformRequest, ApiRequest
-# DEPENDENCIES: azure-functions, psycopg, azure-servicebus, config
-# SOURCE: HTTP requests from external applications (DDH)
-# SCOPE: Platform layer - Anti-Corruption Layer between DDH and CoreMachine
-# VALIDATION: Pydantic models + PlatformConfig validation
-# PATTERNS: Anti-Corruption Layer, Thin Tracking, Parameter Translation
-# ENTRY_POINTS:
-#   - POST /api/platform/submit (generic - detects data type)
-#   - POST /api/platform/raster (single raster with size-based fallback)
-#   - POST /api/platform/raster-collection (multiple rasters → MosaicJSON)
-# INDEX:
-#   - Imports: Line 45
-#   - Generic HTTP Handler: Line 96
-#   - Raster Endpoints: Line 238
-#   - Parameter Translation: Line 526
-#   - Job Creation: Line 850
-# ============================================================================
-
 """
-Platform Request HTTP Trigger - Thin Tracking Pattern (Updated 05 DEC 2025)
+Platform Request HTTP Trigger.
 
-SIMPLIFIED ARCHITECTURE:
-    Platform is an Anti-Corruption Layer (ACL) that:
-    1. Accepts DDH requests (dataset_id, resource_id, version_id, etc.)
-    2. Translates DDH params → CoreMachine job params
-    3. Creates ONE CoreMachine job per request (1:1 mapping)
-    4. Stores thin tracking record (request_id → job_id)
-    5. Returns request_id for DDH status polling
+Anti-Corruption Layer that translates DDH requests to CoreMachine jobs with 1:1 mapping.
+Supports vector and raster data processing workflows with thin tracking pattern.
 
-    NO orchestration logic - CoreMachine handles job stages/tasks.
-    NO job chaining - each Platform request = one CoreMachine job.
-    NO callbacks - status delegated to CoreMachine.
-
-ENDPOINTS:
-    Generic (auto-detects data type):
-        POST /api/platform/submit
-
-    Dedicated Raster Endpoints (05 DEC 2025):
-        POST /api/platform/raster            → Single file (size-based fallback)
-        POST /api/platform/raster-collection → Multiple files (MosaicJSON pipeline)
-
-    DDH explicitly chooses raster endpoint based on single vs multiple files.
-    Platform handles size-based routing (small vs large) via fallback pattern.
-
-Supported Workflows (CREATE operation):
-    - VECTOR: process_vector (3-stage: prepare → upload → finalize) [28 NOV 2025]
-    - RASTER (single): process_raster_v2 (3-stage: validate → COG → STAC) [28 NOV 2025]
-    - RASTER (single, large): process_large_raster_v2 (auto-fallback for >1GB) [04 DEC 2025]
-    - RASTER (collection): process_raster_collection_v2 (4-stage: validate → COGs → MosaicJSON → STAC) [04 DEC 2025]
+Exports:
+    platform_request_submit: Generic HTTP trigger for POST /api/platform/submit
+    platform_raster_submit: Raster HTTP trigger for POST /api/platform/raster
+    platform_raster_collection_submit: Raster collection HTTP trigger for POST /api/platform/raster-collection
 """
 
 import json

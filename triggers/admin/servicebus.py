@@ -1,56 +1,11 @@
-# ============================================================================
-# CLAUDE CONTEXT - SERVICE BUS ADMIN TRIGGER
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: Admin HTTP Trigger - Service Bus queue monitoring and management
-# PURPOSE: Read-only inspection of Service Bus queues + nuclear button for clearing
-# LAST_REVIEWED: 04 NOV 2025
-# EXPORTS: ServiceBusAdminTrigger
-# INTERFACES: None (standalone trigger class)
-# PYDANTIC_MODELS: None (uses dict responses)
-# DEPENDENCIES: azure-servicebus>=7.11.0, config, util_logger
-# SOURCE: HTTP GET/POST requests to /api/admin/servicebus/* endpoints
-# SCOPE: Service Bus queue inspection - metrics, message peeking, dead letters, health
-# VALIDATION: Queue name validation, confirm parameter for destructive operations
-# PATTERNS: Lazy initialization, Read-only inspection, Nuclear button with safety
-# ENTRY_POINTS: GET /api/admin/servicebus/queues, POST /api/admin/servicebus/queues/{queue}/nuke
-# INDEX: ServiceBusAdminTrigger:70, handle_request:120, route handlers:200+
-# ============================================================================
-
 """
-Service Bus Admin HTTP Trigger
+Service Bus Admin HTTP Trigger.
 
-Provides monitoring and management endpoints for Azure Service Bus queues.
-Follows Phase 1 database admin patterns with read-only inspection + nuclear button.
+Service Bus queue monitoring and management endpoints.
 
-Endpoints (6 total):
-
-Read-Only Inspection:
-- GET  /api/admin/servicebus/queues                    - List all queues with metrics
-- GET  /api/admin/servicebus/queues/{queue}            - Queue details and properties
-- GET  /api/admin/servicebus/queues/{queue}/peek       - Peek active messages (read-only)
-- GET  /api/admin/servicebus/queues/{queue}/deadletter - Peek dead letter messages
-- GET  /api/admin/servicebus/health                    - Overall Service Bus health
-
-Destructive Operations:
-- POST /api/admin/servicebus/queues/{queue}/nuke?confirm=yes&target=all - Clear queue messages
-
-Key Features:
-- Queue metrics (active, dead letter, scheduled message counts)
-- Message peeking without dequeuing (read-only)
-- Dead letter queue inspection
-- Health monitoring with status checks
-- Nuclear button with safety confirmations (like db/stac nuke patterns)
-- Granular targeting (active, deadletter, or all)
-
-Safety Features:
-- Requires ?confirm=yes for destructive operations
-- Supports granular targeting (active/deadletter/all)
-- Logs warnings before destructive operations
-- Returns deleted message counts
-- Timeout protection (60 seconds max)
-
-Phase: 2 - Service Bus Admin API
+Exports:
+    ServiceBusAdminTrigger: HTTP trigger class for Service Bus operations
+    servicebus_admin_trigger: Singleton instance of ServiceBusAdminTrigger
 """
 
 import azure.functions as func

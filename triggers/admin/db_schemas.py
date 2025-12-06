@@ -1,35 +1,11 @@
-# ============================================================================
-# CLAUDE CONTEXT - DATABASE SCHEMAS ADMIN TRIGGER
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: Admin API - PostgreSQL schema inspection
-# PURPOSE: HTTP trigger for schema-level database inspection (app, geo, pgstac schemas)
-# LAST_REVIEWED: 03 NOV 2025
-# EXPORTS: AdminDbSchemasTrigger - Singleton trigger for schema operations
-# INTERFACES: Azure Functions HTTP trigger
-# PYDANTIC_MODELS: None - uses dict responses
-# DEPENDENCIES: azure.functions, psycopg, infrastructure.postgresql, util_logger
-# SOURCE: PostgreSQL information_schema and pg_catalog
-# SCOPE: Read-only schema inspection for monitoring and debugging
-# VALIDATION: None yet (future APIM authentication)
-# PATTERNS: Singleton trigger, RESTful admin API
-# ENTRY_POINTS: AdminDbSchemasTrigger.instance().handle_request(req)
-# INDEX: AdminDbSchemasTrigger:50, list_schemas:150, get_schema_details:250, list_schema_tables:350
-# ============================================================================
-
 """
-Database Schemas Admin Trigger
+Database Schemas Admin Trigger.
 
-Provides schema-level inspection of PostgreSQL database:
-- List all schemas with sizes and table counts
-- Get detailed schema information
-- List tables in a schema
+Schema-level inspection of PostgreSQL database.
 
-Endpoints:
-    GET /api/admin/db/schemas
-    GET /api/admin/db/schemas/{schema_name}
-    GET /api/admin/db/schemas/{schema_name}/tables
-
+Exports:
+    AdminDbSchemasTrigger: HTTP trigger class for schema operations
+    admin_db_schemas_trigger: Singleton instance of AdminDbSchemasTrigger
 """
 
 import azure.functions as func

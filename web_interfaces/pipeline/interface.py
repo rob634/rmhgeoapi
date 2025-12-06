@@ -1,34 +1,10 @@
-# ============================================================================
-# CLAUDE CONTEXT - PIPELINE DASHBOARD INTERFACE
-# ============================================================================
-# EPOCH: 4 - ACTIVE
-# STATUS: Web Interface - Bronze container file browser
-# PURPOSE: Generate HTML dashboard for browsing Bronze container files
-# LAST_REVIEWED: 21 NOV 2025
-# EXPORTS: PipelineInterface
-# INTERFACES: BaseInterface
-# PYDANTIC_MODELS: None
-# DEPENDENCIES: web_interfaces.base, azure.functions
-# SOURCE: Container blob listing API endpoints (/api/containers/*/blobs)
-# SCOPE: Bronze container file browsing and selection
-# VALIDATION: None (display only)
-# PATTERNS: Template Method (inherits BaseInterface)
-# ENTRY_POINTS: Registered as 'pipeline' in InterfaceRegistry
-# INDEX: PipelineInterface:40, render:60, _generate_custom_css:150, _generate_custom_js:400
-# ============================================================================
-
 """
-Pipeline Dashboard Interface
+Pipeline dashboard interface module.
 
-Web interface for browsing Bronze container files. Provides:
-    - Container selector (rmhazuregeobronze, rmhazuregeosilver, rmhazuregeogold)
-    - Prefix/folder filter input
-    - Load buttons (10, 50, All)
-    - Files table (Name, Size, Modified, Type)
-    - Click file -> Detail panel with metadata
-    - Placeholder for job submission (future)
+Web dashboard for browsing Azure Blob Storage bronze container files with filtering and detail views.
 
-Route: /api/interface/pipeline
+Exports:
+    PipelineInterface: Bronze container file browser with metadata and selection capabilities
 """
 
 import azure.functions as func

@@ -300,18 +300,35 @@ class ProcessVectorJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
                 total_rows_inserted += result.get("rows_inserted", 0)
                 total_rows_deleted += result.get("rows_deleted", 0)
 
-        # Extract STAC results from Stage 3
+        # Extract STAC results from Stage 3 (with degraded mode detection - 6 DEC 2025)
         stac_summary = {}
+        degraded_mode = False
+        degraded_warnings = []
+
         if stage_3_tasks and stage_3_tasks[0].result_data:
-            stac_result = stage_3_tasks[0].result_data.get("result", {})
-            stac_summary = {
-                "collection_id": stac_result.get("collection_id", "system-vectors"),
-                "stac_id": stac_result.get("stac_id"),
-                "pgstac_id": stac_result.get("pgstac_id"),
-                "inserted_to_pgstac": stac_result.get("inserted_to_pgstac", True),
-                "feature_count": stac_result.get("feature_count"),
-                "bbox": stac_result.get("bbox")
-            }
+            stac_data = stage_3_tasks[0].result_data
+
+            # Check for degraded mode (pgSTAC unavailable)
+            if stac_data.get("degraded"):
+                degraded_mode = True
+                degraded_warnings.append(stac_data.get("warning", "STAC cataloging skipped"))
+                stac_result = stac_data.get("result", {})
+                stac_summary = {
+                    "degraded": True,
+                    "stac_item_created": False,
+                    "ogc_features_available": stac_result.get("ogc_features_available", True),
+                    "degraded_reason": stac_result.get("degraded_reason")
+                }
+            else:
+                stac_result = stac_data.get("result", {})
+                stac_summary = {
+                    "collection_id": stac_result.get("collection_id", "system-vectors"),
+                    "stac_id": stac_result.get("stac_id"),
+                    "pgstac_id": stac_result.get("pgstac_id"),
+                    "inserted_to_pgstac": stac_result.get("inserted_to_pgstac", True),
+                    "feature_count": stac_result.get("feature_count"),
+                    "bbox": stac_result.get("bbox")
+                }
 
         # Generate OGC Features URL and Vector Viewer URL
         from config import get_config
@@ -320,13 +337,15 @@ class ProcessVectorJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
         ogc_features_url = config.generate_ogc_features_url(table_name)
         viewer_url = config.generate_vector_viewer_url(table_name)
 
+        # Log completion with degraded mode indicator
+        stac_status = "(STAC skipped - degraded mode)" if degraded_mode else "STAC cataloged"
         logger.info(
             f"[{context.job_id[:8]}] process_vector completed: "
             f"{total_rows_inserted} rows inserted, {total_rows_deleted} rows deleted (reruns), "
-            f"STAC cataloged"
+            f"{stac_status}"
         )
 
-        return {
+        result = {
             "job_type": "process_vector",
             "blob_name": params.get("blob_name"),
             "file_extension": params.get("file_extension"),
@@ -355,3 +374,12 @@ class ProcessVectorJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
                 "queued": sum(1 for t in task_results if t.status == TaskStatus.QUEUED)
             }
         }
+
+        # Add degraded mode info if applicable (6 DEC 2025)
+        if degraded_mode:
+            result["degraded_mode"] = True
+            result["warnings"] = degraded_warnings
+            result["available_capabilities"] = ["OGC Features API", "Vector Viewer"]
+            result["unavailable_capabilities"] = ["STAC API discovery"]
+
+        return result

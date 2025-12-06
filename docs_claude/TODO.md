@@ -472,11 +472,33 @@ def inventory_raster_item(params):
 **Status**: 🎨 **LOW PRIORITY**
 **Purpose**: Add TiTiler URLs for common band combinations (NDVI, false color)
 
+### Function App Separation: Vector Worker Extraction
+
+**Status**: 📋 **FUTURE ENHANCEMENT**
+**Priority**: 🟡 MEDIUM
+**Reference**: `/PRODUCTION_ARCHITECTURE.md`
+
+**Problem**: Single `host.json` cannot optimize for both raster (GDAL, 2-8GB RAM, low concurrency) and vector (geopandas, 20-200MB, high parallelism) workloads simultaneously.
+
+**Selected Architecture**: Option A - Main ETL as Entry Point + Vector Worker
+- Main app: HTTP triggers, orchestration, raster processing (`maxConcurrentCalls: 2`)
+- Vector app: Service Bus trigger only, vector tasks (`maxConcurrentCalls: 32`)
+
+**Implementation Phases**:
+1. Queue separation: Create `raster-tasks` + `vector-tasks` queues, add routing to CoreMachine
+2. Vector worker extraction: Deploy dedicated Function App for vector processing
+3. Host.json optimization: Tune main app for raster after vector extraction
+4. Container app for 50GB+ files (DEFERRED - wait for TiTiler Docker stability)
+
+**Benefits**: 10-30x vector throughput, workload isolation, no OOM during mixed loads
+
+---
+
 ### Azure API Management (APIM)
 
 **Status**: 📋 **FUTURE**
 **Purpose**: Route single domain to specialized Function Apps
-**When**: After microservices split
+**When**: After Function App separation complete
 
 ---
 
@@ -495,4 +517,4 @@ See `HISTORY2.md` for items completed and moved from TODO.md:
 
 ---
 
-**Last Updated**: 05 DEC 2025 (Added Unpublish Workflows plan)
+**Last Updated**: 06 DEC 2025 (Added Function App Separation architecture reference)

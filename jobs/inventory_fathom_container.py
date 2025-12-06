@@ -1,39 +1,17 @@
-# ============================================================================
-# CLAUDE CONTEXT - JOB WORKFLOW - FATHOM CONTAINER INVENTORY
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: Job workflow - Inventory Fathom container to database
-# PURPOSE: Scan bronze-fathom container and populate etl_fathom tracking table
-# LAST_REVIEWED: 05 DEC 2025
-# EXPORTS: InventoryFathomContainerJob class
-# INTERFACES: JobBase contract, JobBaseMixin for boilerplate elimination
-# PYDANTIC_MODELS: None (uses declarative parameters_schema)
-# DEPENDENCIES: jobs.base.JobBase, jobs.mixins.JobBaseMixin
-# SOURCE: bronze-fathom container (Fathom Global Flood Maps v3)
-# SCOPE: Full container scan - 8M files inventoried to database
-# VALIDATION: Declarative schema via JobBaseMixin
-# PATTERNS: Mixin pattern, parallel scan by prefix, batch database inserts
-# ENTRY_POINTS: Registered in jobs/__init__.py ALL_JOBS as "inventory_fathom_container"
-# INDEX: InventoryFathomContainerJob:35, stages:55, parameters_schema:70, create_tasks_for_stage:110
-# ============================================================================
-
 """
-Inventory Fathom Container Job
+Inventory Fathom Container Job.
 
-Scans the bronze-fathom container and populates the app.etl_fathom tracking table.
-This enables database-driven processing instead of CSV file parsing.
+Scans the bronze-fathom container and populates the etl_fathom tracking table.
+Enables database-driven processing instead of CSV file parsing.
 
 Parallelization Strategy:
-- Stage 1: Generate ~80 scan prefixes (5 flood_types × 4 years × 4 SSPs)
-- Stage 2: Parallel scan (one task per prefix, ~8 parallel inserts)
-- Stage 3: Assign grid cells for phase 2 grouping
-- Stage 4: Generate summary statistics
+    - Stage 1: Generate ~80 scan prefixes
+    - Stage 2: Parallel scan (one task per prefix)
+    - Stage 3: Assign grid cells for phase 2 grouping
+    - Stage 4: Generate summary statistics
 
-Benefits:
-    - Ground truth from actual blob storage (not CSV)
-    - Idempotent (ON CONFLICT DO UPDATE)
-    - Enables resumable processing
-    - SQL-queryable progress tracking
+Exports:
+    InventoryFathomContainerJob: Main job class for Fathom inventory
 """
 
 from typing import List, Dict, Any

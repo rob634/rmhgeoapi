@@ -1,41 +1,17 @@
-# ============================================================================
-# CLAUDE CONTEXT - H3 NATIVE STREAMING HANDLER
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: Service Layer - H3 grid generation with Python native h3-py + streaming to PostGIS
-# PURPOSE: Generate H3 hexagonal grids using h3-py C bindings and stream directly to PostGIS
-# LAST_REVIEWED: 25 NOV 2025
-# EXPORTS: h3_native_streaming_postgis (task handler)
-# INTERFACES: Task handler interface (dict → dict)
-# DEPENDENCIES: h3>=4.0.0 (C bindings), psycopg[binary], shapely, infrastructure.h3_repository
-# SOURCE: Task parameters from CoreMachine jobs
-# SCOPE: H3 grid generation (Stage 1 of create_h3_base and generate_h3_level4 jobs)
-# VALIDATION: Task parameter validation, PostGIS connection validation
-# PATTERNS: Generator pattern (memory efficiency), Repository pattern, batch insertion
-# ENTRY_POINTS: Called by CoreMachine task processor via services.ALL_HANDLERS registry
-# INDEX:
-#   - Lines 30-80: generate_h3_cells_native() - h3-py generator function
-#   - Lines 85-130: stream_to_postgis_sync() - batch insertion via H3Repository
-#   - Lines 135-250: h3_native_streaming_postgis() - main task handler with metrics
-# ============================================================================
-
 """
-H3 Native Streaming Handler
+H3 Native Streaming Handler.
 
-Generates H3 hexagonal grids using h3-py (Python bindings to Uber's C library)
-and streams directly to PostGIS using H3Repository for managed identity support.
+Generates H3 hexagonal grids using h3-py C bindings and streams to PostGIS.
 
-Performance Comparison:
-- DuckDB approach: 60-90 seconds (SQL overhead)
-- h3-py native: 15-25 seconds (direct C calls)
-- Speedup: 3-4x faster with same memory footprint
+Performance: 3-4x faster than DuckDB approach (15-25 sec vs 60-90 sec).
 
 Architecture:
-1. Generator pattern: Yields H3 cells one at a time (memory efficient)
-2. H3Repository: Managed identity authentication, safe SQL composition
-3. Batch insertion: 1000 cells per batch (optimizes network round-trips)
+    - Generator pattern: Yields cells one at a time (memory efficient)
+    - H3Repository: Managed identity authentication, safe SQL composition
+    - Batch insertion: 1000 cells per batch (optimizes network round-trips)
 
-Updated 25 NOV 2025: Replaced asyncpg with H3Repository for managed identity support.
+Exports:
+    h3_native_streaming_postgis: Task handler function
 """
 
 import time

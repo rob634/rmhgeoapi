@@ -1,33 +1,16 @@
-# ============================================================================
-# CLAUDE CONTEXT - H3 STAC CREATION HANDLER
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: Service - H3 grid STAC item creation handler
-# PURPOSE: Create STAC items for H3 grids stored in PostGIS geo.h3_grids table
-# LAST_REVIEWED: 9 NOV 2025
-# EXPORTS: create_h3_stac (task handler function)
-# INTERFACES: Core Machine task handler protocol
-# PYDANTIC_MODELS: stac_pydantic.Item, stac_pydantic.Asset
-# DEPENDENCIES: stac-pydantic, psycopg, infrastructure.stac, util_logger
-# SOURCE: PostGIS geo.h3_grids table metadata
-# SCOPE: Stage 3 of H3 grid workflow (after PostGIS insertion)
-# VALIDATION: Grid ID validation, bbox validation, STAC spec compliance
-# PATTERNS: Task handler pattern, STAC cataloging, idempotency
-# ENTRY_POINTS: Called by Core Machine task processor for "create_h3_stac" task type
-# INDEX: create_h3_stac:40, _extract_h3_metadata:150, _build_stac_item:200
-# ============================================================================
-
 """
-H3 Grid STAC Item Creation Handler
+H3 Grid STAC Item Creation Handler.
 
-Creates STAC items for H3 hexagonal grids stored in PostGIS, enabling discovery
-and cataloging via the STAC API.
+Creates STAC items for H3 hexagonal grids stored in PostGIS,
+enabling discovery and cataloging via the STAC API.
 
 Workflow:
-    Stage 1 → Generate H3 grid → Save to GeoParquet
-    Stage 2 → Load GeoParquet → Insert to PostGIS
-    Stage 3 (THIS HANDLER) → Create STAC item → Catalog in pgstac
+    Stage 1: Generate H3 grid → Save to GeoParquet
+    Stage 2: Load GeoParquet → Insert to PostGIS
+    Stage 3 (this handler): Create STAC item → Catalog in pgstac
 
+Exports:
+    create_h3_stac: Task handler function
 """
 
 import time

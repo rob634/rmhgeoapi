@@ -1,25 +1,15 @@
-# ============================================================================
-# CLAUDE CONTEXT - SERVICE
-# ============================================================================
-# PURPOSE: Extract STAC metadata from raster files using rio-stac + stac-pydantic
-# EXPORTS: StacMetadataService class
-# PYDANTIC_MODELS: stac_pydantic.Item, stac_pydantic.Asset
-# DEPENDENCIES: stac-pydantic, rio-stac, rasterio, azure-storage-blob
-# PATTERNS: Service Layer, DRY (leverage libraries for metadata extraction)
-# ENTRY_POINTS: StacMetadataService().extract_item_from_blob()
-# ============================================================================
-
 """
-STAC Metadata Extraction Service
+STAC Metadata Extraction Service.
 
 Extracts STAC Item metadata from raster files using rio-stac library.
 Validates with stac-pydantic for type safety and STAC spec compliance.
 
-Strategy: DRY - Leverage libraries for heavy lifting
-- rio-stac: Geometry, bbox, projection, raster metadata extraction
-- stac-pydantic: Validation and type safety
-- Our code: Azure metadata, collection determination, custom properties
+Uses:
+    - rio-stac: Geometry, bbox, projection, raster metadata extraction
+    - stac-pydantic: Validation and type safety
 
+Exports:
+    StacMetadataService: Main service class for STAC metadata extraction
 """
 
 from typing import Dict, Any, Optional

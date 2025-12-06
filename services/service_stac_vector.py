@@ -1,28 +1,15 @@
-# ============================================================================
-# CLAUDE CONTEXT - SERVICE
-# ============================================================================
-# PURPOSE: Extract STAC metadata from PostGIS vector tables for cataloging
-# EXPORTS: StacVectorService class
-# PYDANTIC_MODELS: stac_pydantic.Item, stac_pydantic.Asset
-# DEPENDENCIES: stac-pydantic, psycopg, shapely
-# PATTERNS: Service Layer, DRY (leverage PostGIS for metadata extraction)
-# ENTRY_POINTS: StacVectorService().extract_item_from_table()
-# INDEX: StacVectorService:40, extract_item_from_table:55, _get_table_extent:150
-# UPDATED: 29 NOV 2025 - Added target_database parameter for dual database support
-# DUAL_DATABASE: Vector tables in business db (ddhgeodb), STAC catalog in app db (geopgflex)
-# ============================================================================
-
 """
-STAC Vector Metadata Service
+STAC Vector Metadata Service.
 
 Extracts STAC Item metadata from PostGIS vector tables.
 Validates with stac-pydantic for type safety and STAC spec compliance.
 
-Strategy: DRY - Leverage PostGIS for spatial operations
-- PostGIS: Geometry extent, bounds, row count, geometry types
-- stac-pydantic: Validation and type safety
-- Our code: Table metadata, custom properties, asset links
+Uses:
+    - PostGIS: Geometry extent, bounds, row count, geometry types
+    - stac-pydantic: Validation and type safety
 
+Exports:
+    StacVectorService: Main service class for vector STAC metadata extraction
 """
 
 from typing import Dict, Any, Optional, List, Literal

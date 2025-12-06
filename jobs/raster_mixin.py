@@ -1,47 +1,16 @@
-# ============================================================================
-# CLAUDE CONTEXT - RASTER MIXIN (SHARED INFRASTRUCTURE)
-# ============================================================================
-# EPOCH: 4 - ACTIVE
-# STATUS: New infrastructure - Shared schemas and helpers for raster workflows
-# PURPOSE: DRY principle - Extract common raster workflow patterns for extensibility
-# LAST_REVIEWED: 30 NOV 2025
-# EXPORTS: RasterMixin
-# INTERFACES: Mixin pattern - provides schemas and static helpers
-# PYDANTIC_MODELS: None (uses declarative parameters_schema dicts)
-# DEPENDENCIES: infrastructure.blob.BlobRepository, config
-# SOURCE: Extracted from process_raster_v2, process_raster_collection patterns
-# SCOPE: Shared across all raster processing workflows
-# VALIDATION: Relies on JobBaseMixin for schema validation
-# PATTERNS: Mixin pattern, DRY principle, Schema composition
-# ENTRY_POINTS: Inherited by raster workflow classes
-# INDEX:
-#   - COMMON_RASTER_SCHEMA: line 50
-#   - MOSAICJSON_SCHEMA: line 70
-#   - PLATFORM_PASSTHROUGH_SCHEMA: line 85
-#   - VALIDATION_BYPASS_SCHEMA: line 95
-#   - _resolve_raster_config: line 105
-#   - _create_validation_tasks: line 130
-#   - _create_cog_tasks: line 180
-# ============================================================================
-
 """
-RasterMixin - Shared Infrastructure for Raster Workflows
+Raster Mixin - Shared Infrastructure for Raster Workflows.
 
-This mixin provides shared parameter schemas and helper methods for all raster
-processing workflows. Designed for extensibility - new raster jobs inherit
-common patterns while customizing stage-specific logic.
+Provides shared parameter schemas and helper methods for all raster
+processing workflows. Designed for extensibility.
 
 Used by:
-- ProcessRasterV2Job (single file, 3 stages)
-- ProcessRasterCollectionV2Job (multi-tile, 4 stages)
-- ProcessLargeRasterV2Job (large file tiling, 5 stages)
-- Future raster workflows
+    - ProcessRasterV2Job (single file, 3 stages)
+    - ProcessRasterCollectionV2Job (multi-tile, 4 stages)
+    - ProcessLargeRasterV2Job (large file tiling, 5 stages)
 
-Key Features:
-    - Schema composition with ** operator
-    - Static helper methods for fan-out task creation
-    - Config-aware default resolution
-    - Platform passthrough field support
+Exports:
+    RasterMixin: Mixin class with shared schemas and helpers
 """
 
 from typing import Dict, Any, List, Optional

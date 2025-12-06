@@ -1,37 +1,13 @@
-# ============================================================================
-# CLAUDE CONTEXT - POSTGIS HANDLER
-# ============================================================================
-# PURPOSE: Handle GeoDataFrame validation, chunking, and upload to PostGIS
-# EXPORTS: VectorToPostGISHandler class
-# INTERFACES: None (concrete implementation)
-# PYDANTIC_MODELS: None (operates on GeoDataFrames)
-# DEPENDENCIES: geopandas, psycopg, config, core.schema.geo_table_builder
-# SOURCE: Called by validate_vector and upload_vector_chunk tasks
-# SCOPE: Service layer - PostGIS integration
-# VALIDATION: Geometry validation, CRS reprojection, column name cleaning
-# PATTERNS: Handler class with single responsibility methods
-# ENTRY_POINTS: from services.vector.postgis_handler import VectorToPostGISHandler
-# INDEX:
-#   - __init__ (line 39): Initialize with PostgreSQL connection
-#   - prepare_gdf (line 49): Validate and prepare GeoDataFrame
-#   - calculate_optimal_chunk_size (line 108): Auto-calculate chunk size based on data
-#   - chunk_gdf (line 185): Split GeoDataFrame into chunks (auto or manual size)
-#   - upload_chunk (line 213): Upload chunk to PostGIS
-#   - _get_postgres_type (line 250): Map pandas dtypes to PostgreSQL types
-#   - _create_table_if_not_exists (line 270): Create PostGIS table
-#   - _insert_features (line 320): Insert GeoDataFrame rows
-#   - create_table_with_metadata (line NEW): Create table with GeoTableBuilder + metadata
-# UPDATED: 29 NOV 2025 - Added target_database parameter for dual database support
-# DUAL_DATABASE: target_database="business" routes to ddhgeodb business database
-# ============================================================================
-
 """
-VectorToPostGISHandler - GeoDataFrame validation and PostGIS upload.
+Vector to PostGIS Handler.
 
 Handles the complete workflow of preparing and uploading vector data to PostGIS:
-1. prepare_gdf: Validate geometries, reproject to EPSG:4326, clean column names
-2. chunk_gdf: Split large GeoDataFrames for parallel processing
-3. upload_chunk: Create table and insert features into PostGIS geo schema
+    1. prepare_gdf: Validate geometries, reproject to EPSG:4326, clean column names
+    2. chunk_gdf: Split large GeoDataFrames for parallel processing
+    3. upload_chunk: Create table and insert features into PostGIS geo schema
+
+Exports:
+    VectorToPostGISHandler: Main handler class for PostGIS vector operations
 """
 
 from typing import List, Dict, Any, Literal

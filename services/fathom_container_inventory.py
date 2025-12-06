@@ -1,33 +1,13 @@
-# ============================================================================
-# CLAUDE CONTEXT - SERVICE - FATHOM INVENTORY HANDLERS
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: Service - Handlers for Fathom container inventory job
-# PURPOSE: Scan blob storage and populate etl_fathom database table
-# LAST_REVIEWED: 05 DEC 2025
-# EXPORTS: fathom_generate_scan_prefixes, fathom_scan_prefix, fathom_assign_grid_cells, fathom_inventory_summary
-# INTERFACES: Handler functions following (params: Dict) -> Dict pattern
-# PYDANTIC_MODELS: None
-# DEPENDENCIES: infrastructure.blob, infrastructure.postgresql, config
-# SOURCE: Azure Blob Storage (bronze-fathom), PostgreSQL (app.etl_fathom)
-# SCOPE: Container scanning and database population
-# VALIDATION: Parameter validation in handlers
-# PATTERNS: Handler pattern, batch processing, idempotent upserts
-# ENTRY_POINTS: Registered in services/__init__.py ALL_HANDLERS
-# INDEX: fathom_generate_scan_prefixes:50, fathom_scan_prefix:120, fathom_assign_grid_cells:280, fathom_inventory_summary:350
-# ============================================================================
-
 """
-Fathom Container Inventory Handlers
+Fathom Container Inventory Handlers.
 
-Handlers for the inventory_fathom_container job that scans the bronze-fathom
-container and populates the app.etl_fathom tracking table.
+Handlers for scanning blob storage and populating the etl_fathom tracking table.
 
 Handler Functions:
-    1. fathom_generate_scan_prefixes - Generate prefixes for parallel scanning
-    2. fathom_scan_prefix - Scan blobs by prefix and batch insert to database
-    3. fathom_assign_grid_cells - Calculate 5x5 degree grid cell assignments
-    4. fathom_inventory_summary - Generate statistics summary
+    fathom_generate_scan_prefixes: Generate prefixes for parallel scanning
+    fathom_scan_prefix: Scan blobs by prefix and batch insert to database
+    fathom_assign_grid_cells: Calculate grid cell assignments
+    fathom_inventory_summary: Generate statistics summary
 """
 
 import re

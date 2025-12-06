@@ -1,109 +1,20 @@
-# ============================================================================
-# CLAUDE CONTEXT - PGSTAC SEARCH REGISTRATION SERVICE
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: Service - Direct database registration for pgSTAC searches
-# PURPOSE: Register searches in pgstac.searches table (bypassing TiTiler API)
-# LAST_REVIEWED: 25 NOV 2025
-# EXPORTS: PgSTACSearchRegistration class
-# INTERFACES: Service layer for search registration
-# PYDANTIC_MODELS: None - uses dicts for search payloads
-# DEPENDENCIES: hashlib (SHA256), json, infrastructure.postgresql
-# SOURCE: Direct writes to pgstac.searches table
-# SCOPE: Production architecture - ETL writes, TiTiler reads
-# VALIDATION: Search query validation, hash collision detection
-# PATTERNS: Repository pattern, Service layer
-# ENTRY_POINTS: PgSTACSearchRegistration().register_search()
-# INDEX:
-#   - PgSTACSearchRegistration class: Line 40
-#   - register_search: Line 60
-#   - register_collection_search: Line 140
-#   - get_search_urls: Line 170
-# ============================================================================
-
 """
-PgSTAC Search Registration Service
+PgSTAC Search Registration Service.
 
 Registers searches directly in pgstac.searches table without calling TiTiler.
 This allows TiTiler to be read-only in production while ETL handles all writes.
 
 Production Architecture:
-- ETL Pipeline (rmhazuregeoapi): Read-write access to pgstac schema
-- TiTiler (rmhtitiler): Read-only access to pgstac schema
+    ETL Pipeline: Read-write access to pgstac schema
+    TiTiler: Read-only access to pgstac schema
 
-Why This Pattern:
-- TiTiler can be read-only (better security)
-- No APIM needed to protect /searches/register endpoint
-- ETL owns all pgSTAC writes (collections, items, searches)
-- Atomic operations during ingestion workflow
+Benefits:
+    - TiTiler can be read-only (better security)
+    - ETL owns all pgSTAC writes (collections, items, searches)
+    - Atomic operations during ingestion workflow
 
-IMPORTANT: pgSTAC GENERATED Column Workaround (25 NOV 2025)
-============================================================
-
-This service uses a SELECT-then-INSERT/UPDATE pattern instead of a standard
-UPSERT (INSERT...ON CONFLICT) due to a PostgreSQL bug with GENERATED columns.
-
-THE BUG:
---------
-The pgstac.searches table has a GENERATED column:
-    hash TEXT GENERATED ALWAYS AS (search_hash(search, metadata))
-
-When using ON CONFLICT (hash), PostgreSQL's query planner "inlines" the
-GENERATED column expression during conflict detection. This causes it to
-look for search_tohash(jsonb) with 1 argument, but the function is defined
-as search_tohash(jsonb, jsonb) with 2 arguments.
-
-Error: "function search_tohash(jsonb) does not exist"
-
-This happens because search_hash() internally calls search_tohash() and
-during query inlining, PostgreSQL gets confused about the function signature.
-
-THE WORKAROUND:
----------------
-Instead of:
-    INSERT INTO pgstac.searches (search, metadata)
-    VALUES ($1, $2)
-    ON CONFLICT (hash) DO UPDATE SET lastused = NOW()  -- FAILS!
-
-We use:
-    1. Compute hash in Python (SHA256 of canonical JSON)
-    2. SELECT to check if hash exists
-    3. If exists: UPDATE the row
-    4. If not: INSERT new row (GENERATED column computes hash on INSERT)
-
-This avoids ON CONFLICT entirely, which is the only operation that triggers
-the bug.
-
-ROOT CAUSE FIX:
----------------
-A fresh pgSTAC installation via `DROP SCHEMA pgstac CASCADE` followed by
-`pypgstac migrate` creates functions with correct signatures. The endpoint
-POST /api/dbadmin/maintenance/full-rebuild?confirm=yes performs this.
-
-After a clean rebuild, the workaround is technically unnecessary, but we
-keep it as defensive programming to protect against:
-- Future partial migration failures
-- Environments that haven't been rebuilt
-- Edge cases where pgstac schema gets corrupted
-
-VERIFICATION:
--------------
-To check if your pgSTAC functions have correct signatures:
-
-    SELECT p.proname, pg_get_function_arguments(p.oid)
-    FROM pg_proc p
-    JOIN pg_namespace n ON p.pronamespace = n.oid
-    WHERE n.nspname = 'pgstac'
-    AND p.proname IN ('search_tohash', 'search_hash');
-
-Expected (correct):
-    search_hash    | search jsonb, metadata jsonb
-    search_tohash  | search jsonb                   <- 1 argument
-
-Broken (bug present):
-    search_hash    | search jsonb, metadata jsonb
-    search_tohash  | search jsonb, metadata jsonb   <- 2 arguments (WRONG)
-
+Exports:
+    PgSTACSearchRegistration: Search registration service class
 """
 
 import json

@@ -1,59 +1,22 @@
-# ============================================================================
-# CLAUDE CONTEXT - SERVICE - FATHOM ETL HANDLERS
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: Service - Task handlers for Fathom flood hazard ETL pipeline
-# PURPOSE: Inventory, merge/stack, and STAC registration for Fathom data
-# LAST_REVIEWED: 03 DEC 2025
-# EXPORTS: Phase 1 (band stack): fathom_tile_inventory, fathom_band_stack
-#          Phase 2 (spatial merge): fathom_grid_inventory, fathom_spatial_merge
-#          Shared: fathom_stac_register
-# INTERFACES: Standard handler contract (params, context) -> dict
-# PYDANTIC_MODELS: None
-# DEPENDENCIES: pandas, rasterio, GDAL, azure.storage.blob, pgstac
-# SOURCE: bronze-fathom container (Fathom Global Flood Maps v3)
-# SCOPE: Regional flood hazard data consolidation
-# VALIDATION: Handler-level validation, STAC-driven idempotency
-# PATTERNS: Handler contract compliance, streaming blob access, STAC idempotency
-# ENTRY_POINTS: Registered in services/__init__.py ALL_HANDLERS
-# IDEMPOTENCY: Two-tier: STAC query at inventory (skip processed), blob check at processing
-# ============================================================================
-
 """
-Fathom ETL Task Handlers - Two-Phase Architecture (03 DEC 2025)
+Fathom ETL Task Handlers.
 
-PHASE 1: Band Stacking (process_fathom_stack job)
-- fathom_tile_inventory: Group by tile + scenario (not country)
-- fathom_band_stack: Stack 8 return periods into multi-band COG (~500MB/task)
-- Output: 1M files (8× reduction from 8M source files)
+Two-phase architecture for Fathom flood hazard data processing.
 
-PHASE 2: Spatial Merge (process_fathom_merge job)
-- fathom_grid_inventory: Group Phase 1 outputs by NxN grid cell
-- fathom_spatial_merge: Merge NxN tiles band-by-band (~2-3GB/task)
-- Output: 40K files with 5×5 grid (additional 25× reduction)
+Phase 1 (Band Stacking):
+    - fathom_tile_inventory: Group by tile + scenario
+    - fathom_band_stack: Stack 8 return periods into multi-band COG
+
+Phase 2 (Spatial Merge):
+    - fathom_grid_inventory: Group by NxN grid cell
+    - fathom_spatial_merge: Merge tiles band-by-band
 
 Shared:
-- fathom_stac_register: STAC collection/item creation (works for both phases)
+    - fathom_stac_register: STAC collection/item creation
 
-STAC-DRIVEN IDEMPOTENCY (03 DEC 2025):
-- Submit with bbox: Only process tiles within bounding box
-- Inventory stage queries STAC catalog for already-processed items
-- Tiles/grid cells already in STAC are excluded from processing
-- Enables resumable global runs: interrupt → resume → skip completed
-- Two-tier idempotency:
-  1. STAC query at inventory (skip tiles/grid cells with STAC items)
-  2. Blob existence check at processing (fallback for crash recovery)
-
-Usage Examples:
-    # Process single region with bbox filter
-    curl -X POST .../api/jobs/submit/process_fathom_stack \\
-      -d '{"region_code": "CI", "bbox": [-8, 4, -2, 10]}'
-
-    # Resume interrupted global run (skips already-processed tiles)
-    curl -X POST .../api/jobs/submit/process_fathom_stack \\
-      -d '{"region_code": "CI"}'  # No bbox = process all, STAC skips completed
-
-See docs/archive/jobs/fathom_legacy_dec2025/ for legacy handlers.
+Exports:
+    fathom_tile_inventory, fathom_band_stack, fathom_grid_inventory,
+    fathom_spatial_merge, fathom_stac_register
 """
 
 import re

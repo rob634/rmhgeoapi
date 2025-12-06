@@ -1,30 +1,15 @@
-# ============================================================================
-# CLAUDE CONTEXT - VECTOR ETL TASK HANDLERS
-# ============================================================================
-# PURPOSE: Task handlers for vector ETL workflow (load, validate, upload)
-# EXPORTS: load_vector_file, validate_vector, upload_vector_chunk
-# INTERFACES: TaskRegistry (decorator registration pattern)
-# PYDANTIC_MODELS: Uses Dict[str, Any] for parameters and returns
-# DEPENDENCIES: geopandas, infrastructure.blob.BlobRepository, services.vector.converters
-# SOURCE: Called by CoreMachine during task execution
-# SCOPE: Service layer - task execution logic
-# VALIDATION: Format validation, GeoDataFrame validation
-# PATTERNS: TaskRegistry decorator pattern (when registry exists)
-# ENTRY_POINTS: Registered with @TaskRegistry.register() decorator
-# INDEX:
-#   - load_vector_file (line 35): Load file from blob storage and convert to GDF
-#   - validate_vector (line 90): Validate and prepare GeoDataFrame
-#   - upload_vector_chunk (line 110): Upload GDF chunk to PostGIS
-# ============================================================================
-
 """
-Vector ETL task handlers using TaskRegistry.
+Vector ETL Task Handlers.
 
-These task handlers are registered with TaskRegistry and executed by CoreMachine.
-They implement the three stages of vector ETL:
-1. load_vector_file: Load from blob storage and convert to GeoDataFrame
-2. validate_vector: Validate and prepare GeoDataFrame for PostGIS
-3. upload_vector_chunk: Upload chunk to PostGIS geo schema
+Task handlers for the three stages of vector ETL workflow:
+    1. load_vector_file: Load from blob storage and convert to GeoDataFrame
+    2. validate_vector: Validate and prepare GeoDataFrame for PostGIS
+    3. upload_vector_chunk: Upload chunk to PostGIS geo schema
+
+Exports:
+    load_vector_file: Load file from blob storage task
+    validate_vector: Validate and prepare GeoDataFrame task
+    upload_vector_chunk: Upload chunk to PostGIS task
 """
 
 from typing import Dict, Any

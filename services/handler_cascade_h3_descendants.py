@@ -1,45 +1,20 @@
-# ============================================================================
-# CLAUDE CONTEXT - SERVICE HANDLER
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: Service - H3 Multi-Level Cascade Handler
-# PURPOSE: Generate ALL H3 descendants from parent grid (e.g., res 2 → res 3,4,5,6,7)
-# LAST_REVIEWED: 15 NOV 2025
-# EXPORTS: cascade_h3_descendants (task handler function)
-# INTERFACES: CoreMachine task handler contract (params, context → result dict)
-# PYDANTIC_MODELS: None (uses dict parameters and results)
-# DEPENDENCIES: infrastructure.h3_repository.H3Repository, h3, util_logger
-# SOURCE: Called by CoreMachine during Stage 2 of bootstrap_h3_land_grid_pyramid job
-# SCOPE: Multi-resolution cascade generation with batching support
-# VALIDATION: Parent grid existence, batch bounds checking
-# PATTERNS: Task handler, Batch processing, Multi-level cascade, ON CONFLICT idempotency
-# IDEMPOTENCY: Batch-level tracking via H3BatchTracker (26 NOV 2025)
-# ENTRY_POINTS: Registered in services/__init__.py as "cascade_h3_descendants"
-# INDEX: cascade_h3_descendants:44, _cascade_batch:175, _insert_descendants:255
-# ============================================================================
-
 """
-H3 Multi-Level Cascade Handler
+H3 Multi-Level Cascade Handler.
 
 Generates ALL descendants from a parent grid across multiple resolution levels.
 
-Example Use Case:
-    Input: 10 res 2 parent cells
-    Target Resolutions: [3, 4, 5, 6, 7]
-    Output: ~168,070 cells inserted to h3.grids
-        - Res 3: 10 × 7¹ = 70 cells
-        - Res 4: 10 × 7² = 490 cells
-        - Res 5: 10 × 7³ = 3,430 cells
-        - Res 6: 10 × 7⁴ = 24,010 cells
-        - Res 7: 10 × 7⁵ = 168,070 cells
+Example:
+    Input: 10 res 2 parent cells, target [3,4,5,6,7]
+    Output: ~168,070 cells (70 + 490 + 3,430 + 24,010 + 168,070)
 
 Key Properties:
-    - No spatial filtering needed (children inherit parent land membership)
-    - Idempotent (ON CONFLICT DO NOTHING for duplicate cells)
-    - Batch-level idempotency via H3BatchTracker (enables resumable jobs)
-    - Batch processing support (process N parent cells per task)
-    - Multi-resolution in single operation (res 2 → res 7 direct)
+    - No spatial filtering (children inherit parent land membership)
+    - Cell-level idempotency (ON CONFLICT DO NOTHING)
+    - Batch-level idempotency via H3BatchTracker (resumable jobs)
+    - Batch processing support (N parent cells per task)
 
+Exports:
+    cascade_h3_descendants: Task handler function
 """
 
 import time

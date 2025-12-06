@@ -1,45 +1,22 @@
-# ============================================================================
-# CLAUDE CONTEXT - PROCESS_VECTOR_TASKS
-# ============================================================================
-# EPOCH: 4 - ACTIVE
-# STATUS: Service - Idempotent vector ETL handlers
-# PURPOSE: Stage handlers for process_vector workflow with built-in idempotency
-# LAST_REVIEWED: 26 NOV 2025
-# EXPORTS: process_vector_prepare, process_vector_upload
-# INTERFACES: None (standalone handlers registered in ALL_HANDLERS)
-# PYDANTIC_MODELS: None (uses Dict[str, Any] for parameters and returns)
-# DEPENDENCIES: pickle, psycopg, geopandas, infrastructure.blob.BlobRepository
-# SOURCE: Called by CoreMachine during task execution
-# SCOPE: Service layer - idempotent task execution for process_vector workflow
-# VALIDATION: Format validation, GeoDataFrame validation, idempotency via DELETE+INSERT
-# PATTERNS: DELETE+INSERT pattern with etl_batch_id for task-level idempotency
-# ENTRY_POINTS: Registered in services/__init__.py ALL_HANDLERS
-# INDEX:
-#   - process_vector_prepare (line 45): Stage 1 - Load, validate, chunk, create table
-#   - process_vector_upload (line 175): Stage 2 - Idempotent DELETE+INSERT chunk upload
-# ============================================================================
-
 """
-Process Vector Task Handlers - Idempotent by Design
+Process Vector Task Handlers.
 
-These handlers implement the process_vector workflow with idempotency built-in
-at every stage. Unlike ingest_vector which can create duplicate rows on retry,
-these handlers use the DELETE+INSERT pattern for guaranteed idempotency.
+Idempotent vector ETL workflow handlers using DELETE+INSERT pattern.
 
 Stage 1 (process_vector_prepare):
-- Downloads source file from Bronze container
-- Validates and prepares GeoDataFrame
-- Creates target table with etl_batch_id column
-- Chunks and pickles data for Stage 2 fan-out
-- Idempotency: Table uses IF NOT EXISTS, pickles use overwrite=True
+    - Downloads source file from Bronze container
+    - Validates and prepares GeoDataFrame
+    - Creates target table with etl_batch_id column
+    - Chunks and pickles data for Stage 2 fan-out
 
 Stage 2 (process_vector_upload):
-- Loads pickled chunk
-- DELETEs any existing rows with matching batch_id
-- INSERTs new rows with batch_id
-- Idempotency: DELETE+INSERT in single transaction
+    - Loads pickled chunk
+    - DELETEs existing rows with matching batch_id
+    - INSERTs new rows with batch_id
 
-Stage 3: Reuses existing create_vector_stac handler (already idempotent)
+Exports:
+    process_vector_prepare: Stage 1 handler
+    process_vector_upload: Stage 2 handler
 """
 
 from typing import Dict, Any

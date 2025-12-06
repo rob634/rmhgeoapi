@@ -1,39 +1,17 @@
-# ============================================================================
-# CLAUDE CONTEXT - SERVICE - TILING SCHEME GENERATION
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: Service - Tiling scheme generation for large rasters
-# PURPOSE: Generate GeoJSON tiling schemes in EPSG:4326 output space
-# LAST_REVIEWED: 24 OCT 2025
-# EXPORTS: generate_tiling_scheme() - Main handler function
-# INTERFACES: Handler pattern for task execution (Stage 1 of raster tiling)
-# PYDANTIC_MODELS: None (returns dict with GeoJSON structure)
-# DEPENDENCIES: rasterio, shapely, azure-storage-blob, config
-# SOURCE: Bronze container rasters, blob storage
-# SCOPE: Stage 1 of Big Raster ETL workflow (5-30 GB rasters)
-# VALIDATION: Input validation via rasterio, bounds validation
-# PATTERNS: Handler pattern, output-space tiling architecture
-# ENTRY_POINTS: Called by task processor with parameters dict
-# ARCHITECTURE: Tiles defined in EPSG:4326 output space for perfect alignment
-# ============================================================================
-
 """
-Tiling Scheme Generation Service - Stage 1 of Big Raster ETL
+Tiling Scheme Generation Service.
 
 Generates GeoJSON tiling schemes for large rasters (1-30 GB) in EPSG:4326 output space.
+Stage 1 of Big Raster ETL workflow.
 
-Critical Architecture Decision:
-- Tiles are defined in EPSG:4326 OUTPUT space (not source CRS)
-- This ensures perfect tile alignment after reprojection (no seams)
-- Rio-cogeo handles source pixel sampling automatically via WarpedVRT
-- 512-pixel overlap aligns with COG 512×512 internal block structure
+Architecture:
+    - Tiles are defined in EPSG:4326 OUTPUT space (not source CRS)
+    - This ensures perfect tile alignment after reprojection (no seams)
+    - Rio-cogeo handles source pixel sampling automatically via WarpedVRT
+    - 512-pixel overlap aligns with COG 512×512 internal block structure
 
-Example:
-    A 11 GB Web Mercator raster becomes 204 tiles:
-    - 17×12 grid in EPSG:4326 output space
-    - Each tile: 5000×5000 pixels with 512px overlap
-    - Results in 204 tasks for Stage 2 (parallel extraction)
-
+Exports:
+    generate_tiling_scheme: Main handler function for tiling scheme generation
 """
 
 import json

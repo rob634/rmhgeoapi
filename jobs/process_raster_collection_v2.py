@@ -1,42 +1,16 @@
-# ============================================================================
-# CLAUDE CONTEXT - PROCESS RASTER COLLECTION V2 (MIXIN PATTERN)
-# ============================================================================
-# EPOCH: 4 - ACTIVE
-# STATUS: New job - Clean slate JobBaseMixin implementation (30 NOV 2025)
-# PURPOSE: Multi-tile raster collection processing → COGs + MosaicJSON + STAC
-# LAST_REVIEWED: 30 NOV 2025
-# EXPORTS: ProcessRasterCollectionV2Job
-# INTERFACES: JobBase, JobBaseMixin, RasterMixin, RasterWorkflowsBase
-# PYDANTIC_MODELS: None (uses declarative parameters_schema)
-# DEPENDENCIES: jobs.base, jobs.mixins, jobs.raster_mixin, jobs.raster_workflows_base
-# SOURCE: User job submission via /api/jobs/submit/process_raster_collection_v2
-# SCOPE: Multi-tile raster ETL pipeline
-# VALIDATION: JobBaseMixin declarative schema + resource validators (blob_list_exists)
-# PATTERNS: Mixin pattern (77% less boilerplate), Fan-out/fan-in architecture
-# ENTRY_POINTS: from jobs import ALL_JOBS; ALL_JOBS["process_raster_collection_v2"]
-# INDEX: ProcessRasterCollectionV2Job:45, create_tasks_for_stage:95, finalize_job:145
-# ============================================================================
-
 """
-Process Raster Collection V2 - Clean Slate JobBaseMixin Implementation
+Process Raster Collection V2 Job.
 
-Uses JobBaseMixin + RasterMixin pattern for 83% less boilerplate code:
-- validate_job_parameters: Declarative via parameters_schema + resource_validators
-- generate_job_id: Automatic SHA256 from params
-- create_job_record: Automatic via mixin
-- queue_job: Automatic via mixin
+Multi-tile raster collection processing producing COGs + MosaicJSON + STAC.
 
 Four-stage workflow:
-1. Validate Tiles (Fan-out): Parallel validation of all tiles
-2. Create COGs (Fan-out): Parallel COG creation for all tiles
-3. Create MosaicJSON (Fan-in): Aggregate into virtual mosaic
-4. Create STAC Collection (Fan-in): Collection-level STAC item
+    1. Validate Tiles: Parallel validation of all tiles
+    2. Create COGs: Parallel COG creation for all tiles
+    3. Create MosaicJSON: Aggregate into virtual mosaic
+    4. Create STAC Collection: Collection-level STAC item
 
-Key improvements:
-    - Clean slate parameters (no deprecated fields)
-    - Preflight validation with blob_list_exists
-    - Validation bypass option (_skip_blob_validation=True)
-    - Reduced boilerplate via mixin pattern
+Exports:
+    ProcessRasterCollectionV2Job: Job class for multi-tile raster processing
 """
 
 from typing import Dict, Any, List, Optional

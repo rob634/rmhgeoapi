@@ -1,29 +1,13 @@
-# ============================================================================
-# CLAUDE CONTEXT - VECTOR CONVERSION HELPERS
-# ============================================================================
-# PURPOSE: Utility functions for converting various formats to GeoDataFrame
-# EXPORTS: xy_df_to_gdf, wkt_df_to_gdf, extract_zip_file
-# INTERFACES: None (pure utility functions)
-# PYDANTIC_MODELS: None
-# DEPENDENCIES: pandas, geopandas, shapely, zipfile, tempfile
-# SOURCE: Called by converter functions in converters.py
-# SCOPE: Service layer - format conversion utilities
-# VALIDATION: Coordinate bounds checking, WKT validation
-# PATTERNS: Pure functions (no side effects)
-# ENTRY_POINTS: from services.vector.helpers import xy_df_to_gdf, wkt_df_to_gdf
-# INDEX:
-#   - xy_df_to_gdf (line 30): Convert DataFrame with lat/lon to GeoDataFrame
-#   - wkt_df_to_gdf (line 60): Convert DataFrame with WKT column to GeoDataFrame
-#   - extract_zip_file (line 88): Extract file from ZIP archive
-# ============================================================================
-
 """
-Vector conversion utility functions.
+Vector Conversion Helpers.
 
-Provides helper functions for converting various data formats to GeoDataFrames:
-- xy_df_to_gdf: Convert lat/lon columns to Point geometries
-- wkt_df_to_gdf: Parse WKT strings to geometries
-- extract_zip_file: Extract specific files from ZIP archives
+Utility functions for converting various data formats to GeoDataFrames.
+
+Exports:
+    xy_df_to_gdf: Convert DataFrame with lat/lon to GeoDataFrame
+    wkt_df_to_gdf: Convert DataFrame with WKT column to GeoDataFrame
+    extract_zip_file: Extract file from ZIP archive
+    DEFAULT_CRS: Default coordinate reference system (EPSG:4326)
 """
 
 from io import BytesIO

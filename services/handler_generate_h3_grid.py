@@ -1,52 +1,19 @@
-# ============================================================================
-# CLAUDE CONTEXT - UNIVERSAL H3 GRID GENERATION HANDLER
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: Service Layer - Universal H3 grid generation for ALL resolutions (0-15)
-# PURPOSE: Single DRY handler for generating H3 grids with flexible filtering
-# LAST_REVIEWED: 14 NOV 2025
-# EXPORTS: generate_h3_grid (task handler)
-# INTERFACES: Task handler interface (dict → dict)
-# PYDANTIC_MODELS: None (uses dict params)
-# DEPENDENCIES: h3>=4.0.0, shapely, psycopg3, infrastructure.h3_repository
-# SOURCE: Task parameters from H3 jobs (bootstrap, custom queries)
-# SCOPE: Universal H3 generation - base OR cascade, with optional spatial filtering
-# VALIDATION: Task parameter validation, resolution range (0-15), filter geometry
-# PATTERNS: Repository pattern (H3Repository), DRY (single handler), flexible filtering
-# ENTRY_POINTS: Called by CoreMachine task processor via services.ALL_HANDLERS registry
-# INDEX:
-#   - generate_h3_grid:50 - Main handler entry point
-#   - _generate_from_base:150 - Generate from res 0 base cells
-#   - _generate_from_cascade:250 - Generate from parent grid (batch support)
-#   - _apply_spatial_filters:350 - Apply table/geometry/bbox filters (AND logic)
-#   - _build_filter_geometry:450 - Construct shapely geometry from parameters
-# ============================================================================
-
 """
-Universal H3 Grid Generation Handler
+Universal H3 Grid Generation Handler.
 
 Single DRY handler for ALL H3 resolutions (0-15) with flexible filtering.
 
 Generation Modes:
-    1. Base: Generate from scratch using h3.get_res0_cells()
-    2. Cascade: Generate children from parent grid (requires parent_grid_id)
+    Base: Generate from scratch using h3.get_res0_cells()
+    Cascade: Generate children from parent grid (requires parent_grid_id)
 
-Filtering Options (AND logic - all must match):
+Filtering Options (AND logic):
     - spatial_filter_table: PostGIS table (e.g., 'geo.countries')
     - spatial_filter_geometry: WKT polygon/multipolygon
     - spatial_filter_bbox: [minx, miny, maxx, maxy]
 
-Default Behavior:
-    - use_cascade: true (use parent grid if exists, fallback to base if not)
-    - filter_mode: 'intersects' (ST_Intersects for spatial filtering)
-    - Filters combined with AND (cell must pass ALL filters)
-
-Use Cases:
-    1. Bootstrap pyramid: Cascade from res 2 → res 7 with land filter
-    2. Independent resolution: Generate res 6 directly in Peru bbox
-    3. Custom project area: Generate res 5 within specific polygon
-    4. Multi-filter: Combine table + bbox for precise filtering
-
+Exports:
+    generate_h3_grid: Task handler function
 """
 
 import time

@@ -1,30 +1,13 @@
-# ============================================================================
-# CLAUDE CONTEXT - SERVICE HANDLER
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: Service - H3 pyramid finalization and verification
-# PURPOSE: Verify cell counts, update metadata, and finalize H3 bootstrap workflow
-# LAST_REVIEWED: 14 NOV 2025
-# EXPORTS: finalize_h3_pyramid (task handler function)
-# INTERFACES: CoreMachine task handler contract (params, context → result dict)
-# PYDANTIC_MODELS: None (uses dict parameters and results)
-# DEPENDENCIES: infrastructure.h3_repository.H3Repository, util_logger
-# SOURCE: Called by CoreMachine during Stage 7 of bootstrap_h3_land_grid_pyramid job
-# SCOPE: Pyramid verification and metadata updates for completed H3 grids
-# VALIDATION: Cell count verification against expected values
-# PATTERNS: Task handler, PostgreSQL validation, Metadata updates
-# ENTRY_POINTS: Registered in services/__init__.py as "finalize_h3_pyramid"
-# INDEX: finalize_h3_pyramid:44, verify_cell_counts:73, update_metadata:135
-# ============================================================================
-
 """
-H3 Pyramid Finalization Handler
+H3 Pyramid Finalization Handler.
 
 Verifies cell counts, updates h3.grid_metadata, and performs VACUUM ANALYZE
 after H3 bootstrap workflow completes.
 
-Stage 7 (Finalization) of bootstrap_h3_land_grid_pyramid workflow.
+Final stage of bootstrap_h3_land_grid_pyramid workflow.
 
+Exports:
+    finalize_h3_pyramid: Task handler function
 """
 
 from typing import Dict, Any, List

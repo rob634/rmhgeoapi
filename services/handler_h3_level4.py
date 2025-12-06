@@ -1,19 +1,3 @@
-# ============================================================================
-# CLAUDE CONTEXT - SERVICE HANDLER
-# ============================================================================
-# PURPOSE: Task handler for H3 Level 4 grid generation
-# EXPORTS: h3_level4_generate (handler function)
-# INTERFACES: Epoch 4 task handler pattern (@register_task decorator)
-# PYDANTIC_MODELS: Uses TaskData from core.models
-# DEPENDENCIES: services.h3_grid (H3GridService), infrastructure.factory
-# SOURCE: Service Bus task queue messages
-# SCOPE: Execute H3 Level 4 generation tasks
-# VALIDATION: Parameter validation via TaskData
-# PATTERNS: Handler function pattern, service composition
-# ENTRY_POINTS: Registered in services/__init__.py
-# INDEX: handler_function:30
-# ============================================================================
-
 """
 H3 Level 4 Grid Generation Task Handler.
 
@@ -22,7 +6,8 @@ Executes the complete Level 4 workflow:
     2. Filter by Overture Divisions land boundaries
     3. Save to gold container as GeoParquet
 
-Handler function registered as "h3_level4_generate" task type.
+Exports:
+    h3_level4_generate: Task handler function
 """
 
 from typing import Dict, Any

@@ -1,43 +1,17 @@
-# ============================================================================
-# CLAUDE CONTEXT - PROCESS LARGE RASTER V2 (MIXIN PATTERN)
-# ============================================================================
-# EPOCH: 4 - ACTIVE
-# STATUS: New job - Clean slate JobBaseMixin implementation (30 NOV 2025)
-# PURPOSE: Large raster tiling pipeline (1-30 GB files) → tiled COG mosaic + STAC
-# LAST_REVIEWED: 30 NOV 2025
-# EXPORTS: ProcessLargeRasterV2Job
-# INTERFACES: JobBase, JobBaseMixin, RasterMixin, RasterWorkflowsBase
-# PYDANTIC_MODELS: None (uses declarative parameters_schema)
-# DEPENDENCIES: jobs.base, jobs.mixins, jobs.raster_mixin, jobs.raster_workflows_base
-# SOURCE: User job submission via /api/jobs/submit/process_large_raster_v2
-# SCOPE: Large file raster ETL pipeline with tiling
-# VALIDATION: JobBaseMixin declarative schema + resource validators (blob_exists_with_size)
-# PATTERNS: Mixin pattern (75% less boilerplate), Sequential→Fan-out→Fan-in architecture
-# ENTRY_POINTS: from jobs import ALL_JOBS; ALL_JOBS["process_large_raster_v2"]
-# INDEX: ProcessLargeRasterV2Job:50, create_tasks_for_stage:115, finalize_job:230
-# ============================================================================
-
 """
-Process Large Raster V2 - Clean Slate JobBaseMixin Implementation
+Process Large Raster V2 Job.
 
-Uses JobBaseMixin + RasterMixin pattern for 75% less boilerplate code:
-- validate_job_parameters: Declarative via parameters_schema + resource_validators
-- generate_job_id: Automatic SHA256 from params
-- create_job_record: Automatic via mixin
-- queue_job: Automatic via mixin
+Large raster tiling pipeline (1-30 GB files) producing tiled COG mosaic + STAC.
 
 Five-stage workflow:
-1. Generate Tiling Scheme (Single): Calculate tile grid in output CRS
-2. Extract Tiles (Single): Sequential extraction (10x faster than parallel)
-3. Create COGs (Fan-out): Parallel COG creation for all tiles
-4. Create MosaicJSON (Fan-in): Aggregate into virtual mosaic
-5. Create STAC Collection (Fan-in): Collection-level STAC item
+    1. Generate Tiling Scheme: Calculate tile grid in output CRS
+    2. Extract Tiles: Sequential extraction
+    3. Create COGs: Parallel COG creation for all tiles
+    4. Create MosaicJSON: Aggregate into virtual mosaic
+    5. Create STAC Collection: Collection-level STAC item
 
-Key improvements:
-    - Clean slate parameters (no deprecated fields)
-    - Preflight validation with blob_exists_with_size
-    - Size range enforcement (min 100MB, max 30GB)
-    - Reduced boilerplate via mixin pattern
+Exports:
+    ProcessLargeRasterV2Job: Job class for large raster processing
 """
 
 from typing import Dict, Any, List, Optional

@@ -1,45 +1,16 @@
-# ============================================================================
-# CLAUDE CONTEXT - TITILER SEARCH SERVICE
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: Service - TiTiler-PgSTAC search registration and URL generation
-# PURPOSE: Register pgSTAC searches with TiTiler and generate visualization URLs
-# LAST_REVIEWED: 12 NOV 2025
-# EXPORTS: TiTilerSearchService class
-# INTERFACES: Service layer for TiTiler-PgSTAC integration
-# PYDANTIC_MODELS: None - uses dicts for search payloads
-# DEPENDENCIES: httpx (async HTTP client), config, typing
-# SOURCE: TiTiler-PgSTAC API endpoints (search registration)
-# SCOPE: TiTiler search registration for OAuth-only mosaic pattern
-# VALIDATION: HTTP response validation, search_id verification
-# PATTERNS: Service layer, Async HTTP
-# ENTRY_POINTS: TiTilerSearchService().register_search(), generate_*_url()
-# INDEX:
-#   - TiTilerSearchService class: Line 60
-#   - register_search: Line 100
-#   - generate_viewer_url: Line 180
-#   - generate_tilejson_url: Line 200
-#   - generate_tiles_url: Line 220
-#   - validate_search: Line 240
-# ============================================================================
-
 """
-TiTiler-PgSTAC Search Service
+TiTiler-PgSTAC Search Service.
 
-Manages registration of pgSTAC searches with TiTiler for OAuth-only mosaic visualization.
-Replaces MosaicJSON pattern which requires two-tier authentication (HTTPS + OAuth).
+Manages registration of pgSTAC searches with TiTiler for mosaic visualization.
 
 Key Responsibilities:
-- Register pgSTAC searches via TiTiler API
-- Generate viewer/tilejson/tiles URLs for collections
-- Validate search registration
-- Handle HTTP errors gracefully
+    - Register pgSTAC searches via TiTiler API
+    - Generate viewer/tilejson/tiles URLs for collections
+    - Validate search registration
+    - Handle HTTP errors gracefully
 
-Strategy:
-- pgSTAC searches use OAuth Managed Identity throughout (no SAS tokens)
-- Searches are dynamic (always reflect current collection contents)
-- Search IDs are stored in collection metadata for reuse
-
+Exports:
+    TiTilerSearchService: Main service class for TiTiler search operations
 """
 
 from typing import Dict, Any, Optional

@@ -1,38 +1,15 @@
-# ============================================================================
-# CLAUDE CONTEXT - PROCESS_VECTOR_JOB
-# ============================================================================
-# EPOCH: 4 - ACTIVE
-# STATUS: Job Definition - Idempotent vector ETL workflow
-# PURPOSE: Replace ingest_vector with idempotent-by-design workflow
-# LAST_REVIEWED: 26 NOV 2025
-# EXPORTS: ProcessVectorJob
-# INTERFACES: JobBaseMixin (provides 4 methods), JobBase (provides structure)
-# PYDANTIC_MODELS: None (uses declarative parameters_schema)
-# DEPENDENCIES: jobs.base.JobBase, jobs.mixins.JobBaseMixin
-# SOURCE: HTTP job submission via POST /api/jobs/submit/process_vector
-# SCOPE: Vector ETL with idempotent parallel PostGIS uploads
-# VALIDATION: Declarative via parameters_schema (JobBaseMixin handles validation)
-# PATTERNS: JobBaseMixin (77% less code), DELETE+INSERT idempotency
-# ENTRY_POINTS: Registered in jobs/__init__.py ALL_JOBS as "process_vector"
-# INDEX: ProcessVectorJob:40, stages:70, create_tasks_for_stage:100
-# ============================================================================
-
 """
-Process Vector Job - Idempotent Vector ETL Workflow
+Process Vector Job.
 
-This job replaces ingest_vector with idempotency built-in at every stage.
-No retry flags, no optional idempotency - it's always idempotent by design.
+Idempotent vector ETL workflow using DELETE+INSERT pattern.
 
-Architecture:
-- Stage 1 (process_vector_prepare): Load, validate, chunk, create table with etl_batch_id
-- Stage 2 (process_vector_upload): Fan-out DELETE+INSERT for each chunk
-- Stage 3 (create_vector_stac): Reuse existing idempotent STAC handler
+Three-stage workflow:
+    - Stage 1: Load, validate, chunk, create table
+    - Stage 2: Fan-out DELETE+INSERT for each chunk
+    - Stage 3: Create STAC record
 
-Key Features:
-    - Uses JobBaseMixin for declarative validation
-    - Stage 2 uses DELETE+INSERT pattern (idempotent)
-    - etl_batch_id column tracks chunks for retry
-    - No duplicate rows possible on task retry
+Exports:
+    ProcessVectorJob: Job class for vector ETL processing
 """
 
 from typing import Dict, Any, List, Optional

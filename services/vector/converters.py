@@ -1,30 +1,16 @@
-# ============================================================================
-# CLAUDE CONTEXT - FORMAT-SPECIFIC CONVERTERS
-# ============================================================================
-# PURPOSE: Format-specific conversion functions (CSV, GeoJSON, GPKG, KML, KMZ, Shapefile)
-# EXPORTS: _convert_csv, _convert_geojson, _convert_geopackage, _convert_kml, _convert_kmz, _convert_shapefile
-# INTERFACES: None (private helper functions, not classes)
-# PYDANTIC_MODELS: None
-# DEPENDENCIES: pandas, geopandas, services.vector.helpers
-# SOURCE: Called by tasks in services.vector.tasks
-# SCOPE: Service layer - format conversion helpers
-# VALIDATION: Deferred to helper functions and geopandas
-# PATTERNS: Private helper functions (prefix with _)
-# ENTRY_POINTS: from services.vector.converters import _convert_csv, etc.
-# INDEX:
-#   - _convert_csv (line 30): CSV with lat/lon or WKT
-#   - _convert_geojson (line 60): GeoJSON/JSON files
-#   - _convert_geopackage (line 70): GeoPackage with layer selection
-#   - _convert_kml (line 84): KML files
-#   - _convert_geojson (line 94): KMZ (zipped KML) files
-#   - _convert_shapefile (line 107): Shapefile (zipped)
-# ============================================================================
-
 """
-Format-specific vector conversion helpers (private functions).
+Format-Specific Vector Converters.
 
-These are private helper functions called by the load_vector_file task.
-Each converter handles a specific file format and returns a GeoDataFrame.
+Private helper functions for converting various file formats to GeoDataFrame.
+Called by the load_vector_file task.
+
+Exports:
+    _convert_csv: Convert CSV with lat/lon or WKT
+    _convert_geojson: Convert GeoJSON/JSON files
+    _convert_geopackage: Convert GeoPackage with layer selection
+    _convert_kml: Convert KML files
+    _convert_kmz: Convert KMZ (zipped KML) files
+    _convert_shapefile: Convert Shapefile (zipped)
 """
 
 from io import BytesIO

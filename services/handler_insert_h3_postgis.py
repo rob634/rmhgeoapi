@@ -1,33 +1,15 @@
-# ============================================================================
-# CLAUDE CONTEXT - H3 POSTGIS INSERTION HANDLER
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: Service - H3 grid GeoParquet to PostGIS insertion handler
-# PURPOSE: Load H3 grids from GeoParquet (blob storage) and insert to geo.h3_grids table
-# LAST_REVIEWED: 9 NOV 2025
-# EXPORTS: insert_h3_to_postgis (task handler function)
-# INTERFACES: Core Machine task handler protocol
-# PYDANTIC_MODELS: None (uses dict parameters)
-# DEPENDENCIES: pandas, geopandas, psycopg, azure-storage-blob, config, util_logger
-# SOURCE: GeoParquet files in Azure blob storage (gold container)
-# SCOPE: Stage 2 of H3 grid workflow (after GeoParquet generation)
-# VALIDATION: Grid ID validation, resolution check, geometry validation
-# PATTERNS: Task handler pattern, batch insertion, spatial indexing
-# ENTRY_POINTS: Called by Core Machine task processor for "insert_h3_to_postgis" task type
-# INDEX: insert_h3_to_postgis:40, _load_from_blob:150, _prepare_for_postgis:200, _batch_insert:250
-# ============================================================================
-
 """
-H3 Grid PostGIS Insertion Handler
+H3 Grid PostGIS Insertion Handler.
 
-Loads H3 hexagonal grids from GeoParquet files in blob storage and inserts them
-into the geo.h3_grids PostGIS table for spatial querying.
+Loads H3 hexagonal grids from GeoParquet and inserts to geo.h3_grids table.
 
 Workflow:
-    Stage 1 (existing) → Generate H3 grid → Save to GeoParquet
-    Stage 2 (THIS HANDLER) → Load GeoParquet → Insert to PostGIS
-    Stage 3 (separate handler) → Create STAC record
+    Stage 1: Generate H3 grid → Save to GeoParquet
+    Stage 2 (this handler): Load GeoParquet → Insert to PostGIS
+    Stage 3: Create STAC record
 
+Exports:
+    insert_h3_to_postgis: Task handler function
 """
 
 import time

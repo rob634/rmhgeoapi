@@ -1,25 +1,15 @@
-# ============================================================================
-# CLAUDE CONTEXT - SERVICE
-# ============================================================================
-# EPOCH: SHARED - BOTH EPOCHS
-# STATUS: Used by Epoch 3 and Epoch 4
-# NOTE: Careful migration required
-# PURPOSE: Service handlers for STAC database setup tasks
-# EXPORTS: Task handlers for PgSTAC installation, configuration, and verification
-# INTERFACES: TaskRegistry - Registers handlers for task execution
-# PYDANTIC_MODELS: TaskContext, TaskResult
-# DEPENDENCIES: pypgstac[psycopg] for migrations, psycopg for database operations
-# SOURCE: Database configuration from environment variables
-# SCOPE: One-time database setup operations
-# VALIDATION: Verifies PgSTAC installation and functionality
-# PATTERNS: Service pattern with registered task handlers
-# ENTRY_POINTS: TaskHandlerFactory.get_handler(task_type)
-# INDEX:
-#   - Line 25: Imports and setup
-#   - Line 50: install_pgstac handler
-#   - Line 150: configure_pgstac_roles handler
-#   - Line 250: verify_pgstac_installation handler
-# ============================================================================
+"""
+STAC Database Setup Service.
+
+Service handlers for PgSTAC installation, configuration, and verification.
+One-time database setup operations for STAC catalog infrastructure.
+
+Exports:
+    get_connection_string: Get PostgreSQL connection string
+    install_pgstac: Install PgSTAC schema handler
+    configure_pgstac_roles: Configure database roles handler
+    verify_pgstac_installation: Verify installation handler
+"""
 
 import json
 import os

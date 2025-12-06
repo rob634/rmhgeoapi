@@ -1,33 +1,13 @@
-# ============================================================================
-# CLAUDE CONTEXT - JOB WORKFLOW - FATHOM PHASE 2: SPATIAL MERGE
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: Job workflow - Fathom spatial merge (Phase 2 of two-phase architecture)
-# PURPOSE: Merge NxN stacked tiles into larger consolidated COGs
-# LAST_REVIEWED: 03 DEC 2025
-# EXPORTS: ProcessFathomMergeJob class
-# INTERFACES: JobBase contract, JobBaseMixin for boilerplate elimination
-# PYDANTIC_MODELS: None (uses declarative parameters_schema)
-# DEPENDENCIES: jobs.base.JobBase, jobs.mixins.JobBaseMixin
-# SOURCE: silver-cogs/fathom-stacked (Phase 1 outputs)
-# SCOPE: Spatial consolidation - 1M files → 40K files (with 5×5 grid)
-# VALIDATION: Declarative schema via JobBaseMixin
-# PATTERNS: Mixin pattern, fan-out, band-by-band merge (~2-3GB/task)
-# ENTRY_POINTS: Registered in jobs/__init__.py ALL_JOBS as "process_fathom_merge"
-# INDEX: ProcessFathomMergeJob:35, stages:55, parameters_schema:70, create_tasks_for_stage:110
-# ============================================================================
-
 """
-Process Fathom Merge Job - Phase 2: Spatial Merge with Configurable Grid Size
+Process Fathom Merge Job - Phase 2: Spatial Merge.
 
-PHASE 2 of Two-Phase Fathom ETL Architecture:
-- Input: 1M multi-band 1×1 COGs from Phase 1 (fathom-stacked/)
-- Output: 40K merged COGs with 5×5 grid (configurable via grid_size)
-- Memory: ~2-3GB per task (band-by-band processing)
+Phase 2 of Two-Phase Fathom ETL Architecture:
+    - Input: 1M multi-band 1×1 COGs from Phase 1
+    - Output: 40K merged COGs with configurable grid size
+    - Memory: ~2-3GB per task (band-by-band processing)
 
-The grid_size parameter allows easy experimentation:
-    - grid_size=5: 25 tiles merged -> 40K output files
-    - grid_size=4: 16 tiles merged -> 62K output files
+Exports:
+    ProcessFathomMergeJob: Job class for spatial merge operations
 """
 
 from typing import List, Dict, Any

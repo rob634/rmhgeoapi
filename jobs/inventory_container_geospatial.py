@@ -1,44 +1,15 @@
-# ============================================================================
-# CLAUDE CONTEXT - INVENTORY CONTAINER GEOSPATIAL JOB
-# ============================================================================
-# EPOCH: 4 - ACTIVE
-# STATUS: Job - Discovery-only geospatial inventory with pattern detection
-# PURPOSE: Inventory container contents, classify geospatial files, detect vendor
-#          patterns, and group into processing units (collections vs singles)
-# LAST_REVIEWED: 03 DEC 2025
-# EXPORTS: InventoryContainerGeospatialJob
-# INTERFACES: JobBase, JobBaseMixin
-# PYDANTIC_MODELS: None (uses declarative parameters_schema)
-# DEPENDENCIES: jobs.base, jobs.mixins
-# SOURCE: User job submission via /api/jobs/submit/inventory_container_geospatial
-# SCOPE: Container-wide geospatial file discovery and classification
-# VALIDATION: JobBaseMixin declarative schema validation
-# PATTERNS: JobBaseMixin (77% boilerplate reduction), 3-stage fan-out/fan-in
-# ENTRY_POINTS: from jobs import ALL_JOBS; ALL_JOBS["inventory_container_geospatial"]
-# INDEX:
-#   - InventoryContainerGeospatialJob: line 45
-#   - stages: line 60
-#   - parameters_schema: line 70
-#   - create_tasks_for_stage: line 95
-#   - finalize_job: line 150
-# ============================================================================
-
 """
-Inventory Container Geospatial Job - Discovery-Only Pattern
+Inventory Container Geospatial Job.
 
-Uses JobBaseMixin pattern for 77% less boilerplate code:
-- validate_job_parameters: Declarative via parameters_schema
-- generate_job_id: Automatic SHA256 from params
-- create_job_record: Automatic via mixin
-- queue_job: Automatic via mixin
+Discovery-only geospatial inventory with pattern detection.
 
 Three-stage workflow:
-1. List blobs: Enumerate all blobs in container (reuses list_container_blobs)
-2. Classify files: Per-file geospatial classification (fan-out)
-3. Group inventory: Aggregate into collections and singles (fan-in)
+    1. List blobs: Enumerate all blobs in container
+    2. Classify files: Per-file geospatial classification (fan-out)
+    3. Group inventory: Aggregate into collections and singles (fan-in)
 
-Design Principle: Analysis separate from processing.
-Future orchestration job will consume this output for fire-and-forget processing.
+Exports:
+    InventoryContainerGeospatialJob: Main job class for container inventory
 """
 
 from typing import Dict, Any, List, Optional

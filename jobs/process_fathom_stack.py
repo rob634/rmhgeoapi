@@ -1,34 +1,16 @@
-# ============================================================================
-# CLAUDE CONTEXT - JOB WORKFLOW - FATHOM PHASE 1: BAND STACKING
-# ============================================================================
-# EPOCH: 4 - ACTIVE ✅
-# STATUS: Job workflow - Fathom band stacking (Phase 1 of two-phase architecture)
-# PURPOSE: Stack 8 return period files into multi-band COGs (no spatial merge)
-# LAST_REVIEWED: 03 DEC 2025
-# EXPORTS: ProcessFathomStackJob class
-# INTERFACES: JobBase contract, JobBaseMixin for boilerplate elimination
-# PYDANTIC_MODELS: None (uses declarative parameters_schema)
-# DEPENDENCIES: jobs.base.JobBase, jobs.mixins.JobBaseMixin
-# SOURCE: bronze-fathom container (Fathom Global Flood Maps v3)
-# SCOPE: Band stacking only - 8M files → 1M files (8× reduction)
-# VALIDATION: Declarative schema via JobBaseMixin
-# PATTERNS: Mixin pattern, fan-out, memory-efficient (~500MB/task)
-# ENTRY_POINTS: Registered in jobs/__init__.py ALL_JOBS as "process_fathom_stack"
-# INDEX: ProcessFathomStackJob:35, stages:55, parameters_schema:70, create_tasks_for_stage:110
-# ============================================================================
-
 """
-Process Fathom Stack Job - Phase 1: Band Stacking Only
+Process Fathom Stack Job - Phase 1: Band Stacking.
 
-PHASE 1 of Two-Phase Fathom ETL Architecture:
-- Input: 8M single-band 1×1 tiles (8 return periods × scenarios × locations)
-- Output: 1M multi-band 1×1 COGs (8 bands per tile)
-- Memory: ~500MB per task (safe for 16+ concurrent)
+Phase 1 of Two-Phase Fathom ETL Architecture:
+    - Input: 8M single-band 1×1 tiles
+    - Output: 1M multi-band 1×1 COGs
+    - Memory: ~500MB per task
 
-This phase does NO spatial merging - just stacks 8 return period files
-for each tile+scenario combination into a single 8-band COG.
+Stacks 8 return period files for each tile+scenario combination.
+Phase 2 (process_fathom_merge) handles spatial merging.
 
-Phase 2 (process_fathom_merge) can then merge these into NxN grid cells.
+Exports:
+    ProcessFathomStackJob: Job class for band stacking operations
 """
 
 from typing import List, Dict, Any

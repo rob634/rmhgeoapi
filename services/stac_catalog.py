@@ -292,8 +292,8 @@ def extract_stac_metadata(params: dict) -> dict[str, Any]:
             # Get storage account name for URL (silver tier is where COGs are stored)
             storage_account = config.storage.silver.account_name
 
-            # Write JSON to blob storage
-            blob_repo = BlobRepository.instance()
+            # Write JSON to blob storage (silver tier is where COGs and their JSON live)
+            blob_repo = BlobRepository.for_zone("silver")
             blob_repo.write_blob(
                 container=container_name,
                 blob_path=json_blob_name,

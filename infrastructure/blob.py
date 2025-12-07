@@ -298,10 +298,9 @@ class BlobRepository(IBlobRepository):
 
         zone_config = config.storage.get_account(zone)
 
-        return cls(
-            account_name=zone_config.account_name,
-            connection_string=zone_config.connection_string
-        )
+        # StorageAccountConfig only has account_name, not connection_string
+        # BlobRepository.__init__ will use DefaultAzureCredential for auth
+        return cls(account_name=zone_config.account_name)
 
     @classmethod
     def instance(cls, account_name: Optional[str] = None, connection_string: Optional[str] = None) -> 'BlobRepository':

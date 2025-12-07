@@ -102,7 +102,7 @@ def _ensure_etl_fathom_table() -> bool:
     """
 
     try:
-        with repo.get_connection() as conn:
+        with repo._get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(create_table_sql)
                 conn.commit()
@@ -410,7 +410,7 @@ def _batch_insert_etl_records(records: List[Dict[str, Any]], batch_size: int) ->
         batch = records[i:i + batch_size]
 
         try:
-            with repo.get_connection() as conn:
+            with repo._get_connection() as conn:
                 with conn.cursor() as cur:
                     # Build batch INSERT with ON CONFLICT
                     for record in batch:
@@ -479,7 +479,7 @@ def fathom_assign_grid_cells(params: Dict[str, Any]) -> Dict[str, Any]:
     if dry_run:
         # Count records needing grid assignment
         repo = PostgreSQLRepository()
-        with repo.get_connection() as conn:
+        with repo._get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     sql.SQL("SELECT COUNT(*) FROM {schema}.etl_fathom WHERE grid_cell IS NULL").format(
@@ -502,7 +502,7 @@ def fathom_assign_grid_cells(params: Dict[str, Any]) -> Dict[str, Any]:
     # Grid cell format: nXX-nYY_wZZ-wAA (e.g., n00-n05_w010-w005)
     repo = PostgreSQLRepository()
 
-    with repo.get_connection() as conn:
+    with repo._get_connection() as conn:
         with conn.cursor() as cur:
             # Use SQL function to calculate grid cell from tile
             cur.execute(sql.SQL("""
@@ -576,7 +576,7 @@ def fathom_inventory_summary(params: Dict[str, Any]) -> Dict[str, Any]:
 
     repo = PostgreSQLRepository()
 
-    with repo.get_connection() as conn:
+    with repo._get_connection() as conn:
         with conn.cursor() as cur:
             # Total files
             cur.execute(sql.SQL("SELECT COUNT(*) FROM {schema}.etl_fathom").format(

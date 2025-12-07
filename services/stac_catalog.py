@@ -289,8 +289,8 @@ def extract_stac_metadata(params: dict) -> dict[str, Any]:
             json_blob_name = blob_name.rsplit('.', 1)[0] + '.json'
             json_content = json_module.dumps(item_dict_for_json, indent=2, default=str)
 
-            # Get storage account name for URL
-            storage_account = config.storage.account_name
+            # Get storage account name for URL (silver tier is where COGs are stored)
+            storage_account = config.storage.silver.account_name
 
             # Write JSON to blob storage
             blob_repo = BlobRepository.instance()

@@ -430,7 +430,14 @@ class JobBaseMixin(ABC):
 
             logger.debug(f"🔍 Running {len(cls.resource_validators)} resource validators...")
 
-            result = run_validators(cls.resource_validators, validated)
+            # Build job context for verbose logging (07 DEC 2025)
+            job_context = {
+                "job_type": cls.job_type,
+                "job_id": None,  # Not yet created at validation time
+                "submission_endpoint": f"/api/jobs/submit/{cls.job_type}"
+            }
+
+            result = run_validators(cls.resource_validators, validated, job_context)
 
             if not result['valid']:
                 error_msg = f"Pre-flight validation failed: {result['message']}"

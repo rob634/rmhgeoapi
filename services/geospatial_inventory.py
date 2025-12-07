@@ -3,9 +3,11 @@ Geospatial Inventory Service.
 
 Classification and collection grouping for container blobs.
 
-Provides handlers for inventory_container_geospatial job:
-    - classify_geospatial_file: Per-blob classification
-    - aggregate_geospatial_inventory: Group into collections
+Used by inventory_container_contents job (analysis_mode="geospatial"):
+    - classify_geospatial_file: Stage 2 per-blob classification (fan-out)
+    - aggregate_geospatial_inventory: Stage 3 collection grouping (fan-in)
+
+Receives full blob metadata from Stage 1 (list_blobs_with_metadata).
 
 Exports:
     classify_geospatial_file: Classify individual geospatial files

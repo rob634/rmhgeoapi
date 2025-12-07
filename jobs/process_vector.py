@@ -18,6 +18,7 @@ import logging
 from jobs.base import JobBase
 from jobs.mixins import JobBaseMixin
 from config.defaults import STACDefaults
+from config import get_config
 from util_logger import LoggerFactory, ComponentType
 
 # Component-specific logger
@@ -63,8 +64,8 @@ class ProcessVectorJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
         },
         'container_name': {
             'type': 'str',
-            'default': 'rmhazuregeobronze',
-            'description': 'Source blob container'
+            'default': None,  # Resolved at runtime via config.storage.bronze.vectors
+            'description': 'Source blob container (default: bronze-vectors from config)'
         },
         'schema': {
             'type': 'str',
@@ -161,13 +162,18 @@ class ProcessVectorJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
         if stage == 1:
             # Stage 1: Single prepare task
             task_id = generate_deterministic_task_id(job_id, 1, "prepare")
+
+            # Resolve container name from config if not provided
+            config = get_config()
+            container_name = job_params.get('container_name') or config.storage.bronze.vectors
+
             return [{
                 'task_id': task_id,
                 'task_type': 'process_vector_prepare',
                 'parameters': {
                     'job_id': job_id,
                     'blob_name': job_params['blob_name'],
-                    'container_name': job_params.get('container_name', 'rmhazuregeobronze'),
+                    'container_name': container_name,
                     'file_extension': job_params['file_extension'],
                     'table_name': job_params['table_name'],
                     'schema': job_params.get('schema', 'geo'),

@@ -120,6 +120,20 @@ class AdminDbDiagnosticsTrigger:
                     return self._test_functions(req)
                 elif diagnostic_type == 'all':
                     return self._get_all_diagnostics(req)
+                elif diagnostic_type == 'config':
+                    return self._get_config_audit(req)
+                elif diagnostic_type == 'lineage':
+                    # Lineage requires job_id: /diagnostics/lineage/{job_id}
+                    if len(path_parts) < 3:
+                        return func.HttpResponse(
+                            body=json.dumps({'error': 'job_id required: /diagnostics/lineage/{job_id}'}),
+                            status_code=400,
+                            mimetype='application/json'
+                        )
+                    job_id = path_parts[2]
+                    return self._get_etl_lineage(req, job_id)
+                elif diagnostic_type == 'errors':
+                    return self._get_error_aggregation(req)
                 else:
                     return func.HttpResponse(
                         body=json.dumps({'error': f'Unknown diagnostic type: {diagnostic_type}'}),
@@ -553,6 +567,478 @@ class AdminDbDiagnosticsTrigger:
 
         except Exception as e:
             logger.error(f"❌ Error getting all diagnostics: {e}")
+            logger.error(traceback.format_exc())
+            return func.HttpResponse(
+                body=json.dumps({
+                    'error': str(e),
+                    'timestamp': datetime.now(timezone.utc).isoformat()
+                }),
+                status_code=500,
+                mimetype='application/json'
+            )
+
+
+    def _get_config_audit(self, req: func.HttpRequest) -> func.HttpResponse:
+        """
+        Get configuration values with their sources (07 DEC 2025).
+
+        GET /api/dbadmin/diagnostics/config
+
+        Returns all configuration values indicating whether each came from
+        environment variable or default. Secrets are masked.
+
+        Returns:
+            {
+                "config": {
+                    "storage_account_name": {
+                        "value": "rmhazuregeo",
+                        "source": "environment",
+                        "env_var": "STORAGE_ACCOUNT_NAME",
+                        "is_default": false
+                    },
+                    ...
+                },
+                "debug_mode": true,
+                "environment": "dev",
+                "timestamp": "..."
+            }
+        """
+        logger.info("🔧 Getting configuration audit")
+        import os
+        from config.defaults import AzureDefaults, DatabaseDefaults, StorageDefaults
+
+        try:
+            config_audit = {}
+
+            # Azure resources (MUST override for new tenant)
+            azure_configs = [
+                ("storage_account_name", "STORAGE_ACCOUNT_NAME", AzureDefaults.STORAGE_ACCOUNT_NAME),
+                ("managed_identity_name", "MANAGED_IDENTITY_NAME", AzureDefaults.MANAGED_IDENTITY_NAME),
+                ("managed_identity_reader_name", "MANAGED_IDENTITY_READER_NAME", AzureDefaults.MANAGED_IDENTITY_READER_NAME),
+                ("titiler_base_url", "TITILER_BASE_URL", AzureDefaults.TITILER_BASE_URL),
+                ("ogc_stac_app_url", "OGC_STAC_APP_URL", AzureDefaults.OGC_STAC_APP_URL),
+                ("etl_app_url", "ETL_APP_URL", AzureDefaults.ETL_APP_URL),
+            ]
+
+            for config_name, env_var, default_value in azure_configs:
+                env_value = os.environ.get(env_var)
+                actual_value = env_value if env_value else default_value
+                is_default = env_value is None
+
+                config_audit[config_name] = {
+                    "value": actual_value,
+                    "source": "default" if is_default else "environment",
+                    "env_var": env_var,
+                    "is_default": is_default,
+                    "default_class": "AzureDefaults" if is_default else None
+                }
+
+            # Database configs
+            db_configs = [
+                ("postgis_host", "POSTGIS_HOST", None),  # No default - must be set
+                ("postgis_database", "POSTGIS_DATABASE", None),
+                ("postgis_user", "POSTGIS_USER", None),
+                ("postgis_port", "POSTGIS_PORT", str(DatabaseDefaults.PORT)),
+                ("postgis_schema", "POSTGIS_SCHEMA", DatabaseDefaults.POSTGIS_SCHEMA),
+                ("app_schema", "APP_SCHEMA", DatabaseDefaults.APP_SCHEMA),
+            ]
+
+            for config_name, env_var, default_value in db_configs:
+                env_value = os.environ.get(env_var)
+                if default_value is not None:
+                    actual_value = env_value if env_value else default_value
+                    is_default = env_value is None
+                else:
+                    actual_value = env_value if env_value else "[NOT SET - REQUIRED]"
+                    is_default = False  # No default means it's required
+
+                # Mask sensitive values
+                display_value = actual_value
+                if "password" in config_name.lower() or "secret" in config_name.lower():
+                    display_value = "***MASKED***" if actual_value else "[NOT SET]"
+
+                config_audit[config_name] = {
+                    "value": display_value,
+                    "source": "default" if is_default else "environment",
+                    "env_var": env_var,
+                    "is_default": is_default,
+                    "default_class": "DatabaseDefaults" if is_default and default_value else None
+                }
+
+            # Debug mode
+            debug_mode = os.environ.get("DEBUG_MODE", "false").lower() == "true"
+            debug_logging = os.environ.get("DEBUG_LOGGING", "false").lower() == "true"
+
+            result = {
+                "config": config_audit,
+                "debug_mode": debug_mode,
+                "debug_logging": debug_logging,
+                "environment": os.environ.get("ENVIRONMENT", "dev"),
+                "using_defaults_count": sum(1 for c in config_audit.values() if c.get("is_default")),
+                "from_environment_count": sum(1 for c in config_audit.values() if not c.get("is_default")),
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+
+            logger.info(f"✅ Config audit completed: {result['using_defaults_count']} defaults, {result['from_environment_count']} from env")
+
+            return func.HttpResponse(
+                body=json.dumps(result, indent=2),
+                status_code=200,
+                mimetype='application/json'
+            )
+
+        except Exception as e:
+            logger.error(f"❌ Error getting config audit: {e}")
+            logger.error(traceback.format_exc())
+            return func.HttpResponse(
+                body=json.dumps({
+                    'error': str(e),
+                    'timestamp': datetime.now(timezone.utc).isoformat()
+                }),
+                status_code=500,
+                mimetype='application/json'
+            )
+
+    def _get_etl_lineage(self, req: func.HttpRequest, job_id: str) -> func.HttpResponse:
+        """
+        Get full ETL lineage for a job (07 DEC 2025).
+
+        GET /api/dbadmin/diagnostics/lineage/{job_id}
+
+        Returns the complete data lineage: source → processing → destination → STAC.
+
+        Returns:
+            {
+                "job_id": "abc123...",
+                "job_type": "process_vector",
+                "status": "completed",
+                "source": {
+                    "container": "bronze-vectors",
+                    "blob": "parks.geojson",
+                    "size_mb": 15.2
+                },
+                "destination": {
+                    "schema": "geo",
+                    "table": "parks_2024_v1",
+                    "rows_created": 1523
+                },
+                "stac": {
+                    "collection_id": "vectors",
+                    "item_id": "parks-2024-v1"
+                },
+                "tasks": [...],
+                "timeline": {...}
+            }
+        """
+        logger.info(f"🔍 Getting ETL lineage for job: {job_id}")
+
+        try:
+            if not isinstance(self.db_repo, PostgreSQLRepository):
+                raise ValueError("Database repository is not PostgreSQL")
+
+            lineage = {"job_id": job_id}
+
+            with self.db_repo._get_connection() as conn:
+                with conn.cursor() as cursor:
+                    # Get job record
+                    cursor.execute(f"""
+                        SELECT id, job_type, status, stage, parameters, metadata, result_data,
+                               created_at, updated_at
+                        FROM {self.config.app_schema}.jobs
+                        WHERE id = %s
+                    """, (job_id,))
+                    job_row = cursor.fetchone()
+
+                    if not job_row:
+                        return func.HttpResponse(
+                            body=json.dumps({
+                                'error': f'Job not found: {job_id}',
+                                'timestamp': datetime.now(timezone.utc).isoformat()
+                            }),
+                            status_code=404,
+                            mimetype='application/json'
+                        )
+
+                    lineage["job_type"] = job_row["job_type"]
+                    lineage["status"] = job_row["status"]
+                    lineage["stage"] = job_row["stage"]
+
+                    # Extract source info from parameters
+                    params = job_row["parameters"] or {}
+                    lineage["source"] = {
+                        "container": params.get("container_name") or params.get("source_container"),
+                        "blob": params.get("blob_name") or params.get("blob_path"),
+                        "file_path": params.get("file_path"),
+                    }
+                    # Remove None values
+                    lineage["source"] = {k: v for k, v in lineage["source"].items() if v}
+
+                    # Extract destination info
+                    lineage["destination"] = {
+                        "schema": params.get("schema_name") or params.get("target_schema") or "geo",
+                        "table": params.get("table_name") or params.get("target_table"),
+                        "output_container": params.get("output_container") or params.get("destination_container"),
+                        "output_path": params.get("output_path") or params.get("cog_output_path"),
+                    }
+                    lineage["destination"] = {k: v for k, v in lineage["destination"].items() if v}
+
+                    # Extract STAC info from result_data or metadata
+                    result_data = job_row["result_data"] or {}
+                    metadata = job_row["metadata"] or {}
+                    lineage["stac"] = {
+                        "collection_id": params.get("collection_id") or result_data.get("collection_id"),
+                        "item_id": result_data.get("stac_item_id") or result_data.get("item_id"),
+                        "stac_url": result_data.get("stac_url"),
+                    }
+                    lineage["stac"] = {k: v for k, v in lineage["stac"].items() if v}
+
+                    # Timeline
+                    lineage["timeline"] = {
+                        "created_at": job_row["created_at"].isoformat() if job_row["created_at"] else None,
+                        "updated_at": job_row["updated_at"].isoformat() if job_row["updated_at"] else None,
+                        "duration_seconds": None
+                    }
+                    if job_row["created_at"] and job_row["updated_at"]:
+                        duration = (job_row["updated_at"] - job_row["created_at"]).total_seconds()
+                        lineage["timeline"]["duration_seconds"] = round(duration, 2)
+
+                    # Get tasks for this job
+                    cursor.execute(f"""
+                        SELECT id, task_type, status, stage, parameters, result_data,
+                               created_at, updated_at, retry_count
+                        FROM {self.config.app_schema}.tasks
+                        WHERE job_id = %s
+                        ORDER BY stage, created_at
+                    """, (job_id,))
+                    task_rows = cursor.fetchall()
+
+                    lineage["tasks"] = []
+                    for task in task_rows:
+                        task_info = {
+                            "task_id": task["id"],
+                            "task_type": task["task_type"],
+                            "status": task["status"],
+                            "stage": task["stage"],
+                            "retry_count": task["retry_count"],
+                            "created_at": task["created_at"].isoformat() if task["created_at"] else None,
+                        }
+                        # Include result summary if completed
+                        if task["result_data"]:
+                            result = task["result_data"]
+                            task_info["result_summary"] = {
+                                "success": result.get("success"),
+                                "rows_processed": result.get("rows_processed") or result.get("row_count"),
+                                "error": result.get("error") if not result.get("success") else None,
+                            }
+                            task_info["result_summary"] = {k: v for k, v in task_info["result_summary"].items() if v is not None}
+
+                        lineage["tasks"].append(task_info)
+
+                    lineage["task_summary"] = {
+                        "total": len(task_rows),
+                        "completed": len([t for t in task_rows if t["status"] == "completed"]),
+                        "failed": len([t for t in task_rows if t["status"] == "failed"]),
+                        "pending": len([t for t in task_rows if t["status"] in ("queued", "processing")]),
+                    }
+
+            lineage["timestamp"] = datetime.now(timezone.utc).isoformat()
+
+            logger.info(f"✅ ETL lineage retrieved for job {job_id}: {lineage['task_summary']['total']} tasks")
+
+            return func.HttpResponse(
+                body=json.dumps(lineage, indent=2),
+                status_code=200,
+                mimetype='application/json'
+            )
+
+        except Exception as e:
+            logger.error(f"❌ Error getting ETL lineage: {e}")
+            logger.error(traceback.format_exc())
+            return func.HttpResponse(
+                body=json.dumps({
+                    'error': str(e),
+                    'job_id': job_id,
+                    'timestamp': datetime.now(timezone.utc).isoformat()
+                }),
+                status_code=500,
+                mimetype='application/json'
+            )
+
+    def _get_error_aggregation(self, req: func.HttpRequest) -> func.HttpResponse:
+        """
+        Get aggregated error statistics (07 DEC 2025).
+
+        GET /api/dbadmin/diagnostics/errors?hours=24
+
+        Returns error statistics grouped by job type and common error patterns.
+
+        Returns:
+            {
+                "period": "24h",
+                "total_jobs": 150,
+                "failed_jobs": 12,
+                "failure_rate": "8.0%",
+                "by_job_type": {...},
+                "common_errors": [...],
+                "recent_failures": [...]
+            }
+        """
+        hours = int(req.params.get('hours', '24'))
+        limit = int(req.params.get('limit', '10'))
+
+        logger.info(f"📊 Getting error aggregation for last {hours} hours")
+
+        try:
+            if not isinstance(self.db_repo, PostgreSQLRepository):
+                raise ValueError("Database repository is not PostgreSQL")
+
+            error_stats = {
+                "period": f"{hours}h",
+                "hours": hours,
+            }
+
+            with self.db_repo._get_connection() as conn:
+                with conn.cursor() as cursor:
+                    # Overall job statistics
+                    cursor.execute(f"""
+                        SELECT
+                            COUNT(*) as total_jobs,
+                            COUNT(CASE WHEN status = 'completed' THEN 1 END) as completed_jobs,
+                            COUNT(CASE WHEN status = 'failed' THEN 1 END) as failed_jobs,
+                            COUNT(CASE WHEN status = 'processing' THEN 1 END) as processing_jobs,
+                            COUNT(CASE WHEN status = 'queued' THEN 1 END) as queued_jobs
+                        FROM {self.config.app_schema}.jobs
+                        WHERE created_at >= NOW() - INTERVAL '%s hours'
+                    """, (hours,))
+                    stats_row = cursor.fetchone()
+
+                    total = stats_row["total_jobs"] or 0
+                    failed = stats_row["failed_jobs"] or 0
+
+                    error_stats["total_jobs"] = total
+                    error_stats["completed_jobs"] = stats_row["completed_jobs"] or 0
+                    error_stats["failed_jobs"] = failed
+                    error_stats["processing_jobs"] = stats_row["processing_jobs"] or 0
+                    error_stats["queued_jobs"] = stats_row["queued_jobs"] or 0
+                    error_stats["failure_rate"] = f"{(failed / total * 100):.1f}%" if total > 0 else "0%"
+
+                    # Failures by job type
+                    cursor.execute(f"""
+                        SELECT
+                            job_type,
+                            COUNT(*) as total,
+                            COUNT(CASE WHEN status = 'completed' THEN 1 END) as completed,
+                            COUNT(CASE WHEN status = 'failed' THEN 1 END) as failed
+                        FROM {self.config.app_schema}.jobs
+                        WHERE created_at >= NOW() - INTERVAL '%s hours'
+                        GROUP BY job_type
+                        ORDER BY failed DESC, total DESC
+                    """, (hours,))
+                    type_rows = cursor.fetchall()
+
+                    error_stats["by_job_type"] = {}
+                    for row in type_rows:
+                        job_total = row["total"] or 0
+                        job_failed = row["failed"] or 0
+                        error_stats["by_job_type"][row["job_type"]] = {
+                            "total": job_total,
+                            "completed": row["completed"] or 0,
+                            "failed": job_failed,
+                            "rate": f"{(job_failed / job_total * 100):.1f}%" if job_total > 0 else "0%"
+                        }
+
+                    # Task failures by task type
+                    cursor.execute(f"""
+                        SELECT
+                            task_type,
+                            COUNT(*) as total_failed,
+                            COUNT(CASE WHEN retry_count > 0 THEN 1 END) as retried
+                        FROM {self.config.app_schema}.tasks
+                        WHERE status = 'failed'
+                          AND created_at >= NOW() - INTERVAL '%s hours'
+                        GROUP BY task_type
+                        ORDER BY total_failed DESC
+                        LIMIT %s
+                    """, (hours, limit))
+                    task_type_rows = cursor.fetchall()
+
+                    error_stats["failed_task_types"] = []
+                    for row in task_type_rows:
+                        error_stats["failed_task_types"].append({
+                            "task_type": row["task_type"],
+                            "count": row["total_failed"],
+                            "retried": row["retried"]
+                        })
+
+                    # Common error patterns (from result_data)
+                    cursor.execute(f"""
+                        SELECT
+                            result_data->>'error' as error_message,
+                            COUNT(*) as count
+                        FROM {self.config.app_schema}.jobs
+                        WHERE status = 'failed'
+                          AND created_at >= NOW() - INTERVAL '%s hours'
+                          AND result_data->>'error' IS NOT NULL
+                        GROUP BY result_data->>'error'
+                        ORDER BY count DESC
+                        LIMIT %s
+                    """, (hours, limit))
+                    error_rows = cursor.fetchall()
+
+                    error_stats["common_errors"] = []
+                    for row in error_rows:
+                        error_msg = row["error_message"]
+                        # Truncate long error messages
+                        if error_msg and len(error_msg) > 200:
+                            error_msg = error_msg[:200] + "..."
+                        error_stats["common_errors"].append({
+                            "error": error_msg,
+                            "count": row["count"]
+                        })
+
+                    # Recent failures with details
+                    cursor.execute(f"""
+                        SELECT
+                            id,
+                            job_type,
+                            created_at,
+                            updated_at,
+                            result_data->>'error' as error_message,
+                            parameters->>'container_name' as container,
+                            parameters->>'blob_name' as blob
+                        FROM {self.config.app_schema}.jobs
+                        WHERE status = 'failed'
+                          AND created_at >= NOW() - INTERVAL '%s hours'
+                        ORDER BY created_at DESC
+                        LIMIT %s
+                    """, (hours, limit))
+                    recent_rows = cursor.fetchall()
+
+                    error_stats["recent_failures"] = []
+                    for row in recent_rows:
+                        error_msg = row["error_message"]
+                        if error_msg and len(error_msg) > 200:
+                            error_msg = error_msg[:200] + "..."
+                        error_stats["recent_failures"].append({
+                            "job_id": row["id"],
+                            "job_type": row["job_type"],
+                            "failed_at": row["updated_at"].isoformat() if row["updated_at"] else None,
+                            "error_summary": error_msg,
+                            "source": f"{row['container']}/{row['blob']}" if row['container'] and row['blob'] else None
+                        })
+
+            error_stats["timestamp"] = datetime.now(timezone.utc).isoformat()
+
+            logger.info(f"✅ Error aggregation completed: {error_stats['failed_jobs']}/{error_stats['total_jobs']} failed ({error_stats['failure_rate']})")
+
+            return func.HttpResponse(
+                body=json.dumps(error_stats, indent=2),
+                status_code=200,
+                mimetype='application/json'
+            )
+
+        except Exception as e:
+            logger.error(f"❌ Error getting error aggregation: {e}")
             logger.error(traceback.format_exc())
             return func.HttpResponse(
                 body=json.dumps({

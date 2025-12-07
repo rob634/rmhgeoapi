@@ -52,6 +52,9 @@ Endpoints:
     Platform Layer:
         POST /api/platform/submit - Submit Platform API request
         GET  /api/platform/status/{request_id} - Get Platform request status
+        GET  /api/platform/health - Simplified health for DDH (07 DEC 2025)
+        GET  /api/platform/stats - Job statistics for DDH (07 DEC 2025)
+        GET  /api/platform/failures - Recent failures for DDH (07 DEC 2025)
 
     STAC API v1.0.0:
         GET  /api/stac_api - STAC landing page
@@ -214,7 +217,12 @@ from triggers.trigger_platform import (
     platform_raster_submit,
     platform_raster_collection_submit
 )
-from triggers.trigger_platform_status import platform_request_status
+from triggers.trigger_platform_status import (
+    platform_request_status,
+    platform_health,
+    platform_stats,
+    platform_failures
+)
 
 # OGC Features API - Standalone module (29 OCT 2025)
 from ogc_features import get_ogc_triggers
@@ -979,6 +987,93 @@ def platform_status_list(req: func.HttpRequest) -> func.HttpResponse:
     Returns list of all platform requests with optional filtering.
     """
     return platform_request_status(req)
+
+
+# Platform Status Endpoints for DDH Visibility (07 DEC 2025)
+
+@app.route(route="platform/health", methods=["GET"])
+async def platform_health_endpoint(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Simplified health endpoint for DDH consumption.
+
+    GET /api/platform/health
+
+    Returns high-level system health without internal details.
+    Designed for DDH team visibility into processing availability.
+
+    Response:
+        {
+            "status": "healthy",
+            "api_version": "v1.0",
+            "components": {
+                "job_processing": "healthy",
+                "stac_catalog": "healthy",
+                "storage": "healthy"
+            },
+            "recent_activity": {
+                "jobs_last_24h": 45,
+                "success_rate": "93.3%"
+            }
+        }
+    """
+    return await platform_health(req)
+
+
+@app.route(route="platform/stats", methods=["GET"])
+async def platform_stats_endpoint(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Aggregated job statistics for DDH visibility.
+
+    GET /api/platform/stats?hours=24
+
+    Returns job processing statistics without exposing internal job IDs.
+
+    Response:
+        {
+            "period": "24h",
+            "jobs": {
+                "total": 45,
+                "completed": 42,
+                "failed": 3
+            },
+            "by_data_type": {
+                "raster": {"total": 30, "completed": 28, "failed": 2},
+                "vector": {"total": 15, "completed": 14, "failed": 1}
+            },
+            "avg_processing_time_minutes": {
+                "raster": 8.5,
+                "vector": 2.3
+            }
+        }
+    """
+    return await platform_stats(req)
+
+
+@app.route(route="platform/failures", methods=["GET"])
+async def platform_failures_endpoint(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Recent failures for DDH troubleshooting.
+
+    GET /api/platform/failures?hours=24&limit=10
+
+    Returns sanitized failure information (no internal paths or stack traces).
+
+    Response:
+        {
+            "failures": [
+                {
+                    "request_id": "def456...",
+                    "dataset_id": "parcels-2024",
+                    "failed_at": "2025-12-07T09:15:00Z",
+                    "error_category": "validation_failed",
+                    "error_summary": "Source file not found",
+                    "can_retry": true
+                }
+            ],
+            "total_failures": 3
+        }
+    """
+    return await platform_failures(req)
 
 
 # Dedicated Raster Endpoints (05 DEC 2025)

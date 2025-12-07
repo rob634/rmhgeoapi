@@ -1,6 +1,6 @@
 # Active Tasks - Geospatial ETL Pipelines
 
-**Last Updated**: 05 DEC 2025 (Janitor blob cleanup update)
+**Last Updated**: 07 DEC 2025 (Database Diagnostics & Remote Administration Enhancement)
 **Author**: Robert and Geospatial Claude Legion
 
 **Note**: Completed tasks have been moved to `HISTORY2.md` (05 DEC 2025 cleanup)
@@ -9,7 +9,64 @@
 
 ## 🚨 HIGH PRIORITY
 
-### 1. Azure Data Factory Integration (29 NOV 2025)
+### 1. Database Diagnostics & Remote Administration Enhancement (07 DEC 2025)
+
+**Status**: 📋 **PLAN COMPLETE** - Ready for Implementation
+**Priority**: 🚨 HIGH - QA environment has no direct database access
+**Purpose**: HTTP-based database inspection, verbose pre-flight validation, DDH visibility
+
+**Problem**: QA database requires PRIVX → Windows Server → DBeaver workflow. Need comprehensive remote diagnostics.
+
+**Existing Infrastructure** (29 dbadmin endpoints already work):
+- ✅ `/dbadmin/schemas`, `/tables/{schema}.{table}/sample` - Schema inspection
+- ✅ `/dbadmin/jobs`, `/tasks/{job_id}` - Job/task queries
+- ✅ `/dbadmin/health`, `/diagnostics/all` - Health monitoring
+- ✅ `DEBUG_MODE=true` / `DEBUG_LOGGING=true` - Verbose logging flags
+
+**Implementation Phases**:
+
+| Phase | Description | Priority | Files |
+|-------|-------------|----------|-------|
+| 1 | Enhanced Health Endpoint - schema summary, config sources | HIGH | `triggers/health.py` |
+| 2 | Verbose Pre-Flight Validation - job context, param origins/destinations | HIGH | `infrastructure/validators.py`, `jobs/mixins.py` |
+| 3 | New Diagnostic Endpoints - config audit, ETL lineage, error aggregation | MEDIUM | `triggers/admin/db_diagnostics.py` |
+| 4 | Debug Mode Integration - unified verbose flag behavior | LOW | `config/app_config.py` |
+| 5 | Platform Status for DDH - `/platform/health`, `/stats`, `/failures` | MEDIUM | `triggers/trigger_platform_status.py` |
+
+**Phase 1: Enhanced Health Endpoint**
+- Add `schema_summary` component (all schemas, tables, row counts, STAC stats)
+- Add `config_sources` when `DEBUG_MODE=true` (show env var vs default origins)
+
+**Phase 2: Verbose Pre-Flight Validation**
+- Add `job_context` to `run_validators()` (job_type, submission endpoint)
+- Enhanced messages: `"Blob 'x' not found (param: blob_name, job: process_raster_v2)"`
+- Validation summary report on success (source → destination, validators run, timing)
+
+**Phase 3: New Diagnostic Endpoints**
+- `GET /api/dbadmin/diagnostics/config` - All config with sources (masked secrets)
+- `GET /api/dbadmin/diagnostics/lineage/{job_id}` - Full data lineage (source → STAC → table)
+- `GET /api/dbadmin/diagnostics/errors?hours=24` - Error aggregation by job type
+
+**Phase 4: Debug Mode Integration**
+- Ensure `DEBUG_MODE=true` enables all verbose features
+- Add debug banner to dbadmin responses
+
+**Phase 5: Platform Status for DDH**
+- `GET /api/platform/health` - Simplified health (no internal details)
+- `GET /api/platform/stats?hours=24` - Aggregated job statistics
+- `GET /api/platform/failures?hours=24` - Sanitized recent failures
+- `GET /api/platform/status/{request_id}?verbose=true` - Enhanced detail
+
+**Security Notes (Phase 5)**:
+- READ-ONLY endpoints only
+- Sanitized errors (no stack traces, internal paths)
+- Request scoping (DDH sees only their requests)
+
+**Full Plan**: `~/.claude/plans/vast-leaping-candle.md`
+
+---
+
+### 2. Azure Data Factory Integration (29 NOV 2025)
 
 **Status**: 📋 **READY FOR IMPLEMENTATION** - Phase 1 Code Complete
 **Purpose**: Enterprise ETL orchestration and audit logging
@@ -517,4 +574,4 @@ See `HISTORY2.md` for items completed and moved from TODO.md:
 
 ---
 
-**Last Updated**: 06 DEC 2025 (Added Function App Separation architecture reference)
+**Last Updated**: 07 DEC 2025 (Database Diagnostics & Remote Administration Enhancement - #1 HIGH PRIORITY)

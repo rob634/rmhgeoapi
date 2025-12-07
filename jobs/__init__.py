@@ -30,8 +30,6 @@ Exports:
 from .base import JobBase
 from .hello_world import HelloWorldJob
 from .container_summary import ContainerSummaryWorkflow
-from .container_list import ListContainerContentsWorkflow
-from .container_list_diamond import ListContainerContentsDiamondWorkflow
 from .stac_catalog_container import StacCatalogContainerWorkflow
 from .stac_catalog_vectors import StacCatalogVectorsWorkflow
 from .validate_raster_job import ValidateRasterJob
@@ -45,15 +43,21 @@ from .process_raster_v2 import ProcessRasterV2Job
 from .raster_mixin import RasterMixin
 from .process_raster_collection_v2 import ProcessRasterCollectionV2Job
 from .process_large_raster_v2 import ProcessLargeRasterV2Job
-from .inventory_container_geospatial import InventoryContainerGeospatialJob
 from .inventory_fathom_container import InventoryFathomContainerJob
+
+# Consolidated container inventory (07 DEC 2025)
+from .inventory_container_contents import InventoryContainerContentsJob
+
+# ARCHIVED (07 DEC 2025) - replaced by inventory_container_contents
+# from .container_list import ListContainerContentsWorkflow
+# from .container_list_diamond import ListContainerContentsDiamondWorkflow
+# from .inventory_container_geospatial import InventoryContainerGeospatialJob
 
 # Job Registry - add new jobs here
 ALL_JOBS = {
     # Production Workflows
     "hello_world": HelloWorldJob,
     "summarize_container": ContainerSummaryWorkflow,
-    "list_container_contents": ListContainerContentsWorkflow,
     "stac_catalog_container": StacCatalogContainerWorkflow,
     "stac_catalog_vectors": StacCatalogVectorsWorkflow,
     "validate_raster_job": ValidateRasterJob,
@@ -71,12 +75,14 @@ ALL_JOBS = {
     "process_raster_collection_v2": ProcessRasterCollectionV2Job,
     "process_large_raster_v2": ProcessLargeRasterV2Job,
 
-    # Test/Diagnostic Workflows
-    "list_container_contents_diamond": ListContainerContentsDiamondWorkflow,
-
-    # Container Analysis
-    "inventory_container_geospatial": InventoryContainerGeospatialJob,
+    # Container Analysis (consolidated 07 DEC 2025)
+    "inventory_container_contents": InventoryContainerContentsJob,  # Replaces list_container_contents, container_list_diamond, inventory_container_geospatial
     "inventory_fathom_container": InventoryFathomContainerJob,
+
+    # ARCHIVED (07 DEC 2025) - use inventory_container_contents instead
+    # "list_container_contents": ListContainerContentsWorkflow,
+    # "list_container_contents_diamond": ListContainerContentsDiamondWorkflow,
+    # "inventory_container_geospatial": InventoryContainerGeospatialJob,
 }
 
 def validate_job_registry():

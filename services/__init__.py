@@ -72,7 +72,11 @@ Handler Function Contract (ENFORCED BY CoreMachine):
 
 from .service_hello_world import handle_greeting, handle_reply
 from .container_summary import analyze_container_summary
-from .container_list import list_container_blobs, analyze_single_blob, aggregate_blob_analysis
+# Old container_list handlers - ARCHIVED (07 DEC 2025)
+# list_container_blobs: replaced by list_blobs_with_metadata
+# analyze_single_blob: replaced by analyze_blob_basic
+# aggregate_blob_analysis: replaced by container_inventory.aggregate_blob_analysis
+# from .container_list import list_container_blobs, analyze_single_blob, aggregate_blob_analysis
 from .stac_catalog import list_raster_files, extract_stac_metadata
 from .stac_vector_catalog import extract_vector_stac_metadata, create_vector_stac
 # test_minimal removed (30 NOV 2025) - file doesn't exist
@@ -108,6 +112,11 @@ from .geospatial_inventory import (
     classify_geospatial_file,
     aggregate_geospatial_inventory,
 )
+from .container_inventory import (
+    list_blobs_with_metadata,
+    analyze_blob_basic,
+    aggregate_blob_analysis as aggregate_blob_analysis_v2,  # New consolidated handler
+)
 from .fathom_container_inventory import (
     fathom_generate_scan_prefixes,
     fathom_scan_prefix,
@@ -140,9 +149,9 @@ ALL_HANDLERS = {
     "hello_world_greeting": handle_greeting,
     "hello_world_reply": handle_reply,
     "container_summary_task": analyze_container_summary,
-    "list_container_blobs": list_container_blobs,
-    "analyze_single_blob": analyze_single_blob,
-    "aggregate_blob_analysis": aggregate_blob_analysis,  # Fan-in aggregation handler (16 OCT 2025)
+    # Old container_list handlers ARCHIVED (07 DEC 2025) - see Container Inventory handlers below
+    # "list_container_blobs": list_container_blobs,
+    # "analyze_single_blob": analyze_single_blob,
     "list_raster_files": list_raster_files,
     "extract_stac_metadata": extract_stac_metadata,
     "extract_vector_stac_metadata": extract_vector_stac_metadata,
@@ -183,8 +192,13 @@ ALL_HANDLERS = {
     "process_vector_prepare": process_vector_prepare,  # Stage 1: Load, validate, chunk, create table
     "process_vector_upload": process_vector_upload,    # Stage 2: DELETE+INSERT idempotent upload
     # Note: create_vector_stac already registered above - reused for Stage 3
-    # Geospatial Container Inventory handlers (03 DEC 2025)
-    "classify_geospatial_file": classify_geospatial_file,  # Stage 2: Per-blob classification
+    # Container Inventory handlers - consolidated (07 DEC 2025)
+    # Base handlers (analysis_mode="basic")
+    "list_blobs_with_metadata": list_blobs_with_metadata,  # Stage 1: List blobs with full metadata
+    "analyze_blob_basic": analyze_blob_basic,  # Stage 2: Basic per-blob analysis
+    "aggregate_blob_analysis": aggregate_blob_analysis_v2,  # Stage 3: Aggregate basic analysis (replaces old handler)
+    # Geospatial handlers (analysis_mode="geospatial")
+    "classify_geospatial_file": classify_geospatial_file,  # Stage 2: Per-blob geospatial classification
     "aggregate_geospatial_inventory": aggregate_geospatial_inventory,  # Stage 3: Group into collections
     # Fathom Container Inventory handlers (05 DEC 2025)
     "fathom_generate_scan_prefixes": fathom_generate_scan_prefixes,  # Stage 1: Generate prefix list

@@ -12,6 +12,12 @@ Components Monitored:
     - VSI Support
     - Jobs Registry
     - PgSTAC
+    - System Reference Tables
+    - Table Metadata Registry
+    - Schema Summary (07 DEC 2025) - All schemas, tables, row counts
+
+Debug Mode Features (DEBUG_MODE=true):
+    - config_sources: Shows env var vs default sources for all config values
 
 Exports:
     HealthCheckTrigger: Health check trigger class
@@ -214,6 +220,20 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
             # Note: table_metadata is important but not critical - don't fail overall health
             if table_metadata_health["status"] == "error":
                 health_data["errors"].append("geo.table_metadata unavailable (OGC collection properties will be limited)")
+
+            # Schema summary for remote database inspection (07 DEC 2025)
+            schema_summary_health = self._check_schema_summary()
+            health_data["components"]["schema_summary"] = schema_summary_health
+
+        # Debug status - always include (07 DEC 2025)
+        health_data["debug_status"] = config.get_debug_status()
+
+        # Config sources - only include when DEBUG_MODE=true (07 DEC 2025)
+        if config.debug_mode:
+            config_sources = self._get_config_sources()
+            health_data["config_sources"] = config_sources
+            health_data["_debug_mode"] = True
+            health_data["_debug_notice"] = "Verbose config sources included - DEBUG_MODE=true"
 
         return health_data
     
@@ -1669,6 +1689,247 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                 }
 
         return self.check_component_health("table_metadata_registry", check_table_metadata)
+
+
+    def _check_schema_summary(self) -> Dict[str, Any]:
+        """
+        Get comprehensive schema summary for remote database inspection (07 DEC 2025).
+
+        Provides visibility into all schemas, tables, row counts, and STAC statistics
+        without requiring direct database access. Critical for QA environment where
+        database access requires PRIVX → Windows Server → DBeaver workflow.
+
+        Returns:
+            Dict with schema summary including:
+            - schemas: Dict of schema names with tables, counts, sizes
+            - pgstac: STAC collection/item counts
+            - total_tables: Total table count across all schemas
+        """
+        def check_schemas():
+            from infrastructure.postgresql import PostgreSQLRepository
+            from config import get_config
+
+            config = get_config()
+            repo = PostgreSQLRepository()
+
+            try:
+                with repo._get_connection() as conn:
+                    with conn.cursor() as cur:
+                        schemas_data = {}
+
+                        # Get all relevant schemas
+                        target_schemas = ['app', 'geo', 'pgstac', 'h3']
+
+                        for schema_name in target_schemas:
+                            # Check if schema exists
+                            cur.execute("""
+                                SELECT EXISTS(
+                                    SELECT 1 FROM pg_namespace WHERE nspname = %s
+                                ) as schema_exists
+                            """, (schema_name,))
+                            schema_exists = cur.fetchone()['schema_exists']
+
+                            if not schema_exists:
+                                schemas_data[schema_name] = {
+                                    "exists": False,
+                                    "tables": [],
+                                    "table_count": 0
+                                }
+                                continue
+
+                            # Get tables in schema
+                            cur.execute("""
+                                SELECT table_name
+                                FROM information_schema.tables
+                                WHERE table_schema = %s
+                                AND table_type = 'BASE TABLE'
+                                ORDER BY table_name
+                            """, (schema_name,))
+                            tables = [row['table_name'] for row in cur.fetchall()]
+
+                            # Get row counts for key tables (limit to avoid slow queries)
+                            table_counts = {}
+                            key_tables = tables[:10]  # Limit to first 10 tables
+
+                            for table in key_tables:
+                                try:
+                                    cur.execute(f"SELECT COUNT(*) as count FROM {schema_name}.{table}")
+                                    table_counts[table] = cur.fetchone()['count']
+                                except Exception:
+                                    table_counts[table] = "error"
+
+                            schemas_data[schema_name] = {
+                                "exists": True,
+                                "tables": tables,
+                                "table_count": len(tables),
+                                "row_counts": table_counts
+                            }
+
+                        # Special handling for pgstac - get collection/item counts
+                        if schemas_data.get('pgstac', {}).get('exists', False):
+                            try:
+                                cur.execute("SELECT COUNT(*) as count FROM pgstac.collections")
+                                collections_count = cur.fetchone()['count']
+
+                                cur.execute("SELECT COUNT(*) as count FROM pgstac.items")
+                                items_count = cur.fetchone()['count']
+
+                                schemas_data['pgstac']['stac_counts'] = {
+                                    "collections": collections_count,
+                                    "items": items_count
+                                }
+                            except Exception as e:
+                                schemas_data['pgstac']['stac_counts'] = {
+                                    "error": str(e)[:100]
+                                }
+
+                        # Special handling for geo - count geometry columns
+                        if schemas_data.get('geo', {}).get('exists', False):
+                            try:
+                                cur.execute("""
+                                    SELECT COUNT(*) as count
+                                    FROM geometry_columns
+                                    WHERE f_table_schema = 'geo'
+                                """)
+                                geometry_count = cur.fetchone()['count']
+                                schemas_data['geo']['geometry_columns'] = geometry_count
+                            except Exception:
+                                schemas_data['geo']['geometry_columns'] = "error"
+
+                        # Calculate totals
+                        total_tables = sum(
+                            s.get('table_count', 0)
+                            for s in schemas_data.values()
+                            if isinstance(s, dict)
+                        )
+
+                        return {
+                            "schemas": schemas_data,
+                            "total_tables": total_tables,
+                            "schemas_checked": target_schemas
+                        }
+
+            except Exception as e:
+                import traceback
+                return {
+                    "error": str(e)[:200],
+                    "error_type": type(e).__name__,
+                    "traceback": traceback.format_exc()[:500]
+                }
+
+        return self.check_component_health("schema_summary", check_schemas)
+
+    def _get_config_sources(self) -> Dict[str, Any]:
+        """
+        Get configuration values with their sources for debugging (07 DEC 2025).
+
+        Shows whether each config value came from:
+        - ENV: Environment variable
+        - DEFAULT: AzureDefaults or other default class
+
+        Only included when DEBUG_MODE=true to avoid leaking configuration details.
+        Sensitive values (passwords, keys) are masked.
+
+        Returns:
+            Dict mapping config key to {value, source, env_var, is_default}
+        """
+        config = get_config()
+        sources = {}
+
+        # Storage configuration
+        storage_env = os.getenv('STORAGE_ACCOUNT_NAME')
+        sources['storage_account_name'] = {
+            "value": config.storage_account_name,
+            "source": "ENV" if storage_env else "DEFAULT",
+            "env_var": "STORAGE_ACCOUNT_NAME",
+            "is_default": config.storage_account_name == AzureDefaults.STORAGE_ACCOUNT_NAME
+        }
+
+        # Managed Identity (Admin)
+        mi_env = os.getenv('MANAGED_IDENTITY_NAME')
+        sources['managed_identity_name'] = {
+            "value": config.database.managed_identity_name,
+            "source": "ENV" if mi_env else "DEFAULT",
+            "env_var": "MANAGED_IDENTITY_NAME",
+            "is_default": config.database.managed_identity_name == AzureDefaults.MANAGED_IDENTITY_NAME
+        }
+
+        # Managed Identity (Reader)
+        mi_reader_env = os.getenv('MANAGED_IDENTITY_READER_NAME')
+        sources['managed_identity_reader_name'] = {
+            "value": config.database.managed_identity_reader_name,
+            "source": "ENV" if mi_reader_env else "DEFAULT",
+            "env_var": "MANAGED_IDENTITY_READER_NAME",
+            "is_default": config.database.managed_identity_reader_name == AzureDefaults.MANAGED_IDENTITY_READER_NAME
+        }
+
+        # Database host
+        db_host_env = os.getenv('POSTGIS_HOST')
+        sources['postgis_host'] = {
+            "value": config.database.host,
+            "source": "ENV" if db_host_env else "DEFAULT",
+            "env_var": "POSTGIS_HOST",
+            "is_default": not bool(db_host_env)
+        }
+
+        # Database name
+        db_name_env = os.getenv('POSTGIS_DATABASE')
+        sources['postgis_database'] = {
+            "value": config.database.database,
+            "source": "ENV" if db_name_env else "DEFAULT",
+            "env_var": "POSTGIS_DATABASE",
+            "is_default": not bool(db_name_env)
+        }
+
+        # TiTiler URL
+        titiler_env = os.getenv('TITILER_BASE_URL')
+        sources['titiler_base_url'] = {
+            "value": config.titiler_base_url,
+            "source": "ENV" if titiler_env else "DEFAULT",
+            "env_var": "TITILER_BASE_URL",
+            "is_default": config.titiler_base_url == AzureDefaults.TITILER_BASE_URL
+        }
+
+        # ETL App URL
+        etl_env = os.getenv('ETL_APP_URL')
+        sources['etl_app_base_url'] = {
+            "value": config.etl_app_base_url,
+            "source": "ENV" if etl_env else "DEFAULT",
+            "env_var": "ETL_APP_URL",
+            "is_default": config.etl_app_base_url == AzureDefaults.ETL_APP_URL
+        }
+
+        # Service Bus namespace
+        sb_env = os.getenv('SERVICE_BUS_NAMESPACE')
+        sources['service_bus_namespace'] = {
+            "value": config.service_bus_namespace,
+            "source": "ENV" if sb_env else "DEFAULT",
+            "env_var": "SERVICE_BUS_NAMESPACE",
+            "is_default": not bool(sb_env)
+        }
+
+        # Debug mode
+        debug_env = os.getenv('DEBUG_MODE')
+        sources['debug_mode'] = {
+            "value": config.debug_mode,
+            "source": "ENV" if debug_env else "DEFAULT",
+            "env_var": "DEBUG_MODE",
+            "is_default": not bool(debug_env)
+        }
+
+        # Summary statistics
+        env_count = sum(1 for v in sources.values() if v['source'] == 'ENV')
+        default_count = sum(1 for v in sources.values() if v['source'] == 'DEFAULT')
+
+        return {
+            "configs": sources,
+            "summary": {
+                "total_checked": len(sources),
+                "from_environment": env_count,
+                "using_defaults": default_count
+            },
+            "note": "Only shown when DEBUG_MODE=true"
+        }
 
 
 # Create singleton instance for use in function_app.py

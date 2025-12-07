@@ -1,6 +1,6 @@
 # Geospatial Data Platform - Technical Overview
 
-**Last Updated**: 18 NOV 2025
+**Last Updated**: 07 DEC 2025
 **Audience**: Development team (all disciplines)
 **Purpose**: High-level understanding of platform architecture, patterns, and technology stack
 **Wiki**: Azure DevOps Wiki - Technical architecture documentation
@@ -247,6 +247,83 @@ $$ LANGUAGE plpgsql;
 | **Task coordination** | PostgreSQL as single source of truth |
 | **Retry logic** | Service Bus automatic retries + dead-letter queue |
 | **Observability** | Application Insights structured logging |
+
+### Graceful Degradation (pgSTAC Optional)
+
+**Design Principle**: The system continues to function with reduced capabilities when optional components are unavailable.
+
+**Architecture Enabler**: Schema separation in PostgreSQL allows independent failure of components:
+
+```
+PostgreSQL Database (4 independent schemas)
+├── app     (CoreMachine)  ← CRITICAL: Job/task orchestration
+├── geo     (Vector Data)  ← CRITICAL: PostGIS tables, OGC Features API
+├── pgstac  (STAC Catalog) ← OPTIONAL: Metadata discovery
+└── h3      (H3 Grids)     ← OPTIONAL: Hexagonal grid system
+```
+
+**What Works WITHOUT pgSTAC**:
+
+| Capability | Vector Jobs | Raster Jobs | Notes |
+|------------|-------------|-------------|-------|
+| Stage 1: Validation | ✅ | ✅ | No pgstac dependencies |
+| Stage 2: Processing | ✅ | ✅ | PostGIS / COG creation |
+| Stage 3: STAC Cataloging | ⚠️ Degraded | ⚠️ Degraded | Skipped with warning |
+| OGC Features API | ✅ | N/A | Reads from `geo` schema directly |
+| TiTiler COG Viewing | N/A | ✅ | URLs generated from config |
+| Vector Viewer | ✅ | N/A | Uses OGC Features API |
+| STAC API Discovery | ❌ | ❌ | Requires pgstac schema |
+
+**How It Works**:
+
+1. **Detection**: `PgStacBootstrap.is_available()` checks if pgstac schema is functional (cached for 60 seconds)
+2. **Handler Behavior**: STAC handlers detect unavailability and return success with `degraded: true` flag
+3. **Job Completion**: Jobs complete successfully with warnings in `degraded_mode` field
+4. **Health Endpoint**: Reports `degraded_capabilities` and `available_capabilities` lists
+
+**User-Facing Response** (degraded mode):
+
+```json
+{
+  "success": true,
+  "degraded_mode": true,
+  "warnings": ["STAC cataloging skipped - pgSTAC unavailable"],
+  "available_capabilities": ["OGC Features API", "TiTiler COG viewing"],
+  "unavailable_capabilities": ["STAC API discovery"],
+  "result": {
+    "table_name": "my_dataset",
+    "ogc_features_url": "/api/features/collections/my_dataset/items"
+  }
+}
+```
+
+**Why This Matters**:
+
+- **Corporate environments**: DBA may not grant pgstac role prerequisites immediately
+- **Deployment resilience**: pypgstac migration failures don't block entire system
+- **Clear communication**: Users know exactly what works and what doesn't
+- **Graceful recovery**: When pgstac is fixed, full functionality returns automatically
+
+**Implementation Pattern** (for handlers):
+
+```python
+def my_stac_handler(params: Dict[str, Any]) -> Dict[str, Any]:
+    # Check availability FIRST (before any pgstac operations)
+    if not PgStacBootstrap.is_available():
+        logger.warning("pgSTAC unavailable - degraded mode")
+        return {
+            "success": True,
+            "degraded": True,
+            "warning": "pgSTAC schema not available",
+            "result": {
+                # Return whatever IS available
+                "ogc_features_available": True,
+                "stac_item_created": False
+            }
+        }
+
+    # Normal pgstac operations...
+```
 
 ---
 

@@ -1,10 +1,11 @@
 # Schema Rebuild SQL Reference
 
-**Date**: 25 NOV 2025
+**Date**: 07 DEC 2025
 **Status**: Reference Documentation
 **Wiki**: Azure DevOps Wiki - Database schema rebuild instructions
 **Purpose**: Manual SQL instructions for rebuilding `app` and `pgstac` schemas
 **Audience**: Database administrators with PostgreSQL access
+**Last Updated**: 07 DEC 2025 - Added geo schema step, updated to 9-step process
 
 ---
 
@@ -16,6 +17,22 @@ This document provides the SQL commands needed to manually rebuild the `app` and
 ```bash
 curl -X POST "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/dbadmin/maintenance/full-rebuild?confirm=yes"
 ```
+
+### 9-Step Rebuild Process (07 DEC 2025)
+
+| Step | Action | Fatal? | Notes |
+|------|--------|--------|-------|
+| 1 | Drop app schema | **FATAL** | System cannot function without app schema |
+| 2 | Drop pgstac schema | NON-FATAL | Continue if fails; STAC features disabled |
+| 3 | Deploy app schema | **FATAL** | Jobs/Tasks tables required |
+| 4 | Ensure geo schema | NON-FATAL | **Critical for vector workflows** - must exist before any vector jobs |
+| 5 | Deploy pgstac (pypgstac migrate) | NON-FATAL | Continue if fails; STAC features disabled |
+| 6 | Grant pgstac_read role | NON-FATAL | Skip if step 5 failed |
+| 7 | Create system STAC collections | NON-FATAL | Skip if step 5 failed |
+| 8 | Verify app schema | NON-FATAL | Always attempt |
+| 9 | Verify pgstac schema | NON-FATAL | Skip if step 5 failed |
+
+**Architecture Principle**: App schema is FATAL (system non-functional without it). pgstac is NON-FATAL (STAC features disabled but core system works). geo schema is NEVER dropped (contains user business data).
 
 ---
 
@@ -75,33 +92,45 @@ The executing user needs:
 
 ---
 
-## Step 1: Drop Existing Schemas
+## Step 1: Drop App Schema (FATAL)
 
-**WARNING**: This deletes ALL data in these schemas. The `geo` schema (user data) is NOT touched.
+**WARNING**: This deletes ALL data in the app schema. The `geo` schema (user data) is NEVER touched.
 
 ```sql
 -- ============================================================================
--- STEP 1: DROP EXISTING SCHEMAS
--- Execute these in order. CASCADE ensures dependent objects are removed.
+-- STEP 1: DROP APP SCHEMA (FATAL if fails)
+-- CASCADE ensures dependent objects are removed.
 -- ============================================================================
 
 -- Drop app schema (CoreMachine jobs/tasks)
 DROP SCHEMA IF EXISTS app CASCADE;
+```
+
+---
+
+## Step 2: Drop pgstac Schema (NON-FATAL)
+
+**Note**: If this step fails, the rebuild continues. STAC features will be unavailable until pgstac is fixed.
+
+```sql
+-- ============================================================================
+-- STEP 2: DROP PGSTAC SCHEMA (NON-FATAL)
+-- This also drops pgstac roles (pgstac_admin, pgstac_ingest, pgstac_read)
+-- ============================================================================
 
 -- Drop pgstac schema (STAC metadata)
--- NOTE: This also drops pgstac roles (pgstac_admin, pgstac_ingest, pgstac_read)
 DROP SCHEMA IF EXISTS pgstac CASCADE;
 ```
 
 ---
 
-## Step 2: Create App Schema
+## Step 3: Deploy App Schema (FATAL)
 
 Execute these statements **in order**. The SQL is generated from Pydantic models and represents the single source of truth.
 
 ```sql
 -- ============================================================================
--- STEP 2: CREATE APP SCHEMA
+-- STEP 3: DEPLOY APP SCHEMA (FATAL if fails)
 -- Generated from Pydantic models (PydanticToSQL)
 -- Date: 25 NOV 2025
 -- ============================================================================
@@ -433,7 +462,57 @@ CREATE TRIGGER "update_tasks_updated_at"
 
 ---
 
-## Step 3: Deploy pgstac Schema
+## Step 4: Ensure geo Schema Exists (NON-FATAL)
+
+**CRITICAL for vector workflows**: The `geo` schema must exist before any vector processing jobs can run. This step uses `IF NOT EXISTS` so it never deletes existing data.
+
+**Architecture Principle (07 DEC 2025)**: The geo schema stores vector data created by `process_vector` jobs. Unlike app/pgstac (rebuilt from code), geo contains **USER DATA** and is **NEVER dropped**. This step was promoted from step 5b to ensure it runs immediately after app schema deployment.
+
+```sql
+-- ============================================================================
+-- STEP 4: ENSURE GEO SCHEMA EXISTS (NON-FATAL)
+-- Uses IF NOT EXISTS - safe to run on existing schema
+-- Never deletes existing tables or data
+-- ============================================================================
+
+-- Create geo schema if it doesn't exist
+CREATE SCHEMA IF NOT EXISTS geo;
+
+-- Create table_metadata tracking table if it doesn't exist
+-- This tracks all vector tables created by process_vector jobs
+CREATE TABLE IF NOT EXISTS geo.table_metadata (
+    table_name VARCHAR(255) PRIMARY KEY,
+    created_at TIMESTAMP DEFAULT NOW(),
+    source_blob VARCHAR(500),
+    source_container VARCHAR(255),
+    job_id VARCHAR(64),
+    feature_count INTEGER,
+    geometry_type VARCHAR(50),
+    srid INTEGER,
+    bbox JSONB,
+    properties JSONB DEFAULT '{}'
+);
+
+-- Grant permissions to reader identity (for OGC Features API)
+-- Replace 'rmhpgflexreader' with your reader managed identity name
+GRANT USAGE ON SCHEMA geo TO rmhpgflexreader;
+GRANT SELECT ON ALL TABLES IN SCHEMA geo TO rmhpgflexreader;
+ALTER DEFAULT PRIVILEGES IN SCHEMA geo GRANT SELECT ON TABLES TO rmhpgflexreader;
+```
+
+**Verification**:
+```sql
+-- Verify geo schema exists
+SELECT schema_name FROM information_schema.schemata WHERE schema_name = 'geo';
+
+-- Verify table_metadata exists
+SELECT table_name FROM information_schema.tables
+WHERE table_schema = 'geo' AND table_name = 'table_metadata';
+```
+
+---
+
+## Step 5: Deploy pgstac Schema (NON-FATAL)
 
 The `pgstac` schema is managed by the **pypgstac** library (v0.9.8). It cannot be deployed via raw SQL - you must use the CLI tool.
 
@@ -500,14 +579,15 @@ After `pypgstac migrate` completes, the following objects exist:
 
 ---
 
-## Step 4: Grant Roles to Managed Identities
+## Step 6: Grant pgstac_read Role (NON-FATAL)
 
-After pgstac is deployed, grant the `pgstac_read` role to the read-only identity:
+After pgstac is deployed, grant the `pgstac_read` role to the read-only identity. **Skip this step if Step 5 failed.**
 
 ```sql
 -- ============================================================================
--- STEP 4: GRANT PGSTAC ROLES
+-- STEP 6: GRANT PGSTAC ROLES (NON-FATAL)
 -- Required for read-only API access (OGC/STAC API function app)
+-- Skip if pypgstac migrate failed (pgstac_read role won't exist)
 -- ============================================================================
 
 -- Grant pgstac_read to the read-only managed identity
@@ -526,14 +606,15 @@ WHERE r.rolname = 'pgstac_read';
 
 ---
 
-## Step 5: Create System STAC Collections
+## Step 7: Create System STAC Collections (NON-FATAL)
 
-After pgstac is deployed, create the system collections:
+After pgstac is deployed, create the system collections. **Skip this step if Step 5 failed.**
 
 ```sql
 -- ============================================================================
--- STEP 5: CREATE SYSTEM STAC COLLECTIONS
+-- STEP 7: CREATE SYSTEM STAC COLLECTIONS (NON-FATAL)
 -- These collections track ETL operational data
+-- Skip if pypgstac migrate failed (pgstac.create_collection won't exist)
 -- ============================================================================
 
 -- Create system-vectors collection (tracks PostGIS tables created by ETL)
@@ -580,16 +661,17 @@ WHERE id IN ('system-vectors', 'system-rasters');
 
 ---
 
-## Step 6: Verification Queries
+## Step 8: Verify App Schema (NON-FATAL)
 
-Run these queries to verify the rebuild was successful:
+Run these queries to verify app schema deployment was successful:
 
 ```sql
 -- ============================================================================
--- VERIFICATION QUERIES
+-- STEP 8: VERIFY APP SCHEMA (NON-FATAL)
+-- Always attempt this verification
 -- ============================================================================
 
--- 6.1: Verify app schema
+-- 8.1: Verify app schema
 SELECT
     'app schema' as check,
     (SELECT COUNT(*) FROM pg_tables WHERE schemaname = 'app') as tables,
@@ -598,7 +680,25 @@ SELECT
 
 -- Expected: tables=4, functions=5, enums=6
 
--- 6.2: Verify pgstac schema
+-- 8.2: Test app functions
+SELECT * FROM app.check_job_completion('test-job-id');
+
+-- Expected: Returns (false, 0, 0, 0, '[]')
+```
+
+---
+
+## Step 9: Verify pgstac Schema (NON-FATAL)
+
+Run these queries to verify pgstac schema deployment was successful. **Skip this step if Step 5 failed.**
+
+```sql
+-- ============================================================================
+-- STEP 9: VERIFY PGSTAC SCHEMA (NON-FATAL)
+-- Skip if pypgstac migrate failed
+-- ============================================================================
+
+-- 9.1: Verify pgstac schema
 SELECT
     'pgstac schema' as check,
     (SELECT COUNT(*) FROM pg_tables WHERE schemaname = 'pgstac') as tables,
@@ -606,20 +706,15 @@ SELECT
 
 -- Expected: tables=22, version='0.9.8'
 
--- 6.3: Verify pgstac roles
+-- 9.2: Verify pgstac roles
 SELECT rolname FROM pg_roles WHERE rolname LIKE 'pgstac%';
 
 -- Expected: pgstac_admin, pgstac_ingest, pgstac_read
 
--- 6.4: Verify system collections
+-- 9.3: Verify system collections
 SELECT id, content->>'title' as title FROM pgstac.collections;
 
 -- Expected: system-vectors, system-rasters
-
--- 6.5: Test app functions
-SELECT * FROM app.check_job_completion('test-job-id');
-
--- Expected: Returns (false, 0, 0, 0, '[]')
 ```
 
 ---
@@ -657,4 +752,4 @@ GRANT pgstac_admin TO <your_user>;
 
 ---
 
-**Last Updated**: 25 NOV 2025
+**Last Updated**: 07 DEC 2025 - Updated to 9-step process with geo schema at Step 4

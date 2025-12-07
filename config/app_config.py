@@ -711,6 +711,74 @@ class AppConfig(BaseModel):
             raise ValueError(f"Invalid mode: {mode}. Must be one of: 'cog', 'mosaicjson', 'pgstac'")
 
     # ========================================================================
+    # Debug Mode Helper Methods (07 DEC 2025)
+    # ========================================================================
+
+    def get_debug_status(self) -> dict:
+        """
+        Get comprehensive debug mode status for diagnostics (07 DEC 2025).
+
+        Returns a summary of all debug-related settings and what features
+        they enable. Used by health endpoint and diagnostic endpoints.
+
+        Returns:
+            {
+                "debug_mode": true/false,
+                "debug_logging": true/false,
+                "environment": "dev/qa/prod",
+                "features_enabled": [...],
+                "log_level": "DEBUG/INFO/..."
+            }
+        """
+        import os
+
+        debug_mode = self.debug_mode
+        debug_logging = os.environ.get("DEBUG_LOGGING", "false").lower() == "true"
+
+        features_enabled = []
+        if debug_mode:
+            features_enabled.extend([
+                "memory_tracking",
+                "detailed_timing",
+                "config_sources_in_health",
+                "verbose_validation_messages",
+                "parameter_origin_logging",
+                "full_parameter_dumps_on_failure"
+            ])
+        if debug_logging:
+            features_enabled.extend([
+                "debug_log_level",
+                "verbose_sql_logging",
+                "request_payload_logging"
+            ])
+
+        return {
+            "debug_mode": debug_mode,
+            "debug_logging": debug_logging,
+            "environment": self.environment,
+            "log_level": self.log_level,
+            "features_enabled": features_enabled,
+            "is_production": self.environment == "prod",
+            "verbose_enabled": debug_mode or debug_logging
+        }
+
+    def should_log_verbose(self) -> bool:
+        """
+        Check if verbose logging should be enabled (07 DEC 2025).
+
+        Returns True if either DEBUG_MODE or DEBUG_LOGGING is enabled.
+        Use this to guard verbose logging statements.
+
+        Usage:
+            config = get_config()
+            if config.should_log_verbose():
+                logger.debug(f"Detailed info: {extensive_data}")
+        """
+        import os
+        debug_logging = os.environ.get("DEBUG_LOGGING", "false").lower() == "true"
+        return self.debug_mode or debug_logging
+
+    # ========================================================================
     # Factory Methods
     # ========================================================================
 

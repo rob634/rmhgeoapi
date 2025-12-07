@@ -44,7 +44,8 @@ def register_validator(name: str):
 
 def run_validators(
     validators: List[Dict[str, Any]],
-    params: Dict[str, Any]
+    params: Dict[str, Any],
+    job_context: Optional[Dict[str, str]] = None
 ) -> ValidatorResult:
     """
     Run a list of resource validators against job parameters.
@@ -52,6 +53,12 @@ def run_validators(
     Args:
         validators: List of validator configurations from job class
         params: Validated job parameters
+        job_context: Optional context for verbose logging (07 DEC 2025)
+            {
+                "job_type": "process_raster_v2",
+                "job_id": "abc123...",  # May be None before job creation
+                "submission_endpoint": "/api/platform/submit"
+            }
 
     Returns:
         ValidatorResult with 'valid' bool and 'message' str
@@ -59,10 +66,26 @@ def run_validators(
         - valid=False with message from FIRST failing validator
 
     Example:
-        result = run_validators(cls.resource_validators, validated_params)
+        result = run_validators(cls.resource_validators, validated_params, job_context)
         if not result['valid']:
             raise ValueError(f"Pre-flight validation failed: {result['message']}")
     """
+    import time
+    from config import get_config
+
+    start_time = time.time()
+    config = get_config()
+    debug_mode = config.debug_mode
+    validators_run = []
+
+    # Extract job context for logging
+    job_type = job_context.get('job_type', 'unknown') if job_context else 'unknown'
+    job_id = job_context.get('job_id') if job_context else None
+
+    if debug_mode and job_context:
+        logger.info(f"🔍 Pre-flight validation starting for {job_type}" +
+                   (f" (job_id: {job_id[:8]}...)" if job_id else ""))
+
     for validator_config in validators:
         validator_type = validator_config.get('type')
 
@@ -80,13 +103,60 @@ def run_validators(
 
         # Run the validator
         validator_fn = RESOURCE_VALIDATORS[validator_type]
+        validator_start = time.time()
         result = validator_fn(params, validator_config)
+        validator_elapsed = round((time.time() - validator_start) * 1000, 1)
+
+        validators_run.append({
+            "type": validator_type,
+            "elapsed_ms": validator_elapsed,
+            "valid": result['valid']
+        })
 
         if not result['valid']:
-            # Return on first failure
+            # Enhance error message with job context in debug mode
+            if debug_mode and job_context:
+                enhanced_msg = f"{result['message']} (job_type: {job_type}"
+                if job_id:
+                    enhanced_msg += f", job_id: {job_id[:8]}..."
+                enhanced_msg += ")"
+                result = ValidatorResult(valid=False, message=enhanced_msg)
+
+            total_elapsed = round((time.time() - start_time) * 1000, 1)
+            logger.warning(f"❌ Pre-flight validation FAILED for {job_type}: {result['message']} "
+                          f"(checked {len(validators_run)} validator(s) in {total_elapsed}ms)")
             return result
 
-    # All validators passed
+    # All validators passed - log summary in debug mode
+    total_elapsed = round((time.time() - start_time) * 1000, 1)
+
+    if debug_mode:
+        # Build verbose success summary
+        summary_parts = [f"✅ Pre-flight validation PASSED for {job_type}"]
+
+        # Add source info if available
+        container = params.get('container_name')
+        blob = params.get('blob_name') or params.get('blob_list', [None])[0] if params.get('blob_list') else None
+        if container and blob:
+            size_mb = params.get('_blob_size_mb')
+            size_str = f", {size_mb:.1f} MB" if size_mb else ""
+            summary_parts.append(f"   Source: {container}/{blob}{size_str}")
+
+        # Add destination info if available
+        table_name = params.get('table_name')
+        schema = params.get('schema', 'geo')
+        if table_name:
+            summary_parts.append(f"   Destination: {schema}.{table_name}")
+
+        # Add validators summary
+        validator_names = [v['type'] for v in validators_run]
+        summary_parts.append(f"   Validators: {', '.join(validator_names)}")
+        summary_parts.append(f"   Total time: {total_elapsed}ms")
+
+        logger.info("\n".join(summary_parts))
+    else:
+        logger.debug(f"✅ Pre-flight: {len(validators_run)} validators passed in {total_elapsed}ms")
+
     return ValidatorResult(valid=True, message=None)
 
 
@@ -149,12 +219,19 @@ def validate_blob_exists(params: Dict[str, Any], config: Dict[str, Any]) -> Vali
             logger.debug(f"✅ Pre-flight: blob exists: {container}/{blob_path}")
             return ValidatorResult(valid=True, message=None)
         else:
-            error_msg = config.get('error') or validation['message']
+            # Use specific message from BlobRepository (includes container/blob names)
+            # Custom error is appended as context if provided
+            specific_msg = validation['message']
+            custom_error = config.get('error')
+            if custom_error:
+                error_msg = f"{specific_msg} ({custom_error})"
+            else:
+                error_msg = specific_msg
             logger.warning(f"❌ Pre-flight: {error_msg}")
             return ValidatorResult(valid=False, message=error_msg)
 
     except Exception as e:
-        error_msg = f"Failed to validate blob existence: {e}"
+        error_msg = f"Failed to validate blob existence for '{container}/{blob_path}': {e}"
         logger.error(error_msg)
         return ValidatorResult(valid=False, message=error_msg)
 
@@ -203,7 +280,7 @@ def validate_container_exists(params: Dict[str, Any], config: Dict[str, Any]) ->
             return ValidatorResult(valid=False, message=error_msg)
 
     except Exception as e:
-        error_msg = f"Failed to validate container existence: {e}"
+        error_msg = f"Failed to validate container existence for '{container}': {e}"
         logger.error(error_msg)
         return ValidatorResult(valid=False, message=error_msg)
 
@@ -268,7 +345,7 @@ def validate_table_exists(params: Dict[str, Any], config: Dict[str, Any]) -> Val
             return ValidatorResult(valid=False, message=error_msg)
 
     except Exception as e:
-        error_msg = f"Failed to validate table existence: {e}"
+        error_msg = f"Failed to validate table existence for '{schema}.{table_name}': {e}"
         logger.error(error_msg)
         return ValidatorResult(valid=False, message=error_msg)
 
@@ -381,10 +458,16 @@ def validate_blob_size(params: Dict[str, Any], config: Dict[str, Any]) -> Valida
     container = params.get(container_param)
     blob_path = params.get(blob_param)
 
-    if not container or not blob_path:
+    if not container:
         return ValidatorResult(
             valid=False,
-            message=f"Missing container or blob parameter for size check"
+            message=f"Container parameter '{container_param}' is missing or empty"
+        )
+
+    if not blob_path:
+        return ValidatorResult(
+            valid=False,
+            message=f"Blob parameter '{blob_param}' is missing or empty"
         )
 
     # Get size limits
@@ -416,13 +499,13 @@ def validate_blob_size(params: Dict[str, Any], config: Dict[str, Any]) -> Valida
 
         # Check minimum size
         if min_size_mb and size_mb < min_size_mb:
-            error_msg = config.get('error') or f"File too small: {size_mb:.2f} MB (minimum: {min_size_mb} MB)"
+            error_msg = config.get('error') or f"File '{container}/{blob_path}' too small: {size_mb:.2f} MB (minimum: {min_size_mb} MB)"
             logger.warning(f"❌ Pre-flight: {error_msg}")
             return ValidatorResult(valid=False, message=error_msg)
 
         # Check maximum size
         if max_size_mb and size_mb > max_size_mb:
-            error_msg = config.get('error') or f"File too large: {size_mb:.2f} MB (maximum: {max_size_mb} MB)"
+            error_msg = config.get('error') or f"File '{container}/{blob_path}' too large: {size_mb:.2f} MB (maximum: {max_size_mb} MB)"
             logger.warning(f"❌ Pre-flight: {error_msg}")
             return ValidatorResult(valid=False, message=error_msg)
 
@@ -430,7 +513,7 @@ def validate_blob_size(params: Dict[str, Any], config: Dict[str, Any]) -> Valida
         return ValidatorResult(valid=True, message=None)
 
     except Exception as e:
-        error_msg = f"Failed to check blob size: {e}"
+        error_msg = f"Failed to check blob size for '{container}/{blob_path}': {e}"
         logger.error(error_msg)
         return ValidatorResult(valid=False, message=error_msg)
 
@@ -582,7 +665,7 @@ def validate_blob_list_exists(params: Dict[str, Any], config: Dict[str, Any]) ->
         return ValidatorResult(valid=True, message=None)
 
     except Exception as e:
-        error_msg = f"Failed to validate blob list: {e}"
+        error_msg = f"Failed to validate blob list in container '{container}' ({len(blob_list) if blob_list else 0} files): {e}"
         logger.error(error_msg)
         return ValidatorResult(valid=False, message=error_msg)
 
@@ -657,7 +740,14 @@ def validate_blob_exists_with_size(params: Dict[str, Any], config: Dict[str, Any
         # First check if container/blob exist
         validation = blob_repo.validate_container_and_blob(container, blob_path)
         if not validation['valid']:
-            error_msg = config.get('error_not_found') or validation['message']
+            # Use specific message from BlobRepository (includes container/blob names)
+            # Custom error is appended as context if provided
+            specific_msg = validation['message']
+            custom_error = config.get('error_not_found')
+            if custom_error:
+                error_msg = f"{specific_msg} ({custom_error})"
+            else:
+                error_msg = specific_msg
             logger.warning(f"❌ Pre-flight: {error_msg}")
             return ValidatorResult(valid=False, message=error_msg)
 
@@ -676,13 +766,13 @@ def validate_blob_exists_with_size(params: Dict[str, Any], config: Dict[str, Any
 
         # Check minimum size
         if min_size_mb and size_mb < min_size_mb:
-            error_msg = config.get('error_too_small') or f"File too small: {size_mb:.2f} MB (minimum: {min_size_mb} MB)"
+            error_msg = config.get('error_too_small') or f"File '{container}/{blob_path}' too small: {size_mb:.2f} MB (minimum: {min_size_mb} MB)"
             logger.warning(f"❌ Pre-flight: {error_msg}")
             return ValidatorResult(valid=False, message=error_msg)
 
         # Check maximum size
         if max_size_mb and size_mb > max_size_mb:
-            error_msg = config.get('error_too_large') or f"File too large: {size_mb:.2f} MB (maximum: {max_size_mb} MB)"
+            error_msg = config.get('error_too_large') or f"File '{container}/{blob_path}' too large: {size_mb:.2f} MB (maximum: {max_size_mb} MB)"
             logger.warning(f"❌ Pre-flight: {error_msg}")
             return ValidatorResult(valid=False, message=error_msg)
 
@@ -690,7 +780,7 @@ def validate_blob_exists_with_size(params: Dict[str, Any], config: Dict[str, Any
         return ValidatorResult(valid=True, message=None)
 
     except Exception as e:
-        error_msg = f"Failed to validate blob: {e}"
+        error_msg = f"Failed to validate blob '{container}/{blob_path}': {e}"
         logger.error(error_msg)
         return ValidatorResult(valid=False, message=error_msg)
 

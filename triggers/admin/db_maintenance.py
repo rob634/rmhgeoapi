@@ -19,7 +19,7 @@ import psycopg
 from psycopg import sql
 
 from infrastructure import RepositoryFactory, PostgreSQLRepository
-from config import config
+from config import get_config
 from config.defaults import STACDefaults, AzureDefaults
 from util_logger import LoggerFactory, ComponentType
 
@@ -949,6 +949,7 @@ class AdminDbMaintenanceTrigger:
             # Unlike app/pgstac (rebuilt from code), geo contains USER DATA and is never dropped.
             # CRITICAL: Must exist BEFORE any vector jobs run - moved to step 4 for this reason.
             # Reader identity needs SELECT on geo schema tables for OGC Features API.
+            config = get_config()
             reader_identity = config.database.managed_identity_reader_name
             logger.info(f"🗺️ Step 4/9: Ensuring geo schema exists and granting permissions to {reader_identity}...")
             step4 = {"step": 4, "action": "ensure_geo_schema_and_grant_permissions", "status": "pending"}

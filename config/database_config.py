@@ -214,6 +214,29 @@ class DatabaseConfig(BaseModel):
         """
     )
 
+    managed_identity_reader_name: Optional[str] = Field(
+        default=AzureDefaults.MANAGED_IDENTITY_READER_NAME,
+        description="""Read-only managed identity name for PostgreSQL (used by OGC/STAC API).
+
+        Purpose:
+            Specifies the PostgreSQL user name for read-only access. This identity
+            is used by TiTiler, OGC/STAC API apps that only need SELECT permissions.
+
+        Environment Variable: MANAGED_IDENTITY_READER_NAME
+
+        Used By:
+            - db_maintenance.py: Grants pgstac_read role and geo/h3 schema SELECT
+            - OGC/STAC Function App: Read-only access to pgstac and geo schemas
+            - TiTiler: Read-only access to STAC metadata
+
+        PostgreSQL Setup:
+            SELECT * FROM pgaadauth_create_principal('rmhpgflexreader', false, false);
+            GRANT pgstac_read TO rmhpgflexreader;
+            GRANT USAGE ON SCHEMA geo TO rmhpgflexreader;
+            GRANT SELECT ON ALL TABLES IN SCHEMA geo TO rmhpgflexreader;
+        """
+    )
+
     # Connection pooling (reserved for future use)
     min_connections: int = Field(
         default=DatabaseDefaults.MIN_CONNECTIONS,
@@ -262,6 +285,7 @@ class DatabaseConfig(BaseModel):
             "password": "***MASKED***" if self.password else None,
             "managed_identity": self.use_managed_identity,
             "managed_identity_name": self.managed_identity_name,
+            "managed_identity_reader_name": self.managed_identity_reader_name,
             "managed_identity_client_id": self.managed_identity_client_id[:8] + "..." if self.managed_identity_client_id else None,
             "postgis_schema": self.postgis_schema,
             "app_schema": self.app_schema,
@@ -289,6 +313,7 @@ class DatabaseConfig(BaseModel):
             use_managed_identity=os.environ.get("USE_MANAGED_IDENTITY", "false").lower() == "true",
             managed_identity_name=os.environ.get("MANAGED_IDENTITY_NAME", AzureDefaults.MANAGED_IDENTITY_NAME),
             managed_identity_client_id=os.environ.get("MANAGED_IDENTITY_CLIENT_ID"),
+            managed_identity_reader_name=os.environ.get("MANAGED_IDENTITY_READER_NAME", AzureDefaults.MANAGED_IDENTITY_READER_NAME),
             connection_timeout_seconds=int(os.environ.get("DB_CONNECTION_TIMEOUT", str(DatabaseDefaults.CONNECTION_TIMEOUT_SECONDS)))
         )
 

@@ -37,8 +37,12 @@ class AzureDefaults:
     # Storage Account - Override: STORAGE_ACCOUNT_NAME
     STORAGE_ACCOUNT_NAME = "rmhazuregeo"
 
-    # Managed Identity - Override: MANAGED_IDENTITY_NAME
+    # Managed Identity (Admin) - Override: MANAGED_IDENTITY_NAME
     MANAGED_IDENTITY_NAME = "rmhpgflexadmin"
+
+    # Managed Identity (Reader) - Override: MANAGED_IDENTITY_READER_NAME
+    # Used by OGC/STAC API for read-only PostgreSQL access
+    MANAGED_IDENTITY_READER_NAME = "rmhpgflexreader"
 
     # TiTiler tile server - Override: TITILER_BASE_URL
     TITILER_BASE_URL = "https://rmhtitiler-ghcyd7g0bxdvc2hc.eastus-01.azurewebsites.net"

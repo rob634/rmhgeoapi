@@ -56,14 +56,27 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
         Returns:
             Health status data
         """
+        config = get_config()
         health_data = {
             "status": "healthy",
             "components": {},
             "environment": {
-                "bronze_storage_account": get_config().storage.bronze.account_name,
+                "bronze_storage_account": config.storage.bronze.account_name,
                 "python_version": sys.version.split()[0],
                 "function_runtime": "python",
-                "health_check_version": "v2025-12-08_ZONE_STORAGE"
+                "health_check_version": "v2025-12-08_IDENTITY_ECHO"
+            },
+            "identity": {
+                "database": {
+                    "admin_identity_name": config.database.managed_identity_admin_name,
+                    "reader_identity_name": config.database.managed_identity_reader_name,
+                    "use_managed_identity": config.database.use_managed_identity,
+                    "auth_method": "managed_identity" if config.database.use_managed_identity else "password"
+                },
+                "storage": {
+                    "auth_method": "DefaultAzureCredential (system-assigned)",
+                    "note": "Storage uses system-assigned managed identity via DefaultAzureCredential"
+                }
             },
             "errors": []
         }

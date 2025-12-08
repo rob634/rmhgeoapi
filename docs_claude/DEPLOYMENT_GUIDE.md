@@ -318,7 +318,8 @@ Create `local.settings.json`:
   "Values": {
     "AzureWebJobsStorage": "UseDevelopmentStorage=true",
     "FUNCTIONS_WORKER_RUNTIME": "python",
-    "STORAGE_ACCOUNT_NAME": "rmhazuregeo",
+    "BRONZE_STORAGE_ACCOUNT": "rmhazuregeo",
+    "SILVER_STORAGE_ACCOUNT": "rmhazuregeo",
     "STORAGE_ACCOUNT_KEY": "[See Azure Portal]",
     "POSTGRES_HOST": "rmhpgflex.postgres.database.azure.com",
     "POSTGRES_DB": "geopgflex",
@@ -518,4 +519,4 @@ AND m.rolname = 'migeoetldbadminqa';
 
 ---
 
-**Last Updated**: 05 DEC 2025
+**Last Updated**: 08 DEC 2025

@@ -294,11 +294,14 @@ class PostgreSQLRepository(BaseRepository):
         """
         Build PostgreSQL connection string with automatic credential detection.
 
-        Authentication Priority Chain:
-        -----------------------------
-        1. User-Assigned Managed Identity (if MANAGED_IDENTITY_CLIENT_ID is set)
-        2. System-Assigned Managed Identity (if running in Azure with WEBSITE_SITE_NAME)
-        3. Password Authentication (if POSTGIS_PASSWORD is set)
+        Authentication Priority Chain (08 DEC 2025 - Config-Driven):
+        ------------------------------------------------------------
+        All credentials are loaded via DatabaseConfig.from_environment() at startup.
+        This method uses config values only - no direct os.getenv() calls.
+
+        1. User-Assigned Managed Identity (if config.database.managed_identity_client_id is set)
+        2. System-Assigned Managed Identity (if config.database.is_azure_environment is True)
+        3. Password Authentication (if config.postgis_password is set)
         4. FAIL with clear error message
 
         This allows the application to work in multiple environments:
@@ -340,17 +343,17 @@ class PostgreSQLRepository(BaseRepository):
 
         logger.debug("🔌 Detecting PostgreSQL authentication method...")
 
-        # Get environment variables for detection
-        # For business database, prefer its specific managed identity config
+        # Get credentials from config - SINGLE SOURCE OF TRUTH (08 DEC 2025)
+        # Config loads all env vars at startup via DatabaseConfig.from_environment()
         if use_business_db and db_config:
-            client_id = db_config.managed_identity_client_id or os.getenv("MANAGED_IDENTITY_CLIENT_ID")
-            identity_name = db_config.managed_identity_name
+            client_id = db_config.managed_identity_client_id
+            identity_name = db_config.managed_identity_admin_name
         else:
-            client_id = os.getenv("MANAGED_IDENTITY_CLIENT_ID") or self.config.database.managed_identity_client_id
-            # Use config value - single source of truth for default in database_config.py
-            identity_name = self.config.database.managed_identity_name or os.getenv("MANAGED_IDENTITY_NAME")
+            client_id = self.config.database.managed_identity_client_id
+            identity_name = self.config.database.effective_identity_name
 
-        website_name = os.getenv("WEBSITE_SITE_NAME")
+        # Azure environment detection from config (not os.getenv)
+        is_azure = self.config.database.is_azure_environment
         password = self.config.postgis_password
 
         # Priority 1: User-Assigned Managed Identity
@@ -363,10 +366,8 @@ class PostgreSQLRepository(BaseRepository):
             )
 
         # Priority 2: System-Assigned Managed Identity (running in Azure)
-        if website_name:
-            # Use website name as identity name for system-assigned identity
-            if not use_business_db:
-                identity_name = os.getenv("MANAGED_IDENTITY_NAME", website_name)
+        if is_azure:
+            # effective_identity_name already handles fallback to azure_website_name
             logger.info(f"🔐 [AUTH] Using SYSTEM-ASSIGNED managed identity: {identity_name} (detected Azure environment)")
             return self._build_managed_identity_connection_string(
                 client_id=None,
@@ -389,14 +390,14 @@ class PostgreSQLRepository(BaseRepository):
         error_msg = (
             "❌ NO DATABASE CREDENTIALS FOUND!\n"
             "Please configure one of the following:\n"
-            "  1. User-Assigned Identity: Set MANAGED_IDENTITY_CLIENT_ID + MANAGED_IDENTITY_NAME\n"
+            "  1. User-Assigned Identity: Set DB_ADMIN_MANAGED_IDENTITY_CLIENT_ID + DB_ADMIN_MANAGED_IDENTITY_NAME\n"
             "  2. System-Assigned Identity: Deploy to Azure (auto-detected via WEBSITE_SITE_NAME)\n"
             "  3. Password Auth: Set POSTGIS_PASSWORD environment variable\n"
             "\n"
-            "Current state:\n"
-            f"  - MANAGED_IDENTITY_CLIENT_ID: {'set' if client_id else 'NOT SET'}\n"
-            f"  - WEBSITE_SITE_NAME: {'set' if website_name else 'NOT SET (not in Azure)'}\n"
-            f"  - POSTGIS_PASSWORD: {'set' if password else 'NOT SET'}"
+            "Current config state:\n"
+            f"  - managed_identity_client_id: {'set' if client_id else 'NOT SET'}\n"
+            f"  - is_azure_environment: {is_azure}\n"
+            f"  - postgis_password: {'set' if password else 'NOT SET'}"
         )
         logger.error(error_msg)
         raise ValueError(error_msg)

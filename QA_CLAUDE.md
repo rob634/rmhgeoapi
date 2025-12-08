@@ -197,13 +197,14 @@ az functionapp config appsettings list --name <FUNCTION_APP_NAME> --resource-gro
 POSTGIS_HOST=<server>.postgres.database.azure.com
 POSTGIS_DATABASE=<database_name>
 USE_MANAGED_IDENTITY=true
-MANAGED_IDENTITY_NAME=<identity_name>
-MANAGED_IDENTITY_CLIENT_ID=<client_id>
+DB_ADMIN_MANAGED_IDENTITY_NAME=<identity_name>
+DB_ADMIN_MANAGED_IDENTITY_CLIENT_ID=<client_id>
 SERVICE_BUS_CONNECTION_STRING=Endpoint=sb://...
 SERVICE_BUS_NAMESPACE=<namespace_name>
 JOBS_QUEUE_NAME=geospatial-jobs
 TASKS_QUEUE_NAME=geospatial-tasks
-STORAGE_ACCOUNT_NAME=<storage_account>
+BRONZE_STORAGE_ACCOUNT=<storage_account>
+SILVER_STORAGE_ACCOUNT=<storage_account>
 ```
 
 ### Function App #2: Read-Only APIs
@@ -230,8 +231,8 @@ STORAGE_ACCOUNT_NAME=<storage_account>
 POSTGIS_HOST=<server>.postgres.database.azure.com
 POSTGIS_DATABASE=<database_name>
 USE_MANAGED_IDENTITY=true
-MANAGED_IDENTITY_NAME=<identity_name>
-MANAGED_IDENTITY_CLIENT_ID=<client_id>
+DB_ADMIN_MANAGED_IDENTITY_NAME=<identity_name>
+DB_ADMIN_MANAGED_IDENTITY_CLIENT_ID=<client_id>
 ```
 
 ---
@@ -466,7 +467,7 @@ az role assignment list --assignee <PRINCIPAL_ID> \
 | Property | Used For |
 |----------|----------|
 | `name` | PostgreSQL user name (must match exactly) |
-| `clientId` | `MANAGED_IDENTITY_CLIENT_ID` environment variable |
+| `clientId` | `DB_ADMIN_MANAGED_IDENTITY_CLIENT_ID` environment variable |
 | `principalId` | Azure RBAC role assignments |
 
 ### Expected RBAC Assignments
@@ -597,13 +598,14 @@ done
 | `POSTGIS_DATABASE` | `geoetldb` | Yes | Database name |
 | `POSTGIS_PORT` | `5432` | No | Default: 5432 |
 | `USE_MANAGED_IDENTITY` | `true` | Yes | Enable MI auth |
-| `MANAGED_IDENTITY_NAME` | `migeoetldbadminqa` | Yes | PG user name |
-| `MANAGED_IDENTITY_CLIENT_ID` | `abc123-...` | Yes* | For user-assigned MI |
+| `DB_ADMIN_MANAGED_IDENTITY_NAME` | `migeoetldbadminqa` | Yes | PG user name |
+| `DB_ADMIN_MANAGED_IDENTITY_CLIENT_ID` | `abc123-...` | Yes* | For user-assigned MI |
 | `SERVICE_BUS_CONNECTION_STRING` | `Endpoint=sb://...` | Yes | Service Bus connection |
 | `SERVICE_BUS_NAMESPACE` | `rmhazure` | Yes | Namespace name |
 | `JOBS_QUEUE_NAME` | `geospatial-jobs` | Yes | Jobs queue |
 | `TASKS_QUEUE_NAME` | `geospatial-tasks` | Yes | Tasks queue |
-| `STORAGE_ACCOUNT_NAME` | `rmhazuregeo` | Yes | Primary storage |
+| `BRONZE_STORAGE_ACCOUNT` | `rmhazuregeo` | Yes | Bronze tier storage |
+| `SILVER_STORAGE_ACCOUNT` | `rmhazuregeo` | Yes | Silver tier storage |
 | `STORAGE_ACCOUNT_KEY` | `...` | Yes** | Storage access |
 
 *Required for user-assigned managed identity
@@ -616,8 +618,8 @@ done
 | `POSTGIS_HOST` | `server.postgres.database.azure.com` | Yes | PostgreSQL hostname |
 | `POSTGIS_DATABASE` | `geoetldb` | Yes | Database name |
 | `USE_MANAGED_IDENTITY` | `true` | Yes | Enable MI auth |
-| `MANAGED_IDENTITY_NAME` | `migeoetldbadminqa` | Yes | PG user name |
-| `MANAGED_IDENTITY_CLIENT_ID` | `abc123-...` | Yes* | For user-assigned MI |
+| `DB_ADMIN_MANAGED_IDENTITY_NAME` | `migeoetldbadminqa` | Yes | PG user name |
+| `DB_ADMIN_MANAGED_IDENTITY_CLIENT_ID` | `abc123-...` | Yes* | For user-assigned MI |
 
 ### TiTiler Web App
 

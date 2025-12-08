@@ -31,7 +31,7 @@ from datetime import datetime, timezone
 
 import azure.functions as func
 from .http_base import SystemMonitoringTrigger
-from config import get_config, AzureDefaults, get_app_mode_config
+from config import get_config, AzureDefaults, StorageDefaults, get_app_mode_config
 from core.schema.deployer import SchemaManagerFactory
 from utils import validator
 
@@ -60,10 +60,10 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
             "status": "healthy",
             "components": {},
             "environment": {
-                "storage_account": get_config().storage_account_name,
+                "bronze_storage_account": get_config().storage.bronze.account_name,
                 "python_version": sys.version.split()[0],
                 "function_runtime": "python",
-                "health_check_version": "v2025-11-13_B3_OPTIMIZED"
+                "health_check_version": "v2025-12-08_ZONE_STORAGE"
             },
             "errors": []
         }
@@ -347,7 +347,11 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
 
             return queue_status
 
-        return self.check_component_health("storage_queues", check_queues)
+        return self.check_component_health(
+            "storage_queues",
+            check_queues,
+            description="Azure Storage Queue connectivity (deprecated - use Service Bus)"
+        )
 
     def _check_service_bus_queues(self) -> Dict[str, Any]:
         """
@@ -427,7 +431,11 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
 
             return queue_status
 
-        return self.check_component_health("service_bus", check_service_bus)
+        return self.check_component_health(
+            "service_bus",
+            check_service_bus,
+            description="Azure Service Bus message queues for job and task orchestration"
+        )
 
     def _check_database(self) -> Dict[str, Any]:
         """Enhanced PostgreSQL database health check with query metrics.
@@ -721,7 +729,21 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                             "all_queries_successful": False
                         }
                     
-                    return {
+                    # Determine if critical app schema is missing (08 DEC 2025)
+                    # App schema is CRITICAL - without it, job/task orchestration is non-functional
+                    tables_ready = all(status is True for status in app_tables_status.values()) if app_tables_status else False
+
+                    # Build error message if app schema is missing or tables not ready
+                    error_msg = None
+                    impact_msg = None
+                    if not app_schema_exists:
+                        error_msg = f"CRITICAL: App schema '{config.app_schema}' does not exist - run full-rebuild"
+                        impact_msg = "Job/task orchestration completely unavailable"
+                    elif not tables_ready:
+                        error_msg = f"App schema exists but required tables missing: {table_management_results}"
+                        impact_msg = "Job/task orchestration may fail"
+
+                    result = {
                         "postgresql_version": pg_version.split()[0],
                         "postgis_version": postgis_version,
                         "connection": "successful",
@@ -729,6 +751,7 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                         "schema_health": {
                             "app_schema_name": config.app_schema,
                             "app_schema_exists": app_schema_exists,
+                            "app_schema_critical": True,  # Indicates this is required for core functionality
                             "postgis_schema_name": config.postgis_schema,
                             "postgis_schema_exists": postgis_schema_exists,
                             "app_tables": app_tables_status if app_schema_exists else "schema_not_found"
@@ -736,7 +759,7 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                         "table_management": {
                             "auto_creation_enabled": True,
                             "operations_performed": table_management_results,
-                            "tables_ready": all(status is True for status in app_tables_status.values()) if app_tables_status else False
+                            "tables_ready": tables_ready
                         },
                         "stac_data": {
                             "items_count": stac_count,
@@ -748,14 +771,27 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                         "function_availability": function_metrics,
                         "query_performance": query_metrics
                     }
-        
-        return self.check_component_health("database", check_pg)
+
+                    # Add error field if app schema issues detected (triggers unhealthy status)
+                    if error_msg:
+                        result["error"] = error_msg
+                        result["impact"] = impact_msg
+                        result["fix"] = "POST /api/dbadmin/maintenance/full-rebuild?confirm=yes"
+
+                    return result
+
+        return self.check_component_health(
+            "database",
+            check_pg,
+            description="PostgreSQL/PostGIS database connectivity and query metrics"
+        )
     
     def _check_vault_configuration(self) -> Dict[str, Any]:
         """Check Azure Key Vault configuration and connectivity. DISABLED - using environment variables."""
         return {
             "component": "vault",
-            "status": "disabled", 
+            "description": "Azure Key Vault for secrets management (optional)",
+            "status": "disabled",
             "details": {"message": "Key Vault disabled - using environment variables only"}
         }
         
@@ -804,26 +840,32 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                     "vault_connectivity": "failed",
                     "error": str(e)[:200]
                 }
-        
-        return self.check_component_health("vault", check_vault)
+
+        return self.check_component_health(
+            "vault",
+            check_vault,
+            description="Azure Key Vault for secrets management (optional)"
+        )
     
     def _check_database_configuration(self) -> Dict[str, Any]:
         """Check PostgreSQL database configuration."""
         def check_db_config():
             config = get_config()
-            
-            # Required environment variables
+
+            # Required environment variables for database connection
+            # Note: KEY_VAULT is optional - system uses env vars for password (08 DEC 2025)
             required_env_vars = {
-                "KEY_VAULT": os.getenv("KEY_VAULT"),
-                "KEY_VAULT_DATABASE_SECRET": os.getenv("KEY_VAULT_DATABASE_SECRET"), 
                 "POSTGIS_DATABASE": os.getenv("POSTGIS_DATABASE"),
                 "POSTGIS_HOST": os.getenv("POSTGIS_HOST"),
                 "POSTGIS_USER": os.getenv("POSTGIS_USER"),
                 "POSTGIS_PORT": os.getenv("POSTGIS_PORT")
             }
-            
+
             # Optional environment variables
+            # KEY_VAULT is optional - disabled by default, using environment variables (08 DEC 2025)
             optional_env_vars = {
+                "KEY_VAULT": os.getenv("KEY_VAULT"),
+                "KEY_VAULT_DATABASE_SECRET": os.getenv("KEY_VAULT_DATABASE_SECRET"),
                 "POSTGIS_PASSWORD": bool(os.getenv("POSTGIS_PASSWORD")),
                 "POSTGIS_SCHEMA": os.getenv("POSTGIS_SCHEMA", "geo"),
                 "APP_SCHEMA": os.getenv("APP_SCHEMA", "app")
@@ -859,8 +901,12 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                 "loaded_config_values": config_values,
                 "configuration_complete": len(missing_vars) == 0
             }
-        
-        return self.check_component_health("database_config", check_db_config)
+
+        return self.check_component_health(
+            "database_config",
+            check_db_config,
+            description="PostgreSQL connection environment variables and configuration"
+        )
     
     def _should_check_database(self) -> bool:
         """Check if database health check is enabled."""
@@ -975,8 +1021,12 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                     "environment_detected": "azure_functions" if validator.is_azure_functions else "local"
                 }
             }
-        
-        return self.check_component_health("import_validation", check_imports)
+
+        return self.check_component_health(
+            "import_validation",
+            check_imports,
+            description="Python module imports and dependency validation"
+        )
 
     def _check_duckdb(self) -> Dict[str, Any]:
         """
@@ -1032,7 +1082,11 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                     "impact": "Analytical queries and GeoParquet exports unavailable"
                 }
 
-        return self.check_component_health("duckdb", check_duckdb)
+        return self.check_component_health(
+            "duckdb",
+            check_duckdb,
+            description="DuckDB analytical engine for serverless queries and GeoParquet exports"
+        )
 
     def _check_vsi_support(self) -> Dict[str, Any]:
         """
@@ -1145,7 +1199,11 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                     "impact": "Big Raster ETL may be unavailable"
                 }
 
-        return self.check_component_health("vsi_support", check_vsi)
+        return self.check_component_health(
+            "vsi_support",
+            check_vsi,
+            description="GDAL/rasterio VSI for cloud-native raster streaming from Azure Blob Storage"
+        )
 
     def _check_jobs_registry(self) -> Dict[str, Any]:
         """
@@ -1175,7 +1233,11 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                 "note": "Jobs are explicitly registered in jobs/__init__.py ALL_JOBS dict"
             }
 
-        return self.check_component_health("jobs", check_jobs)
+        return self.check_component_health(
+            "jobs",
+            check_jobs,
+            description="Job registry showing available ETL job types and their handlers"
+        )
 
     def _check_pgstac(self) -> Dict[str, Any]:
         """
@@ -1321,10 +1383,11 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                             "critical_functions": critical_functions,
                             "table_counts": table_counts,
                             "all_critical_tables_present": all_tables_exist,
-                            "all_critical_functions_present": all_functions_exist
+                            "all_critical_functions_present": all_functions_exist,
+                            "criticality": "medium"  # Not required for single raster workflows
                         }
 
-                        # Add warnings if issues detected
+                        # Add warnings/errors if issues detected (08 DEC 2025)
                         warnings = []
 
                         if not searches_table_exists:
@@ -1338,6 +1401,9 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                             result["warnings"] = warnings
                             result["impact"] = "Cannot register pgSTAC searches for TiTiler visualization"
                             result["fix"] = "Run /api/dbadmin/maintenance/pgstac/redeploy?confirm=yes to reinstall pgSTAC"
+                            # Add error field to trigger unhealthy status when critical tables/functions missing
+                            if not all_tables_exist or not all_functions_exist:
+                                result["error"] = f"PgSTAC incomplete: tables_ok={all_tables_exist}, functions_ok={all_functions_exist}"
 
                         return result
 
@@ -1352,7 +1418,11 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                     "impact": "PgSTAC health check failed - STAC operations may be impacted"
                 }
 
-        return self.check_component_health("pgstac", check_pgstac)
+        return self.check_component_health(
+            "pgstac",
+            check_pgstac,
+            description="PgSTAC extension for STAC catalog storage and TiTiler integration"
+        )
 
     def _check_system_reference_tables(self) -> Dict[str, Any]:
         """
@@ -1452,7 +1522,8 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                                 "name": has_name
                             },
                             "spatial_index": has_spatial_index,
-                            "ready_for_attribution": ready
+                            "ready_for_attribution": ready,
+                            "criticality": "low"  # Optional - only affects ISO3 country attribution
                         }
 
                         # Add warnings if issues detected
@@ -1484,7 +1555,11 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                     "impact": "System reference tables check failed"
                 }
 
-        return self.check_component_health("system_reference_tables", check_system_tables)
+        return self.check_component_health(
+            "system_reference_tables",
+            check_system_tables,
+            description="Reference data tables for ISO3 country attribution and spatial enrichment"
+        )
 
     def _check_deployment_config(self) -> Dict[str, Any]:
         """
@@ -1512,16 +1587,16 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
             defaults_detected = {}
             env_vars_set = {}
 
-            # Check storage account name
-            storage_account = config.storage_account_name
-            if storage_account == AzureDefaults.STORAGE_ACCOUNT_NAME:
-                defaults_detected['storage_account_name'] = {
-                    'current_value': storage_account,
-                    'default_value': AzureDefaults.STORAGE_ACCOUNT_NAME,
-                    'env_var': 'STORAGE_ACCOUNT_NAME'
+            # Check storage accounts (zone-specific - 08 DEC 2025)
+            bronze_account = config.storage.bronze.account_name
+            if bronze_account == StorageDefaults.DEFAULT_ACCOUNT_NAME:
+                defaults_detected['bronze_storage_account'] = {
+                    'current_value': bronze_account,
+                    'default_value': StorageDefaults.DEFAULT_ACCOUNT_NAME,
+                    'env_var': 'BRONZE_STORAGE_ACCOUNT'
                 }
-                issues.append(f"Storage account using development default: {storage_account}")
-            env_vars_set['STORAGE_ACCOUNT_NAME'] = bool(os.getenv('STORAGE_ACCOUNT_NAME'))
+                issues.append(f"Bronze storage using development default: {bronze_account}")
+            env_vars_set['BRONZE_STORAGE_ACCOUNT'] = bool(os.getenv('BRONZE_STORAGE_ACCOUNT'))
 
             # Check TiTiler URL
             titiler_url = config.titiler_base_url
@@ -1559,15 +1634,15 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
             # Check Managed Identity name (if using managed identity)
             use_managed_identity = os.getenv('USE_MANAGED_IDENTITY', 'false').lower() == 'true'
             if use_managed_identity:
-                mi_name = config.database.managed_identity_name
+                mi_name = config.database.managed_identity_admin_name
                 if mi_name == AzureDefaults.MANAGED_IDENTITY_NAME:
-                    defaults_detected['managed_identity_name'] = {
+                    defaults_detected['managed_identity_admin_name'] = {
                         'current_value': mi_name,
                         'default_value': AzureDefaults.MANAGED_IDENTITY_NAME,
-                        'env_var': 'MANAGED_IDENTITY_NAME'
+                        'env_var': 'DB_ADMIN_MANAGED_IDENTITY_NAME'
                     }
-                    issues.append(f"Managed Identity using development default: {mi_name}")
-                env_vars_set['MANAGED_IDENTITY_NAME'] = bool(os.getenv('MANAGED_IDENTITY_NAME'))
+                    issues.append(f"Managed Identity Admin using development default: {mi_name}")
+                env_vars_set['DB_ADMIN_MANAGED_IDENTITY_NAME'] = bool(os.getenv('DB_ADMIN_MANAGED_IDENTITY_NAME'))
             else:
                 env_vars_set['USE_MANAGED_IDENTITY'] = False
 
@@ -1608,7 +1683,11 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                 )
             }
 
-        return self.check_component_health("deployment_config", check_deployment)
+        return self.check_component_health(
+            "deployment_config",
+            check_deployment,
+            description="Tenant-specific configuration validation for production deployments"
+        )
 
     def _check_app_mode(self) -> Dict[str, Any]:
         """
@@ -1661,7 +1740,11 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                 }
             }
 
-        return self.check_component_health("app_mode", check_app_mode)
+        return self.check_component_health(
+            "app_mode",
+            check_app_mode,
+            description="Multi-Function App deployment mode and queue routing configuration"
+        )
 
     def _check_table_metadata_registry(self) -> Dict[str, Any]:
         """
@@ -1760,7 +1843,8 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                                 "required_present": len(required_columns) - len(missing_columns),
                                 "missing": missing_columns if missing_columns else None
                             },
-                            "ready": ready
+                            "ready": ready,
+                            "criticality": "high"  # Required for vector ETL, OGC Features metadata
                         }
 
                         if missing_columns:
@@ -1783,7 +1867,11 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                     "impact": "Table metadata registry check failed"
                 }
 
-        return self.check_component_health("table_metadata_registry", check_table_metadata)
+        return self.check_component_health(
+            "table_metadata_registry",
+            check_table_metadata,
+            description="Vector table metadata registry for ETL traceability and OGC Features API"
+        )
 
 
     def _check_schema_summary(self) -> Dict[str, Any]:
@@ -1912,7 +2000,11 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                     "traceback": traceback.format_exc()[:500]
                 }
 
-        return self.check_component_health("schema_summary", check_schemas)
+        return self.check_component_health(
+            "schema_summary",
+            check_schemas,
+            description="Database schema inventory with table counts and STAC statistics"
+        )
 
     def _get_config_sources(self) -> Dict[str, Any]:
         """
@@ -1931,22 +2023,22 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
         config = get_config()
         sources = {}
 
-        # Storage configuration
-        storage_env = os.getenv('STORAGE_ACCOUNT_NAME')
-        sources['storage_account_name'] = {
-            "value": config.storage_account_name,
-            "source": "ENV" if storage_env else "DEFAULT",
-            "env_var": "STORAGE_ACCOUNT_NAME",
-            "is_default": config.storage_account_name == AzureDefaults.STORAGE_ACCOUNT_NAME
+        # Storage configuration (zone-specific - 08 DEC 2025)
+        bronze_env = os.getenv('BRONZE_STORAGE_ACCOUNT')
+        sources['bronze_storage_account'] = {
+            "value": config.storage.bronze.account_name,
+            "source": "ENV" if bronze_env else "DEFAULT",
+            "env_var": "BRONZE_STORAGE_ACCOUNT",
+            "is_default": config.storage.bronze.account_name == StorageDefaults.DEFAULT_ACCOUNT_NAME
         }
 
         # Managed Identity (Admin)
-        mi_env = os.getenv('MANAGED_IDENTITY_NAME')
-        sources['managed_identity_name'] = {
-            "value": config.database.managed_identity_name,
+        mi_env = os.getenv('DB_ADMIN_MANAGED_IDENTITY_NAME')
+        sources['managed_identity_admin_name'] = {
+            "value": config.database.managed_identity_admin_name,
             "source": "ENV" if mi_env else "DEFAULT",
-            "env_var": "MANAGED_IDENTITY_NAME",
-            "is_default": config.database.managed_identity_name == AzureDefaults.MANAGED_IDENTITY_NAME
+            "env_var": "DB_ADMIN_MANAGED_IDENTITY_NAME",
+            "is_default": config.database.managed_identity_admin_name == AzureDefaults.MANAGED_IDENTITY_NAME
         }
 
         # Managed Identity (Reader)

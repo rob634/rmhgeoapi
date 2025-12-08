@@ -243,8 +243,10 @@ def _create_stac_collection_impl(
     logger.info(f"Creating STAC collection: {collection_id}")
 
     try:
-        # Get Azure storage account name
-        storage_account = os.environ.get("AZURE_STORAGE_ACCOUNT_NAME", "rmhazuregeo")
+        # Get Azure storage account name from config (08 DEC 2025)
+        from config import get_config
+        config = get_config()
+        storage_account = config.storage.silver.account_name
 
         # Calculate spatial extent if not provided
         if spatial_extent is None:
@@ -584,8 +586,10 @@ def _calculate_spatial_extent_from_tiles(
     minx, miny = float('inf'), float('inf')
     maxx, maxy = float('-inf'), float('-inf')
 
-    # Get Azure credentials
-    storage_account = os.environ.get("AZURE_STORAGE_ACCOUNT_NAME", "rmhazuregeo")
+    # Get Azure credentials from config (08 DEC 2025)
+    from config import get_config
+    config = get_config()
+    storage_account = config.storage.silver.account_name
     storage_key = os.environ.get("AZURE_STORAGE_KEY")
 
     tiles_read = 0

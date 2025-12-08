@@ -58,7 +58,7 @@ class DatabaseConfig(BaseModel):
         IMPORTANT: Only used for password authentication (local development/troubleshooting).
 
         Authentication Methods:
-        - Managed Identity (Production): User is determined by MANAGED_IDENTITY_NAME
+        - Managed Identity (Production): User is determined by DB_ADMIN_MANAGED_IDENTITY_NAME
         - Password Auth (Dev/Troubleshooting): Uses this POSTGIS_USER value
 
         Security Note:
@@ -149,36 +149,38 @@ class DatabaseConfig(BaseModel):
         """
     )
 
-    managed_identity_name: Optional[str] = Field(
+    managed_identity_admin_name: Optional[str] = Field(
         default=AzureDefaults.MANAGED_IDENTITY_NAME,
-        description="""Managed identity name for PostgreSQL authentication.
+        description="""Admin managed identity name for PostgreSQL authentication (ETL/write operations).
 
         Purpose:
-            Specifies the PostgreSQL user name that matches the Azure managed identity.
+            Specifies the PostgreSQL user name for ADMIN operations (CREATE, DROP, INSERT, UPDATE, DELETE).
+            This identity is used by ETL jobs, schema rebuild, and all write operations.
             This must exactly match the identity name created in PostgreSQL.
 
         User-Assigned Identity Pattern (RECOMMENDED):
-            Use the same user-assigned identity across multiple apps for easier management:
-            - 'rmhpgflexadmin' for read/write/admin access (Function App, etc.)
-            - 'rmhpgflexreader' for read-only access (TiTiler, OGC/STAC apps)
+            - 'rmhpgflexadmin' (or 'migeoetldbadminqa' in QA) for read/write/admin access
+            - Use managed_identity_reader_name for read-only access (TiTiler, OGC/STAC apps)
 
         Behavior:
             - If specified via env var: Uses that value
             - If not specified: Uses default 'rmhpgflexadmin' (user-assigned identity)
 
-        Environment Variable: MANAGED_IDENTITY_NAME
+        Environment Variable: DB_ADMIN_MANAGED_IDENTITY_NAME
 
         PostgreSQL Setup:
             The managed identity user must be created in PostgreSQL using:
             SELECT * FROM pgaadauth_create_principal('rmhpgflexadmin', false, false);
             GRANT ALL PRIVILEGES ON SCHEMA geo TO rmhpgflexadmin;
             GRANT ALL PRIVILEGES ON SCHEMA app TO rmhpgflexadmin;
+            GRANT ALL PRIVILEGES ON SCHEMA pgstac TO rmhpgflexadmin;
             -- etc. for all required schemas
 
         Important:
             - Name must match EXACTLY (case-sensitive)
             - Must be a valid PostgreSQL identifier
             - For user-assigned identities: matches the identity's display name in Azure AD
+            - This is the ADMIN identity - use managed_identity_reader_name for read-only
         """
     )
 
@@ -202,15 +204,15 @@ class DatabaseConfig(BaseModel):
             - Can grant permissions before app deployment
             - Cleaner separation of concerns
 
-        Environment Variable: MANAGED_IDENTITY_CLIENT_ID
+        Environment Variable: DB_ADMIN_MANAGED_IDENTITY_CLIENT_ID
 
         How to Find Client ID:
             1. Azure Portal → Managed Identities → rmhpgflexadmin
             2. Copy "Client ID" value (NOT Object ID)
-            3. Set as MANAGED_IDENTITY_CLIENT_ID environment variable
+            3. Set as DB_ADMIN_MANAGED_IDENTITY_CLIENT_ID environment variable
 
         Example:
-            MANAGED_IDENTITY_CLIENT_ID=12345678-1234-1234-1234-123456789abc
+            DB_ADMIN_MANAGED_IDENTITY_CLIENT_ID=12345678-1234-1234-1234-123456789abc
         """
     )
 
@@ -253,6 +255,40 @@ class DatabaseConfig(BaseModel):
         description="Connection timeout in seconds"
     )
 
+    # Azure Environment Detection (08 DEC 2025)
+    # These are set automatically by Azure Functions runtime
+    azure_website_name: Optional[str] = Field(
+        default=None,
+        description="""Azure Function App name (auto-detected from WEBSITE_SITE_NAME).
+
+        This is set automatically by Azure Functions runtime. Used to detect
+        if running in Azure environment for system-assigned managed identity fallback.
+
+        Environment Variable: WEBSITE_SITE_NAME (set by Azure, not user-configurable)
+        """
+    )
+
+    @property
+    def is_azure_environment(self) -> bool:
+        """Check if running in Azure environment (Function App or App Service)."""
+        return self.azure_website_name is not None
+
+    @property
+    def effective_identity_name(self) -> str:
+        """
+        Get the effective identity name for managed identity authentication.
+
+        Priority:
+        1. managed_identity_admin_name (explicitly configured)
+        2. azure_website_name (for system-assigned identity in Azure)
+        3. AzureDefaults.MANAGED_IDENTITY_NAME (fallback)
+        """
+        if self.managed_identity_admin_name:
+            return self.managed_identity_admin_name
+        if self.azure_website_name:
+            return self.azure_website_name
+        return AzureDefaults.MANAGED_IDENTITY_NAME
+
     @property
     def connection_string(self) -> str:
         """
@@ -265,7 +301,7 @@ class DatabaseConfig(BaseModel):
         For password auth only, returns basic connection string.
         """
         if self.use_managed_identity:
-            # Managed identity: user is determined by MANAGED_IDENTITY_NAME
+            # Managed identity: user is determined by DB_ADMIN_MANAGED_IDENTITY_NAME
             # This connection string is not actually used by PostgreSQLRepository
             return f"host={self.host} port={self.port} dbname={self.database}"
         else:
@@ -284,7 +320,7 @@ class DatabaseConfig(BaseModel):
             "database": self.database,
             "password": "***MASKED***" if self.password else None,
             "managed_identity": self.use_managed_identity,
-            "managed_identity_name": self.managed_identity_name,
+            "managed_identity_admin_name": self.managed_identity_admin_name,
             "managed_identity_reader_name": self.managed_identity_reader_name,
             "managed_identity_client_id": self.managed_identity_client_id[:8] + "..." if self.managed_identity_client_id else None,
             "postgis_schema": self.postgis_schema,
@@ -311,10 +347,12 @@ class DatabaseConfig(BaseModel):
             pgstac_schema=os.environ.get("PGSTAC_SCHEMA", DatabaseDefaults.PGSTAC_SCHEMA),
             h3_schema=os.environ.get("H3_SCHEMA", DatabaseDefaults.H3_SCHEMA),
             use_managed_identity=os.environ.get("USE_MANAGED_IDENTITY", "false").lower() == "true",
-            managed_identity_name=os.environ.get("MANAGED_IDENTITY_NAME", AzureDefaults.MANAGED_IDENTITY_NAME),
-            managed_identity_client_id=os.environ.get("MANAGED_IDENTITY_CLIENT_ID"),
+            managed_identity_admin_name=os.environ.get("DB_ADMIN_MANAGED_IDENTITY_NAME", AzureDefaults.MANAGED_IDENTITY_NAME),
+            managed_identity_client_id=os.environ.get("DB_ADMIN_MANAGED_IDENTITY_CLIENT_ID"),
             managed_identity_reader_name=os.environ.get("MANAGED_IDENTITY_READER_NAME", AzureDefaults.MANAGED_IDENTITY_READER_NAME),
-            connection_timeout_seconds=int(os.environ.get("DB_CONNECTION_TIMEOUT", str(DatabaseDefaults.CONNECTION_TIMEOUT_SECONDS)))
+            connection_timeout_seconds=int(os.environ.get("DB_CONNECTION_TIMEOUT", str(DatabaseDefaults.CONNECTION_TIMEOUT_SECONDS))),
+            # Azure environment detection (set automatically by Azure Functions runtime)
+            azure_website_name=os.environ.get("WEBSITE_SITE_NAME")
         )
 
 
@@ -348,7 +386,7 @@ class BusinessDatabaseConfig(BaseModel):
         BUSINESS_DB_NAME: Database name (default: "geodata")
         BUSINESS_DB_SCHEMA: Schema for ETL outputs (default: "geo")
         BUSINESS_DB_MANAGED_IDENTITY_NAME: Identity name (default: "rmhpgflexadmin")
-        BUSINESS_DB_MANAGED_IDENTITY_CLIENT_ID: Client ID (optional, uses app db client_id if not set)
+        BUSINESS_DB_MANAGED_IDENTITY_CLIENT_ID: Client ID (optional, uses DB_ADMIN_MANAGED_IDENTITY_CLIENT_ID if not set)
 
     Usage:
         from config import get_config
@@ -390,9 +428,9 @@ class BusinessDatabaseConfig(BaseModel):
         description="Enable Azure Managed Identity (should match app database setting)"
     )
 
-    managed_identity_name: str = Field(
+    managed_identity_admin_name: str = Field(
         default=AzureDefaults.MANAGED_IDENTITY_NAME,
-        description="""Managed identity name - uses SAME identity as app database.
+        description="""Admin managed identity name - uses SAME identity as app database.
 
         The key difference is not the identity, but the PERMISSIONS granted
         to this identity on the business database:
@@ -434,7 +472,7 @@ class BusinessDatabaseConfig(BaseModel):
             "database": self.database,
             "db_schema": self.db_schema,
             "use_managed_identity": self.use_managed_identity,
-            "managed_identity_name": self.managed_identity_name,
+            "managed_identity_admin_name": self.managed_identity_admin_name,
             "managed_identity_client_id": self.managed_identity_client_id[:8] + "..." if self.managed_identity_client_id else None,
             "is_configured": self.is_configured
         }
@@ -457,14 +495,14 @@ class BusinessDatabaseConfig(BaseModel):
                 "BUSINESS_DB_USE_MANAGED_IDENTITY",
                 os.environ.get("USE_MANAGED_IDENTITY", "true")
             ).lower() == "true",
-            # managed_identity_name: Use env vars, fall back to AzureDefaults
-            managed_identity_name=os.environ.get(
-                "BUSINESS_DB_MANAGED_IDENTITY_NAME",
-                os.environ.get("MANAGED_IDENTITY_NAME", AzureDefaults.MANAGED_IDENTITY_NAME)
+            # managed_identity_admin_name: Use env vars, fall back to AzureDefaults
+            managed_identity_admin_name=os.environ.get(
+                "BUSINESS_DB_MANAGED_IDENTITY_ADMIN_NAME",
+                os.environ.get("DB_ADMIN_MANAGED_IDENTITY_NAME", AzureDefaults.MANAGED_IDENTITY_NAME)
             ),
             managed_identity_client_id=os.environ.get(
                 "BUSINESS_DB_MANAGED_IDENTITY_CLIENT_ID",
-                os.environ.get("MANAGED_IDENTITY_CLIENT_ID")
+                os.environ.get("DB_ADMIN_MANAGED_IDENTITY_CLIENT_ID")
             ),
             connection_timeout_seconds=int(os.environ.get("BUSINESS_DB_CONNECTION_TIMEOUT", str(DatabaseDefaults.CONNECTION_TIMEOUT_SECONDS)))
         )

@@ -88,12 +88,39 @@ class OGCFeaturesConfig(BaseModel):
         description="Enable table optimization validation checks (spatial indexes, primary keys, etc.)"
     )
 
-    # Managed Identity Settings (29 NOV 2025)
-    # Single source of truth for default is config/database_config.py
+    # Managed Identity Settings (29 NOV 2025, updated 08 DEC 2025)
+    # OGC Features is read-only, so can use either admin or reader identity
+    # Default to admin for simplicity; use MANAGED_IDENTITY_READER_NAME for restricted read-only access
     managed_identity_name: str = Field(
-        default_factory=lambda: os.getenv("MANAGED_IDENTITY_NAME", "rmhpgflexadmin"),
-        description="PostgreSQL user name matching the Azure managed identity"
+        default_factory=lambda: os.getenv("DB_ADMIN_MANAGED_IDENTITY_NAME", "rmhpgflexadmin"),
+        description="PostgreSQL user name matching the Azure managed identity (admin or reader)"
     )
+
+    # Managed Identity Client ID (08 DEC 2025 - for config-driven auth)
+    managed_identity_client_id: Optional[str] = Field(
+        default_factory=lambda: os.getenv("DB_ADMIN_MANAGED_IDENTITY_CLIENT_ID"),
+        description="Client ID for user-assigned managed identity"
+    )
+
+    # Azure Environment Detection (08 DEC 2025)
+    azure_website_name: Optional[str] = Field(
+        default_factory=lambda: os.getenv("WEBSITE_SITE_NAME"),
+        description="Azure Function App name (auto-detected). Used to detect Azure environment."
+    )
+
+    @property
+    def is_azure_environment(self) -> bool:
+        """Check if running in Azure environment."""
+        return self.azure_website_name is not None
+
+    @property
+    def effective_identity_name(self) -> str:
+        """Get effective identity name with fallback to website name for system-assigned."""
+        if self.managed_identity_name:
+            return self.managed_identity_name
+        if self.azure_website_name:
+            return self.azure_website_name
+        return "rmhpgflexadmin"  # Default
 
     @field_validator("postgis_host", "postgis_database", "postgis_user", "postgis_password")
     @classmethod
@@ -107,40 +134,32 @@ class OGCFeaturesConfig(BaseModel):
         """
         Build PostgreSQL connection string with managed identity support.
 
-        ARCHITECTURE PRINCIPLE (24 NOV 2025):
-        All database connections must support managed identity authentication.
-        This method uses the same authentication priority chain as PostgreSQLRepository:
+        ARCHITECTURE PRINCIPLE (08 DEC 2025 - Config-Driven):
+        All credentials are loaded at config instantiation time.
+        This method uses config properties only - no direct os.getenv() calls.
 
         Authentication Priority:
-        1. User-Assigned Managed Identity (if MANAGED_IDENTITY_CLIENT_ID is set)
-        2. System-Assigned Managed Identity (if running in Azure with WEBSITE_SITE_NAME)
-        3. Password Authentication (if POSTGIS_PASSWORD is set)
+        1. User-Assigned Managed Identity (if managed_identity_client_id is set)
+        2. System-Assigned Managed Identity (if is_azure_environment is True)
+        3. Password Authentication (if postgis_password is set)
 
         Returns:
             PostgreSQL connection string (managed identity or password-based)
         """
-        import os
         import logging
         logger = logging.getLogger(__name__)
 
-        # Get environment variables for detection
-        client_id = os.getenv("MANAGED_IDENTITY_CLIENT_ID")
-        website_name = os.getenv("WEBSITE_SITE_NAME")
-        password = self.postgis_password
-
         # Priority 1: User-Assigned Managed Identity
-        if client_id:
-            # Use config value - single source of truth for default
+        if self.managed_identity_client_id:
             logger.info(f"🔐 [OGC AUTH] Using USER-ASSIGNED managed identity: {self.managed_identity_name}")
             return self._build_managed_identity_connection_string(
-                client_id=client_id,
+                client_id=self.managed_identity_client_id,
                 identity_name=self.managed_identity_name
             )
 
         # Priority 2: System-Assigned Managed Identity (running in Azure)
-        if website_name:
-            # For system-assigned, use website name as fallback if MANAGED_IDENTITY_NAME not set
-            identity_name = self.managed_identity_name if os.getenv("MANAGED_IDENTITY_NAME") else website_name
+        if self.is_azure_environment:
+            identity_name = self.effective_identity_name
             logger.info(f"🔐 [OGC AUTH] Using SYSTEM-ASSIGNED managed identity: {identity_name}")
             return self._build_managed_identity_connection_string(
                 client_id=None,
@@ -148,7 +167,7 @@ class OGCFeaturesConfig(BaseModel):
             )
 
         # Priority 3: Password Authentication
-        if password:
+        if self.postgis_password:
             logger.info("🔑 [OGC AUTH] Using PASSWORD authentication (local development mode)")
             return (
                 f"host={self.postgis_host} "
@@ -163,7 +182,7 @@ class OGCFeaturesConfig(BaseModel):
         error_msg = (
             "❌ [OGC] NO DATABASE CREDENTIALS FOUND!\n"
             "Please configure one of the following:\n"
-            "  1. User-Assigned Identity: Set MANAGED_IDENTITY_CLIENT_ID + MANAGED_IDENTITY_NAME\n"
+            "  1. User-Assigned Identity: Set DB_ADMIN_MANAGED_IDENTITY_CLIENT_ID + DB_ADMIN_MANAGED_IDENTITY_NAME\n"
             "  2. System-Assigned Identity: Deploy to Azure (auto-detected via WEBSITE_SITE_NAME)\n"
             "  3. Password Auth: Set POSTGIS_PASSWORD environment variable"
         )

@@ -15,7 +15,7 @@ Usage:
     port: int = Field(default=DatabaseDefaults.PORT, ...)
 
     # In deployment validation:
-    if config.storage_account_name == AzureDefaults.STORAGE_ACCOUNT_NAME:
+    if config.storage.bronze.account_name == StorageDefaults.DEFAULT_ACCOUNT_NAME:
         issues.append("Storage account not configured for this tenant")
 """
 
@@ -32,12 +32,12 @@ class AzureDefaults:
     When deploying to a new tenant, ALL of these must be set via environment variables.
 
     The health endpoint uses these to detect if deployment is properly configured.
+
+    NOTE (08 DEC 2025): STORAGE_ACCOUNT_NAME removed - use zone-specific accounts instead:
+        BRONZE_STORAGE_ACCOUNT, SILVER_STORAGE_ACCOUNT, etc.
     """
 
-    # Storage Account - Override: STORAGE_ACCOUNT_NAME
-    STORAGE_ACCOUNT_NAME = "rmhazuregeo"
-
-    # Managed Identity (Admin) - Override: MANAGED_IDENTITY_NAME
+    # Managed Identity (Admin) - Override: DB_ADMIN_MANAGED_IDENTITY_NAME
     MANAGED_IDENTITY_NAME = "rmhpgflexadmin"
 
     # Managed Identity (Reader) - Override: MANAGED_IDENTITY_READER_NAME
@@ -85,7 +85,13 @@ class StorageDefaults:
 
     Container names follow the pattern: {tier}-{purpose}
     These can be overridden per-container if needed.
+
+    Storage accounts should be set per-zone:
+        BRONZE_STORAGE_ACCOUNT, SILVER_STORAGE_ACCOUNT, etc.
     """
+
+    # Default storage account (for validation - should be overridden)
+    DEFAULT_ACCOUNT_NAME = "rmhazuregeo"
 
     # Bronze tier containers (raw uploads)
     BRONZE_VECTORS = "bronze-vectors"

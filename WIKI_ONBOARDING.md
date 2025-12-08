@@ -1400,7 +1400,8 @@ nano local.settings.json
     "SERVICEBUS_JOBS_QUEUE": "geospatial-jobs-dev",
     "SERVICEBUS_TASKS_QUEUE": "geospatial-tasks-dev",
 
-    "STORAGE_ACCOUNT_NAME": "storage_account",
+    "BRONZE_STORAGE_ACCOUNT": "storage_account",
+    "SILVER_STORAGE_ACCOUNT": "storage_account",
     "STORAGE_ACCOUNT_KEY": "<copy from Azure Portal>"
   }
 }

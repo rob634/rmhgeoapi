@@ -337,14 +337,9 @@ class PgStacBootstrap:
             >>> if not prereqs['ready']:
             ...     print("DBA must run:", prereqs['dba_sql'])
         """
-        # Get identity name from config if not provided
+        # Get identity name from config if not provided (08 DEC 2025 - config-driven)
         if identity_name is None:
-            identity_name = (
-                self.config.database.managed_identity_name or
-                os.getenv("MANAGED_IDENTITY_NAME") or
-                os.getenv("PGUSER") or
-                "rmhpgflexadmin"  # Default fallback
-            )
+            identity_name = self.config.database.effective_identity_name
 
         logger.info(f"🔍 Checking DBA prerequisites for identity: {identity_name}")
 
@@ -598,17 +593,17 @@ ORDER BY r.rolname;""")
             # ARCHITECTURE PRINCIPLE (24 NOV 2025): Support managed identity for pypgstac CLI
             env = os.environ.copy()
 
-            # Determine authentication method
-            client_id = os.getenv("MANAGED_IDENTITY_CLIENT_ID") or self.config.database.managed_identity_client_id
-            website_name = os.getenv("WEBSITE_SITE_NAME")
+            # Determine authentication method from config - SINGLE SOURCE OF TRUTH (08 DEC 2025)
+            client_id = self.config.database.managed_identity_client_id
+            is_azure = self.config.database.is_azure_environment
 
-            if client_id or website_name:
+            if client_id or is_azure:
                 # Managed identity: acquire token for PostgreSQL
                 logger.info("🔐 Using managed identity for pypgstac migrate...")
                 from azure.identity import ManagedIdentityCredential, DefaultAzureCredential
 
-                # Get the identity name from config - single source of truth for default
-                identity_name = self.config.database.managed_identity_name or os.getenv("MANAGED_IDENTITY_NAME")
+                # Get the identity name from config
+                identity_name = self.config.database.effective_identity_name
 
                 # Acquire token
                 if client_id:

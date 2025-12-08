@@ -69,17 +69,6 @@ class AppConfig(BaseModel):
     )
 
     # ========================================================================
-    # Legacy Storage Settings (DEPRECATED - Use storage.* instead)
-    # ========================================================================
-
-    storage_account_name: str = Field(
-        default=AzureDefaults.STORAGE_ACCOUNT_NAME,
-        description="DEPRECATED: Use storage.bronze.account_name instead. Azure Storage Account name for managed identity authentication",
-        examples=["rmhazuregeo"],
-        deprecated="Use storage.bronze.account_name, storage.silver.account_name, etc."
-    )
-
-    # ========================================================================
     # Timeouts and Retries
     # ========================================================================
 
@@ -789,7 +778,6 @@ class AppConfig(BaseModel):
             # Core settings (using defaults from config/defaults.py)
             debug_mode=os.environ.get("DEBUG_MODE", str(AppDefaults.DEBUG_MODE).lower()).lower() == "true",
             environment=os.environ.get("ENVIRONMENT", AppDefaults.ENVIRONMENT),
-            storage_account_name=os.environ.get("STORAGE_ACCOUNT_NAME", AzureDefaults.STORAGE_ACCOUNT_NAME),
             function_timeout_minutes=int(os.environ.get("FUNCTION_TIMEOUT_MINUTES", str(AppDefaults.FUNCTION_TIMEOUT_MINUTES))),
             log_level=os.environ.get("LOG_LEVEL", AppDefaults.LOG_LEVEL),
 

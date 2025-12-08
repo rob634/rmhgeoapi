@@ -146,7 +146,13 @@ class DuckDBRepository(IDuckDBRepository):
         """
         self.connection_type = connection_type
         self.database_path = database_path
-        self.storage_account_name = storage_account_name or os.getenv('AZURE_STORAGE_ACCOUNT_NAME', 'rmhazuregeo')
+        # Get storage account from config if not provided (08 DEC 2025)
+        if storage_account_name:
+            self.storage_account_name = storage_account_name
+        else:
+            from config import get_config
+            config = get_config()
+            self.storage_account_name = config.storage.gold.account_name
         self._conn: Optional[duckdb.DuckDBPyConnection] = None
         self._extensions_loaded: bool = False
         self._managed_identity_enabled: bool = False  # Track if credential_chain succeeded
@@ -258,8 +264,8 @@ class DuckDBRepository(IDuckDBRepository):
 
                 # Try to configure Managed Identity using credential_chain
                 # This is equivalent to DefaultAzureCredential in Python
-                import os
-                storage_account = os.getenv("AZURE_STORAGE_ACCOUNT_NAME", "rmhazuregeo")
+                # Use self.storage_account_name which was already resolved from config (08 DEC 2025)
+                storage_account = self.storage_account_name
 
                 try:
                     # Use CREATE SECRET with credential_chain provider

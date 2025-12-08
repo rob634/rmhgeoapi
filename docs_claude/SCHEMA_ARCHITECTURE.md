@@ -428,16 +428,16 @@ All database connections use the same authentication priority chain:
 
 | Priority | Method | Detection | Environment Variables |
 |----------|--------|-----------|----------------------|
-| 1 | User-Assigned Managed Identity | `MANAGED_IDENTITY_CLIENT_ID` is set | `MANAGED_IDENTITY_CLIENT_ID`, `MANAGED_IDENTITY_NAME` |
-| 2 | System-Assigned Managed Identity | `WEBSITE_SITE_NAME` is set (Azure) | `MANAGED_IDENTITY_NAME` (optional) |
+| 1 | User-Assigned Managed Identity | `DB_ADMIN_MANAGED_IDENTITY_CLIENT_ID` is set | `DB_ADMIN_MANAGED_IDENTITY_CLIENT_ID`, `DB_ADMIN_MANAGED_IDENTITY_NAME` |
+| 2 | System-Assigned Managed Identity | `WEBSITE_SITE_NAME` is set (Azure) | `DB_ADMIN_MANAGED_IDENTITY_NAME` (optional) |
 | 3 | Password Authentication | `POSTGIS_PASSWORD` is set | `POSTGIS_USER`, `POSTGIS_PASSWORD` |
 | 4 | **FAIL** | None of the above | - |
 
 **Environment Variables**:
 ```bash
 # User-Assigned Managed Identity (PRODUCTION - RECOMMENDED)
-MANAGED_IDENTITY_CLIENT_ID=12345678-1234-1234-1234-123456789abc  # Client ID from Azure Portal
-MANAGED_IDENTITY_NAME=rmhpgflexadmin                              # PostgreSQL user name (default)
+DB_ADMIN_MANAGED_IDENTITY_CLIENT_ID=12345678-1234-1234-1234-123456789abc  # Client ID from Azure Portal
+DB_ADMIN_MANAGED_IDENTITY_NAME=rmhpgflexadmin                              # PostgreSQL user name (default)
 
 # Password Authentication (LOCAL DEVELOPMENT ONLY)
 POSTGIS_USER=rob634

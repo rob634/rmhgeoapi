@@ -407,28 +407,67 @@ class SystemMonitoringTrigger(BaseHttpTrigger):
         """Get standardized system timestamp."""
         return datetime.now(timezone.utc).isoformat()
     
-    def check_component_health(self, component_name: str, check_function) -> Dict[str, Any]:
+    def check_component_health(
+        self,
+        component_name: str,
+        check_function,
+        description: Optional[str] = None
+    ) -> Dict[str, Any]:
         """
         Standard pattern for checking component health.
-        
+
+        Status determination (in priority order):
+        1. If check_function raises exception → "unhealthy"
+        2. If result contains "_status" key → use that value (explicit override)
+        3. If result contains "error" key with truthy value → "unhealthy"
+        4. If result contains "installed": False → "unhealthy"
+        5. If result contains "exists": False → "unhealthy"
+        6. Otherwise → "healthy"
+
+        Convention for check functions:
+        - Return dict with failure indicators (error, installed, exists) for automatic detection
+        - Use "_status" key for explicit override when needed (e.g., "degraded", "warning")
+        - Raise exceptions only for truly unexpected errors
+
         Args:
             component_name: Name of the component
-            check_function: Function that returns health status
-            
+            check_function: Function that returns health status dict
+            description: Human-readable description of what this component does
+
         Returns:
-            Health check result dictionary
+            Health check result dictionary with component, description, status, details
         """
         try:
             result = check_function()
+
+            # Determine status from result dict
+            if isinstance(result, dict):
+                # Explicit status override takes priority (use _status to avoid collision)
+                if "_status" in result:
+                    status = result.pop("_status")
+                # Check for failure indicators in returned data
+                elif result.get("error"):
+                    status = "unhealthy"
+                elif result.get("installed") is False:
+                    status = "unhealthy"
+                elif result.get("exists") is False:
+                    status = "unhealthy"
+                else:
+                    status = "healthy"
+            else:
+                status = "healthy"
+
             return {
                 "component": component_name,
-                "status": "healthy",
+                "description": description or f"{component_name} health check",
+                "status": status,
                 "details": result,
                 "checked_at": self.get_system_timestamp()
             }
         except Exception as e:
             return {
-                "component": component_name, 
+                "component": component_name,
+                "description": description or f"{component_name} health check",
                 "status": "unhealthy",
                 "error": str(e),
                 "checked_at": self.get_system_timestamp()

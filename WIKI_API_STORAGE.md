@@ -195,7 +195,8 @@ az functionapp config appsettings set \
   --name <YOUR_FUNCTION_APP> \
   --settings AzureWebJobsStorage="$CONNECTION_STRING" \
            STORAGE_CONNECTION_STRING="$CONNECTION_STRING" \
-           STORAGE_ACCOUNT_NAME="<YOUR_STORAGE_ACCOUNT>"
+           BRONZE_STORAGE_ACCOUNT="<YOUR_STORAGE_ACCOUNT>" \
+           SILVER_STORAGE_ACCOUNT="<YOUR_STORAGE_ACCOUNT>"
 ```
 
 ### Step 5: Verify Configuration
@@ -292,7 +293,10 @@ Lifecycle Policy: None
 | Variable | Description | Required |
 |----------|-------------|----------|
 | `STORAGE_CONNECTION_STRING` | Full connection string | Yes |
-| `STORAGE_ACCOUNT_NAME` | Account name only | Yes |
+| `BRONZE_STORAGE_ACCOUNT` | Bronze tier storage account name | Yes |
+| `SILVER_STORAGE_ACCOUNT` | Silver tier storage account name | Yes |
+| `SILVEREXT_STORAGE_ACCOUNT` | Silver extended tier storage account name | No |
+| `GOLD_STORAGE_ACCOUNT` | Gold tier storage account name | No |
 | `STORAGE_ACCOUNT_KEY` | Account key (alternative to connection string) | No |
 | `AzureWebJobsStorage` | Functions runtime storage | Yes |
 
@@ -510,4 +514,4 @@ az storage account management-policy create \
 
 ---
 
-**Last Updated**: 24 NOV 2025
+**Last Updated**: 08 DEC 2025

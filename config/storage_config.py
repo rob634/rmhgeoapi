@@ -18,7 +18,7 @@ from typing import Optional, List
 from enum import Enum
 from pydantic import BaseModel, Field
 
-from .defaults import StorageDefaults, AzureDefaults, RasterDefaults
+from .defaults import StorageDefaults, RasterDefaults
 
 
 # ============================================================================
@@ -332,11 +332,11 @@ class MultiAccountStorageConfig(BaseModel):
 
     Environment Variables:
     ----------------------
-    Storage Accounts (one per zone):
-        BRONZE_STORAGE_ACCOUNT    - Bronze zone account (default: STORAGE_ACCOUNT_NAME or "rmhazuregeo")
-        SILVER_STORAGE_ACCOUNT    - Silver zone account (default: STORAGE_ACCOUNT_NAME or "rmhazuregeo")
-        SILVEREXT_STORAGE_ACCOUNT - SilverExt zone account (default: STORAGE_ACCOUNT_NAME or "rmhazuregeo")
-        GOLD_STORAGE_ACCOUNT      - Gold zone account (default: STORAGE_ACCOUNT_NAME or "rmhazuregeo")
+    Storage Accounts (one per zone) - REQUIRED for production:
+        BRONZE_STORAGE_ACCOUNT    - Bronze zone account (default: "rmhazuregeo")
+        SILVER_STORAGE_ACCOUNT    - Silver zone account (default: "rmhazuregeo")
+        SILVEREXT_STORAGE_ACCOUNT - SilverExt zone account (default: "rmhazuregeo")
+        GOLD_STORAGE_ACCOUNT      - Gold zone account (default: "rmhazuregeo")
 
     Bronze Containers (input/staging):
         BRONZE_VECTORS_CONTAINER  - Vector uploads (default: "bronze-vectors")
@@ -371,8 +371,7 @@ class MultiAccountStorageConfig(BaseModel):
     Example Deployment Scenarios:
     ----------------------------
     1. Development (single account, all containers):
-       STORAGE_ACCOUNT_NAME=rmhazuregeo
-       # All zones use same account, default container names
+       # Uses default "rmhazuregeo" for all zones
 
     2. Production (3 accounts):
        BRONZE_STORAGE_ACCOUNT=rmhgeo-bronze
@@ -390,7 +389,7 @@ class MultiAccountStorageConfig(BaseModel):
         default_factory=lambda: StorageAccountConfig(
             account_name=os.getenv(
                 "BRONZE_STORAGE_ACCOUNT",
-                os.getenv("STORAGE_ACCOUNT_NAME", AzureDefaults.STORAGE_ACCOUNT_NAME)
+                StorageDefaults.DEFAULT_ACCOUNT_NAME
             ),
             container_prefix="bronze",
             vectors=os.getenv("BRONZE_VECTORS_CONTAINER", StorageDefaults.BRONZE_VECTORS),
@@ -410,7 +409,7 @@ class MultiAccountStorageConfig(BaseModel):
         default_factory=lambda: StorageAccountConfig(
             account_name=os.getenv(
                 "SILVER_STORAGE_ACCOUNT",
-                os.getenv("STORAGE_ACCOUNT_NAME", AzureDefaults.STORAGE_ACCOUNT_NAME)
+                StorageDefaults.DEFAULT_ACCOUNT_NAME
             ),
             container_prefix="silver",
             vectors=os.getenv("SILVER_VECTORS_CONTAINER", StorageDefaults.SILVER_VECTORS),
@@ -429,7 +428,7 @@ class MultiAccountStorageConfig(BaseModel):
         default_factory=lambda: StorageAccountConfig(
             account_name=os.getenv(
                 "SILVEREXT_STORAGE_ACCOUNT",
-                os.getenv("STORAGE_ACCOUNT_NAME", AzureDefaults.STORAGE_ACCOUNT_NAME)
+                StorageDefaults.DEFAULT_ACCOUNT_NAME
             ),
             container_prefix="silverext",
             vectors=os.getenv("SILVEREXT_VECTORS_CONTAINER", StorageDefaults.SILVEREXT_VECTORS),
@@ -448,7 +447,7 @@ class MultiAccountStorageConfig(BaseModel):
         default_factory=lambda: StorageAccountConfig(
             account_name=os.getenv(
                 "GOLD_STORAGE_ACCOUNT",
-                os.getenv("STORAGE_ACCOUNT_NAME", AzureDefaults.STORAGE_ACCOUNT_NAME)
+                StorageDefaults.DEFAULT_ACCOUNT_NAME
             ),
             container_prefix="gold",
             vectors=os.getenv("GOLD_GEOPARQUET_CONTAINER", StorageDefaults.GOLD_GEOPARQUET),

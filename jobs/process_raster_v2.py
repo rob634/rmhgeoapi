@@ -114,7 +114,8 @@ class ProcessRasterV2Job(JobBaseMixin, JobBase):
 
         if stage == 1:
             # Stage 1: Validate raster
-            blob_repo = BlobRepository.instance()
+            # Use Bronze zone for input rasters (08 DEC 2025)
+            blob_repo = BlobRepository.for_zone("bronze")
             blob_url = blob_repo.get_blob_url_with_sas(
                 container_name=job_params['container_name'],
                 blob_name=job_params['blob_name'],

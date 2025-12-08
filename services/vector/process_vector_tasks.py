@@ -95,8 +95,8 @@ def process_vector_prepare(parameters: Dict[str, Any]) -> Dict[str, Any]:
 
     logger.info(f"[{job_id[:8]}] Stage 1: Preparing vector data from {blob_name}")
 
-    # Step 1: Download source file
-    blob_repo = BlobRepository.instance()
+    # Step 1: Download source file from Bronze zone (08 DEC 2025)
+    blob_repo = BlobRepository.for_zone("bronze")
     file_data = blob_repo.read_blob_to_stream(container_name, blob_name)
 
     # Step 2: Convert to GeoDataFrame

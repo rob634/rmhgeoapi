@@ -164,7 +164,8 @@ def validate_raster(params: dict) -> dict:
 
         from infrastructure.blob import BlobRepository
         from core.errors import ErrorCode, create_error_response
-        blob_repo = BlobRepository.instance()
+        # Use Bronze zone for input rasters (08 DEC 2025)
+        blob_repo = BlobRepository.for_zone("bronze")
 
         # Check container exists first
         if not blob_repo.container_exists(container_name):

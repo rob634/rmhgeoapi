@@ -51,8 +51,8 @@ def load_vector_file(parameters: Dict[str, Any]) -> Dict[str, Any]:
     container_name = parameters.get("container_name", "bronze")
     file_extension = parameters["file_extension"].lower().lstrip('.')
 
-    # Get file from blob storage using BlobRepository singleton
-    blob_repo = BlobRepository.instance()
+    # Get file from blob storage using Bronze zone for input vectors (08 DEC 2025)
+    blob_repo = BlobRepository.for_zone("bronze")
     file_data = blob_repo.read_blob_to_stream(container_name, blob_name)
 
     # Extract converter-specific parameters
@@ -208,8 +208,8 @@ def prepare_vector_chunks(parameters: Dict[str, Any]) -> Dict[str, Any]:
     converter_params = parameters.get("converter_params", {})
     geometry_params = parameters.get("geometry_params", {})  # NEW: Phase 2 (9 NOV 2025)
 
-    # 1. Load vector file from blob storage
-    blob_repo = BlobRepository.instance()
+    # 1. Load vector file from blob storage using Bronze zone (08 DEC 2025)
+    blob_repo = BlobRepository.for_zone("bronze")
     file_data = blob_repo.read_blob_to_stream(container_name, blob_name)
 
     # 2. Convert to GeoDataFrame

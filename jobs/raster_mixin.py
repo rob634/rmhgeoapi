@@ -168,7 +168,8 @@ class RasterMixin:
         logger = LoggerFactory.create_logger(ComponentType.CONTROLLER, "raster_mixin")
 
         tasks = []
-        blob_repo = BlobRepository.instance()
+        # Use Bronze zone for input rasters (08 DEC 2025)
+        blob_repo = BlobRepository.for_zone("bronze")
 
         for i, blob_name in enumerate(blob_list):
             blob_url = blob_repo.get_blob_url_with_sas(

@@ -159,7 +159,8 @@ class ValidateRasterJob(JobBase):
         container_name = job_params.get('container_name') or config.storage.bronze.get_container('rasters')
 
         # Build blob URL with SAS token
-        blob_repo = BlobRepository.instance()
+        # Use Bronze zone for input rasters (08 DEC 2025)
+        blob_repo = BlobRepository.for_zone("bronze")
         blob_url = blob_repo.get_blob_url_with_sas(
             container_name=container_name,
             blob_name=job_params['blob_name'],

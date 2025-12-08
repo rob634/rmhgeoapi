@@ -89,11 +89,11 @@ class OGCFeaturesConfig(BaseModel):
     )
 
     # Managed Identity Settings (29 NOV 2025, updated 08 DEC 2025)
-    # OGC Features is read-only, so can use either admin or reader identity
-    # Default to admin for simplicity; use MANAGED_IDENTITY_READER_NAME for restricted read-only access
+    # Single admin identity used for all database operations (ETL, OGC/STAC, TiTiler)
+    # This simplifies architecture - no separate reader identity needed
     managed_identity_name: str = Field(
         default_factory=lambda: os.getenv("DB_ADMIN_MANAGED_IDENTITY_NAME", "rmhpgflexadmin"),
-        description="PostgreSQL user name matching the Azure managed identity (admin or reader)"
+        description="PostgreSQL user name matching the Azure managed identity"
     )
 
     # Managed Identity Client ID (08 DEC 2025 - for config-driven auth)

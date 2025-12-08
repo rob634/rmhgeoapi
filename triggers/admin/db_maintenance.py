@@ -944,14 +944,14 @@ class AdminDbMaintenanceTrigger:
             # ================================================================
             # STEP 4: Ensure geo schema exists and grant permissions
             # ================================================================
-            # ARCHITECTURE PRINCIPLE (07 DEC 2025 - PROMOTED from step 5b):
+            # ARCHITECTURE PRINCIPLE (08 DEC 2025 - Updated):
             # The geo schema stores vector data created by process_vector jobs.
             # Unlike app/pgstac (rebuilt from code), geo contains USER DATA and is never dropped.
             # CRITICAL: Must exist BEFORE any vector jobs run - moved to step 4 for this reason.
-            # Reader identity needs SELECT on geo schema tables for OGC Features API.
+            # Single admin identity is used for all database operations (ETL, OGC/STAC, TiTiler).
             config = get_config()
-            reader_identity = config.database.managed_identity_reader_name
-            logger.info(f"🗺️ Step 4/10: Ensuring geo schema exists and granting permissions to {reader_identity}...")
+            admin_identity = config.database.managed_identity_admin_name
+            logger.info(f"🗺️ Step 4/10: Ensuring geo schema exists and granting permissions to {admin_identity}...")
             step4 = {"step": 4, "action": "ensure_geo_schema_and_grant_permissions", "status": "pending"}
 
             try:
@@ -1024,23 +1024,23 @@ class AdminDbMaintenanceTrigger:
 
                         # 2. Grant USAGE on geo schema
                         # Use sql.Identifier to safely inject the role name
-                        reader_ident = sql.Identifier(reader_identity)
-                        cur.execute(sql.SQL("GRANT USAGE ON SCHEMA geo TO {}").format(reader_ident))
+                        admin_ident = sql.Identifier(admin_identity)
+                        cur.execute(sql.SQL("GRANT USAGE ON SCHEMA geo TO {}").format(admin_ident))
 
                         # 3. Grant SELECT on ALL existing tables in geo schema
-                        cur.execute(sql.SQL("GRANT SELECT ON ALL TABLES IN SCHEMA geo TO {}").format(reader_ident))
+                        cur.execute(sql.SQL("GRANT SELECT ON ALL TABLES IN SCHEMA geo TO {}").format(admin_ident))
 
                         # 4. Set default privileges for FUTURE tables created in geo schema
                         # This ensures process_vector created tables auto-grant SELECT
-                        cur.execute(sql.SQL("ALTER DEFAULT PRIVILEGES IN SCHEMA geo GRANT SELECT ON TABLES TO {}").format(reader_ident))
+                        cur.execute(sql.SQL("ALTER DEFAULT PRIVILEGES IN SCHEMA geo GRANT SELECT ON TABLES TO {}").format(admin_ident))
 
                         # 5. Grant on h3 schema (static bootstrap data)
-                        cur.execute(sql.SQL("GRANT USAGE ON SCHEMA h3 TO {}").format(reader_ident))
-                        cur.execute(sql.SQL("GRANT SELECT ON ALL TABLES IN SCHEMA h3 TO {}").format(reader_ident))
-                        cur.execute(sql.SQL("ALTER DEFAULT PRIVILEGES IN SCHEMA h3 GRANT SELECT ON TABLES TO {}").format(reader_ident))
+                        cur.execute(sql.SQL("GRANT USAGE ON SCHEMA h3 TO {}").format(admin_ident))
+                        cur.execute(sql.SQL("GRANT SELECT ON ALL TABLES IN SCHEMA h3 TO {}").format(admin_ident))
+                        cur.execute(sql.SQL("ALTER DEFAULT PRIVILEGES IN SCHEMA h3 GRANT SELECT ON TABLES TO {}").format(admin_ident))
 
                         conn.commit()
-                        logger.info(f"✅ Granted geo+h3 schema permissions to {reader_identity} (existing + future tables)")
+                        logger.info(f"✅ Granted geo+h3 schema permissions to {admin_identity} (existing + future tables)")
 
                 step4["status"] = "success"
                 step4["schema_created"] = "geo, h3 (if not exists)"
@@ -1053,12 +1053,12 @@ class AdminDbMaintenanceTrigger:
                     "SELECT ON ALL TABLES IN SCHEMA h3",
                     "DEFAULT PRIVILEGES SELECT ON TABLES IN h3"
                 ]
-                step4["granted_to"] = reader_identity
+                step4["granted_to"] = admin_identity
 
             except Exception as e:
                 # Non-fatal error - log warning but continue
-                # The grants might fail if reader identity doesn't exist yet
-                logger.warning(f"⚠️ Failed to ensure geo schema or grant permissions to {reader_identity}: {e}")
+                # The grants might fail if admin identity doesn't exist yet
+                logger.warning(f"⚠️ Failed to ensure geo schema or grant permissions to {admin_identity}: {e}")
                 step4["status"] = "warning"
                 step4["error"] = str(e)
                 step4["note"] = "Geo schema setup failed - vector workflows and OGC Features API may not work"
@@ -1114,14 +1114,14 @@ class AdminDbMaintenanceTrigger:
             results["steps"].append(step5)
 
             # ================================================================
-            # STEP 6: Grant pgstac_read role to reader identity
+            # STEP 6: Grant pgstac_read role to admin identity
             # ================================================================
-            # ARCHITECTURE PRINCIPLE (25 NOV 2025):
-            # The reader identity is the read-only PostgreSQL user used by the OGC/STAC API
-            # function app. After pypgstac migrate recreates the pgstac schema and roles,
-            # we must grant pgstac_read to the reader identity so it can query STAC data.
-            # Note: reader_identity already defined in step 4 (geo schema)
-            logger.info(f"🔐 Step 6/10: Granting pgstac_read role to {reader_identity}...")
+            # ARCHITECTURE PRINCIPLE (08 DEC 2025 - Updated):
+            # Single admin identity is used for all database operations (ETL, OGC/STAC, TiTiler).
+            # After pypgstac migrate recreates the pgstac schema and roles,
+            # we grant pgstac_read to the admin identity for STAC catalog access.
+            # Note: admin_identity already defined in step 4 (geo schema)
+            logger.info(f"🔐 Step 6/10: Granting pgstac_read role to {admin_identity}...")
             step6 = {"step": 6, "action": "grant_pgstac_read_role", "status": "pending"}
 
             if pgstac_failed:
@@ -1136,25 +1136,25 @@ class AdminDbMaintenanceTrigger:
 
                     with pgstac_repo._get_connection() as conn:
                         with conn.cursor() as cur:
-                            # Grant pgstac_read role to reader identity
-                            # This allows the read-only OGC/STAC API to query pgstac tables
+                            # Grant pgstac_read role to admin identity
+                            # This allows OGC/STAC API and TiTiler to query pgstac tables
                             # Use sql.Identifier to safely inject the role name
                             cur.execute(
                                 sql.SQL("GRANT pgstac_read TO {}").format(
-                                    sql.Identifier(reader_identity)
+                                    sql.Identifier(admin_identity)
                                 )
                             )
                             conn.commit()
-                            logger.info(f"✅ Granted pgstac_read to {reader_identity}")
+                            logger.info(f"✅ Granted pgstac_read to {admin_identity}")
 
                     step6["status"] = "success"
                     step6["role_granted"] = "pgstac_read"
-                    step6["granted_to"] = reader_identity
+                    step6["granted_to"] = admin_identity
 
                 except Exception as e:
                     # Non-fatal error - log warning but continue
-                    # The role grant might fail if reader identity doesn't exist yet
-                    logger.warning(f"⚠️ Failed to grant pgstac_read to {reader_identity}: {e}")
+                    # The role grant might fail if admin identity doesn't exist yet
+                    logger.warning(f"⚠️ Failed to grant pgstac_read to {admin_identity}: {e}")
                     step6["status"] = "warning"
                     step6["error"] = str(e)
                     step6["note"] = "Role grant failed - OGC/STAC API may not have read access"

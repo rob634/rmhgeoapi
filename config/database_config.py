@@ -151,16 +151,16 @@ class DatabaseConfig(BaseModel):
 
     managed_identity_admin_name: Optional[str] = Field(
         default=AzureDefaults.MANAGED_IDENTITY_NAME,
-        description="""Admin managed identity name for PostgreSQL authentication (ETL/write operations).
+        description="""Admin managed identity name for PostgreSQL authentication.
 
         Purpose:
-            Specifies the PostgreSQL user name for ADMIN operations (CREATE, DROP, INSERT, UPDATE, DELETE).
-            This identity is used by ETL jobs, schema rebuild, and all write operations.
+            Specifies the PostgreSQL user name for ALL database operations.
+            This single identity is used by ETL jobs, OGC/STAC API, TiTiler, and all apps.
             This must exactly match the identity name created in PostgreSQL.
 
-        User-Assigned Identity Pattern (RECOMMENDED):
-            - 'rmhpgflexadmin' (or 'migeoetldbadminqa' in QA) for read/write/admin access
-            - Use managed_identity_reader_name for read-only access (TiTiler, OGC/STAC apps)
+        Architecture (08 DEC 2025):
+            Single admin identity for ALL operations - no separate reader identity.
+            This simplifies the architecture and deployment configuration.
 
         Behavior:
             - If specified via env var: Uses that value
@@ -180,7 +180,6 @@ class DatabaseConfig(BaseModel):
             - Name must match EXACTLY (case-sensitive)
             - Must be a valid PostgreSQL identifier
             - For user-assigned identities: matches the identity's display name in Azure AD
-            - This is the ADMIN identity - use managed_identity_reader_name for read-only
         """
     )
 
@@ -216,28 +215,9 @@ class DatabaseConfig(BaseModel):
         """
     )
 
-    managed_identity_reader_name: Optional[str] = Field(
-        default=AzureDefaults.MANAGED_IDENTITY_READER_NAME,
-        description="""Read-only managed identity name for PostgreSQL (used by OGC/STAC API).
-
-        Purpose:
-            Specifies the PostgreSQL user name for read-only access. This identity
-            is used by TiTiler, OGC/STAC API apps that only need SELECT permissions.
-
-        Environment Variable: MANAGED_IDENTITY_READER_NAME
-
-        Used By:
-            - db_maintenance.py: Grants pgstac_read role and geo/h3 schema SELECT
-            - OGC/STAC Function App: Read-only access to pgstac and geo schemas
-            - TiTiler: Read-only access to STAC metadata
-
-        PostgreSQL Setup:
-            SELECT * FROM pgaadauth_create_principal('rmhpgflexreader', false, false);
-            GRANT pgstac_read TO rmhpgflexreader;
-            GRANT USAGE ON SCHEMA geo TO rmhpgflexreader;
-            GRANT SELECT ON ALL TABLES IN SCHEMA geo TO rmhpgflexreader;
-        """
-    )
+    # NOTE (08 DEC 2025): Reader identity removed - using single admin identity for all operations
+    # This simplifies the architecture and eliminates the need for separate reader/writer identities.
+    # OGC/STAC API and TiTiler now use the same admin identity as the ETL pipeline.
 
     # Connection pooling (reserved for future use)
     min_connections: int = Field(
@@ -321,7 +301,6 @@ class DatabaseConfig(BaseModel):
             "password": "***MASKED***" if self.password else None,
             "managed_identity": self.use_managed_identity,
             "managed_identity_admin_name": self.managed_identity_admin_name,
-            "managed_identity_reader_name": self.managed_identity_reader_name,
             "managed_identity_client_id": self.managed_identity_client_id[:8] + "..." if self.managed_identity_client_id else None,
             "postgis_schema": self.postgis_schema,
             "app_schema": self.app_schema,
@@ -349,7 +328,6 @@ class DatabaseConfig(BaseModel):
             use_managed_identity=os.environ.get("USE_MANAGED_IDENTITY", "false").lower() == "true",
             managed_identity_admin_name=os.environ.get("DB_ADMIN_MANAGED_IDENTITY_NAME", AzureDefaults.MANAGED_IDENTITY_NAME),
             managed_identity_client_id=os.environ.get("DB_ADMIN_MANAGED_IDENTITY_CLIENT_ID"),
-            managed_identity_reader_name=os.environ.get("MANAGED_IDENTITY_READER_NAME", AzureDefaults.MANAGED_IDENTITY_READER_NAME),
             connection_timeout_seconds=int(os.environ.get("DB_CONNECTION_TIMEOUT", str(DatabaseDefaults.CONNECTION_TIMEOUT_SECONDS))),
             # Azure environment detection (set automatically by Azure Functions runtime)
             azure_website_name=os.environ.get("WEBSITE_SITE_NAME")

@@ -613,10 +613,10 @@ class AdminDbDiagnosticsTrigger:
             # Azure resources (MUST override for new tenant)
             # NOTE: STORAGE_ACCOUNT_NAME removed 08 DEC 2025 - use zone-specific accounts instead
             # NOTE: managed_identity_name renamed to managed_identity_admin_name 08 DEC 2025
+            # NOTE (08 DEC 2025): managed_identity_reader_name removed - single admin identity for all operations
             azure_configs = [
                 ("bronze_storage_account", "BRONZE_STORAGE_ACCOUNT", StorageDefaults.DEFAULT_ACCOUNT_NAME),
                 ("managed_identity_admin_name", "DB_ADMIN_MANAGED_IDENTITY_NAME", AzureDefaults.MANAGED_IDENTITY_NAME),
-                ("managed_identity_reader_name", "MANAGED_IDENTITY_READER_NAME", AzureDefaults.MANAGED_IDENTITY_READER_NAME),
                 ("titiler_base_url", "TITILER_BASE_URL", AzureDefaults.TITILER_BASE_URL),
                 ("ogc_stac_app_url", "OGC_STAC_APP_URL", AzureDefaults.OGC_STAC_APP_URL),
                 ("etl_app_url", "ETL_APP_URL", AzureDefaults.ETL_APP_URL),

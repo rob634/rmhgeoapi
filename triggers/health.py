@@ -69,9 +69,9 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
             "identity": {
                 "database": {
                     "admin_identity_name": config.database.managed_identity_admin_name,
-                    "reader_identity_name": config.database.managed_identity_reader_name,
                     "use_managed_identity": config.database.use_managed_identity,
-                    "auth_method": "managed_identity" if config.database.use_managed_identity else "password"
+                    "auth_method": "managed_identity" if config.database.use_managed_identity else "password",
+                    "note": "Single admin identity used for all database operations (ETL, OGC/STAC, TiTiler)"
                 },
                 "storage": {
                     "auth_method": "DefaultAzureCredential (system-assigned)",
@@ -2054,14 +2054,7 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
             "is_default": config.database.managed_identity_admin_name == AzureDefaults.MANAGED_IDENTITY_NAME
         }
 
-        # Managed Identity (Reader)
-        mi_reader_env = os.getenv('MANAGED_IDENTITY_READER_NAME')
-        sources['managed_identity_reader_name'] = {
-            "value": config.database.managed_identity_reader_name,
-            "source": "ENV" if mi_reader_env else "DEFAULT",
-            "env_var": "MANAGED_IDENTITY_READER_NAME",
-            "is_default": config.database.managed_identity_reader_name == AzureDefaults.MANAGED_IDENTITY_READER_NAME
-        }
+        # NOTE (08 DEC 2025): Reader identity removed - single admin identity for all operations
 
         # Database host
         db_host_env = os.getenv('POSTGIS_HOST')

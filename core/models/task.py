@@ -60,6 +60,20 @@ class TaskRecord(TaskData):
     heartbeat: Optional[datetime] = Field(default=None, description="Last heartbeat timestamp")
     next_stage_params: Optional[Dict[str, Any]] = Field(default=None, description="Parameters for next stage")
 
+    # Multi-app tracking (07 DEC 2025 - Multi-Function App Architecture)
+    target_queue: Optional[str] = Field(
+        default=None,
+        description="Service Bus queue task was routed to (raster-tasks, vector-tasks, etc)"
+    )
+    executed_by_app: Optional[str] = Field(
+        default=None,
+        description="APP_NAME of the Function App that processed this task"
+    )
+    execution_started_at: Optional[datetime] = Field(
+        default=None,
+        description="Timestamp when task processing began (for duration tracking)"
+    )
+
     # Timestamps (Database-specific)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

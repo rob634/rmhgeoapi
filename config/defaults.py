@@ -132,13 +132,100 @@ class QueueDefaults:
 
     Note: This is a SERVICE BUS ONLY application.
     Storage Queues are NOT supported.
+
+    Queue Architecture (07 DEC 2025):
+    - geospatial-jobs: Job orchestration (Platform apps listen)
+    - raster-tasks: Raster task processing (memory-intensive GDAL ops)
+    - vector-tasks: Vector task processing (high-concurrency DB ops)
+    - geospatial-tasks: Legacy/fallback (standalone mode only)
     """
 
     JOBS_QUEUE = "geospatial-jobs"
-    TASKS_QUEUE = "geospatial-tasks"
+    TASKS_QUEUE = "geospatial-tasks"      # Legacy/fallback
+    RASTER_TASKS_QUEUE = "raster-tasks"   # Raster-optimized queue
+    VECTOR_TASKS_QUEUE = "vector-tasks"   # Vector-optimized queue
     MAX_BATCH_SIZE = 100
     BATCH_THRESHOLD = 50
     RETRY_COUNT = 3
+
+
+# =============================================================================
+# APP MODE DEFAULTS (Multi-Function App Architecture)
+# =============================================================================
+
+class AppModeDefaults:
+    """
+    Application deployment mode configuration.
+
+    Controls which queues this app listens to and how tasks are routed.
+    Enables single codebase to be deployed in different configurations.
+
+    Architecture (07 DEC 2025):
+    - Centralized orchestration: Platform app handles jobs queue
+    - Distributed execution: Workers process task queues
+    - Message-based signaling: Workers send stage_complete to jobs queue
+    """
+
+    # Valid modes
+    STANDALONE = "standalone"           # All queues, all endpoints (current behavior)
+    PLATFORM_RASTER = "platform_raster" # HTTP + jobs + raster-tasks
+    PLATFORM_VECTOR = "platform_vector" # HTTP + jobs + vector-tasks
+    PLATFORM_ONLY = "platform_only"     # HTTP + jobs only (pure router)
+    WORKER_RASTER = "worker_raster"     # raster-tasks only
+    WORKER_VECTOR = "worker_vector"     # vector-tasks only
+
+    VALID_MODES = [
+        STANDALONE, PLATFORM_RASTER, PLATFORM_VECTOR,
+        PLATFORM_ONLY, WORKER_RASTER, WORKER_VECTOR
+    ]
+
+    DEFAULT_MODE = STANDALONE
+    DEFAULT_APP_NAME = "rmhazuregeoapi"
+
+
+# =============================================================================
+# TASK ROUTING DEFAULTS (Task Type → Queue Mapping)
+# =============================================================================
+
+class TaskRoutingDefaults:
+    """
+    Task type to queue category mapping.
+
+    Maps task_type → routing category (raster, vector, default).
+    CoreMachine uses this to route tasks to appropriate queues.
+
+    Note: Task types not in either list route to the legacy tasks queue.
+    """
+
+    # Raster tasks → raster-tasks queue (memory-intensive, low concurrency)
+    RASTER_TASKS = [
+        # process_raster_v2 handlers
+        "handler_raster_validate",
+        "handler_raster_create_cog",
+        "handler_stac_raster_item",
+        # process_large_raster_v2 handlers
+        "handler_raster_create_tiles",
+        "handler_raster_create_mosaic",
+        # Legacy/generic names (for flexibility)
+        "validate_raster",
+        "create_cog",
+        "extract_stac_metadata",
+        "create_tiling_scheme",
+        "extract_tile",
+        "create_mosaic_json",
+    ]
+
+    # Vector tasks → vector-tasks queue (high concurrency, DB-bound)
+    VECTOR_TASKS = [
+        # process_vector handlers
+        "handler_vector_prepare",
+        "handler_vector_upload",
+        "handler_stac_vector_item",
+        # Legacy/generic names (for flexibility)
+        "process_vector_prepare",
+        "process_vector_upload",
+        "create_vector_stac",
+    ]
 
 
 # =============================================================================
@@ -473,6 +560,8 @@ __all__ = [
     "DatabaseDefaults",
     "StorageDefaults",
     "QueueDefaults",
+    "AppModeDefaults",
+    "TaskRoutingDefaults",
     "RasterDefaults",
     "VectorDefaults",
     "AnalyticsDefaults",

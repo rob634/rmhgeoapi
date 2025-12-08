@@ -819,7 +819,7 @@ class AdminDbMaintenanceTrigger:
             # ================================================================
             # STEP 1: Drop app schema
             # ================================================================
-            logger.info("💣 Step 1/9: Dropping app schema...")
+            logger.info("💣 Step 1/10: Dropping app schema...")
             step1 = {"step": 1, "action": "drop_app_schema", "status": "pending"}
 
             try:
@@ -855,7 +855,7 @@ class AdminDbMaintenanceTrigger:
             # ================================================================
             # STEP 2: Drop pgstac schema
             # ================================================================
-            logger.info("💣 Step 2/9: Dropping pgstac schema...")
+            logger.info("💣 Step 2/10: Dropping pgstac schema...")
             step2 = {"step": 2, "action": "drop_pgstac_schema", "status": "pending"}
 
             try:
@@ -886,7 +886,7 @@ class AdminDbMaintenanceTrigger:
             # ================================================================
             # STEP 3: Redeploy app schema from Pydantic models
             # ================================================================
-            logger.info("🏗️ Step 3/9: Deploying app schema from Pydantic models...")
+            logger.info("🏗️ Step 3/10: Deploying app schema from Pydantic models...")
             step3 = {"step": 3, "action": "deploy_app_schema", "status": "pending"}
 
             try:
@@ -951,7 +951,7 @@ class AdminDbMaintenanceTrigger:
             # Reader identity needs SELECT on geo schema tables for OGC Features API.
             config = get_config()
             reader_identity = config.database.managed_identity_reader_name
-            logger.info(f"🗺️ Step 4/9: Ensuring geo schema exists and granting permissions to {reader_identity}...")
+            logger.info(f"🗺️ Step 4/10: Ensuring geo schema exists and granting permissions to {reader_identity}...")
             step4 = {"step": 4, "action": "ensure_geo_schema_and_grant_permissions", "status": "pending"}
 
             try:
@@ -1071,7 +1071,7 @@ class AdminDbMaintenanceTrigger:
             # NON-FATAL: pgstac deployment failure should not block system operation
             # App schema (jobs/tasks) is already deployed - core system is functional
             # STAC features just won't work until pgstac is fixed
-            logger.info("📦 Step 5/9: Running pypgstac migrate...")
+            logger.info("📦 Step 5/10: Running pypgstac migrate...")
             step5 = {"step": 5, "action": "deploy_pgstac_schema", "status": "pending"}
 
             if pgstac_failed:
@@ -1121,7 +1121,7 @@ class AdminDbMaintenanceTrigger:
             # function app. After pypgstac migrate recreates the pgstac schema and roles,
             # we must grant pgstac_read to the reader identity so it can query STAC data.
             # Note: reader_identity already defined in step 4 (geo schema)
-            logger.info(f"🔐 Step 6/9: Granting pgstac_read role to {reader_identity}...")
+            logger.info(f"🔐 Step 6/10: Granting pgstac_read role to {reader_identity}...")
             step6 = {"step": 6, "action": "grant_pgstac_read_role", "status": "pending"}
 
             if pgstac_failed:
@@ -1166,7 +1166,7 @@ class AdminDbMaintenanceTrigger:
             # ================================================================
             # FIX (26 NOV 2025): Use create_production_collection() directly
             # instead of going through mock HTTP trigger which was silently failing
-            logger.info("📚 Step 7/9: Creating system STAC collections...")
+            logger.info("📚 Step 7/10: Creating system STAC collections...")
             step7 = {"step": 7, "action": "create_system_collections", "status": "pending", "collections": []}
 
             if pgstac_failed:
@@ -1213,7 +1213,7 @@ class AdminDbMaintenanceTrigger:
             # ================================================================
             # STEP 8: Verify app schema
             # ================================================================
-            logger.info("🔍 Step 8/9: Verifying app schema...")
+            logger.info("🔍 Step 8/10: Verifying app schema...")
             step8 = {"step": 8, "action": "verify_app_schema", "status": "pending"}
 
             try:
@@ -1260,7 +1260,7 @@ class AdminDbMaintenanceTrigger:
             # ================================================================
             # STEP 9: Verify pgstac schema
             # ================================================================
-            logger.info("🔍 Step 9/9: Verifying pgstac schema...")
+            logger.info("🔍 Step 9/10: Verifying pgstac schema...")
             step9 = {"step": 9, "action": "verify_pgstac_schema", "status": "pending"}
 
             if pgstac_failed:
@@ -1294,6 +1294,42 @@ class AdminDbMaintenanceTrigger:
                     step9["error"] = str(e)
 
             results["steps"].append(step9)
+
+            # ================================================================
+            # STEP 10: Ensure Service Bus queues exist (08 DEC 2025)
+            # Multi-Function App Architecture requires 4 queues
+            # ================================================================
+            logger.info("🚌 Step 10/10: Ensuring Service Bus queues exist...")
+            step10 = {"step": 10, "action": "ensure_service_bus_queues", "status": "pending"}
+
+            try:
+                from infrastructure.service_bus import ServiceBusRepository
+
+                service_bus = ServiceBusRepository.instance()
+                queue_results = service_bus.ensure_all_queues_exist()
+
+                if queue_results.get("all_queues_ready"):
+                    step10["status"] = "success"
+                    step10["queues_checked"] = queue_results.get("queues_checked", 0)
+                    step10["queues_created"] = queue_results.get("queues_created", 0)
+                    step10["queues_existed"] = queue_results.get("queues_existed", 0)
+                    logger.info(f"✅ All {step10['queues_checked']} Service Bus queues ready "
+                               f"({step10['queues_existed']} existed, {step10['queues_created']} created)")
+                else:
+                    # Some queues failed - non-fatal but should be logged
+                    step10["status"] = "partial"
+                    step10["errors"] = queue_results.get("errors", [])
+                    step10["queue_results"] = queue_results.get("queue_results", {})
+                    logger.warning(f"⚠️ Some Service Bus queues failed: {step10['errors']}")
+
+            except Exception as e:
+                # Non-fatal error - schema rebuild succeeded, just queue setup failed
+                logger.warning(f"⚠️ Failed to ensure Service Bus queues: {e}")
+                step10["status"] = "failed"
+                step10["error"] = str(e)
+                step10["note"] = "Schema rebuild succeeded but queue verification failed - tasks may not route correctly"
+
+            results["steps"].append(step10)
 
             # ================================================================
             # Final result

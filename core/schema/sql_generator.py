@@ -460,6 +460,24 @@ class PydanticToSQL:
                     sql.Identifier("retry_count")
                 )
             )
+            # Target queue index for multi-app tracking (07 DEC 2025)
+            indexes.append(
+                sql.SQL("CREATE INDEX IF NOT EXISTS {} ON {}.{} ({})").format(
+                    sql.Identifier("idx_tasks_target_queue"),
+                    sql.Identifier(self.schema_name),
+                    sql.Identifier("tasks"),
+                    sql.Identifier("target_queue")
+                )
+            )
+            # Executed by app index for multi-app tracking (07 DEC 2025)
+            indexes.append(
+                sql.SQL("CREATE INDEX IF NOT EXISTS {} ON {}.{} ({})").format(
+                    sql.Identifier("idx_tasks_executed_by_app"),
+                    sql.Identifier(self.schema_name),
+                    sql.Identifier("tasks"),
+                    sql.Identifier("executed_by_app")
+                )
+            )
 
         elif table_name == "api_requests":
             # Platform Layer indexes (added 16 NOV 2025, FIXED 24 NOV 2025)

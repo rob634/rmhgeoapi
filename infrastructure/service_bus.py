@@ -23,6 +23,7 @@ Exports:
 
 from azure.servicebus import ServiceBusClient, ServiceBusMessage, ServiceBusSender, ServiceBusReceiver
 from azure.servicebus.aio import ServiceBusClient as AsyncServiceBusClient
+from azure.servicebus.management import ServiceBusAdministrationClient, QueueProperties
 from azure.servicebus.exceptions import (
     ServiceBusError,                    # Base exception
     ServiceBusConnectionError,          # Connection failures
@@ -39,6 +40,7 @@ from azure.servicebus.exceptions import (
     ServiceBusServerBusyError,          # Server busy (transient, retry)
     AutoLockRenewTimeout,               # Lock renewal failed (transient)
 )
+from azure.core.exceptions import ResourceNotFoundError, ResourceExistsError
 from azure.identity import DefaultAzureCredential
 from azure.core.exceptions import ServiceRequestError
 from typing import Optional, List, Dict, Any, Union
@@ -858,6 +860,235 @@ class ServiceBusRepository(IQueueRepository):
         except Exception as e:
             logger.error(f"❌ Failed to clear queue {queue_name}: {e}")
             return False
+
+    # ========================================================================
+    # Queue Management Methods (08 DEC 2025 - Multi-Function App Architecture)
+    # ========================================================================
+
+    def _get_admin_client(self) -> ServiceBusAdministrationClient:
+        """
+        Get Service Bus Administration Client for queue management operations.
+
+        Creates admin client on demand for operations like queue creation/verification.
+        Uses same authentication method as messaging client.
+        """
+        from config import get_config
+        config = get_config()
+
+        connection_string = config.service_bus_connection_string
+        if connection_string:
+            return ServiceBusAdministrationClient.from_connection_string(connection_string)
+        else:
+            fully_qualified_namespace = config.service_bus_namespace
+            if not fully_qualified_namespace:
+                raise ValueError("Service Bus namespace not configured")
+            return ServiceBusAdministrationClient(
+                fully_qualified_namespace=fully_qualified_namespace,
+                credential=DefaultAzureCredential()
+            )
+
+    def queue_exists(self, queue_name: str) -> bool:
+        """
+        Check if a Service Bus queue exists.
+
+        Args:
+            queue_name: Name of the queue to check
+
+        Returns:
+            True if queue exists, False otherwise
+        """
+        try:
+            admin_client = self._get_admin_client()
+            with admin_client:
+                queue = admin_client.get_queue(queue_name)
+                return queue is not None
+        except ResourceNotFoundError:
+            return False
+        except Exception as e:
+            logger.error(f"❌ Error checking queue existence '{queue_name}': {e}")
+            raise
+
+    def ensure_queue_exists(
+        self,
+        queue_name: str,
+        lock_duration_minutes: int = 5,
+        max_delivery_count: int = 1,
+        default_ttl_days: int = 7
+    ) -> Dict[str, Any]:
+        """
+        Ensure a Service Bus queue exists, creating it if necessary.
+
+        This method is critical for Multi-Function App Architecture to ensure
+        raster-tasks and vector-tasks queues exist before routing tasks.
+
+        Args:
+            queue_name: Name of the queue to ensure exists
+            lock_duration_minutes: Message lock duration (default: 5 min for raster, 2 min for vector)
+            max_delivery_count: Max retries before dead-letter (default: 1)
+            default_ttl_days: Message time-to-live in days (default: 7)
+
+        Returns:
+            Dict with operation result:
+            - queue_name: Name of queue
+            - exists: True if queue existed or was created
+            - created: True if queue was created, False if it already existed
+            - properties: Queue properties (if accessible)
+            - error: Error message if operation failed
+        """
+        logger.info(f"🔍 Ensuring queue exists: {queue_name}")
+
+        try:
+            admin_client = self._get_admin_client()
+            with admin_client:
+                # Check if queue exists
+                try:
+                    queue_props = admin_client.get_queue(queue_name)
+                    logger.info(f"✅ Queue '{queue_name}' already exists")
+                    return {
+                        "queue_name": queue_name,
+                        "exists": True,
+                        "created": False,
+                        "properties": {
+                            "lock_duration": str(queue_props.lock_duration),
+                            "max_delivery_count": queue_props.max_delivery_count,
+                            "default_message_time_to_live": str(queue_props.default_message_time_to_live),
+                            "max_size_in_megabytes": queue_props.max_size_in_megabytes
+                        }
+                    }
+
+                except ResourceNotFoundError:
+                    # Queue doesn't exist - create it
+                    logger.info(f"📝 Queue '{queue_name}' not found, creating...")
+
+                    from datetime import timedelta
+
+                    queue_props = admin_client.create_queue(
+                        queue_name,
+                        lock_duration=timedelta(minutes=lock_duration_minutes),
+                        max_delivery_count=max_delivery_count,
+                        default_message_time_to_live=timedelta(days=default_ttl_days),
+                        dead_lettering_on_message_expiration=True
+                    )
+
+                    logger.info(f"✅ Queue '{queue_name}' created successfully")
+                    return {
+                        "queue_name": queue_name,
+                        "exists": True,
+                        "created": True,
+                        "properties": {
+                            "lock_duration": str(queue_props.lock_duration),
+                            "max_delivery_count": queue_props.max_delivery_count,
+                            "default_message_time_to_live": str(queue_props.default_message_time_to_live),
+                            "max_size_in_megabytes": queue_props.max_size_in_megabytes
+                        }
+                    }
+
+        except ResourceExistsError:
+            # Race condition - queue was created between check and create
+            logger.info(f"✅ Queue '{queue_name}' exists (race condition handled)")
+            return {
+                "queue_name": queue_name,
+                "exists": True,
+                "created": False,
+                "note": "Queue created by another process"
+            }
+
+        except Exception as e:
+            logger.error(f"❌ Failed to ensure queue '{queue_name}': {e}")
+            return {
+                "queue_name": queue_name,
+                "exists": False,
+                "created": False,
+                "error": str(e),
+                "error_type": type(e).__name__
+            }
+
+    def ensure_all_queues_exist(self) -> Dict[str, Any]:
+        """
+        Ensure all required Service Bus queues exist for Multi-Function App Architecture.
+
+        Creates the following queues if missing:
+        - geospatial-jobs: Job orchestration + stage_complete signals
+        - geospatial-tasks: Legacy task queue (backward compat)
+        - raster-tasks: Raster task processing (memory-intensive, longer lock)
+        - vector-tasks: Vector task processing (high concurrency, shorter lock)
+
+        Returns:
+            Dict with results for each queue
+        """
+        from config import get_config
+        config = get_config()
+
+        logger.info("🚌 Ensuring all required Service Bus queues exist...")
+
+        # Queue configurations for Multi-Function App Architecture
+        queue_configs = [
+            {
+                "name": config.service_bus_jobs_queue,  # geospatial-jobs
+                "lock_duration_minutes": 5,
+                "max_delivery_count": 1,
+                "purpose": "Job orchestration and stage_complete signals"
+            },
+            {
+                "name": config.queues.tasks_queue,  # geospatial-tasks (legacy)
+                "lock_duration_minutes": 5,
+                "max_delivery_count": 1,
+                "purpose": "Legacy task queue (backward compatibility)"
+            },
+            {
+                "name": config.queues.raster_tasks_queue,  # raster-tasks
+                "lock_duration_minutes": 5,  # Longer lock for GDAL operations
+                "max_delivery_count": 1,
+                "purpose": "Raster task processing (memory-intensive GDAL ops)"
+            },
+            {
+                "name": config.queues.vector_tasks_queue,  # vector-tasks
+                "lock_duration_minutes": 2,  # Shorter lock for faster vector ops
+                "max_delivery_count": 1,
+                "purpose": "Vector task processing (high concurrency)"
+            }
+        ]
+
+        results = {
+            "queues_checked": len(queue_configs),
+            "queues_created": 0,
+            "queues_existed": 0,
+            "errors": [],
+            "queue_results": {}
+        }
+
+        for queue_config in queue_configs:
+            queue_name = queue_config["name"]
+            result = self.ensure_queue_exists(
+                queue_name=queue_name,
+                lock_duration_minutes=queue_config["lock_duration_minutes"],
+                max_delivery_count=queue_config["max_delivery_count"]
+            )
+
+            result["purpose"] = queue_config["purpose"]
+            results["queue_results"][queue_name] = result
+
+            if result.get("created"):
+                results["queues_created"] += 1
+            elif result.get("exists"):
+                results["queues_existed"] += 1
+            elif result.get("error"):
+                results["errors"].append({
+                    "queue": queue_name,
+                    "error": result["error"]
+                })
+
+        results["all_queues_ready"] = (
+            results["queues_created"] + results["queues_existed"] == results["queues_checked"]
+        )
+
+        if results["all_queues_ready"]:
+            logger.info(f"✅ All {results['queues_checked']} queues ready "
+                       f"({results['queues_existed']} existed, {results['queues_created']} created)")
+        else:
+            logger.error(f"❌ Queue verification failed: {len(results['errors'])} errors")
+
+        return results
 
     # ========================================================================
     # Service Bus Specific Methods (High-Volume Operations)

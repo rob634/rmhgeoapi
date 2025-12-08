@@ -40,6 +40,12 @@ class QueueConfig(BaseModel):
     Azure Service Bus queue configuration.
 
     Controls Service Bus connection and message processing settings.
+
+    Queue Architecture (07 DEC 2025):
+    - jobs_queue: Job orchestration and stage_complete signals
+    - tasks_queue: Legacy/fallback for unrouted tasks
+    - raster_tasks_queue: Memory-intensive GDAL operations (low concurrency)
+    - vector_tasks_queue: DB-bound operations (high concurrency)
     """
 
     # Service Bus connection
@@ -54,15 +60,26 @@ class QueueConfig(BaseModel):
         description="Service Bus namespace for managed identity auth (alternative to connection string)"
     )
 
-    # Queue names
+    # Queue names - Core
     jobs_queue: str = Field(
         default=QueueDefaults.JOBS_QUEUE,
-        description="Service Bus queue name for job messages"
+        description="Service Bus queue name for job messages and stage_complete signals"
     )
 
     tasks_queue: str = Field(
         default=QueueDefaults.TASKS_QUEUE,
-        description="Service Bus queue name for task messages"
+        description="Service Bus queue name for legacy/fallback task messages"
+    )
+
+    # Queue names - Specialized (07 DEC 2025)
+    raster_tasks_queue: str = Field(
+        default=QueueDefaults.RASTER_TASKS_QUEUE,
+        description="Service Bus queue for raster tasks (GDAL operations, low concurrency)"
+    )
+
+    vector_tasks_queue: str = Field(
+        default=QueueDefaults.VECTOR_TASKS_QUEUE,
+        description="Service Bus queue for vector tasks (DB operations, high concurrency)"
     )
 
     # Batch processing
@@ -101,6 +118,8 @@ class QueueConfig(BaseModel):
             namespace=os.environ.get("SERVICE_BUS_NAMESPACE") or os.environ.get("ServiceBusConnection__fullyQualifiedNamespace"),
             jobs_queue=os.environ.get("SERVICE_BUS_JOBS_QUEUE", QueueDefaults.JOBS_QUEUE),
             tasks_queue=os.environ.get("SERVICE_BUS_TASKS_QUEUE", QueueDefaults.TASKS_QUEUE),
+            raster_tasks_queue=os.environ.get("SERVICE_BUS_RASTER_TASKS_QUEUE", QueueDefaults.RASTER_TASKS_QUEUE),
+            vector_tasks_queue=os.environ.get("SERVICE_BUS_VECTOR_TASKS_QUEUE", QueueDefaults.VECTOR_TASKS_QUEUE),
             max_batch_size=int(os.environ.get("SERVICE_BUS_MAX_BATCH_SIZE", str(QueueDefaults.MAX_BATCH_SIZE))),
             batch_threshold=int(os.environ.get("SERVICE_BUS_BATCH_THRESHOLD", str(QueueDefaults.BATCH_THRESHOLD))),
             retry_count=int(os.environ.get("SERVICE_BUS_RETRY_COUNT", str(QueueDefaults.RETRY_COUNT))),

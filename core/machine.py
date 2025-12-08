@@ -56,6 +56,8 @@ from infrastructure import RepositoryFactory
 
 # Configuration
 from config import AppConfig
+from config.defaults import TaskRoutingDefaults
+from config.app_mode_config import get_app_mode_config, AppMode
 
 # Logging
 from util_logger import LoggerFactory, ComponentType
@@ -154,6 +156,9 @@ class CoreMachine:
         self.state_manager = state_manager or StateManager()
         self.config = config or AppConfig.from_environment()
 
+        # App mode configuration (07 DEC 2025 - Multi-App Architecture)
+        self.app_mode_config = get_app_mode_config()
+
         # Completion callback (Platform layer integration - 30 OCT 2025)
         self.on_job_complete = on_job_complete
 
@@ -216,13 +221,55 @@ class CoreMachine:
         return self._service_bus_repo
 
     # ========================================================================
+    # TASK ROUTING (07 DEC 2025 - Multi-App Architecture)
+    # ========================================================================
+
+    def _get_queue_for_task(self, task_type: str) -> str:
+        """
+        Route task to appropriate queue based on task type.
+
+        Uses TaskRoutingDefaults to determine queue category:
+        - RASTER_TASKS → raster_tasks_queue (GDAL operations, low concurrency)
+        - VECTOR_TASKS → vector_tasks_queue (DB operations, high concurrency)
+        - Default → tasks_queue (legacy/fallback)
+
+        Args:
+            task_type: The task_type field from TaskDefinition
+
+        Returns:
+            Queue name string (e.g., "raster-tasks", "vector-tasks", "geospatial-tasks")
+
+        Used by:
+            - _batch_queue_tasks() - groups tasks by target queue
+            - _individual_queue_tasks() - routes each task
+
+        Example:
+            queue = self._get_queue_for_task("handler_raster_create_cog")
+            # Returns: "raster-tasks"
+        """
+        # Determine task category
+        if task_type in TaskRoutingDefaults.RASTER_TASKS:
+            queue_name = self.config.queues.raster_tasks_queue
+            self.logger.debug(f"📤 Task type '{task_type}' → raster queue: {queue_name}")
+        elif task_type in TaskRoutingDefaults.VECTOR_TASKS:
+            queue_name = self.config.queues.vector_tasks_queue
+            self.logger.debug(f"📤 Task type '{task_type}' → vector queue: {queue_name}")
+        else:
+            # Fallback to legacy tasks queue
+            queue_name = self.config.queues.tasks_queue
+            self.logger.debug(f"📤 Task type '{task_type}' → default queue: {queue_name}")
+
+        return queue_name
+
+    # ========================================================================
     # TASK CONVERSION HELPERS (13 NOV 2025 - Part 1 Task 1.2)
     # ========================================================================
 
     def _task_definition_to_record(
         self,
         task_def: TaskDefinition,
-        task_index: int
+        task_index: int,
+        target_queue: Optional[str] = None
     ) -> TaskRecord:
         """
         Convert TaskDefinition to TaskRecord for database persistence.
@@ -233,6 +280,7 @@ class CoreMachine:
         Args:
             task_def: TaskDefinition from job's create_tasks_for_stage()
             task_index: Index in task list (for task_index field)
+            target_queue: Queue name this task will be sent to (07 DEC 2025)
 
         Returns:
             TaskRecord ready for database insertion
@@ -242,7 +290,8 @@ class CoreMachine:
             - _batch_queue_tasks() (batch task creation)
 
         Example:
-            task_record = self._task_definition_to_record(task_def, 0)
+            queue_name = self._get_queue_for_task(task_def.task_type)
+            task_record = self._task_definition_to_record(task_def, 0, queue_name)
             self.repos['task_repo'].create_task(task_record)
         """
         return TaskRecord(
@@ -255,6 +304,7 @@ class CoreMachine:
             task_index=str(task_index),
             parameters=task_def.parameters,
             metadata=task_def.metadata or {},
+            target_queue=target_queue,  # Multi-app tracking (07 DEC 2025)
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc)
         )
@@ -532,6 +582,103 @@ class CoreMachine:
             self.logger.error(f"   Traceback: {traceback.format_exc()}")
             self._mark_job_failed(job_message.job_id, f"Task queueing failed: {e}")
             raise BusinessLogicError(f"Failed to queue tasks: {e}")
+
+    # ========================================================================
+    # STAGE COMPLETE PROCESSING - Entry point for stage_complete messages
+    # ========================================================================
+
+    def process_stage_complete_message(self, message: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Process stage_complete message from worker apps.
+
+        This is called when a stage_complete message arrives from the jobs queue.
+        Worker apps send these after completing the last task of a stage.
+        Platform app handles stage advancement/job completion.
+
+        Message format:
+            {
+                'message_type': 'stage_complete',
+                'job_id': str,
+                'job_type': str,
+                'completed_stage': int,
+                'completed_at': str (ISO timestamp),
+                'completed_by_app': str,
+                'correlation_id': str
+            }
+
+        Args:
+            message: Stage complete message dict
+
+        Returns:
+            Result dict with success status and metadata
+
+        Raises:
+            BusinessLogicError: If stage advancement fails
+
+        Added: 07 DEC 2025 - Multi-App Architecture
+        """
+        job_id = message.get('job_id')
+        job_type = message.get('job_type')
+        completed_stage = message.get('completed_stage')
+        completed_by_app = message.get('completed_by_app', 'unknown')
+        correlation_id = message.get('correlation_id', 'unknown')
+
+        self.logger.info(
+            f"📬 [STAGE_COMPLETE_RECV] Received stage_complete message "
+            f"(job: {job_id[:16]}..., stage: {completed_stage}, from: {completed_by_app})",
+            extra={
+                'checkpoint': 'STAGE_COMPLETE_MESSAGE_RECEIVED',
+                'job_id': job_id,
+                'job_type': job_type,
+                'completed_stage': completed_stage,
+                'completed_by_app': completed_by_app,
+                'correlation_id': correlation_id,
+                'app_mode': self.app_mode_config.mode.value
+            }
+        )
+
+        try:
+            # Handle stage completion (advance or finalize)
+            self._handle_stage_completion(job_id, job_type, completed_stage)
+
+            self.logger.info(
+                f"✅ [STAGE_COMPLETE_RECV] Successfully processed stage_complete",
+                extra={
+                    'checkpoint': 'STAGE_COMPLETE_MESSAGE_SUCCESS',
+                    'job_id': job_id,
+                    'completed_stage': completed_stage
+                }
+            )
+
+            return {
+                'success': True,
+                'message': f'Stage {completed_stage} complete, advanced job',
+                'job_id': job_id,
+                'completed_stage': completed_stage,
+                'completed_by_app': completed_by_app
+            }
+
+        except Exception as e:
+            self.logger.error(
+                f"❌ [STAGE_COMPLETE_RECV] Failed to process stage_complete: {e}",
+                extra={
+                    'checkpoint': 'STAGE_COMPLETE_MESSAGE_FAILED',
+                    'job_id': job_id,
+                    'completed_stage': completed_stage,
+                    'error': str(e)
+                }
+            )
+
+            # Try to mark job as failed
+            try:
+                self._mark_job_failed(
+                    job_id,
+                    f"Stage complete processing failed: {e}"
+                )
+            except Exception as cleanup_error:
+                self.logger.error(f"❌ Failed to mark job as failed: {cleanup_error}")
+
+            raise BusinessLogicError(f"Stage complete processing failed: {e}")
 
     # ========================================================================
     # TASK PROCESSING - Entry point for task queue messages
@@ -846,16 +993,32 @@ class CoreMachine:
                             'task_id': task_message.task_id,
                             'job_id': task_message.parent_job_id,
                             'stage': task_message.stage,
-                            'last_task_detected': True
+                            'last_task_detected': True,
+                            'app_mode': self.app_mode_config.mode.value
                         }
                     )
                     # FP3 FIX: Wrap stage advancement in try-catch to prevent orphaned jobs
                     try:
-                        self._handle_stage_completion(
-                            task_message.parent_job_id,
-                            task_message.job_type,
-                            task_message.stage
-                        )
+                        # Multi-App Architecture (07 DEC 2025):
+                        # - Worker modes: Signal stage_complete to centralized jobs queue
+                        # - Other modes: Handle stage completion locally
+                        if self._should_signal_stage_complete():
+                            self.logger.info(
+                                f"📤 [WORKER_MODE] Signaling stage_complete to jobs queue "
+                                f"(mode: {self.app_mode_config.mode.value})"
+                            )
+                            self._send_stage_complete_signal(
+                                task_message.parent_job_id,
+                                task_message.job_type,
+                                task_message.stage
+                            )
+                        else:
+                            # Local handling (standalone, platform_* modes)
+                            self._handle_stage_completion(
+                                task_message.parent_job_id,
+                                task_message.job_type,
+                                task_message.stage
+                            )
                         self.logger.info(
                             f"✅ [TASK_COMPLETE] Stage {task_message.stage} advancement complete (core/machine.py:process_task_message)",
                             extra={
@@ -863,7 +1026,8 @@ class CoreMachine:
                                 'task_id': task_message.task_id,
                                 'job_id': task_message.parent_job_id,
                                 'stage': task_message.stage,
-                                'stage_advanced': True
+                                'stage_advanced': True,
+                                'signaled_to_platform': self._should_signal_stage_complete()
                             }
                         )
 
@@ -1219,60 +1383,94 @@ class CoreMachine:
         job_id: str,
         stage_number: int
     ) -> Dict[str, Any]:
-        """Queue tasks in batches to Service Bus."""
+        """
+        Queue tasks in batches to Service Bus, routing by task type.
+
+        Groups tasks by target queue (raster/vector/default) and sends
+        each group to the appropriate queue. This enables multi-app
+        architecture where different Function Apps process different task types.
+
+        Updated: 07 DEC 2025 - Multi-App Architecture
+        """
         start_time = time.time()
         total_tasks = len(task_defs)
         successful_batches = []
         failed_batches = []
 
-        # Get queue name (modern pattern - 30 NOV 2025)
-        queue_name = self.config.queues.tasks_queue
+        # Group tasks by target queue (07 DEC 2025 - Multi-App Architecture)
+        tasks_by_queue: Dict[str, list] = {}
+        for task_def in task_defs:
+            queue_name = self._get_queue_for_task(task_def.task_type)
+            if queue_name not in tasks_by_queue:
+                tasks_by_queue[queue_name] = []
+            tasks_by_queue[queue_name].append(task_def)
 
-        # Process in batches of 100
-        for i in range(0, total_tasks, self.BATCH_SIZE):
-            batch = task_defs[i:i + self.BATCH_SIZE]
-            batch_id = f"{job_id[:8]}-s{stage_number}-b{i//self.BATCH_SIZE:03d}"
+        # Log routing summary
+        for queue, tasks in tasks_by_queue.items():
+            self.logger.info(f"📤 Routing {len(tasks)} tasks to queue: {queue}")
 
-            try:
-                # Create task records using helper (consistent status)
-                task_records = [
-                    self._task_definition_to_record(task_def, i + idx)
-                    for idx, task_def in enumerate(batch)
-                ]
-                self.repos['task_repo'].batch_create_tasks(task_records)
+        # Process each queue's tasks in batches
+        global_task_idx = 0  # Track global index for task_index field
+        for queue_name, queue_tasks in tasks_by_queue.items():
+            queue_total = len(queue_tasks)
 
-                # Send to Service Bus using helper (consistent message format)
-                messages = [
-                    self._task_definition_to_message(task_def)
-                    for task_def in batch
-                ]
-                result = self.service_bus.batch_send_messages(queue_name, messages)
+            for i in range(0, queue_total, self.BATCH_SIZE):
+                batch = queue_tasks[i:i + self.BATCH_SIZE]
+                batch_id = f"{job_id[:8]}-s{stage_number}-{queue_name[:6]}-b{i//self.BATCH_SIZE:03d}"
 
-                if not result.success:
-                    raise RuntimeError(f"Batch send failed: {result.errors}")
+                try:
+                    # Create task records with target_queue tracking
+                    task_records = [
+                        self._task_definition_to_record(
+                            task_def,
+                            global_task_idx + idx,
+                            target_queue=queue_name
+                        )
+                        for idx, task_def in enumerate(batch)
+                    ]
+                    self.repos['task_repo'].batch_create_tasks(task_records)
 
-                successful_batches.append({
-                    'batch_id': batch_id,
-                    'size': len(batch)
-                })
+                    # Send to Service Bus using helper (consistent message format)
+                    messages = [
+                        self._task_definition_to_message(task_def)
+                        for task_def in batch
+                    ]
+                    result = self.service_bus.batch_send_messages(queue_name, messages)
 
-                self.logger.debug(f"✅ Batch {batch_id}: {len(batch)} tasks")
+                    if not result.success:
+                        raise RuntimeError(f"Batch send failed: {result.errors}")
 
-            except Exception as e:
-                self.logger.error(f"❌ Batch {batch_id} failed: {e}")
-                failed_batches.append({
-                    'batch_id': batch_id,
-                    'size': len(batch),
-                    'error': str(e)
-                })
+                    successful_batches.append({
+                        'batch_id': batch_id,
+                        'size': len(batch),
+                        'queue': queue_name
+                    })
+
+                    self.logger.debug(f"✅ Batch {batch_id}: {len(batch)} tasks → {queue_name}")
+                    global_task_idx += len(batch)
+
+                except Exception as e:
+                    self.logger.error(f"❌ Batch {batch_id} failed: {e}")
+                    failed_batches.append({
+                        'batch_id': batch_id,
+                        'size': len(batch),
+                        'queue': queue_name,
+                        'error': str(e)
+                    })
 
         elapsed_ms = (time.time() - start_time) * 1000
         tasks_queued = sum(b['size'] for b in successful_batches)
+
+        # Build routing summary for return
+        routing_summary = {
+            queue: len(tasks) for queue, tasks in tasks_by_queue.items()
+        }
 
         return {
             'status': 'completed' if not failed_batches else 'partial',
             'total_tasks': total_tasks,
             'tasks_queued': tasks_queued,
+            'routing': routing_summary,  # NEW: Shows distribution across queues
             'batches': {
                 'successful': len(successful_batches),
                 'failed': len(failed_batches)
@@ -1286,19 +1484,34 @@ class CoreMachine:
         job_id: str,
         stage_number: int
     ) -> Dict[str, Any]:
-        """Queue tasks individually to Service Bus."""
+        """
+        Queue tasks individually to Service Bus, routing by task type.
+
+        Routes each task to the appropriate queue (raster/vector/default)
+        based on task_type. Used for small task batches below batch_threshold.
+
+        Updated: 07 DEC 2025 - Multi-App Architecture
+        """
         start_time = time.time()
         total_tasks = len(task_defs)
         tasks_queued = 0
         tasks_failed = 0
 
-        # Get queue name (modern pattern - 30 NOV 2025)
-        queue_name = self.config.queues.tasks_queue
+        # Track routing distribution (07 DEC 2025)
+        routing_counts: Dict[str, int] = {}
 
         for idx, task_def in enumerate(task_defs):
             try:
-                # Create task record using helper (single source of truth)
-                task_record = self._task_definition_to_record(task_def, idx)
+                # Route task to appropriate queue based on task_type
+                queue_name = self._get_queue_for_task(task_def.task_type)
+
+                # Track routing distribution
+                routing_counts[queue_name] = routing_counts.get(queue_name, 0) + 1
+
+                # Create task record with target_queue tracking
+                task_record = self._task_definition_to_record(
+                    task_def, idx, target_queue=queue_name
+                )
                 self.repos['task_repo'].create_task(task_record)
 
                 # Send to Service Bus using helper (single source of truth)
@@ -1313,11 +1526,16 @@ class CoreMachine:
 
         elapsed_ms = (time.time() - start_time) * 1000
 
+        # Log routing summary
+        for queue, count in routing_counts.items():
+            self.logger.info(f"📤 Routed {count} tasks to queue: {queue}")
+
         return {
             'status': 'completed' if tasks_failed == 0 else 'partial',
             'total_tasks': total_tasks,
             'tasks_queued': tasks_queued,
             'tasks_failed': tasks_failed,
+            'routing': routing_counts,  # NEW: Shows distribution across queues
             'method': 'individual',
             'elapsed_ms': elapsed_ms
         }
@@ -1410,6 +1628,87 @@ class CoreMachine:
                 }
             )
             self._complete_job(job_id, job_type)
+
+    def _send_stage_complete_signal(
+        self,
+        job_id: str,
+        job_type: str,
+        completed_stage: int
+    ):
+        """
+        Send stage_complete message to centralized jobs queue.
+
+        Used by worker apps (worker_raster, worker_vector) to signal stage
+        completion back to the Platform app for orchestration.
+
+        In multi-app architecture:
+        - Workers process tasks from specialized queues
+        - On last task completion, worker sends stage_complete to jobs queue
+        - Platform app receives stage_complete and handles advancement
+
+        Args:
+            job_id: The job identifier
+            job_type: The job type (for lookup in Platform registry)
+            completed_stage: The stage number that just completed
+
+        Added: 07 DEC 2025 - Multi-App Architecture
+        """
+        self.logger.info(
+            f"📤 [STAGE_COMPLETE_SIGNAL] Sending stage_complete to jobs queue "
+            f"(job: {job_id[:16]}..., stage: {completed_stage})",
+            extra={
+                'checkpoint': 'STAGE_COMPLETE_SIGNAL_SEND',
+                'job_id': job_id,
+                'job_type': job_type,
+                'completed_stage': completed_stage,
+                'app_mode': self.app_mode_config.mode.value,
+                'app_name': self.app_mode_config.app_name
+            }
+        )
+
+        # Create stage_complete message for jobs queue
+        stage_complete_message = {
+            'message_type': 'stage_complete',
+            'job_id': job_id,
+            'job_type': job_type,
+            'completed_stage': completed_stage,
+            'completed_at': datetime.now(timezone.utc).isoformat(),
+            'completed_by_app': self.app_mode_config.app_name,
+            'correlation_id': str(uuid.uuid4())[:8]
+        }
+
+        # Send to centralized jobs queue
+        jobs_queue = self.config.queues.jobs_queue
+        self.service_bus.send_message(jobs_queue, stage_complete_message)
+
+        self.logger.info(
+            f"✅ [STAGE_COMPLETE_SIGNAL] Message sent to {jobs_queue} "
+            f"(correlation: {stage_complete_message['correlation_id']})",
+            extra={
+                'checkpoint': 'STAGE_COMPLETE_SIGNAL_SENT',
+                'job_id': job_id,
+                'queue': jobs_queue,
+                'correlation_id': stage_complete_message['correlation_id']
+            }
+        )
+
+    def _should_signal_stage_complete(self) -> bool:
+        """
+        Determine if this app should signal stage completion to jobs queue.
+
+        Returns True for worker modes (worker_raster, worker_vector) which
+        process tasks but don't handle stage orchestration locally.
+
+        Returns False for modes that handle orchestration locally:
+        - standalone: Does everything
+        - platform_*: Handles jobs queue
+
+        Added: 07 DEC 2025 - Multi-App Architecture
+        """
+        return self.app_mode_config.mode in [
+            AppMode.WORKER_RASTER,
+            AppMode.WORKER_VECTOR
+        ]
 
     def _advance_stage(self, job_id: str, job_type: str, next_stage: int):
         """

@@ -31,7 +31,7 @@ from datetime import datetime, timezone
 
 import azure.functions as func
 from .http_base import SystemMonitoringTrigger
-from config import get_config, AzureDefaults
+from config import get_config, AzureDefaults, get_app_mode_config
 from core.schema.deployer import SchemaManagerFactory
 from utils import validator
 
@@ -75,6 +75,10 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
         # This allows the dev environment to work while alerting on production deployments
         if deployment_health.get("details", {}).get("config_status") == "using_defaults":
             health_data["errors"].append("Configuration using development defaults - set environment variables for production")
+
+        # Check app mode configuration (07 DEC 2025 - Multi-Function App Architecture)
+        app_mode_health = self._check_app_mode()
+        health_data["components"]["app_mode"] = app_mode_health
 
         # Check import validation (critical for application startup)
         import_health = self._check_import_validation()
@@ -346,7 +350,15 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
         return self.check_component_health("storage_queues", check_queues)
 
     def _check_service_bus_queues(self) -> Dict[str, Any]:
-        """Check Azure Service Bus queue health using ServiceBusRepository."""
+        """
+        Check Azure Service Bus queue health using ServiceBusRepository.
+
+        Updated 08 DEC 2025: Now checks all 4 queues required for Multi-Function App Architecture:
+        - geospatial-jobs: Job orchestration
+        - geospatial-tasks: Legacy task queue
+        - raster-tasks: Raster task processing (NEW)
+        - vector-tasks: Vector task processing (NEW)
+        """
         def check_service_bus():
             from infrastructure.service_bus import ServiceBusRepository
             from config import get_config
@@ -355,25 +367,56 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
             service_bus_repo = ServiceBusRepository()
 
             queue_status = {}
+
+            # Check all 4 queues required for Multi-Function App Architecture (08 DEC 2025)
             queues_to_check = [
-                config.service_bus_jobs_queue,
-                config.service_bus_tasks_queue
+                {"name": config.service_bus_jobs_queue, "purpose": "Job orchestration"},
+                {"name": config.queues.tasks_queue, "purpose": "Legacy tasks (backward compat)"},
+                {"name": config.queues.raster_tasks_queue, "purpose": "Raster task processing"},
+                {"name": config.queues.vector_tasks_queue, "purpose": "Vector task processing"}
             ]
 
-            for queue_name in queues_to_check:
+            queues_accessible = 0
+            queues_missing = 0
+
+            for queue_config in queues_to_check:
+                queue_name = queue_config["name"]
                 try:
                     # Peek at queue to verify connectivity and get approximate count
                     message_count = service_bus_repo.get_queue_length(queue_name)
                     queue_status[queue_name] = {
                         "status": "accessible",
+                        "purpose": queue_config["purpose"],
                         "approximate_message_count": message_count,
                         "note": "Count is approximate (peek limit: 100)"
                     }
+                    queues_accessible += 1
                 except Exception as e:
-                    queue_status[queue_name] = {
-                        "status": "error",
-                        "error": str(e)
-                    }
+                    error_str = str(e)
+                    # Check if this is a "queue not found" error
+                    if "not found" in error_str.lower() or "404" in error_str or "MessagingEntityNotFoundError" in error_str:
+                        queue_status[queue_name] = {
+                            "status": "missing",
+                            "purpose": queue_config["purpose"],
+                            "error": "Queue does not exist",
+                            "fix": "Run schema rebuild to auto-create: POST /api/dbadmin/maintenance/full-rebuild?confirm=yes"
+                        }
+                        queues_missing += 1
+                    else:
+                        queue_status[queue_name] = {
+                            "status": "error",
+                            "purpose": queue_config["purpose"],
+                            "error": error_str[:200]
+                        }
+
+            # Add summary for Multi-Function App readiness
+            queue_status["_summary"] = {
+                "total_queues": len(queues_to_check),
+                "accessible": queues_accessible,
+                "missing": queues_missing,
+                "multi_function_app_ready": queues_missing == 0,
+                "note": "All 4 queues required for Multi-Function App Architecture" if queues_missing == 0 else f"{queues_missing} queue(s) missing - run full-rebuild to create"
+            }
 
             # Add repository info
             queue_status["_repository_info"] = {
@@ -1567,6 +1610,58 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
 
         return self.check_component_health("deployment_config", check_deployment)
 
+    def _check_app_mode(self) -> Dict[str, Any]:
+        """
+        Check application mode configuration (07 DEC 2025 - Multi-Function App Architecture).
+
+        Reports on the current app mode and which queues this instance listens to.
+        Used for monitoring multi-Function App deployments.
+
+        Returns:
+            Dict with app mode health status including:
+            - mode: Current app mode (standalone, platform_raster, etc.)
+            - app_name: Unique identifier for this app instance
+            - queues_listening: Which queues this app processes
+            - routing: External routing configuration
+            - role: Platform vs Worker role indicators
+        """
+        def check_app_mode():
+            app_mode_config = get_app_mode_config()
+            config = get_config()
+
+            return {
+                "mode": app_mode_config.mode.value,
+                "app_name": app_mode_config.app_name,
+                "queues_listening": {
+                    "jobs": app_mode_config.listens_to_jobs_queue,
+                    "raster_tasks": app_mode_config.listens_to_raster_tasks,
+                    "vector_tasks": app_mode_config.listens_to_vector_tasks,
+                    "legacy_tasks": app_mode_config.listens_to_legacy_tasks
+                },
+                "queue_names": {
+                    "jobs": config.queues.jobs_queue,
+                    "raster_tasks": config.queues.raster_tasks_queue,
+                    "vector_tasks": config.queues.vector_tasks_queue,
+                    "legacy_tasks": config.queues.tasks_queue
+                },
+                "routing": {
+                    "routes_raster_externally": app_mode_config.routes_raster_externally,
+                    "routes_vector_externally": app_mode_config.routes_vector_externally,
+                    "raster_app_url": app_mode_config.raster_app_url,
+                    "vector_app_url": app_mode_config.vector_app_url
+                },
+                "role": {
+                    "is_platform": app_mode_config.is_platform_mode,
+                    "is_worker": app_mode_config.is_worker_mode,
+                    "has_http": app_mode_config.has_http_endpoints
+                },
+                "environment_var": {
+                    "APP_MODE": os.getenv("APP_MODE", "not_set (defaults to standalone)"),
+                    "APP_NAME": os.getenv("APP_NAME", "not_set (defaults to rmhazuregeoapi)")
+                }
+            }
+
+        return self.check_component_health("app_mode", check_app_mode)
 
     def _check_table_metadata_registry(self) -> Dict[str, Any]:
         """

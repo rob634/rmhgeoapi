@@ -38,6 +38,8 @@ from .defaults import (
     DatabaseDefaults,
     StorageDefaults,
     QueueDefaults,
+    AppModeDefaults,
+    TaskRoutingDefaults,
     RasterDefaults,
     VectorDefaults,
     AnalyticsDefaults,
@@ -68,6 +70,7 @@ from .analytics_config import AnalyticsConfig, DuckDBConnectionType
 from .h3_config import H3Config
 from .platform_config import PlatformConfig, generate_platform_request_id
 from .app_config import AppConfig
+from .app_mode_config import AppMode, AppModeConfig, get_app_mode_config
 
 
 # ============================================================================
@@ -169,6 +172,8 @@ __all__ = [
     'DatabaseDefaults',
     'StorageDefaults',
     'QueueDefaults',
+    'AppModeDefaults',
+    'TaskRoutingDefaults',
     'RasterDefaults',
     'VectorDefaults',
     'AnalyticsDefaults',
@@ -183,6 +188,11 @@ __all__ = [
     'AppConfig',
     'get_config',
     'debug_config',
+
+    # App Mode (multi-Function App architecture)
+    'AppMode',
+    'AppModeConfig',
+    'get_app_mode_config',
 
     # Storage
     'StorageConfig',

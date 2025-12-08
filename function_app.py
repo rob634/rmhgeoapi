@@ -159,6 +159,11 @@ from pydantic import ValidationError
 import re
 from typing import Optional
 
+# App Mode Configuration (07 DEC 2025 - Multi-Function App Architecture)
+# Evaluated at module load time to control which Service Bus triggers are registered
+from config import get_app_mode_config
+_app_mode = get_app_mode_config()
+
 # CoreMachine - Universal orchestrator (Epoch 4)
 from core.machine import CoreMachine
 
@@ -966,7 +971,7 @@ def platform_submit(req: func.HttpRequest) -> func.HttpResponse:
 
 
 @app.route(route="platform/status/{request_id}", methods=["GET"])
-def platform_status_by_id(req: func.HttpRequest) -> func.HttpResponse:
+async def platform_status_by_id(req: func.HttpRequest) -> func.HttpResponse:
     """
     Get status of a platform request.
 
@@ -974,11 +979,11 @@ def platform_status_by_id(req: func.HttpRequest) -> func.HttpResponse:
 
     Returns detailed status including all CoreMachine jobs.
     """
-    return platform_request_status(req)
+    return await platform_request_status(req)
 
 
 @app.route(route="platform/status", methods=["GET"])
-def platform_status_list(req: func.HttpRequest) -> func.HttpResponse:
+async def platform_status_list(req: func.HttpRequest) -> func.HttpResponse:
     """
     List all platform requests.
 
@@ -986,7 +991,7 @@ def platform_status_list(req: func.HttpRequest) -> func.HttpResponse:
 
     Returns list of all platform requests with optional filtering.
     """
-    return platform_request_status(req)
+    return await platform_request_status(req)
 
 
 # Platform Status Endpoints for DDH Visibility (07 DEC 2025)
@@ -2025,198 +2030,383 @@ def debug_dump_all(req: func.HttpRequest) -> func.HttpResponse:
 
 
 # ============================================================================
-# SERVICE BUS TRIGGERS - Parallel Pipeline for High-Volume Processing
+# SERVICE BUS TRIGGERS - Conditional Registration (07 DEC 2025)
+# ============================================================================
+# Multi-Function App Architecture: Triggers are conditionally registered based
+# on APP_MODE environment variable. This allows identical code to be deployed
+# to multiple Function Apps with different queue listening configurations.
+#
+# - _app_mode.listens_to_jobs_queue: Platform/standalone modes
+# - _app_mode.listens_to_raster_tasks: Raster worker/platform_raster/standalone
+# - _app_mode.listens_to_vector_tasks: Vector worker/platform_vector/standalone
+# - _app_mode.listens_to_legacy_tasks: Standalone mode only (backward compat)
+#
+# See config/app_mode_config.py for mode definitions and queue mappings.
 # ============================================================================
 
-@app.service_bus_queue_trigger(
-    arg_name="msg",
-    queue_name="geospatial-jobs",  # Same as Storage Queue name
-    connection="ServiceBusConnection"
-)
-def process_service_bus_job(msg: func.ServiceBusMessage) -> None:
-    """
-    Process job messages from Service Bus using CoreMachine.
-
-    EPOCH 4: Uses CoreMachine universal orchestrator instead of controllers.
-    Works with ALL job types via registry pattern - no job-specific code needed.
-
-    Performance benefits:
-    - No base64 encoding needed (Service Bus handles binary)
-    - Better throughput for high-volume scenarios
-    - Built-in dead letter queue support
-    """
-    # Generate correlation_id for function invocation tracing
-    # Purpose: Log prefix [abc12345] to filter Application Insights logs for this execution
-    # Scope: Local to this function invocation (not propagated to JobQueueMessage.correlation_id)
-    # Usage: Search Application Insights: traces | where message contains '[abc12345]'
-    # Note: This is different from JobQueueMessage.correlation_id (stage advancement tracking)
-    # See: core/schema/queue.py for JobQueueMessage.correlation_id documentation
-    correlation_id = str(uuid.uuid4())[:8]
-    start_time = time.time()
-
-    logger.info(
-        f"[{correlation_id}] 🤖 COREMACHINE JOB TRIGGER (Service Bus)",
-        extra={
-            'checkpoint': 'JOB_TRIGGER_START',
-            'correlation_id': correlation_id,
-            'trigger_type': 'service_bus',
-            'queue_name': 'geospatial-jobs'
-        }
+# Jobs Queue Trigger - Platform modes only (job orchestration + stage_complete signals)
+if _app_mode.listens_to_jobs_queue:
+    @app.service_bus_queue_trigger(
+        arg_name="msg",
+        queue_name="geospatial-jobs",
+        connection="ServiceBusConnection"
     )
+    def process_service_bus_job(msg: func.ServiceBusMessage) -> None:
+        """
+        Process job messages from Service Bus using CoreMachine.
 
-    try:
-        # Extract message body (no base64 decoding needed for Service Bus)
-        message_body = msg.get_body().decode('utf-8')
+        EPOCH 4: Uses CoreMachine universal orchestrator instead of controllers.
+        Works with ALL job types via registry pattern - no job-specific code needed.
+
+        Multi-App Architecture (07 DEC 2025):
+        Handles TWO message types on the jobs queue:
+        1. job_submit (default): New job or stage advancement - creates tasks
+        2. stage_complete: Signal from worker app that a stage finished
+
+        Performance benefits:
+        - No base64 encoding needed (Service Bus handles binary)
+        - Better throughput for high-volume scenarios
+        - Built-in dead letter queue support
+        """
+        # Generate correlation_id for function invocation tracing
+        # Purpose: Log prefix [abc12345] to filter Application Insights logs for this execution
+        # Scope: Local to this function invocation (not propagated to JobQueueMessage.correlation_id)
+        # Usage: Search Application Insights: traces | where message contains '[abc12345]'
+        # Note: This is different from JobQueueMessage.correlation_id (stage advancement tracking)
+        # See: core/schema/queue.py for JobQueueMessage.correlation_id documentation
+        correlation_id = str(uuid.uuid4())[:8]
+        start_time = time.time()
+
         logger.info(
-            f"[{correlation_id}] 📦 Message size: {len(message_body)} bytes",
+            f"[{correlation_id}] 🤖 COREMACHINE JOB TRIGGER (Service Bus)",
             extra={
-                'checkpoint': 'JOB_TRIGGER_RECEIVE_MESSAGE',
+                'checkpoint': 'JOB_TRIGGER_START',
                 'correlation_id': correlation_id,
-                'message_size_bytes': len(message_body)
+                'trigger_type': 'service_bus',
+                'queue_name': 'geospatial-jobs'
             }
         )
 
-        # Parse message
-        job_message = JobQueueMessage.model_validate_json(message_body)
-        logger.info(
-            f"[{correlation_id}] ✅ Parsed job: {job_message.job_id[:16]}..., type={job_message.job_type}",
-            extra={
-                'checkpoint': 'JOB_TRIGGER_PARSE_SUCCESS',
-                'correlation_id': correlation_id,
-                'job_id': job_message.job_id,
-                'job_type': job_message.job_type,
-                'stage': job_message.stage
-            }
-        )
+        try:
+            # Extract message body (no base64 decoding needed for Service Bus)
+            message_body = msg.get_body().decode('utf-8')
+            logger.info(
+                f"[{correlation_id}] 📦 Message size: {len(message_body)} bytes",
+                extra={
+                    'checkpoint': 'JOB_TRIGGER_RECEIVE_MESSAGE',
+                    'correlation_id': correlation_id,
+                    'message_size_bytes': len(message_body)
+                }
+            )
 
-        # Add correlation ID for tracking
-        if job_message.parameters is None:
-            job_message.parameters = {}
-        job_message.parameters['_correlation_id'] = correlation_id
-        job_message.parameters['_processing_path'] = 'service_bus'
+            # Multi-App Architecture (07 DEC 2025): Detect message type
+            # Parse as generic dict first to check message_type
+            message_dict = json.loads(message_body)
+            message_type = message_dict.get('message_type', 'job_submit')
 
-        # EPOCH 4: Process via CoreMachine (universal orchestrator)
-        result = core_machine.process_job_message(job_message)
+            if message_type == 'stage_complete':
+                # Worker app signaling stage completion
+                logger.info(
+                    f"[{correlation_id}] 📬 Processing stage_complete message from worker",
+                    extra={
+                        'checkpoint': 'JOB_TRIGGER_STAGE_COMPLETE',
+                        'correlation_id': correlation_id,
+                        'job_id': message_dict.get('job_id', 'unknown')[:16],
+                        'completed_stage': message_dict.get('completed_stage'),
+                        'completed_by_app': message_dict.get('completed_by_app', 'unknown')
+                    }
+                )
+                result = core_machine.process_stage_complete_message(message_dict)
+            else:
+                # Standard job message (job_submit or stage advancement)
+                job_message = JobQueueMessage.model_validate_json(message_body)
+                logger.info(
+                    f"[{correlation_id}] ✅ Parsed job: {job_message.job_id[:16]}..., type={job_message.job_type}",
+                    extra={
+                        'checkpoint': 'JOB_TRIGGER_PARSE_SUCCESS',
+                        'correlation_id': correlation_id,
+                        'job_id': job_message.job_id,
+                        'job_type': job_message.job_type,
+                        'stage': job_message.stage
+                    }
+                )
 
-        elapsed = time.time() - start_time
-        logger.info(f"[{correlation_id}] ✅ CoreMachine processed job in {elapsed:.3f}s")
-        logger.info(f"[{correlation_id}] 📊 Result: {result}")
+                # Add correlation ID for tracking
+                if job_message.parameters is None:
+                    job_message.parameters = {}
+                job_message.parameters['_correlation_id'] = correlation_id
+                job_message.parameters['_processing_path'] = 'service_bus'
 
-    except Exception as e:
-        elapsed = time.time() - start_time
-        logger.error(f"[{correlation_id}] ❌ EXCEPTION in process_service_bus_job after {elapsed:.3f}s")
-        logger.error(f"[{correlation_id}] 📍 Exception type: {type(e).__name__}")
-        logger.error(f"[{correlation_id}] 📍 Exception message: {e}")
-        logger.error(f"[{correlation_id}] 📍 Full traceback:\n{traceback.format_exc()}")
+                # EPOCH 4: Process via CoreMachine (universal orchestrator)
+                result = core_machine.process_job_message(job_message)
 
-        # Log job details if available
-        if 'job_message' in locals() and job_message:
-            logger.error(f"[{correlation_id}] 📋 Job ID: {job_message.job_id}")
-            logger.error(f"[{correlation_id}] 📋 Job Type: {job_message.job_type}")
-            logger.error(f"[{correlation_id}] 📋 Stage: {job_message.stage}")
+            elapsed = time.time() - start_time
+            logger.info(f"[{correlation_id}] ✅ CoreMachine processed in {elapsed:.3f}s")
+            logger.info(f"[{correlation_id}] 📊 Result: {result}")
+
+        except Exception as e:
+            elapsed = time.time() - start_time
+            logger.error(f"[{correlation_id}] ❌ EXCEPTION in process_service_bus_job after {elapsed:.3f}s")
+            logger.error(f"[{correlation_id}] 📍 Exception type: {type(e).__name__}")
+            logger.error(f"[{correlation_id}] 📍 Exception message: {e}")
+            logger.error(f"[{correlation_id}] 📍 Full traceback:\n{traceback.format_exc()}")
+
+            # Extract job_id from either job_message or message_dict (stage_complete)
+            job_id = None
+            if 'job_message' in locals() and job_message:
+                job_id = job_message.job_id
+                logger.error(f"[{correlation_id}] 📋 Job ID: {job_message.job_id}")
+                logger.error(f"[{correlation_id}] 📋 Job Type: {job_message.job_type}")
+                logger.error(f"[{correlation_id}] 📋 Stage: {job_message.stage}")
+            elif 'message_dict' in locals() and message_dict:
+                job_id = message_dict.get('job_id')
+                logger.error(f"[{correlation_id}] 📋 Job ID (from stage_complete): {job_id}")
+                logger.error(f"[{correlation_id}] 📋 Message Type: {message_dict.get('message_type')}")
+                logger.error(f"[{correlation_id}] 📋 Completed Stage: {message_dict.get('completed_stage')}")
 
             # FP1 FIX: Mark job as FAILED in database to prevent stuck jobs
-            try:
-                repos = RepositoryFactory.create_repositories()
-                job_repo = repos['job_repo']
+            if job_id:
+                try:
+                    repos = RepositoryFactory.create_repositories()
+                    job_repo = repos['job_repo']
 
-                error_msg = f"Job processing exception: {type(e).__name__}: {e}"
-                job_repo.mark_failed(job_message.job_id, error_msg)
+                    error_msg = f"Job processing exception: {type(e).__name__}: {e}"
+                    job_repo.mark_failed(job_id, error_msg)
 
-                logger.info(f"[{correlation_id}] ✅ Job {job_message.job_id[:16]}... marked as FAILED in database")
+                    logger.info(f"[{correlation_id}] ✅ Job {job_id[:16]}... marked as FAILED in database")
 
-            except Exception as cleanup_error:
-                logger.error(f"[{correlation_id}] ❌ Failed to mark job as FAILED: {cleanup_error}")
-                logger.error(f"[{correlation_id}] 💀 Job {job_message.job_id[:16]}... may be stuck - requires manual cleanup")
-        else:
-            logger.error(f"[{correlation_id}] ⚠️ job_message is None - cannot mark job as FAILED")
-            logger.error(f"[{correlation_id}] 📍 Exception occurred before job message parsing")
+                except Exception as cleanup_error:
+                    logger.error(f"[{correlation_id}] ❌ Failed to mark job as FAILED: {cleanup_error}")
+                    logger.error(f"[{correlation_id}] 💀 Job {job_id[:16]}... may be stuck - requires manual cleanup")
+            else:
+                logger.error(f"[{correlation_id}] ⚠️ No job_id available - cannot mark job as FAILED")
+                logger.error(f"[{correlation_id}] 📍 Exception occurred before message parsing")
 
-        # NOTE: Job processing errors are typically critical (workflow creation failures).
-        # Unlike task retries, jobs don't have application-level retry logic.
-        # Log extensively but don't re-raise to avoid Service Bus retries for job messages.
-        logger.warning(f"[{correlation_id}] ⚠️ Function completing (exception logged but not re-raised)")
-        logger.warning(f"[{correlation_id}] ✅ Job failure handling complete")
+            # NOTE: Job processing errors are typically critical (workflow creation failures).
+            # Unlike task retries, jobs don't have application-level retry logic.
+            # Log extensively but don't re-raise to avoid Service Bus retries for job messages.
+            logger.warning(f"[{correlation_id}] ⚠️ Function completing (exception logged but not re-raised)")
+            logger.warning(f"[{correlation_id}] ✅ Job failure handling complete")
 
 
-@app.service_bus_queue_trigger(
-    arg_name="msg",
-    queue_name="geospatial-tasks",  # Same as Storage Queue name
-    connection="ServiceBusConnection"
-)
-def process_service_bus_task(msg: func.ServiceBusMessage) -> None:
-    """
-    Process task messages from Service Bus using CoreMachine.
+# Legacy Tasks Queue Trigger - Standalone mode only (backward compatibility)
+if _app_mode.listens_to_legacy_tasks:
+    @app.service_bus_queue_trigger(
+        arg_name="msg",
+        queue_name="geospatial-tasks",
+        connection="ServiceBusConnection"
+    )
+    def process_service_bus_task(msg: func.ServiceBusMessage) -> None:
+        """
+        Process task messages from Service Bus using CoreMachine.
 
-    EPOCH 4: Uses CoreMachine universal orchestrator instead of controllers.
-    Handles all task execution, stage completion, and job advancement automatically.
+        EPOCH 4: Uses CoreMachine universal orchestrator instead of controllers.
+        Handles all task execution, stage completion, and job advancement automatically.
 
-    Performance benefits:
-    - Processes batches of tasks efficiently
-    - Better concurrency handling
-    - Lower latency for high-volume scenarios
-    """
-    # Generate correlation_id for function invocation tracing
-    # Purpose: Log prefix [abc12345] to filter Application Insights logs for this execution
-    # Scope: Local to this function invocation (not propagated to TaskQueueMessage)
-    # Usage: Search Application Insights: traces | where message contains '[abc12345]'
-    # Note: TaskQueueMessage doesn't have correlation_id field (only JobQueueMessage does)
-    # See: core/schema/queue.py for correlation_id field documentation
-    correlation_id = str(uuid.uuid4())[:8]
-    start_time = time.time()
+        Note: This is the LEGACY tasks queue (geospatial-tasks).
+        New deployments use raster-tasks and vector-tasks queues.
+        This queue is only enabled in standalone mode for backward compatibility.
 
-    logger.info(f"[{correlation_id}] 🤖 COREMACHINE TASK TRIGGER (Service Bus)")
+        Performance benefits:
+        - Processes batches of tasks efficiently
+        - Better concurrency handling
+        - Lower latency for high-volume scenarios
+        """
+        # Generate correlation_id for function invocation tracing
+        # Purpose: Log prefix [abc12345] to filter Application Insights logs for this execution
+        # Scope: Local to this function invocation (not propagated to TaskQueueMessage)
+        # Usage: Search Application Insights: traces | where message contains '[abc12345]'
+        # Note: TaskQueueMessage doesn't have correlation_id field (only JobQueueMessage does)
+        # See: core/schema/queue.py for correlation_id field documentation
+        correlation_id = str(uuid.uuid4())[:8]
+        start_time = time.time()
 
-    try:
-        # Extract message body
-        message_body = msg.get_body().decode('utf-8')
+        logger.info(f"[{correlation_id}] 🤖 COREMACHINE TASK TRIGGER (Service Bus - legacy queue)")
 
-        # Parse message
-        task_message = TaskQueueMessage.model_validate_json(message_body)
-        logger.info(f"[{correlation_id}] ✅ Parsed task: {task_message.task_id}, type={task_message.task_type}")
+        try:
+            # Extract message body
+            message_body = msg.get_body().decode('utf-8')
 
-        # Add metadata for tracking
-        if task_message.parameters is None:
-            task_message.parameters = {}
-        task_message.parameters['_correlation_id'] = correlation_id
-        task_message.parameters['_processing_path'] = 'service_bus'
+            # Parse message
+            task_message = TaskQueueMessage.model_validate_json(message_body)
+            logger.info(f"[{correlation_id}] ✅ Parsed task: {task_message.task_id}, type={task_message.task_type}")
 
-        # EPOCH 4: Process via CoreMachine (universal orchestrator)
-        # Handles: task execution, stage completion detection, job advancement
-        result = core_machine.process_task_message(task_message)
+            # Add metadata for tracking
+            if task_message.parameters is None:
+                task_message.parameters = {}
+            task_message.parameters['_correlation_id'] = correlation_id
+            task_message.parameters['_processing_path'] = 'service_bus_legacy'
 
-        elapsed = time.time() - start_time
-        logger.info(f"[{correlation_id}] ✅ CoreMachine processed task in {elapsed:.3f}s")
-        logger.info(f"[{correlation_id}] 📊 Result: {result}")
+            # EPOCH 4: Process via CoreMachine (universal orchestrator)
+            # Handles: task execution, stage completion detection, job advancement
+            result = core_machine.process_task_message(task_message)
 
-        # Check if stage completed
-        if result.get('stage_complete'):
-            logger.info(f"[{correlation_id}] 🎯 Stage {task_message.stage} complete for job {task_message.parent_job_id[:16]}...")
+            elapsed = time.time() - start_time
+            logger.info(f"[{correlation_id}] ✅ CoreMachine processed task in {elapsed:.3f}s")
+            logger.info(f"[{correlation_id}] 📊 Result: {result}")
 
-    except Exception as e:
-        elapsed = time.time() - start_time
-        logger.error(f"[{correlation_id}] ❌ EXCEPTION in process_service_bus_task after {elapsed:.3f}s")
-        logger.error(f"[{correlation_id}] 📍 Exception type: {type(e).__name__}")
-        logger.error(f"[{correlation_id}] 📍 Exception message: {e}")
-        logger.error(f"[{correlation_id}] 📍 Full traceback:\n{traceback.format_exc()}")
+            # Check if stage completed
+            if result.get('stage_complete'):
+                logger.info(f"[{correlation_id}] 🎯 Stage {task_message.stage} complete for job {task_message.parent_job_id[:16]}...")
 
-        # Log task details if available
-        if 'task_message' in locals() and task_message:
-            logger.error(f"[{correlation_id}] 📋 Task ID: {task_message.task_id}")
-            logger.error(f"[{correlation_id}] 📋 Task Type: {task_message.task_type}")
-            logger.error(f"[{correlation_id}] 📋 Job ID: {task_message.parent_job_id}")
-            logger.error(f"[{correlation_id}] 📋 Stage: {task_message.stage}")
+        except Exception as e:
+            elapsed = time.time() - start_time
+            logger.error(f"[{correlation_id}] ❌ EXCEPTION in process_service_bus_task after {elapsed:.3f}s")
+            logger.error(f"[{correlation_id}] 📍 Exception type: {type(e).__name__}")
+            logger.error(f"[{correlation_id}] 📍 Exception message: {e}")
+            logger.error(f"[{correlation_id}] 📍 Full traceback:\n{traceback.format_exc()}")
 
-        # NOTE: Do NOT re-raise! CoreMachine already handled the failure internally.
-        # Re-raising would trigger Service Bus retries instead of our application-level
-        # retry logic (exponential backoff, retry_count tracking in database).
-        # CoreMachine's process_task_message() already:
-        # 1. Caught the task execution failure
-        # 2. Incremented retry_count in database
-        # 3. Re-queued with exponential backoff delay (if retries available)
-        # 4. OR marked as permanently FAILED (if max retries exceeded)
-        logger.warning(f"[{correlation_id}] ⚠️ Function completing (exception logged but not re-raised)")
-        logger.warning(f"[{correlation_id}] ⚠️ CoreMachine retry logic has handled this failure internally")
+            # Log task details if available
+            if 'task_message' in locals() and task_message:
+                logger.error(f"[{correlation_id}] 📋 Task ID: {task_message.task_id}")
+                logger.error(f"[{correlation_id}] 📋 Task Type: {task_message.task_type}")
+                logger.error(f"[{correlation_id}] 📋 Job ID: {task_message.parent_job_id}")
+                logger.error(f"[{correlation_id}] 📋 Stage: {task_message.stage}")
+
+            # NOTE: Do NOT re-raise! CoreMachine already handled the failure internally.
+            # Re-raising would trigger Service Bus retries instead of our application-level
+            # retry logic (exponential backoff, retry_count tracking in database).
+            # CoreMachine's process_task_message() already:
+            # 1. Caught the task execution failure
+            # 2. Incremented retry_count in database
+            # 3. Re-queued with exponential backoff delay (if retries available)
+            # 4. OR marked as permanently FAILED (if max retries exceeded)
+            logger.warning(f"[{correlation_id}] ⚠️ Function completing (exception logged but not re-raised)")
+            logger.warning(f"[{correlation_id}] ⚠️ CoreMachine retry logic has handled this failure internally")
+
+
+# Raster Tasks Queue Trigger - Raster worker/platform_raster/standalone modes
+if _app_mode.listens_to_raster_tasks:
+    @app.service_bus_queue_trigger(
+        arg_name="msg",
+        queue_name="raster-tasks",
+        connection="ServiceBusConnection"
+    )
+    def process_raster_task(msg: func.ServiceBusMessage) -> None:
+        """
+        Process raster task messages from dedicated raster-tasks queue.
+
+        Multi-App Architecture (07 DEC 2025):
+        - Dedicated queue for GDAL/raster operations
+        - Separate Function App can use host.json with maxConcurrentCalls: 2
+        - Memory-intensive operations (2-8GB per task)
+
+        Task types routed here:
+        - handler_raster_validate, handler_raster_create_cog
+        - handler_stac_raster_item, validate_raster, create_cog
+        - extract_stac_metadata, create_tiling_scheme, extract_tile
+        """
+        correlation_id = str(uuid.uuid4())[:8]
+        start_time = time.time()
+
+        logger.info(
+            f"[{correlation_id}] 🗺️ RASTER TASK TRIGGER (raster-tasks queue)",
+            extra={
+                'checkpoint': 'RASTER_TASK_TRIGGER_START',
+                'correlation_id': correlation_id,
+                'queue_name': 'raster-tasks'
+            }
+        )
+
+        try:
+            message_body = msg.get_body().decode('utf-8')
+            task_message = TaskQueueMessage.model_validate_json(message_body)
+            logger.info(f"[{correlation_id}] ✅ Parsed raster task: {task_message.task_id}, type={task_message.task_type}")
+
+            if task_message.parameters is None:
+                task_message.parameters = {}
+            task_message.parameters['_correlation_id'] = correlation_id
+            task_message.parameters['_processing_path'] = 'raster-tasks'
+
+            result = core_machine.process_task_message(task_message)
+
+            elapsed = time.time() - start_time
+            logger.info(f"[{correlation_id}] ✅ Raster task processed in {elapsed:.3f}s")
+            logger.info(f"[{correlation_id}] 📊 Result: {result}")
+
+            if result.get('stage_complete'):
+                logger.info(f"[{correlation_id}] 🎯 Stage {task_message.stage} complete for job {task_message.parent_job_id[:16]}...")
+
+        except Exception as e:
+            elapsed = time.time() - start_time
+            logger.error(f"[{correlation_id}] ❌ EXCEPTION in process_raster_task after {elapsed:.3f}s")
+            logger.error(f"[{correlation_id}] 📍 Exception type: {type(e).__name__}")
+            logger.error(f"[{correlation_id}] 📍 Exception message: {e}")
+            logger.error(f"[{correlation_id}] 📍 Full traceback:\n{traceback.format_exc()}")
+
+            if 'task_message' in locals() and task_message:
+                logger.error(f"[{correlation_id}] 📋 Task ID: {task_message.task_id}")
+                logger.error(f"[{correlation_id}] 📋 Task Type: {task_message.task_type}")
+                logger.error(f"[{correlation_id}] 📋 Job ID: {task_message.parent_job_id}")
+
+            logger.warning(f"[{correlation_id}] ⚠️ Function completing (CoreMachine handled failure internally)")
+
+
+# Vector Tasks Queue Trigger - Vector worker/platform_vector/standalone modes
+if _app_mode.listens_to_vector_tasks:
+    @app.service_bus_queue_trigger(
+        arg_name="msg",
+        queue_name="vector-tasks",
+        connection="ServiceBusConnection"
+    )
+    def process_vector_task(msg: func.ServiceBusMessage) -> None:
+        """
+        Process vector task messages from dedicated vector-tasks queue.
+
+        Multi-App Architecture (07 DEC 2025):
+        - Dedicated queue for geopandas/PostGIS operations
+        - Separate Function App can use host.json with maxConcurrentCalls: 32
+        - DB-bound operations (20-200MB per task)
+
+        Task types routed here:
+        - handler_vector_prepare, handler_vector_upload
+        - handler_stac_vector_item, process_vector_prepare
+        - process_vector_upload, create_vector_stac
+        """
+        correlation_id = str(uuid.uuid4())[:8]
+        start_time = time.time()
+
+        logger.info(
+            f"[{correlation_id}] 📍 VECTOR TASK TRIGGER (vector-tasks queue)",
+            extra={
+                'checkpoint': 'VECTOR_TASK_TRIGGER_START',
+                'correlation_id': correlation_id,
+                'queue_name': 'vector-tasks'
+            }
+        )
+
+        try:
+            message_body = msg.get_body().decode('utf-8')
+            task_message = TaskQueueMessage.model_validate_json(message_body)
+            logger.info(f"[{correlation_id}] ✅ Parsed vector task: {task_message.task_id}, type={task_message.task_type}")
+
+            if task_message.parameters is None:
+                task_message.parameters = {}
+            task_message.parameters['_correlation_id'] = correlation_id
+            task_message.parameters['_processing_path'] = 'vector-tasks'
+
+            result = core_machine.process_task_message(task_message)
+
+            elapsed = time.time() - start_time
+            logger.info(f"[{correlation_id}] ✅ Vector task processed in {elapsed:.3f}s")
+            logger.info(f"[{correlation_id}] 📊 Result: {result}")
+
+            if result.get('stage_complete'):
+                logger.info(f"[{correlation_id}] 🎯 Stage {task_message.stage} complete for job {task_message.parent_job_id[:16]}...")
+
+        except Exception as e:
+            elapsed = time.time() - start_time
+            logger.error(f"[{correlation_id}] ❌ EXCEPTION in process_vector_task after {elapsed:.3f}s")
+            logger.error(f"[{correlation_id}] 📍 Exception type: {type(e).__name__}")
+            logger.error(f"[{correlation_id}] 📍 Exception message: {e}")
+            logger.error(f"[{correlation_id}] 📍 Full traceback:\n{traceback.format_exc()}")
+
+            if 'task_message' in locals() and task_message:
+                logger.error(f"[{correlation_id}] 📋 Task ID: {task_message.task_id}")
+                logger.error(f"[{correlation_id}] 📋 Task Type: {task_message.task_type}")
+                logger.error(f"[{correlation_id}] 📋 Job ID: {task_message.parent_job_id}")
+
+            logger.warning(f"[{correlation_id}] ⚠️ Function completing (CoreMachine handled failure internally)")
 
 
 # ============================================================================

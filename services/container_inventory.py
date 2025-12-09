@@ -58,7 +58,8 @@ def list_blobs_with_metadata(params: dict) -> dict[str, Any]:
         suffix = params.get("suffix") or ""
         limit = params.get("limit", 500)
 
-        blob_repo = BlobRepository.instance()
+        # Get blob repository for bronze zone (source data)
+        blob_repo = BlobRepository.for_zone("bronze")
 
         start_time = datetime.now(timezone.utc)
 

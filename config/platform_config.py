@@ -65,7 +65,6 @@ class PlatformConfig(BaseModel):
             "bronze-rasters",
             "bronze-misc",
             "bronze-temp",
-            "rmhazuregeobronze"  # Legacy flat container
         ],
         description="Valid Azure containers for DDH input data (Bronze tier)"
     )
@@ -174,7 +173,7 @@ class PlatformConfig(BaseModel):
         # Parse valid containers from comma-separated list
         containers_env = os.environ.get(
             "PLATFORM_VALID_CONTAINERS",
-            "bronze-vectors,bronze-rasters,bronze-misc,bronze-temp,rmhazuregeobronze"
+            "bronze-vectors,bronze-rasters,bronze-misc,bronze-temp"
         )
         valid_containers = [c.strip() for c in containers_env.split(",") if c.strip()]
 

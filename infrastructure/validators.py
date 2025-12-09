@@ -209,10 +209,10 @@ def validate_blob_exists(params: Dict[str, Any], config: Dict[str, Any]) -> Vali
             message=f"Blob parameter '{blob_param}' is missing or empty"
         )
 
-    # Use singleton instance (managed identity) - works for all zones
-    # NOTE: .for_zone() reserved for future multi-account support
+    # Get zone from config (default: bronze for input validation)
+    zone = config.get('zone', 'bronze')
     try:
-        blob_repo = BlobRepository.instance()
+        blob_repo = BlobRepository.for_zone(zone)
         validation = blob_repo.validate_container_and_blob(container, blob_path)
 
         if validation['valid']:
@@ -266,10 +266,10 @@ def validate_container_exists(params: Dict[str, Any], config: Dict[str, Any]) ->
             message=f"Container parameter '{container_param}' is missing or empty"
         )
 
-    # Use singleton instance (managed identity) - works for all zones
-    # NOTE: .for_zone() reserved for future multi-account support
+    # Get zone from config (default: bronze for input validation)
+    zone = config.get('zone', 'bronze')
     try:
-        blob_repo = BlobRepository.instance()
+        blob_repo = BlobRepository.for_zone(zone)
 
         if blob_repo.container_exists(container):
             logger.debug(f"✅ Pre-flight: container exists: {container}")
@@ -484,8 +484,10 @@ def validate_blob_size(params: Dict[str, Any], config: Dict[str, Any]) -> Valida
             except ValueError:
                 logger.warning(f"Invalid {max_size_env} value: {env_value}, ignoring")
 
+    # Get zone from config (default: bronze for input validation)
+    zone = config.get('zone', 'bronze')
     try:
-        blob_repo = BlobRepository.instance()
+        blob_repo = BlobRepository.for_zone(zone)
         props = blob_repo.get_blob_properties(container, blob_path)
         size_bytes = props['size']
         size_mb = size_bytes / (1024 * 1024)
@@ -599,12 +601,14 @@ def validate_blob_list_exists(params: Dict[str, Any], config: Dict[str, Any]) ->
             message=f"Collection must contain at least {min_count} files (got {len(blob_list)})"
         )
 
+    # Get zone from config (default: bronze for input validation)
+    zone = config.get('zone', 'bronze')
     try:
-        blob_repo = BlobRepository.instance()
+        blob_repo = BlobRepository.for_zone(zone)
 
         # First check if container exists
         if not blob_repo.container_exists(container):
-            error_msg = f"Container '{container}' does not exist"
+            error_msg = f"Container '{container}' does not exist in {zone} zone"
             logger.warning(f"❌ Pre-flight: {error_msg}")
             return ValidatorResult(valid=False, message=error_msg)
 
@@ -734,8 +738,10 @@ def validate_blob_exists_with_size(params: Dict[str, Any], config: Dict[str, Any
             except ValueError:
                 pass
 
+    # Get zone from config (default: bronze for input validation)
+    zone = config.get('zone', 'bronze')
     try:
-        blob_repo = BlobRepository.instance()
+        blob_repo = BlobRepository.for_zone(zone)
 
         # First check if container/blob exist
         validation = blob_repo.validate_container_and_blob(container, blob_path)

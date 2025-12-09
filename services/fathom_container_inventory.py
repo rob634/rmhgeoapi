@@ -248,8 +248,8 @@ def fathom_scan_prefix(params: Dict[str, Any]) -> Dict[str, Any]:
     # Ensure table exists before inserting (self-contained, no schema rebuild needed)
     _ensure_etl_fathom_table()
 
-    # Get blob repository
-    blob_repo = BlobRepository.instance()
+    # Get blob repository for bronze zone (source data)
+    blob_repo = BlobRepository.for_zone("bronze")
 
     # List all blobs with this prefix
     blobs = blob_repo.list_blobs(source_container, prefix=prefix)

@@ -3,6 +3,10 @@ Get Blob Metadata HTTP Trigger.
 
 Single-blob metadata endpoint for Pipeline Dashboard UI.
 
+Updated (08 DEC 2025):
+    - Added zone parameter for multi-account storage support (default: bronze)
+    - Removed hardcoded container list
+
 Exports:
     get_blob_metadata_handler: HTTP trigger function for GET /api/containers/{container_name}/blob
 """
@@ -27,7 +31,9 @@ def get_blob_metadata_handler(req: func.HttpRequest) -> func.HttpResponse:
     Args:
         req: Azure Functions HTTP request
              Route params: container_name
-             Query params: path (blob path within container)
+             Query params:
+                - path (required): Blob path within container
+                - zone (optional): Storage zone - "bronze", "silver", "silverext" (default: bronze)
 
     Returns:
         JSON response with blob metadata
@@ -53,23 +59,38 @@ def get_blob_metadata_handler(req: func.HttpRequest) -> func.HttpResponse:
             return func.HttpResponse(
                 json.dumps({
                     "error": "Missing 'path' query parameter",
-                    "usage": "/api/containers/{container_name}/blobs?path=folder/file.tif"
+                    "usage": "/api/containers/{container_name}/blobs?path=folder/file.tif&zone=bronze"
                 }),
                 status_code=400,
                 mimetype="application/json"
             )
 
-        logger.info(f"Getting blob metadata: container={container_name}, blob={blob_path}")
+        # Get and validate zone parameter
+        zone = req.params.get('zone', 'bronze').lower()
+        valid_zones = ('bronze', 'silver', 'silverext')
+        if zone not in valid_zones:
+            return func.HttpResponse(
+                json.dumps({
+                    "error": f"Invalid zone '{zone}'",
+                    "valid_zones": list(valid_zones),
+                    "hint": "Use zone=bronze for input data, zone=silver for processed data"
+                }),
+                status_code=400,
+                mimetype="application/json"
+            )
 
-        # Get blob repository instance
-        blob_repo = BlobRepository.instance()
+        logger.info(f"Getting blob metadata: zone={zone}, container={container_name}, blob={blob_path}")
+
+        # Get blob repository for the specified zone
+        blob_repo = BlobRepository.for_zone(zone)
 
         # Check if container exists
         if not blob_repo.container_exists(container_name):
             return func.HttpResponse(
                 json.dumps({
-                    "error": f"Container '{container_name}' not found",
-                    "available_containers": ["rmhazuregeobronze", "rmhazuregeosilver", "rmhazuregeogold", "silver-cogs", "source-data"]
+                    "error": f"Container '{container_name}' not found in {zone} zone",
+                    "zone": zone,
+                    "hint": "Verify container exists and zone is correct"
                 }),
                 status_code=404,
                 mimetype="application/json"
@@ -93,6 +114,7 @@ def get_blob_metadata_handler(req: func.HttpRequest) -> func.HttpResponse:
 
         # Enhance response with additional fields
         response = {
+            "zone": zone,
             "container": container_name,
             **props,
             "size_mb": round(props.get('size', 0) / (1024 * 1024), 2) if props.get('size') else 0,

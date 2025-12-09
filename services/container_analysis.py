@@ -671,8 +671,11 @@ class ContainerAnalysisService:
         import json
 
         # Generate output path
+        from config import get_config
+        config = get_config()
         timestamp = datetime.utcnow().strftime('%Y%m%d_%H%M%S')
-        container = 'rmhazuregeoinventory'  # TODO: Move to centralized config
+        # Use silver misc container for analysis output
+        container = config.storage.silver.misc
         blob_path = f"container-analysis/{job_id}/{timestamp}.json"
 
         # Serialize to JSON

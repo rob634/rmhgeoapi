@@ -107,6 +107,13 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
         #     health_data["status"] = "unhealthy"
         #     health_data["errors"].extend(queue_health.get("errors", []))
 
+        # Check critical storage containers (08 DEC 2025)
+        storage_containers_health = self._check_storage_containers()
+        health_data["components"]["storage_containers"] = storage_containers_health
+        # Note: Missing containers are a warning, not a failure - the container can be created
+        if storage_containers_health["status"] == "error":
+            health_data["errors"].append("Storage container check failed")
+
         # Check Service Bus queues
         service_bus_health = self._check_service_bus_queues()
         health_data["components"]["service_bus"] = service_bus_health
@@ -364,6 +371,54 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
             "storage_queues",
             check_queues,
             description="Azure Storage Queue connectivity (deprecated - use Service Bus)"
+        )
+
+    def _check_storage_containers(self) -> Dict[str, Any]:
+        """
+        Check critical storage container existence.
+
+        Verifies that containers required for ETL operations exist in their zones:
+        - pickles (silver zone): Vector ETL intermediate storage
+
+        Added 08 DEC 2025 as part of storage configuration cleanup.
+        """
+        def check_containers():
+            from infrastructure.blob import BlobRepository
+            from config.defaults import VectorDefaults
+
+            container_status = {}
+
+            # Check pickles container in silver zone
+            try:
+                silver_repo = BlobRepository.for_zone("silver")
+                pickles_container = VectorDefaults.PICKLE_CONTAINER
+
+                if silver_repo.container_exists(pickles_container):
+                    container_status[pickles_container] = {
+                        "status": "exists",
+                        "zone": "silver",
+                        "purpose": "Vector ETL intermediate storage"
+                    }
+                else:
+                    container_status[pickles_container] = {
+                        "status": "missing",
+                        "zone": "silver",
+                        "purpose": "Vector ETL intermediate storage",
+                        "action_required": f"Create container '{pickles_container}' in silver storage account"
+                    }
+            except Exception as e:
+                container_status[VectorDefaults.PICKLE_CONTAINER] = {
+                    "status": "error",
+                    "zone": "silver",
+                    "error": str(e)
+                }
+
+            return container_status
+
+        return self.check_component_health(
+            "storage_containers",
+            check_containers,
+            description="Critical storage container existence check"
         )
 
     def _check_service_bus_queues(self) -> Dict[str, Any]:

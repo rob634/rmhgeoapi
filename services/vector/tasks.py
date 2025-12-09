@@ -172,7 +172,7 @@ def prepare_vector_chunks(parameters: Dict[str, Any]) -> Dict[str, Any]:
     Parameters:
         job_id: str - Job ID for temp path naming
         blob_name: str - Source file path in blob storage
-        container_name: str - Source container (default: 'rmhazuregeobronze')
+        container_name: str - Source container (default: config.storage.bronze.rasters)
         file_extension: str - File extension (csv, gpkg, etc.)
         table_name: str - Target PostGIS table name
         schema: str - Target schema (default: 'geo')
@@ -199,8 +199,8 @@ def prepare_vector_chunks(parameters: Dict[str, Any]) -> Dict[str, Any]:
 
     job_id = parameters["job_id"]
     blob_name = parameters["blob_name"]
-    # TODO: Parameterize via env var instead of hardcoded default
-    container_name = parameters.get("container_name", "rmhazuregeobronze")
+    # Use config for default container (bronze zone for input data)
+    container_name = parameters.get("container_name", config.storage.bronze.rasters)
     file_extension = parameters["file_extension"]
     table_name = parameters["table_name"]
     schema = parameters.get("schema", "geo")
@@ -310,8 +310,8 @@ def upload_pickled_chunk(parameters: Dict[str, Any]) -> Dict[str, Any]:
     schema = parameters.get("schema", "geo")
     chunk_index = parameters.get("chunk_index", 0)
 
-    # 1. Load pickled chunk from blob storage
-    blob_repo = BlobRepository.instance()
+    # 1. Load pickled chunk from blob storage (silver zone - intermediate data)
+    blob_repo = BlobRepository.for_zone("silver")
     pickled_data = blob_repo.read_blob(config.vector_pickle_container, chunk_path)
     chunk = pickle.loads(pickled_data)
 

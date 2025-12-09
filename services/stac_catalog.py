@@ -45,7 +45,8 @@ def list_raster_files(params: dict) -> dict[str, Any]:
         prefix = params.get("prefix", "")
         file_limit = params.get("file_limit")
 
-        blob_repo = BlobRepository.instance()
+        # Silver zone - STAC catalog references processed data
+        blob_repo = BlobRepository.for_zone("silver")
 
         start_time = datetime.utcnow()
 

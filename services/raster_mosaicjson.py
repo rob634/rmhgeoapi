@@ -54,7 +54,7 @@ def create_mosaicjson(
                 See services/raster_cog.py create_cog() Returns for full structure.
             - collection_name (str, REQUIRED): Collection identifier
             - output_folder (str, optional): Output folder path (default: "mosaics")
-            - container (str, optional): Container name (default: "rmhazuregeosilver")
+            - container (str, optional): Container name (default: config.storage.silver.misc)
             - maxzoom (int, optional): Maximum zoom level for tile serving.
                 If not specified, uses config.raster_mosaicjson_maxzoom (default: 19).
                 Zoom 18 = 0.60m/pixel, 19 = 0.30m/pixel, 20 = 0.15m/pixel, 21 = 0.07m/pixel.
@@ -333,7 +333,8 @@ def _create_mosaicjson_impl(
     # Convert blob paths to authenticated URLs with SAS tokens
     # MosaicJSON.from_urls() needs to read each COG to determine bounds
     # CRITICAL (12 NOV 2025): Use cog_container (where COGs are stored), not mosaicjson_container
-    blob_repo = BlobRepository.instance()
+    # Silver zone - COGs are processed data
+    blob_repo = BlobRepository.for_zone("silver")
     cog_urls = []
     logger.info(f"🔐 Generating SAS URLs for {len(cog_blobs)} COG blobs from container '{cog_container}'...")
     for blob in cog_blobs:

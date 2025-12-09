@@ -888,8 +888,8 @@ class BlobRepository(IBlobRepository):
             Full HTTPS URL to the blob
 
         Example:
-            url = repo.get_blob_url('rmhazuregeosilver', 'mosaics/my_mosaic.json')
-            # Returns: https://rmhazuregeo.blob.core.windows.net/rmhazuregeosilver/mosaics/my_mosaic.json
+            url = repo.get_blob_url('silver-cogs', 'mosaics/my_mosaic.json')
+            # Returns: https://<account>.blob.core.windows.net/silver-cogs/mosaics/my_mosaic.json
         """
         return f"https://{self.account_name}.blob.core.windows.net/{container}/{blob_path}"
 

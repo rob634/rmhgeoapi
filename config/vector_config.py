@@ -14,6 +14,8 @@ Exports:
 import os
 from pydantic import BaseModel, Field
 
+from config.defaults import VectorDefaults
+
 
 # ============================================================================
 # VECTOR CONFIGURATION
@@ -28,9 +30,9 @@ class VectorConfig(BaseModel):
 
     # Pickle storage for chunked processing
     pickle_container: str = Field(
-        default="rmhazuregeotemp",
-        description="Container for vector ETL intermediate pickle files",
-        examples=["rmhazuregeotemp", "silver"]
+        default=VectorDefaults.PICKLE_CONTAINER,
+        description="Container for vector ETL intermediate pickle files (silver zone)",
+        examples=["pickles", "silver-temp"]
     )
 
     pickle_prefix: str = Field(
@@ -67,7 +69,7 @@ class VectorConfig(BaseModel):
     def from_environment(cls):
         """Load from environment variables."""
         return cls(
-            pickle_container=os.environ.get("VECTOR_PICKLE_CONTAINER", "rmhazuregeotemp"),
+            pickle_container=os.environ.get("VECTOR_PICKLE_CONTAINER", VectorDefaults.PICKLE_CONTAINER),
             pickle_prefix=os.environ.get("VECTOR_PICKLE_PREFIX", "temp/vector_etl"),
             default_chunk_size=int(os.environ.get("VECTOR_DEFAULT_CHUNK_SIZE", "1000")),
             auto_chunk_sizing=os.environ.get("VECTOR_AUTO_CHUNK_SIZING", "true").lower() == "true",

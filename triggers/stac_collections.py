@@ -49,10 +49,10 @@ class StacCollectionsTrigger(BaseHttpTrigger):
 
         POST /api/stac/collections/{tier}  (tier: bronze, silver, gold)
         Body: {
-            "container": "rmhazuregeobronze",  # Required (use config.storage.{zone}.get_container())
-            "collection_id": "custom-id",      # Optional
-            "title": "Custom Title",           # Optional
-            "description": "Custom description"# Optional
+            "container": "<bronze-container>",  # Required (use config.storage.{zone})
+            "collection_id": "custom-id",       # Optional
+            "title": "Custom Title",            # Optional
+            "description": "Custom description" # Optional
         }
 
         Returns:
@@ -111,7 +111,7 @@ class StacCollectionsTrigger(BaseHttpTrigger):
                 'success': False,
                 'error': 'Missing required parameter: container',
                 'example': {
-                    'container': 'rmhazuregeobronze',  # Use config container name
+                    'container': '<bronze-container>',  # Use config.storage.bronze
                     'collection_id': f'{tier}-custom (optional)',
                     'title': 'Custom Title (optional)',
                     'description': 'Custom description (optional)'

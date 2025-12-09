@@ -59,7 +59,7 @@ def create_stac_collection(
             - stac_item_id: Optional custom STAC collection ID (overrides collection_id)
             - description: Collection description
             - license: STAC license (default: "proprietary")
-            - container: Container name (default: "rmhazuregeosilver")
+            - container: Container name (default: config.storage.silver.cogs)
         context: Optional task context (unused)
 
     Returns:
@@ -92,7 +92,10 @@ def create_stac_collection(
         # STAC spec requires description to be a non-empty string, not None
         description = job_parameters.get("collection_description") or params.get("description") or f"Raster collection: {collection_id}"
         license = params.get("license", "proprietary")
-        container = params.get("container", "rmhazuregeosilver")
+        # Use config for default container (silver zone for processed data)
+        from config import get_config
+        config = get_config()
+        container = params.get("container", config.storage.silver.cogs)
 
         # Use stac_item_id if provided, otherwise use collection_id
         final_collection_id = stac_item_id if stac_item_id else collection_id

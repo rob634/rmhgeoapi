@@ -295,8 +295,9 @@ class RepositoryFactory:
             )
 
             # Query Parquet in blob storage (NO DOWNLOAD!)
+            # Use config.storage.silver.get_container() for container name
             result = duckdb_repo.read_parquet_from_blob(
-                'rmhazuregeosilver',
+                config.storage.silver.misc,  # Use config for container name
                 'exports/2025/*.parquet'
             )
         """

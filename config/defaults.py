@@ -278,7 +278,7 @@ class VectorDefaults:
     Controls chunked vector processing, PostGIS uploads, and spatial indexing.
     """
 
-    PICKLE_CONTAINER = "rmhazuregeotemp"
+    PICKLE_CONTAINER = "pickles"  # Silver zone - intermediate vector processing
     PICKLE_PREFIX = "temp/vector_etl"
     DEFAULT_CHUNK_SIZE = 1000
     AUTO_CHUNK_SIZING = True
@@ -534,7 +534,7 @@ class AppDefaults:
     ENABLE_DUCKDB_HEALTH_CHECK = False  # Adds ~200-500ms overhead
     ENABLE_VSI_HEALTH_CHECK = False  # Adds ~500-1000ms overhead
     VSI_TEST_FILE = "dctest.tif"
-    VSI_TEST_CONTAINER = "rmhazuregeobronze"
+    VSI_TEST_CONTAINER = "bronze-rasters"  # Default bronze container for VSI health check
 
     # TiTiler
     TITILER_MODE = "pgstac"

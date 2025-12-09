@@ -371,16 +371,16 @@ class MultiAccountStorageConfig(BaseModel):
     Example Deployment Scenarios:
     ----------------------------
     1. Development (single account, all containers):
-       # Uses default "rmhazuregeo" for all zones
+       # Uses default storage account for all zones
 
     2. Production (3 accounts):
-       BRONZE_STORAGE_ACCOUNT=rmhgeo-bronze
-       SILVER_STORAGE_ACCOUNT=rmhgeo-silver
-       SILVEREXT_STORAGE_ACCOUNT=rmhgeo-external
+       BRONZE_STORAGE_ACCOUNT=<app>-bronze
+       SILVER_STORAGE_ACCOUNT=<app>-silver
+       SILVEREXT_STORAGE_ACCOUNT=<app>-external
 
-    3. Custom container names (legacy compatibility):
-       BRONZE_RASTERS_CONTAINER=rmhazuregeobronze
-       BRONZE_VECTORS_CONTAINER=rmhazuregeobronze
+    3. Custom container names:
+       BRONZE_RASTERS_CONTAINER=<custom-bronze>
+       BRONZE_VECTORS_CONTAINER=<custom-bronze>
        # Both rasters and vectors in same container
     """
 

@@ -506,8 +506,9 @@ class DuckDBRepository(IDuckDBRepository):
 
         Example:
             # Query multiple Parquet files at once
+            # Use config.storage.silver.misc for container name
             result = repo.read_parquet_from_blob(
-                'rmhazuregeosilver',
+                config.storage.silver.misc,
                 'exports/2025/*.parquet'
             )
             df = result.df()

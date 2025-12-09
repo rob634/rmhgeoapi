@@ -195,7 +195,8 @@ def create_h3_stac(task_params: dict) -> dict:
                     'h3:queryable': True
                 },
                 'parquet': {
-                    'href': f"https://rmhazuregeo.blob.core.windows.net/rmhazuregeogold/{source_blob}",
+                    # Build URL from config
+                    'href': f"https://{config.storage.gold.account_name}.blob.core.windows.net/{config.storage.gold.misc}/{source_blob}",
                     'type': 'application/x-parquet',
                     'title': 'Original GeoParquet file',
                     'roles': ['data']

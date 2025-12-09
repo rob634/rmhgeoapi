@@ -719,7 +719,7 @@ def analyze_container(req: func.HttpRequest) -> func.HttpResponse:
     - Execution timing analysis
 
     Query Parameters:
-        save: If 'true', saves results to rmhazuregeoinventory container
+        save: If 'true', saves results to inventory container (silver zone)
     """
     return analyze_container_trigger.handle_request(req)
 
@@ -883,10 +883,10 @@ def stac_collections(req: func.HttpRequest) -> func.HttpResponse:
 
     Body:
         {
-            "container": "rmhazuregeobronze",  // Required
-            "collection_id": "custom-id",      // Optional
-            "title": "Custom Title",           // Optional
-            "description": "Custom description"// Optional
+            "container": "<bronze-container>",  // Required (use config.storage.bronze)
+            "collection_id": "custom-id",       // Optional
+            "title": "Custom Title",            // Optional
+            "description": "Custom description" // Optional
         }
 
     Returns:
@@ -922,7 +922,7 @@ def stac_extract(req: func.HttpRequest) -> func.HttpResponse:
 
     Body:
         {
-            "container": "rmhazuregeobronze",      // Required
+            "container": "<bronze-container>",     // Required (use config.storage.bronze)
             "blob_name": "test/file.tif",          // Required
             "collection_id": "dev",                // Optional (default: "dev")
             "insert": true                         // Optional (default: true)

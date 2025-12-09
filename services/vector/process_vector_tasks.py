@@ -48,7 +48,7 @@ def process_vector_prepare(parameters: Dict[str, Any]) -> Dict[str, Any]:
         params: {
             'job_id': str,           # Required for batch_id generation and pickle paths
             'blob_name': str,        # Source file path in container
-            'container_name': str,   # Bronze container (default: rmhazuregeobronze)
+            'container_name': str,   # Bronze container (default: config.storage.bronze.rasters)
             'file_extension': str,   # csv, geojson, gpkg, kml, kmz, shp, zip
             'table_name': str,       # Target PostGIS table name
             'schema': str,           # Target schema (default: geo)
@@ -84,7 +84,8 @@ def process_vector_prepare(parameters: Dict[str, Any]) -> Dict[str, Any]:
     # Extract parameters
     job_id = parameters['job_id']
     blob_name = parameters['blob_name']
-    container_name = parameters.get('container_name', 'rmhazuregeobronze')
+    # Use config for default container (bronze zone for input data)
+    container_name = parameters.get('container_name', config.storage.bronze.rasters)
     file_extension = parameters['file_extension'].lower().lstrip('.')
     table_name = parameters['table_name']
     schema = parameters.get('schema', 'geo')
@@ -261,8 +262,8 @@ def process_vector_upload(parameters: Dict[str, Any]) -> Dict[str, Any]:
     logger.info(f"[{job_id[:8]}] Stage 2: Uploading chunk {chunk_index} (batch_id: {batch_id})")
 
     try:
-        # Step 1: Load pickled chunk from blob storage
-        blob_repo = BlobRepository.instance()
+        # Step 1: Load pickled chunk from blob storage (silver zone - intermediate data)
+        blob_repo = BlobRepository.for_zone("silver")
         pickled_data = blob_repo.read_blob(config.vector_pickle_container, chunk_path)
         chunk = pickle.loads(pickled_data)
 

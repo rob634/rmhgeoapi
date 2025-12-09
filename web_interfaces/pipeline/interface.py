@@ -62,11 +62,11 @@ class PipelineInterface(BaseInterface):
                 <div class="control-group">
                     <label for="container-select">Container:</label>
                     <select id="container-select" class="filter-select">
-                        <option value="rmhazuregeobronze" selected>rmhazuregeobronze (Bronze)</option>
-                        <option value="rmhazuregeosilver">rmhazuregeosilver (Silver)</option>
-                        <option value="rmhazuregeogold">rmhazuregeogold (Gold)</option>
-                        <option value="silver-cogs">silver-cogs</option>
-                        <option value="source-data">source-data</option>
+                        <option value="bronze-rasters" selected>bronze-rasters (Bronze)</option>
+                        <option value="bronze-vectors">bronze-vectors (Bronze)</option>
+                        <option value="silver-cogs">silver-cogs (Silver)</option>
+                        <option value="silver-mosaicjson">silver-mosaicjson (Silver)</option>
+                        <option value="gold-geoparquet">gold-geoparquet (Gold)</option>
                     </select>
                 </div>
 

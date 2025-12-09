@@ -82,7 +82,8 @@ class StacMetadataService:
 
     def __init__(self):
         """Initialize STAC metadata service."""
-        self.blob_repo = BlobRepository.instance()
+        # Silver zone - STAC items reference processed data
+        self.blob_repo = BlobRepository.for_zone("silver")
         self.stac = PgStacRepository()  # 18 NOV 2025: Use PgStacRepository for data operations
 
     def extract_item_from_blob(

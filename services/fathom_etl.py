@@ -267,7 +267,8 @@ def fathom_tile_inventory(params: dict, context: dict = None) -> dict:
         logger.info(f"   Spatial filter (bbox): {bbox}")
 
     # Auto-detect CSV filename if not provided
-    blob_repo = BlobRepository.instance()
+    # Bronze zone - source Fathom data
+    blob_repo = BlobRepository.for_zone("bronze")
     if not file_list_csv:
         # Use prefix filter to avoid listing millions of tiles
         # CSV files are named like "CI_Côte_d'Ivoire_file_list.csv"
@@ -515,13 +516,15 @@ def fathom_band_stack(params: dict, context: dict = None) -> dict:
     logger.info(f"🔧 Band stacking tile: {output_name}")
 
     config = get_config()
-    blob_repo = BlobRepository.instance()
+    # Bronze zone for reading source tiles, Silver zone for writing output
+    bronze_repo = BlobRepository.for_zone("bronze")
+    silver_repo = BlobRepository.for_zone("silver")
 
     # Output path: fathom-stacked/{region}/{tile}/{scenario}.tif
     output_blob_path = f"{output_prefix}/{region_code}/{tile}/{output_name}.tif"
 
-    # Idempotency check
-    if not force_reprocess and blob_repo.blob_exists(output_container, output_blob_path):
+    # Idempotency check (check silver for existing output)
+    if not force_reprocess and silver_repo.blob_exists(output_container, output_blob_path):
         logger.info(f"⏭️ SKIP: Output already exists: {output_container}/{output_blob_path}")
         return {
             "success": True,
@@ -559,9 +562,9 @@ def fathom_band_stack(params: dict, context: dict = None) -> dict:
                     bands.append(empty)
                 continue
 
-            # Download single file
+            # Download single file from bronze (source data)
             local_path = tmpdir / f"{return_period}.tif"
-            blob_bytes = blob_repo.read_blob(source_container, rp_path)
+            blob_bytes = bronze_repo.read_blob(source_container, rp_path)
             with open(local_path, "wb") as f:
                 f.write(blob_bytes)
 
@@ -619,9 +622,9 @@ def fathom_band_stack(params: dict, context: dict = None) -> dict:
         output_size_kb = output_size / 1024
         logger.info(f"   📏 Output size: {output_size_kb:.1f} KB")
 
-        # Upload
+        # Upload to silver (processed data)
         with open(output_path, "rb") as f:
-            blob_repo.write_blob(output_container, output_blob_path, f.read())
+            silver_repo.write_blob(output_container, output_blob_path, f.read())
 
         logger.info(f"   ☁️ Uploaded: {output_container}/{output_blob_path}")
 
@@ -698,7 +701,8 @@ def fathom_grid_inventory(params: dict, context: dict = None) -> dict:
     if bbox:
         logger.info(f"   Spatial filter (bbox): {bbox}")
 
-    blob_repo = BlobRepository.instance()
+    # Silver zone - reading Phase 1 stacked COGs (processed data)
+    blob_repo = BlobRepository.for_zone("silver")
 
     # List all stacked COGs for this region
     prefix = f"{source_prefix}/{region_code}/"
@@ -929,7 +933,8 @@ def fathom_spatial_merge(params: dict, context: dict = None) -> dict:
     logger.info(f"   Tiles to merge: {len(tiles)}")
 
     config = get_config()
-    blob_repo = BlobRepository.instance()
+    # Silver zone for both reading (stacked COGs) and writing (merged COGs)
+    blob_repo = BlobRepository.for_zone("silver")
 
     # Output path
     output_blob_path = f"{output_prefix}/{region_code}/{grid_cell}/{output_name}.tif"

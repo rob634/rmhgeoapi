@@ -8,6 +8,9 @@ Features (07 DEC 2025):
     - metadata toggle: ?metadata=true returns full dict, false returns just names
     - limit default: 500 (was 50)
 
+Updated (08 DEC 2025):
+    - Added zone parameter for multi-account storage support (default: bronze)
+
 Exports:
     list_container_blobs_handler: HTTP trigger function for GET /api/containers/{container_name}/blobs
 """
@@ -32,6 +35,7 @@ def list_container_blobs_handler(req: func.HttpRequest) -> func.HttpResponse:
         req: Azure Functions HTTP request
              Route params: container_name
              Query params:
+                - zone (optional): Storage zone - "bronze", "silver", "silverext" (default: bronze)
                 - prefix (optional): Path prefix filter
                 - suffix (optional): Extension filter, e.g., ".tif"
                 - metadata (optional): "true" returns full dict, "false" returns just names (default: true)
@@ -42,8 +46,8 @@ def list_container_blobs_handler(req: func.HttpRequest) -> func.HttpResponse:
 
     Examples:
         GET /api/containers/bronze-rasters/blobs
-        GET /api/containers/bronze-rasters/blobs?suffix=.tif&limit=100
-        GET /api/containers/bronze-rasters/blobs?prefix=maxar/&metadata=false
+        GET /api/containers/bronze-rasters/blobs?zone=bronze&suffix=.tif&limit=100
+        GET /api/containers/silver-cogs/blobs?zone=silver&prefix=maxar/&metadata=false
     """
     try:
         # Get container name from route
@@ -60,10 +64,24 @@ def list_container_blobs_handler(req: func.HttpRequest) -> func.HttpResponse:
             )
 
         # Get query parameters
+        zone = req.params.get('zone', 'bronze').lower()
         prefix = req.params.get('prefix', '')
         suffix = req.params.get('suffix', '')
         metadata_str = req.params.get('metadata', 'true').lower()
         limit_str = req.params.get('limit', '500')
+
+        # Validate zone parameter
+        valid_zones = ('bronze', 'silver', 'silverext')
+        if zone not in valid_zones:
+            return func.HttpResponse(
+                json.dumps({
+                    "error": f"Invalid zone '{zone}'",
+                    "valid_zones": list(valid_zones),
+                    "hint": "Use zone=bronze for input data, zone=silver for processed data"
+                }),
+                status_code=400,
+                mimetype="application/json"
+            )
 
         # Parse metadata flag
         include_metadata = metadata_str in ('true', '1', 'yes')
@@ -75,10 +93,10 @@ def list_container_blobs_handler(req: func.HttpRequest) -> func.HttpResponse:
         except ValueError:
             limit = 500
 
-        logger.info(f"Listing blobs: container={container_name}, prefix='{prefix}', suffix='{suffix}', metadata={include_metadata}, limit={limit}")
+        logger.info(f"Listing blobs: zone={zone}, container={container_name}, prefix='{prefix}', suffix='{suffix}', metadata={include_metadata}, limit={limit}")
 
-        # Get blob repository instance
-        blob_repo = BlobRepository.instance()
+        # Get blob repository for the specified zone
+        blob_repo = BlobRepository.for_zone(zone)
 
         # Check if container exists
         if not blob_repo.container_exists(container_name):
@@ -118,6 +136,7 @@ def list_container_blobs_handler(req: func.HttpRequest) -> func.HttpResponse:
             blob_output = [b['name'] for b in blobs]
 
         response = {
+            "zone": zone,
             "container": container_name,
             "prefix": prefix if prefix else None,
             "suffix": suffix if suffix else None,

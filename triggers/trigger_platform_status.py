@@ -25,7 +25,7 @@ from typing import Dict, Any, Optional
 import azure.functions as func
 
 # Import infrastructure
-from infrastructure import PlatformRepository, JobRepository, PostgreSQLRepository, RepositoryFactory
+from infrastructure import PlatformRepository, JobRepository, TaskRepository, PostgreSQLRepository, RepositoryFactory
 from config import get_config
 
 # Configure logging
@@ -43,6 +43,8 @@ async def platform_request_status(req: func.HttpRequest) -> func.HttpResponse:
 
     GET /api/platform/status/{request_id}
         Returns Platform request with delegated CoreMachine job status.
+        Query params:
+            - verbose=true: Include full task details (default: false)
 
     GET /api/platform/status
         Lists all Platform requests with optional filtering.
@@ -58,6 +60,17 @@ async def platform_request_status(req: func.HttpRequest) -> func.HttpResponse:
         "job_status": "completed",
         "job_stage": 3,
         "job_result": {...},
+        "task_summary": {
+            "total": 5,
+            "completed": 4,
+            "failed": 0,
+            "processing": 1,
+            "pending": 0,
+            "by_stage": {
+                "1": {"total": 3, "completed": 3},
+                "2": {"total": 2, "completed": 1, "processing": 1}
+            }
+        },
         "data_type": "raster",
         "created_at": "2025-11-22T10:00:00Z"
     }
@@ -67,9 +80,11 @@ async def platform_request_status(req: func.HttpRequest) -> func.HttpResponse:
     try:
         platform_repo = PlatformRepository()
         job_repo = JobRepository()
+        task_repo = TaskRepository()
 
         # Check if specific request_id provided
         request_id = req.route_params.get('request_id')
+        verbose = req.params.get('verbose', 'false').lower() == 'true'
 
         if request_id:
             # ================================================================
@@ -102,6 +117,9 @@ async def platform_request_status(req: func.HttpRequest) -> func.HttpResponse:
                 job_type = None
                 logger.warning(f"CoreMachine job {platform_request.job_id} not found")
 
+            # Get task summary (09 DEC 2025)
+            task_summary = _get_task_summary(task_repo, platform_request.job_id, verbose=verbose)
+
             # Build response
             result = {
                 "success": True,
@@ -120,6 +138,9 @@ async def platform_request_status(req: func.HttpRequest) -> func.HttpResponse:
                 "job_stage": job_stage,
                 "job_result": job_result,
 
+                # Task summary (09 DEC 2025)
+                "task_summary": task_summary,
+
                 # Helpful URLs
                 "urls": {
                     "job_status": f"/api/jobs/status/{platform_request.job_id}",
@@ -136,7 +157,7 @@ async def platform_request_status(req: func.HttpRequest) -> func.HttpResponse:
                 )
 
             return func.HttpResponse(
-                json.dumps(result, indent=2),
+                json.dumps(result, indent=2, default=str),
                 status_code=200,
                 headers={"Content-Type": "application/json"}
             )
@@ -176,6 +197,144 @@ async def platform_request_status(req: func.HttpRequest) -> func.HttpResponse:
 # ============================================================================
 # HELPER FUNCTIONS
 # ============================================================================
+
+def _get_task_summary(
+    task_repo: 'TaskRepository',
+    job_id: str,
+    verbose: bool = False
+) -> Dict[str, Any]:
+    """
+    Get task summary for a job (09 DEC 2025).
+
+    Args:
+        task_repo: TaskRepository instance
+        job_id: Job identifier
+        verbose: If True, include full task details
+
+    Returns:
+        Dictionary with task counts and optional task details:
+        {
+            "total": 5,
+            "completed": 4,
+            "failed": 0,
+            "processing": 1,
+            "pending": 0,
+            "queued": 0,
+            "by_stage": {
+                "1": {"total": 3, "completed": 3, "task_types": ["handler_raster_validate"]},
+                "2": {"total": 2, "completed": 1, "processing": 1, "task_types": ["handler_raster_create_cog"]}
+            },
+            "tasks": [...]  # Only if verbose=True
+        }
+    """
+    try:
+        tasks = task_repo.get_tasks_for_job(job_id)
+
+        if not tasks:
+            return {
+                "total": 0,
+                "completed": 0,
+                "failed": 0,
+                "processing": 0,
+                "pending": 0,
+                "queued": 0,
+                "by_stage": {}
+            }
+
+        # Count by status
+        status_counts = {
+            "total": len(tasks),
+            "completed": 0,
+            "failed": 0,
+            "processing": 0,
+            "pending": 0,
+            "queued": 0
+        }
+
+        # Group by stage
+        by_stage = {}
+
+        for task in tasks:
+            # Get status string
+            status = task.status.value if hasattr(task.status, 'value') else str(task.status)
+
+            # Update overall counts
+            if status == "completed":
+                status_counts["completed"] += 1
+            elif status == "failed":
+                status_counts["failed"] += 1
+            elif status == "processing":
+                status_counts["processing"] += 1
+            elif status == "pending":
+                status_counts["pending"] += 1
+            elif status == "queued":
+                status_counts["queued"] += 1
+
+            # Update stage counts
+            stage_key = str(task.stage)
+            if stage_key not in by_stage:
+                by_stage[stage_key] = {
+                    "total": 0,
+                    "completed": 0,
+                    "failed": 0,
+                    "processing": 0,
+                    "pending": 0,
+                    "queued": 0,
+                    "task_types": set()
+                }
+
+            by_stage[stage_key]["total"] += 1
+            by_stage[stage_key]["task_types"].add(task.task_type)
+
+            if status == "completed":
+                by_stage[stage_key]["completed"] += 1
+            elif status == "failed":
+                by_stage[stage_key]["failed"] += 1
+            elif status == "processing":
+                by_stage[stage_key]["processing"] += 1
+            elif status == "pending":
+                by_stage[stage_key]["pending"] += 1
+            elif status == "queued":
+                by_stage[stage_key]["queued"] += 1
+
+        # Convert task_types sets to lists and remove zero counts
+        for stage_key in by_stage:
+            by_stage[stage_key]["task_types"] = list(by_stage[stage_key]["task_types"])
+            # Remove zero counts for cleaner output
+            by_stage[stage_key] = {
+                k: v for k, v in by_stage[stage_key].items()
+                if v != 0 or k in ["total", "task_types"]
+            }
+
+        result = {
+            **status_counts,
+            "by_stage": by_stage
+        }
+
+        # Add verbose task details if requested
+        if verbose:
+            result["tasks"] = [
+                {
+                    "task_id": task.task_id,
+                    "task_type": task.task_type,
+                    "stage": task.stage,
+                    "status": task.status.value if hasattr(task.status, 'value') else str(task.status),
+                    "created_at": task.created_at.isoformat() if task.created_at else None,
+                    "updated_at": task.updated_at.isoformat() if task.updated_at else None,
+                    "error": task.result_data.get("error") if task.result_data else None
+                }
+                for task in tasks
+            ]
+
+        return result
+
+    except Exception as e:
+        logger.warning(f"Failed to get task summary for job {job_id}: {e}")
+        return {
+            "error": str(e),
+            "total": 0
+        }
+
 
 def _generate_data_access_urls(
     platform_request,

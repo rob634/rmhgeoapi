@@ -375,50 +375,126 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
 
     def _check_storage_containers(self) -> Dict[str, Any]:
         """
-        Check critical storage container existence.
+        Check critical storage container existence for Bronze and Silver zones.
 
-        Verifies that containers required for ETL operations exist in their zones:
-        - pickles (silver zone): Vector ETL intermediate storage
+        Verifies that storage accounts are accessible and required containers exist:
 
-        Added 08 DEC 2025 as part of storage configuration cleanup.
+        Bronze Zone (raw data input):
+        - bronze-vectors: Raw vector uploads (Shapefiles, GeoJSON)
+        - bronze-rasters: Raw raster uploads (GeoTIFF)
+
+        Silver Zone (processed data):
+        - silver-cogs: Cloud Optimized GeoTIFFs (COG output)
+        - pickles: Vector ETL intermediate storage
+
+        Updated 09 DEC 2025: Expanded to check Bronze/Silver accounts and critical containers.
         """
         def check_containers():
             from infrastructure.blob import BlobRepository
-            from config.defaults import VectorDefaults
+            from config.defaults import VectorDefaults, StorageDefaults
+            from config import get_config
 
-            container_status = {}
+            config = get_config()
+            result = {
+                "zones": {},
+                "summary": {
+                    "total_containers_checked": 0,
+                    "containers_exist": 0,
+                    "containers_missing": 0,
+                    "zones_accessible": 0,
+                    "zones_error": 0
+                }
+            }
 
-            # Check pickles container in silver zone
-            try:
-                silver_repo = BlobRepository.for_zone("silver")
-                pickles_container = VectorDefaults.PICKLE_CONTAINER
+            # Define critical containers per zone
+            # Format: (container_name, purpose, criticality)
+            critical_containers = {
+                "bronze": [
+                    (config.storage.bronze.vectors, "Raw vector uploads (Shapefiles, GeoJSON)", "high"),
+                    (config.storage.bronze.rasters, "Raw raster uploads (GeoTIFF)", "high"),
+                ],
+                "silver": [
+                    (config.storage.silver.cogs, "Cloud Optimized GeoTIFFs (COG output)", "high"),
+                    (VectorDefaults.PICKLE_CONTAINER, "Vector ETL intermediate storage", "high"),
+                ]
+            }
 
-                if silver_repo.container_exists(pickles_container):
-                    container_status[pickles_container] = {
-                        "status": "exists",
-                        "zone": "silver",
-                        "purpose": "Vector ETL intermediate storage"
-                    }
-                else:
-                    container_status[pickles_container] = {
-                        "status": "missing",
-                        "zone": "silver",
-                        "purpose": "Vector ETL intermediate storage",
-                        "action_required": f"Create container '{pickles_container}' in silver storage account"
-                    }
-            except Exception as e:
-                container_status[VectorDefaults.PICKLE_CONTAINER] = {
-                    "status": "error",
-                    "zone": "silver",
-                    "error": str(e)
+            for zone, containers in critical_containers.items():
+                zone_result = {
+                    "account": None,
+                    "account_accessible": False,
+                    "containers": {}
                 }
 
-            return container_status
+                try:
+                    # Get repository for zone
+                    repo = BlobRepository.for_zone(zone)
+                    zone_config = config.storage.get_account(zone)
+                    zone_result["account"] = zone_config.account_name
+                    zone_result["account_accessible"] = True
+                    result["summary"]["zones_accessible"] += 1
+
+                    # Check each critical container
+                    for container_name, purpose, criticality in containers:
+                        result["summary"]["total_containers_checked"] += 1
+
+                        try:
+                            exists = repo.container_exists(container_name)
+                            if exists:
+                                zone_result["containers"][container_name] = {
+                                    "status": "exists",
+                                    "purpose": purpose,
+                                    "criticality": criticality
+                                }
+                                result["summary"]["containers_exist"] += 1
+                            else:
+                                zone_result["containers"][container_name] = {
+                                    "status": "missing",
+                                    "purpose": purpose,
+                                    "criticality": criticality,
+                                    "action_required": f"Create container '{container_name}' in {zone_config.account_name}"
+                                }
+                                result["summary"]["containers_missing"] += 1
+                        except Exception as container_error:
+                            zone_result["containers"][container_name] = {
+                                "status": "error",
+                                "purpose": purpose,
+                                "criticality": criticality,
+                                "error": str(container_error)[:200]
+                            }
+                            result["summary"]["containers_missing"] += 1
+
+                except Exception as zone_error:
+                    zone_result["account_accessible"] = False
+                    zone_result["error"] = str(zone_error)[:200]
+                    result["summary"]["zones_error"] += 1
+                    # Still count containers as missing since we couldn't check them
+                    result["summary"]["total_containers_checked"] += len(containers)
+                    result["summary"]["containers_missing"] += len(containers)
+
+                result["zones"][zone] = zone_result
+
+            # Determine overall health based on missing containers
+            if result["summary"]["containers_missing"] > 0 or result["summary"]["zones_error"] > 0:
+                missing_list = []
+                for zone, zone_data in result["zones"].items():
+                    if zone_data.get("error"):
+                        missing_list.append(f"{zone} zone inaccessible")
+                    else:
+                        for container, status in zone_data.get("containers", {}).items():
+                            if status.get("status") != "exists":
+                                missing_list.append(f"{zone}/{container}")
+
+                result["error"] = f"Missing or inaccessible: {', '.join(missing_list)}"
+                result["impact"] = "ETL operations may fail for affected data types"
+                result["fix"] = "Create missing containers or check storage account access"
+
+            return result
 
         return self.check_component_health(
             "storage_containers",
             check_containers,
-            description="Critical storage container existence check"
+            description="Bronze and Silver zone storage accounts and critical containers"
         )
 
     def _check_service_bus_queues(self) -> Dict[str, Any]:

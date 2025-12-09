@@ -385,6 +385,57 @@ class BlobRepository(IBlobRepository):
             logger.error(f"Error checking container existence for '{container}': {e}")
             raise
 
+    def ensure_container_exists(self, container: str) -> Dict[str, Any]:
+        """
+        Ensure container exists, creating it if necessary.
+
+        Idempotent operation - safe to call multiple times.
+        Used by full-rebuild to ensure critical containers exist.
+
+        Args:
+            container: Container name to ensure exists
+
+        Returns:
+            Dict with operation result:
+            {
+                "container": str,
+                "existed": bool,  # True if already existed
+                "created": bool,  # True if we created it
+                "success": bool
+            }
+
+        Raises:
+            Exception: For permission or other errors
+        """
+        result = {
+            "container": container,
+            "existed": False,
+            "created": False,
+            "success": False
+        }
+
+        try:
+            # Check if already exists
+            if self.container_exists(container):
+                result["existed"] = True
+                result["success"] = True
+                logger.debug(f"Container already exists: {container}")
+                return result
+
+            # Create container
+            container_client = self.blob_service.get_container_client(container)
+            container_client.create_container()
+
+            result["created"] = True
+            result["success"] = True
+            logger.info(f"✅ Created container: {container}")
+            return result
+
+        except Exception as e:
+            logger.error(f"Failed to ensure container {container} exists: {e}")
+            result["error"] = str(e)
+            return result
+
     def validate_container_and_blob(self, container: str, blob_path: str) -> Dict[str, Any]:
         """
         Validate both container and blob existence.

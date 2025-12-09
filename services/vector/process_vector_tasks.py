@@ -171,19 +171,107 @@ def process_vector_prepare(parameters: Dict[str, Any]) -> Dict[str, Any]:
     chunks = handler.chunk_gdf(validated_gdf, chunk_size)
     actual_chunk_size = len(chunks[0]) if chunks else 0
 
-    # Step 6: Pickle each chunk to blob storage (IDEMPOTENT - overwrite=True)
+    # Step 6: Pickle each chunk to Silver zone blob storage (IDEMPOTENT - overwrite=True)
+    # IMPORTANT: Pickles go to Silver zone (intermediate processed data), not Bronze (09 DEC 2025)
+    # Bronze = raw input files, Silver = processed/intermediate data
+    logger.info(f"[{job_id[:8]}] Step 6: Writing {len(chunks)} pickles to Silver zone container '{config.vector_pickle_container}'")
+    silver_repo = BlobRepository.for_zone("silver")
+
     chunk_paths = []
+    verified_pickles = []
+    pickle_errors = []
+
     for i, chunk in enumerate(chunks):
         chunk_path = f"{config.vector_pickle_prefix}/{job_id}/chunk_{i}.pkl"
 
-        # Pickle with protocol 5 (best compression)
-        pickled = pickle.dumps(chunk, protocol=5)
+        try:
+            # Pickle with protocol 5 (best compression)
+            logger.debug(f"[{job_id[:8]}] Pickling chunk {i+1}/{len(chunks)} ({len(chunk)} rows)")
+            pickled = pickle.dumps(chunk, protocol=5)
+            pickle_size = len(pickled)
+            logger.debug(f"[{job_id[:8]}] Chunk {i+1} pickled: {pickle_size:,} bytes")
 
-        # Write to blob storage with overwrite=True (IDEMPOTENT)
-        blob_repo.write_blob(config.vector_pickle_container, chunk_path, pickled)
+            # Write to Silver zone blob storage with overwrite=True (IDEMPOTENT)
+            write_result = silver_repo.write_blob(
+                config.vector_pickle_container,
+                chunk_path,
+                pickled
+            )
 
-        chunk_paths.append(chunk_path)
-        logger.info(f"[{job_id[:8]}] Pickled chunk {i+1}/{len(chunks)}: {len(chunk)} rows")
+            # CRITICAL: Verify write was successful (09 DEC 2025)
+            if write_result and write_result.get('size', 0) > 0:
+                logger.info(
+                    f"[{job_id[:8]}] ✅ Chunk {i+1}/{len(chunks)} written: "
+                    f"{chunk_path} ({write_result['size']:,} bytes, etag={write_result.get('etag', 'N/A')[:16]}...)"
+                )
+                chunk_paths.append(chunk_path)
+                verified_pickles.append({
+                    'chunk_index': i,
+                    'path': chunk_path,
+                    'rows': len(chunk),
+                    'pickle_bytes': pickle_size,
+                    'blob_bytes': write_result['size'],
+                    'etag': write_result.get('etag')
+                })
+            else:
+                # Write returned but with no size - suspicious!
+                error_msg = f"Chunk {i} write returned invalid result: {write_result}"
+                logger.error(f"[{job_id[:8]}] ❌ {error_msg}")
+                pickle_errors.append({
+                    'chunk_index': i,
+                    'path': chunk_path,
+                    'error': error_msg,
+                    'error_type': 'InvalidWriteResult'
+                })
+
+        except Exception as e:
+            # Capture and log pickle/write errors but continue to track all failures
+            error_msg = f"Failed to pickle/write chunk {i}: {e}"
+            logger.error(f"[{job_id[:8]}] ❌ {error_msg}\n{traceback.format_exc()}")
+            pickle_errors.append({
+                'chunk_index': i,
+                'path': chunk_path,
+                'error': str(e),
+                'error_type': type(e).__name__,
+                'traceback': traceback.format_exc()
+            })
+
+    # Step 7: CRITICAL VALIDATION - Ensure ALL pickles were created successfully (09 DEC 2025)
+    if pickle_errors:
+        error_summary = f"Failed to create {len(pickle_errors)}/{len(chunks)} pickles"
+        logger.error(f"[{job_id[:8]}] ❌ STAGE 1 FAILED: {error_summary}")
+        logger.error(f"[{job_id[:8]}] Pickle errors: {pickle_errors}")
+
+        # Raise exception to PREVENT Stage 2 from starting
+        raise RuntimeError(
+            f"Stage 1 pickle creation failed: {error_summary}. "
+            f"Failed chunks: {[e['chunk_index'] for e in pickle_errors]}. "
+            f"First error: {pickle_errors[0]['error']}"
+        )
+
+    if len(chunk_paths) != len(chunks):
+        error_msg = f"Pickle count mismatch: expected {len(chunks)}, got {len(chunk_paths)}"
+        logger.error(f"[{job_id[:8]}] ❌ STAGE 1 FAILED: {error_msg}")
+        raise RuntimeError(f"Stage 1 validation failed: {error_msg}")
+
+    # Step 8: Final verification - check all pickles exist in blob storage
+    logger.info(f"[{job_id[:8]}] Step 8: Verifying all {len(chunk_paths)} pickles exist in blob storage")
+    missing_pickles = []
+    for chunk_path in chunk_paths:
+        if not silver_repo.blob_exists(config.vector_pickle_container, chunk_path):
+            missing_pickles.append(chunk_path)
+            logger.error(f"[{job_id[:8]}] ❌ Pickle missing after write: {chunk_path}")
+
+    if missing_pickles:
+        error_msg = f"Pickle verification failed: {len(missing_pickles)} pickles missing after write"
+        logger.error(f"[{job_id[:8]}] ❌ STAGE 1 FAILED: {error_msg}")
+        logger.error(f"[{job_id[:8]}] Missing pickles: {missing_pickles}")
+        raise RuntimeError(f"Stage 1 verification failed: {error_msg}. Missing: {missing_pickles}")
+
+    logger.info(
+        f"[{job_id[:8]}] ✅ Stage 1 COMPLETE: {len(chunk_paths)} pickles created and verified, "
+        f"{total_features} total features, ready for Stage 2 fan-out"
+    )
 
     result = {
         'chunk_paths': chunk_paths,
@@ -196,7 +284,13 @@ def process_vector_prepare(parameters: Dict[str, Any]) -> Dict[str, Any]:
         'geometry_type': geometry_type,
         'srid': 4326,
         'source_file': blob_name,
-        'source_crs': original_crs  # Original CRS before reprojection to 4326
+        'source_crs': original_crs,  # Original CRS before reprojection to 4326
+        'pickle_verification': {
+            'all_verified': True,
+            'pickle_count': len(verified_pickles),
+            'total_pickle_bytes': sum(p['pickle_bytes'] for p in verified_pickles),
+            'total_blob_bytes': sum(p['blob_bytes'] for p in verified_pickles)
+        }
     }
 
     # Include skipped columns in result if any were filtered

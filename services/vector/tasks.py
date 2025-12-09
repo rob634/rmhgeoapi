@@ -12,13 +12,17 @@ Exports:
     upload_vector_chunk: Upload chunk to PostGIS task
 """
 
-from typing import Dict, Any
+from typing import Dict, Any, List
 import geopandas as gpd
 from infrastructure.blob import BlobRepository
+from util_logger import LoggerFactory, ComponentType
 from .converters import (
     _convert_csv, _convert_geojson, _convert_geopackage,
     _convert_kml, _convert_kmz, _convert_shapefile
 )
+
+# Component-specific logger (09 DEC 2025)
+logger = LoggerFactory.create_logger(ComponentType.SERVICE, "vector_tasks")
 
 # Note: TaskRegistry will be imported when it exists
 # from services.registry import TaskRegistry
@@ -192,6 +196,7 @@ def prepare_vector_chunks(parameters: Dict[str, Any]) -> Dict[str, Any]:
         chunk_size_used: int - Actual chunk size used
     """
     import pickle
+    import traceback
     from io import BytesIO
     from config import get_config
 
@@ -208,9 +213,13 @@ def prepare_vector_chunks(parameters: Dict[str, Any]) -> Dict[str, Any]:
     converter_params = parameters.get("converter_params", {})
     geometry_params = parameters.get("geometry_params", {})  # NEW: Phase 2 (9 NOV 2025)
 
+    logger.info(f"[{job_id[:8]}] Stage 1: prepare_vector_chunks starting for {blob_name}")
+
     # 1. Load vector file from blob storage using Bronze zone (08 DEC 2025)
+    logger.info(f"[{job_id[:8]}] Step 1: Loading from Bronze zone {container_name}/{blob_name}")
     blob_repo = BlobRepository.for_zone("bronze")
     file_data = blob_repo.read_blob_to_stream(container_name, blob_name)
+    logger.info(f"[{job_id[:8]}] Step 1 complete: File loaded from blob storage")
 
     # 2. Convert to GeoDataFrame
     converters = {
@@ -228,15 +237,18 @@ def prepare_vector_chunks(parameters: Dict[str, Any]) -> Dict[str, Any]:
         raise ValueError(f"Unsupported file extension: '{file_extension}'")
 
     gdf = converters[file_extension](file_data, **converter_params)
+    logger.info(f"[{job_id[:8]}] Step 2 complete: Converted to GeoDataFrame with {len(gdf)} features")
 
     # 3. Validate, prepare, and optionally process geometries
     from .postgis_handler import VectorToPostGISHandler
     handler = VectorToPostGISHandler()
     validated_gdf = handler.prepare_gdf(gdf, geometry_params=geometry_params)
+    logger.info(f"[{job_id[:8]}] Step 3 complete: Validated GeoDataFrame with {len(validated_gdf)} features")
 
     # 4. Calculate optimal chunk size and split
     chunks = handler.chunk_gdf(validated_gdf, chunk_size)
     actual_chunk_size = len(chunks[0]) if chunks else 0
+    logger.info(f"[{job_id[:8]}] Step 4 complete: Split into {len(chunks)} chunks of ~{actual_chunk_size} rows each")
 
     # 5. Attach index configuration as chunk metadata (31 OCT 2025)
     # This allows upload_pickled_chunk to create indexes with proper config
@@ -246,21 +258,110 @@ def prepare_vector_chunks(parameters: Dict[str, Any]) -> Dict[str, Any]:
         "temporal": []
     })
 
-    # 6. Pickle each chunk to temp blob storage
-    chunk_paths = []
+    # 6. Pickle each chunk to Silver zone temp blob storage (09 DEC 2025)
+    # IMPORTANT: Pickles go to Silver zone (intermediate processed data), not Bronze
+    # Bronze = raw input files, Silver = processed/intermediate data
+    logger.info(f"[{job_id[:8]}] Step 6: Writing {len(chunks)} pickles to Silver zone container '{config.vector_pickle_container}'")
+    silver_repo = BlobRepository.for_zone("silver")
+
+    chunk_paths: List[str] = []
+    verified_pickles: List[Dict[str, Any]] = []
+    pickle_errors: List[Dict[str, Any]] = []
+
     for i, chunk in enumerate(chunks):
         chunk_path = f"{config.vector_pickle_prefix}/{job_id}/chunk_{i}.pkl"
 
         # Attach index config as chunk metadata (persists through pickle)
         chunk._index_config = index_config
 
-        # Pickle with protocol 5 (best compression)
-        pickled = pickle.dumps(chunk, protocol=5)
+        try:
+            # Pickle with protocol 5 (best compression)
+            logger.debug(f"[{job_id[:8]}] Pickling chunk {i+1}/{len(chunks)} ({len(chunk)} rows)")
+            pickled = pickle.dumps(chunk, protocol=5)
+            pickle_size = len(pickled)
+            logger.debug(f"[{job_id[:8]}] Chunk {i+1} pickled: {pickle_size:,} bytes")
 
-        # Write to blob storage (configured container for intermediate data)
-        blob_repo.write_blob(config.vector_pickle_container, chunk_path, pickled)
+            # Write to Silver zone blob storage (intermediate data)
+            write_result = silver_repo.write_blob(
+                config.vector_pickle_container,
+                chunk_path,
+                pickled
+            )
 
-        chunk_paths.append(chunk_path)
+            # CRITICAL: Verify write was successful (09 DEC 2025)
+            if write_result and write_result.get('size', 0) > 0:
+                logger.info(
+                    f"[{job_id[:8]}] ✅ Chunk {i+1}/{len(chunks)} written: "
+                    f"{chunk_path} ({write_result['size']:,} bytes, etag={write_result.get('etag', 'N/A')[:16]}...)"
+                )
+                chunk_paths.append(chunk_path)
+                verified_pickles.append({
+                    'chunk_index': i,
+                    'path': chunk_path,
+                    'rows': len(chunk),
+                    'pickle_bytes': pickle_size,
+                    'blob_bytes': write_result['size'],
+                    'etag': write_result.get('etag')
+                })
+            else:
+                # Write returned but with no size - suspicious!
+                error_msg = f"Chunk {i} write returned invalid result: {write_result}"
+                logger.error(f"[{job_id[:8]}] ❌ {error_msg}")
+                pickle_errors.append({
+                    'chunk_index': i,
+                    'path': chunk_path,
+                    'error': error_msg,
+                    'error_type': 'InvalidWriteResult'
+                })
+
+        except Exception as e:
+            # Capture and log pickle/write errors but continue to track all failures
+            error_msg = f"Failed to pickle/write chunk {i}: {e}"
+            logger.error(f"[{job_id[:8]}] ❌ {error_msg}\n{traceback.format_exc()}")
+            pickle_errors.append({
+                'chunk_index': i,
+                'path': chunk_path,
+                'error': str(e),
+                'error_type': type(e).__name__,
+                'traceback': traceback.format_exc()
+            })
+
+    # 7. CRITICAL VALIDATION: Ensure ALL pickles were created successfully (09 DEC 2025)
+    if pickle_errors:
+        error_summary = f"Failed to create {len(pickle_errors)}/{len(chunks)} pickles"
+        logger.error(f"[{job_id[:8]}] ❌ STAGE 1 FAILED: {error_summary}")
+        logger.error(f"[{job_id[:8]}] Pickle errors: {pickle_errors}")
+
+        # Raise exception to PREVENT Stage 2 from starting
+        raise RuntimeError(
+            f"Stage 1 pickle creation failed: {error_summary}. "
+            f"Failed chunks: {[e['chunk_index'] for e in pickle_errors]}. "
+            f"First error: {pickle_errors[0]['error']}"
+        )
+
+    if len(chunk_paths) != len(chunks):
+        error_msg = f"Pickle count mismatch: expected {len(chunks)}, got {len(chunk_paths)}"
+        logger.error(f"[{job_id[:8]}] ❌ STAGE 1 FAILED: {error_msg}")
+        raise RuntimeError(f"Stage 1 validation failed: {error_msg}")
+
+    # 8. Final verification - check all pickles exist in blob storage
+    logger.info(f"[{job_id[:8]}] Step 8: Verifying all {len(chunk_paths)} pickles exist in blob storage")
+    missing_pickles = []
+    for chunk_path in chunk_paths:
+        if not silver_repo.blob_exists(config.vector_pickle_container, chunk_path):
+            missing_pickles.append(chunk_path)
+            logger.error(f"[{job_id[:8]}] ❌ Pickle missing after write: {chunk_path}")
+
+    if missing_pickles:
+        error_msg = f"Pickle verification failed: {len(missing_pickles)} pickles missing after write"
+        logger.error(f"[{job_id[:8]}] ❌ STAGE 1 FAILED: {error_msg}")
+        logger.error(f"[{job_id[:8]}] Missing pickles: {missing_pickles}")
+        raise RuntimeError(f"Stage 1 verification failed: {error_msg}. Missing: {missing_pickles}")
+
+    logger.info(
+        f"[{job_id[:8]}] ✅ Stage 1 COMPLETE: {len(chunk_paths)} pickles created and verified, "
+        f"{len(validated_gdf)} total rows, ready for Stage 2 fan-out"
+    )
 
     return {
         "success": True,
@@ -272,7 +373,13 @@ def prepare_vector_chunks(parameters: Dict[str, Any]) -> Dict[str, Any]:
             'chunk_count': len(chunks),
             'chunk_size_used': actual_chunk_size,
             'source_file': blob_name,
-            'geometry_types': validated_gdf.geometry.type.unique().tolist()
+            'geometry_types': validated_gdf.geometry.type.unique().tolist(),
+            'pickle_verification': {
+                'all_verified': True,
+                'pickle_count': len(verified_pickles),
+                'total_pickle_bytes': sum(p['pickle_bytes'] for p in verified_pickles),
+                'total_blob_bytes': sum(p['blob_bytes'] for p in verified_pickles)
+            }
         }
     }
 

@@ -819,7 +819,7 @@ class AdminDbMaintenanceTrigger:
             # ================================================================
             # STEP 1: Drop app schema
             # ================================================================
-            logger.info("💣 Step 1/10: Dropping app schema...")
+            logger.info("💣 Step 1/11: Dropping app schema...")
             step1 = {"step": 1, "action": "drop_app_schema", "status": "pending"}
 
             try:
@@ -855,7 +855,7 @@ class AdminDbMaintenanceTrigger:
             # ================================================================
             # STEP 2: Drop pgstac schema
             # ================================================================
-            logger.info("💣 Step 2/10: Dropping pgstac schema...")
+            logger.info("💣 Step 2/11: Dropping pgstac schema...")
             step2 = {"step": 2, "action": "drop_pgstac_schema", "status": "pending"}
 
             try:
@@ -886,7 +886,7 @@ class AdminDbMaintenanceTrigger:
             # ================================================================
             # STEP 3: Redeploy app schema from Pydantic models
             # ================================================================
-            logger.info("🏗️ Step 3/10: Deploying app schema from Pydantic models...")
+            logger.info("🏗️ Step 3/11: Deploying app schema from Pydantic models...")
             step3 = {"step": 3, "action": "deploy_app_schema", "status": "pending"}
 
             try:
@@ -951,7 +951,7 @@ class AdminDbMaintenanceTrigger:
             # Single admin identity is used for all database operations (ETL, OGC/STAC, TiTiler).
             config = get_config()
             admin_identity = config.database.managed_identity_admin_name
-            logger.info(f"🗺️ Step 4/10: Ensuring geo schema exists and granting permissions to {admin_identity}...")
+            logger.info(f"🗺️ Step 4/11: Ensuring geo schema exists and granting permissions to {admin_identity}...")
             step4 = {"step": 4, "action": "ensure_geo_schema_and_grant_permissions", "status": "pending"}
 
             try:
@@ -1071,7 +1071,7 @@ class AdminDbMaintenanceTrigger:
             # NON-FATAL: pgstac deployment failure should not block system operation
             # App schema (jobs/tasks) is already deployed - core system is functional
             # STAC features just won't work until pgstac is fixed
-            logger.info("📦 Step 5/10: Running pypgstac migrate...")
+            logger.info("📦 Step 5/11: Running pypgstac migrate...")
             step5 = {"step": 5, "action": "deploy_pgstac_schema", "status": "pending"}
 
             if pgstac_failed:
@@ -1121,7 +1121,7 @@ class AdminDbMaintenanceTrigger:
             # After pypgstac migrate recreates the pgstac schema and roles,
             # we grant pgstac_read to the admin identity for STAC catalog access.
             # Note: admin_identity already defined in step 4 (geo schema)
-            logger.info(f"🔐 Step 6/10: Granting pgstac_read role to {admin_identity}...")
+            logger.info(f"🔐 Step 6/11: Granting pgstac_read role to {admin_identity}...")
             step6 = {"step": 6, "action": "grant_pgstac_read_role", "status": "pending"}
 
             if pgstac_failed:
@@ -1166,7 +1166,7 @@ class AdminDbMaintenanceTrigger:
             # ================================================================
             # FIX (26 NOV 2025): Use create_production_collection() directly
             # instead of going through mock HTTP trigger which was silently failing
-            logger.info("📚 Step 7/10: Creating system STAC collections...")
+            logger.info("📚 Step 7/11: Creating system STAC collections...")
             step7 = {"step": 7, "action": "create_system_collections", "status": "pending", "collections": []}
 
             if pgstac_failed:
@@ -1213,7 +1213,7 @@ class AdminDbMaintenanceTrigger:
             # ================================================================
             # STEP 8: Verify app schema
             # ================================================================
-            logger.info("🔍 Step 8/10: Verifying app schema...")
+            logger.info("🔍 Step 8/11: Verifying app schema...")
             step8 = {"step": 8, "action": "verify_app_schema", "status": "pending"}
 
             try:
@@ -1260,7 +1260,7 @@ class AdminDbMaintenanceTrigger:
             # ================================================================
             # STEP 9: Verify pgstac schema
             # ================================================================
-            logger.info("🔍 Step 9/10: Verifying pgstac schema...")
+            logger.info("🔍 Step 9/11: Verifying pgstac schema...")
             step9 = {"step": 9, "action": "verify_pgstac_schema", "status": "pending"}
 
             if pgstac_failed:
@@ -1299,7 +1299,7 @@ class AdminDbMaintenanceTrigger:
             # STEP 10: Ensure Service Bus queues exist (08 DEC 2025)
             # Multi-Function App Architecture requires 4 queues
             # ================================================================
-            logger.info("🚌 Step 10/10: Ensuring Service Bus queues exist...")
+            logger.info("🚌 Step 10/11: Ensuring Service Bus queues exist...")
             step10 = {"step": 10, "action": "ensure_service_bus_queues", "status": "pending"}
 
             try:
@@ -1330,6 +1330,93 @@ class AdminDbMaintenanceTrigger:
                 step10["note"] = "Schema rebuild succeeded but queue verification failed - tasks may not route correctly"
 
             results["steps"].append(step10)
+
+            # ================================================================
+            # STEP 11: Ensure critical storage containers exist (09 DEC 2025)
+            # Bronze and Silver zones must have containers for ETL to function
+            # ================================================================
+            logger.info("📦 Step 11/11: Ensuring critical storage containers exist...")
+            step11 = {"step": 11, "action": "ensure_storage_containers", "status": "pending"}
+
+            try:
+                from infrastructure.blob import BlobRepository
+                from config.defaults import VectorDefaults
+
+                # Define critical containers per zone
+                critical_containers = {
+                    "bronze": [
+                        (config.storage.bronze.vectors, "Raw vector uploads"),
+                        (config.storage.bronze.rasters, "Raw raster uploads"),
+                    ],
+                    "silver": [
+                        (config.storage.silver.cogs, "Cloud Optimized GeoTIFFs"),
+                        (VectorDefaults.PICKLE_CONTAINER, "Vector ETL intermediate storage"),
+                    ]
+                }
+
+                containers_checked = 0
+                containers_created = 0
+                containers_existed = 0
+                container_errors = []
+                container_results = {}
+
+                for zone, containers in critical_containers.items():
+                    try:
+                        blob_repo = BlobRepository.for_zone(zone)
+                        zone_results = {}
+
+                        for container_name, description in containers:
+                            containers_checked += 1
+                            result = blob_repo.ensure_container_exists(container_name)
+                            zone_results[container_name] = result
+
+                            if result.get("success"):
+                                if result.get("created"):
+                                    containers_created += 1
+                                    logger.info(f"   ✅ Created {zone}/{container_name}: {description}")
+                                else:
+                                    containers_existed += 1
+                                    logger.debug(f"   ⏭️ Exists {zone}/{container_name}")
+                            else:
+                                container_errors.append({
+                                    "zone": zone,
+                                    "container": container_name,
+                                    "error": result.get("error", "Unknown error")
+                                })
+                                logger.warning(f"   ⚠️ Failed {zone}/{container_name}: {result.get('error')}")
+
+                        container_results[zone] = zone_results
+
+                    except Exception as zone_error:
+                        logger.warning(f"⚠️ Failed to access {zone} zone: {zone_error}")
+                        container_errors.append({
+                            "zone": zone,
+                            "error": str(zone_error)
+                        })
+
+                # Determine status
+                if not container_errors:
+                    step11["status"] = "success"
+                    logger.info(f"✅ All {containers_checked} storage containers ready "
+                               f"({containers_existed} existed, {containers_created} created)")
+                else:
+                    step11["status"] = "partial"
+                    step11["errors"] = container_errors
+                    logger.warning(f"⚠️ Some storage containers failed: {len(container_errors)} errors")
+
+                step11["containers_checked"] = containers_checked
+                step11["containers_created"] = containers_created
+                step11["containers_existed"] = containers_existed
+                step11["container_results"] = container_results
+
+            except Exception as e:
+                # Non-fatal error - schema rebuild succeeded, just container setup failed
+                logger.warning(f"⚠️ Failed to ensure storage containers: {e}")
+                step11["status"] = "failed"
+                step11["error"] = str(e)
+                step11["note"] = "Schema rebuild succeeded but container creation failed - ETL may fail on first run"
+
+            results["steps"].append(step11)
 
             # ================================================================
             # Final result

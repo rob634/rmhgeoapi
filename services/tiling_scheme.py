@@ -587,12 +587,13 @@ def generate_tiling_scheme(params: dict) -> dict:
             blob_stem = Path(blob_name).stem
             output_blob_name = f"{blob_stem}_tiling_scheme.geojson"
 
-        # Initialize repository
-        blob_repo = BlobRepository()
+        # Initialize repositories for input (bronze) and output (could be either zone)
+        # Input files come from bronze zone - use bronze repo for SAS URL generation
+        bronze_repo = BlobRepository.for_zone("bronze")
 
         # Generate SAS URL for VSI access (2-hour expiry for processing buffer)
         logger.info(f"🌐 Generating SAS URL for VSI access: {blob_name}")
-        sas_url = blob_repo.get_blob_url_with_sas(
+        sas_url = bronze_repo.get_blob_url_with_sas(
             container_name=container_name,
             blob_name=blob_name,
             hours=2  # 2-hour buffer for large file processing
@@ -624,9 +625,10 @@ def generate_tiling_scheme(params: dict) -> dict:
                 raise  # Re-raise other errors
 
         # Upload tiling scheme to blob storage
+        # Output defaults to same container as input (bronze), but can be overridden
         logger.info(f"📤 Uploading tiling scheme: {output_blob_name}")
         geojson_bytes = json.dumps(geojson, indent=2).encode('utf-8')
-        blob_repo.write_blob(
+        bronze_repo.write_blob(
             container=output_container,
             blob_path=output_blob_name,
             data=geojson_bytes,

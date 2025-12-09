@@ -296,8 +296,8 @@ def create_cog(params: dict) -> dict:
         # Generate blob URL with SAS token using managed identity
         logger.info("🔄 Generating SAS URL for input blob using managed identity...")
         from infrastructure.blob import BlobRepository
-        blob_repo = BlobRepository()
-        blob_url = blob_repo.get_blob_url_with_sas(container_name, blob_name, hours=2)
+        bronze_repo = BlobRepository.for_zone("bronze")  # Input files come from bronze zone
+        blob_url = bronze_repo.get_blob_url_with_sas(container_name, blob_name, hours=2)
         logger.info(f"   ✅ SAS URL generated (valid for 2 hours)")
 
         logger.info(f"✅ STEP 1: Parameters validated - blob={blob_name}, container={container_name}")
@@ -354,12 +354,12 @@ def create_cog(params: dict) -> dict:
         config_obj = get_config()
         silver_container = config_obj.storage.silver.get_container('cogs')
 
-        # Download input tile bytes to memory
+        # Download input tile bytes from bronze zone
         from infrastructure.blob import BlobRepository
-        blob_repo = BlobRepository()
+        bronze_repo = BlobRepository.for_zone("bronze")  # Input files come from bronze zone
 
         try:
-            input_blob_bytes = blob_repo.read_blob(
+            input_blob_bytes = bronze_repo.read_blob(
                 container=container_name,
                 blob_path=blob_name
             )
@@ -545,8 +545,9 @@ def create_cog(params: dict) -> dict:
                         raise
 
                     try:
-                        # Upload bytes directly (no BytesIO wrapper needed)
-                        blob_repo.write_blob(
+                        # Upload bytes directly to silver zone (no BytesIO wrapper needed)
+                        silver_repo = BlobRepository.for_zone("silver")  # Output COGs go to silver zone
+                        silver_repo.write_blob(
                             container=silver_container,
                             blob_path=output_blob_name,
                             data=cog_bytes,

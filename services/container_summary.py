@@ -43,8 +43,9 @@ def analyze_container_summary(params: dict) -> dict[str, Any]:
         container_name = params["container_name"]
         file_limit = params.get("file_limit")
         filter_criteria = params.get("filter", {})
+        zone = params.get("zone", "bronze")  # Default to bronze for container analysis
 
-        blob_repo = BlobRepository()
+        blob_repo = BlobRepository.for_zone(zone)  # Use specified zone
 
         # Initialize accumulators
         total_files = 0

@@ -270,10 +270,12 @@ def extract_tiles(params: dict) -> dict:
             logger.info(f"📁 Using job-scoped folder: {output_prefix} (container: {output_container})")
 
         # 🔍 CHECKPOINT 3: BlobRepository Init
+        # Input raster and tiling scheme come from bronze zone, output tiles go to silver zone
         try:
-            logger.debug(f"🔍 [CHECKPOINT_BLOB_REPO] Initializing BlobRepository...")
-            blob_repo = BlobRepository()
-            logger.debug(f"✅ [CHECKPOINT_BLOB_REPO] BlobRepository initialized successfully")
+            logger.debug(f"🔍 [CHECKPOINT_BLOB_REPO] Initializing BlobRepositories (bronze for input, silver for output)...")
+            bronze_repo = BlobRepository.for_zone("bronze")  # Input raster from bronze
+            silver_repo = BlobRepository.for_zone("silver")  # Output tiles to silver
+            logger.debug(f"✅ [CHECKPOINT_BLOB_REPO] BlobRepositories initialized successfully")
         except Exception as e:
             error_msg = f"❌ [CHECKPOINT_BLOB_REPO] FAILED: {str(e)}\n{traceback.format_exc()}"
             logger.error(error_msg)
@@ -282,7 +284,7 @@ def extract_tiles(params: dict) -> dict:
         # 🔍 CHECKPOINT 4: SAS URL Generation
         try:
             logger.info(f"🔍 [CHECKPOINT_SAS_URL] Generating SAS URL for VSI access: {blob_name}")
-            sas_url = blob_repo.get_blob_url_with_sas(
+            sas_url = bronze_repo.get_blob_url_with_sas(
                 container_name=container_name,
                 blob_name=blob_name,
                 hours=4  # 4-hour buffer for long-running extraction (204 tiles ~3-4 min)
@@ -297,9 +299,10 @@ def extract_tiles(params: dict) -> dict:
             return {"success": False, "error": error_msg}
 
         # 🔍 CHECKPOINT 5: Tiling Scheme Download
+        # Note: Tiling scheme is stored in silver zone (config.storage.silver.get_container('cogs'))
         try:
             logger.info(f"🔍 [CHECKPOINT_TILING_SCHEME] Downloading tiling scheme: {tiling_scheme_blob}")
-            tiling_scheme_json = blob_repo.read_blob(tiling_scheme_container, tiling_scheme_blob)
+            tiling_scheme_json = silver_repo.read_blob(tiling_scheme_container, tiling_scheme_blob)
             tiling_scheme = json.loads(tiling_scheme_json)
             logger.debug(f"✅ [CHECKPOINT_TILING_SCHEME] Tiling scheme loaded: {len(tiling_scheme.get('features', []))} tiles")
         except Exception as e:
@@ -448,7 +451,7 @@ def extract_tiles(params: dict) -> dict:
                         blob_name_full = f"{output_prefix}{blob_stem}_{tile_id}.tif"
 
                         logger.debug(f"🔍 [CHECKPOINT_TILE_{i}_UPLOAD] Uploading to blob: {blob_name_full}...")
-                        blob_repo.write_blob(
+                        silver_repo.write_blob(
                             container=output_container,
                             blob_path=blob_name_full,
                             data=tile_buffer,

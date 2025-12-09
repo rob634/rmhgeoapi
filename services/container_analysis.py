@@ -57,11 +57,12 @@ def analyze_container_job(job_id: str, save_to_blob: bool = False) -> Dict[str, 
     task_repo = repos['task_repo']
 
     # Create blob repository if saving requested
+    # Analysis results are saved to silver zone (config.storage.silver.misc)
     blob_repo = None
     if save_to_blob:
         try:
-            blob_repo = BlobRepository()
-            logger.info(f"✅ BlobRepository created for saving results")
+            blob_repo = BlobRepository.for_zone("silver")  # Output to silver zone
+            logger.info(f"✅ BlobRepository created for saving results (silver zone)")
         except Exception as e:
             logger.error(f"❌ Failed to create BlobRepository: {e}")
             # Continue without blob_repo - analysis will still work

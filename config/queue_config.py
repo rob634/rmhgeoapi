@@ -3,11 +3,19 @@ Azure Service Bus Queue Configuration.
 
 Provides configuration for:
     - Service Bus connection settings
-    - Queue names (jobs, tasks)
+    - Queue names (jobs, raster-tasks, vector-tasks)
     - Batch processing settings
     - Retry configuration
 
 Note: This is a SERVICE BUS ONLY application - Storage Queues are NOT supported.
+
+Queue Architecture (11 DEC 2025 - No Legacy Fallbacks):
+    - geospatial-jobs: Job orchestration and stage_complete signals
+    - raster-tasks: Memory-intensive GDAL operations (low concurrency)
+    - vector-tasks: DB-bound and lightweight operations (high concurrency)
+
+All task types MUST be explicitly mapped in TaskRoutingDefaults.
+There is NO fallback queue - unmapped task types raise ContractViolationError.
 
 Exports:
     QueueConfig: Pydantic queue configuration model
@@ -28,7 +36,8 @@ from .defaults import QueueDefaults
 class QueueNames:
     """Queue name constants for easy access."""
     JOBS = QueueDefaults.JOBS_QUEUE
-    TASKS = QueueDefaults.TASKS_QUEUE
+    RASTER_TASKS = QueueDefaults.RASTER_TASKS_QUEUE
+    VECTOR_TASKS = QueueDefaults.VECTOR_TASKS_QUEUE
 
 
 # ============================================================================
@@ -41,11 +50,13 @@ class QueueConfig(BaseModel):
 
     Controls Service Bus connection and message processing settings.
 
-    Queue Architecture (07 DEC 2025):
+    Queue Architecture (11 DEC 2025 - No Legacy Fallbacks):
     - jobs_queue: Job orchestration and stage_complete signals
-    - tasks_queue: Legacy/fallback for unrouted tasks
     - raster_tasks_queue: Memory-intensive GDAL operations (low concurrency)
-    - vector_tasks_queue: DB-bound operations (high concurrency)
+    - vector_tasks_queue: DB-bound and lightweight operations (high concurrency)
+
+    All task types MUST be explicitly mapped in TaskRoutingDefaults.
+    Unmapped task types raise ContractViolationError (no fallback queue).
     """
 
     # Service Bus connection
@@ -60,18 +71,12 @@ class QueueConfig(BaseModel):
         description="Service Bus namespace for managed identity auth (alternative to connection string)"
     )
 
-    # Queue names - Core
+    # Queue names
     jobs_queue: str = Field(
         default=QueueDefaults.JOBS_QUEUE,
         description="Service Bus queue name for job messages and stage_complete signals"
     )
 
-    tasks_queue: str = Field(
-        default=QueueDefaults.TASKS_QUEUE,
-        description="Service Bus queue name for legacy/fallback task messages"
-    )
-
-    # Queue names - Specialized (07 DEC 2025)
     raster_tasks_queue: str = Field(
         default=QueueDefaults.RASTER_TASKS_QUEUE,
         description="Service Bus queue for raster tasks (GDAL operations, low concurrency)"
@@ -105,10 +110,6 @@ class QueueConfig(BaseModel):
         description="Number of retry attempts for Service Bus operations"
     )
 
-    # NOTE: Legacy Storage Queue fields REMOVED (30 NOV 2025)
-    # Storage Queues are NOT supported - Service Bus only.
-    # Use jobs_queue and tasks_queue properties instead.
-
     @classmethod
     def from_environment(cls):
         """Load from environment variables."""
@@ -117,7 +118,6 @@ class QueueConfig(BaseModel):
             # Check both SERVICE_BUS_NAMESPACE and Azure Functions binding variable
             namespace=os.environ.get("SERVICE_BUS_NAMESPACE") or os.environ.get("ServiceBusConnection__fullyQualifiedNamespace"),
             jobs_queue=os.environ.get("SERVICE_BUS_JOBS_QUEUE", QueueDefaults.JOBS_QUEUE),
-            tasks_queue=os.environ.get("SERVICE_BUS_TASKS_QUEUE", QueueDefaults.TASKS_QUEUE),
             raster_tasks_queue=os.environ.get("SERVICE_BUS_RASTER_TASKS_QUEUE", QueueDefaults.RASTER_TASKS_QUEUE),
             vector_tasks_queue=os.environ.get("SERVICE_BUS_VECTOR_TASKS_QUEUE", QueueDefaults.VECTOR_TASKS_QUEUE),
             max_batch_size=int(os.environ.get("SERVICE_BUS_MAX_BATCH_SIZE", str(QueueDefaults.MAX_BATCH_SIZE))),

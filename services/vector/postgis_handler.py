@@ -1314,7 +1314,16 @@ class VectorToPostGISHandler:
         source_crs: str,
         feature_count: int,
         geometry_type: str,
-        bbox: tuple
+        bbox: tuple,
+        # New optional metadata fields (09 DEC 2025)
+        title: str = None,
+        description: str = None,
+        attribution: str = None,
+        license: str = None,
+        keywords: str = None,
+        temporal_start: str = None,
+        temporal_end: str = None,
+        temporal_property: str = None
     ) -> None:
         """
         Register or update table metadata in geo.table_metadata registry.
@@ -1335,6 +1344,14 @@ class VectorToPostGISHandler:
             feature_count: Total number of features in table
             geometry_type: PostGIS geometry type (e.g., 'MULTIPOLYGON')
             bbox: Bounding box tuple (minx, miny, maxx, maxy) for pre-computed extent
+            title: User-friendly display name (optional, 09 DEC 2025)
+            description: Full dataset description (optional, 09 DEC 2025)
+            attribution: Data source attribution (optional, 09 DEC 2025)
+            license: SPDX license identifier e.g. CC-BY-4.0 (optional, 09 DEC 2025)
+            keywords: Comma-separated tags for discoverability (optional, 09 DEC 2025)
+            temporal_start: Start of temporal extent ISO8601 (optional, 09 DEC 2025)
+            temporal_end: End of temporal extent ISO8601 (optional, 09 DEC 2025)
+            temporal_property: Column name containing date data (optional, 09 DEC 2025)
         """
         # Handle None or invalid bbox gracefully
         bbox_values = (None, None, None, None)
@@ -1348,8 +1365,14 @@ class VectorToPostGISHandler:
                         table_name, schema_name, etl_job_id, source_file,
                         source_format, source_crs, feature_count, geometry_type,
                         bbox_minx, bbox_miny, bbox_maxx, bbox_maxy,
+                        title, description, attribution, license, keywords,
+                        temporal_start, temporal_end, temporal_property,
                         created_at, updated_at
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
+                    ) VALUES (
+                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s, %s, %s, %s,
+                        NOW(), NOW()
+                    )
                     ON CONFLICT (table_name) DO UPDATE SET
                         schema_name = EXCLUDED.schema_name,
                         etl_job_id = EXCLUDED.etl_job_id,
@@ -1362,11 +1385,21 @@ class VectorToPostGISHandler:
                         bbox_miny = EXCLUDED.bbox_miny,
                         bbox_maxx = EXCLUDED.bbox_maxx,
                         bbox_maxy = EXCLUDED.bbox_maxy,
+                        title = COALESCE(EXCLUDED.title, geo.table_metadata.title),
+                        description = COALESCE(EXCLUDED.description, geo.table_metadata.description),
+                        attribution = COALESCE(EXCLUDED.attribution, geo.table_metadata.attribution),
+                        license = COALESCE(EXCLUDED.license, geo.table_metadata.license),
+                        keywords = COALESCE(EXCLUDED.keywords, geo.table_metadata.keywords),
+                        temporal_start = COALESCE(EXCLUDED.temporal_start, geo.table_metadata.temporal_start),
+                        temporal_end = COALESCE(EXCLUDED.temporal_end, geo.table_metadata.temporal_end),
+                        temporal_property = COALESCE(EXCLUDED.temporal_property, geo.table_metadata.temporal_property),
                         updated_at = NOW()
                 """, (
                     table_name, schema, etl_job_id, source_file,
                     source_format, source_crs, feature_count, geometry_type,
-                    bbox_values[0], bbox_values[1], bbox_values[2], bbox_values[3]
+                    bbox_values[0], bbox_values[1], bbox_values[2], bbox_values[3],
+                    title, description, attribution, license, keywords,
+                    temporal_start, temporal_end, temporal_property
                 ))
                 conn.commit()
 

@@ -75,6 +75,12 @@ Endpoints:
     Schema Management (DEV ONLY):
         POST /api/dbadmin/maintenance/full-rebuild?confirm=yes - Atomic schema rebuild
 
+    Geo Schema Management (DEV ONLY):
+        GET  /api/dbadmin/geo/tables - List geo tables with tracking status
+        GET  /api/dbadmin/geo/metadata - List geo.table_metadata records
+        GET  /api/dbadmin/geo/orphans - Check for orphaned tables/metadata
+        POST /api/dbadmin/geo/unpublish?table_name={name}&confirm=yes - Cascade delete table
+
 Processing Pattern:
     1. HTTP Request Processing:
        - HTTP request triggers workflow definition validation
@@ -82,12 +88,13 @@ Processing Pattern:
        - Each stage creates parallel tasks with parameter validation
        - Job queued to geospatial-jobs queue for asynchronous processing
 
-    2. Queue-Based Task Execution:
-       - geospatial-jobs queue: Job messages from controllers
-       - geospatial-tasks queue: Task messages for atomic work units
+    2. Queue-Based Task Execution (11 DEC 2025 - No Legacy Fallbacks):
+       - geospatial-jobs queue: Job messages and stage_complete signals
+       - raster-tasks queue: Memory-intensive GDAL operations (low concurrency)
+       - vector-tasks queue: DB-bound and lightweight operations (high concurrency)
        - Tasks processed independently with strong typing discipline
        - Last completing task aggregates results into job result_data
-       - Poison queues monitor and recover failed messages
+       - All task types MUST be mapped in TaskRoutingDefaults (no fallback)
 
 Environment Variables:
     STORAGE_ACCOUNT_NAME: Azure storage account name
@@ -178,6 +185,7 @@ from core.machine import CoreMachine
 # Application modules (our code) - HTTP Trigger Classes
 # Import directly from modules to control when instances are created
 from triggers.health import health_check_trigger
+from triggers.livez import livez_trigger
 from triggers.submit_job import submit_job_trigger
 from triggers.get_job_status import get_job_status_trigger
 from triggers.poison_monitor import poison_monitor_trigger
@@ -241,6 +249,7 @@ from vector_viewer import get_vector_viewer_triggers
 # Pipeline Dashboard - Container blob browser (21 NOV 2025) - Read-only UI operations
 from triggers.list_container_blobs import list_container_blobs_handler
 from triggers.get_blob_metadata import get_blob_metadata_handler
+from triggers.list_storage_containers import list_storage_containers_handler
 
 # Janitor Triggers (21 NOV 2025) - System maintenance (timer + HTTP)
 from triggers.janitor import (
@@ -335,6 +344,12 @@ app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
 def health(req: func.HttpRequest) -> func.HttpResponse:
     """Health check endpoint using HTTP trigger base class."""
     return health_check_trigger.handle_request(req)
+
+
+@app.route(route="livez", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def livez(req: func.HttpRequest) -> func.HttpResponse:
+    """Liveness probe - is the app alive? No dependencies checked."""
+    return livez_trigger.handle_request(req)
 
 
 # ============================================================================
@@ -496,6 +511,126 @@ def db_maintenance_full_rebuild(req: func.HttpRequest) -> func.HttpResponse:
     Preserves geo schema (business data) and h3 schema (static bootstrap data).
     """
     return admin_db_maintenance_trigger.handle_request(req)
+
+
+# ============================================================================
+# GEO SCHEMA MANAGEMENT ENDPOINTS (10 DEC 2025)
+# ============================================================================
+# Tools for managing vector tables in the geo schema.
+# Handles both tracked tables (with metadata) and orphaned tables
+# (tables that exist after a full-rebuild wipes app/pgstac schemas).
+# ============================================================================
+
+@app.route(route="dbadmin/geo/tables", methods=["GET"])
+def list_geo_tables(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    List all tables in the geo schema with metadata tracking status.
+
+    GET /api/dbadmin/geo/tables
+
+    Returns tables with tracking info (has_metadata, has_stac_item).
+    Useful for discovering orphaned tables after a full-rebuild.
+
+    Response:
+        {
+            "tables": [
+                {"table_name": "world_countries", "has_metadata": true, "has_stac_item": true, ...},
+                {"table_name": "orphaned_test", "has_metadata": false, "has_stac_item": false, ...}
+            ],
+            "summary": {"total": 2, "tracked": 1, "orphaned": 1}
+        }
+    """
+    return admin_db_maintenance_trigger._list_geo_tables(req)
+
+
+@app.route(route="dbadmin/geo/unpublish", methods=["POST"])
+def unpublish_geo_table(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Cascade delete a vector table from geo schema.
+
+    POST /api/dbadmin/geo/unpublish?table_name={name}&confirm=yes
+
+    Handles both tracked and orphaned tables:
+    - Tracked: Delete STAC item -> Delete metadata row -> DROP TABLE
+    - Orphaned: Just DROP TABLE (with warnings)
+
+    Query Parameters:
+        table_name: Table name in geo schema (without 'geo.' prefix)
+        confirm: Must be "yes" to execute (safety)
+
+    Response:
+        {
+            "success": true,
+            "table_name": "world_countries",
+            "deleted": {
+                "stac_item": "postgis-geo-world_countries",
+                "metadata_row": true,
+                "geo_table": true
+            },
+            "warnings": [...],
+            "was_orphaned": false
+        }
+    """
+    return admin_db_maintenance_trigger._unpublish_geo_table(req)
+
+
+@app.route(route="dbadmin/geo/metadata", methods=["GET"])
+def list_geo_metadata(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    List all records in geo.table_metadata with filtering options.
+
+    GET /api/dbadmin/geo/metadata
+    GET /api/dbadmin/geo/metadata?job_id=abc123
+    GET /api/dbadmin/geo/metadata?has_stac=true
+    GET /api/dbadmin/geo/metadata?limit=50&offset=0
+
+    Query Parameters:
+        job_id: Filter by ETL job ID
+        has_stac: Filter by STAC linkage (true/false)
+        limit: Max records (default: 100, max: 500)
+        offset: Pagination offset (default: 0)
+
+    Response:
+        {
+            "metadata": [{...}],
+            "total": 15,
+            "limit": 100,
+            "offset": 0,
+            "filters_applied": {...}
+        }
+    """
+    return admin_db_maintenance_trigger._list_metadata(req)
+
+
+@app.route(route="dbadmin/geo/orphans", methods=["GET"])
+def check_geo_orphans(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Check for orphaned tables and metadata in geo schema.
+
+    GET /api/dbadmin/geo/orphans
+
+    Detects:
+    - Orphaned Tables: Tables in geo schema without metadata records
+    - Orphaned Metadata: Metadata records for non-existent tables
+
+    Detection only - does NOT delete anything.
+
+    Response:
+        {
+            "success": true,
+            "orphaned_tables": [...],
+            "orphaned_metadata": [...],
+            "tracked_tables": [...],
+            "summary": {
+                "total_geo_tables": 3,
+                "tracked": 2,
+                "orphaned_tables": 1,
+                "orphaned_metadata": 0,
+                "health_status": "ORPHANS_DETECTED"
+            }
+        }
+    """
+    return admin_db_maintenance_trigger._check_geo_orphans(req)
 
 
 # ============================================================================
@@ -1844,6 +1979,27 @@ def get_blob_metadata(req: func.HttpRequest) -> func.HttpResponse:
     return get_blob_metadata_handler(req)
 
 
+@app.route(route="storage/containers", methods=["GET"])
+def list_storage_containers(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    List all containers across all storage zones (read-only UI operation).
+
+    GET /api/storage/containers
+    GET /api/storage/containers?zone=bronze
+    GET /api/storage/containers?prefix=silver-
+
+    Query Parameters:
+        zone (optional): Filter to specific zone (bronze, silver, silverext, gold)
+        prefix (optional): Container name prefix filter
+
+    Returns:
+        JSON with containers grouped by zone, storage account info, and counts
+
+    Note: This is a lightweight UI endpoint for discovering available containers.
+    """
+    return list_storage_containers_handler(req)
+
+
 # ============================================================================
 # UNIFIED WEB INTERFACES (14 NOV 2025)
 # ============================================================================
@@ -2030,16 +2186,19 @@ def debug_dump_all(req: func.HttpRequest) -> func.HttpResponse:
 
 
 # ============================================================================
-# SERVICE BUS TRIGGERS - Conditional Registration (07 DEC 2025)
+# SERVICE BUS TRIGGERS - Conditional Registration (11 DEC 2025)
 # ============================================================================
 # Multi-Function App Architecture: Triggers are conditionally registered based
 # on APP_MODE environment variable. This allows identical code to be deployed
 # to multiple Function Apps with different queue listening configurations.
 #
-# - _app_mode.listens_to_jobs_queue: Platform/standalone modes
-# - _app_mode.listens_to_raster_tasks: Raster worker/platform_raster/standalone
-# - _app_mode.listens_to_vector_tasks: Vector worker/platform_vector/standalone
-# - _app_mode.listens_to_legacy_tasks: Standalone mode only (backward compat)
+# THREE QUEUES ONLY (No Legacy Fallbacks):
+# - geospatial-jobs: Job orchestration + stage_complete signals
+# - raster-tasks: Memory-intensive GDAL operations (low concurrency)
+# - vector-tasks: DB-bound and lightweight operations (high concurrency)
+#
+# All task types MUST be explicitly mapped in TaskRoutingDefaults.
+# Unmapped task types raise ContractViolationError (no fallback queue).
 #
 # See config/app_mode_config.py for mode definitions and queue mappings.
 # ============================================================================
@@ -2187,92 +2346,6 @@ if _app_mode.listens_to_jobs_queue:
             # Log extensively but don't re-raise to avoid Service Bus retries for job messages.
             logger.warning(f"[{correlation_id}] ⚠️ Function completing (exception logged but not re-raised)")
             logger.warning(f"[{correlation_id}] ✅ Job failure handling complete")
-
-
-# Legacy Tasks Queue Trigger - Standalone mode only (backward compatibility)
-if _app_mode.listens_to_legacy_tasks:
-    @app.service_bus_queue_trigger(
-        arg_name="msg",
-        queue_name="geospatial-tasks",
-        connection="ServiceBusConnection"
-    )
-    def process_service_bus_task(msg: func.ServiceBusMessage) -> None:
-        """
-        Process task messages from Service Bus using CoreMachine.
-
-        EPOCH 4: Uses CoreMachine universal orchestrator instead of controllers.
-        Handles all task execution, stage completion, and job advancement automatically.
-
-        Note: This is the LEGACY tasks queue (geospatial-tasks).
-        New deployments use raster-tasks and vector-tasks queues.
-        This queue is only enabled in standalone mode for backward compatibility.
-
-        Performance benefits:
-        - Processes batches of tasks efficiently
-        - Better concurrency handling
-        - Lower latency for high-volume scenarios
-        """
-        # Generate correlation_id for function invocation tracing
-        # Purpose: Log prefix [abc12345] to filter Application Insights logs for this execution
-        # Scope: Local to this function invocation (not propagated to TaskQueueMessage)
-        # Usage: Search Application Insights: traces | where message contains '[abc12345]'
-        # Note: TaskQueueMessage doesn't have correlation_id field (only JobQueueMessage does)
-        # See: core/schema/queue.py for correlation_id field documentation
-        correlation_id = str(uuid.uuid4())[:8]
-        start_time = time.time()
-
-        logger.info(f"[{correlation_id}] 🤖 COREMACHINE TASK TRIGGER (Service Bus - legacy queue)")
-
-        try:
-            # Extract message body
-            message_body = msg.get_body().decode('utf-8')
-
-            # Parse message
-            task_message = TaskQueueMessage.model_validate_json(message_body)
-            logger.info(f"[{correlation_id}] ✅ Parsed task: {task_message.task_id}, type={task_message.task_type}")
-
-            # Add metadata for tracking
-            if task_message.parameters is None:
-                task_message.parameters = {}
-            task_message.parameters['_correlation_id'] = correlation_id
-            task_message.parameters['_processing_path'] = 'service_bus_legacy'
-
-            # EPOCH 4: Process via CoreMachine (universal orchestrator)
-            # Handles: task execution, stage completion detection, job advancement
-            result = core_machine.process_task_message(task_message)
-
-            elapsed = time.time() - start_time
-            logger.info(f"[{correlation_id}] ✅ CoreMachine processed task in {elapsed:.3f}s")
-            logger.info(f"[{correlation_id}] 📊 Result: {result}")
-
-            # Check if stage completed
-            if result.get('stage_complete'):
-                logger.info(f"[{correlation_id}] 🎯 Stage {task_message.stage} complete for job {task_message.parent_job_id[:16]}...")
-
-        except Exception as e:
-            elapsed = time.time() - start_time
-            logger.error(f"[{correlation_id}] ❌ EXCEPTION in process_service_bus_task after {elapsed:.3f}s")
-            logger.error(f"[{correlation_id}] 📍 Exception type: {type(e).__name__}")
-            logger.error(f"[{correlation_id}] 📍 Exception message: {e}")
-            logger.error(f"[{correlation_id}] 📍 Full traceback:\n{traceback.format_exc()}")
-
-            # Log task details if available
-            if 'task_message' in locals() and task_message:
-                logger.error(f"[{correlation_id}] 📋 Task ID: {task_message.task_id}")
-                logger.error(f"[{correlation_id}] 📋 Task Type: {task_message.task_type}")
-                logger.error(f"[{correlation_id}] 📋 Job ID: {task_message.parent_job_id}")
-                logger.error(f"[{correlation_id}] 📋 Stage: {task_message.stage}")
-
-            # NOTE: Do NOT re-raise! CoreMachine already handled the failure internally.
-            # Re-raising would trigger Service Bus retries instead of our application-level
-            # retry logic (exponential backoff, retry_count tracking in database).
-            # CoreMachine's process_task_message() already:
-            # 1. Caught the task execution failure
-            # 2. Incremented retry_count in database
-            # 3. Re-queued with exponential backoff delay (if retries available)
-            # 4. OR marked as permanently FAILED (if max retries exceeded)
-            logger.warning(f"[{correlation_id}] ⚠️ Function completing (exception logged but not re-raised)")
-            logger.warning(f"[{correlation_id}] ⚠️ CoreMachine retry logic has handled this failure internally")
 
 
 # Raster Tasks Queue Trigger - Raster worker/platform_raster/standalone modes
@@ -2650,6 +2723,44 @@ def janitor_orphan_detector(timer: func.TimerRequest) -> None:
     Schedule: Every hour - these are edge cases, not time-critical
     """
     orphan_detector_handler(timer)
+
+
+@app.timer_trigger(
+    schedule="0 0 */6 * * *",  # Every 6 hours at minute 0
+    arg_name="timer",
+    run_on_startup=False
+)
+def geo_orphan_check_timer(timer: func.TimerRequest) -> None:
+    """
+    Timer trigger: Check for geo schema orphans every 6 hours.
+
+    Detects:
+    1. Orphaned Tables: Tables in geo schema without metadata records
+    2. Orphaned Metadata: Metadata records for non-existent tables
+
+    Detection only - does NOT auto-delete. Logs findings to Application Insights.
+
+    Schedule: Every 6 hours - low overhead monitoring for data integrity
+    """
+    from services.janitor_service import geo_orphan_detector
+    from util_logger import LoggerFactory, ComponentType
+
+    timer_logger = LoggerFactory.create_logger(ComponentType.CONTROLLER, "geo_orphan_timer")
+    timer_logger.info("⏰ Timer: Starting geo orphan detection")
+
+    result = geo_orphan_detector.run()
+
+    if result.get("success"):
+        summary = result.get("summary", {})
+        timer_logger.info(
+            f"⏰ Timer: Geo orphan check complete - "
+            f"{summary.get('tracked', 0)} tracked, "
+            f"{summary.get('orphaned_tables', 0)} orphaned tables, "
+            f"{summary.get('orphaned_metadata', 0)} orphaned metadata, "
+            f"status={summary.get('health_status', 'UNKNOWN')}"
+        )
+    else:
+        timer_logger.error(f"⏰ Timer: Geo orphan check failed - {result.get('error')}")
 
 
 # ============================================================================

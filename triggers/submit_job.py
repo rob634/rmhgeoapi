@@ -113,16 +113,20 @@ class JobSubmissionTrigger(JobManagementTrigger):
         job_id = controller.generate_job_id(validated_params)
         self.logger.info(f"Checking for existing {job_type} job with ID: {job_id}")
 
+        # Extract force parameter from query string (09 DEC 2025)
+        force_retry = req.params.get('force', 'false').lower() == 'true'
+
         # IDEMPOTENCY CHECK: See if job already exists
         from infrastructure.factory import RepositoryFactory
         repos = RepositoryFactory.create_repositories()
         existing_job = repos['job_repo'].get_job(job_id)
 
         if existing_job:
-            self.logger.info(f"🔄 Job {job_id[:16]}... already exists with status: {existing_job.status}")
+            job_status = existing_job.status.value if hasattr(existing_job.status, 'value') else str(existing_job.status)
+            self.logger.info(f"🔄 Job {job_id[:16]}... already exists with status: {job_status}")
 
             # If job already completed, return existing results without re-running
-            if existing_job.status.value == 'completed':
+            if job_status == 'completed':
                 self.logger.info(f"✅ Job already completed - returning existing results")
                 return {
                     "job_id": job_id,
@@ -135,14 +139,76 @@ class JobSubmissionTrigger(JobManagementTrigger):
                     "completed_at": existing_job.updated_at.isoformat() if existing_job.updated_at else None,
                     "idempotent": True
                 }
-            else:
-                # Job exists but not completed - return current status
-                self.logger.info(f"⏳ Job in progress with status: {existing_job.status}")
+
+            # ====================================================================================
+            # FAILED JOB RE-SUBMISSION (09 DEC 2025)
+            # ====================================================================================
+            # If job is failed, auto-retry: reset job state and re-queue
+            # Previous error is preserved in job's metadata.error_history[]
+            # ====================================================================================
+            elif job_status == 'failed':
+                self.logger.info(f"🔄 Re-submitting failed job {job_id[:16]}...")
+
+                # Reset job state (preserves error history in metadata)
+                reset_result = repos['job_repo'].reset_failed_job(job_id, preserve_error=True)
+
+                if not reset_result.get('reset'):
+                    # Concurrent modification or other issue
+                    self.logger.warning(f"⚠️ Failed to reset job {job_id[:16]}... for re-submission")
+                    return {
+                        "job_id": job_id,
+                        "status": "reset_failed",
+                        "job_type": job_type,
+                        "message": "Failed to reset job for re-submission (concurrent modification?)",
+                        "previous_status": "failed",
+                        "idempotent": True
+                    }
+
+                # Delete old tasks (they'll be recreated when job is processed)
+                tasks_deleted = repos['task_repo'].delete_tasks_for_job(job_id)
+                self.logger.info(f"🗑️ Cleared {tasks_deleted} old tasks for re-submission")
+
+                # Re-queue the job
+                self.logger.debug(f"📤 Re-queueing job for processing")
+                try:
+                    queue_result = controller.queue_job(job_id, validated_params)
+                    self.logger.debug(f"📤 Queue result: {queue_result}")
+                except Exception as queue_error:
+                    self.logger.error(f"❌ Failed to re-queue job {job_id}: {queue_error}")
+                    raise RuntimeError(f"Job re-queuing failed: {queue_error}")
+
                 return {
                     "job_id": job_id,
-                    "status": existing_job.status.value,
+                    "status": "resubmitted",
                     "job_type": job_type,
-                    "message": f"Job already exists with status: {existing_job.status.value} (idempotency - not re-queued)",
+                    "message": "Previously failed job has been reset and re-queued",
+                    "attempt": reset_result.get('attempt', 2),
+                    "previous_status": "failed",
+                    "previous_stage": reset_result.get('previous_stage'),
+                    "previous_error": reset_result.get('previous_error'),
+                    "tasks_cleared": tasks_deleted,
+                    "queue_info": queue_result,
+                    "idempotent": False
+                }
+
+            # Job is in progress (queued/processing) - check force parameter
+            elif force_retry:
+                # Cannot force retry a non-failed job
+                self.logger.warning(f"⚠️ Cannot force retry job with status '{job_status}'")
+                raise ValueError(
+                    f"Cannot force retry job with status '{job_status}'. "
+                    f"Only failed jobs can be re-submitted. "
+                    f"Current job is still {job_status}."
+                )
+
+            else:
+                # Job exists but not completed - return current status
+                self.logger.info(f"⏳ Job in progress with status: {job_status}")
+                return {
+                    "job_id": job_id,
+                    "status": job_status,
+                    "job_type": job_type,
+                    "message": f"Job already exists with status: {job_status} (idempotency - not re-queued)",
                     "parameters": validated_params,
                     "created_at": existing_job.created_at.isoformat() if existing_job.created_at else None,
                     "current_stage": existing_job.stage,

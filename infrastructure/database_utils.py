@@ -134,7 +134,7 @@ async def batched_executemany_async(
     benefits with non-blocking I/O for better concurrency.
 
     Args:
-        conn: asyncpg connection (from connection pool)
+        conn: asyncpg connection (fresh connection, NO POOLING)
         stmt: SQL statement string (asyncpg uses $1, $2 placeholders)
         data_iterator: Iterator yielding data tuples (one per row)
         batch_size: Rows per batch (default: 1000)
@@ -148,8 +148,8 @@ async def batched_executemany_async(
         from infrastructure.database_utils import batched_executemany_async
 
         async def insert_h3_cells():
-            # Create connection pool
-            pool = await asyncpg.create_pool(conn_string)
+            # Create fresh connection (NO POOLING - Azure Functions requirement)
+            conn = await asyncpg.connect(conn_string)
 
             # Prepare statement (asyncpg uses $1, $2, $3 placeholders)
             stmt = '''
@@ -163,14 +163,13 @@ async def batched_executemany_async(
                     yield (i, 4, f'POLYGON(...)')
 
             # Execute batched insert
-            async with pool.acquire() as conn:
-                total = await batched_executemany_async(
-                    conn, stmt, generate_cells(),
-                    batch_size=1000, description="H3 cells"
-                )
-                print(f"Inserted {total} H3 cells")
+            total = await batched_executemany_async(
+                conn, stmt, generate_cells(),
+                batch_size=1000, description="H3 cells"
+            )
+            print(f"Inserted {total} H3 cells")
 
-            await pool.close()
+            await conn.close()
 
     Performance:
         - Async I/O allows CPU generation to overlap with database writes
@@ -179,7 +178,7 @@ async def batched_executemany_async(
 
     Notes:
         - asyncpg auto-commits unless in explicit transaction
-        - Use connection from pool.acquire() context
+        - Use fresh connection per operation (NO POOLING in Azure Functions)
         - asyncpg uses $1, $2, $3 placeholders (not %s like psycopg)
         - Generator allows large dataset processing without memory pressure
     """

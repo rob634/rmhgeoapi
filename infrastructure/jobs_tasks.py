@@ -281,11 +281,11 @@ class JobRepository(PostgreSQLJobRepository):
     def fail_job(self, job_id: str, error_details: str) -> bool:
         """
         Mark job as failed with error details.
-        
+
         Args:
             job_id: Job ID to fail
             error_details: Error description
-            
+
         Returns:
             True if failed successfully
         """
@@ -294,6 +294,116 @@ class JobRepository(PostgreSQLJobRepository):
             JobStatus.FAILED,
             {'error_details': error_details}
         )
+
+    def reset_failed_job(self, job_id: str, preserve_error: bool = True) -> Dict[str, Any]:
+        """
+        Reset a failed job for re-processing (09 DEC 2025).
+
+        This method is used for failed job re-submission. It:
+        1. Optionally preserves error history in job metadata
+        2. Resets job state to stage 1 with status QUEUED
+        3. Clears error_details and result_data for fresh start
+
+        Args:
+            job_id: Job ID to reset
+            preserve_error: If True, append current error to metadata.error_history[]
+
+        Returns:
+            Dict with reset results:
+            {
+                "reset": True/False,
+                "attempt": int (new attempt number),
+                "previous_stage": int,
+                "previous_error": str or None
+            }
+
+        Raises:
+            ValueError: If job not found or not in failed status
+
+        Example:
+            result = job_repo.reset_failed_job("abc123...")
+            # result = {"reset": True, "attempt": 2, "previous_stage": 3, "previous_error": "..."}
+        """
+        import json
+        from psycopg import sql
+
+        with self._error_context("reset failed job", job_id):
+            # Get current job
+            current_job = self.get_job(job_id)
+
+            if not current_job:
+                raise ValueError(f"Job not found: {job_id}")
+
+            # Verify job is in failed status
+            job_status = current_job.status.value if hasattr(current_job.status, 'value') else str(current_job.status)
+            if job_status != 'failed':
+                raise ValueError(
+                    f"Cannot reset job with status '{job_status}'. "
+                    f"Only failed jobs can be reset for re-submission."
+                )
+
+            # Prepare error history preservation
+            previous_stage = current_job.stage
+            previous_error = current_job.error_details
+
+            # Get existing metadata (may be None or {})
+            existing_metadata = current_job.metadata if hasattr(current_job, 'metadata') and current_job.metadata else {}
+            error_history = existing_metadata.get('error_history', [])
+            new_attempt = len(error_history) + 2  # +2 because original was attempt 1
+
+            if preserve_error and previous_error:
+                # Append current error to history
+                error_entry = {
+                    "attempt": new_attempt - 1,  # This was the failed attempt
+                    "failed_at": current_job.updated_at.isoformat() if current_job.updated_at else None,
+                    "failed_stage": previous_stage,
+                    "error": previous_error
+                }
+                error_history.append(error_entry)
+                existing_metadata['error_history'] = error_history
+
+            # Update job to reset state
+            query = sql.SQL("""
+                UPDATE {schema}.{table}
+                SET status = 'queued',
+                    stage = 1,
+                    error_details = NULL,
+                    result_data = NULL,
+                    stage_results = '{{}}',
+                    metadata = %s,
+                    updated_at = NOW()
+                WHERE job_id = %s AND status = 'failed'
+                RETURNING job_id
+            """).format(
+                schema=sql.Identifier(self.schema_name),
+                table=sql.Identifier("jobs")
+            )
+
+            result = self._execute_query(
+                query,
+                (json.dumps(existing_metadata), job_id),
+                fetch='one'
+            )
+
+            if result:
+                logger.info(
+                    f"🔄 Reset failed job {job_id[:16]}... for attempt #{new_attempt} "
+                    f"(was at stage {previous_stage})"
+                )
+                return {
+                    "reset": True,
+                    "attempt": new_attempt,
+                    "previous_stage": previous_stage,
+                    "previous_error": previous_error
+                }
+            else:
+                logger.warning(f"⚠️ Failed to reset job {job_id[:16]}... (concurrent modification?)")
+                return {
+                    "reset": False,
+                    "attempt": new_attempt - 1,
+                    "previous_stage": previous_stage,
+                    "previous_error": previous_error
+                }
 
 
 # ============================================================================
@@ -728,6 +838,47 @@ class TaskRepository(PostgreSQLTaskRepository):
                 task_records.append(TaskRecord(**row))
 
         return task_records
+
+    def delete_tasks_for_job(self, job_id: str) -> int:
+        """
+        Delete all tasks for a job (09 DEC 2025).
+
+        Used during failed job re-submission to clear old tasks before
+        creating new ones. Tasks will be recreated when the job is re-queued.
+
+        Args:
+            job_id: Job identifier
+
+        Returns:
+            Number of tasks deleted
+
+        Example:
+            deleted_count = task_repo.delete_tasks_for_job('job123...')
+            # deleted_count = 6
+        """
+        from psycopg import sql
+
+        with self._error_context("delete tasks for job", job_id):
+            query = sql.SQL("""
+                DELETE FROM {schema}.{table}
+                WHERE parent_job_id = %s
+                RETURNING task_id
+            """).format(
+                schema=sql.Identifier(self.schema_name),
+                table=sql.Identifier("tasks")
+            )
+
+            # Execute and count deleted rows
+            result = self._execute_query(query, (job_id,), fetch='all')
+
+            deleted_count = len(result) if result else 0
+
+            if deleted_count > 0:
+                logger.info(f"🗑️ Deleted {deleted_count} tasks for job {job_id[:16]}...")
+            else:
+                logger.debug(f"📋 No tasks to delete for job {job_id[:16]}...")
+
+            return deleted_count
 
     def get_pending_retry_batches(
         self,

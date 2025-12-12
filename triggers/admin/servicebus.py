@@ -22,6 +22,7 @@ from azure.identity import DefaultAzureCredential
 
 from util_logger import LoggerFactory, ComponentType
 from config import AppConfig
+from config.defaults import QueueDefaults
 
 
 class ServiceBusAdminTrigger:
@@ -44,8 +45,12 @@ class ServiceBusAdminTrigger:
         self._service_bus_client = None
         self._config = None
 
-        # Known queue names from config
-        self._known_queues = ["geospatial-jobs", "geospatial-tasks"]
+        # Known queue names from QueueDefaults (11 DEC 2025 - No Legacy Fallbacks)
+        self._known_queues = [
+            QueueDefaults.JOBS_QUEUE,
+            QueueDefaults.RASTER_TASKS_QUEUE,
+            QueueDefaults.VECTOR_TASKS_QUEUE,
+        ]
 
         self.logger.info("🔧 Initializing ServiceBusAdminTrigger")
         self.logger.info("✅ ServiceBusAdminTrigger initialized")

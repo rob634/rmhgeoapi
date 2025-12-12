@@ -1,9 +1,38 @@
 # Active Tasks - Geospatial ETL Pipelines
 
-**Last Updated**: 07 DEC 2025 (Database Diagnostics & Remote Administration Enhancement)
+**Last Updated**: 11 DEC 2025 (Service Bus Queue Standardization Complete)
 **Author**: Robert and Geospatial Claude Legion
 
 **Note**: Completed tasks have been moved to `HISTORY2.md` (05 DEC 2025 cleanup)
+
+---
+
+## ✅ RECENTLY COMPLETED (11 DEC 2025)
+
+### Service Bus Queue Standardization - No Legacy Fallbacks
+
+**Status**: ✅ **COMPLETE**
+**Philosophy**: First Principles - explicit errors over fallback patterns
+
+**What Changed**:
+- Removed `geospatial-tasks` legacy queue - now only 3 queues:
+  - `geospatial-jobs` - Job orchestration + stage_complete signals
+  - `raster-tasks` - Memory-intensive GDAL operations (low concurrency)
+  - `vector-tasks` - DB-bound and lightweight operations (high concurrency)
+- All task types MUST be explicitly mapped in `TaskRoutingDefaults`
+- Unmapped task types raise `ContractViolationError` (no silent fallback)
+- Retry logic now routes back to original queue (was routing to legacy queue)
+- Health endpoint includes `task_routing` check for configuration validation
+
+**Files Modified**:
+- `config/defaults.py` - Removed `TASKS_QUEUE`, expanded `TaskRoutingDefaults`
+- `config/queue_config.py` - Removed `tasks_queue` field
+- `config/app_mode_config.py` - Removed `listens_to_legacy_tasks` property
+- `function_app.py` - Removed legacy tasks trigger
+- `core/machine.py` - Explicit routing with `ContractViolationError`
+- `triggers/health.py` - Added `_check_task_routing_coverage()`
+- `triggers/admin/servicebus.py` - Updated known queues
+- `infrastructure/service_bus.py` - Updated `ensure_all_queues_exist()`
 
 ---
 
@@ -551,6 +580,45 @@ def inventory_raster_item(params):
 
 ---
 
+### Docker Worker for Long-Running GDAL Operations (12 DEC 2025)
+
+**Status**: 📋 **PLANNING COMPLETE** - Ready for Implementation
+**Priority**: 🟡 MEDIUM - Future Enhancement
+**Reference**: `/GDAL_WORKER.md` (comprehensive implementation guide)
+
+**Problem**: Azure Functions has a 30-minute timeout. Large raster operations (tile extraction, COG creation for >1GB files) can exceed this limit.
+
+**Solution**: Separate Docker-based worker on Azure Web App with dedicated App Service Plan.
+
+**Key Architecture Decisions**:
+| Decision | Choice | Rationale |
+|----------|--------|-----------|
+| Platform | Azure Web App (Docker) | Dedicated App Service Plan, no EA approval needed |
+| Codebase | **Separate Git repo** | Clean separation, copy only needed components |
+| Queue | NEW `docker-tasks` queue | Explicit routing, no race conditions |
+| Timeout | 1 hour default (env configurable) | Covers largest raster operations |
+| Priority | Raster operations only | Vector timeout issues are rare |
+
+**Critical Finding**: Architecture already supports multi-queue jobs! Stage completion is queue-agnostic - counts tasks in database regardless of which queue processed them.
+
+**Phase 1: rmhgeoapi Modifications** (this repo):
+- [ ] Add `DOCKER_TASKS_QUEUE = "docker-tasks"` to `config/defaults.py`
+- [ ] Add `DockerRoutingDefaults` class with `DOCKER_TASK_TYPES` list
+- [ ] Add `docker_tasks_queue` field to `config/queues_config.py`
+- [ ] Add `_should_route_to_docker()` method to `core/machine.py`
+- [ ] Update `_get_queue_for_task()` to check Docker routing first
+- [ ] Create `docker-tasks` queue in Azure Service Bus
+
+**Phase 2+: New Repository** (`rmh-gdal-worker`):
+- Create Docker image with GDAL dependencies
+- Service Bus listener for `docker-tasks` queue
+- Copy CoreMachine task processing logic
+- Send `stage_complete` signals to `geospatial-jobs` queue
+
+**Full Implementation Details**: See `/GDAL_WORKER.md`
+
+---
+
 ### Azure API Management (APIM)
 
 **Status**: 📋 **FUTURE**
@@ -559,9 +627,66 @@ def inventory_raster_item(params):
 
 ---
 
+### Service Bus Sessions for Jobs Queue (09 DEC 2025)
+
+**Status**: 📋 **FUTURE ENHANCEMENT** (Low Priority)
+**Purpose**: Enable high-throughput job orchestration without message timeout risk
+**When**: When job submission volume causes stage_complete signals to timeout
+
+**Problem (Future Scale)**:
+The `geospatial-jobs` queue combines:
+- New job submissions (from HTTP)
+- Stage advancement messages (internal)
+- Stage complete signals (from workers)
+
+At high volume, stage_complete signals could timeout waiting behind unrelated job submissions (current lock duration: PT5M).
+
+**Solution**: Service Bus Sessions
+- Enable sessions on `geospatial-jobs` queue
+- Use `job_id` as `SessionId` for all messages
+- Messages with same `job_id` processed in order (FIFO)
+- Different jobs processed in parallel
+- `maxConcurrentSessions: 32+` for high parallelism
+
+**How It Works**:
+```
+Without Sessions:
+  Queue: [job1] [job2] [stage_complete_job1] [job3]...
+                              ↑ Could timeout behind unrelated jobs
+
+With Sessions:
+  Session job1: [job1] → [stage_complete_job1]  ← Processed together
+  Session job2: [job2]                          ← Independent, parallel
+  Session job3: [job3]                          ← Independent, parallel
+```
+
+**Implementation Requirements**:
+1. Create new queue with sessions enabled (can't modify existing)
+2. Update senders to set `session_id=job_id` on all messages
+3. Update `function_app.py` trigger: `is_sessions_enabled=True`
+4. Update `host.json`: `sessionHandlerOptions.maxConcurrentSessions: 32`
+
+**Code Changes**:
+- `jobs/mixins.py` - Add `session_id` to `send_message()` calls
+- `core/machine.py` - Add `session_id` to stage_complete and advance messages
+- `function_app.py` - Enable session mode on jobs queue trigger
+- `host.json` - Add `sessionHandlerOptions` configuration
+
+**Trade-offs**:
+| Aspect | Current | With Sessions |
+|--------|---------|---------------|
+| Ordering | No guarantee | Per-job FIFO |
+| Parallelism | `maxConcurrentCalls` | `maxConcurrentSessions` (higher) |
+| Migration | N/A | Requires new queue |
+
+**Trigger**: Implement when observing stage_complete timeouts in Application Insights or dead-letter queue growth.
+
+---
+
 ## ✅ Recently Completed
 
 See `HISTORY2.md` for items completed and moved from TODO.md:
+- Container Inventory Consolidation (07 DEC) - Consolidated container listing into `inventory_container_contents` job with basic/geospatial modes, sync endpoint with zone/suffix/metadata params, archived 3 legacy jobs
 - JPEG COG Compression Fix (05 DEC) - INTERLEAVE=PIXEL for YCbCr encoding
 - JSON Deserialization Error Handling (28 NOV)
 - Pre-Flight Resource Validation (27 NOV)
@@ -574,4 +699,4 @@ See `HISTORY2.md` for items completed and moved from TODO.md:
 
 ---
 
-**Last Updated**: 07 DEC 2025 (Database Diagnostics & Remote Administration Enhancement - #1 HIGH PRIORITY)
+**Last Updated**: 08 DEC 2025 (Container Inventory Consolidation Complete)

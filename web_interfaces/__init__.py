@@ -285,6 +285,12 @@ try:
 except ImportError as e:
     logger.warning(f"⚠️ Could not import Pipeline interface: {e}")
 
+try:
+    from .health import interface as _health
+    logger.info("✅ Imported Health interface module")
+except ImportError as e:
+    logger.warning(f"⚠️ Could not import Health interface: {e}")
+
 
 # Public API
 __all__ = [

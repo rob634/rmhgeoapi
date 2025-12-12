@@ -502,6 +502,189 @@ curl -X POST "https://<YOUR_FUNCTION_APP>.azurewebsites.net/api/dbadmin/maintena
 
 **WARNING**: Schema operations delete data. Use only in development/test environments.
 
+### Geo Schema Management (11 DEC 2025)
+
+The geo schema contains vector tables created by `process_vector` jobs. These endpoints help manage and audit geo tables.
+
+#### List Geo Table Metadata
+
+Query all records in `geo.table_metadata` (the source of truth for vector datasets):
+
+```bash
+# List all metadata records
+curl "https://<YOUR_FUNCTION_APP>.azurewebsites.net/api/dbadmin/geo/metadata"
+
+# Filter by job ID
+curl "https://<YOUR_FUNCTION_APP>.azurewebsites.net/api/dbadmin/geo/metadata?job_id=abc123"
+
+# Filter by STAC linkage status
+curl "https://<YOUR_FUNCTION_APP>.azurewebsites.net/api/dbadmin/geo/metadata?has_stac=true"
+curl "https://<YOUR_FUNCTION_APP>.azurewebsites.net/api/dbadmin/geo/metadata?has_stac=false"
+
+# Pagination
+curl "https://<YOUR_FUNCTION_APP>.azurewebsites.net/api/dbadmin/geo/metadata?limit=50&offset=0"
+```
+
+**Response**:
+```json
+{
+  "metadata": [
+    {
+      "table_name": "world_countries",
+      "schema_name": "geo",
+      "title": "World Country Boundaries",
+      "description": "Administrative boundaries...",
+      "attribution": "Natural Earth",
+      "license": "CC0-1.0",
+      "keywords": "boundaries,countries,admin",
+      "feature_count": 250,
+      "geometry_type": "MultiPolygon",
+      "source_file": "world_countries.geojson",
+      "source_format": "geojson",
+      "etl_job_id": "abc123...",
+      "stac_item_id": "postgis-geo-world_countries",
+      "stac_collection_id": "system-vectors",
+      "bbox": [-180, -90, 180, 90],
+      "created_at": "2025-12-09T10:00:00Z"
+    }
+  ],
+  "total": 15,
+  "limit": 100,
+  "offset": 0,
+  "filters_applied": {}
+}
+```
+
+#### Check for Orphaned Tables
+
+Detect tables without metadata (orphaned tables) or metadata without tables (orphaned metadata):
+
+```bash
+curl "https://<YOUR_FUNCTION_APP>.azurewebsites.net/api/dbadmin/geo/orphans"
+```
+
+**Response**:
+```json
+{
+  "success": true,
+  "timestamp": "2025-12-10T12:00:00Z",
+  "orphaned_tables": [
+    {
+      "table_name": "mystery_data",
+      "row_count": 1500,
+      "reason": "Table exists in geo schema but has no metadata record"
+    }
+  ],
+  "orphaned_metadata": [
+    {
+      "table_name": "deleted_table",
+      "etl_job_id": "xyz789",
+      "created_at": "2025-12-01T10:00:00Z",
+      "reason": "Metadata exists but table was dropped"
+    }
+  ],
+  "tracked_tables": ["world_countries", "admin_boundaries"],
+  "summary": {
+    "total_geo_tables": 3,
+    "total_metadata_records": 3,
+    "tracked": 2,
+    "orphaned_tables": 1,
+    "orphaned_metadata": 1,
+    "health_status": "ORPHANS_DETECTED"
+  }
+}
+```
+
+**Note**: Orphan check also runs automatically every 6 hours via timer trigger and logs findings to Application Insights.
+
+#### Unpublish (Delete) Geo Table
+
+Cascade delete a vector table from the geo schema. Handles both tracked tables (with metadata) and orphaned tables.
+
+**Deletion order** (with SAVEPOINT isolation for fault tolerance):
+1. Delete STAC item from `pgstac.items` (if exists) - *isolated with SAVEPOINT*
+2. Delete metadata row from `geo.table_metadata` (if exists)
+3. DROP TABLE `geo.{table_name}` CASCADE
+
+**Fault Tolerance**: STAC deletion uses PostgreSQL SAVEPOINTs so that if pgSTAC triggers fail (e.g., missing partition tables after schema rebuild), the operation rolls back only the STAC deletion and continues with metadata/table cleanup.
+
+```bash
+# Unpublish a table (requires confirmation)
+curl -X POST "https://<YOUR_FUNCTION_APP>.azurewebsites.net/api/dbadmin/geo/unpublish?table_name=world_countries&confirm=yes"
+```
+
+**Parameters**:
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `table_name` | Yes | Table name in geo schema (without schema prefix) |
+| `confirm` | Yes | Must be "yes" to execute (safety measure) |
+
+**Response (Success)**:
+```json
+{
+  "success": true,
+  "table_name": "world_countries",
+  "deleted": {
+    "stac_item": "postgis-geo-world_countries",
+    "metadata_row": true,
+    "geo_table": true
+  },
+  "warnings": [],
+  "was_orphaned": false
+}
+```
+
+**Response (Orphaned Table)**:
+```json
+{
+  "success": true,
+  "table_name": "mystery_table",
+  "deleted": {
+    "stac_item": null,
+    "metadata_row": false,
+    "geo_table": true
+  },
+  "warnings": [
+    "No metadata found - table was orphaned (created outside ETL or metadata wiped)",
+    "No STAC item ID in metadata (STAC cataloging may have been skipped)"
+  ],
+  "was_orphaned": true
+}
+```
+
+**Response (STAC Deletion Failed - Graceful Degradation)**:
+
+When pgSTAC has issues (e.g., missing partition tables after schema rebuild), the STAC deletion is isolated using PostgreSQL SAVEPOINTs. The metadata and table are still deleted successfully:
+
+```json
+{
+  "success": true,
+  "table_name": "vector_worker_test",
+  "deleted": {
+    "stac_item": null,
+    "metadata_row": true,
+    "geo_table": true
+  },
+  "warnings": [
+    "STAC item deletion failed (pgstac trigger error): relation \"partition_sys_meta\" does not exist..."
+  ],
+  "was_orphaned": false
+}
+```
+
+**Note**: The `warnings` array captures any non-fatal issues. STAC deletion failures are isolated so metadata and table cleanup still proceed.
+
+**Response (Table Not Found)**:
+```json
+{
+  "success": false,
+  "error": "Table 'nonexistent_table' does not exist in geo schema",
+  "table_name": "nonexistent_table"
+}
+```
+
+**WARNING**: Unpublish permanently deletes the table and associated metadata. This operation cannot be undone.
+
 ---
 
 ## Troubleshooting
@@ -589,4 +772,4 @@ EXPLAIN ANALYZE SELECT * FROM app.jobs WHERE status = 'processing';
 
 ---
 
-**Last Updated**: 03 DEC 2025
+**Last Updated**: 11 DEC 2025

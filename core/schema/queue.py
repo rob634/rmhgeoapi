@@ -15,7 +15,7 @@ Exports:
 
 from datetime import datetime
 from typing import Dict, Any, Optional
-from pydantic import Field, field_validator, ConfigDict
+from pydantic import BaseModel, Field, field_validator, ConfigDict
 
 from core.contracts import TaskData, JobData
 
@@ -137,6 +137,31 @@ class JobQueueMessage(JobData):
     model_config = ConfigDict(validate_assignment=True)
 
 
+class StageCompleteMessage(BaseModel):
+    """
+    Stage completion signal from worker to platform.
+
+    Sent by worker apps (worker_raster, worker_vector) after completing
+    all tasks in a stage, signaling the platform to advance to next stage.
+
+    This message is sent to the jobs queue so the platform can:
+    1. Detect stage completion
+    2. Advance the job to the next stage
+    3. Create tasks for the next stage
+
+    Added: 10 DEC 2025 - Multi-App Architecture
+    """
+    message_type: str = Field(default="stage_complete", description="Message type identifier")
+    job_id: str = Field(..., description="Job ID that completed a stage")
+    job_type: str = Field(..., description="Type of job")
+    completed_stage: int = Field(..., ge=1, description="Stage number that completed")
+    completed_at: str = Field(..., description="ISO format timestamp of completion")
+    completed_by_app: str = Field(..., description="App name that processed the tasks")
+    correlation_id: str = Field(..., max_length=16, description="Correlation ID for tracing")
+
+    model_config = ConfigDict(validate_assignment=True)
+
+
 class TaskQueueMessage(TaskData):
     """
     Task queue message for Azure Storage Queue and Service Bus.
@@ -170,4 +195,5 @@ class TaskQueueMessage(TaskData):
 __all__ = [
     'JobQueueMessage',
     'TaskQueueMessage',
+    'StageCompleteMessage',
 ]

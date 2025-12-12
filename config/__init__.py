@@ -136,10 +136,11 @@ def debug_config() -> dict:
                 'target_schema': config.vector.target_schema,
             },
 
-            # Queues
+            # Queues (11 DEC 2025 - No Legacy Fallbacks, 3 queues only)
             'queues': {
                 'jobs_queue': config.queues.jobs_queue,
-                'tasks_queue': config.queues.tasks_queue,
+                'raster_tasks_queue': config.queues.raster_tasks_queue,
+                'vector_tasks_queue': config.queues.vector_tasks_queue,
                 'connection': '***MASKED***' if config.queues.connection_string else None,
             },
 

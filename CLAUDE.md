@@ -16,19 +16,16 @@ This is your main starting point - it contains everything you need to understand
 
 ### Documentation Structure:
 ```
-docs_claude/                               # 🎯 ACTIVE DOCS (12 files)
+docs_claude/                               # 🎯 ACTIVE DOCS
 ├── CLAUDE_CONTEXT.md                      # 🎯 START HERE - Primary context
 ├── TODO.md                                # ⚡ PRIMARY TASK LIST - Only active TODO file
+├── APPLICATION_INSIGHTS.md                # 🔍 THE ONE LOG QUERY PATTERN (12 DEC 2025)
 ├── COREMACHINE_PLATFORM_ARCHITECTURE.md   # 🏗️ Two-layer architecture (26 OCT 2025)
 ├── SERVICE_BUS_HARMONIZATION.md           # 🔧 Three-layer config architecture (27 OCT 2025)
 ├── SCHEMA_ARCHITECTURE.md                 # Database schema design
 ├── ARCHITECTURE_REFERENCE.md              # Deep technical specifications
-├── FILE_CATALOG.md                        # Quick file lookup
 ├── DEPLOYMENT_GUIDE.md                    # Deployment procedures
-├── HISTORY.md                             # Completed work log
-├── APPLICATION_INSIGHTS_QUERY_PATTERNS.md # Log querying guide
-├── claude_log_access.md                   # Azure log access
-└── MANAGED_IDENTITY_QUICKSTART.md         # Identity ops reference
+└── HISTORY.md                             # Completed work log
 
 docs/archive/docs_claude/                  # 📦 ARCHIVED (83 files, 25 NOV 2025)
 ├── migrations/                            # Completed migration phases
@@ -529,65 +526,33 @@ curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/dba
 
 **🔍 APPLICATION INSIGHTS LOG ACCESS (CRITICAL FOR DEBUGGING):**
 
-**PREREQUISITE - Must be logged in to Azure:**
+**📖 FULL GUIDE**: `docs_claude/APPLICATION_INSIGHTS.md` - THE definitive, verified pattern
+
+**⚡ QUICK REFERENCE - The One Correct Pattern:**
 ```bash
-# Login via browser (required once per session)
+# Step 1: Login (if needed)
 az login
 
-# Verify login
-az account show --query "{subscription:name, user:user.name}" -o table
-```
-
-**RECOMMENDED PATTERN - Script File (Most Reliable):**
-```bash
-# Create query script
+# Step 2: Run this exact script (App ID: 829adb94-5f5c-46ae-9f00-18e731529222)
 cat > /tmp/query_ai.sh << 'EOF'
 #!/bin/bash
 TOKEN=$(az account get-access-token --resource https://api.applicationinsights.io --query accessToken -o tsv)
 curl -s -H "Authorization: Bearer $TOKEN" \
   "https://api.applicationinsights.io/v1/apps/829adb94-5f5c-46ae-9f00-18e731529222/query" \
-  --data-urlencode "query=traces | where timestamp >= ago(15m) | order by timestamp desc | take 10" \
+  --data-urlencode "query=traces | where timestamp >= ago(15m) | order by timestamp desc | take 20" \
   -G
 EOF
-
-# Execute and format
 chmod +x /tmp/query_ai.sh && /tmp/query_ai.sh | python3 -m json.tool
 ```
 
-**Common KQL Queries (replace query= in script above):**
-```kql
-# Recent errors
-traces | where timestamp >= ago(1h) | where severityLevel >= 3 | order by timestamp desc | take 20
+**❌ DO NOT try**: `az monitor app-insights query`, inline token commands, manual URL encoding - they all fail!
 
-# Retry-related logs
-traces | where timestamp >= ago(15m) | where message contains "retry" or message contains "RETRY" | order by timestamp desc
+**Common Queries** (replace the `query=` part):
+- Recent errors: `traces | where timestamp >= ago(1h) | where severityLevel >= 3 | order by timestamp desc | take 20`
+- Task logs: `traces | where timestamp >= ago(15m) | where message contains "task" | order by timestamp desc`
+- Specific job: `traces | where timestamp >= ago(30m) | where message contains "JOB_ID_HERE" | order by timestamp desc`
 
-# Task processing
-traces | where timestamp >= ago(15m) | where message contains "Processing task" | order by timestamp desc
-
-# Health endpoint
-union requests, traces | where timestamp >= ago(30m) | where operation_Name contains "health" | take 20
-```
-
-**Key Identifiers:**
-- **App ID**: `829adb94-5f5c-46ae-9f00-18e731529222`
-- **Resource Group**: `rmhazure_rg`
-- **Function App**: `rmhazuregeoapi`
-
-**Important Notes:**
-- **Must run `az login` first** (opens browser for auth)
-- Bearer tokens expire after 1 hour - script regenerates automatically
-- **Use script file pattern** - inline commands fail due to shell evaluation issues
-- Standard `az monitor app-insights query` doesn't work (requires AAD auth)
-- **Full guide**: `docs_claude/APPLICATION_INSIGHTS_QUERY_PATTERNS.md`
-- **Auth details**: `docs_claude/claude_log_access.md`
-
-**🚨 CRITICAL: Azure Functions Python Severity Mapping Bug (28 OCT 2025)**
-- Azure SDK **incorrectly maps `logging.DEBUG` to severity 1 (INFO)** instead of 0 (DEBUG)
-- **DO NOT search by `severityLevel == 0`** - it returns ZERO results!
-- **DO search by message content**: `where message contains '"level": "DEBUG"'`
-- Requires `DEBUG_LOGGING=true` environment variable in Azure Functions
-- See `docs_claude/APPLICATION_INSIGHTS_QUERY_PATTERNS.md` section "Azure Functions Python Logging Severity Mapping Issue" for full details and workarounds
+**🚨 DEBUG logs bug**: Search by `message contains '"level": "DEBUG"'` NOT `severityLevel == 0`
 
 **STORAGE ENVIRONMENT**
 Use rmhazuregeo with the storage account key to access storage to check queues and containers

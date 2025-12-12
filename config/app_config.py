@@ -381,11 +381,6 @@ class AppConfig(BaseModel):
         return self.queues.jobs_queue
 
     @property
-    def task_processing_queue(self) -> str:
-        """Legacy compatibility - use queues.tasks_queue instead."""
-        return self.queues.tasks_queue
-
-    @property
     def blob_service_url(self) -> str:
         """Azure Blob Storage service URL for managed identity."""
         return f"https://{self.storage_account_name}.blob.core.windows.net"
@@ -404,11 +399,6 @@ class AppConfig(BaseModel):
     def service_bus_jobs_queue(self) -> str:
         """Legacy compatibility - use queues.jobs_queue instead."""
         return self.queues.jobs_queue
-
-    @property
-    def service_bus_tasks_queue(self) -> str:
-        """Legacy compatibility - use queues.tasks_queue instead."""
-        return self.queues.tasks_queue
 
     @property
     def service_bus_namespace(self) -> Optional[str]:

@@ -92,7 +92,7 @@ class HomeInterface(BaseInterface):
                 </a>
 
                 <!-- Health Status Card -->
-                <a href="/api/health" class="card">
+                <a href="/api/interface/health" class="card">
                     <div class="card-icon">💚</div>
                     <h3 class="card-title">System Health</h3>
                     <p class="card-description">

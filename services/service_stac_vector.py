@@ -132,7 +132,40 @@ class StacVectorService:
         if source_file:
             properties['source_file'] = source_file
 
-        # Merge additional properties
+        # Fetch user-provided metadata from geo.table_metadata (09 DEC 2025)
+        # This is the SOURCE OF TRUTH - same data used by OGC Features API
+        user_metadata = self._get_user_metadata(table_name)
+        if user_metadata:
+            # Map to STAC-compliant property names
+            if user_metadata.get('title'):
+                properties['title'] = user_metadata['title']
+            if user_metadata.get('description'):
+                properties['description'] = user_metadata['description']
+            if user_metadata.get('attribution'):
+                properties['attribution'] = user_metadata['attribution']
+            if user_metadata.get('license'):
+                properties['license'] = user_metadata['license']
+            if user_metadata.get('keywords'):
+                properties['keywords'] = user_metadata['keywords']
+            if user_metadata.get('feature_count'):
+                properties['feature_count'] = user_metadata['feature_count']
+
+            # Add temporal extent using STAC datetime convention
+            temporal_start = user_metadata.get('temporal_start')
+            temporal_end = user_metadata.get('temporal_end')
+            if temporal_start or temporal_end:
+                # STAC spec: use start_datetime/end_datetime for ranges, datetime=null
+                properties['datetime'] = None
+                if temporal_start:
+                    properties['start_datetime'] = temporal_start
+                if temporal_end:
+                    properties['end_datetime'] = temporal_end
+                if user_metadata.get('temporal_property'):
+                    properties['temporal_property'] = user_metadata['temporal_property']
+
+            logger.debug(f"Added user metadata to STAC properties: {list(user_metadata.keys())}")
+
+        # Merge additional properties (after user metadata so ETL props can override)
         if additional_properties:
             properties.update(additional_properties)
 
@@ -332,6 +365,100 @@ class StacVectorService:
                     'geometry_column': geom_column,
                     'created_at': created_at
                 }
+
+    def _get_user_metadata(self, table_name: str) -> Optional[Dict[str, Any]]:
+        """
+        Fetch user-provided metadata from geo.table_metadata registry.
+
+        This is the SOURCE OF TRUTH for vector metadata. STAC items should
+        read from here to stay synchronized with OGC Features API.
+
+        Added: 09 DEC 2025
+
+        Args:
+            table_name: Table name (primary key in geo.table_metadata)
+
+        Returns:
+            Dict with user-provided metadata fields, or None if not found:
+            {
+                "title": str,
+                "description": str,
+                "attribution": str,
+                "license": str,
+                "keywords": [str],  # Parsed from comma-separated
+                "temporal_start": str,  # ISO 8601
+                "temporal_end": str,    # ISO 8601
+                "temporal_property": str,
+                "feature_count": int
+            }
+        """
+        from infrastructure.postgresql import PostgreSQLRepository
+        repo = PostgreSQLRepository(target_database=self.target_database)
+
+        try:
+            with repo._get_connection() as conn:
+                with conn.cursor() as cur:
+                    # Check if geo.table_metadata exists
+                    cur.execute("""
+                        SELECT EXISTS (
+                            SELECT 1 FROM information_schema.tables
+                            WHERE table_schema = 'geo'
+                            AND table_name = 'table_metadata'
+                        ) as table_exists
+                    """)
+                    result = cur.fetchone()
+                    if not result or not result.get('table_exists'):
+                        logger.debug(f"geo.table_metadata does not exist - skipping user metadata for {table_name}")
+                        return None
+
+                    # Query user-provided metadata fields
+                    cur.execute("""
+                        SELECT
+                            title,
+                            description,
+                            attribution,
+                            license,
+                            keywords,
+                            temporal_start,
+                            temporal_end,
+                            temporal_property,
+                            feature_count
+                        FROM geo.table_metadata
+                        WHERE table_name = %s
+                    """, (table_name,))
+
+                    row = cur.fetchone()
+                    if not row:
+                        logger.debug(f"No user metadata found in geo.table_metadata for {table_name}")
+                        return None
+
+                    # Parse keywords from comma-separated string to list
+                    keywords_str = row.get('keywords')
+                    keywords_list = None
+                    if keywords_str:
+                        keywords_list = [k.strip() for k in keywords_str.split(',') if k.strip()]
+
+                    result = {
+                        "title": row.get('title'),
+                        "description": row.get('description'),
+                        "attribution": row.get('attribution'),
+                        "license": row.get('license'),
+                        "keywords": keywords_list,
+                        "temporal_start": row['temporal_start'].isoformat() if row.get('temporal_start') else None,
+                        "temporal_end": row['temporal_end'].isoformat() if row.get('temporal_end') else None,
+                        "temporal_property": row.get('temporal_property'),
+                        "feature_count": row.get('feature_count')
+                    }
+
+                    # Remove None values
+                    result = {k: v for k, v in result.items() if v is not None}
+
+                    logger.debug(f"Retrieved user metadata for {table_name}: {list(result.keys())}")
+                    return result if result else None
+
+        except Exception as e:
+            logger.warning(f"Error fetching user metadata for {table_name}: {e}")
+            return None
 
     # _get_countries_for_bbox() REMOVED (25 NOV 2025)
     # ISO3 country attribution now handled by services/iso3_attribution.py

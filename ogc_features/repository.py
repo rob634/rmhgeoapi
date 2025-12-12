@@ -243,7 +243,16 @@ class OGCFeaturesRepository:
                 "geometry_type": str,        # PostGIS geometry type
                 "created_at": str,           # ISO 8601 timestamp
                 "updated_at": str,           # ISO 8601 timestamp
-                "cached_bbox": [float, ...]  # [minx, miny, maxx, maxy] or None
+                "cached_bbox": [float, ...], # [minx, miny, maxx, maxy] or None
+                # User-provided metadata (09 DEC 2025)
+                "title": str,                # User-friendly display name
+                "description": str,          # Full dataset description
+                "attribution": str,          # Data source attribution
+                "license": str,              # SPDX license identifier
+                "keywords": str,             # Comma-separated tags
+                "temporal_start": str,       # ISO 8601 start datetime
+                "temporal_end": str,         # ISO 8601 end datetime
+                "temporal_property": str     # Column name for temporal data
             }
         """
         try:
@@ -265,7 +274,7 @@ class OGCFeaturesRepository:
                         logger.debug(f"geo.table_metadata table does not exist - returning None for {collection_id}")
                         return None
 
-                    # Query the metadata
+                    # Query the metadata (09 DEC 2025 - added user-provided fields)
                     cur.execute("""
                         SELECT
                             etl_job_id,
@@ -281,7 +290,15 @@ class OGCFeaturesRepository:
                             bbox_minx,
                             bbox_miny,
                             bbox_maxx,
-                            bbox_maxy
+                            bbox_maxy,
+                            title,
+                            description,
+                            attribution,
+                            license,
+                            keywords,
+                            temporal_start,
+                            temporal_end,
+                            temporal_property
                         FROM geo.table_metadata
                         WHERE table_name = %s
                     """, (collection_id,))
@@ -304,7 +321,16 @@ class OGCFeaturesRepository:
                         "geometry_type": row.get('geometry_type'),
                         "created_at": row['created_at'].isoformat() if row.get('created_at') else None,
                         "updated_at": row['updated_at'].isoformat() if row.get('updated_at') else None,
-                        "cached_bbox": None
+                        "cached_bbox": None,
+                        # User-provided metadata (09 DEC 2025)
+                        "title": row.get('title'),
+                        "description": row.get('description'),
+                        "attribution": row.get('attribution'),
+                        "license": row.get('license'),
+                        "keywords": row.get('keywords'),
+                        "temporal_start": row['temporal_start'].isoformat() if row.get('temporal_start') else None,
+                        "temporal_end": row['temporal_end'].isoformat() if row.get('temporal_end') else None,
+                        "temporal_property": row.get('temporal_property')
                     }
 
                     # Build cached_bbox if all coordinates present

@@ -33,7 +33,9 @@ import azure.functions as func
 from .http_base import SystemMonitoringTrigger
 from config import get_config, AzureDefaults, StorageDefaults, get_app_mode_config
 from core.schema.deployer import SchemaManagerFactory
-from utils import validator
+# NOTE: 'from utils import validator' REMOVED (12 DEC 2025)
+# Importing validator triggers cascade: validator → function_app → CoreMachine → 75+ seconds
+# The lightweight _check_import_validation() now uses sys.modules instead
 
 
 class HealthCheckTrigger(SystemMonitoringTrigger):
@@ -92,6 +94,21 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
         # Check app mode configuration (07 DEC 2025 - Multi-Function App Architecture)
         app_mode_health = self._check_app_mode()
         health_data["components"]["app_mode"] = app_mode_health
+
+        # Check task routing coverage (11 DEC 2025 - No Legacy Fallbacks)
+        # DISABLED 12 DEC 2025: This import loads ALL_HANDLERS which triggers heavy GDAL/rasterio imports
+        # causing 30-minute timeout. Need lightweight version that doesn't import handler modules.
+        # task_routing_health = self._check_task_routing_coverage()
+        # health_data["components"]["task_routing"] = task_routing_health
+        # if task_routing_health.get("details", {}).get("status") == "CRITICAL_MISCONFIGURATION":
+        #     health_data["status"] = "unhealthy"
+        #     health_data["errors"].extend(task_routing_health.get("details", {}).get("warnings", []))
+        health_data["components"]["task_routing"] = {
+            "component": "task_routing",
+            "status": "disabled",
+            "details": {"message": "Temporarily disabled - heavy import chain causes timeout"},
+            "checked_at": datetime.now(timezone.utc).isoformat()
+        }
 
         # Check import validation (critical for application startup)
         import_health = self._check_import_validation()
@@ -501,11 +518,10 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
         """
         Check Azure Service Bus queue health using ServiceBusRepository.
 
-        Updated 08 DEC 2025: Now checks all 4 queues required for Multi-Function App Architecture:
-        - geospatial-jobs: Job orchestration
-        - geospatial-tasks: Legacy task queue
-        - raster-tasks: Raster task processing (NEW)
-        - vector-tasks: Vector task processing (NEW)
+        Updated 11 DEC 2025 (No Legacy Fallbacks): Only 3 queues:
+        - geospatial-jobs: Job orchestration + stage_complete signals
+        - raster-tasks: Memory-intensive GDAL operations (low concurrency)
+        - vector-tasks: DB-bound and lightweight operations (high concurrency)
         """
         def check_service_bus():
             from infrastructure.service_bus import ServiceBusRepository
@@ -516,12 +532,11 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
 
             queue_status = {}
 
-            # Check all 4 queues required for Multi-Function App Architecture (08 DEC 2025)
+            # Check all 3 queues (11 DEC 2025 - No Legacy Fallbacks)
             queues_to_check = [
-                {"name": config.service_bus_jobs_queue, "purpose": "Job orchestration"},
-                {"name": config.queues.tasks_queue, "purpose": "Legacy tasks (backward compat)"},
-                {"name": config.queues.raster_tasks_queue, "purpose": "Raster task processing"},
-                {"name": config.queues.vector_tasks_queue, "purpose": "Vector task processing"}
+                {"name": config.service_bus_jobs_queue, "purpose": "Job orchestration + stage_complete signals"},
+                {"name": config.queues.raster_tasks_queue, "purpose": "Raster tasks (GDAL, low concurrency)"},
+                {"name": config.queues.vector_tasks_queue, "purpose": "Vector tasks (DB, high concurrency)"}
             ]
 
             queues_accessible = 0
@@ -638,10 +653,14 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                     except:
                         postgis_schema_exists = False
                     
-                    # Count STAC items (optional)
+                    # Count STAC items (optional) - use pg_stat for performance (12 DEC 2025)
                     try:
-                        cur.execute(f"SELECT COUNT(*) FROM {config.postgis_schema}.items")
-                        stac_count = cur.fetchone()[0]
+                        cur.execute("""
+                            SELECT n_live_tup FROM pg_stat_user_tables
+                            WHERE schemaname = %s AND relname = 'items'
+                        """, (config.postgis_schema,))
+                        result = cur.fetchone()
+                        stac_count = result[0] if result else 0
                     except:
                         stac_count = "unknown"
                     
@@ -731,147 +750,14 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                         detailed_schema_info['function_test'] = f"ERROR: {str(func_error)}"
                         detailed_schema_info['function_error_type'] = type(func_error).__name__
                     
-                    # NEW: Enhanced database query metrics for monitoring
-                    query_metrics = {}
-                    job_metrics = {}
-                    task_metrics = {}
-                    function_metrics = {}
-                    
-                    if app_schema_exists and app_tables_status.get('jobs', False) and app_tables_status.get('tasks', False):
-                        try:
-                            # Job counts and status breakdown (last 24h)
-                            query_start = time.time()
-                            cur.execute(f"""
-                                SELECT 
-                                    status::text,
-                                    COUNT(*) as count
-                                FROM {config.app_schema}.jobs 
-                                WHERE created_at >= NOW() - INTERVAL '24 hours'
-                                GROUP BY status::text
-                            """)
-                            job_status_counts = dict(cur.fetchall())
-                            
-                            # Total jobs in last 24h
-                            cur.execute(f"""
-                                SELECT COUNT(*) 
-                                FROM {config.app_schema}.jobs 
-                                WHERE created_at >= NOW() - INTERVAL '24 hours'
-                            """)
-                            total_jobs_24h = cur.fetchone()[0]
-                            
-                            job_query_time = round((time.time() - query_start) * 1000, 2)
-                            
-                            job_metrics = {
-                                "total_last_24h": total_jobs_24h,
-                                "status_breakdown": {
-                                    "queued": job_status_counts.get('queued', 0),
-                                    "processing": job_status_counts.get('processing', 0),
-                                    "completed": job_status_counts.get('completed', 0),
-                                    "failed": job_status_counts.get('failed', 0),
-                                    "completed_with_errors": job_status_counts.get('completed_with_errors', 0)
-                                },
-                                "query_time_ms": job_query_time
-                            }
-                            
-                            # Task counts and status breakdown (last 24h)
-                            query_start = time.time()
-                            cur.execute(f"""
-                                SELECT 
-                                    status::text,
-                                    COUNT(*) as count
-                                FROM {config.app_schema}.tasks 
-                                WHERE created_at >= NOW() - INTERVAL '24 hours'
-                                GROUP BY status::text
-                            """)
-                            task_status_counts = dict(cur.fetchall())
-                            
-                            # Total tasks in last 24h
-                            cur.execute(f"""
-                                SELECT COUNT(*) 
-                                FROM {config.app_schema}.tasks 
-                                WHERE created_at >= NOW() - INTERVAL '24 hours'
-                            """)
-                            total_tasks_24h = cur.fetchone()[0]
-                            
-                            task_query_time = round((time.time() - query_start) * 1000, 2)
-                            
-                            task_metrics = {
-                                "total_last_24h": total_tasks_24h,
-                                "status_breakdown": {
-                                    "queued": task_status_counts.get('queued', 0),
-                                    "processing": task_status_counts.get('processing', 0),
-                                    "completed": task_status_counts.get('completed', 0),
-                                    "failed": task_status_counts.get('failed', 0)
-                                },
-                                "query_time_ms": task_query_time
-                            }
-                            
-                            # Test PostgreSQL functions with performance timing
-                            function_tests = []
-                            
-                            for func_name in ['complete_task_and_check_stage', 'advance_job_stage', 'check_job_completion']:
-                                func_start = time.time()
-                                try:
-                                    # Execute function test in isolated transaction
-                                    with conn.transaction():
-                                        if func_name == 'complete_task_and_check_stage':
-                                            cur.execute(f"SET search_path TO {config.app_schema}, public")
-                                            cur.execute(f"SELECT task_updated, is_last_task_in_stage, job_id, stage_number, remaining_tasks FROM {config.app_schema}.complete_task_and_check_stage('test_nonexistent_task', 'test_job_id', 1)")
-                                        elif func_name == 'advance_job_stage':
-                                            cur.execute(f"SET search_path TO {config.app_schema}, public")
-                                            cur.execute(f"SELECT job_updated, new_stage, is_final_stage FROM {config.app_schema}.advance_job_stage('test_nonexistent_job', 1)")
-                                        elif func_name == 'check_job_completion':
-                                            cur.execute(f"SET search_path TO {config.app_schema}, public")
-                                            cur.execute(f"SELECT job_complete, final_stage, total_tasks, completed_tasks, task_results FROM {config.app_schema}.check_job_completion('test_nonexistent_job')")
-
-                                        result = cur.fetchone()
-
-                                    # Transaction committed successfully
-                                    func_time = round((time.time() - func_start) * 1000, 2)
-                                    function_tests.append({
-                                        "function_name": func_name,
-                                        "status": "available",
-                                        "execution_time_ms": func_time,
-                                        "test_result": "function_callable"
-                                    })
-                                except Exception as func_error:
-                                    # Transaction auto-rolled back, cursor remains valid
-                                    function_tests.append({
-                                        "function_name": func_name,
-                                        "status": "error",
-                                        "error": str(func_error)[:200],
-                                        "execution_time_ms": 0
-                                    })
-                            
-                            function_metrics = {
-                                "functions_available": [f["function_name"] for f in function_tests if f["status"] == "available"],
-                                "function_tests": function_tests,
-                                "avg_function_time_ms": round(
-                                    sum(f["execution_time_ms"] for f in function_tests if f["status"] == "available") / 
-                                    max(len([f for f in function_tests if f["status"] == "available"]), 1), 2
-                                )
-                            }
-                            
-                            # Overall query performance metrics
-                            query_metrics = {
-                                "connection_time_ms": connection_time_ms,
-                                "avg_query_time_ms": round((job_query_time + task_query_time) / 2, 2),
-                                "total_queries_executed": 4 + len(function_tests),
-                                "all_queries_successful": True
-                            }
-                            
-                        except Exception as metrics_error:
-                            query_metrics = {
-                                "connection_time_ms": connection_time_ms,
-                                "metrics_error": f"Failed to collect database metrics: {str(metrics_error)}",
-                                "all_queries_successful": False
-                            }
-                    else:
-                        query_metrics = {
-                            "connection_time_ms": connection_time_ms,
-                            "metrics_status": "tables_not_ready",
-                            "all_queries_successful": False
-                        }
+                    # NOTE (12 DEC 2025): Query metrics REMOVED for health check performance
+                    # Job/task status breakdown and function tests moved to /api/dbadmin/metrics
+                    # These were adding 5+ seconds and multiple transactions to health check
+                    query_metrics = {
+                        "connection_time_ms": connection_time_ms,
+                        "note": "Detailed metrics available at /api/dbadmin/stats",
+                        "metrics_removed_reason": "Performance optimization - health check should be <5s"
+                    }
                     
                     # Determine if critical app schema is missing (08 DEC 2025)
                     # App schema is CRITICAL - without it, job/task orchestration is non-functional
@@ -910,9 +796,6 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                             "schema_accessible": postgis_schema_exists
                         },
                         "detailed_schema_inspection": detailed_schema_info,
-                        "jobs_last_24h": job_metrics,
-                        "tasks_last_24h": task_metrics,
-                        "function_availability": function_metrics,
                         "query_performance": query_metrics
                     }
 
@@ -930,66 +813,9 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
             description="PostgreSQL/PostGIS database connectivity and query metrics"
         )
     
-    def _check_vault_configuration(self) -> Dict[str, Any]:
-        """Check Azure Key Vault configuration and connectivity. DISABLED - using environment variables."""
-        return {
-            "component": "vault",
-            "description": "Azure Key Vault for secrets management (optional)",
-            "status": "disabled",
-            "details": {"message": "Key Vault disabled - using environment variables only"}
-        }
-        
-        # DISABLED - Key Vault not configured for managed identity
-        def check_vault():
-            from infrastructure.vault import VaultRepositoryFactory, VaultAccessError
-            
-            config = get_config()
-            
-            # Validate configuration
-            config_status = {
-                "key_vault_name": config.key_vault_name,
-                "key_vault_database_secret": config.key_vault_database_secret,
-                "vault_url": f"https://{config.key_vault_name}.vault.azure.net/"
-            }
-            
-            # Test vault connectivity
-            try:
-                vault_repo = VaultRepositoryFactory.create_with_config()
-                vault_info = vault_repo.get_vault_info()
-                
-                # Test secret access (just to verify connectivity, not retrieve actual secret)
-                try:
-                    # This will test connectivity without exposing the secret
-                    vault_repo.get_secret(config.key_vault_database_secret)
-                    secret_accessible = True
-                except VaultAccessError as e:
-                    if "Failed to resolve" in str(e):
-                        secret_accessible = "DNS resolution failed"
-                    elif "authentication" in str(e).lower():
-                        secret_accessible = "Authentication failed"
-                    else:
-                        secret_accessible = f"Access failed: {str(e)[:100]}..."
-                
-                return {
-                    **config_status,
-                    "vault_connectivity": "successful",
-                    "authentication_type": vault_info["authentication_type"],
-                    "secret_accessible": secret_accessible,
-                    "cache_ttl_minutes": vault_info["cache_ttl_minutes"]
-                }
-                
-            except Exception as e:
-                return {
-                    **config_status,
-                    "vault_connectivity": "failed",
-                    "error": str(e)[:200]
-                }
-
-        return self.check_component_health(
-            "vault",
-            check_vault,
-            description="Azure Key Vault for secrets management (optional)"
-        )
+    # NOTE (12 DEC 2025): _check_vault_configuration REMOVED
+    # Key Vault is disabled - using environment variables only
+    # Dead code removed for maintainability
     
     def _check_database_configuration(self) -> Dict[str, Any]:
         """Check PostgreSQL database configuration."""
@@ -1058,118 +884,58 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
     
     def _check_import_validation(self) -> Dict[str, Any]:
         """
-        Check import validation status using enhanced auto-discovery validator.
-        
-        Provides comprehensive import health including:
-        - Critical dependency validation (Azure SDK, Pydantic, etc.)
-        - Auto-discovered application module validation
-        - Historical validation tracking
-        - Registry file status
-        
+        Lightweight import validation check (12 DEC 2025 - Performance Fix).
+
+        IMPORTANT: This check verifies that critical modules are loaded in sys.modules
+        rather than re-importing them. Re-importing triggers a cascade through
+        function_app.py → CoreMachine → all jobs/handlers → GDAL/rasterio which
+        takes 75+ seconds and causes health check timeouts.
+
+        Since this health endpoint can only run if function_app.py already loaded
+        successfully, re-validating imports is redundant - if imports had failed,
+        this endpoint wouldn't be callable in the first place.
+
         Returns:
-            Dict with import validation health status
+            Dict with lightweight import validation status
         """
         def check_imports():
-            # Get comprehensive health status from enhanced validator
-            import_status = validator.get_health_status()
-            
-            # Extract key metrics from validation results
-            validation_results = import_status.get('imports', {})
-            auto_discovery = validation_results.get('auto_discovery', {})
-            critical_imports = validation_results.get('critical_imports', {})
-            application_modules = validation_results.get('application_modules', {})
-            
-            # Count successful vs failed imports
-            critical_success = len([m for m, d in critical_imports.get('details', {}).items() 
-                                  if d.get('status') == 'success'])
-            critical_total = len(critical_imports.get('details', {}))
-            critical_failed = len(critical_imports.get('failed', []))
-            
-            app_success = len([m for m, d in application_modules.get('details', {}).items() 
-                             if d.get('status') == 'success'])
-            app_total = len(application_modules.get('details', {}))
-            app_failed = len(application_modules.get('failed', []))
-            
-            # Generate summary statistics
-            total_modules = critical_total + app_total
-            total_success = critical_success + app_success
-            total_failed = critical_failed + app_failed
-            success_rate = (total_success / total_modules * 100) if total_modules > 0 else 0
-            
-            # Check if registry file exists and is accessible
-            registry_status = "unknown"
-            try:
-                import os
-                if os.path.exists('import_validation_registry.json'):
-                    registry_status = "accessible"
-                    registry_size = os.path.getsize('import_validation_registry.json')
-                else:
-                    registry_status = "not_found"
-                    registry_size = 0
-            except Exception as e:
-                registry_status = f"error: {str(e)[:50]}"
-                registry_size = 0
-            
-            # Get validation timestamp for cache status
-            validation_timestamp = validation_results.get('timestamp', 'unknown')
-            cache_age = "unknown"
-            if validation_timestamp != 'unknown':
-                try:
-                    val_time = datetime.fromisoformat(validation_timestamp.replace('Z', '+00:00'))
-                    cache_age = (datetime.now(timezone.utc).replace(tzinfo=None) - val_time.replace(tzinfo=None)).total_seconds()
-                    cache_age = f"{int(cache_age)}s ago"
-                except:
-                    cache_age = "parse_error"
-            
-            return {
-                "overall_success": import_status.get('overall_success', False),
-                "validation_summary": import_status.get('summary', 'No summary available'),
-                "statistics": {
-                    "total_modules_discovered": total_modules,
-                    "successful_imports": total_success,
-                    "failed_imports": total_failed,
-                    "success_rate_percent": round(success_rate, 1)
-                },
-                "critical_dependencies": {
-                    "total": critical_total,
-                    "successful": critical_success,
-                    "failed": critical_failed,
-                    "failed_modules": critical_imports.get('failed', [])
-                },
-                "application_modules": {
-                    "total": app_total,
-                    "successful": app_success, 
-                    "failed": app_failed,
-                    "failed_modules": application_modules.get('failed', []),
-                    "auto_discovered": auto_discovery.get('modules_discovered', 0)
-                },
-                "auto_discovery": {
-                    "enabled": True,
-                    "modules_discovered": auto_discovery.get('modules_discovered', 0),
-                    "patterns_used": auto_discovery.get('discovery_patterns_used', 0),
-                    "registry_updated": auto_discovery.get('registry_updated', False)
-                },
-                "registry_file": {
-                    "status": registry_status,
-                    "size_bytes": registry_size if registry_status == "accessible" else None,
-                    "location": "import_validation_registry.json"
-                },
-                "validation_cache": {
-                    "timestamp": validation_timestamp,
-                    "age": cache_age,
-                    "cache_duration": "5 minutes"
-                },
-                "startup_validation": {
-                    "enabled": validator.is_azure_functions or validator.force_validation,
-                    "fail_fast_active": validator.is_azure_functions,
-                    "environment_detected": "azure_functions" if validator.is_azure_functions else "local"
+            # Check critical modules are in sys.modules (already loaded at startup)
+            # No new imports triggered - just checking what's already there
+            critical_modules = {
+                'azure.functions': 'Azure Functions runtime',
+                'pydantic': 'Data validation library',
+                'psycopg': 'PostgreSQL adapter',
+                'azure.identity': 'Azure authentication',
+                'azure.storage.blob': 'Azure Blob Storage client',
+            }
+
+            module_status = {}
+            for module, description in critical_modules.items():
+                module_status[module] = {
+                    'loaded': module in sys.modules,
+                    'description': description
                 }
+
+            all_loaded = all(status['loaded'] for status in module_status.values())
+            loaded_count = sum(1 for status in module_status.values() if status['loaded'])
+
+            return {
+                "overall_success": all_loaded,
+                "validation_summary": f"All critical modules loaded" if all_loaded else f"Missing modules detected",
+                "statistics": {
+                    "modules_checked": len(critical_modules),
+                    "modules_loaded": loaded_count,
+                    "success_rate_percent": round(loaded_count / len(critical_modules) * 100, 1)
+                },
+                "critical_dependencies": module_status,
+                "note": "Lightweight check via sys.modules - full validation runs at startup only",
+                "rationale": "If this endpoint responds, function_app.py loaded successfully, proving all imports work"
             }
 
         return self.check_component_health(
             "import_validation",
             check_imports,
-            description="Python module imports and dependency validation"
+            description="Python module imports (lightweight sys.modules check)"
         )
 
     def _check_duckdb(self) -> Dict[str, Any]:
@@ -1443,13 +1209,17 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                             table_exists = cur.fetchone()['table_exists']
                             critical_tables[table_name] = table_exists
 
-                        # Get row counts for collections and items
+                        # Get row counts for collections and items - use pg_stat for performance (12 DEC 2025)
                         table_counts = {}
 
                         if critical_tables.get('collections', False):
                             try:
-                                cur.execute("SELECT COUNT(*) as count FROM pgstac.collections")
-                                table_counts['collections'] = cur.fetchone()['count']
+                                cur.execute("""
+                                    SELECT n_live_tup FROM pg_stat_user_tables
+                                    WHERE schemaname = 'pgstac' AND relname = 'collections'
+                                """)
+                                result = cur.fetchone()
+                                table_counts['collections'] = result['n_live_tup'] if result else 0
                             except Exception:
                                 table_counts['collections'] = "error"
                         else:
@@ -1457,8 +1227,12 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
 
                         if critical_tables.get('items', False):
                             try:
-                                cur.execute("SELECT COUNT(*) as count FROM pgstac.items")
-                                table_counts['items'] = cur.fetchone()['count']
+                                cur.execute("""
+                                    SELECT n_live_tup FROM pg_stat_user_tables
+                                    WHERE schemaname = 'pgstac' AND relname = 'items'
+                                """)
+                                result = cur.fetchone()
+                                table_counts['items'] = result['n_live_tup'] if result else 0
                             except Exception:
                                 table_counts['items'] = "error"
                         else:
@@ -1636,11 +1410,15 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                         has_geom = 'geom' in columns or 'geometry' in columns
                         has_name = 'name' in columns
 
-                        # Check row count
+                        # Check row count - use pg_stat for performance (12 DEC 2025)
                         row_count = 0
                         try:
-                            cur.execute(f"SELECT COUNT(*) as count FROM {schema}.{table}")
-                            row_count = cur.fetchone()['count']
+                            cur.execute("""
+                                SELECT n_live_tup FROM pg_stat_user_tables
+                                WHERE schemaname = %s AND relname = %s
+                            """, (schema, table))
+                            result = cur.fetchone()
+                            row_count = result['n_live_tup'] if result else 0
                         except Exception:
                             row_count = "error"
 
@@ -1859,13 +1637,11 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                     "jobs": app_mode_config.listens_to_jobs_queue,
                     "raster_tasks": app_mode_config.listens_to_raster_tasks,
                     "vector_tasks": app_mode_config.listens_to_vector_tasks,
-                    "legacy_tasks": app_mode_config.listens_to_legacy_tasks
                 },
                 "queue_names": {
                     "jobs": config.queues.jobs_queue,
                     "raster_tasks": config.queues.raster_tasks_queue,
                     "vector_tasks": config.queues.vector_tasks_queue,
-                    "legacy_tasks": config.queues.tasks_queue
                 },
                 "routing": {
                     "routes_raster_externally": app_mode_config.routes_raster_externally,
@@ -1888,6 +1664,75 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
             "app_mode",
             check_app_mode,
             description="Multi-Function App deployment mode and queue routing configuration"
+        )
+
+    def _check_task_routing_coverage(self) -> Dict[str, Any]:
+        """
+        Check that all registered handlers have queue routing configured (11 DEC 2025).
+
+        Validates that every task type in ALL_HANDLERS is mapped in TaskRoutingDefaults.
+        This catches configuration errors early before tasks fail at runtime.
+
+        Returns:
+            Dict with task routing coverage status including:
+            - total_handlers: Number of registered handlers
+            - raster_mapped: Count of handlers mapped to raster queue
+            - vector_mapped: Count of handlers mapped to vector queue
+            - unmapped: List of handler task types NOT in any routing list
+            - warnings: Any configuration warnings
+        """
+        def check_task_routing():
+            from services import ALL_HANDLERS
+            from config.defaults import TaskRoutingDefaults
+
+            all_task_types = set(ALL_HANDLERS.keys())
+            raster_set = set(TaskRoutingDefaults.RASTER_TASKS)
+            vector_set = set(TaskRoutingDefaults.VECTOR_TASKS)
+
+            # Find handlers that are mapped
+            raster_mapped = all_task_types & raster_set
+            vector_mapped = all_task_types & vector_set
+
+            # Find handlers that are NOT mapped (will fail at runtime!)
+            unmapped = all_task_types - raster_set - vector_set
+
+            # Find routing entries that don't have handlers (stale config)
+            stale_raster = raster_set - all_task_types
+            stale_vector = vector_set - all_task_types
+
+            warnings = []
+            if unmapped:
+                warnings.append(
+                    f"CRITICAL: {len(unmapped)} task type(s) have NO queue routing! "
+                    f"Add to TaskRoutingDefaults.RASTER_TASKS or VECTOR_TASKS: {sorted(unmapped)}"
+                )
+            if stale_raster:
+                warnings.append(
+                    f"INFO: {len(stale_raster)} routing entries in RASTER_TASKS have no handler: {sorted(stale_raster)}"
+                )
+            if stale_vector:
+                warnings.append(
+                    f"INFO: {len(stale_vector)} routing entries in VECTOR_TASKS have no handler: {sorted(stale_vector)}"
+                )
+
+            return {
+                "total_handlers": len(all_task_types),
+                "raster_mapped": len(raster_mapped),
+                "vector_mapped": len(vector_mapped),
+                "unmapped_count": len(unmapped),
+                "unmapped_task_types": sorted(unmapped) if unmapped else [],
+                "stale_routing_entries": {
+                    "raster": sorted(stale_raster) if stale_raster else [],
+                    "vector": sorted(stale_vector) if stale_vector else []
+                },
+                "warnings": warnings,
+                "status": "healthy" if not unmapped else "CRITICAL_MISCONFIGURATION"
+            }
+
+        return self.check_component_health(
+            "task_routing",
+            check_task_routing,
+            description="Task type → queue routing coverage (11 DEC 2025 - No Legacy Fallbacks)"
         )
 
     def _check_table_metadata_registry(self) -> Dict[str, Any]:
@@ -1952,9 +1797,13 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
 
                         missing_columns = [col for col in required_columns if col not in columns]
 
-                        # Get row count
-                        cur.execute("SELECT COUNT(*) as count FROM geo.table_metadata")
-                        row_count = cur.fetchone()['count']
+                        # Get row count - use pg_stat for performance (12 DEC 2025)
+                        cur.execute("""
+                            SELECT n_live_tup FROM pg_stat_user_tables
+                            WHERE schemaname = 'geo' AND relname = 'table_metadata'
+                        """)
+                        result = cur.fetchone()
+                        row_count = result['n_live_tup'] if result else 0
 
                         # Get sample entries (last 5 registered)
                         sample_entries = []
@@ -2074,36 +1923,37 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                             """, (schema_name,))
                             tables = [row['table_name'] for row in cur.fetchall()]
 
-                            # Get row counts for key tables (limit to avoid slow queries)
-                            table_counts = {}
-                            key_tables = tables[:10]  # Limit to first 10 tables
-
-                            for table in key_tables:
-                                try:
-                                    cur.execute(f"SELECT COUNT(*) as count FROM {schema_name}.{table}")
-                                    table_counts[table] = cur.fetchone()['count']
-                                except Exception:
-                                    table_counts[table] = "error"
+                            # Get row counts for all tables in schema - single query using pg_stat (12 DEC 2025)
+                            # This is instant regardless of table size, unlike COUNT(*)
+                            cur.execute("""
+                                SELECT relname, n_live_tup
+                                FROM pg_stat_user_tables
+                                WHERE schemaname = %s
+                                ORDER BY relname
+                            """, (schema_name,))
+                            table_counts = {row['relname']: row['n_live_tup'] for row in cur.fetchall()}
 
                             schemas_data[schema_name] = {
                                 "exists": True,
                                 "tables": tables,
                                 "table_count": len(tables),
-                                "row_counts": table_counts
+                                "row_counts": table_counts,
+                                "note": "Row counts are approximate (from pg_stat_user_tables)"
                             }
 
-                        # Special handling for pgstac - get collection/item counts
+                        # Special handling for pgstac - get collection/item counts using pg_stat (12 DEC 2025)
                         if schemas_data.get('pgstac', {}).get('exists', False):
                             try:
-                                cur.execute("SELECT COUNT(*) as count FROM pgstac.collections")
-                                collections_count = cur.fetchone()['count']
-
-                                cur.execute("SELECT COUNT(*) as count FROM pgstac.items")
-                                items_count = cur.fetchone()['count']
+                                cur.execute("""
+                                    SELECT relname, n_live_tup
+                                    FROM pg_stat_user_tables
+                                    WHERE schemaname = 'pgstac' AND relname IN ('collections', 'items')
+                                """)
+                                stac_counts = {row['relname']: row['n_live_tup'] for row in cur.fetchall()}
 
                                 schemas_data['pgstac']['stac_counts'] = {
-                                    "collections": collections_count,
-                                    "items": items_count
+                                    "collections": stac_counts.get('collections', 0),
+                                    "items": stac_counts.get('items', 0)
                                 }
                             except Exception as e:
                                 schemas_data['pgstac']['stac_counts'] = {

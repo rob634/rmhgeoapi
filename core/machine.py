@@ -49,7 +49,7 @@ from core.models import (
     TaskResult,
     JobExecutionContext
 )
-from core.schema.queue import JobQueueMessage, TaskQueueMessage
+from core.schema.queue import JobQueueMessage, TaskQueueMessage, StageCompleteMessage
 
 # Infrastructure
 from infrastructure import RepositoryFactory
@@ -221,7 +221,7 @@ class CoreMachine:
         return self._service_bus_repo
 
     # ========================================================================
-    # TASK ROUTING (07 DEC 2025 - Multi-App Architecture)
+    # TASK ROUTING (11 DEC 2025 - No Legacy Fallbacks)
     # ========================================================================
 
     def _get_queue_for_task(self, task_type: str) -> str:
@@ -231,13 +231,19 @@ class CoreMachine:
         Uses TaskRoutingDefaults to determine queue category:
         - RASTER_TASKS → raster_tasks_queue (GDAL operations, low concurrency)
         - VECTOR_TASKS → vector_tasks_queue (DB operations, high concurrency)
-        - Default → tasks_queue (legacy/fallback)
+
+        CRITICAL (11 DEC 2025 - No Legacy Fallbacks):
+        All task types MUST be explicitly mapped in TaskRoutingDefaults.
+        Unmapped task types raise ContractViolationError to enforce explicit routing.
 
         Args:
             task_type: The task_type field from TaskDefinition
 
         Returns:
-            Queue name string (e.g., "raster-tasks", "vector-tasks", "geospatial-tasks")
+            Queue name string (e.g., "raster-tasks", "vector-tasks")
+
+        Raises:
+            ContractViolationError: If task_type is not mapped in TaskRoutingDefaults
 
         Used by:
             - _batch_queue_tasks() - groups tasks by target queue
@@ -247,7 +253,9 @@ class CoreMachine:
             queue = self._get_queue_for_task("handler_raster_create_cog")
             # Returns: "raster-tasks"
         """
-        # Determine task category
+        from utils.errors import ContractViolationError
+
+        # Determine task category - NO FALLBACK
         if task_type in TaskRoutingDefaults.RASTER_TASKS:
             queue_name = self.config.queues.raster_tasks_queue
             self.logger.debug(f"📤 Task type '{task_type}' → raster queue: {queue_name}")
@@ -255,9 +263,12 @@ class CoreMachine:
             queue_name = self.config.queues.vector_tasks_queue
             self.logger.debug(f"📤 Task type '{task_type}' → vector queue: {queue_name}")
         else:
-            # Fallback to legacy tasks queue
-            queue_name = self.config.queues.tasks_queue
-            self.logger.debug(f"📤 Task type '{task_type}' → default queue: {queue_name}")
+            # NO FALLBACK - Explicit routing required (11 DEC 2025)
+            raise ContractViolationError(
+                f"Task type '{task_type}' is not mapped to a queue. "
+                f"Add '{task_type}' to TaskRoutingDefaults.RASTER_TASKS or "
+                f"TaskRoutingDefaults.VECTOR_TASKS in config/defaults.py"
+            )
 
         return queue_name
 
@@ -1213,9 +1224,10 @@ class CoreMachine:
                     self.logger.debug(f"✅ retry_count incremented successfully")
 
                     # Re-queue with delay using Service Bus scheduled delivery
-                    # Modern pattern (30 NOV 2025): config.queues.tasks_queue
+                    # Route to ORIGINAL queue based on task type (11 DEC 2025 - No Legacy Fallbacks)
+                    retry_queue = self._get_queue_for_task(task_message.task_type)
                     message_id = self.service_bus.send_message_with_delay(
-                        config.queues.tasks_queue,
+                        retry_queue,
                         task_message,
                         delay_seconds
                     )
@@ -1666,16 +1678,15 @@ class CoreMachine:
             }
         )
 
-        # Create stage_complete message for jobs queue
-        stage_complete_message = {
-            'message_type': 'stage_complete',
-            'job_id': job_id,
-            'job_type': job_type,
-            'completed_stage': completed_stage,
-            'completed_at': datetime.now(timezone.utc).isoformat(),
-            'completed_by_app': self.app_mode_config.app_name,
-            'correlation_id': str(uuid.uuid4())[:8]
-        }
+        # Create stage_complete message for jobs queue (Pydantic model for serialization)
+        stage_complete_message = StageCompleteMessage(
+            job_id=job_id,
+            job_type=job_type,
+            completed_stage=completed_stage,
+            completed_at=datetime.now(timezone.utc).isoformat(),
+            completed_by_app=self.app_mode_config.app_name,
+            correlation_id=str(uuid.uuid4())[:8]
+        )
 
         # Send to centralized jobs queue
         jobs_queue = self.config.queues.jobs_queue
@@ -1683,12 +1694,12 @@ class CoreMachine:
 
         self.logger.info(
             f"✅ [STAGE_COMPLETE_SIGNAL] Message sent to {jobs_queue} "
-            f"(correlation: {stage_complete_message['correlation_id']})",
+            f"(correlation: {stage_complete_message.correlation_id})",
             extra={
                 'checkpoint': 'STAGE_COMPLETE_SIGNAL_SENT',
                 'job_id': job_id,
                 'queue': jobs_queue,
-                'correlation_id': stage_complete_message['correlation_id']
+                'correlation_id': stage_complete_message.correlation_id
             }
         )
 

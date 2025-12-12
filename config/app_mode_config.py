@@ -3,10 +3,12 @@ Application Mode Configuration.
 
 Controls deployment mode and task routing behavior for multi-Function App architecture.
 
-Architecture (07 DEC 2025):
+Architecture (11 DEC 2025 - No Legacy Fallbacks):
 - Single codebase deployable to multiple Function Apps
 - Environment variable APP_MODE controls behavior
 - Centralized orchestration (Platform) + Distributed execution (Workers)
+- THREE queues only: geospatial-jobs, raster-tasks, vector-tasks
+- NO legacy/fallback queue - all tasks must be explicitly routed
 
 Modes:
 - standalone: All queues, all endpoints (current behavior, default)
@@ -137,12 +139,6 @@ class AppModeConfig(BaseModel):
             AppMode.WORKER_VECTOR,
         ]
 
-    @property
-    def listens_to_legacy_tasks(self) -> bool:
-        """Whether this mode processes the legacy tasks queue."""
-        # Only standalone mode listens to legacy queue for backward compat
-        return self.mode == AppMode.STANDALONE
-
     # =========================================================================
     # ROUTING PROPERTIES
     # =========================================================================
@@ -231,7 +227,6 @@ class AppModeConfig(BaseModel):
                 "jobs": self.listens_to_jobs_queue,
                 "raster_tasks": self.listens_to_raster_tasks,
                 "vector_tasks": self.listens_to_vector_tasks,
-                "legacy_tasks": self.listens_to_legacy_tasks,
             },
             "routing": {
                 "routes_raster_externally": self.routes_raster_externally,

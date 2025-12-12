@@ -336,6 +336,202 @@ class BlobRepository:
 
 ---
 
+## Container Operations API
+
+The platform provides HTTP endpoints for exploring and inventorying storage containers without direct Azure portal access.
+
+### List All Containers (Sync)
+
+**Endpoint**: `GET /api/storage/containers`
+
+Lists all containers across all configured storage zones (Bronze, Silver, SilverExt, Gold).
+
+**Query Parameters**:
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `zone` | string | all | Filter to specific zone: `bronze`, `silver`, `silverext`, `gold` |
+| `prefix` | string | none | Container name prefix filter |
+
+**Example Requests**:
+```bash
+# List all containers across all zones
+curl https://rmhazuregeoapi-.../api/storage/containers
+
+# Filter to bronze zone only
+curl "https://rmhazuregeoapi-.../api/storage/containers?zone=bronze"
+
+# Filter by container name prefix
+curl "https://rmhazuregeoapi-.../api/storage/containers?prefix=silver-"
+```
+
+**Example Response**:
+```json
+{
+  "zones": {
+    "bronze": {
+      "account": "rmhazuregeo",
+      "containers": ["rmhazuregeobronze"],
+      "container_count": 1
+    },
+    "silver": {
+      "account": "rmhazuregeo",
+      "containers": ["silver-cogs", "silver-mosaicjson"],
+      "container_count": 2
+    },
+    "silverext": {
+      "account": "rmhazuregeo",
+      "containers": [],
+      "container_count": 0
+    },
+    "gold": {
+      "account": "rmhazuregeo",
+      "containers": [],
+      "container_count": 0
+    }
+  },
+  "total_containers": 3,
+  "query_time_seconds": 0.234
+}
+```
+
+### List Blobs in Container (Sync)
+
+**Endpoint**: `GET /api/containers/{container_name}/blobs`
+
+Lists blobs within a specific container with filtering options. Returns immediately (synchronous).
+
+**Path Parameters**:
+| Parameter | Description |
+|-----------|-------------|
+| `container_name` | Azure Blob Storage container name |
+
+**Query Parameters**:
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `zone` | string | `bronze` | Storage zone: `bronze`, `silver`, `silverext`, `gold` |
+| `prefix` | string | none | Blob path prefix filter |
+| `suffix` | string | none | File extension filter (e.g., `.tif`, `.geojson`) |
+| `metadata` | bool | `true` | Return full metadata dict vs just blob names |
+| `limit` | int | 500 | Max blobs to return (max: 10000) |
+
+**Example Requests**:
+```bash
+# List first 10 TIF files with full metadata
+curl "https://rmhazuregeoapi-.../api/containers/rmhazuregeobronze/blobs?suffix=.tif&limit=10"
+
+# List blob names only (lightweight)
+curl "https://rmhazuregeoapi-.../api/containers/rmhazuregeobronze/blobs?metadata=false&limit=100"
+
+# List from silver zone with prefix filter
+curl "https://rmhazuregeoapi-.../api/containers/silver-cogs/blobs?zone=silver&prefix=maxar/"
+```
+
+**Example Response** (metadata=true):
+```json
+{
+  "zone": "bronze",
+  "container": "rmhazuregeobronze",
+  "prefix": null,
+  "suffix": ".tif",
+  "metadata": true,
+  "limit": 10,
+  "count": 2,
+  "blobs": [
+    {
+      "name": "maxar/tile_001.tif",
+      "size": 52428800,
+      "size_mb": 50.0,
+      "last_modified": "2025-12-09T15:30:00+00:00",
+      "content_type": "image/tiff",
+      "etag": "0x8DC...",
+      "metadata": {}
+    }
+  ]
+}
+```
+
+### Container Inventory Job (Async)
+
+**Endpoint**: `POST /api/jobs/submit/inventory_container_contents`
+
+Submits an async job to inventory container contents with detailed analysis. Uses CoreMachine job orchestration (fan-out pattern).
+
+**Request Body**:
+```json
+{
+  "container_name": "rmhazuregeobronze",
+  "prefix": "maxar/",
+  "suffix": ".tif",
+  "limit": 500,
+  "analysis_mode": "basic",
+  "grouping_mode": "auto",
+  "min_collection_size": 2,
+  "include_unrecognized": true
+}
+```
+
+**Parameters**:
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `container_name` | string | required | Container to inventory |
+| `prefix` | string | none | Path prefix filter |
+| `suffix` | string | none | Extension filter |
+| `limit` | int | 500 | Max blobs to analyze |
+| `analysis_mode` | string | `basic` | `basic` (file stats) or `geospatial` (pattern detection) |
+| `grouping_mode` | string | `auto` | How to group files: `auto`, `folder`, `prefix`, `manifest`, `all_singles`, `all_collection` |
+| `min_collection_size` | int | 2 | Minimum files to form a collection |
+| `include_unrecognized` | bool | `true` | Include unknown file types in results |
+
+**Analysis Modes**:
+
+| Mode | Stage 2 Handler | Stage 3 Handler | Use Case |
+|------|-----------------|-----------------|----------|
+| `basic` | `analyze_blob_basic` | `aggregate_blob_analysis` | File counts, sizes, extensions |
+| `geospatial` | `classify_geospatial_file` | `aggregate_geospatial_inventory` | Vendor pattern detection, collection grouping, sidecar association |
+
+**Example Requests**:
+```bash
+# Basic inventory
+curl -X POST "https://rmhazuregeoapi-.../api/jobs/submit/inventory_container_contents" \
+  -H "Content-Type: application/json" \
+  -d '{"container_name": "rmhazuregeobronze", "limit": 100}'
+
+# Geospatial inventory with TIF filter
+curl -X POST "https://rmhazuregeoapi-.../api/jobs/submit/inventory_container_contents" \
+  -H "Content-Type: application/json" \
+  -d '{"container_name": "rmhazuregeobronze", "analysis_mode": "geospatial", "suffix": ".tif"}'
+```
+
+**Job Result** (basic mode):
+```json
+{
+  "summary": {
+    "total_files": 100,
+    "total_size_mb": 2924.4,
+    "average_size_mb": 29.24,
+    "by_extension": {
+      ".tif": {"count": 28, "total_size_mb": 2877.87, "percentage": 28.0},
+      ".geojson": {"count": 25, "total_size_mb": 9.86, "percentage": 25.0}
+    },
+    "largest_file": {"name": "raster.tif", "size_mb": 284.37},
+    "smallest_file": {"name": "meta.json", "size_mb": 0.01}
+  }
+}
+```
+
+### Comparison: Sync vs Async
+
+| Feature | Sync Endpoint | Async Job |
+|---------|---------------|-----------|
+| Response time | Immediate | Minutes (depends on blob count) |
+| Max blobs | 10,000 | 50,000 |
+| Analysis depth | Basic metadata only | Full geospatial classification |
+| Pattern detection | No | Yes (geospatial mode) |
+| Collection grouping | No | Yes (geospatial mode) |
+| Use case | Quick lookups, UI | Deep analysis, inventory reports |
+
+---
+
 ## SAS Token Management
 
 ### What is a SAS Token?

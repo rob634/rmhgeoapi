@@ -1007,9 +1007,8 @@ class ServiceBusRepository(IQueueRepository):
         """
         Ensure all required Service Bus queues exist for Multi-Function App Architecture.
 
-        Creates the following queues if missing:
+        Creates the following queues if missing (11 DEC 2025 - No Legacy Fallbacks):
         - geospatial-jobs: Job orchestration + stage_complete signals
-        - geospatial-tasks: Legacy task queue (backward compat)
         - raster-tasks: Raster task processing (memory-intensive, longer lock)
         - vector-tasks: Vector task processing (high concurrency, shorter lock)
 
@@ -1021,19 +1020,13 @@ class ServiceBusRepository(IQueueRepository):
 
         logger.info("🚌 Ensuring all required Service Bus queues exist...")
 
-        # Queue configurations for Multi-Function App Architecture
+        # Queue configurations (11 DEC 2025 - No Legacy Fallbacks, 3 queues only)
         queue_configs = [
             {
                 "name": config.service_bus_jobs_queue,  # geospatial-jobs
                 "lock_duration_minutes": 5,
                 "max_delivery_count": 1,
                 "purpose": "Job orchestration and stage_complete signals"
-            },
-            {
-                "name": config.queues.tasks_queue,  # geospatial-tasks (legacy)
-                "lock_duration_minutes": 5,
-                "max_delivery_count": 1,
-                "purpose": "Legacy task queue (backward compatibility)"
             },
             {
                 "name": config.queues.raster_tasks_queue,  # raster-tasks

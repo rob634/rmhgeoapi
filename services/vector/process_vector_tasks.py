@@ -94,6 +94,14 @@ def process_vector_prepare(parameters: Dict[str, Any]) -> Dict[str, Any]:
     geometry_params = parameters.get('geometry_params', {})
     indexes = parameters.get('indexes', {'spatial': True, 'attributes': [], 'temporal': []})
 
+    # User-provided metadata fields (09 DEC 2025)
+    title = parameters.get('title')
+    description = parameters.get('description')
+    attribution = parameters.get('attribution')
+    license_id = parameters.get('license')  # 'license' is reserved word
+    keywords = parameters.get('keywords')
+    temporal_property = parameters.get('temporal_property')
+
     logger.info(f"[{job_id[:8]}] Stage 1: Preparing vector data from {blob_name}")
 
     # Step 1: Download source file from Bronze zone (08 DEC 2025)
@@ -143,6 +151,32 @@ def process_vector_prepare(parameters: Dict[str, Any]) -> Dict[str, Any]:
             f"These columns are created by our schema (id=PRIMARY KEY, geom=GEOMETRY, etl_batch_id=IDEMPOTENCY)."
         )
 
+    # Step 3b: Auto-detect temporal extent if temporal_property specified (09 DEC 2025)
+    temporal_start = None
+    temporal_end = None
+    if temporal_property and temporal_property in validated_gdf.columns:
+        try:
+            import pandas as pd
+            temporal_col = pd.to_datetime(validated_gdf[temporal_property], errors='coerce')
+            valid_dates = temporal_col.dropna()
+            if len(valid_dates) > 0:
+                temporal_start = valid_dates.min().isoformat() + "Z"
+                temporal_end = valid_dates.max().isoformat() + "Z"
+                logger.info(
+                    f"[{job_id[:8]}] Temporal extent detected from '{temporal_property}': "
+                    f"{temporal_start} to {temporal_end}"
+                )
+            else:
+                logger.warning(
+                    f"[{job_id[:8]}] ⚠️ temporal_property '{temporal_property}' found but no valid dates parsed"
+                )
+        except Exception as e:
+            logger.warning(f"[{job_id[:8]}] ⚠️ Failed to parse temporal_property '{temporal_property}': {e}")
+    elif temporal_property:
+        logger.warning(
+            f"[{job_id[:8]}] ⚠️ temporal_property '{temporal_property}' not found in columns: {list(validated_gdf.columns)}"
+        )
+
     # Step 4: Create table with etl_batch_id column (IDEMPOTENT - IF NOT EXISTS)
     handler.create_table_with_batch_tracking(
         table_name=table_name,
@@ -152,7 +186,7 @@ def process_vector_prepare(parameters: Dict[str, Any]) -> Dict[str, Any]:
     )
     logger.info(f"[{job_id[:8]}] Created table {schema}.{table_name} with etl_batch_id tracking")
 
-    # Step 4b: Register table metadata in geo.table_metadata (06 DEC 2025)
+    # Step 4b: Register table metadata in geo.table_metadata (06 DEC 2025, updated 09 DEC 2025)
     # This is the SOURCE OF TRUTH for vector metadata - STAC copies for convenience
     # Uses INSERT ON CONFLICT UPDATE for idempotency
     handler.register_table_metadata(
@@ -164,7 +198,16 @@ def process_vector_prepare(parameters: Dict[str, Any]) -> Dict[str, Any]:
         source_crs=original_crs,
         feature_count=total_features,
         geometry_type=geometry_type,
-        bbox=tuple(validated_gdf.total_bounds)  # [minx, miny, maxx, maxy]
+        bbox=tuple(validated_gdf.total_bounds),  # [minx, miny, maxx, maxy]
+        # User-provided metadata (09 DEC 2025)
+        title=title,
+        description=description,
+        attribution=attribution,
+        license=license_id,
+        keywords=keywords,
+        temporal_start=temporal_start,
+        temporal_end=temporal_end,
+        temporal_property=temporal_property
     )
 
     # Step 5: Calculate optimal chunk size and split

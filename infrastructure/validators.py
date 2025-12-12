@@ -174,6 +174,9 @@ def validate_blob_exists(params: Dict[str, Any], config: Dict[str, Any]) -> Vali
         blob_param: str - Name of parameter containing blob path
         zone: str - Optional trust zone ('bronze', 'silver', 'silverext').
                     If not specified, inferred from container name.
+        default_container: str - Default container if param is None/empty.
+                    Special values: 'bronze.vectors', 'bronze.rasters', 'silver.cogs'
+                    resolve from config at runtime (09 DEC 2025)
         error: str - Optional custom error message
 
     Example:
@@ -182,12 +185,14 @@ def validate_blob_exists(params: Dict[str, Any], config: Dict[str, Any]) -> Vali
                 'type': 'blob_exists',
                 'container_param': 'container_name',
                 'blob_param': 'blob_name',
-                'zone': 'bronze',  # Optional
-                'error': 'Source file not found'  # Optional
+                'zone': 'bronze',
+                'default_container': 'bronze.vectors',  # Resolves from config
+                'error': 'Source file not found'
             }
         ]
     """
     from infrastructure.blob import BlobRepository
+    from config import get_config
 
     # Extract parameter names from config
     container_param = config.get('container_param', 'container_name')
@@ -196,6 +201,23 @@ def validate_blob_exists(params: Dict[str, Any], config: Dict[str, Any]) -> Vali
     # Get actual values from job parameters
     container = params.get(container_param)
     blob_path = params.get(blob_param)
+
+    # Resolve default container if not provided (09 DEC 2025)
+    if not container:
+        default_container = config.get('default_container')
+        if default_container:
+            app_config = get_config()
+            # Handle config path resolution (e.g., 'bronze.vectors' -> config.storage.bronze.vectors)
+            if default_container == 'bronze.vectors':
+                container = app_config.storage.bronze.vectors
+            elif default_container == 'bronze.rasters':
+                container = app_config.storage.bronze.rasters
+            elif default_container == 'silver.cogs':
+                container = app_config.storage.silver.cogs
+            else:
+                # Use as literal container name
+                container = default_container
+            logger.debug(f"📦 Resolved default container: {default_container} -> {container}")
 
     if not container:
         return ValidatorResult(

@@ -748,7 +748,38 @@ class BlobRepository(IBlobRepository):
         except Exception as e:
             logger.error(f"Failed to list blobs in {container}: {e}")
             raise
-    
+
+    def list_containers(self, prefix: str = None) -> List[Dict[str, Any]]:
+        """
+        List all containers in the storage account.
+
+        Args:
+            prefix: Optional container name prefix filter (e.g., "bronze-")
+
+        Returns:
+            List of container metadata dictionaries with name, last_modified, metadata
+
+        Raises:
+            Exception: If listing fails (propagated to caller for proper error handling)
+        """
+        try:
+            containers = []
+            logger.debug(f"Listing containers in account {self.account_name} with prefix='{prefix or ''}'")
+
+            for container in self.blob_service.list_containers(name_starts_with=prefix):
+                containers.append({
+                    "name": container.name,
+                    "last_modified": container.last_modified.isoformat() if container.last_modified else None,
+                    "metadata": container.metadata or {}
+                })
+
+            logger.debug(f"Found {len(containers)} containers in account {self.account_name}")
+            return containers
+
+        except Exception as e:
+            logger.error(f"Failed to list containers in account {self.account_name}: {e}")
+            raise
+
     def blob_exists(self, container: str, blob_path: str) -> bool:
         """
         Check if blob exists.

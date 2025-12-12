@@ -93,19 +93,68 @@ class ProcessVectorJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
             'type': 'dict',
             'default': {'spatial': True, 'attributes': [], 'temporal': []},
             'description': 'Database index configuration'
+        },
+        'overwrite': {
+            'type': 'bool',
+            'default': False,
+            'description': 'If true, allows overwriting existing tables (DELETE+INSERT for existing data)'
+        },
+        # User-provided metadata fields (09 DEC 2025)
+        # These populate geo.table_metadata which is the source of truth for OGC/STAC
+        'title': {
+            'type': 'str',
+            'default': None,
+            'description': 'User-friendly display name for the dataset'
+        },
+        'description': {
+            'type': 'str',
+            'default': None,
+            'description': 'Full dataset description'
+        },
+        'attribution': {
+            'type': 'str',
+            'default': None,
+            'description': 'Data source attribution (e.g., "Natural Earth - naturalearthdata.com")'
+        },
+        'license': {
+            'type': 'str',
+            'default': None,
+            'description': 'SPDX license identifier (e.g., CC-BY-4.0, MIT, CC0-1.0)'
+        },
+        'keywords': {
+            'type': 'str',
+            'default': None,
+            'description': 'Comma-separated tags for discoverability (e.g., "boundaries,admin,political")'
+        },
+        'temporal_property': {
+            'type': 'str',
+            'default': None,
+            'description': 'Column name containing date data for temporal extent auto-detection'
         }
     }
 
-    # Pre-flight resource validation (28 NOV 2025)
-    # Validates source blob exists BEFORE job creation - fail fast at HTTP 400!
-    # Prevents wasted job records and queue messages for non-existent files.
+    # Pre-flight resource validation (28 NOV 2025, updated 09 DEC 2025)
+    # Validates resources BEFORE job creation - fail fast at HTTP 400!
+    # Prevents wasted job records and queue messages for non-existent files or table conflicts.
     resource_validators = [
         {
             'type': 'blob_exists',
             'container_param': 'container_name',
             'blob_param': 'blob_name',
             'zone': 'bronze',  # Source files are in Bronze tier
+            'default_container': 'bronze.vectors',  # Resolves to config.storage.bronze.vectors if not provided
             'error': 'Source file does not exist in Bronze storage. Check blob_name and container_name.'
+        },
+        {
+            # Prevent overwriting existing tables (09 DEC 2025)
+            # If table exists, job submission fails with 400 Bad Request
+            # To re-ingest to same table, submit with overwrite=true
+            'type': 'table_not_exists',
+            'table_param': 'table_name',
+            'schema_param': 'schema',
+            'default_schema': 'geo',
+            'allow_overwrite_param': 'overwrite',
+            'error': "Table already exists in geo schema. Use 'overwrite': true to replace existing data, or choose a different table_name."
         }
     ]
 
@@ -180,7 +229,14 @@ class ProcessVectorJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
                     'chunk_size': job_params.get('chunk_size'),
                     'converter_params': job_params.get('converter_params', {}),
                     'geometry_params': job_params.get('geometry_params', {}),
-                    'indexes': job_params.get('indexes', {'spatial': True, 'attributes': [], 'temporal': []})
+                    'indexes': job_params.get('indexes', {'spatial': True, 'attributes': [], 'temporal': []}),
+                    # User-provided metadata (09 DEC 2025)
+                    'title': job_params.get('title'),
+                    'description': job_params.get('description'),
+                    'attribution': job_params.get('attribution'),
+                    'license': job_params.get('license'),
+                    'keywords': job_params.get('keywords'),
+                    'temporal_property': job_params.get('temporal_property')
                 }
             }]
 

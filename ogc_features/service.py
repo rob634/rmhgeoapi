@@ -23,6 +23,7 @@ from .models import (
     OGCLink,
     OGCExtent,
     OGCSpatialExtent,
+    OGCTemporalExtent,  # Added 09 DEC 2025
     OGCQueryParameters
 )
 
@@ -208,23 +209,46 @@ class OGCFeaturesService:
             # Fall back to ST_Extent result (computed during get_collection_metadata)
             bbox = metadata['bbox']
 
-        if bbox:
+        # Build temporal extent if available (09 DEC 2025)
+        temporal_extent = None
+        if custom_metadata:
+            temporal_start = custom_metadata.get('temporal_start')
+            temporal_end = custom_metadata.get('temporal_end')
+            if temporal_start or temporal_end:
+                temporal_extent = OGCTemporalExtent(
+                    interval=[[temporal_start, temporal_end]]
+                )
+
+        if bbox or temporal_extent:
             extent = OGCExtent(
                 spatial=OGCSpatialExtent(
-                    bbox=[bbox],
+                    bbox=[bbox] if bbox else None,
                     crs="http://www.opengis.net/def/crs/OGC/1.3/CRS84"
-                )
+                ) if bbox else None,
+                temporal=temporal_extent
             )
 
         # =====================================================================
-        # BUILD DESCRIPTION - Enhanced with source info when available
+        # BUILD TITLE - Use user-provided title if available (09 DEC 2025)
+        # =====================================================================
+        if custom_metadata and custom_metadata.get('title'):
+            title = custom_metadata['title']
+        else:
+            # Default: table name with underscores to title case
+            title = collection_id.replace("_", " ").title()
+
+        # =====================================================================
+        # BUILD DESCRIPTION - User-provided or auto-generated (09 DEC 2025)
         # =====================================================================
         feature_count = metadata.get('feature_count', 0)
         if custom_metadata and custom_metadata.get('feature_count'):
             feature_count = custom_metadata['feature_count']
 
-        if custom_metadata and custom_metadata.get('source_file'):
-            # Enhanced description with source file info
+        if custom_metadata and custom_metadata.get('description'):
+            # User-provided description (09 DEC 2025)
+            description = custom_metadata['description']
+        elif custom_metadata and custom_metadata.get('source_file'):
+            # Auto-generated description with source file info
             description = (
                 f"Source: {custom_metadata['source_file']} "
                 f"({feature_count:,} features). "
@@ -236,19 +260,34 @@ class OGCFeaturesService:
             description = f"Vector features from {collection_id} table ({feature_count:,} features)"
 
         # =====================================================================
-        # BUILD CUSTOM PROPERTIES - ETL traceability and STAC linkage
+        # BUILD CUSTOM PROPERTIES - ETL traceability, STAC linkage, user metadata
         # =====================================================================
         properties = None
         if custom_metadata:
+            # Parse keywords from comma-separated string to list (09 DEC 2025)
+            keywords_str = custom_metadata.get('keywords')
+            keywords_list = None
+            if keywords_str:
+                keywords_list = [k.strip() for k in keywords_str.split(',') if k.strip()]
+
             properties = {
+                # ETL traceability
                 "etl:job_id": custom_metadata.get('etl_job_id'),
                 "source:file": custom_metadata.get('source_file'),
                 "source:format": custom_metadata.get('source_format'),
                 "source:crs": custom_metadata.get('source_crs'),
+                # STAC linkage
                 "stac:item_id": custom_metadata.get('stac_item_id'),
                 "stac:collection_id": custom_metadata.get('stac_collection_id'),
+                # Timestamps
                 "created": custom_metadata.get('created_at'),
-                "updated": custom_metadata.get('updated_at')
+                "updated": custom_metadata.get('updated_at'),
+                # User-provided metadata (09 DEC 2025)
+                "attribution": custom_metadata.get('attribution'),
+                "license": custom_metadata.get('license'),
+                "keywords": keywords_list,
+                "feature_count": custom_metadata.get('feature_count'),
+                "temporal_property": custom_metadata.get('temporal_property')
             }
             # Remove None values for cleaner JSON output
             properties = {k: v for k, v in properties.items() if v is not None}
@@ -285,7 +324,7 @@ class OGCFeaturesService:
 
         collection = OGCCollection(
             id=collection_id,
-            title=collection_id.replace("_", " ").title(),
+            title=title,  # Uses user-provided title or auto-generated (09 DEC 2025)
             description=description,
             links=links,
             extent=extent,

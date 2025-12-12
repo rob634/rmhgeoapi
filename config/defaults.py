@@ -137,15 +137,16 @@ class QueueDefaults:
     Note: This is a SERVICE BUS ONLY application.
     Storage Queues are NOT supported.
 
-    Queue Architecture (07 DEC 2025):
+    Queue Architecture (11 DEC 2025 - No Legacy Fallbacks):
     - geospatial-jobs: Job orchestration (Platform apps listen)
     - raster-tasks: Raster task processing (memory-intensive GDAL ops)
     - vector-tasks: Vector task processing (high-concurrency DB ops)
-    - geospatial-tasks: Legacy/fallback (standalone mode only)
+
+    All task types MUST be explicitly mapped in TaskRoutingDefaults.
+    Unmapped task types will raise ContractViolationError (no fallback).
     """
 
     JOBS_QUEUE = "geospatial-jobs"
-    TASKS_QUEUE = "geospatial-tasks"      # Legacy/fallback
     RASTER_TASKS_QUEUE = "raster-tasks"   # Raster-optimized queue
     VECTOR_TASKS_QUEUE = "vector-tasks"   # Vector-optimized queue
     MAX_BATCH_SIZE = 100
@@ -195,10 +196,17 @@ class TaskRoutingDefaults:
     """
     Task type to queue category mapping.
 
-    Maps task_type → routing category (raster, vector, default).
+    Maps task_type → routing category (raster, vector).
     CoreMachine uses this to route tasks to appropriate queues.
 
-    Note: Task types not in either list route to the legacy tasks queue.
+    CRITICAL (11 DEC 2025 - No Legacy Fallbacks):
+    ALL task types MUST be explicitly listed here. If a task type is not
+    in RASTER_TASKS or VECTOR_TASKS, CoreMachine will raise ContractViolationError.
+    This prevents silent misrouting and enforces explicit queue assignment.
+
+    Queue Selection Guidelines:
+    - RASTER_TASKS: Memory-intensive GDAL operations (2-8GB RAM, low concurrency)
+    - VECTOR_TASKS: DB-bound or lightweight operations (high concurrency)
     """
 
     # Raster tasks → raster-tasks queue (memory-intensive, low concurrency)
@@ -210,25 +218,64 @@ class TaskRoutingDefaults:
         # process_large_raster_v2 handlers
         "handler_raster_create_tiles",
         "handler_raster_create_mosaic",
-        # Legacy/generic names (for flexibility)
+        # Raster validation and COG creation
         "validate_raster",
         "create_cog",
         "extract_stac_metadata",
         "create_tiling_scheme",
         "extract_tile",
         "create_mosaic_json",
+        # STAC raster catalog
+        "list_raster_files",
+        # Tiling and extraction
+        "generate_tiling_scheme",
+        "extract_tiles",
+        # MosaicJSON and STAC collection
+        "create_mosaicjson",
+        "create_stac_collection",
+        # Fathom ETL (memory-intensive raster operations)
+        "fathom_tile_inventory",
+        "fathom_band_stack",
+        "fathom_grid_inventory",
+        "fathom_spatial_merge",
+        "fathom_stac_register",
     ]
 
-    # Vector tasks → vector-tasks queue (high concurrency, DB-bound)
+    # Vector tasks → vector-tasks queue (high concurrency, DB-bound or lightweight)
     VECTOR_TASKS = [
         # process_vector handlers
         "handler_vector_prepare",
         "handler_vector_upload",
         "handler_stac_vector_item",
-        # Legacy/generic names (for flexibility)
+        # Vector ETL (idempotent)
         "process_vector_prepare",
         "process_vector_upload",
         "create_vector_stac",
+        "extract_vector_stac_metadata",
+        # H3 handlers (DB-bound PostGIS operations)
+        "h3_level4_generate",
+        "h3_base_generate",
+        "insert_h3_to_postgis",
+        "create_h3_stac",
+        "h3_native_streaming_postgis",
+        "generate_h3_grid",
+        "cascade_h3_descendants",
+        "finalize_h3_pyramid",
+        # Container inventory (lightweight blob listing)
+        "container_summary_task",
+        "list_blobs_with_metadata",
+        "analyze_blob_basic",
+        "aggregate_blob_analysis",
+        "classify_geospatial_file",
+        "aggregate_geospatial_inventory",
+        # Fathom container inventory (lightweight)
+        "fathom_generate_scan_prefixes",
+        "fathom_scan_prefix",
+        "fathom_assign_grid_cells",
+        "fathom_inventory_summary",
+        # Hello world and test handlers (lightweight)
+        "hello_world_greeting",
+        "hello_world_reply",
     ]
 
 
@@ -244,9 +291,9 @@ class RasterDefaults:
     """
 
     # Size thresholds
-    SIZE_THRESHOLD_MB = 1000  # 1 GB - small vs large file cutoff
+    SIZE_THRESHOLD_MB = 800  # 800 MB - small vs large file cutoff
     MAX_FILE_SIZE_MB = 20000  # 20 GB - maximum allowed file size
-    IN_MEMORY_THRESHOLD_MB = 500  # 500 MB - in-memory vs disk processing
+    IN_MEMORY_THRESHOLD_MB = 100  # 100 MB - in-memory vs disk processing
 
     # COG creation
     COG_COMPRESSION = "deflate"

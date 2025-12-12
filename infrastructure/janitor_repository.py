@@ -445,7 +445,12 @@ class JanitorRepository(PostgreSQLRepository):
         """
         import json
 
-        duration_ms = int((completed_at - started_at).total_seconds() * 1000)
+        # Calculate duration only if both timestamps are available
+        # At start of run, completed_at will be None
+        if completed_at and started_at:
+            duration_ms = int((completed_at - started_at).total_seconds() * 1000)
+        else:
+            duration_ms = None
 
         query = sql.SQL("""
             INSERT INTO {schema}.janitor_runs (

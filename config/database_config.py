@@ -325,7 +325,7 @@ class DatabaseConfig(BaseModel):
             app_schema=os.environ.get("APP_SCHEMA", DatabaseDefaults.APP_SCHEMA),
             pgstac_schema=os.environ.get("PGSTAC_SCHEMA", DatabaseDefaults.PGSTAC_SCHEMA),
             h3_schema=os.environ.get("H3_SCHEMA", DatabaseDefaults.H3_SCHEMA),
-            use_managed_identity=os.environ.get("USE_MANAGED_IDENTITY", "false").lower() == "true",
+            use_managed_identity=os.environ.get("USE_MANAGED_IDENTITY", "true").lower() == "true",
             managed_identity_admin_name=os.environ.get("DB_ADMIN_MANAGED_IDENTITY_NAME", AzureDefaults.MANAGED_IDENTITY_NAME),
             managed_identity_client_id=os.environ.get("DB_ADMIN_MANAGED_IDENTITY_CLIENT_ID"),
             connection_timeout_seconds=int(os.environ.get("DB_CONNECTION_TIMEOUT", str(DatabaseDefaults.CONNECTION_TIMEOUT_SECONDS))),

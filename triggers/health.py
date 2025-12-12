@@ -95,20 +95,9 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
         app_mode_health = self._check_app_mode()
         health_data["components"]["app_mode"] = app_mode_health
 
-        # Check task routing coverage (11 DEC 2025 - No Legacy Fallbacks)
-        # DISABLED 12 DEC 2025: This import loads ALL_HANDLERS which triggers heavy GDAL/rasterio imports
-        # causing 30-minute timeout. Need lightweight version that doesn't import handler modules.
-        # task_routing_health = self._check_task_routing_coverage()
-        # health_data["components"]["task_routing"] = task_routing_health
-        # if task_routing_health.get("details", {}).get("status") == "CRITICAL_MISCONFIGURATION":
-        #     health_data["status"] = "unhealthy"
-        #     health_data["errors"].extend(task_routing_health.get("details", {}).get("warnings", []))
-        health_data["components"]["task_routing"] = {
-            "component": "task_routing",
-            "status": "disabled",
-            "details": {"message": "Temporarily disabled - heavy import chain causes timeout"},
-            "checked_at": datetime.now(timezone.utc).isoformat()
-        }
+        # Task routing coverage REMOVED (12 DEC 2025)
+        # Moved to services/__init__.py (startup validation) and scripts/validate_config.py (pre-deployment)
+        # This is configuration validation, not runtime health - doesn't belong in health endpoint
 
         # Check import validation (critical for application startup)
         import_health = self._check_import_validation()
@@ -1666,74 +1655,9 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
             description="Multi-Function App deployment mode and queue routing configuration"
         )
 
-    def _check_task_routing_coverage(self) -> Dict[str, Any]:
-        """
-        Check that all registered handlers have queue routing configured (11 DEC 2025).
-
-        Validates that every task type in ALL_HANDLERS is mapped in TaskRoutingDefaults.
-        This catches configuration errors early before tasks fail at runtime.
-
-        Returns:
-            Dict with task routing coverage status including:
-            - total_handlers: Number of registered handlers
-            - raster_mapped: Count of handlers mapped to raster queue
-            - vector_mapped: Count of handlers mapped to vector queue
-            - unmapped: List of handler task types NOT in any routing list
-            - warnings: Any configuration warnings
-        """
-        def check_task_routing():
-            from services import ALL_HANDLERS
-            from config.defaults import TaskRoutingDefaults
-
-            all_task_types = set(ALL_HANDLERS.keys())
-            raster_set = set(TaskRoutingDefaults.RASTER_TASKS)
-            vector_set = set(TaskRoutingDefaults.VECTOR_TASKS)
-
-            # Find handlers that are mapped
-            raster_mapped = all_task_types & raster_set
-            vector_mapped = all_task_types & vector_set
-
-            # Find handlers that are NOT mapped (will fail at runtime!)
-            unmapped = all_task_types - raster_set - vector_set
-
-            # Find routing entries that don't have handlers (stale config)
-            stale_raster = raster_set - all_task_types
-            stale_vector = vector_set - all_task_types
-
-            warnings = []
-            if unmapped:
-                warnings.append(
-                    f"CRITICAL: {len(unmapped)} task type(s) have NO queue routing! "
-                    f"Add to TaskRoutingDefaults.RASTER_TASKS or VECTOR_TASKS: {sorted(unmapped)}"
-                )
-            if stale_raster:
-                warnings.append(
-                    f"INFO: {len(stale_raster)} routing entries in RASTER_TASKS have no handler: {sorted(stale_raster)}"
-                )
-            if stale_vector:
-                warnings.append(
-                    f"INFO: {len(stale_vector)} routing entries in VECTOR_TASKS have no handler: {sorted(stale_vector)}"
-                )
-
-            return {
-                "total_handlers": len(all_task_types),
-                "raster_mapped": len(raster_mapped),
-                "vector_mapped": len(vector_mapped),
-                "unmapped_count": len(unmapped),
-                "unmapped_task_types": sorted(unmapped) if unmapped else [],
-                "stale_routing_entries": {
-                    "raster": sorted(stale_raster) if stale_raster else [],
-                    "vector": sorted(stale_vector) if stale_vector else []
-                },
-                "warnings": warnings,
-                "status": "healthy" if not unmapped else "CRITICAL_MISCONFIGURATION"
-            }
-
-        return self.check_component_health(
-            "task_routing",
-            check_task_routing,
-            description="Task type → queue routing coverage (11 DEC 2025 - No Legacy Fallbacks)"
-        )
+    # _check_task_routing_coverage() REMOVED (12 DEC 2025)
+    # Moved to services/__init__.py (startup validation) and scripts/validate_config.py (pre-deployment)
+    # Configuration validation doesn't belong in runtime health checks
 
     def _check_table_metadata_registry(self) -> Dict[str, Any]:
         """

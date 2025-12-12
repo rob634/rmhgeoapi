@@ -8,8 +8,13 @@
 
 ## 🎯 TL;DR - Copy This Exact Pattern
 
-**App ID**: `829adb94-5f5c-46ae-9f00-18e731529222`
-**Function App**: `rmhazuregeoapi`
+### Application Insights App IDs (VERIFIED 12 DEC 2025)
+
+| Function App | App ID | Purpose |
+|--------------|--------|---------|
+| **rmhazuregeoapi** | `d3af3d37-cfe3-411f-adef-bc540181cbca` | Main API (HTTP triggers, jobs) |
+| **rmhgeoapi-worker** | `60530c92-dc55-4d1f-a528-4d523fd5a135` | Worker (Service Bus processing) |
+
 **Resource Group**: `rmhazure_rg`
 
 ### The One Correct Pattern
@@ -18,17 +23,19 @@
 # Step 1: Login (if not already logged in)
 az login
 
-# Step 2: Create and run query script
+# Step 2: Create and run query script (using rmhazuregeoapi App ID)
 cat > /tmp/query_ai.sh << 'EOF'
 #!/bin/bash
 TOKEN=$(az account get-access-token --resource https://api.applicationinsights.io --query accessToken -o tsv)
 curl -s -H "Authorization: Bearer $TOKEN" \
-  "https://api.applicationinsights.io/v1/apps/829adb94-5f5c-46ae-9f00-18e731529222/query" \
+  "https://api.applicationinsights.io/v1/apps/d3af3d37-cfe3-411f-adef-bc540181cbca/query" \
   --data-urlencode "query=traces | where timestamp >= ago(15m) | order by timestamp desc | take 20" \
   -G
 EOF
 chmod +x /tmp/query_ai.sh && /tmp/query_ai.sh | python3 -m json.tool
 ```
+
+**For worker logs, replace App ID with**: `60530c92-dc55-4d1f-a528-4d523fd5a135`
 
 **That's it. This pattern works. Use it.**
 
@@ -113,7 +120,7 @@ cat > /tmp/query_ai.sh << 'EOF'
 #!/bin/bash
 TOKEN=$(az account get-access-token --resource https://api.applicationinsights.io --query accessToken -o tsv)
 curl -s -H "Authorization: Bearer $TOKEN" \
-  "https://api.applicationinsights.io/v1/apps/829adb94-5f5c-46ae-9f00-18e731529222/query" \
+  "https://api.applicationinsights.io/v1/apps/d3af3d37-cfe3-411f-adef-bc540181cbca/query" \
   --data-urlencode "query=traces | where timestamp >= ago(15m) | order by timestamp desc | take 10" \
   -G
 EOF
@@ -156,8 +163,8 @@ traces | where message contains '"level": "DEBUG"' | order by timestamp desc
 
 | Component | Value |
 |-----------|-------|
-| **App ID** | `829adb94-5f5c-46ae-9f00-18e731529222` |
-| **Function App** | `rmhazuregeoapi` |
+| **rmhazuregeoapi App ID** | `d3af3d37-cfe3-411f-adef-bc540181cbca` |
+| **rmhgeoapi-worker App ID** | `60530c92-dc55-4d1f-a528-4d523fd5a135` |
 | **Resource Group** | `rmhazure_rg` |
 | **API Endpoint** | `https://api.applicationinsights.io/v1/apps/{APP_ID}/query` |
 
@@ -185,6 +192,70 @@ traces | where message contains '"level": "DEBUG"' | order by timestamp desc
 The AAD authentication requirement (`APPLICATIONINSIGHTS_AUTHENTICATION_STRING = Authorization=AAD`) breaks standard Azure CLI commands. The REST API with bearer token bypasses this limitation.
 
 Shell evaluation issues cause inline commands to fail - the script file pattern isolates the token acquisition and curl execution properly.
+
+---
+
+## 📖 KQL Query Language Reference
+
+**Official Docs**: https://docs.microsoft.com/en-us/azure/data-explorer/kusto/query/
+
+### Application Insights Tables
+
+| Table | Contains |
+|-------|----------|
+| `traces` | Custom logs (logger.info, logger.error, etc.) |
+| `requests` | HTTP requests to your function app |
+| `exceptions` | Unhandled exceptions with stack traces |
+| `dependencies` | Outbound calls (DB, HTTP, Service Bus, etc.) |
+| `customEvents` | Custom telemetry events |
+
+### KQL Syntax Quick Reference
+
+```kql
+// Time filters
+| where timestamp >= ago(15m)      // Last 15 minutes
+| where timestamp >= ago(1h)       // Last hour
+| where timestamp >= ago(24h)      // Last 24 hours
+
+// Text filters
+| where message contains "error"           // Case-insensitive contains
+| where message has "error"                // Word boundary match
+| where message startswith "Starting"      // Starts with
+| where message matches regex "task_[0-9]+" // Regex match
+
+// Severity filters (0=Verbose, 1=INFO, 2=WARN, 3=ERROR, 4=CRITICAL)
+| where severityLevel >= 3                 // Errors and above
+
+// Combine tables
+union traces, requests, exceptions
+
+// Select specific columns
+| project timestamp, message, severityLevel, operation_Name
+
+// Order and limit
+| order by timestamp desc
+| take 20
+
+// Aggregations
+| summarize count() by bin(timestamp, 5m)  // Count per 5-min bucket
+| summarize count() by severityLevel       // Count by severity
+```
+
+### Common Patterns
+
+```kql
+// All errors in last hour
+traces | where timestamp >= ago(1h) | where severityLevel >= 3 | order by timestamp desc
+
+// HTTP requests with failures
+requests | where timestamp >= ago(1h) | where success == false | project timestamp, name, resultCode, duration
+
+// Exceptions with stack traces
+exceptions | where timestamp >= ago(1h) | project timestamp, type, outerMessage, details
+
+// Dependency calls (DB, HTTP, etc.)
+dependencies | where timestamp >= ago(1h) | project timestamp, name, type, success, duration
+```
 
 ---
 

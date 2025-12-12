@@ -1,12 +1,24 @@
 """
 Configuration Defaults - Single source of truth for all default values.
 
-When deploying to a new Azure tenant, review this file to understand
-what environment variables must be set vs what can use defaults.
+FAIL-FAST DESIGN (12 DEC 2025):
+Tenant-specific defaults use INTENTIONALLY INVALID placeholder values.
+This ensures deployments fail loudly if required environment variables aren't set.
 
 Organization:
-    - AzureDefaults: Values that MUST be overridden for new tenant deployment
-    - *Defaults: Safe defaults that work for any deployment
+    - AzureDefaults: MUST be overridden - uses invalid placeholders (fail-fast)
+    - StorageDefaults.DEFAULT_ACCOUNT_NAME: MUST be overridden (fail-fast)
+    - AppModeDefaults.DEFAULT_APP_NAME: MUST be overridden (fail-fast)
+    - All other *Defaults: Safe universal defaults that work for any deployment
+
+Required Environment Variables (will fail if not set):
+    DB_ADMIN_MANAGED_IDENTITY_NAME - PostgreSQL managed identity name
+    TITILER_BASE_URL - TiTiler tile server URL
+    OGC_STAC_APP_URL - OGC/STAC API URL
+    ETL_APP_URL - ETL/Admin Function App URL
+    BRONZE_STORAGE_ACCOUNT - Bronze zone storage account name
+    SILVER_STORAGE_ACCOUNT - Silver zone storage account name
+    APP_NAME - Function App name for task tracking
 
 Usage:
     from config.defaults import DatabaseDefaults, AzureDefaults
@@ -14,9 +26,9 @@ Usage:
     # In Pydantic Field definitions:
     port: int = Field(default=DatabaseDefaults.PORT, ...)
 
-    # In deployment validation:
+    # Fail-fast validation example:
     if config.storage.bronze.account_name == StorageDefaults.DEFAULT_ACCOUNT_NAME:
-        issues.append("Storage account not configured for this tenant")
+        raise ValueError("BRONZE_STORAGE_ACCOUNT environment variable not set!")
 """
 
 
@@ -28,28 +40,31 @@ class AzureDefaults:
     """
     Defaults that MUST be overridden for a new Azure tenant deployment.
 
-    These values are specific to the development tenant (rmhazure_rg).
-    When deploying to a new tenant, ALL of these must be set via environment variables.
+    FAIL-FAST DESIGN (12 DEC 2025):
+    These defaults are INTENTIONALLY INVALID to cause loud failures if not overridden.
+    If you see errors referencing these placeholder values, you need to set the
+    corresponding environment variables for your deployment.
 
-    The health endpoint uses these to detect if deployment is properly configured.
-
-    NOTE (08 DEC 2025): STORAGE_ACCOUNT_NAME removed - use zone-specific accounts instead:
-        BRONZE_STORAGE_ACCOUNT, SILVER_STORAGE_ACCOUNT, etc.
+    Required Environment Variables:
+        DB_ADMIN_MANAGED_IDENTITY_NAME - PostgreSQL managed identity name
+        TITILER_BASE_URL - TiTiler tile server URL
+        OGC_STAC_APP_URL - OGC/STAC API URL (or same as ETL_APP_URL for standalone)
+        ETL_APP_URL - ETL/Admin Function App URL
     """
 
     # Managed Identity (Admin) - Override: DB_ADMIN_MANAGED_IDENTITY_NAME
     # Single identity used for ALL database operations (ETL, OGC/STAC, TiTiler)
     # Simplifies architecture - no separate reader identity needed
-    MANAGED_IDENTITY_NAME = "rmhpgflexadmin"
+    MANAGED_IDENTITY_NAME = "your-managed-identity-name"
 
     # TiTiler tile server - Override: TITILER_BASE_URL
-    TITILER_BASE_URL = "https://rmhtitiler-ghcyd7g0bxdvc2hc.eastus-01.azurewebsites.net"
+    TITILER_BASE_URL = "https://your-titiler-webapp-url"
 
     # OGC/STAC API - Override: OGC_STAC_APP_URL
-    OGC_STAC_APP_URL = "https://rmhogcstac-b4f5ccetf0a7hwe9.eastus-01.azurewebsites.net"
+    OGC_STAC_APP_URL = "https://your-ogc-stac-app-url"
 
     # ETL/Admin Function App - Override: ETL_APP_URL
-    ETL_APP_URL = "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net"
+    ETL_APP_URL = "https://your-etl-app-url"
 
 
 # =============================================================================
@@ -88,8 +103,8 @@ class StorageDefaults:
         BRONZE_STORAGE_ACCOUNT, SILVER_STORAGE_ACCOUNT, etc.
     """
 
-    # Default storage account (for validation - should be overridden)
-    DEFAULT_ACCOUNT_NAME = "rmhazuregeo"
+    # Default storage account (INTENTIONALLY INVALID - must be overridden)
+    DEFAULT_ACCOUNT_NAME = "your-storage-account-name"
 
     # Bronze tier containers (raw uploads)
     BRONZE_VECTORS = "bronze-vectors"
@@ -185,7 +200,8 @@ class AppModeDefaults:
     ]
 
     DEFAULT_MODE = STANDALONE
-    DEFAULT_APP_NAME = "rmhazuregeoapi"
+    # App name used for task tracking (INTENTIONALLY INVALID - set APP_NAME env var)
+    DEFAULT_APP_NAME = "your-function-app-name"
 
 
 # =============================================================================

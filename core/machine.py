@@ -253,7 +253,7 @@ class CoreMachine:
             queue = self._get_queue_for_task("handler_raster_create_cog")
             # Returns: "raster-tasks"
         """
-        from utils.errors import ContractViolationError
+        from exceptions import ContractViolationError
 
         # Determine task category - NO FALLBACK
         if task_type in TaskRoutingDefaults.RASTER_TASKS:

@@ -252,14 +252,44 @@ def get_handler(task_type: str):
     return ALL_HANDLERS[task_type]
 
 
+# ============================================================================
+# STARTUP VALIDATION - Fail Fast (12 DEC 2025)
+# ============================================================================
+
+
+def validate_task_routing_coverage():
+    """
+    Validate all handlers have queue routing configured.
+
+    Runs at import time - fail fast if misconfigured.
+    Added 12 DEC 2025.
+    """
+    from config.defaults import TaskRoutingDefaults
+
+    all_tasks = set(ALL_HANDLERS.keys())
+    raster_set = set(TaskRoutingDefaults.RASTER_TASKS)
+    vector_set = set(TaskRoutingDefaults.VECTOR_TASKS)
+
+    unmapped = all_tasks - raster_set - vector_set
+
+    if unmapped:
+        raise ValueError(
+            f"FATAL: {len(unmapped)} handler(s) have NO queue routing configured! "
+            f"Tasks will fail at runtime. Add to config/defaults.py "
+            f"TaskRoutingDefaults.RASTER_TASKS or VECTOR_TASKS: {sorted(unmapped)}"
+        )
+
+
 # Validate on import - fail fast if something's wrong.
 validate_handler_registry()
+validate_task_routing_coverage()  # NEW - 12 DEC 2025
 
 __all__ = [
     # Handler registry
     'ALL_HANDLERS',
     'get_handler',
     'validate_handler_registry',
+    'validate_task_routing_coverage',  # 12 DEC 2025
     # STAC Metadata Helper (25 NOV 2025)
     'STACMetadataHelper',
     'PlatformMetadata',

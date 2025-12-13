@@ -1,8 +1,9 @@
 """
-API Explorer Interface Module (Coming Soon)
+API Documentation Interface Module.
 
-Future: Interactive API documentation (Swagger-like).
-
+Static rendering of API documentation for job submission endpoints.
 """
 
-# Placeholder
+from .interface import DocsInterface
+
+__all__ = ['DocsInterface']

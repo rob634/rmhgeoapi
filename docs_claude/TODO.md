@@ -593,6 +593,39 @@ def inventory_raster_item(params):
 
 ---
 
+### Dynamic OpenAPI Documentation Generation (13 DEC 2025)
+
+**Status**: 🎨 **LOW PRIORITY** - Future Enhancement
+**Purpose**: Generate interactive API documentation from OpenAPI specification
+
+**Current State**: Static HTML rendering in `web_interfaces/docs/interface.py`
+- Hardcoded endpoint documentation for `process_vector` and `process_raster`
+- Works well, matches existing interface pattern
+- Changes require editing Python file
+
+**Future Enhancement**: Dynamic OpenAPI parsing
+- Maintain `openapi.yaml` specification file with all endpoints
+- Use JavaScript library (Swagger UI or Redoc) to parse and render at runtime
+- Benefits:
+  - Single source of truth for API documentation
+  - Interactive "Try it out" functionality
+  - Auto-generated client SDKs
+  - Industry-standard format for API consumers
+
+**Why Deferred**:
+- Current static approach works and matches existing patterns
+- OpenAPI spec would require converting WIKI markdown to structured format
+- No immediate consumer requesting OpenAPI format
+- Many higher priority items in backlog
+
+**Implementation Notes** (when ready):
+1. Create `static/openapi.yaml` with endpoint definitions
+2. Serve Swagger UI or Redoc from CDN in docs interface
+3. Point to `/api/openapi.yaml` endpoint for spec
+4. Consider generating spec from Pydantic models (FastAPI pattern)
+
+---
+
 ### Multispectral Band Combination URLs in STAC
 
 **Status**: 🎨 **LOW PRIORITY**

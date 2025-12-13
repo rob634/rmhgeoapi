@@ -61,14 +61,24 @@ class HomeInterface(BaseInterface):
                     <div class="card-footer">Browse Features →</div>
                 </a>
 
-                <!-- Pipeline Dashboard Card -->
+                <!-- Map Viewer Card -->
+                <a href="/api/interface/map" class="card">
+                    <div class="card-icon">🌍</div>
+                    <h3 class="card-title">Map Viewer</h3>
+                    <p class="card-description">
+                        Interactive Leaflet map to visualize vector features from any collection
+                    </p>
+                    <div class="card-footer">Open Map →</div>
+                </a>
+
+                <!-- Storage Browser Card -->
                 <a href="/api/interface/pipeline" class="card">
                     <div class="card-icon">📂</div>
-                    <h3 class="card-title">Pipeline Dashboard</h3>
+                    <h3 class="card-title">Storage Browser</h3>
                     <p class="card-description">
-                        Browse Bronze/Silver/Gold containers and manage data staging
+                        Browse Azure Blob Storage across Bronze, Silver, and Gold zones
                     </p>
-                    <div class="card-footer">View Files →</div>
+                    <div class="card-footer">Browse Storage →</div>
                 </a>
 
                 <!-- Job Monitor Card -->
@@ -79,6 +89,16 @@ class HomeInterface(BaseInterface):
                         Track ETL job execution and task progress in real-time
                     </p>
                     <div class="card-footer">Monitor Jobs →</div>
+                </a>
+
+                <!-- Platform Configuration Card -->
+                <a href="/api/interface/platform" class="card">
+                    <div class="card-icon">🔧</div>
+                    <h3 class="card-title">Platform Config</h3>
+                    <p class="card-description">
+                        DDH integration settings, naming patterns, and Platform API endpoints
+                    </p>
+                    <div class="card-footer">View Config →</div>
                 </a>
 
                 <!-- API Documentation Card -->

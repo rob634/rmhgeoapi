@@ -297,6 +297,12 @@ try:
 except ImportError as e:
     logger.warning(f"⚠️ Could not import Map interface: {e}")
 
+try:
+    from .platform import interface as _platform
+    logger.info("✅ Imported Platform interface module")
+except ImportError as e:
+    logger.warning(f"⚠️ Could not import Platform interface: {e}")
+
 
 # Public API
 __all__ = [

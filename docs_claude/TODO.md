@@ -36,6 +36,46 @@
 
 ---
 
+## 🚨 IMMEDIATE - NEXT WORK ITEM
+
+### TEST & IMPLEMENT UNPUBLISH WORKFLOWS (12 DEC 2025)
+
+**Status**: 🔴 **IMMEDIATE PRIORITY** - Ready for Implementation
+**Purpose**: Surgical data removal - reverse raster/vector processing
+**Full Design**: See Section 8 in BACKLOG below (lines 270-553)
+
+**Why Now**:
+- Design is complete and comprehensive (ready to build)
+- Critical for data lifecycle management
+- Enables cleanup of test/development data
+- Required for production data governance
+
+**Quick Implementation Checklist**:
+1. [ ] Add validators to `infrastructure/validators.py` (`stac_item_exists`, `stac_collection_exists`)
+2. [ ] Create `core/models/unpublished.py` audit model
+3. [ ] Update `core/schema/sql_generator.py` for `app.unpublished_jobs` table
+4. [ ] Create `services/unpublish_handlers.py` (5 handlers)
+5. [ ] Create `jobs/unpublish_raster.py`
+6. [ ] Create `jobs/unpublish_vector.py`
+7. [ ] Register in `jobs/__init__.py` and `services/__init__.py`
+8. [ ] Deploy and rebuild schema
+9. [ ] Test with `dry_run=true` first
+
+**Test Commands** (after implementation):
+```bash
+# Dry-run raster unpublish (SAFE preview)
+curl -X POST .../api/jobs/submit/unpublish_raster \
+  -H "Content-Type: application/json" \
+  -d '{"stac_item_id": "test-item", "collection_id": "cogs", "dry_run": true}'
+
+# Dry-run vector unpublish
+curl -X POST .../api/jobs/submit/unpublish_vector \
+  -H "Content-Type: application/json" \
+  -d '{"stac_item_id": "test-vector", "collection_id": "vectors", "dry_run": true}'
+```
+
+---
+
 ## 🚨 HIGH PRIORITY
 
 ### 1. Database Diagnostics & Remote Administration Enhancement (07 DEC 2025)
@@ -699,4 +739,4 @@ See `HISTORY2.md` for items completed and moved from TODO.md:
 
 ---
 
-**Last Updated**: 08 DEC 2025 (Container Inventory Consolidation Complete)
+**Last Updated**: 12 DEC 2025 (Unpublish Workflows prioritized as immediate next work item)

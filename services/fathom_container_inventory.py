@@ -500,11 +500,14 @@ def fathom_assign_grid_cells(params: Dict[str, Any]) -> Dict[str, Any]:
 
     # Update all records with grid_cell and phase2_group_key
     # Grid cell format: nXX-nYY_wZZ-wAA (e.g., n00-n05_w010-w005)
+    #
+    # IMPORTANT: Split into two UPDATEs because PostgreSQL SET clause uses OLD values,
+    # so grid_cell would be NULL when referenced in same UPDATE statement.
     repo = PostgreSQLRepository()
 
     with repo._get_connection() as conn:
         with conn.cursor() as cur:
-            # Use SQL function to calculate grid cell from tile
+            # Step 1: Calculate and set grid_cell from tile coordinate
             cur.execute(sql.SQL("""
                 UPDATE {schema}.etl_fathom
                 SET
@@ -531,16 +534,29 @@ def fathom_assign_grid_cells(params: Dict[str, Any]) -> Dict[str, Any]:
                             ELSE NULL
                         END
                     ),
-                    phase2_group_key = grid_cell || '_' || flood_type || '-' || defense || '_' || year || COALESCE('_' || ssp, ''),
                     updated_at = NOW()
                 WHERE grid_cell IS NULL
             """).format(schema=sql.Identifier("app")),
                         (grid_size, grid_size, grid_size, grid_size, grid_size, grid_size, grid_size, grid_size))
 
-            updated = cur.rowcount
+            grid_cell_updated = cur.rowcount
+            logger.info(f"   Step 1: Set grid_cell for {grid_cell_updated} records")
+
+            # Step 2: Calculate phase2_group_key using the now-populated grid_cell
+            cur.execute(sql.SQL("""
+                UPDATE {schema}.etl_fathom
+                SET
+                    phase2_group_key = grid_cell || '_' || flood_type || '-' || defense || '_' || year || COALESCE('_' || ssp, ''),
+                    updated_at = NOW()
+                WHERE grid_cell IS NOT NULL AND phase2_group_key IS NULL
+            """).format(schema=sql.Identifier("app")))
+
+            phase2_key_updated = cur.rowcount
+            logger.info(f"   Step 2: Set phase2_group_key for {phase2_key_updated} records")
+
             conn.commit()
 
-    logger.info(f"✅ Updated {updated} records with grid cells")
+    logger.info(f"✅ Updated {grid_cell_updated} records with grid cells")
 
     return {
         "success": True,

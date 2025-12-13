@@ -1113,7 +1113,7 @@ def fathom_stac_register(params: dict, context: dict = None) -> dict:
         dict with collection and item creation summary
     """
     from datetime import datetime, timezone
-    from infrastructure.stac import STACRepository
+    from infrastructure.pgstac_bootstrap import PgStacBootstrap
     from config import get_config
 
     logger = LoggerFactory.create_logger(
@@ -1141,7 +1141,7 @@ def fathom_stac_register(params: dict, context: dict = None) -> dict:
     logger.info(f"📚 Registering {len(cog_results)} STAC items for region: {region_code}")
 
     config = get_config()
-    stac_repo = STACRepository()
+    stac_repo = PgStacBootstrap()
 
     # Create collection ID with region suffix
     full_collection_id = f"{collection_id}-{region_code}"
@@ -1253,8 +1253,8 @@ def fathom_stac_register(params: dict, context: dict = None) -> dict:
                 "fathom:year": year,
                 "fathom:ssp_scenario": cog_result.get("ssp"),
                 "fathom:depth_unit": "cm",
-                "fathom:source_tiles": cog_result["tile_count"],
-                "fathom:source_files": cog_result["file_count"],
+                # Handle both Phase 1 (file_count) and Phase 2 (tile_count)
+                "fathom:source_tiles": cog_result.get("tile_count", cog_result.get("file_count", 0)),
                 "eo:bands": eo_bands
             },
             "assets": {
@@ -1283,9 +1283,9 @@ def fathom_stac_register(params: dict, context: dict = None) -> dict:
             ]
         }
 
-        # Insert item
+        # Insert item (note: PgStacBootstrap.insert_item signature is (item, collection_id))
         try:
-            stac_repo.create_item(full_collection_id, item)
+            stac_repo.insert_item(item, full_collection_id)
             items_created += 1
             logger.info(f"   ✅ Item created: {item_id}")
         except Exception as e:

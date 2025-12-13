@@ -292,6 +292,13 @@ class TaskRoutingDefaults:
         # Hello world and test handlers (lightweight)
         "hello_world_greeting",
         "hello_world_reply",
+        # Unpublish handlers - surgical data removal (12 DEC 2025)
+        # All unpublish tasks are lightweight (STAC queries, blob deletes, DROP TABLE)
+        "inventory_raster_item",
+        "inventory_vector_item",
+        "delete_blob",
+        "drop_postgis_table",
+        "delete_stac_and_audit",
     ]
 
 

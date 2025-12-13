@@ -69,6 +69,13 @@ from .etl import (
     EtlFathomRecord
 )
 
+# Unpublish audit models (12 DEC 2025)
+from .unpublish import (
+    UnpublishJobRecord,
+    UnpublishType,
+    UnpublishStatus
+)
+
 __all__ = [
     # Enums
     'JobStatus',
@@ -110,5 +117,10 @@ __all__ = [
     'JanitorRunStatus',
 
     # ETL tracking models (05 DEC 2025)
-    'EtlFathomRecord'
+    'EtlFathomRecord',
+
+    # Unpublish audit models (12 DEC 2025)
+    'UnpublishJobRecord',
+    'UnpublishType',
+    'UnpublishStatus'
 ]

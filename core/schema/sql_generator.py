@@ -33,7 +33,10 @@ from ..models import (
     JanitorRun,
     JanitorRunType,
     JanitorRunStatus,
-    EtlFathomRecord  # ETL tracking (05 DEC 2025)
+    EtlFathomRecord,  # ETL tracking (05 DEC 2025)
+    UnpublishJobRecord,  # Unpublish audit (12 DEC 2025)
+    UnpublishType,
+    UnpublishStatus
 )
 
 
@@ -326,6 +329,11 @@ class PydanticToSQL:
             # Janitor audit table (21 NOV 2025)
             constraints.append(
                 sql.SQL("PRIMARY KEY ({})").format(sql.Identifier("run_id"))
+            )
+        elif table_name == "unpublish_jobs":
+            # Unpublish audit table (12 DEC 2025)
+            constraints.append(
+                sql.SQL("PRIMARY KEY ({})").format(sql.Identifier("unpublish_id"))
             )
 
         # Combine columns and constraints
@@ -622,6 +630,63 @@ class PydanticToSQL:
                     sql.Identifier("phase2_group_key"),
                     sql.Identifier("phase1_processed_at"),
                     sql.Identifier("phase2_processed_at")
+                )
+            )
+
+        elif table_name == "unpublish_jobs":
+            # Unpublish audit table indexes (12 DEC 2025)
+            # STAC item lookup
+            indexes.append(
+                sql.SQL("CREATE INDEX IF NOT EXISTS {} ON {}.{} ({})").format(
+                    sql.Identifier("idx_unpublish_jobs_stac_item"),
+                    sql.Identifier(self.schema_name),
+                    sql.Identifier("unpublish_jobs"),
+                    sql.Identifier("stac_item_id")
+                )
+            )
+            # Collection lookup
+            indexes.append(
+                sql.SQL("CREATE INDEX IF NOT EXISTS {} ON {}.{} ({})").format(
+                    sql.Identifier("idx_unpublish_jobs_collection"),
+                    sql.Identifier(self.schema_name),
+                    sql.Identifier("unpublish_jobs"),
+                    sql.Identifier("collection_id")
+                )
+            )
+            # Original job lookup (for checking if job was unpublished)
+            indexes.append(
+                sql.SQL("CREATE INDEX IF NOT EXISTS {} ON {}.{} ({})").format(
+                    sql.Identifier("idx_unpublish_jobs_original_job"),
+                    sql.Identifier(self.schema_name),
+                    sql.Identifier("unpublish_jobs"),
+                    sql.Identifier("original_job_id")
+                )
+            )
+            # Status filter
+            indexes.append(
+                sql.SQL("CREATE INDEX IF NOT EXISTS {} ON {}.{} ({})").format(
+                    sql.Identifier("idx_unpublish_jobs_status"),
+                    sql.Identifier(self.schema_name),
+                    sql.Identifier("unpublish_jobs"),
+                    sql.Identifier("status")
+                )
+            )
+            # Created at for recent queries (descending for newest first)
+            indexes.append(
+                sql.SQL("CREATE INDEX IF NOT EXISTS {} ON {}.{} ({} DESC)").format(
+                    sql.Identifier("idx_unpublish_jobs_created_at"),
+                    sql.Identifier(self.schema_name),
+                    sql.Identifier("unpublish_jobs"),
+                    sql.Identifier("created_at")
+                )
+            )
+            # Unpublish job ID lookup
+            indexes.append(
+                sql.SQL("CREATE INDEX IF NOT EXISTS {} ON {}.{} ({})").format(
+                    sql.Identifier("idx_unpublish_jobs_unpublish_job_id"),
+                    sql.Identifier(self.schema_name),
+                    sql.Identifier("unpublish_jobs"),
+                    sql.Identifier("unpublish_job_id")
                 )
             )
 
@@ -1000,6 +1065,8 @@ $$""").format(
         composed.extend(self.generate_enum("data_type", DataType))
         composed.extend(self.generate_enum("janitor_run_type", JanitorRunType))
         composed.extend(self.generate_enum("janitor_run_status", JanitorRunStatus))
+        composed.extend(self.generate_enum("unpublish_type", UnpublishType))  # Unpublish audit (12 DEC 2025)
+        composed.extend(self.generate_enum("unpublish_status", UnpublishStatus))
 
         # For tables, indexes, functions, and triggers, we still need string format
         # because they are complex multi-line statements
@@ -1012,6 +1079,7 @@ $$""").format(
         composed.append(self.generate_table_composed(ApiRequest, "api_requests"))
         composed.append(self.generate_table_composed(JanitorRun, "janitor_runs"))
         composed.append(self.generate_table_composed(EtlFathomRecord, "etl_fathom"))  # ETL tracking (05 DEC 2025)
+        composed.append(self.generate_table_composed(UnpublishJobRecord, "unpublish_jobs"))  # Unpublish audit (12 DEC 2025)
 
         # Indexes - now using composed SQL
         composed.extend(self.generate_indexes_composed("jobs", JobRecord))
@@ -1019,7 +1087,8 @@ $$""").format(
         composed.extend(self.generate_indexes_composed("api_requests", ApiRequest))
         composed.extend(self.generate_indexes_composed("janitor_runs", JanitorRun))
         composed.extend(self.generate_indexes_composed("etl_fathom", EtlFathomRecord))  # ETL tracking (05 DEC 2025)
-            
+        composed.extend(self.generate_indexes_composed("unpublish_jobs", UnpublishJobRecord))  # Unpublish audit (12 DEC 2025)
+
         # Functions - already sql.Composed objects
         composed.extend(self.generate_static_functions())
             

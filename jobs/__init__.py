@@ -48,6 +48,10 @@ from .inventory_fathom_container import InventoryFathomContainerJob
 # Consolidated container inventory (07 DEC 2025)
 from .inventory_container_contents import InventoryContainerContentsJob
 
+# Unpublish workflows (12 DEC 2025)
+from .unpublish_raster import UnpublishRasterJob
+from .unpublish_vector import UnpublishVectorJob
+
 # ARCHIVED (07 DEC 2025) - replaced by inventory_container_contents
 # from .container_list import ListContainerContentsWorkflow
 # from .container_list_diamond import ListContainerContentsDiamondWorkflow
@@ -78,6 +82,10 @@ ALL_JOBS = {
     # Container Analysis (consolidated 07 DEC 2025)
     "inventory_container_contents": InventoryContainerContentsJob,  # Replaces list_container_contents, container_list_diamond, inventory_container_geospatial
     "inventory_fathom_container": InventoryFathomContainerJob,
+
+    # Unpublish workflows - surgical data removal (12 DEC 2025)
+    "unpublish_raster": UnpublishRasterJob,
+    "unpublish_vector": UnpublishVectorJob,
 
     # ARCHIVED (07 DEC 2025) - use inventory_container_contents instead
     # "list_container_contents": ListContainerContentsWorkflow,

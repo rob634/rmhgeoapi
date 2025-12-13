@@ -814,6 +814,224 @@ def validate_blob_exists_with_size(params: Dict[str, Any], config: Dict[str, Any
 
 
 # ============================================================================
+# STAC VALIDATORS (12 DEC 2025 - Unpublish Workflow Support)
+# ============================================================================
+
+@register_validator("stac_item_exists")
+def validate_stac_item_exists(params: Dict[str, Any], config: Dict[str, Any]) -> ValidatorResult:
+    """
+    Validate that a STAC item exists in pgstac.items.
+
+    This validator is essential for unpublish workflows - prevents
+    attempting to delete items that don't exist.
+
+    Stores the full STAC item content in params['_stac_item'] for
+    downstream use (audit trail, artifact lookup).
+
+    Config options:
+        item_id_param: str - Parameter name for STAC item ID (default: 'stac_item_id')
+        collection_id_param: str - Parameter name for collection ID (default: 'collection_id')
+        store_item: bool - Store full item in params['_stac_item'] (default: True)
+        error: str - Optional custom error message
+
+    Example:
+        resource_validators = [
+            {
+                'type': 'stac_item_exists',
+                'item_id_param': 'stac_item_id',
+                'collection_id_param': 'collection_id',
+                'error': 'STAC item not found - cannot unpublish'
+            }
+        ]
+
+    Stored in params (if store_item=True):
+        _stac_item: dict - Full STAC item content (for audit trail)
+        _stac_item_assets: dict - Item assets (for blob deletion)
+        _stac_original_job_id: str - Original processing job ID (if available)
+    """
+    from infrastructure.postgresql import PostgreSQLRepository
+
+    item_id_param = config.get('item_id_param', 'stac_item_id')
+    collection_id_param = config.get('collection_id_param', 'collection_id')
+    store_item = config.get('store_item', True)
+
+    item_id = params.get(item_id_param)
+    collection_id = params.get(collection_id_param)
+
+    if not item_id:
+        return ValidatorResult(
+            valid=False,
+            message=f"STAC item ID parameter '{item_id_param}' is missing or empty"
+        )
+
+    if not collection_id:
+        return ValidatorResult(
+            valid=False,
+            message=f"Collection ID parameter '{collection_id_param}' is missing or empty"
+        )
+
+    try:
+        repo = PostgreSQLRepository()
+        with repo._get_connection() as conn:
+            with conn.cursor() as cur:
+                # Query pgstac.items for the item
+                # pgstac stores: id, collection, geometry, content (JSONB)
+                cur.execute(
+                    """
+                    SELECT id, collection, content
+                    FROM pgstac.items
+                    WHERE id = %s AND collection = %s
+                    """,
+                    (item_id, collection_id)
+                )
+                result = cur.fetchone()
+
+        if result:
+            logger.debug(f"✅ Pre-flight: STAC item exists: {collection_id}/{item_id}")
+
+            if store_item:
+                # Store full item for downstream use
+                content = result['content'] if isinstance(result, dict) else result[2]
+                params['_stac_item'] = content
+
+                # Extract assets for blob deletion
+                if isinstance(content, dict):
+                    params['_stac_item_assets'] = content.get('assets', {})
+
+                    # Extract original job ID if available (for idempotency fix)
+                    properties = content.get('properties', {})
+                    original_job_id = properties.get('processing:job_id') or properties.get('etl_job_id')
+                    if original_job_id:
+                        params['_stac_original_job_id'] = original_job_id
+
+            return ValidatorResult(valid=True, message=None)
+        else:
+            error_msg = config.get('error') or f"STAC item '{item_id}' not found in collection '{collection_id}'"
+            logger.warning(f"❌ Pre-flight: {error_msg}")
+            return ValidatorResult(valid=False, message=error_msg)
+
+    except Exception as e:
+        error_msg = f"Failed to validate STAC item existence for '{collection_id}/{item_id}': {e}"
+        logger.error(error_msg)
+        return ValidatorResult(valid=False, message=error_msg)
+
+
+@register_validator("stac_collection_exists")
+def validate_stac_collection_exists(params: Dict[str, Any], config: Dict[str, Any]) -> ValidatorResult:
+    """
+    Validate that a STAC collection exists in pgstac.collections.
+
+    Config options:
+        collection_id_param: str - Parameter name for collection ID (default: 'collection_id')
+        store_collection: bool - Store collection in params['_stac_collection'] (default: False)
+        error: str - Optional custom error message
+
+    Example:
+        resource_validators = [
+            {
+                'type': 'stac_collection_exists',
+                'collection_id_param': 'collection_id',
+                'error': 'STAC collection does not exist'
+            }
+        ]
+    """
+    from infrastructure.postgresql import PostgreSQLRepository
+
+    collection_id_param = config.get('collection_id_param', 'collection_id')
+    store_collection = config.get('store_collection', False)
+
+    collection_id = params.get(collection_id_param)
+
+    if not collection_id:
+        return ValidatorResult(
+            valid=False,
+            message=f"Collection ID parameter '{collection_id_param}' is missing or empty"
+        )
+
+    try:
+        repo = PostgreSQLRepository()
+        with repo._get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT id, content
+                    FROM pgstac.collections
+                    WHERE id = %s
+                    """,
+                    (collection_id,)
+                )
+                result = cur.fetchone()
+
+        if result:
+            logger.debug(f"✅ Pre-flight: STAC collection exists: {collection_id}")
+
+            if store_collection:
+                content = result['content'] if isinstance(result, dict) else result[1]
+                params['_stac_collection'] = content
+
+            return ValidatorResult(valid=True, message=None)
+        else:
+            error_msg = config.get('error') or f"STAC collection '{collection_id}' does not exist"
+            logger.warning(f"❌ Pre-flight: {error_msg}")
+            return ValidatorResult(valid=False, message=error_msg)
+
+    except Exception as e:
+        error_msg = f"Failed to validate STAC collection existence for '{collection_id}': {e}"
+        logger.error(error_msg)
+        return ValidatorResult(valid=False, message=error_msg)
+
+
+@register_validator("stac_item_not_exists")
+def validate_stac_item_not_exists(params: Dict[str, Any], config: Dict[str, Any]) -> ValidatorResult:
+    """
+    Validate that a STAC item does NOT exist (for create-new workflows).
+
+    Useful for ensuring idempotency - prevent duplicate item creation.
+
+    Config options:
+        item_id_param: str - Parameter name for STAC item ID (default: 'stac_item_id')
+        collection_id_param: str - Parameter name for collection ID (default: 'collection_id')
+        allow_overwrite_param: str - If this param is True, skip validation
+        error: str - Optional custom error message
+
+    Example:
+        resource_validators = [
+            {
+                'type': 'stac_item_not_exists',
+                'item_id_param': 'stac_item_id',
+                'collection_id_param': 'collection_id',
+                'allow_overwrite_param': 'overwrite',
+                'error': 'STAC item already exists. Set overwrite=true to replace.'
+            }
+        ]
+    """
+    # Check if overwrite is allowed
+    allow_overwrite_param = config.get('allow_overwrite_param')
+    if allow_overwrite_param and params.get(allow_overwrite_param):
+        logger.debug(f"✅ Pre-flight: stac_item_not_exists skipped (overwrite={params.get(allow_overwrite_param)})")
+        return ValidatorResult(valid=True, message=None)
+
+    # Inverse of stac_item_exists
+    result = validate_stac_item_exists(params, {**config, 'store_item': False})
+
+    if result['valid']:
+        # Item exists - this is a FAILURE for stac_item_not_exists
+        item_id_param = config.get('item_id_param', 'stac_item_id')
+        collection_id_param = config.get('collection_id_param', 'collection_id')
+        item_id = params.get(item_id_param)
+        collection_id = params.get(collection_id_param)
+
+        error_msg = config.get('error') or f"STAC item '{item_id}' already exists in collection '{collection_id}'"
+        return ValidatorResult(valid=False, message=error_msg)
+    else:
+        # Item doesn't exist - this is SUCCESS for stac_item_not_exists
+        # (unless the check itself failed due to connection error)
+        if result.get('message') and "Failed to validate" in result['message']:
+            return result  # Propagate connection errors
+        return ValidatorResult(valid=True, message=None)
+
+
+# ============================================================================
 # HELPER FUNCTIONS
 # ============================================================================
 
@@ -863,4 +1081,8 @@ __all__ = [
     'validate_blob_size',
     'validate_blob_list_exists',
     'validate_blob_exists_with_size',
+    # STAC validators (12 DEC 2025)
+    'validate_stac_item_exists',
+    'validate_stac_collection_exists',
+    'validate_stac_item_not_exists',
 ]

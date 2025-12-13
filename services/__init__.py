@@ -124,6 +124,15 @@ from .fathom_container_inventory import (
     fathom_inventory_summary,
 )
 
+# Unpublish handlers - surgical data removal (12 DEC 2025)
+from .unpublish_handlers import (
+    inventory_raster_item,
+    inventory_vector_item,
+    delete_blob,
+    drop_postgis_table,
+    delete_stac_and_audit,
+)
+
 # ============================================================================
 # STAC METADATA HELPER (25 NOV 2025)
 # ============================================================================
@@ -205,6 +214,12 @@ ALL_HANDLERS = {
     "fathom_scan_prefix": fathom_scan_prefix,  # Stage 2: Parallel scan + batch insert
     "fathom_assign_grid_cells": fathom_assign_grid_cells,  # Stage 3: Calculate grid assignments
     "fathom_inventory_summary": fathom_inventory_summary,  # Stage 4: Generate statistics
+    # Unpublish handlers - surgical data removal (12 DEC 2025)
+    "inventory_raster_item": inventory_raster_item,  # Stage 1: Query STAC, extract blob list
+    "inventory_vector_item": inventory_vector_item,  # Stage 1: Query STAC, extract table ref
+    "delete_blob": delete_blob,  # Stage 2: Delete blob from Azure Storage
+    "drop_postgis_table": drop_postgis_table,  # Stage 2: DROP TABLE IF EXISTS
+    "delete_stac_and_audit": delete_stac_and_audit,  # Stage 3: Delete STAC item, audit
 }
 
 # ============================================================================

@@ -533,12 +533,14 @@ curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/dba
 # Step 1: Login (if needed)
 az login
 
-# Step 2: Run this exact script (App ID: 829adb94-5f5c-46ae-9f00-18e731529222)
+# Step 2: Run this exact script
+# rmhazuregeoapi App ID: d3af3d37-cfe3-411f-adef-bc540181cbca
+# rmhgeoapi-worker App ID: 60530c92-dc55-4d1f-a528-4d523fd5a135
 cat > /tmp/query_ai.sh << 'EOF'
 #!/bin/bash
 TOKEN=$(az account get-access-token --resource https://api.applicationinsights.io --query accessToken -o tsv)
 curl -s -H "Authorization: Bearer $TOKEN" \
-  "https://api.applicationinsights.io/v1/apps/829adb94-5f5c-46ae-9f00-18e731529222/query" \
+  "https://api.applicationinsights.io/v1/apps/d3af3d37-cfe3-411f-adef-bc540181cbca/query" \
   --data-urlencode "query=traces | where timestamp >= ago(15m) | order by timestamp desc | take 20" \
   -G
 EOF

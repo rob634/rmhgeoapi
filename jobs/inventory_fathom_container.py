@@ -137,7 +137,7 @@ class InventoryFathomContainerJob(JobBaseMixin, JobBase):
 
     @staticmethod
     def create_tasks_for_stage(
-        stage: Dict[str, Any],
+        stage: int,
         job_params: Dict[str, Any],
         job_id: str,
         previous_results: List[Dict[str, Any]] = None
@@ -149,16 +149,29 @@ class InventoryFathomContainerJob(JobBaseMixin, JobBase):
         Stage 2 (scan_prefix): One task per prefix (parallel)
         Stage 3 (assign_grid_cells): Single task to update grid assignments
         Stage 4 (generate_summary): Single task for statistics
+
+        Args:
+            stage: Stage number (int) per JobBase contract
+            job_params: Job parameters
+            job_id: Job ID for task generation
+            previous_results: Results from previous stage
         """
-        stage_num = stage["number"]
-        stage_name = stage["name"]
-        task_type = stage["task_type"]
+        # Look up stage definition from class attribute
+        stage_def = next(
+            (s for s in InventoryFathomContainerJob.stages if s["number"] == stage),
+            None
+        )
+        if not stage_def:
+            raise ValueError(f"Invalid stage number: {stage}")
+
+        stage_name = stage_def["name"]
+        task_type = stage_def["task_type"]
         job_short = job_id[:8]
 
         if stage_name == "generate_prefixes":
             # Stage 1: Generate list of prefixes to scan
             return [{
-                "task_id": f"{job_short}-s{stage_num}-prefixes",
+                "task_id": f"{job_short}-s{stage}-prefixes",
                 "task_type": task_type,
                 "parameters": {
                     "source_container": job_params.get("source_container", FathomDefaults.SOURCE_CONTAINER),
@@ -184,7 +197,7 @@ class InventoryFathomContainerJob(JobBaseMixin, JobBase):
             tasks = []
             for i, prefix in enumerate(prefixes):
                 tasks.append({
-                    "task_id": f"{job_short}-s{stage_num}-p{i:03d}",
+                    "task_id": f"{job_short}-s{stage}-p{i:03d}",
                     "task_type": task_type,
                     "parameters": {
                         "prefix": prefix,
@@ -198,7 +211,7 @@ class InventoryFathomContainerJob(JobBaseMixin, JobBase):
         elif stage_name == "assign_grid_cells":
             # Stage 3: Single task to update grid cell assignments
             return [{
-                "task_id": f"{job_short}-s{stage_num}-grid",
+                "task_id": f"{job_short}-s{stage}-grid",
                 "task_type": task_type,
                 "parameters": {
                     "grid_size": job_params.get("grid_size", 5),
@@ -209,7 +222,7 @@ class InventoryFathomContainerJob(JobBaseMixin, JobBase):
         elif stage_name == "generate_summary":
             # Stage 4: Single task for summary statistics
             return [{
-                "task_id": f"{job_short}-s{stage_num}-summary",
+                "task_id": f"{job_short}-s{stage}-summary",
                 "task_type": task_type,
                 "parameters": {
                     "source_container": job_params.get("source_container", FathomDefaults.SOURCE_CONTAINER),
@@ -220,11 +233,17 @@ class InventoryFathomContainerJob(JobBaseMixin, JobBase):
         return []
 
     @staticmethod
-    def finalize_job(context: Dict[str, Any] = None) -> Dict[str, Any]:
+    def finalize_job(context=None) -> Dict[str, Any]:
         """
         Finalize the inventory job.
 
         Returns summary of inventory results from stage 4.
+
+        Args:
+            context: JobExecutionContext object (not dict) containing:
+                - job_id, job_type, parameters
+                - task_results: List of TaskRecord objects
+                - stage_results: Dict of stage results
         """
         if not context:
             return {
@@ -233,14 +252,17 @@ class InventoryFathomContainerJob(JobBaseMixin, JobBase):
                 "message": "Fathom container inventory completed"
             }
 
-        # Get stage results if available
-        stage_results = context.get("stage_results", [])
+        # Access task_results from context object (not dict)
+        task_results = context.task_results if hasattr(context, 'task_results') else []
 
-        # Find summary stage result (stage 4)
+        # Find summary task result (Stage 4: fathom_inventory_summary)
         summary = {}
-        for result in stage_results:
-            if result.get("stage_name") == "generate_summary":
-                summary = result.get("result", {})
+        for task in task_results:
+            task_type = task.task_type if hasattr(task, 'task_type') else task.get('task_type', '')
+            if task_type == "fathom_inventory_summary":
+                result_data = task.result_data if hasattr(task, 'result_data') else task.get('result_data', {})
+                if result_data:
+                    summary = result_data.get("result", {}) if isinstance(result_data, dict) else {}
                 break
 
         return {

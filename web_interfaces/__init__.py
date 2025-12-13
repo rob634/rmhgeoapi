@@ -291,6 +291,12 @@ try:
 except ImportError as e:
     logger.warning(f"⚠️ Could not import Health interface: {e}")
 
+try:
+    from .map import interface as _map
+    logger.info("✅ Imported Map interface module")
+except ImportError as e:
+    logger.warning(f"⚠️ Could not import Map interface: {e}")
+
 
 # Public API
 __all__ = [

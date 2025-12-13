@@ -41,7 +41,7 @@ class PipelineInterface(BaseInterface):
         custom_js = self._generate_custom_js()
 
         return self.wrap_html(
-            title="Pipeline Dashboard",
+            title="Storage Browser",
             content=content,
             custom_css=custom_css,
             custom_js=custom_js
@@ -53,34 +53,43 @@ class PipelineInterface(BaseInterface):
         <div class="container">
             <!-- Header -->
             <header class="dashboard-header">
-                <h1>📦 Pipeline Dashboard</h1>
-                <p class="subtitle">Browse Bronze container files for processing</p>
+                <h1>📦 Storage Browser</h1>
+                <p class="subtitle">Browse Azure Blob Storage across Bronze, Silver, and Gold zones</p>
             </header>
 
             <!-- Controls -->
             <div class="controls">
                 <div class="control-group">
-                    <label for="container-select">Container:</label>
-                    <select id="container-select" class="filter-select">
-                        <option value="bronze-rasters" selected>bronze-rasters (Bronze)</option>
-                        <option value="bronze-vectors">bronze-vectors (Bronze)</option>
-                        <option value="silver-cogs">silver-cogs (Silver)</option>
-                        <option value="silver-mosaicjson">silver-mosaicjson (Silver)</option>
-                        <option value="gold-geoparquet">gold-geoparquet (Gold)</option>
+                    <label for="zone-select">Zone:</label>
+                    <select id="zone-select" class="filter-select" onchange="onZoneChange()">
+                        <option value="">Loading zones...</option>
                     </select>
                 </div>
 
                 <div class="control-group">
-                    <label for="prefix-input">Folder Filter:</label>
+                    <label for="container-select">Container:</label>
+                    <select id="container-select" class="filter-select" disabled>
+                        <option value="">Select zone first</option>
+                    </select>
+                </div>
+
+                <div class="control-group">
+                    <label for="prefix-input">Path Filter:</label>
                     <input type="text" id="prefix-input" class="filter-input"
                            placeholder="e.g., maxar/ or data/2025/">
                 </div>
 
+                <div class="control-group">
+                    <label for="suffix-input">Extension:</label>
+                    <input type="text" id="suffix-input" class="filter-input suffix-input"
+                           placeholder=".tif">
+                </div>
+
                 <div class="button-group">
-                    <button onclick="loadBlobs()" class="refresh-button">🔄 Refresh</button>
-                    <button onclick="loadBlobs(10)" class="load-button">10</button>
-                    <button onclick="loadBlobs(50)" class="load-button active">50</button>
-                    <button onclick="loadBlobs(1000)" class="load-button">All</button>
+                    <button onclick="loadBlobs()" class="refresh-button" id="load-btn" disabled>🔄 Load Files</button>
+                    <button onclick="loadBlobs(50)" class="load-button">50</button>
+                    <button onclick="loadBlobs(250)" class="load-button active">250</button>
+                    <button onclick="loadBlobs(1000)" class="load-button">1000</button>
                 </div>
             </div>
 
@@ -220,7 +229,12 @@ class PipelineInterface(BaseInterface):
         }
 
         .filter-input {
-            min-width: 250px;
+            min-width: 200px;
+        }
+
+        .filter-input.suffix-input {
+            min-width: 80px;
+            width: 80px;
         }
 
         .filter-select:focus, .filter-input:focus {
@@ -535,12 +549,64 @@ class PipelineInterface(BaseInterface):
     def _generate_custom_js(self) -> str:
         """Generate custom JavaScript for Pipeline Dashboard."""
         return """
-        let currentLimit = 50;
+        let currentLimit = 250;
         let currentBlobs = [];
         let selectedBlob = null;
+        let zonesData = {};  // Cache zones and containers
 
-        // Load blobs on page load
-        document.addEventListener('DOMContentLoaded', () => loadBlobs(50));
+        // Load zones on page load
+        document.addEventListener('DOMContentLoaded', loadZones);
+
+        // Load zones from API
+        async function loadZones() {
+            const zoneSelect = document.getElementById('zone-select');
+
+            try {
+                const data = await fetchJSON(`${API_BASE_URL}/api/storage/containers`);
+                zonesData = data.zones || {};
+
+                // Populate zone dropdown
+                const zoneOptions = Object.entries(zonesData)
+                    .filter(([zone, info]) => !info.error && info.containers?.length > 0)
+                    .map(([zone, info]) => {
+                        const icon = zone === 'bronze' ? '🟤' :
+                                    zone === 'silver' ? '⚪' :
+                                    zone === 'silverext' ? '🔘' : '🟡';
+                        return `<option value="${zone}">${icon} ${zone} (${info.account}) - ${info.container_count} containers</option>`;
+                    });
+
+                if (zoneOptions.length > 0) {
+                    zoneSelect.innerHTML = '<option value="">Select a zone...</option>' + zoneOptions.join('');
+                } else {
+                    zoneSelect.innerHTML = '<option value="">No zones available</option>';
+                }
+
+            } catch (error) {
+                console.error('Error loading zones:', error);
+                zoneSelect.innerHTML = '<option value="">Error loading zones</option>';
+            }
+        }
+
+        // Handle zone selection change
+        function onZoneChange() {
+            const zone = document.getElementById('zone-select').value;
+            const containerSelect = document.getElementById('container-select');
+            const loadBtn = document.getElementById('load-btn');
+
+            if (!zone || !zonesData[zone]) {
+                containerSelect.innerHTML = '<option value="">Select zone first</option>';
+                containerSelect.disabled = true;
+                loadBtn.disabled = true;
+                return;
+            }
+
+            const containers = zonesData[zone].containers || [];
+            containerSelect.innerHTML = containers
+                .map(c => `<option value="${c}">${c}</option>`)
+                .join('');
+            containerSelect.disabled = false;
+            loadBtn.disabled = false;
+        }
 
         // Load blobs from API
         async function loadBlobs(limit = null) {
@@ -549,16 +615,23 @@ class PipelineInterface(BaseInterface):
                 // Update active button
                 document.querySelectorAll('.load-button').forEach(btn => {
                     btn.classList.remove('active');
-                    if ((limit === 10 && btn.textContent === '10') ||
-                        (limit === 50 && btn.textContent === '50') ||
-                        (limit === 1000 && btn.textContent === 'All')) {
+                    if ((limit === 50 && btn.textContent === '50') ||
+                        (limit === 250 && btn.textContent === '250') ||
+                        (limit === 1000 && btn.textContent === '1000')) {
                         btn.classList.add('active');
                     }
                 });
             }
 
+            const zone = document.getElementById('zone-select').value;
             const container = document.getElementById('container-select').value;
             const prefix = document.getElementById('prefix-input').value.trim();
+            const suffix = document.getElementById('suffix-input').value.trim();
+
+            if (!zone || !container) {
+                setStatus('Please select a zone and container first', true);
+                return;
+            }
 
             const spinner = document.getElementById('loading-spinner');
             const table = document.getElementById('files-table');
@@ -576,9 +649,14 @@ class PipelineInterface(BaseInterface):
             closeDetailPanel();
 
             try {
-                // Build URL
-                const params = new URLSearchParams({ limit: currentLimit });
+                // Build URL with zone parameter
+                const params = new URLSearchParams({
+                    zone: zone,
+                    limit: currentLimit,
+                    metadata: 'true'
+                });
                 if (prefix) params.append('prefix', prefix);
+                if (suffix) params.append('suffix', suffix);
 
                 const url = `${API_BASE_URL}/api/containers/${container}/blobs?${params}`;
                 const data = await fetchJSON(url);
@@ -664,9 +742,10 @@ class PipelineInterface(BaseInterface):
 
             try {
                 // Fetch detailed metadata
+                const zone = document.getElementById('zone-select').value;
                 const container = document.getElementById('container-select').value;
                 // Use query param for blob path (Azure Functions v4 doesn't support :path constraint)
-                const url = `${API_BASE_URL}/api/containers/${container}/blob?path=${encodeURIComponent(blob.name)}`;
+                const url = `${API_BASE_URL}/api/containers/${container}/blob?zone=${zone}&path=${encodeURIComponent(blob.name)}`;
                 const metadata = await fetchJSON(url);
 
                 // Render details
@@ -731,10 +810,12 @@ class PipelineInterface(BaseInterface):
             selectedBlob = null;
         }
 
-        // Handle Enter key in prefix input
-        document.getElementById('prefix-input')?.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') {
-                loadBlobs();
-            }
+        // Handle Enter key in filter inputs
+        ['prefix-input', 'suffix-input'].forEach(id => {
+            document.getElementById(id)?.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    loadBlobs();
+                }
+            });
         });
         """

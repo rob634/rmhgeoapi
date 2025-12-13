@@ -264,7 +264,7 @@ class BaseInterface(ABC):
                       text-decoration: none; transition: color 0.2s;"
                onmouseover="this.style.color='#0071BC'"
                onmouseout="this.style.color='#053657'">
-                🛰️ Geospatial API
+                Geospatial API
             </a>
             <div style="display: flex; gap: 20px;">
                 <a href="/api/interface/stac"
@@ -272,7 +272,7 @@ class BaseInterface(ABC):
                           transition: color 0.2s;"
                    onmouseover="this.style.color='#00A3DA'"
                    onmouseout="this.style.color='#0071BC'">
-                    STAC Collections
+                    STAC
                 </a>
                 <a href="/api/interface/vector"
                    style="color: #0071BC; text-decoration: none; font-weight: 600;
@@ -281,26 +281,33 @@ class BaseInterface(ABC):
                    onmouseout="this.style.color='#0071BC'">
                     OGC Features
                 </a>
+                <a href="/api/interface/map"
+                   style="color: #0071BC; text-decoration: none; font-weight: 600;
+                          transition: color 0.2s;"
+                   onmouseover="this.style.color='#00A3DA'"
+                   onmouseout="this.style.color='#0071BC'">
+                    Map
+                </a>
                 <a href="/api/interface/pipeline"
                    style="color: #0071BC; text-decoration: none; font-weight: 600;
                           transition: color 0.2s;"
                    onmouseover="this.style.color='#00A3DA'"
                    onmouseout="this.style.color='#0071BC'">
-                    Pipeline
+                    Storage
                 </a>
                 <a href="/api/interface/jobs"
                    style="color: #0071BC; text-decoration: none; font-weight: 600;
                           transition: color 0.2s;"
                    onmouseover="this.style.color='#00A3DA'"
                    onmouseout="this.style.color='#0071BC'">
-                    Job Monitor
+                    Jobs
                 </a>
-                <a href="/api/interface/docs"
+                <a href="/api/interface/health"
                    style="color: #0071BC; text-decoration: none; font-weight: 600;
                           transition: color 0.2s;"
                    onmouseover="this.style.color='#00A3DA'"
                    onmouseout="this.style.color='#0071BC'">
-                    API Docs
+                    Health
                 </a>
             </div>
         </nav>

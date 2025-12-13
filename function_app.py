@@ -2006,8 +2006,7 @@ def list_storage_containers(req: func.HttpRequest) -> func.HttpResponse:
 
 from triggers.static_files import static_files_handler
 
-@app.route(route="dashboard", methods=["GET"])
-@app.route(route="dashboard/{filename}", methods=["GET"])
+@app.route(route="dashboard/{filename:alpha?}", methods=["GET"])
 def dashboard_static(req: func.HttpRequest) -> func.HttpResponse:
     """
     Serve dashboard static files (HTML/JS/CSS).
@@ -2018,6 +2017,7 @@ def dashboard_static(req: func.HttpRequest) -> func.HttpResponse:
     GET /api/dashboard/map          -> map.html
 
     Note: Clean URLs supported - /dashboard/health serves health.html
+    The {filename:alpha?} makes filename optional and only matches alphanumeric.
     """
     return static_files_handler(req)
 

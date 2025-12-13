@@ -39,6 +39,23 @@ class ProcessLargeRasterV2Job(RasterMixin, RasterWorkflowsBase, JobBaseMixin, Jo
     Preflight Validation:
     - Blob exists with size check (min 100MB, max 30GB)
     - Files smaller than 100MB should use process_raster_v2
+
+    Future Enhancement - Docker Worker Routing (13 DEC 2025):
+        The extract_tiles stage (Stage 2) is a long-running, memory-intensive
+        operation that may exceed Azure Functions timeout limits for very large
+        files. When the Docker worker infrastructure is ready:
+
+        - Stage 2 tasks will route to 'long-running-raster-tasks' queue
+        - Docker worker will process without timeout constraints
+        - Size threshold for Docker routing will be higher than collection
+          threshold (~several GB vs 800 MB)
+
+        This is separate from the collection size routing (process_raster_collection_v2):
+        - Single large files use tiling approach here
+        - Collections with large files route all tasks to Docker worker (all-or-none)
+
+        Queue routing will be controlled by adding extract_tiles to
+        TaskRoutingDefaults.LONG_RUNNING_RASTER_TASKS when Docker is ready.
     """
 
     job_type = "process_large_raster_v2"

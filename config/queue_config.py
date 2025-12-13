@@ -38,6 +38,8 @@ class QueueNames:
     JOBS = QueueDefaults.JOBS_QUEUE
     RASTER_TASKS = QueueDefaults.RASTER_TASKS_QUEUE
     VECTOR_TASKS = QueueDefaults.VECTOR_TASKS_QUEUE
+    # Long-running tasks (13 DEC 2025 - placeholder for Docker worker)
+    LONG_RUNNING_RASTER_TASKS = QueueDefaults.LONG_RUNNING_RASTER_TASKS_QUEUE
 
 
 # ============================================================================
@@ -87,6 +89,14 @@ class QueueConfig(BaseModel):
         description="Service Bus queue for vector tasks (DB operations, high concurrency)"
     )
 
+    # Long-running tasks queue (13 DEC 2025 - placeholder for Docker worker)
+    long_running_raster_tasks_queue: str = Field(
+        default=QueueDefaults.LONG_RUNNING_RASTER_TASKS_QUEUE,
+        description="Service Bus queue for long-running raster tasks (Docker worker). "
+                    "Currently placeholder - tasks route here when Docker support is added. "
+                    "Used for raster collections containing files exceeding size threshold."
+    )
+
     # Batch processing
     max_batch_size: int = Field(
         default=QueueDefaults.MAX_BATCH_SIZE,
@@ -120,6 +130,11 @@ class QueueConfig(BaseModel):
             jobs_queue=os.environ.get("SERVICE_BUS_JOBS_QUEUE", QueueDefaults.JOBS_QUEUE),
             raster_tasks_queue=os.environ.get("SERVICE_BUS_RASTER_TASKS_QUEUE", QueueDefaults.RASTER_TASKS_QUEUE),
             vector_tasks_queue=os.environ.get("SERVICE_BUS_VECTOR_TASKS_QUEUE", QueueDefaults.VECTOR_TASKS_QUEUE),
+            # Long-running queue (13 DEC 2025 - placeholder for Docker worker)
+            long_running_raster_tasks_queue=os.environ.get(
+                "SERVICE_BUS_LONG_RUNNING_RASTER_TASKS_QUEUE",
+                QueueDefaults.LONG_RUNNING_RASTER_TASKS_QUEUE
+            ),
             max_batch_size=int(os.environ.get("SERVICE_BUS_MAX_BATCH_SIZE", str(QueueDefaults.MAX_BATCH_SIZE))),
             batch_threshold=int(os.environ.get("SERVICE_BUS_BATCH_THRESHOLD", str(QueueDefaults.BATCH_THRESHOLD))),
             retry_count=int(os.environ.get("SERVICE_BUS_RETRY_COUNT", str(QueueDefaults.RETRY_COUNT))),

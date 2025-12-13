@@ -34,7 +34,31 @@ class ProcessRasterCollectionV2Job(RasterMixin, RasterWorkflowsBase, JobBaseMixi
 
     Preflight Validation:
     - Container exists check
-    - All blobs in blob_list exist (parallel check, can bypass)
+    - All blobs in blob_list exist with size capture (parallel check)
+    - Collection size limit enforced (max files allowed)
+    - Individual raster size threshold enforced (reject large files)
+
+    Size-Based Routing (13 DEC 2025):
+        Pre-flight validation checks the count and size of each raster in the collection.
+
+        Rejection conditions:
+        1. Collection exceeds RASTER_COLLECTION_SIZE_LIMIT (default: 20 files)
+           → Submit smaller batches
+        2. ANY raster exceeds RASTER_SIZE_THRESHOLD_MB (default: 800 MB)
+           → Large raster collection processing requires Docker worker (coming soon)
+
+        Current behavior:
+            Rejects with clear error message - large collection processing
+            requires Docker worker which is not yet implemented.
+
+        Future behavior (when Docker worker is ready):
+            Routes ALL tasks to 'long-running-raster-tasks' queue instead of
+            'raster-tasks' queue. All-or-none routing prevents complexity of
+            splitting tasks between queues for a single job.
+
+        Thresholds configurable via environment variables:
+        - RASTER_COLLECTION_SIZE_LIMIT: Max files in collection (default: 20)
+        - RASTER_SIZE_THRESHOLD_MB: Max individual file size in MB (default: 800)
     """
 
     job_type = "process_raster_collection_v2"
@@ -63,8 +87,8 @@ class ProcessRasterCollectionV2Job(RasterMixin, RasterWorkflowsBase, JobBaseMixi
         'cog_container': {'type': 'str', 'default': None},
     }
 
-    # Preflight resource validators
-    # Uses blob_list_exists for efficient parallel validation of all tiles
+    # Preflight resource validators (13 DEC 2025 - size enforcement)
+    # Uses blob_list_exists_with_max_size for parallel validation + size capture
     resource_validators = [
         {
             'type': 'container_exists',
@@ -72,7 +96,9 @@ class ProcessRasterCollectionV2Job(RasterMixin, RasterWorkflowsBase, JobBaseMixi
             'error': 'Source container does not exist'
         },
         {
-            'type': 'blob_list_exists',
+            # Size-aware validator (13 DEC 2025)
+            # Checks: existence, collection count limit, individual size threshold
+            'type': 'blob_list_exists_with_max_size',
             'container_param': 'container_name',
             'blob_list_param': 'blob_list',
             'skip_validation_param': '_skip_blob_validation',
@@ -80,7 +106,21 @@ class ProcessRasterCollectionV2Job(RasterMixin, RasterWorkflowsBase, JobBaseMixi
             'max_parallel': 10,
             'report_all': True,
             'min_count': 2,
-            'error_not_found': 'One or more tiles not found in collection. Verify blob paths.'
+            # Collection count limit (from env var)
+            'max_collection_count_env': 'RASTER_COLLECTION_SIZE_LIMIT',
+            # Individual raster size threshold (from env var)
+            'max_individual_size_mb_env': 'RASTER_SIZE_THRESHOLD_MB',
+            # Error messages
+            'error_not_found': 'One or more tiles not found in collection. Verify blob paths.',
+            'error_collection_too_large': (
+                'Collection exceeds maximum file count ({limit} files). '
+                'Submit smaller batches or contact support for bulk processing.'
+            ),
+            'error_raster_too_large': (
+                'Collection contains raster(s) exceeding {threshold}MB threshold. '
+                'Large raster collection processing requires Docker worker (coming soon). '
+                'For now, process large files individually using process_large_raster_v2.'
+            )
         }
     ]
 

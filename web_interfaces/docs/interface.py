@@ -1,8 +1,8 @@
 """
 API Documentation Interface.
 
-Static rendering of API documentation for key job submission endpoints.
-Focuses on process_vector and process_raster jobs.
+Static rendering of API documentation for Platform endpoints used by DDH.
+Platform is the Anti-Corruption Layer that translates DDH requests to CoreMachine jobs.
 
 Note: Future enhancement could use OpenAPI/Swagger for dynamic docs.
 See TODO.md "Dynamic OpenAPI Documentation Generation" for details.
@@ -17,17 +17,20 @@ from web_interfaces.base import BaseInterface
 @InterfaceRegistry.register('docs')
 class DocsInterface(BaseInterface):
     """
-    API documentation interface.
+    API documentation interface for Platform (DDH) endpoints.
 
-    Provides OpenAPI-style documentation for:
-        - process_vector job (CSV, GeoJSON, Shapefile, etc.)
-        - process_raster job (GeoTIFF to COG conversion)
+    Provides documentation for:
+        - POST /api/platform/submit - Generic data submission
+        - POST /api/platform/raster - Single raster file
+        - POST /api/platform/raster-collection - Multiple raster files
+        - GET /api/platform/status/{request_id} - Check request status
+        - GET /api/platform/health - Platform health check
     """
 
     def render(self, request: func.HttpRequest) -> str:
         """Generate API documentation page."""
         return self.wrap_html(
-            title="API Documentation - Job Submission",
+            title="Platform API Documentation - DDH Integration",
             content=self._generate_html_content(),
             custom_css=self._generate_css(),
             custom_js=self._generate_js()
@@ -55,6 +58,21 @@ class DocsInterface(BaseInterface):
                 margin: 0;
             }
 
+            .info-box {
+                background: #e7f3ff;
+                border: 1px solid #b3d7ff;
+                border-radius: 6px;
+                padding: 16px 20px;
+                margin-bottom: 24px;
+                font-size: 14px;
+                color: #0056b3;
+            }
+
+            .info-box strong {
+                display: block;
+                margin-bottom: 8px;
+            }
+
             .endpoint-section {
                 background: white;
                 border-radius: 8px;
@@ -70,6 +88,7 @@ class DocsInterface(BaseInterface):
                 display: flex;
                 align-items: center;
                 gap: 16px;
+                flex-wrap: wrap;
             }
 
             .endpoint-header h2 {
@@ -88,6 +107,11 @@ class DocsInterface(BaseInterface):
 
             .method-badge.post {
                 background: #28a745;
+                color: white;
+            }
+
+            .method-badge.get {
+                background: #007bff;
                 color: white;
             }
 
@@ -177,6 +201,7 @@ class DocsInterface(BaseInterface):
                 font-size: 13px;
                 overflow-x: auto;
                 margin: 12px 0;
+                white-space: pre;
             }
 
             .code-block .comment {
@@ -195,6 +220,7 @@ class DocsInterface(BaseInterface):
                 display: flex;
                 gap: 8px;
                 margin-bottom: 12px;
+                flex-wrap: wrap;
             }
 
             .example-tab {
@@ -279,71 +305,85 @@ class DocsInterface(BaseInterface):
                 text-decoration: underline;
             }
 
-            .file-types {
-                display: flex;
-                flex-wrap: wrap;
-                gap: 8px;
-                margin-top: 8px;
+            .toc-section {
+                margin-top: 12px;
+                padding-top: 12px;
+                border-top: 1px solid #eee;
             }
 
-            .file-type {
-                background: var(--wb-bg);
-                padding: 4px 10px;
-                border-radius: 4px;
-                font-size: 12px;
-                font-family: monospace;
-                border: 1px solid #ddd;
+            .toc-section-title {
+                font-weight: 600;
+                color: var(--wb-navy);
+                font-size: 13px;
+                margin-bottom: 8px;
             }
+
+            .access-level {
+                display: inline-block;
+                padding: 2px 8px;
+                border-radius: 12px;
+                font-size: 11px;
+                font-weight: 600;
+            }
+
+            .access-level.public { background: #d4edda; color: #155724; }
+            .access-level.ouo { background: #fff3cd; color: #856404; }
+            .access-level.restricted { background: #f8d7da; color: #721c24; }
         """
 
     def _generate_html_content(self) -> str:
-        """Generate documentation content."""
+        """Generate documentation content for Platform API."""
         return """
         <div class="container">
             <header class="docs-header">
-                <h1>API Documentation</h1>
-                <p class="subtitle">Job Submission Endpoints for Geospatial Data Processing</p>
+                <h1>Platform API Documentation</h1>
+                <p class="subtitle">DDH Integration Endpoints for Geospatial Data Processing</p>
             </header>
+
+            <div class="info-box">
+                <strong>Anti-Corruption Layer (ACL)</strong>
+                Platform translates DDH requests to CoreMachine jobs. DDH submits data using
+                <code>dataset_id</code>, <code>resource_id</code>, and <code>version_id</code>.
+                Platform generates deterministic <code>request_id</code> for idempotent operations
+                and maps these to internal job/task workflows.
+            </div>
 
             <!-- Table of Contents -->
             <div class="toc">
-                <h3>Endpoints</h3>
+                <h3>Platform Endpoints</h3>
+                <div class="toc-section-title">Submission</div>
                 <ul>
-                    <li><a href="#process-vector">POST /api/jobs/submit/process_vector</a> - Vector data ingestion</li>
-                    <li><a href="#process-raster">POST /api/jobs/submit/process_raster</a> - Raster to COG conversion</li>
-                    <li><a href="#job-status">GET /api/jobs/status/{job_id}</a> - Check job status</li>
+                    <li><a href="#platform-submit">POST /api/platform/submit</a> - Generic data submission (auto-detect type)</li>
+                    <li><a href="#platform-raster">POST /api/platform/raster</a> - Single raster file</li>
+                    <li><a href="#platform-raster-collection">POST /api/platform/raster-collection</a> - Multiple raster files (MosaicJSON)</li>
                 </ul>
+                <div class="toc-section">
+                    <div class="toc-section-title">Monitoring</div>
+                    <ul>
+                        <li><a href="#platform-status">GET /api/platform/status/{request_id}</a> - Check request status</li>
+                        <li><a href="#platform-health">GET /api/platform/health</a> - Platform health check</li>
+                        <li><a href="#platform-stats">GET /api/platform/stats</a> - Job statistics</li>
+                        <li><a href="#platform-failures">GET /api/platform/failures</a> - Recent failures</li>
+                    </ul>
+                </div>
             </div>
 
-            <!-- Process Vector -->
-            <div id="process-vector" class="endpoint-section">
+            <!-- Platform Submit -->
+            <div id="platform-submit" class="endpoint-section">
                 <div class="endpoint-header">
                     <span class="method-badge post">POST</span>
-                    <code class="endpoint-path">/api/jobs/submit/process_vector</code>
-                    <h2>Process Vector</h2>
+                    <code class="endpoint-path">/api/platform/submit</code>
+                    <h2>Generic Submission</h2>
                 </div>
                 <div class="endpoint-body">
                     <p class="endpoint-desc">
-                        Load vector data into PostGIS with idempotent DELETE+INSERT pattern.
-                        Supports CSV, GeoJSON, Shapefile, GeoPackage, KML, and KMZ formats.
-                        Creates STAC metadata and enables OGC Features API access.
+                        Submit data for processing. Platform auto-detects data type (vector/raster)
+                        based on file extension and routes to appropriate CoreMachine job.
+                        Returns <code>request_id</code> for status polling.
                     </p>
 
                     <div class="params-section">
-                        <h3>Supported File Types</h3>
-                        <div class="file-types">
-                            <span class="file-type">.csv</span>
-                            <span class="file-type">.geojson</span>
-                            <span class="file-type">.json</span>
-                            <span class="file-type">.gpkg</span>
-                            <span class="file-type">.kml</span>
-                            <span class="file-type">.kmz</span>
-                            <span class="file-type">.shp (zipped)</span>
-                        </div>
-                    </div>
-
-                    <div class="params-section">
-                        <h3>Parameters</h3>
+                        <h3>Request Parameters</h3>
                         <table class="params-table">
                             <thead>
                                 <tr>
@@ -355,46 +395,118 @@ class DocsInterface(BaseInterface):
                             </thead>
                             <tbody>
                                 <tr>
-                                    <td><span class="param-name">blob_name</span></td>
+                                    <td><span class="param-name">dataset_id</span></td>
                                     <td><span class="param-type">string</span></td>
                                     <td><span class="param-required">Required</span></td>
-                                    <td>Source file path in blob container</td>
+                                    <td>DDH dataset identifier (e.g., "aerial-imagery-2024")</td>
                                 </tr>
                                 <tr>
-                                    <td><span class="param-name">file_extension</span></td>
+                                    <td><span class="param-name">resource_id</span></td>
                                     <td><span class="param-type">string</span></td>
                                     <td><span class="param-required">Required</span></td>
-                                    <td>File type: csv, geojson, json, gpkg, kml, kmz, shp, zip</td>
+                                    <td>DDH resource identifier (e.g., "site-alpha")</td>
                                 </tr>
                                 <tr>
-                                    <td><span class="param-name">table_name</span></td>
+                                    <td><span class="param-name">version_id</span></td>
                                     <td><span class="param-type">string</span></td>
                                     <td><span class="param-required">Required</span></td>
-                                    <td>Target PostGIS table name (will be created)</td>
+                                    <td>DDH version identifier (e.g., "v1.0")</td>
                                 </tr>
                                 <tr>
                                     <td><span class="param-name">container_name</span></td>
                                     <td><span class="param-type">string</span></td>
-                                    <td><span class="param-optional">Optional</span></td>
-                                    <td>Source container (default: rmhazuregeobronze)</td>
+                                    <td><span class="param-required">Required</span></td>
+                                    <td>Bronze tier container: bronze-vectors, bronze-rasters, bronze-misc</td>
                                 </tr>
                                 <tr>
-                                    <td><span class="param-name">schema</span></td>
+                                    <td><span class="param-name">file_name</span></td>
+                                    <td><span class="param-type">string</span></td>
+                                    <td><span class="param-required">Required</span></td>
+                                    <td>File path in container (e.g., "data/parcels.geojson")</td>
+                                </tr>
+                                <tr>
+                                    <td><span class="param-name">service_name</span></td>
                                     <td><span class="param-type">string</span></td>
                                     <td><span class="param-optional">Optional</span></td>
-                                    <td>PostgreSQL schema (default: geo)</td>
+                                    <td>Human-readable name for the dataset</td>
                                 </tr>
                                 <tr>
-                                    <td><span class="param-name">chunk_size</span></td>
-                                    <td><span class="param-type">integer</span></td>
+                                    <td><span class="param-name">description</span></td>
+                                    <td><span class="param-type">string</span></td>
                                     <td><span class="param-optional">Optional</span></td>
-                                    <td>Rows per chunk (100-500000, auto-calculated if not set)</td>
+                                    <td>Dataset description for STAC metadata</td>
                                 </tr>
                                 <tr>
-                                    <td><span class="param-name">converter_params</span></td>
+                                    <td><span class="param-name">access_level</span></td>
+                                    <td><span class="param-type">string</span></td>
+                                    <td><span class="param-optional">Optional</span></td>
+                                    <td>
+                                        <span class="access-level public">public</span>
+                                        <span class="access-level ouo">OUO</span> (default)
+                                        <span class="access-level restricted">restricted</span>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td><span class="param-name">data_type</span></td>
+                                    <td><span class="param-type">string</span></td>
+                                    <td><span class="param-optional">Optional</span></td>
+                                    <td>Explicit type: "vector" or "raster" (auto-detected if omitted)</td>
+                                </tr>
+                                <tr>
+                                    <td><span class="param-name">processing_options</span></td>
                                     <td><span class="param-type">object</span></td>
-                                    <td><span class="param-optional">Required for CSV</span></td>
-                                    <td>CSV: {lat_name, lon_name} or {wkt_column}</td>
+                                    <td><span class="param-optional">Optional</span></td>
+                                    <td>See Processing Options below</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <div class="params-section">
+                        <h3>Processing Options</h3>
+                        <table class="params-table">
+                            <thead>
+                                <tr>
+                                    <th>Option</th>
+                                    <th>Applies To</th>
+                                    <th>Description</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td><span class="param-name">lon_column</span></td>
+                                    <td>Vector (CSV)</td>
+                                    <td>Column name containing longitude values</td>
+                                </tr>
+                                <tr>
+                                    <td><span class="param-name">lat_column</span></td>
+                                    <td>Vector (CSV)</td>
+                                    <td>Column name containing latitude values</td>
+                                </tr>
+                                <tr>
+                                    <td><span class="param-name">wkt_column</span></td>
+                                    <td>Vector (CSV)</td>
+                                    <td>Column name containing WKT geometry</td>
+                                </tr>
+                                <tr>
+                                    <td><span class="param-name">overwrite</span></td>
+                                    <td>Vector</td>
+                                    <td>Force overwrite existing table (default: false)</td>
+                                </tr>
+                                <tr>
+                                    <td><span class="param-name">crs</span></td>
+                                    <td>Raster</td>
+                                    <td>Target CRS (default: EPSG:4326)</td>
+                                </tr>
+                                <tr>
+                                    <td><span class="param-name">output_tier</span></td>
+                                    <td>Raster</td>
+                                    <td>analysis (DEFLATE), visualization (JPEG), archive (LZW)</td>
+                                </tr>
+                                <tr>
+                                    <td><span class="param-name">raster_type</span></td>
+                                    <td>Raster</td>
+                                    <td>auto, rgb, rgba, dem, categorical, multispectral</td>
                                 </tr>
                             </tbody>
                         </table>
@@ -403,238 +515,194 @@ class DocsInterface(BaseInterface):
                     <div class="params-section">
                         <h3>Example Request</h3>
                         <div class="example-tabs">
-                            <button class="example-tab active" onclick="showExample('vector', 'csv')">CSV</button>
-                            <button class="example-tab" onclick="showExample('vector', 'geojson')">GeoJSON</button>
-                            <button class="example-tab" onclick="showExample('vector', 'shapefile')">Shapefile</button>
+                            <button class="example-tab active" onclick="showExample('submit', 'vector')">Vector</button>
+                            <button class="example-tab" onclick="showExample('submit', 'raster')">Raster</button>
+                            <button class="example-tab" onclick="showExample('submit', 'csv')">CSV with Coords</button>
                         </div>
 
-                        <div id="vector-csv" class="code-block">
-<span class="comment"># CSV with lat/lon columns</span>
+                        <div id="submit-vector" class="code-block"><span class="comment"># Submit vector data (GeoJSON)</span>
 curl -X POST \\
-  ${API_BASE_URL}/api/jobs/submit/process_vector \\
+  ${API_BASE_URL}/api/platform/submit \\
   -H 'Content-Type: application/json' \\
   -d '{
-    <span class="key">"blob_name"</span>: <span class="string">"data/events.csv"</span>,
-    <span class="key">"file_extension"</span>: <span class="string">"csv"</span>,
-    <span class="key">"table_name"</span>: <span class="string">"events_table"</span>,
-    <span class="key">"converter_params"</span>: {
-      <span class="key">"lat_name"</span>: <span class="string">"latitude"</span>,
-      <span class="key">"lon_name"</span>: <span class="string">"longitude"</span>
+    <span class="key">"dataset_id"</span>: <span class="string">"parcels-2024"</span>,
+    <span class="key">"resource_id"</span>: <span class="string">"downtown-district"</span>,
+    <span class="key">"version_id"</span>: <span class="string">"v1.0"</span>,
+    <span class="key">"container_name"</span>: <span class="string">"bronze-vectors"</span>,
+    <span class="key">"file_name"</span>: <span class="string">"parcels/downtown.geojson"</span>,
+    <span class="key">"service_name"</span>: <span class="string">"Downtown Parcels 2024"</span>,
+    <span class="key">"access_level"</span>: <span class="string">"OUO"</span>
+  }'</div>
+
+                        <div id="submit-raster" class="code-block" style="display: none;"><span class="comment"># Submit raster data (GeoTIFF)</span>
+curl -X POST \\
+  ${API_BASE_URL}/api/platform/submit \\
+  -H 'Content-Type: application/json' \\
+  -d '{
+    <span class="key">"dataset_id"</span>: <span class="string">"aerial-imagery-2024"</span>,
+    <span class="key">"resource_id"</span>: <span class="string">"site-alpha"</span>,
+    <span class="key">"version_id"</span>: <span class="string">"v1.0"</span>,
+    <span class="key">"container_name"</span>: <span class="string">"bronze-rasters"</span>,
+    <span class="key">"file_name"</span>: <span class="string">"imagery/site_alpha.tif"</span>,
+    <span class="key">"service_name"</span>: <span class="string">"Aerial Imagery Site Alpha"</span>,
+    <span class="key">"access_level"</span>: <span class="string">"OUO"</span>,
+    <span class="key">"processing_options"</span>: {
+      <span class="key">"output_tier"</span>: <span class="string">"analysis"</span>
     }
   }'</div>
 
-                        <div id="vector-geojson" class="code-block" style="display: none;">
-<span class="comment"># GeoJSON file</span>
+                        <div id="submit-csv" class="code-block" style="display: none;"><span class="comment"># Submit CSV with coordinate columns</span>
 curl -X POST \\
-  ${API_BASE_URL}/api/jobs/submit/process_vector \\
+  ${API_BASE_URL}/api/platform/submit \\
   -H 'Content-Type: application/json' \\
   -d '{
-    <span class="key">"blob_name"</span>: <span class="string">"boundaries.geojson"</span>,
-    <span class="key">"file_extension"</span>: <span class="string">"geojson"</span>,
-    <span class="key">"table_name"</span>: <span class="string">"admin_boundaries"</span>
-  }'</div>
-
-                        <div id="vector-shapefile" class="code-block" style="display: none;">
-<span class="comment"># Zipped Shapefile</span>
-curl -X POST \\
-  ${API_BASE_URL}/api/jobs/submit/process_vector \\
-  -H 'Content-Type: application/json' \\
-  -d '{
-    <span class="key">"blob_name"</span>: <span class="string">"roads.zip"</span>,
-    <span class="key">"file_extension"</span>: <span class="string">"shp"</span>,
-    <span class="key">"table_name"</span>: <span class="string">"roads_network"</span>
+    <span class="key">"dataset_id"</span>: <span class="string">"facilities-2024"</span>,
+    <span class="key">"resource_id"</span>: <span class="string">"health-centers"</span>,
+    <span class="key">"version_id"</span>: <span class="string">"v1.0"</span>,
+    <span class="key">"container_name"</span>: <span class="string">"bronze-vectors"</span>,
+    <span class="key">"file_name"</span>: <span class="string">"health_centers.csv"</span>,
+    <span class="key">"service_name"</span>: <span class="string">"Health Centers 2024"</span>,
+    <span class="key">"data_type"</span>: <span class="string">"vector"</span>,
+    <span class="key">"processing_options"</span>: {
+      <span class="key">"lon_column"</span>: <span class="string">"longitude"</span>,
+      <span class="key">"lat_column"</span>: <span class="string">"latitude"</span>
+    }
   }'</div>
                     </div>
 
                     <div class="response-section">
                         <h4>Response</h4>
-                        <span class="status-badge success">200 OK</span>
-                        <div class="code-block">
-{
-  <span class="key">"job_id"</span>: <span class="string">"a3f2c1b8e9d7..."</span>,
-  <span class="key">"status"</span>: <span class="string">"created"</span>,
+                        <span class="status-badge success">202 Accepted</span>
+                        <div class="code-block">{
+  <span class="key">"success"</span>: true,
+  <span class="key">"request_id"</span>: <span class="string">"a3f2c1b8e9d7f6a5..."</span>,
+  <span class="key">"job_id"</span>: <span class="string">"abc123def456..."</span>,
   <span class="key">"job_type"</span>: <span class="string">"process_vector"</span>,
-  <span class="key">"message"</span>: <span class="string">"Job created and queued"</span>
+  <span class="key">"message"</span>: <span class="string">"Platform request submitted. CoreMachine job created."</span>,
+  <span class="key">"monitor_url"</span>: <span class="string">"/api/platform/status/a3f2c1b8e9d7f6a5..."</span>
 }</div>
                     </div>
                 </div>
             </div>
 
-            <!-- Process Raster -->
-            <div id="process-raster" class="endpoint-section">
+            <!-- Platform Raster -->
+            <div id="platform-raster" class="endpoint-section">
                 <div class="endpoint-header">
                     <span class="method-badge post">POST</span>
-                    <code class="endpoint-path">/api/jobs/submit/process_raster</code>
-                    <h2>Process Raster</h2>
+                    <code class="endpoint-path">/api/platform/raster</code>
+                    <h2>Single Raster</h2>
                 </div>
                 <div class="endpoint-body">
                     <p class="endpoint-desc">
-                        Convert raster files (GeoTIFF, etc.) to Cloud-Optimized GeoTIFF (COG) with STAC metadata.
-                        Outputs are served via TiTiler for web map visualization.
+                        Submit a single raster file for COG conversion and STAC cataloging.
+                        Use this endpoint when submitting one raster file.
+                        <code>file_name</code> must be a string (not a list).
                     </p>
 
                     <div class="params-section">
-                        <h3>Parameters</h3>
-                        <table class="params-table">
-                            <thead>
-                                <tr>
-                                    <th>Name</th>
-                                    <th>Type</th>
-                                    <th>Required</th>
-                                    <th>Description</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <tr>
-                                    <td><span class="param-name">blob_name</span></td>
-                                    <td><span class="param-type">string</span></td>
-                                    <td><span class="param-required">Required</span></td>
-                                    <td>Raster file name in blob storage</td>
-                                </tr>
-                                <tr>
-                                    <td><span class="param-name">container_name</span></td>
-                                    <td><span class="param-type">string</span></td>
-                                    <td><span class="param-required">Required</span></td>
-                                    <td>Source blob container</td>
-                                </tr>
-                                <tr>
-                                    <td><span class="param-name">collection_id</span></td>
-                                    <td><span class="param-type">string</span></td>
-                                    <td><span class="param-optional">Optional</span></td>
-                                    <td>STAC collection ID (default: system-rasters)</td>
-                                </tr>
-                                <tr>
-                                    <td><span class="param-name">output_tier</span></td>
-                                    <td><span class="param-type">string</span></td>
-                                    <td><span class="param-optional">Optional</span></td>
-                                    <td>analysis (DEFLATE), visualization (JPEG), archive (LZW)</td>
-                                </tr>
-                                <tr>
-                                    <td><span class="param-name">target_crs</span></td>
-                                    <td><span class="param-type">string</span></td>
-                                    <td><span class="param-optional">Optional</span></td>
-                                    <td>Target CRS (default: EPSG:4326)</td>
-                                </tr>
-                                <tr>
-                                    <td><span class="param-name">raster_type</span></td>
-                                    <td><span class="param-type">string</span></td>
-                                    <td><span class="param-optional">Optional</span></td>
-                                    <td>auto, rgb, rgba, dem, categorical, multispectral</td>
-                                </tr>
-                                <tr>
-                                    <td><span class="param-name">output_folder</span></td>
-                                    <td><span class="param-type">string</span></td>
-                                    <td><span class="param-optional">Optional</span></td>
-                                    <td>Custom output folder in silver-cogs container</td>
-                                </tr>
-                            </tbody>
-                        </table>
-                    </div>
-
-                    <div class="params-section">
                         <h3>Example Request</h3>
-                        <div class="code-block">
-<span class="comment"># Convert GeoTIFF to COG</span>
+                        <div class="code-block"><span class="comment"># Single raster file</span>
 curl -X POST \\
-  ${API_BASE_URL}/api/jobs/submit/process_raster \\
+  ${API_BASE_URL}/api/platform/raster \\
   -H 'Content-Type: application/json' \\
   -d '{
-    <span class="key">"blob_name"</span>: <span class="string">"satellite_image.tif"</span>,
-    <span class="key">"container_name"</span>: <span class="string">"rmhazuregeobronze"</span>,
-    <span class="key">"output_tier"</span>: <span class="string">"analysis"</span>,
-    <span class="key">"output_folder"</span>: <span class="string">"cogs/my_project"</span>
+    <span class="key">"dataset_id"</span>: <span class="string">"elevation-data"</span>,
+    <span class="key">"resource_id"</span>: <span class="string">"region-west"</span>,
+    <span class="key">"version_id"</span>: <span class="string">"v2.0"</span>,
+    <span class="key">"container_name"</span>: <span class="string">"bronze-rasters"</span>,
+    <span class="key">"file_name"</span>: <span class="string">"dem/region_west_dem.tif"</span>,
+    <span class="key">"service_name"</span>: <span class="string">"Region West DEM"</span>,
+    <span class="key">"access_level"</span>: <span class="string">"public"</span>
   }'</div>
                     </div>
 
                     <div class="response-section">
-                        <h4>Successful Response</h4>
-                        <span class="status-badge success">200 OK</span>
-                        <div class="code-block">
-{
-  <span class="key">"job_id"</span>: <span class="string">"def456abc789..."</span>,
-  <span class="key">"status"</span>: <span class="string">"created"</span>,
-  <span class="key">"job_type"</span>: <span class="string">"process_raster"</span>,
-  <span class="key">"message"</span>: <span class="string">"Job created and queued"</span>
-}</div>
-                    </div>
-
-                    <div class="response-section">
-                        <h4>Completed Job Result</h4>
-                        <div class="code-block" style="font-size: 12px;">
-{
-  <span class="key">"status"</span>: <span class="string">"completed"</span>,
-  <span class="key">"resultData"</span>: {
-    <span class="key">"cog"</span>: {
-      <span class="key">"cog_blob"</span>: <span class="string">"cogs/my_project/image_cog.tif"</span>,
-      <span class="key">"size_mb"</span>: 127.58,
-      <span class="key">"compression"</span>: <span class="string">"deflate"</span>
-    },
-    <span class="key">"stac"</span>: {
-      <span class="key">"collection_id"</span>: <span class="string">"system-rasters"</span>,
-      <span class="key">"inserted_to_pgstac"</span>: true
-    },
-    <span class="key">"share_url"</span>: <span class="string">"https://titiler.../map.html?url=..."</span>
-  }
+                        <h4>Response</h4>
+                        <span class="status-badge success">202 Accepted</span>
+                        <div class="code-block">{
+  <span class="key">"success"</span>: true,
+  <span class="key">"request_id"</span>: <span class="string">"b4e5d6c7..."</span>,
+  <span class="key">"job_id"</span>: <span class="string">"xyz789..."</span>,
+  <span class="key">"job_type"</span>: <span class="string">"process_raster_v2"</span>,
+  <span class="key">"message"</span>: <span class="string">"Single raster request submitted."</span>,
+  <span class="key">"monitor_url"</span>: <span class="string">"/api/platform/status/b4e5d6c7..."</span>
 }</div>
                     </div>
                 </div>
             </div>
 
-            <!-- Job Status -->
-            <div id="job-status" class="endpoint-section">
+            <!-- Platform Raster Collection -->
+            <div id="platform-raster-collection" class="endpoint-section">
                 <div class="endpoint-header">
-                    <span class="method-badge" style="background: #007bff; color: white;">GET</span>
-                    <code class="endpoint-path">/api/jobs/status/{job_id}</code>
-                    <h2>Job Status</h2>
+                    <span class="method-badge post">POST</span>
+                    <code class="endpoint-path">/api/platform/raster-collection</code>
+                    <h2>Raster Collection (MosaicJSON)</h2>
                 </div>
                 <div class="endpoint-body">
                     <p class="endpoint-desc">
-                        Check the status of a submitted job. Returns current status, stage progress, and result data when complete.
+                        Submit multiple raster files as a collection. Creates MosaicJSON for
+                        seamless tiled access. <code>file_name</code> must be a list with at least 2 files.
                     </p>
 
                     <div class="params-section">
-                        <h3>Path Parameters</h3>
-                        <table class="params-table">
-                            <thead>
-                                <tr>
-                                    <th>Name</th>
-                                    <th>Type</th>
-                                    <th>Description</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <tr>
-                                    <td><span class="param-name">job_id</span></td>
-                                    <td><span class="param-type">string</span></td>
-                                    <td>Job ID returned from submission</td>
-                                </tr>
-                            </tbody>
-                        </table>
+                        <h3>Example Request</h3>
+                        <div class="code-block"><span class="comment"># Multiple raster files (tiles)</span>
+curl -X POST \\
+  ${API_BASE_URL}/api/platform/raster-collection \\
+  -H 'Content-Type: application/json' \\
+  -d '{
+    <span class="key">"dataset_id"</span>: <span class="string">"satellite-tiles-2024"</span>,
+    <span class="key">"resource_id"</span>: <span class="string">"coverage-area"</span>,
+    <span class="key">"version_id"</span>: <span class="string">"v1.0"</span>,
+    <span class="key">"container_name"</span>: <span class="string">"bronze-rasters"</span>,
+    <span class="key">"file_name"</span>: [
+      <span class="string">"tiles/tile_001.tif"</span>,
+      <span class="string">"tiles/tile_002.tif"</span>,
+      <span class="string">"tiles/tile_003.tif"</span>,
+      <span class="string">"tiles/tile_004.tif"</span>
+    ],
+    <span class="key">"service_name"</span>: <span class="string">"Satellite Coverage 2024"</span>,
+    <span class="key">"access_level"</span>: <span class="string">"OUO"</span>
+  }'</div>
                     </div>
 
+                    <div class="response-section">
+                        <h4>Response</h4>
+                        <span class="status-badge success">202 Accepted</span>
+                        <div class="code-block">{
+  <span class="key">"success"</span>: true,
+  <span class="key">"request_id"</span>: <span class="string">"c5f6e7d8..."</span>,
+  <span class="key">"job_id"</span>: <span class="string">"mno456..."</span>,
+  <span class="key">"job_type"</span>: <span class="string">"process_raster_collection_v2"</span>,
+  <span class="key">"file_count"</span>: 4,
+  <span class="key">"message"</span>: <span class="string">"Raster collection request submitted (4 files)."</span>,
+  <span class="key">"monitor_url"</span>: <span class="string">"/api/platform/status/c5f6e7d8..."</span>
+}</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Platform Status -->
+            <div id="platform-status" class="endpoint-section">
+                <div class="endpoint-header">
+                    <span class="method-badge get">GET</span>
+                    <code class="endpoint-path">/api/platform/status/{request_id}</code>
+                    <h2>Request Status</h2>
+                </div>
+                <div class="endpoint-body">
+                    <p class="endpoint-desc">
+                        Check the status of a Platform request. Returns DDH identifiers,
+                        delegated CoreMachine job status, task summary, and data access URLs when complete.
+                    </p>
+
                     <div class="params-section">
-                        <h3>Job Status Values</h3>
+                        <h3>Query Parameters</h3>
                         <table class="params-table">
                             <tbody>
                                 <tr>
-                                    <td><code>queued</code></td>
-                                    <td>Job is waiting to be processed</td>
-                                </tr>
-                                <tr>
-                                    <td><code>processing</code></td>
-                                    <td>Job is currently being executed</td>
-                                </tr>
-                                <tr>
-                                    <td><code>completed</code></td>
-                                    <td>Job finished successfully</td>
-                                </tr>
-                                <tr>
-                                    <td><code>failed</code></td>
-                                    <td>Job encountered an error</td>
-                                </tr>
-                                <tr>
-                                    <td><code>completed_with_errors</code></td>
-                                    <td>Job finished but some tasks failed</td>
+                                    <td><span class="param-name">verbose</span></td>
+                                    <td><span class="param-type">boolean</span></td>
+                                    <td>Include full task details (default: false)</td>
                                 </tr>
                             </tbody>
                         </table>
@@ -642,11 +710,164 @@ curl -X POST \\
 
                     <div class="params-section">
                         <h3>Example</h3>
-                        <div class="code-block">
-curl ${API_BASE_URL}/api/jobs/status/a3f2c1b8e9d7...</div>
+                        <div class="code-block">curl ${API_BASE_URL}/api/platform/status/a3f2c1b8e9d7f6a5...</div>
+                    </div>
+
+                    <div class="response-section">
+                        <h4>Response (Completed)</h4>
+                        <span class="status-badge success">200 OK</span>
+                        <div class="code-block">{
+  <span class="key">"success"</span>: true,
+  <span class="key">"request_id"</span>: <span class="string">"a3f2c1b8e9d7f6a5..."</span>,
+  <span class="key">"dataset_id"</span>: <span class="string">"parcels-2024"</span>,
+  <span class="key">"resource_id"</span>: <span class="string">"downtown-district"</span>,
+  <span class="key">"version_id"</span>: <span class="string">"v1.0"</span>,
+  <span class="key">"data_type"</span>: <span class="string">"vector"</span>,
+  <span class="key">"job_id"</span>: <span class="string">"abc123..."</span>,
+  <span class="key">"job_type"</span>: <span class="string">"process_vector"</span>,
+  <span class="key">"job_status"</span>: <span class="string">"completed"</span>,
+  <span class="key">"job_stage"</span>: 3,
+  <span class="key">"task_summary"</span>: {
+    <span class="key">"total"</span>: 5,
+    <span class="key">"completed"</span>: 5,
+    <span class="key">"failed"</span>: 0
+  },
+  <span class="key">"data_access"</span>: {
+    <span class="key">"ogc_features"</span>: {
+      <span class="key">"collection"</span>: <span class="string">"/api/features/collections/parcels_2024_downtown_district_v1_0"</span>,
+      <span class="key">"items"</span>: <span class="string">"/api/features/collections/parcels_2024_downtown_district_v1_0/items"</span>
+    }
+  }
+}</div>
                     </div>
                 </div>
             </div>
+
+            <!-- Platform Health -->
+            <div id="platform-health" class="endpoint-section">
+                <div class="endpoint-header">
+                    <span class="method-badge get">GET</span>
+                    <code class="endpoint-path">/api/platform/health</code>
+                    <h2>Platform Health</h2>
+                </div>
+                <div class="endpoint-body">
+                    <p class="endpoint-desc">
+                        Simplified health endpoint for DDH consumption. Returns high-level
+                        system health without internal implementation details.
+                    </p>
+
+                    <div class="params-section">
+                        <h3>Example</h3>
+                        <div class="code-block">curl ${API_BASE_URL}/api/platform/health</div>
+                    </div>
+
+                    <div class="response-section">
+                        <h4>Response</h4>
+                        <span class="status-badge success">200 OK</span>
+                        <div class="code-block">{
+  <span class="key">"status"</span>: <span class="string">"healthy"</span>,
+  <span class="key">"api_version"</span>: <span class="string">"v1.0"</span>,
+  <span class="key">"components"</span>: {
+    <span class="key">"job_processing"</span>: <span class="string">"healthy"</span>,
+    <span class="key">"stac_catalog"</span>: <span class="string">"healthy"</span>,
+    <span class="key">"storage"</span>: <span class="string">"healthy"</span>
+  },
+  <span class="key">"recent_activity"</span>: {
+    <span class="key">"jobs_last_24h"</span>: 45,
+    <span class="key">"success_rate"</span>: <span class="string">"93.3%"</span>
+  }
+}</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Platform Stats -->
+            <div id="platform-stats" class="endpoint-section">
+                <div class="endpoint-header">
+                    <span class="method-badge get">GET</span>
+                    <code class="endpoint-path">/api/platform/stats</code>
+                    <h2>Job Statistics</h2>
+                </div>
+                <div class="endpoint-body">
+                    <p class="endpoint-desc">
+                        Aggregated job statistics for DDH visibility.
+                    </p>
+
+                    <div class="params-section">
+                        <h3>Query Parameters</h3>
+                        <table class="params-table">
+                            <tbody>
+                                <tr>
+                                    <td><span class="param-name">hours</span></td>
+                                    <td><span class="param-type">integer</span></td>
+                                    <td>Time period in hours (default: 24)</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <div class="params-section">
+                        <h3>Example</h3>
+                        <div class="code-block">curl "${API_BASE_URL}/api/platform/stats?hours=48"</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Platform Failures -->
+            <div id="platform-failures" class="endpoint-section">
+                <div class="endpoint-header">
+                    <span class="method-badge get">GET</span>
+                    <code class="endpoint-path">/api/platform/failures</code>
+                    <h2>Recent Failures</h2>
+                </div>
+                <div class="endpoint-body">
+                    <p class="endpoint-desc">
+                        Recent failures for DDH troubleshooting. Returns sanitized error
+                        information (no internal paths or stack traces).
+                    </p>
+
+                    <div class="params-section">
+                        <h3>Query Parameters</h3>
+                        <table class="params-table">
+                            <tbody>
+                                <tr>
+                                    <td><span class="param-name">hours</span></td>
+                                    <td><span class="param-type">integer</span></td>
+                                    <td>Time period in hours (default: 24)</td>
+                                </tr>
+                                <tr>
+                                    <td><span class="param-name">limit</span></td>
+                                    <td><span class="param-type">integer</span></td>
+                                    <td>Max results (default: 10)</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <div class="params-section">
+                        <h3>Example</h3>
+                        <div class="code-block">curl "${API_BASE_URL}/api/platform/failures?hours=24&limit=5"</div>
+                    </div>
+
+                    <div class="response-section">
+                        <h4>Response</h4>
+                        <div class="code-block">{
+  <span class="key">"failures"</span>: [
+    {
+      <span class="key">"request_id"</span>: <span class="string">"def456..."</span>,
+      <span class="key">"dataset_id"</span>: <span class="string">"parcels-2024"</span>,
+      <span class="key">"failed_at"</span>: <span class="string">"2025-12-07T09:15:00Z"</span>,
+      <span class="key">"error_category"</span>: <span class="string">"resource_not_found"</span>,
+      <span class="key">"error_summary"</span>: <span class="string">"Source file not found in bronze-vectors container"</span>,
+      <span class="key">"can_retry"</span>: true
+    }
+  ],
+  <span class="key">"total_failures"</span>: 3
+}</div>
+                    </div>
+                </div>
+            </div>
+
         </div>
         """
 
@@ -663,10 +884,12 @@ curl ${API_BASE_URL}/api/jobs/status/a3f2c1b8e9d7...</div>
             document.getElementById(`${endpoint}-${type}`).style.display = 'block';
 
             // Update tab states
-            const section = document.getElementById(endpoint === 'vector' ? 'process-vector' : 'process-raster');
-            section.querySelectorAll('.example-tab').forEach(tab => {
-                tab.classList.remove('active');
-            });
+            const section = document.getElementById('platform-' + endpoint);
+            if (section) {
+                section.querySelectorAll('.example-tab').forEach(tab => {
+                    tab.classList.remove('active');
+                });
+            }
             event.target.classList.add('active');
         }
 

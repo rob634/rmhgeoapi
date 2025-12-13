@@ -28,26 +28,42 @@ class RasterConfig(BaseModel):
     Raster processing pipeline configuration.
 
     Controls COG creation, validation, and processing settings.
+
+    Size Threshold Fields (13 DEC 2025):
+        Field names match environment variable names for clarity.
+        No prefix stripping - what you see is what you set.
+
+        raster_size_threshold_mb: Small vs large raster cutoff (per-file)
+        raster_max_file_size_mb: Absolute max for any raster (hard reject)
+        raster_in_memory_threshold_mb: Memory vs disk processing threshold
+        raster_collection_size_limit: Max files allowed in a collection
     """
 
-    # Pipeline selection and size limits
-    size_threshold_mb: int = Field(
-        default=RasterDefaults.SIZE_THRESHOLD_MB,
-        description="File size threshold (MB) for pipeline selection (small vs large file). "
-                    "Files smaller than this use in-memory processing, larger files use chunked."
+    # Pipeline selection and size limits (field names match env vars - 13 DEC 2025)
+    raster_size_threshold_mb: int = Field(
+        default=RasterDefaults.RASTER_SIZE_THRESHOLD_MB,
+        description="File size threshold (MB) for small vs large raster routing. "
+                    "Rasters exceeding this trigger large file handling or rejection."
     )
 
-    max_file_size_mb: int = Field(
-        default=RasterDefaults.MAX_FILE_SIZE_MB,
+    raster_max_file_size_mb: int = Field(
+        default=RasterDefaults.RASTER_MAX_FILE_SIZE_MB,
         description="Maximum allowed file size in MB for raster processing. "
                     "Files larger than this are rejected at pre-flight validation. "
                     "Set to 0 to disable size limit."
     )
 
-    in_memory_threshold_mb: int = Field(
-        default=RasterDefaults.IN_MEMORY_THRESHOLD_MB,
+    raster_in_memory_threshold_mb: int = Field(
+        default=RasterDefaults.RASTER_IN_MEMORY_THRESHOLD_MB,
         description="Files smaller than this threshold use in-memory processing by default. "
                     "Files larger use disk-based temp storage. Can be overridden per-job."
+    )
+
+    # Collection validation limit (13 DEC 2025)
+    raster_collection_size_limit: int = Field(
+        default=RasterDefaults.RASTER_COLLECTION_SIZE_LIMIT,
+        description="Max files allowed in a raster collection. "
+                    "Collections larger than this are rejected - submit smaller batches."
     )
 
     # Intermediate storage
@@ -164,10 +180,23 @@ class RasterConfig(BaseModel):
     def from_environment(cls):
         """Load from environment variables."""
         return cls(
-            # Size thresholds and limits
-            size_threshold_mb=int(os.environ.get("RASTER_SIZE_THRESHOLD_MB", str(RasterDefaults.SIZE_THRESHOLD_MB))),
-            max_file_size_mb=int(os.environ.get("RASTER_MAX_FILE_SIZE_MB", str(RasterDefaults.MAX_FILE_SIZE_MB))),
-            in_memory_threshold_mb=int(os.environ.get("RASTER_IN_MEMORY_THRESHOLD_MB", str(RasterDefaults.IN_MEMORY_THRESHOLD_MB))),
+            # Size thresholds and limits (field names match env vars - 13 DEC 2025)
+            raster_size_threshold_mb=int(os.environ.get(
+                "RASTER_SIZE_THRESHOLD_MB",
+                str(RasterDefaults.RASTER_SIZE_THRESHOLD_MB)
+            )),
+            raster_max_file_size_mb=int(os.environ.get(
+                "RASTER_MAX_FILE_SIZE_MB",
+                str(RasterDefaults.RASTER_MAX_FILE_SIZE_MB)
+            )),
+            raster_in_memory_threshold_mb=int(os.environ.get(
+                "RASTER_IN_MEMORY_THRESHOLD_MB",
+                str(RasterDefaults.RASTER_IN_MEMORY_THRESHOLD_MB)
+            )),
+            raster_collection_size_limit=int(os.environ.get(
+                "RASTER_COLLECTION_SIZE_LIMIT",
+                str(RasterDefaults.RASTER_COLLECTION_SIZE_LIMIT)
+            )),
             # Intermediate storage
             intermediate_tiles_container=os.environ.get("INTERMEDIATE_TILES_CONTAINER"),
             intermediate_prefix=os.environ.get("RASTER_INTERMEDIATE_PREFIX", RasterDefaults.INTERMEDIATE_PREFIX),

@@ -156,6 +156,7 @@ class QueueDefaults:
     - geospatial-jobs: Job orchestration (Platform apps listen)
     - raster-tasks: Raster task processing (memory-intensive GDAL ops)
     - vector-tasks: Vector task processing (high-concurrency DB ops)
+    - long-running-raster-tasks: Docker worker processing (13 DEC 2025 placeholder)
 
     All task types MUST be explicitly mapped in TaskRoutingDefaults.
     Unmapped task types will raise ContractViolationError (no fallback).
@@ -164,6 +165,11 @@ class QueueDefaults:
     JOBS_QUEUE = "geospatial-jobs"
     RASTER_TASKS_QUEUE = "raster-tasks"   # Raster-optimized queue
     VECTOR_TASKS_QUEUE = "vector-tasks"   # Vector-optimized queue
+
+    # Long-running tasks for Docker worker (13 DEC 2025 - placeholder)
+    # When Docker support is added, large raster collection tasks route here
+    LONG_RUNNING_RASTER_TASKS_QUEUE = "long-running-raster-tasks"
+
     MAX_BATCH_SIZE = 100
     BATCH_THRESHOLD = 50
     RETRY_COUNT = 3
@@ -212,18 +218,30 @@ class TaskRoutingDefaults:
     """
     Task type to queue category mapping.
 
-    Maps task_type → routing category (raster, vector).
+    Maps task_type → routing category (raster, vector, long-running).
     CoreMachine uses this to route tasks to appropriate queues.
 
     CRITICAL (11 DEC 2025 - No Legacy Fallbacks):
     ALL task types MUST be explicitly listed here. If a task type is not
-    in RASTER_TASKS or VECTOR_TASKS, CoreMachine will raise ContractViolationError.
+    in RASTER_TASKS, VECTOR_TASKS, or LONG_RUNNING_RASTER_TASKS,
+    CoreMachine will raise ContractViolationError.
     This prevents silent misrouting and enforces explicit queue assignment.
 
     Queue Selection Guidelines:
     - RASTER_TASKS: Memory-intensive GDAL operations (2-8GB RAM, low concurrency)
     - VECTOR_TASKS: DB-bound or lightweight operations (high concurrency)
+    - LONG_RUNNING_RASTER_TASKS: Docker worker for large files (no timeout constraints)
     """
+
+    # Long-running raster tasks → long-running-raster-tasks queue (13 DEC 2025)
+    # Placeholder for Docker worker. When Docker support is added, large raster
+    # collection tasks will route here instead of raising NotImplementedError.
+    # Currently empty - no tasks route here yet.
+    LONG_RUNNING_RASTER_TASKS = [
+        # Future: "create_cog_large", "extract_tiles_large", etc.
+        # When a raster collection contains files > RASTER_SIZE_THRESHOLD_MB,
+        # ALL tasks for that job will route to this queue (all-or-none pattern)
+    ]
 
     # Raster tasks → raster-tasks queue (memory-intensive, low concurrency)
     RASTER_TASKS = [
@@ -311,12 +329,24 @@ class RasterDefaults:
     Raster processing pipeline defaults.
 
     Controls COG creation, validation, and MosaicJSON generation.
+
+    Size Threshold Configuration (13 DEC 2025):
+        - RASTER_SIZE_THRESHOLD_MB: Small vs large raster cutoff (per-file)
+        - RASTER_MAX_FILE_SIZE_MB: Absolute maximum allowed file size
+        - RASTER_IN_MEMORY_THRESHOLD_MB: Memory vs disk processing threshold
+        - RASTER_COLLECTION_SIZE_LIMIT: Max files allowed in a raster collection
+
+    Environment variables match constant names for clarity (no prefix stripping).
     """
 
-    # Size thresholds
-    SIZE_THRESHOLD_MB = 800  # 800 MB - small vs large file cutoff
-    MAX_FILE_SIZE_MB = 20000  # 20 GB - maximum allowed file size
-    IN_MEMORY_THRESHOLD_MB = 100  # 100 MB - in-memory vs disk processing
+    # Size thresholds - names match env vars for clarity (13 DEC 2025)
+    RASTER_SIZE_THRESHOLD_MB = 800      # 800 MB - small vs large file cutoff
+    RASTER_MAX_FILE_SIZE_MB = 20000     # 20 GB - maximum allowed file size
+    RASTER_IN_MEMORY_THRESHOLD_MB = 100 # 100 MB - in-memory vs disk processing
+
+    # Collection validation limit (13 DEC 2025)
+    # Collections larger than this are rejected (too many files to size-check efficiently)
+    RASTER_COLLECTION_SIZE_LIMIT = 20
 
     # COG creation
     COG_COMPRESSION = "deflate"

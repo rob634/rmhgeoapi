@@ -395,7 +395,7 @@ class ProcessRasterV2Job(JobBaseMixin, JobBase):
         # Priority 2: Size-based automatic selection
         blob_size_mb = job_params.get('_blob_size_mb')
         if blob_size_mb is not None:
-            threshold = config.raster.in_memory_threshold_mb
+            threshold = config.raster.raster_in_memory_threshold_mb
             use_in_memory = blob_size_mb <= threshold
             # Log the decision for debugging
             from util_logger import LoggerFactory, ComponentType

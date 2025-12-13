@@ -814,6 +814,266 @@ def validate_blob_exists_with_size(params: Dict[str, Any], config: Dict[str, Any
 
 
 # ============================================================================
+# RASTER COLLECTION SIZE VALIDATION (13 DEC 2025)
+# ============================================================================
+
+@register_validator("blob_list_exists_with_max_size")
+def validate_blob_list_exists_with_max_size(
+    params: Dict[str, Any],
+    config: Dict[str, Any]
+) -> ValidatorResult:
+    """
+    Validate all blobs in list exist AND capture max/total sizes.
+
+    Combines blob_list_exists + blob_exists_with_size for efficiency:
+    - Single API call per blob (get_blob_properties includes existence)
+    - Parallel checking with ThreadPoolExecutor
+    - Tracks max size for routing decisions (large files → Docker worker)
+
+    Config options:
+        container_param: str - Parameter for container (default: 'container_name')
+        blob_list_param: str - Parameter for blob list (default: 'blob_list')
+        skip_validation_param: str - Bypass flag (default: '_skip_blob_validation')
+        parallel: bool - Use parallel checking (default: True)
+        max_parallel: int - Max concurrent workers (default: 10)
+        report_all: bool - Report all missing vs first (default: True)
+        min_count: int - Minimum blobs required (default: 2)
+        max_collection_count: int - Max files allowed in collection (optional)
+        max_collection_count_env: str - Env var for collection limit (e.g., 'RASTER_COLLECTION_SIZE_LIMIT')
+        max_individual_size_mb: int - Reject if ANY blob exceeds this (optional)
+        max_individual_size_mb_env: str - Env var for size threshold (e.g., 'RASTER_SIZE_THRESHOLD_MB')
+        error_not_found: str - Error if blob missing
+        error_collection_too_large: str - Error if collection exceeds file count limit
+        error_raster_too_large: str - Error if any blob exceeds size threshold
+
+    Stores in params:
+        _blob_list_count: int - Total blobs
+        _blob_list_validated: bool - Whether validation occurred
+        _blob_list_max_size_bytes: int - Largest blob size
+        _blob_list_max_size_mb: float - Largest blob in MB
+        _blob_list_total_size_bytes: int - Sum of all blobs
+        _blob_list_total_size_mb: float - Sum in MB
+        _blob_list_has_large_raster: bool - True if any blob > threshold
+        _blob_list_largest_blob: str - Name of largest blob
+
+    Example:
+        resource_validators = [
+            {
+                'type': 'blob_list_exists_with_max_size',
+                'container_param': 'container_name',
+                'blob_list_param': 'blob_list',
+                'max_collection_count_env': 'RASTER_COLLECTION_SIZE_LIMIT',
+                'max_individual_size_mb_env': 'RASTER_SIZE_THRESHOLD_MB',
+                'error_collection_too_large': 'Collection exceeds max file count.',
+                'error_raster_too_large': 'Collection contains raster(s) exceeding size threshold.'
+            }
+        ]
+    """
+    import os
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    from infrastructure.blob import BlobRepository
+
+    # Extract config options
+    container_param = config.get('container_param', 'container_name')
+    blob_list_param = config.get('blob_list_param', 'blob_list')
+    skip_param = config.get('skip_validation_param', '_skip_blob_validation')
+    use_parallel = config.get('parallel', True)
+    max_parallel = config.get('max_parallel', 10)
+    report_all = config.get('report_all', True)
+    min_count = config.get('min_count', 2)
+
+    # Check for bypass flag
+    if params.get(skip_param, False):
+        logger.info(f"⏭️ Pre-flight: blob_list_exists_with_max_size bypassed ({skip_param}=True)")
+        params['_blob_list_validated'] = False
+        return ValidatorResult(valid=True, message=None)
+
+    # Get container and blob list from params
+    container = params.get(container_param)
+    blob_list = params.get(blob_list_param)
+
+    if not container:
+        return ValidatorResult(
+            valid=False,
+            message=f"Container parameter '{container_param}' is missing or empty"
+        )
+
+    if not blob_list or not isinstance(blob_list, list):
+        return ValidatorResult(
+            valid=False,
+            message=f"Blob list parameter '{blob_list_param}' must be a non-empty list"
+        )
+
+    if len(blob_list) < min_count:
+        return ValidatorResult(
+            valid=False,
+            message=f"Collection must contain at least {min_count} files (got {len(blob_list)})"
+        )
+
+    # Get collection count limit (from config or env var)
+    max_collection_count = config.get('max_collection_count')
+    max_collection_count_env = config.get('max_collection_count_env')
+    if max_collection_count_env:
+        env_value = os.environ.get(max_collection_count_env)
+        if env_value:
+            try:
+                max_collection_count = int(env_value)
+            except ValueError:
+                logger.warning(f"Invalid {max_collection_count_env} value: {env_value}, ignoring")
+
+    # Check collection count limit FIRST (before any blob API calls)
+    if max_collection_count and len(blob_list) > max_collection_count:
+        error_template = config.get('error_collection_too_large') or \
+            f"Collection exceeds maximum file count ({max_collection_count} files). Submit smaller batches."
+        # Support {limit} placeholder in error message
+        error_msg = error_template.replace('{limit}', str(max_collection_count))
+        logger.warning(f"❌ Pre-flight: {error_msg}")
+        return ValidatorResult(valid=False, message=error_msg)
+
+    # Get individual size threshold (from config or env var)
+    max_individual_size_mb = config.get('max_individual_size_mb')
+    max_individual_size_mb_env = config.get('max_individual_size_mb_env')
+    if max_individual_size_mb_env:
+        env_value = os.environ.get(max_individual_size_mb_env)
+        if env_value:
+            try:
+                max_individual_size_mb = int(env_value)
+            except ValueError:
+                logger.warning(f"Invalid {max_individual_size_mb_env} value: {env_value}, ignoring")
+
+    # Get zone from config (default: bronze for input validation)
+    zone = config.get('zone', 'bronze')
+
+    try:
+        blob_repo = BlobRepository.for_zone(zone)
+
+        # First check if container exists
+        if not blob_repo.container_exists(container):
+            error_msg = f"Container '{container}' does not exist in {zone} zone"
+            logger.warning(f"❌ Pre-flight: {error_msg}")
+            return ValidatorResult(valid=False, message=error_msg)
+
+        # Track sizes and missing blobs
+        blob_sizes = {}
+        max_size_bytes = 0
+        max_size_blob = None
+        total_size_bytes = 0
+        missing_or_failed = []
+        large_rasters = []
+
+        def get_blob_size(blob_name: str) -> tuple:
+            """Get blob size, return (blob_name, size_bytes, exists, error)."""
+            try:
+                props = blob_repo.get_blob_properties(container, blob_name)
+                return (blob_name, props['size'], True, None)
+            except Exception as e:
+                # Check if it's a "not found" type error
+                error_str = str(e).lower()
+                if 'not found' in error_str or 'does not exist' in error_str or '404' in error_str:
+                    return (blob_name, None, False, "not found")
+                return (blob_name, None, False, str(e))
+
+        if use_parallel and len(blob_list) > 1:
+            # Parallel checking with ThreadPoolExecutor
+            with ThreadPoolExecutor(max_workers=min(max_parallel, len(blob_list))) as executor:
+                futures = {executor.submit(get_blob_size, blob): blob for blob in blob_list}
+                for future in as_completed(futures):
+                    blob_name, size_bytes, exists, error = future.result()
+                    if not exists or error:
+                        missing_or_failed.append((blob_name, error or "not found"))
+                        if not report_all:
+                            break
+                    else:
+                        blob_sizes[blob_name] = size_bytes
+                        total_size_bytes += size_bytes
+                        if size_bytes > max_size_bytes:
+                            max_size_bytes = size_bytes
+                            max_size_blob = blob_name
+                        # Check individual size threshold
+                        if max_individual_size_mb:
+                            size_mb = size_bytes / (1024 * 1024)
+                            if size_mb > max_individual_size_mb:
+                                large_rasters.append((blob_name, size_mb))
+        else:
+            # Sequential checking
+            for blob_name in blob_list:
+                bn, size_bytes, exists, error = get_blob_size(blob_name)
+                if not exists or error:
+                    missing_or_failed.append((blob_name, error or "not found"))
+                    if not report_all:
+                        break
+                else:
+                    blob_sizes[blob_name] = size_bytes
+                    total_size_bytes += size_bytes
+                    if size_bytes > max_size_bytes:
+                        max_size_bytes = size_bytes
+                        max_size_blob = blob_name
+                    # Check individual size threshold
+                    if max_individual_size_mb:
+                        size_mb = size_bytes / (1024 * 1024)
+                        if size_mb > max_individual_size_mb:
+                            large_rasters.append((blob_name, size_mb))
+
+        # Check for missing blobs first
+        if missing_or_failed:
+            if report_all:
+                if len(missing_or_failed) > 10:
+                    missing_preview = [m[0] for m in missing_or_failed[:10]]
+                    error_detail = (
+                        f"{len(missing_or_failed)} of {len(blob_list)} files not found:\n  - " +
+                        "\n  - ".join(missing_preview) +
+                        f"\n  ... and {len(missing_or_failed) - 10} more"
+                    )
+                else:
+                    error_detail = (
+                        f"{len(missing_or_failed)} of {len(blob_list)} files not found:\n  - " +
+                        "\n  - ".join([m[0] for m in missing_or_failed])
+                    )
+            else:
+                error_detail = f"File not found: {missing_or_failed[0][0]}"
+
+            error_msg = config.get('error_not_found') or error_detail
+            logger.warning(f"❌ Pre-flight: {error_msg}")
+            return ValidatorResult(valid=False, message=error_msg)
+
+        # Check for large rasters (after all sizes are collected)
+        if large_rasters:
+            largest = max(large_rasters, key=lambda x: x[1])
+            error_template = config.get('error_raster_too_large') or \
+                f"Collection contains raster(s) exceeding {max_individual_size_mb}MB threshold. " \
+                f"Largest: {largest[0]} ({largest[1]:.1f}MB). " \
+                "Large raster collection processing requires Docker worker (coming soon)."
+            # Support {threshold} placeholder
+            error_msg = error_template.replace('{threshold}', str(max_individual_size_mb))
+            logger.warning(f"❌ Pre-flight: {error_msg}")
+            return ValidatorResult(valid=False, message=error_msg)
+
+        # Success - store size information
+        max_size_mb = max_size_bytes / (1024 * 1024)
+        total_size_mb = total_size_bytes / (1024 * 1024)
+
+        params['_blob_list_count'] = len(blob_list)
+        params['_blob_list_validated'] = True
+        params['_blob_list_max_size_bytes'] = max_size_bytes
+        params['_blob_list_max_size_mb'] = max_size_mb
+        params['_blob_list_total_size_bytes'] = total_size_bytes
+        params['_blob_list_total_size_mb'] = total_size_mb
+        params['_blob_list_largest_blob'] = max_size_blob
+        params['_blob_list_has_large_raster'] = False  # All under threshold
+
+        logger.info(
+            f"✅ Pre-flight: {len(blob_list)} blobs validated "
+            f"(max={max_size_mb:.1f}MB, total={total_size_mb:.1f}MB)"
+        )
+        return ValidatorResult(valid=True, message=None)
+
+    except Exception as e:
+        error_msg = f"Failed to validate blob list in container '{container}' ({len(blob_list) if blob_list else 0} files): {e}"
+        logger.error(error_msg)
+        return ValidatorResult(valid=False, message=error_msg)
+
+
+# ============================================================================
 # STAC VALIDATORS (12 DEC 2025 - Unpublish Workflow Support)
 # ============================================================================
 
@@ -1081,6 +1341,8 @@ __all__ = [
     'validate_blob_size',
     'validate_blob_list_exists',
     'validate_blob_exists_with_size',
+    # Collection size validation (13 DEC 2025)
+    'validate_blob_list_exists_with_max_size',
     # STAC validators (12 DEC 2025)
     'validate_stac_item_exists',
     'validate_stac_collection_exists',

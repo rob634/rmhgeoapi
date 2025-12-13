@@ -38,40 +38,29 @@
 
 ## 🚨 IMMEDIATE - NEXT WORK ITEM
 
-### TEST & IMPLEMENT UNPUBLISH WORKFLOWS (12 DEC 2025)
+### Database Diagnostics & Remote Administration Enhancement (07 DEC 2025)
 
 **Status**: 🔴 **IMMEDIATE PRIORITY** - Ready for Implementation
-**Purpose**: Surgical data removal - reverse raster/vector processing
-**Full Design**: See Section 8 in BACKLOG below (lines 270-553)
+**Priority**: HIGH - QA environment has no direct database access
+**Purpose**: HTTP-based database inspection, verbose pre-flight validation, DDH visibility
+**Full Plan**: `~/.claude/plans/vast-leaping-candle.md`
 
-**Why Now**:
-- Design is complete and comprehensive (ready to build)
-- Critical for data lifecycle management
-- Enables cleanup of test/development data
-- Required for production data governance
+**Problem**: QA database requires PRIVX → Windows Server → DBeaver workflow. Need comprehensive remote diagnostics.
 
-**Quick Implementation Checklist**:
-1. [ ] Add validators to `infrastructure/validators.py` (`stac_item_exists`, `stac_collection_exists`)
-2. [ ] Create `core/models/unpublished.py` audit model
-3. [ ] Update `core/schema/sql_generator.py` for `app.unpublished_jobs` table
-4. [ ] Create `services/unpublish_handlers.py` (5 handlers)
-5. [ ] Create `jobs/unpublish_raster.py`
-6. [ ] Create `jobs/unpublish_vector.py`
-7. [ ] Register in `jobs/__init__.py` and `services/__init__.py`
-8. [ ] Deploy and rebuild schema
-9. [ ] Test with `dry_run=true` first
+**Phase 1: Enhanced Health Endpoint** (START HERE):
+- Add `schema_summary` component (all schemas, tables, row counts, STAC stats)
+- Add `config_sources` when `DEBUG_MODE=true` (show env var vs default origins)
+- File: `triggers/health.py`
 
-**Test Commands** (after implementation):
+**Phase 2: Verbose Pre-Flight Validation**:
+- Add `job_context` to `run_validators()` (job_type, submission endpoint)
+- Enhanced messages: `"Blob 'x' not found (param: blob_name, job: process_raster_v2)"`
+- Files: `infrastructure/validators.py`, `jobs/mixins.py`
+
+**Quick Start**:
 ```bash
-# Dry-run raster unpublish (SAFE preview)
-curl -X POST .../api/jobs/submit/unpublish_raster \
-  -H "Content-Type: application/json" \
-  -d '{"stac_item_id": "test-item", "collection_id": "cogs", "dry_run": true}'
-
-# Dry-run vector unpublish
-curl -X POST .../api/jobs/submit/unpublish_vector \
-  -H "Content-Type: application/json" \
-  -d '{"stac_item_id": "test-vector", "collection_id": "vectors", "dry_run": true}'
+# Test current health endpoint
+curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/health
 ```
 
 ---
@@ -80,7 +69,7 @@ curl -X POST .../api/jobs/submit/unpublish_vector \
 
 ### 1. Database Diagnostics & Remote Administration Enhancement (07 DEC 2025)
 
-**Status**: 📋 **PLAN COMPLETE** - Ready for Implementation
+**Status**: 🔴 **NOW IMMEDIATE PRIORITY** - See IMMEDIATE section above
 **Priority**: 🚨 HIGH - QA environment has no direct database access
 **Purpose**: HTTP-based database inspection, verbose pre-flight validation, DDH visibility
 
@@ -309,10 +298,13 @@ with psycopg.connect(conn_str) as conn:
 
 ### 8. Unpublish Workflows - Surgical Data Removal (05 DEC 2025)
 
-**Status**: 📋 **PLANNING COMPLETE** - Ready for Implementation
+**Status**: ✅ **IMPLEMENTED** (12 DEC 2025) - See Recently Completed
 **Priority**: 🟡 MEDIUM - Future Enhancement
 **Purpose**: Reverse raster/vector processing - remove STAC items and referenced data surgically
 **Designed By**: Robert and Geospatial Claude Legion
+
+> **Implementation Complete**: All code written and registered. Deploy and test with `dry_run=true`.
+> Files: `jobs/unpublish_raster.py`, `jobs/unpublish_vector.py`, `services/unpublish_handlers.py`, `core/models/unpublish.py`, `infrastructure/validators.py` (stac_item_exists, stac_collection_exists)
 
 #### Overview
 
@@ -759,6 +751,7 @@ With Sessions:
 ## ✅ Recently Completed
 
 See `HISTORY2.md` for items completed and moved from TODO.md:
+- UNPUBLISH Workflows (12 DEC 2025) - `unpublish_raster` and `unpublish_vector` jobs with surgical data removal (COGs, MosaicJSON, PostGIS tables), audit trail in `app.unpublish_jobs`, validators (`stac_item_exists`, `stac_collection_exists`), all 5 handlers registered. Next: deploy and test with `dry_run=true`
 - Container Inventory Consolidation (07 DEC) - Consolidated container listing into `inventory_container_contents` job with basic/geospatial modes, sync endpoint with zone/suffix/metadata params, archived 3 legacy jobs
 - JPEG COG Compression Fix (05 DEC) - INTERLEAVE=PIXEL for YCbCr encoding
 - JSON Deserialization Error Handling (28 NOV)
@@ -772,4 +765,4 @@ See `HISTORY2.md` for items completed and moved from TODO.md:
 
 ---
 
-**Last Updated**: 12 DEC 2025 (Unpublish Workflows prioritized as immediate next work item)
+**Last Updated**: 13 DEC 2025 (UNPUBLISH Workflows implementation complete, Database Diagnostics is new immediate priority)

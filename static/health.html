@@ -353,7 +353,28 @@
         <div class="env-grid" id="env-grid"></div>
     </div>
 
-    <script src="common.js"></script>
+    <script>
+        // API Configuration - Auto-detect from current URL
+        const API_BASE_URL = (function() {
+            const path = window.location.pathname;
+            if (path.startsWith('/api/dashboard')) {
+                return window.location.origin;
+            }
+            return 'https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net';
+        })();
+
+        async function fetchAPI(path) {
+            const response = await fetch(`${API_BASE_URL}${path}`);
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+            return response.json();
+        }
+
+        function formatTime() {
+            return new Date().toLocaleTimeString('en-GB');
+        }
+    </script>
     <script>
         // Auto-refresh timer
         let autoRefreshInterval = null;

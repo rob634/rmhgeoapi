@@ -422,7 +422,45 @@
         </div>
     </div>
 
-    <script src="common.js"></script>
+    <script>
+        // API Configuration - Auto-detect from current URL
+        const API_BASE_URL = (function() {
+            const path = window.location.pathname;
+            if (path.startsWith('/api/dashboard')) {
+                return window.location.origin;
+            }
+            return 'https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net';
+        })();
+
+        async function fetchAPI(path) {
+            const response = await fetch(`${API_BASE_URL}${path}`);
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+            return response.json();
+        }
+
+        function formatBytes(bytes) {
+            if (bytes === 0) return '0 B';
+            const k = 1024;
+            const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+        }
+
+        function formatDate(isoString) {
+            if (!isoString) return '-';
+            const date = new Date(isoString);
+            const day = date.getDate();
+            const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                            'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+            const month = months[date.getMonth()];
+            const year = date.getFullYear();
+            const hours = date.getHours().toString().padStart(2, '0');
+            const mins = date.getMinutes().toString().padStart(2, '0');
+            return `${day} ${month} ${year} ${hours}:${mins}`;
+        }
+    </script>
     <script>
         // Current selection state
         let currentZone = null;

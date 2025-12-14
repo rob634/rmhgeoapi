@@ -133,12 +133,12 @@ curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/job
 
 ## Available Jobs
 
-Current job types (as of 28 NOV 2025):
+Current job types (as of 13 DEC 2025):
 - `hello_world` - Simple test job
 - `process_vector` - **RECOMMENDED** Idempotent vector data ingestion to PostGIS (CSV, GeoJSON, Shapefile, GeoPackage, KML, KMZ)
-- `process_raster` - Single raster to COG conversion
-- `process_raster_collection` - Multi-raster collection processing
-- `process_large_raster` - Large raster tiling and COG conversion
+- `process_raster_v2` - Single raster to COG conversion (≤800 MB files)
+- `process_raster_collection_v2` - Multi-raster collection processing (≤20 files, each ≤800 MB)
+- `process_large_raster_v2` - Large raster tiling and COG conversion (100 MB - 30 GB files)
 - `validate_raster_job` - Raster validation
 - `stac_catalog_container` - STAC catalog for blob container
 - `stac_catalog_vectors` - STAC catalog for vector data
@@ -674,29 +674,72 @@ Direct submission when you know the exact output folder and collection names.
 
 **⚠️ KNOWN ISSUE (21 NOV 2025)**: `visualization` tier (JPEG compression) is currently failing with `COG_TRANSLATE_FAILED`. Use `analysis` tier (DEFLATE) as workaround. See [TODO.md](docs_claude/TODO.md) for investigation status.
 
+#### Size Limits (13 DEC 2025)
+
+| Limit | Value | Behavior |
+|-------|-------|----------|
+| **Max file size** | 800 MB | Files >800MB rejected with error directing to `process_large_raster_v2` |
+| **Min file size** | None | Any size accepted (but very small files process faster) |
+
+**Pre-flight validation** automatically checks file size before processing. Large files are rejected immediately with a clear error message.
+
 #### CoreMachine Examples
 
-**Working example** (21 NOV 2025 - verified with dctest.tif):
+**Working example** (13 DEC 2025 - verified with dctest.tif, 25.8 MB):
 ```bash
 curl -X POST \
-  https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/jobs/submit/process_raster \
+  https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/jobs/submit/process_raster_v2 \
   -H 'Content-Type: application/json' \
   -d '{
     "blob_name": "dctest.tif",
-    "container_name": "rmhazuregeobronze",
-    "output_tier": "analysis",
-    "output_folder": "cogs/my_test"
+    "container_name": "rmhazuregeobronze"
   }'
+```
+
+**Response** (job created successfully):
+```json
+{
+  "job_id": "3dadb0696eb5bf763b7e784864d456aed8eaafe4e02012f33cca747f52e541ab",
+  "status": "created",
+  "parameters": {
+    "blob_name": "dctest.tif",
+    "container_name": "rmhazuregeobronze",
+    "_blob_size_mb": 25.82,
+    "_blob_size_bytes": 27077396
+  }
+}
 ```
 
 **Results**:
 | Metric | Value |
 |--------|-------|
 | Status | `completed` |
+| File Size | 25.82 MB |
 | Processing Time | ~22 seconds total |
 | COG Size | 127.58 MB (DEFLATE compression) |
 | STAC Inserted | Yes |
 | TiTiler URLs | Generated (9 URLs including viewer, preview, tilejson)
+
+**Large file rejection example** (13 DEC 2025 - antigua.tif, 11.16 GB):
+```bash
+curl -X POST \
+  https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/jobs/submit/process_raster_v2 \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "blob_name": "antigua.tif",
+    "container_name": "rmhazuregeobronze"
+  }'
+```
+
+**Response** (rejected - file too large):
+```json
+{
+  "error": "Bad request",
+  "message": "Pre-flight validation failed: Raster file too_large for direct processing. Use process_large_raster_v2 for files over size limit."
+}
+```
+
+**Solution**: Use `process_large_raster_v2` for files >800 MB (supports 100 MB - 30 GB)
 
 **Basic raster to COG (uses defaults)**:
 ```bash
@@ -1010,12 +1053,41 @@ Direct submission when you know the exact blob paths and collection names.
 | `create_mosaicjson` | bool | No | true | Create MosaicJSON index |
 | `create_stac_collection` | bool | No | true | Create STAC collection |
 
+#### Size and Count Limits (13 DEC 2025)
+
+| Limit | Value | Behavior |
+|-------|-------|----------|
+| **Max files per collection** | 20 | Collections with >20 files rejected at pre-flight |
+| **Max individual file size** | 800 MB | Collections containing ANY file >800MB rejected |
+| **Min files per collection** | 2 | Single files should use `process_raster_v2` |
+
+**Pre-flight validation** checks:
+1. **Collection count** - Rejected immediately if >20 files (before any blob API calls)
+2. **Individual file sizes** - Each blob is checked in parallel; rejected if ANY exceeds 800MB
+3. **File existence** - All blobs must exist in the container
+
+**Why these limits?**
+- Collections with >20 files should be submitted in smaller batches for efficiency
+- Large rasters (>800MB) require Docker worker processing (coming soon)
+- Current Azure Functions have memory/timeout constraints for large raster operations
+
+**Size metadata captured** (available in job parameters after validation):
+```json
+{
+  "_blob_list_count": 4,
+  "_blob_list_max_size_mb": 777.69,
+  "_blob_list_total_size_mb": 1619.37,
+  "_blob_list_largest_blob": "namangan/namangan14aug2019_R1C1cog.tif",
+  "_blob_list_has_large_raster": false
+}
+```
+
 #### CoreMachine Examples
 
-**Process multiple raster tiles** (22 NOV 2025 - verified with Namangan imagery):
+**Working example** (13 DEC 2025 - verified with Namangan imagery, 4 tiles, 1.6 GB total):
 ```bash
 curl -X POST \
-  https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/jobs/submit/process_raster_collection \
+  https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/jobs/submit/process_raster_collection_v2 \
   -H 'Content-Type: application/json' \
   -d '{
     "container_name": "rmhazuregeobronze",
@@ -1025,20 +1097,58 @@ curl -X POST \
       "namangan/namangan14aug2019_R2C1cog.tif",
       "namangan/namangan14aug2019_R2C2cog.tif"
     ],
-    "collection_id": "namangan-full-collection",
-    "output_folder": "cogs/namangan_full"
+    "collection_id": "namangan-test"
   }'
 ```
 
-**Results** (Namangan 4-tile collection - 1.7 GB total):
+**Response** (job created with size metadata):
+```json
+{
+  "job_id": "1574336e5362c6acc1301f6f275bcab3a7922cde381d75d44bd0e3f586257547",
+  "status": "created",
+  "parameters": {
+    "blob_list": ["namangan/namangan14aug2019_R1C1cog.tif", "..."],
+    "_blob_list_count": 4,
+    "_blob_list_max_size_mb": 777.69,
+    "_blob_list_total_size_mb": 1619.37,
+    "_blob_list_largest_blob": "namangan/namangan14aug2019_R1C1cog.tif",
+    "_blob_list_has_large_raster": false
+  }
+}
+```
+
+**Results** (Namangan 4-tile collection - 1.6 GB total):
 | Metric | Value |
 |--------|-------|
 | Status | `completed` |
+| Files | 4 (778 MB, 704 MB, 73 MB, 65 MB) |
+| Total Size | 1,619 MB |
+| Largest File | 777.69 MB (under 800 MB limit) |
 | Total Tasks | 10 (4 COG + 4 STAC items + MosaicJSON + Collection) |
-| COGs Created | 4 (1654.49 MB total) |
-| STAC Items | 4 |
 | Duration | ~9 minutes |
 | Bounding Box | `[71.6063, 40.9806, 71.7219, 41.0318]` (Namangan, Uzbekistan) |
+
+**Collection count rejection example** (13 DEC 2025 - 21 files):
+```bash
+curl -X POST \
+  https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/jobs/submit/process_raster_collection_v2 \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "container_name": "rmhazuregeobronze",
+    "blob_list": ["f1.tif","f2.tif","f3.tif","f4.tif","f5.tif","f6.tif","f7.tif","f8.tif","f9.tif","f10.tif","f11.tif","f12.tif","f13.tif","f14.tif","f15.tif","f16.tif","f17.tif","f18.tif","f19.tif","f20.tif","f21.tif"],
+    "collection_id": "test-too-many"
+  }'
+```
+
+**Response** (rejected - too many files):
+```json
+{
+  "error": "Bad request",
+  "message": "Pre-flight validation failed: Collection exceeds maximum file count (20 files). Submit smaller batches or contact support for bulk processing."
+}
+```
+
+**Solution**: Split collection into batches of ≤20 files each
 
 ### Workflow Stages
 
@@ -1604,7 +1714,7 @@ curl -X POST \
 
 ---
 
-**Last Updated**: 28 NOV 2025
+**Last Updated**: 13 DEC 2025
 **Function App**: rmhazuregeoapi (B3 Basic tier)
 **Region**: East US
 **Python Version**: 3.12

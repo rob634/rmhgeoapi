@@ -910,7 +910,8 @@ def validate_blob_list_exists_with_max_size(
             message=f"Collection must contain at least {min_count} files (got {len(blob_list)})"
         )
 
-    # Get collection count limit (from config or env var)
+    # Get collection count limit (from config or env var, with fallback to defaults)
+    from config.defaults import RasterDefaults
     max_collection_count = config.get('max_collection_count')
     max_collection_count_env = config.get('max_collection_count_env')
     if max_collection_count_env:
@@ -919,7 +920,11 @@ def validate_blob_list_exists_with_max_size(
             try:
                 max_collection_count = int(env_value)
             except ValueError:
-                logger.warning(f"Invalid {max_collection_count_env} value: {env_value}, ignoring")
+                logger.warning(f"Invalid {max_collection_count_env} value: {env_value}, using default")
+                max_collection_count = RasterDefaults.RASTER_COLLECTION_SIZE_LIMIT
+        else:
+            # Env var not set, use default
+            max_collection_count = RasterDefaults.RASTER_COLLECTION_SIZE_LIMIT
 
     # Check collection count limit FIRST (before any blob API calls)
     if max_collection_count and len(blob_list) > max_collection_count:
@@ -930,7 +935,7 @@ def validate_blob_list_exists_with_max_size(
         logger.warning(f"❌ Pre-flight: {error_msg}")
         return ValidatorResult(valid=False, message=error_msg)
 
-    # Get individual size threshold (from config or env var)
+    # Get individual size threshold (from config or env var, with fallback to defaults)
     max_individual_size_mb = config.get('max_individual_size_mb')
     max_individual_size_mb_env = config.get('max_individual_size_mb_env')
     if max_individual_size_mb_env:
@@ -939,7 +944,11 @@ def validate_blob_list_exists_with_max_size(
             try:
                 max_individual_size_mb = int(env_value)
             except ValueError:
-                logger.warning(f"Invalid {max_individual_size_mb_env} value: {env_value}, ignoring")
+                logger.warning(f"Invalid {max_individual_size_mb_env} value: {env_value}, using default")
+                max_individual_size_mb = RasterDefaults.RASTER_SIZE_THRESHOLD_MB
+        else:
+            # Env var not set, use default
+            max_individual_size_mb = RasterDefaults.RASTER_SIZE_THRESHOLD_MB
 
     # Get zone from config (default: bronze for input validation)
     zone = config.get('zone', 'bronze')

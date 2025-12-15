@@ -280,6 +280,12 @@ except ImportError as e:
     logger.warning(f"⚠️ Could not import Tasks interface: {e}")
 
 try:
+    from .storage import interface as _storage
+    logger.info("✅ Imported Storage interface module")
+except ImportError as e:
+    logger.warning(f"⚠️ Could not import Storage interface: {e}")
+
+try:
     from .pipeline import interface as _pipeline
     logger.info("✅ Imported Pipeline interface module")
 except ImportError as e:

@@ -1052,6 +1052,45 @@ class AdminDbMaintenanceTrigger:
                             cur.execute(alter_sql)
                         logger.info("✅ Ensured geo.table_metadata has all required columns")
 
+                        # 0d. Add table_type column for curated dataset tracking (15 DEC 2025)
+                        cur.execute("""
+                            ALTER TABLE geo.table_metadata
+                            ADD COLUMN IF NOT EXISTS table_type VARCHAR(20) DEFAULT 'user'
+                        """)
+                        logger.info("✅ Ensured geo.table_metadata has table_type column")
+
+                        # 0e. Migrate system_admin0 to curated_admin0 (15 DEC 2025)
+                        # Curated datasets use curated_ prefix for protection
+                        cur.execute("""
+                            SELECT EXISTS (
+                                SELECT 1 FROM information_schema.tables
+                                WHERE table_schema = 'geo' AND table_name = 'system_admin0'
+                            ) as old_exists,
+                            EXISTS (
+                                SELECT 1 FROM information_schema.tables
+                                WHERE table_schema = 'geo' AND table_name = 'curated_admin0'
+                            ) as new_exists
+                        """)
+                        migration_check = cur.fetchone()
+
+                        if migration_check['old_exists'] and not migration_check['new_exists']:
+                            # Old table exists, new doesn't - do the rename
+                            cur.execute("ALTER TABLE geo.system_admin0 RENAME TO curated_admin0")
+                            logger.info("✅ Migrated geo.system_admin0 → geo.curated_admin0")
+
+                            # Update table_metadata if it exists
+                            cur.execute("""
+                                UPDATE geo.table_metadata
+                                SET table_name = 'curated_admin0',
+                                    table_type = 'curated'
+                                WHERE table_name = 'system_admin0'
+                            """)
+                            logger.info("✅ Updated table_metadata for curated_admin0")
+                        elif migration_check['new_exists']:
+                            logger.info("✅ geo.curated_admin0 already exists (no migration needed)")
+                        else:
+                            logger.info("⚠️  geo.system_admin0 not found (load country boundaries later)")
+
                         # 1. Create h3 schema if it doesn't exist (04 DEC 2025)
                         # h3 schema stores static bootstrap H3 grid data
                         cur.execute("CREATE SCHEMA IF NOT EXISTS h3")

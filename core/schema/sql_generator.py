@@ -41,7 +41,13 @@ from ..models import (
     EtlFathomRecord,  # ETL tracking (05 DEC 2025)
     UnpublishJobRecord,  # Unpublish audit (12 DEC 2025)
     UnpublishType,
-    UnpublishStatus
+    UnpublishStatus,
+    CuratedDataset,  # Curated datasets (15 DEC 2025)
+    CuratedUpdateLog,
+    CuratedSourceType,
+    CuratedUpdateStrategy,
+    CuratedUpdateType,
+    CuratedUpdateStatus
 )
 
 
@@ -1072,6 +1078,10 @@ $$""").format(
         composed.extend(self.generate_enum("janitor_run_status", JanitorRunStatus))
         composed.extend(self.generate_enum("unpublish_type", UnpublishType))  # Unpublish audit (12 DEC 2025)
         composed.extend(self.generate_enum("unpublish_status", UnpublishStatus))
+        composed.extend(self.generate_enum("curated_source_type", CuratedSourceType))  # Curated datasets (15 DEC 2025)
+        composed.extend(self.generate_enum("curated_update_strategy", CuratedUpdateStrategy))
+        composed.extend(self.generate_enum("curated_update_type", CuratedUpdateType))
+        composed.extend(self.generate_enum("curated_update_status", CuratedUpdateStatus))
 
         # For tables, indexes, functions, and triggers, we still need string format
         # because they are complex multi-line statements
@@ -1085,6 +1095,8 @@ $$""").format(
         composed.append(self.generate_table_composed(JanitorRun, "janitor_runs"))
         composed.append(self.generate_table_composed(EtlFathomRecord, "etl_fathom"))  # ETL tracking (05 DEC 2025)
         composed.append(self.generate_table_composed(UnpublishJobRecord, "unpublish_jobs"))  # Unpublish audit (12 DEC 2025)
+        composed.append(self.generate_table_composed(CuratedDataset, "curated_datasets"))  # Curated datasets (15 DEC 2025)
+        composed.append(self.generate_table_composed(CuratedUpdateLog, "curated_update_log"))
 
         # Indexes - now using composed SQL
         composed.extend(self.generate_indexes_composed("jobs", JobRecord))
@@ -1093,6 +1105,8 @@ $$""").format(
         composed.extend(self.generate_indexes_composed("janitor_runs", JanitorRun))
         composed.extend(self.generate_indexes_composed("etl_fathom", EtlFathomRecord))  # ETL tracking (05 DEC 2025)
         composed.extend(self.generate_indexes_composed("unpublish_jobs", UnpublishJobRecord))  # Unpublish audit (12 DEC 2025)
+        composed.extend(self.generate_indexes_composed("curated_datasets", CuratedDataset))  # Curated datasets (15 DEC 2025)
+        composed.extend(self.generate_indexes_composed("curated_update_log", CuratedUpdateLog))
 
         # Functions - already sql.Composed objects
         composed.extend(self.generate_static_functions())

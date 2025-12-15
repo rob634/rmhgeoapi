@@ -429,10 +429,10 @@
             'comp-job-tables': 'database',
             'comp-parallel-queue': 'service_bus',
             'comp-compute-queue': 'service_bus',
-            'comp-long-queue': 'service_bus',
+            // comp-long-queue: not implemented - stays grey/disabled
             'comp-io-worker': 'imports',
             'comp-compute-worker': 'imports',
-            'comp-container': 'duckdb',
+            // comp-container: not implemented - stays grey/disabled
             'comp-task-tables': 'database',
             'comp-input-storage': 'storage_containers',
             'comp-output-storage': 'storage_containers',
@@ -446,7 +446,6 @@
             'jobs': 'healthy',
             'database': 'healthy',
             'imports': 'healthy',
-            'duckdb': 'disabled',  // Shows as grey/unknown
             'storage_containers': 'healthy',
             'pgstac': 'healthy'
         };

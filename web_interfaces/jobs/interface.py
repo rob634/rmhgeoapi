@@ -458,18 +458,19 @@ class JobsInterface(BaseInterface):
             jobs.forEach(job => {
                 const row = document.createElement('tr');
 
-                // Job ID (short version)
-                const jobIdShort = job.id.substring(0, 8);
-                const createdAt = new Date(job.created_at).toLocaleString();
+                // Job ID (short version) - API returns job_id, not id
+                const jobId = job.job_id || job.id;
+                const jobIdShort = jobId ? jobId.substring(0, 8) : '--';
+                const createdAt = job.created_at ? new Date(job.created_at).toLocaleString() : '--';
 
                 // Task counts
                 const taskCounts = job.task_counts || { queued: 0, processing: 0, completed: 0, failed: 0 };
 
                 row.innerHTML = `
-                    <td><span class="job-id-short" title="${job.id}">${jobIdShort}</span></td>
-                    <td>${job.job_type}</td>
-                    <td><span class="status-badge status-${job.status}">${job.status}</span></td>
-                    <td><span class="stage-badge">Stage ${job.stage}/${job.total_stages || '?'}</span></td>
+                    <td><span class="job-id-short" title="${jobId}">${jobIdShort}</span></td>
+                    <td>${job.job_type || '--'}</td>
+                    <td><span class="status-badge status-${job.status || 'unknown'}">${job.status || 'unknown'}</span></td>
+                    <td><span class="stage-badge">Stage ${job.stage || 0}/${job.total_stages || '?'}</span></td>
                     <td>
                         <div class="task-summary">
                             ${taskCounts.queued > 0 ? `<span class="task-count task-count-queued">Q:${taskCounts.queued}</span>` : ''}
@@ -480,7 +481,7 @@ class JobsInterface(BaseInterface):
                     </td>
                     <td>${createdAt}</td>
                     <td>
-                        <a href="/api/interface/tasks?job_id=${job.id}" class="btn btn-sm btn-primary">View Tasks</a>
+                        <a href="/api/interface/tasks?job_id=${jobId}" class="btn btn-sm btn-primary">View Tasks</a>
                     </td>
                 `;
 

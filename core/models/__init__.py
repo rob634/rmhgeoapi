@@ -76,6 +76,16 @@ from .unpublish import (
     UnpublishStatus
 )
 
+# Curated dataset models (15 DEC 2025)
+from .curated import (
+    CuratedDataset,
+    CuratedUpdateLog,
+    CuratedSourceType,
+    CuratedUpdateStrategy,
+    CuratedUpdateType,
+    CuratedUpdateStatus
+)
+
 __all__ = [
     # Enums
     'JobStatus',
@@ -122,5 +132,13 @@ __all__ = [
     # Unpublish audit models (12 DEC 2025)
     'UnpublishJobRecord',
     'UnpublishType',
-    'UnpublishStatus'
+    'UnpublishStatus',
+
+    # Curated dataset models (15 DEC 2025)
+    'CuratedDataset',
+    'CuratedUpdateLog',
+    'CuratedSourceType',
+    'CuratedUpdateStrategy',
+    'CuratedUpdateType',
+    'CuratedUpdateStatus'
 ]

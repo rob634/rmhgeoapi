@@ -51,7 +51,7 @@ Example Future Workflow:
 # Generate H3 grid in PostGIS (current)
 job = submit_job("bootstrap_h3_land_grid_pyramid", {
     "resolution": 4,
-    "spatial_filter": "system_admin0"  # config.h3.spatial_filter_table
+    "spatial_filter": "curated_admin0"  # config.h3.spatial_filter_table
 })
 
 # Export to GeoParquet for analytics (future - Phase 2)
@@ -92,13 +92,13 @@ class H3Config(BaseModel):
     system_admin0_table: PostGIS table with admin0 (country) boundaries
         - Used for spatial filtering during H3 grid generation
         - Full qualified name: schema.table
-        - Default: "geo.system_admin0"
+        - Default: "geo.curated_admin0" (curated dataset prefix)
 
     spatial_filter_table: Short reference key for H3 spatial filters
         - Used in job parameters to select which filter to apply
         - No schema prefix (just the table suffix)
-        - Default: "system_admin0"
-        - Allows flexible filter selection: "system_admin0", "system_continents", etc.
+        - Default: "curated_admin0"
+        - Allows flexible filter selection: "curated_admin0", "curated_continents", etc.
 
     default_resolution: Default H3 resolution for grid generation
         - Range: 0 (coarsest) to 15 (finest)
@@ -140,20 +140,22 @@ class H3Config(BaseModel):
 
     # System reference tables (PostGIS)
     system_admin0_table: str = Field(
-        default="geo.system_admin0",
+        default="geo.curated_admin0",
         description=(
             "PostGIS table containing admin0 (country) boundaries. "
             "Full qualified name (schema.table). "
-            "Used for spatial filtering during H3 grid generation."
+            "Used for spatial filtering during H3 grid generation. "
+            "Renamed from system_admin0 to curated_admin0 (15 DEC 2025)."
         )
     )
 
     spatial_filter_table: str = Field(
-        default="system_admin0",
+        default="curated_admin0",
         description=(
             "Short reference key for H3 spatial filters (no schema prefix). "
             "Used in job parameters to select which filter to apply. "
-            "Allows flexible filter selection without hardcoding full table paths."
+            "Allows flexible filter selection without hardcoding full table paths. "
+            "Curated datasets use curated_ prefix for protection."
         )
     )
 
@@ -185,8 +187,8 @@ class H3Config(BaseModel):
 
         Environment Variables:
         ---------------------
-        H3_SYSTEM_ADMIN0_TABLE: PostGIS admin0 table (default: "geo.system_admin0")
-        H3_SPATIAL_FILTER_TABLE: Spatial filter key (default: "system_admin0")
+        H3_SYSTEM_ADMIN0_TABLE: PostGIS admin0 table (default: "geo.curated_admin0")
+        H3_SPATIAL_FILTER_TABLE: Spatial filter key (default: "curated_admin0")
         H3_DEFAULT_RESOLUTION: Default H3 resolution (default: 4)
         H3_ENABLE_LAND_FILTER: Enable land filtering (default: "true")
 
@@ -200,11 +202,11 @@ class H3Config(BaseModel):
         return cls(
             system_admin0_table=os.environ.get(
                 "H3_SYSTEM_ADMIN0_TABLE",
-                "geo.system_admin0"
+                "geo.curated_admin0"  # Renamed from system_admin0 (15 DEC 2025)
             ),
             spatial_filter_table=os.environ.get(
                 "H3_SPATIAL_FILTER_TABLE",
-                "system_admin0"
+                "curated_admin0"  # Curated datasets use curated_ prefix
             ),
             default_resolution=int(os.environ.get("H3_DEFAULT_RESOLUTION", "4")),
             enable_land_filter=parse_bool(

@@ -83,7 +83,7 @@ def generate_h3_grid(task_params: dict) -> dict:
         # Bootstrap res 2 with country filter
         {"resolution": 2, "grid_id": "land_res2",
          "use_cascade": False,  # Generate from base
-         "spatial_filter_table": "geo.system_admin0"}
+         "spatial_filter_table": "geo.curated_admin0"}
 
         # Cascade res 3 from res 2 (batch processing)
         {"resolution": 3, "grid_id": "land_res3",

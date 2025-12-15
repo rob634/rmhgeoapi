@@ -416,8 +416,8 @@ class H3Defaults:
     Controls H3 grid generation and spatial filtering.
     """
 
-    SYSTEM_ADMIN0_TABLE = "geo.system_admin0"
-    SPATIAL_FILTER_TABLE = "system_admin0"
+    SYSTEM_ADMIN0_TABLE = "geo.curated_admin0"  # Renamed from system_admin0 (15 DEC 2025)
+    SPATIAL_FILTER_TABLE = "curated_admin0"     # Curated datasets use curated_ prefix
     DEFAULT_RESOLUTION = 4  # ~1,770 km² per cell
     ENABLE_LAND_FILTER = True
 

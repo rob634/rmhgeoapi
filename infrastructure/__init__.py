@@ -95,6 +95,9 @@ if TYPE_CHECKING:
     # Azure Data Factory (29 NOV 2025 - ADF pipeline orchestration)
     from .data_factory import AzureDataFactoryRepository as _AzureDataFactoryRepository
     from .interface_repository import IDataFactoryRepository as _IDataFactoryRepository
+    # Curated datasets (15 DEC 2025 - system-managed data)
+    from .curated_repository import CuratedDatasetRepository as _CuratedDatasetRepository
+    from .curated_repository import CuratedUpdateLogRepository as _CuratedUpdateLogRepository
 
 
 def __getattr__(name: str):
@@ -182,6 +185,14 @@ def __getattr__(name: str):
         from .data_factory import AzureDataFactoryRepository
         return AzureDataFactoryRepository
 
+    # Curated datasets (15 DEC 2025 - system-managed data)
+    elif name == "CuratedDatasetRepository":
+        from .curated_repository import CuratedDatasetRepository
+        return CuratedDatasetRepository
+    elif name == "CuratedUpdateLogRepository":
+        from .curated_repository import CuratedUpdateLogRepository
+        return CuratedUpdateLogRepository
+
     # Helper function for getting default repositories
     elif name == "get_default_repositories":
         from .factory import get_default_repositories
@@ -214,5 +225,7 @@ __all__ = [
     "IBlobRepository",
     "IDataFactoryRepository",
     "AzureDataFactoryRepository",  # Added 29 NOV 2025 - ADF pipeline orchestration
+    "CuratedDatasetRepository",  # Added 15 DEC 2025 - system-managed data
+    "CuratedUpdateLogRepository",  # Added 15 DEC 2025 - system-managed data
     "get_default_repositories",
 ]

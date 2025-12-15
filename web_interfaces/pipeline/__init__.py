@@ -1,1 +1,1 @@
-# Pipeline Dashboard module
+"""Pipeline interface module."""

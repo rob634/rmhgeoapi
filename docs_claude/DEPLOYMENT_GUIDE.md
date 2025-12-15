@@ -1,7 +1,6 @@
 # Deployment Guide
 
 **Date**: 05 DEC 2025
-**Author**: Robert and Geospatial Claude Legion
 **Purpose**: Complete deployment, monitoring, and authentication guide
 
 ---

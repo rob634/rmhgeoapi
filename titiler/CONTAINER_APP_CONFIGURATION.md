@@ -3,7 +3,6 @@
 **Container App Name**: rmhtitiler
 **Created**: 24 OCT 2025
 **Last Updated**: 26 OCT 2025
-**Author**: Robert and Geospatial Claude Legion
 
 ## Overview
 

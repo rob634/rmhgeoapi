@@ -1,7 +1,6 @@
 # PostgreSQL Schema Architecture
 
 **Date**: 24 NOV 2025
-**Author**: Robert and Geospatial Claude Legion
 
 ## Overview
 

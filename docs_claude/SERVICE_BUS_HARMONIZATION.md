@@ -1,7 +1,6 @@
 # Service Bus + Azure Functions Configuration Harmonization
 
 **Date**: 27 OCT 2025
-**Author**: Robert and Geospatial Claude Legion
 **Status**: ✅ PRODUCTION - Configuration Harmonized
 **Context**: Critical bug fix for Stage 2 race condition in `process_large_raster` workflow
 

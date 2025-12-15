@@ -65,6 +65,245 @@ class HealthInterface(BaseInterface):
                 </div>
             </header>
 
+            <!-- Architecture Diagram -->
+            <div class="architecture-diagram">
+                <h3>System Architecture</h3>
+                <div class="diagram-legend">
+                    <span class="legend-item"><span class="legend-dot healthy"></span> Healthy</span>
+                    <span class="legend-item"><span class="legend-dot warning"></span> Warning</span>
+                    <span class="legend-item"><span class="legend-dot unhealthy"></span> Unhealthy</span>
+                    <span class="legend-item"><span class="legend-dot unknown"></span> Unknown</span>
+                </div>
+                <svg viewBox="0 0 1100 580" class="arch-svg" id="arch-diagram">
+                    <!-- Definitions for icons and markers -->
+                    <defs>
+                        <marker id="arrowhead" markerWidth="7" markerHeight="4.9" refX="6.3" refY="2.45" orient="auto">
+                            <polygon points="0 0, 7 2.45, 0 4.9" fill="#0071BC"/>
+                        </marker>
+                        <!-- Grey arrowhead for inactive/not implemented components -->
+                        <marker id="arrowhead-grey" markerWidth="7" markerHeight="4.9" refX="6.3" refY="2.45" orient="auto">
+                            <polygon points="0 0, 7 2.45, 0 4.9" fill="#9CA3AF"/>
+                        </marker>
+                        <!-- Function App icon pattern -->
+                        <pattern id="funcapp-pattern" width="1" height="1">
+                            <rect width="100%" height="100%" fill="#FFC14D"/>
+                        </pattern>
+                    </defs>
+
+                    <!-- Background groups for organization -->
+                    <!-- ETL Pipelines Box - encloses queues and workers -->
+                    <rect x="510" y="195" width="295" height="282" rx="8" fill="#FAFBFC" stroke="#E1E4E8" stroke-width="1"/>
+                    <!-- Header bar -->
+                    <rect x="510" y="195" width="295" height="28" rx="8" fill="#0071BC"/>
+                    <!-- Bottom corners of header need to be square where they meet the body -->
+                    <rect x="510" y="215" width="295" height="8" fill="#0071BC"/>
+                    <text x="657" y="214" class="diagram-header-label">ETL Pipelines</text>
+
+                    <!-- ========== ROW 1: Platform API ========== -->
+                    <g class="component" id="comp-platform-api" data-component="platform_api">
+                        <rect x="30" y="320" width="100" height="60" rx="6" class="comp-box funcapp"/>
+                        <text x="80" y="345" class="comp-icon">⚡</text>
+                        <text x="80" y="365" class="comp-label">Platform API</text>
+                        <circle cx="120" cy="330" r="8" class="status-indicator" data-status="unknown"/>
+                    </g>
+
+                    <!-- Arrow: Platform API -> Job Queues -->
+                    <path d="M 130 350 L 175 350" class="flow-arrow" marker-end="url(#arrowhead)"/>
+                    <text x="145" y="340" class="flow-label">Queue Job</text>
+
+                    <!-- ========== Job Queues (Service Bus) ========== -->
+                    <g class="component" id="comp-job-queues" data-component="service_bus">
+                        <rect x="180" y="320" width="100" height="60" rx="6" class="comp-box servicebus"/>
+                        <text x="230" y="345" class="comp-icon">📨</text>
+                        <text x="230" y="365" class="comp-label">Job Queues</text>
+                        <circle cx="270" cy="330" r="8" class="status-indicator" data-status="unknown"/>
+                    </g>
+
+                    <!-- Arrow: Job Queues -> Orchestrator -->
+                    <path d="M 280 350 L 325 350" class="flow-arrow" marker-end="url(#arrowhead)"/>
+                    <text x="295" y="340" class="flow-label">Trigger</text>
+
+                    <!-- ========== Orchestrator (Function App) ========== -->
+                    <g class="component" id="comp-orchestrator" data-component="orchestrator">
+                        <rect x="330" y="320" width="110" height="60" rx="6" class="comp-box funcapp"/>
+                        <text x="385" y="345" class="comp-icon">⚡</text>
+                        <text x="385" y="365" class="comp-label">Orchestrator</text>
+                        <circle cx="430" cy="330" r="8" class="status-indicator" data-status="unknown"/>
+                    </g>
+
+                    <!-- Arrow: Orchestrator -> Job Tables (straight down) -->
+                    <path d="M 385 380 L 385 510" class="flow-arrow" marker-end="url(#arrowhead)"/>
+                    <text x="395" y="445" class="flow-label">Update State</text>
+
+                    <!-- ========== Job Tables (PostgreSQL) - vertically aligned with Orchestrator, horizontally with Task Tables ========== -->
+                    <g class="component" id="comp-job-tables" data-component="database">
+                        <rect x="335" y="510" width="100" height="60" rx="6" class="comp-box postgres"/>
+                        <text x="385" y="535" class="comp-icon">🐘</text>
+                        <text x="385" y="555" class="comp-label">Job Tables</text>
+                        <circle cx="425" cy="520" r="8" class="status-indicator" data-status="unknown"/>
+                    </g>
+
+                    <!-- ========== Fan-out arrows from Orchestrator ========== -->
+                    <!-- Arrow: Orchestrator -> Parallel Task Queue -->
+                    <path d="M 440 340 L 520 265" class="flow-arrow" marker-end="url(#arrowhead)"/>
+                    <text x="460" y="290" class="flow-label">Fan-out</text>
+
+                    <!-- Arrow: Orchestrator -> Compute Task Queue -->
+                    <path d="M 440 350 L 520 350" class="flow-arrow" marker-end="url(#arrowhead)"/>
+
+                    <!-- Arrow: Orchestrator -> Long Task Queue (NOT IMPLEMENTED) -->
+                    <path d="M 440 360 L 520 435" class="flow-arrow inactive" marker-end="url(#arrowhead-grey)"/>
+
+                    <!-- ========== PARALLEL TASK PATH ========== -->
+                    <g class="component" id="comp-parallel-queue" data-component="task_queue_parallel">
+                        <rect x="520" y="235" width="100" height="60" rx="6" class="comp-box servicebus"/>
+                        <text x="570" y="260" class="comp-icon">📨</text>
+                        <text x="570" y="280" class="comp-label">Parallel Queue</text>
+                        <circle cx="610" cy="245" r="8" class="status-indicator" data-status="unknown"/>
+                    </g>
+
+                    <path d="M 620 265 L 680 265" class="flow-arrow" marker-end="url(#arrowhead)"/>
+
+                    <g class="component" id="comp-io-worker" data-component="worker_io">
+                        <rect x="680" y="235" width="110" height="60" rx="6" class="comp-box funcapp"/>
+                        <text x="735" y="260" class="comp-icon">⚡</text>
+                        <text x="735" y="280" class="comp-label">I/O Optimized</text>
+                        <circle cx="780" cy="245" r="8" class="status-indicator" data-status="unknown"/>
+                    </g>
+
+                    <!-- ========== COMPUTE TASK PATH ========== -->
+                    <g class="component" id="comp-compute-queue" data-component="task_queue_compute">
+                        <rect x="520" y="320" width="100" height="60" rx="6" class="comp-box servicebus"/>
+                        <text x="570" y="345" class="comp-icon">📨</text>
+                        <text x="570" y="365" class="comp-label">Compute Queue</text>
+                        <circle cx="610" cy="330" r="8" class="status-indicator" data-status="unknown"/>
+                    </g>
+
+                    <path d="M 620 350 L 680 350" class="flow-arrow" marker-end="url(#arrowhead)"/>
+
+                    <g class="component" id="comp-compute-worker" data-component="worker_compute">
+                        <rect x="680" y="320" width="110" height="60" rx="6" class="comp-box funcapp"/>
+                        <text x="735" y="345" class="comp-icon">⚡</text>
+                        <text x="735" y="365" class="comp-label">Compute Worker</text>
+                        <circle cx="780" cy="330" r="8" class="status-indicator" data-status="unknown"/>
+                    </g>
+
+                    <!-- ========== LONG-RUNNING TASK PATH - NOT IMPLEMENTED ========== -->
+                    <g class="component disabled" id="comp-long-queue" data-component="task_queue_long">
+                        <rect x="520" y="405" width="100" height="60" rx="6" class="comp-box inactive"/>
+                        <text x="570" y="430" class="comp-icon disabled">📨</text>
+                        <text x="570" y="450" class="comp-label disabled">Long Queue</text>
+                        <circle cx="610" cy="415" r="8" class="status-indicator" data-status="disabled"/>
+                    </g>
+
+                    <path d="M 620 435 L 680 435" class="flow-arrow inactive" marker-end="url(#arrowhead-grey)"/>
+
+                    <g class="component disabled" id="comp-container" data-component="worker_container">
+                        <rect x="680" y="405" width="110" height="60" rx="6" class="comp-box inactive"/>
+                        <text x="735" y="430" class="comp-icon disabled">🐳</text>
+                        <text x="735" y="450" class="comp-label disabled">Long Worker</text>
+                        <circle cx="780" cy="415" r="8" class="status-indicator" data-status="disabled"/>
+                    </g>
+
+                    <!-- ========== TASK COMPLETION -> Task Tables ========== -->
+                    <!-- Single arrow from ETL box right edge, horizontally aligned with Compute Worker center (y=350), 90° turn down to Task Tables -->
+                    <path d="M 805 350 L 870 350 L 870 510" class="flow-arrow" marker-end="url(#arrowhead)"/>
+                    <text x="835" y="340" class="flow-label">Task Complete</text>
+
+                    <g class="component" id="comp-task-tables" data-component="database">
+                        <rect x="820" y="510" width="100" height="60" rx="6" class="comp-box postgres"/>
+                        <text x="870" y="535" class="comp-icon">🐘</text>
+                        <text x="870" y="555" class="comp-label">Task Tables</text>
+                        <circle cx="910" cy="520" r="8" class="status-indicator" data-status="unknown"/>
+                    </g>
+
+                    <!-- ========== STATE PROGRESSION FEEDBACK ========== -->
+                    <!-- From Task Tables left edge to Job Tables right edge -->
+                    <path d="M 820 540 L 435 540" class="flow-arrow" marker-end="url(#arrowhead)" stroke-dasharray="5,3"/>
+                    <text x="610" y="555" class="flow-label">Last Task Triggers State Progression</text>
+
+                    <!-- ========== TOP ROW: TiTiler-pgstac and OGC Features ========== -->
+                    <!-- TiTiler-pgstac: above Output Data (x=735 center) -->
+                    <g class="component" id="comp-titiler">
+                        <rect x="685" y="5" width="100" height="60" rx="6" class="comp-box appservice"/>
+                        <text x="735" y="30" class="comp-icon">🐳</text>
+                        <text x="735" y="50" class="comp-label">TiTiler-pgstac</text>
+                        <circle cx="775" cy="15" r="8" class="status-indicator" data-status="unknown"/>
+                    </g>
+
+                    <!-- OGC Features: above PostGIS (x=870 center) -->
+                    <g class="component" id="comp-ogc-features">
+                        <rect x="820" y="5" width="100" height="60" rx="6" class="comp-box funcapp"/>
+                        <text x="870" y="30" class="comp-icon">⚡</text>
+                        <text x="870" y="50" class="comp-label">OGC Features</text>
+                        <circle cx="910" cy="15" r="8" class="status-indicator" data-status="unknown"/>
+                    </g>
+
+                    <!-- ========== STORAGE ROW: Input/Output/PostGIS ========== -->
+                    <!-- Input Data: aligned with queues (x=570 center) -->
+                    <g class="component" id="comp-input-storage" data-component="storage_bronze">
+                        <rect x="520" y="95" width="100" height="60" rx="6" class="comp-box storage"/>
+                        <text x="570" y="120" class="comp-icon">📦</text>
+                        <text x="570" y="140" class="comp-label">Input Data</text>
+                        <circle cx="610" cy="105" r="8" class="status-indicator" data-status="unknown"/>
+                    </g>
+
+                    <!-- Output Data: aligned with workers (x=735 center) -->
+                    <g class="component" id="comp-output-storage" data-component="storage_silver">
+                        <rect x="685" y="95" width="100" height="60" rx="6" class="comp-box storage"/>
+                        <text x="735" y="120" class="comp-icon">📦</text>
+                        <text x="735" y="140" class="comp-label">Output Data</text>
+                        <circle cx="775" cy="105" r="8" class="status-indicator" data-status="unknown"/>
+                    </g>
+
+                    <!-- PostGIS - horizontally aligned with storage -->
+                    <g class="component" id="comp-output-tables" data-component="postgis">
+                        <rect x="820" y="95" width="100" height="60" rx="6" class="comp-box postgres"/>
+                        <text x="870" y="120" class="comp-icon">🐘</text>
+                        <text x="870" y="140" class="comp-label">PostGIS</text>
+                        <circle cx="910" cy="105" r="8" class="status-indicator" data-status="unknown"/>
+                    </g>
+
+                    <!-- ========== NEW COLUMN: Zarr/xarray (NOT IMPLEMENTED - grey) ========== -->
+                    <!-- TiTiler-xarray: above Zarr Store (x=1005 center) - NOT IMPLEMENTED -->
+                    <g class="component disabled" id="comp-titiler-xarray">
+                        <rect x="955" y="5" width="100" height="60" rx="6" class="comp-box inactive"/>
+                        <text x="1005" y="30" class="comp-icon disabled">🐳</text>
+                        <text x="1005" y="50" class="comp-label disabled">TiTiler-xarray</text>
+                        <circle cx="1045" cy="15" r="8" class="status-indicator" data-status="disabled"/>
+                    </g>
+
+                    <!-- Zarr Store: to the right of PostGIS (x=1005 center) - NOT IMPLEMENTED -->
+                    <g class="component disabled" id="comp-zarr-store">
+                        <rect x="955" y="95" width="100" height="60" rx="6" class="comp-box inactive"/>
+                        <text x="1005" y="120" class="comp-icon disabled">📦</text>
+                        <text x="1005" y="140" class="comp-label disabled">Zarr Store</text>
+                        <circle cx="1045" cy="105" r="8" class="status-indicator" data-status="disabled"/>
+                    </g>
+
+                    <!-- Arrow: Zarr Store -> TiTiler-xarray (up) - grey/dashed for not implemented -->
+                    <path d="M 1005 95 L 1005 65" class="flow-arrow inactive" marker-end="url(#arrowhead-grey)"/>
+
+                    <!-- Arrows: Output Data -> TiTiler-pgstac (up) -->
+                    <path d="M 735 95 L 735 65" class="flow-arrow" marker-end="url(#arrowhead)"/>
+
+                    <!-- Arrows: PostGIS -> OGC Features (up) -->
+                    <path d="M 870 95 L 870 65" class="flow-arrow" marker-end="url(#arrowhead)"/>
+
+                    <!-- Arrows: Input Data -> ETL Apps box (down) -->
+                    <path d="M 570 155 L 570 195" class="flow-arrow" marker-end="url(#arrowhead)"/>
+                    <text x="580" y="178" class="flow-label-tiny">Read</text>
+
+                    <!-- ETL Apps box -> Output Data (up) -->
+                    <path d="M 735 195 L 735 155" class="flow-arrow" marker-end="url(#arrowhead)"/>
+                    <text x="745" y="178" class="flow-label-tiny">Write</text>
+
+                    <!-- ETL Apps box (right edge) -> PostGIS - 90 degree: right then up -->
+                    <path d="M 805 225 L 870 225 L 870 155" class="flow-arrow" marker-end="url(#arrowhead)"/>
+                    <text x="875" y="190" class="flow-label-tiny">Write</text>
+                </svg>
+            </div>
+
             <!-- Overall Status Banner -->
             <div id="overall-status" class="overall-status loading">
                 <div class="spinner"></div>
@@ -95,6 +334,211 @@ class HealthInterface(BaseInterface):
     def _generate_custom_css(self) -> str:
         """Generate custom CSS for Health Dashboard."""
         return """
+        /* ========== Architecture Diagram Styles ========== */
+        .architecture-diagram {
+            background: white;
+            border: 1px solid #e9ecef;
+            border-radius: 3px;
+            padding: 20px;
+            margin-bottom: 20px;
+            overflow-x: auto;
+        }
+
+        .architecture-diagram h3 {
+            color: #053657;
+            font-size: 16px;
+            margin: 0 0 15px 0;
+            font-weight: 600;
+        }
+
+        .diagram-legend {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 15px;
+            flex-wrap: wrap;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 13px;
+            color: #626F86;
+        }
+
+        .legend-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            border: 2px solid white;
+            box-shadow: 0 0 0 1px #ccc;
+        }
+
+        .legend-dot.healthy { background: #10B981; box-shadow: 0 0 0 1px #10B981; }
+        .legend-dot.warning { background: #F59E0B; box-shadow: 0 0 0 1px #F59E0B; }
+        .legend-dot.unhealthy { background: #DC2626; box-shadow: 0 0 0 1px #DC2626; }
+        .legend-dot.unknown { background: #9CA3AF; box-shadow: 0 0 0 1px #9CA3AF; }
+
+        .arch-svg {
+            width: 100%;
+            max-width: 1100px;
+            height: auto;
+            min-height: 400px;
+            display: block;
+            margin: 0 auto;
+        }
+
+        /* Component boxes */
+        .comp-box {
+            stroke-width: 2;
+            transition: all 0.3s;
+        }
+
+        .comp-box.funcapp {
+            fill: #FFF8E7;
+            stroke: #FFC14D;
+        }
+
+        .comp-box.servicebus {
+            fill: #E8F4FD;
+            stroke: #0078D4;
+        }
+
+        .comp-box.postgres {
+            fill: #E8F0F5;
+            stroke: #336791;
+        }
+
+        .comp-box.storage {
+            fill: #F0F7EE;
+            stroke: #5BB381;
+        }
+
+        .comp-box.appservice {
+            fill: #F3E8FF;
+            stroke: #7C3AED;
+        }
+
+        /* Inactive/Not Implemented components - grey styling */
+        .comp-box.inactive {
+            fill: #F3F4F6;
+            stroke: #9CA3AF;
+            stroke-dasharray: 4,2;
+        }
+
+        .comp-icon.disabled {
+            opacity: 0.5;
+        }
+
+        .comp-label.disabled {
+            fill: #9CA3AF;
+        }
+
+        .flow-arrow.inactive {
+            stroke: #9CA3AF;
+            stroke-dasharray: 4,2;
+        }
+
+        .status-indicator[data-status="disabled"] {
+            fill: #D1D5DB;
+            stroke: #9CA3AF;
+        }
+
+        /* Component hover effect */
+        .component:hover .comp-box {
+            filter: brightness(0.95);
+        }
+
+        .component {
+            cursor: pointer;
+        }
+
+        /* Labels */
+        .comp-icon {
+            font-size: 16px;
+            text-anchor: middle;
+            dominant-baseline: middle;
+        }
+
+        .comp-label {
+            font-size: 11px;
+            font-weight: 600;
+            fill: #053657;
+            text-anchor: middle;
+        }
+
+        .comp-label-small {
+            font-size: 9px;
+            font-weight: 600;
+            fill: #053657;
+            text-anchor: middle;
+        }
+
+        .diagram-label-small {
+            font-size: 11px;
+            fill: #626F86;
+            font-style: italic;
+        }
+
+        .diagram-header-label {
+            font-size: 12px;
+            font-weight: 600;
+            fill: white;
+            text-anchor: middle;
+        }
+
+        /* Flow arrows */
+        .flow-arrow {
+            fill: none;
+            stroke: #0071BC;
+            stroke-width: 2;
+        }
+
+        .flow-label {
+            font-size: 9px;
+            fill: #626F86;
+            text-anchor: middle;
+        }
+
+        .flow-label-tiny {
+            font-size: 8px;
+            fill: #626F86;
+        }
+
+        /* Status indicators */
+        .status-indicator {
+            stroke: white;
+            stroke-width: 2;
+            transition: fill 0.3s;
+        }
+
+        .status-indicator[data-status="healthy"] {
+            fill: #10B981;
+        }
+
+        .status-indicator[data-status="warning"] {
+            fill: #F59E0B;
+        }
+
+        .status-indicator[data-status="unhealthy"] {
+            fill: #DC2626;
+        }
+
+        .status-indicator[data-status="unknown"] {
+            fill: #9CA3AF;
+        }
+
+        /* Pulse animation for unhealthy */
+        @keyframes pulse-unhealthy {
+            0%, 100% { r: 8; opacity: 1; }
+            50% { r: 10; opacity: 0.8; }
+        }
+
+        .status-indicator[data-status="unhealthy"] {
+            animation: pulse-unhealthy 1.5s ease-in-out infinite;
+        }
+
+        /* ========== Original Dashboard Styles ========== */
         .dashboard-header {
             background: white;
             padding: 30px;
@@ -481,6 +925,79 @@ class HealthInterface(BaseInterface):
         // Load health data on page load
         document.addEventListener('DOMContentLoaded', loadHealth);
 
+        // Component mapping: SVG component ID -> health API component name
+        // Maps diagram components to /api/health response components
+        const COMPONENT_MAPPING = {
+            'comp-platform-api': 'deployment_config',    // API deployment configuration
+            'comp-job-queues': 'service_bus',            // Azure Service Bus queues
+            'comp-orchestrator': 'jobs',                 // Job orchestration/registry
+            'comp-job-tables': 'database',               // PostgreSQL jobs/tasks tables
+            'comp-parallel-queue': 'service_bus',        // Service Bus (all queues)
+            'comp-compute-queue': 'service_bus',         // Service Bus (all queues)
+            'comp-long-queue': 'service_bus',            // Service Bus (all queues)
+            'comp-io-worker': 'imports',                 // Workers need imports healthy
+            'comp-compute-worker': 'imports',            // Workers need imports healthy
+            'comp-container': 'duckdb',                  // Container worker (DuckDB)
+            'comp-task-tables': 'database',              // PostgreSQL tasks table
+            'comp-input-storage': 'storage_containers',  // Bronze storage
+            'comp-output-storage': 'storage_containers', // Silver storage
+            'comp-output-tables': 'pgstac',              // PostGIS/pgstac output
+            'comp-titiler': 'titiler',                   // TiTiler-pgstac raster tile server
+            'comp-ogc-features': 'ogc_features'          // OGC Features API
+        };
+
+        // Update architecture diagram status indicators
+        function updateDiagramStatus(components) {
+            if (!components) return;
+
+            // Update each component in the diagram
+            Object.entries(COMPONENT_MAPPING).forEach(([svgId, healthKey]) => {
+                const component = components[healthKey];
+                const indicator = document.querySelector(`#${svgId} .status-indicator`);
+
+                if (indicator) {
+                    let status = 'unknown';
+                    if (component) {
+                        // For TiTiler and OGC Features, check details.overall_status for nuanced status
+                        // (these components can have warning state: livez OK but health not OK)
+                        if (component.details && component.details.overall_status) {
+                            status = component.details.overall_status;
+                        } else {
+                            status = component.status || 'unknown';
+                        }
+                        // Normalize status values
+                        if (status === 'error') status = 'unhealthy';
+                        if (status === 'partial') status = 'warning';
+                        if (status === 'disabled' || status === 'deprecated') status = 'unknown';
+                    }
+                    indicator.setAttribute('data-status', status);
+                }
+            });
+        }
+
+        // Click handler for diagram components
+        function setupDiagramClickHandlers() {
+            document.querySelectorAll('.architecture-diagram .component').forEach(comp => {
+                comp.addEventListener('click', () => {
+                    const healthKey = COMPONENT_MAPPING[comp.id];
+                    if (healthKey) {
+                        // Scroll to and highlight the corresponding component card
+                        const card = document.querySelector(`[data-component-key="${healthKey}"]`);
+                        if (card) {
+                            card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                            card.style.boxShadow = '0 0 0 3px #0071BC';
+                            setTimeout(() => {
+                                card.style.boxShadow = '';
+                            }, 2000);
+                        }
+                    }
+                });
+            });
+        }
+
+        // Initialize diagram handlers
+        document.addEventListener('DOMContentLoaded', setupDiagramClickHandlers);
+
         // Load health data from API
         async function loadHealth() {
             const refreshBtn = document.getElementById('refresh-btn');
@@ -510,6 +1027,9 @@ class HealthInterface(BaseInterface):
 
                 // Render component cards
                 renderComponents(data.components);
+
+                // Update architecture diagram
+                updateDiagramStatus(data.components);
 
                 // Render debug info if present
                 renderDebugInfo(data);
@@ -645,7 +1165,7 @@ class HealthInterface(BaseInterface):
                 const checkedAt = component.checked_at;
 
                 return `
-                    <div class="component-card ${status}">
+                    <div class="component-card ${status}" data-component-key="${name}">
                         <div class="component-header" onclick="toggleDetails('${name}')">
                             <div>
                                 <div class="component-name">${formatLabel(name)}</div>

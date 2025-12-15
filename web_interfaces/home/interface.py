@@ -135,7 +135,7 @@ class HomeInterface(BaseInterface):
         .hero {
             text-align: center;
             padding: 60px 20px;
-            background: linear-gradient(135deg, var(--wb-blue-primary) 0%, var(--wb-navy) 100%);
+            background: linear-gradient(135deg, var(--ds-blue-primary) 0%, var(--ds-navy) 100%);
             color: white;
             border-radius: 8px;
             margin-bottom: 40px;
@@ -172,7 +172,7 @@ class HomeInterface(BaseInterface):
             text-decoration: none;
             color: inherit;
             box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-            border-left: 4px solid var(--wb-blue-primary);
+            border-left: 4px solid var(--ds-blue-primary);
             transition: all 0.3s ease;
             display: flex;
             flex-direction: column;
@@ -181,7 +181,7 @@ class HomeInterface(BaseInterface):
         .card:hover {
             transform: translateY(-4px);
             box-shadow: 0 8px 24px rgba(0,113,188,0.2);
-            border-left-color: var(--wb-cyan);
+            border-left-color: var(--ds-cyan);
         }
 
         .card-icon {
@@ -192,13 +192,13 @@ class HomeInterface(BaseInterface):
         .card-title {
             font-size: 22px;
             font-weight: 700;
-            color: var(--wb-navy);
+            color: var(--ds-navy);
             margin-bottom: 12px;
         }
 
         .card-description {
             font-size: 15px;
-            color: var(--wb-gray);
+            color: var(--ds-gray);
             line-height: 1.6;
             margin-bottom: 20px;
             flex-grow: 1;
@@ -207,12 +207,12 @@ class HomeInterface(BaseInterface):
         .card-footer {
             font-size: 15px;
             font-weight: 600;
-            color: var(--wb-blue-primary);
+            color: var(--ds-blue-primary);
             transition: color 0.2s;
         }
 
         .card:hover .card-footer {
-            color: var(--wb-cyan);
+            color: var(--ds-cyan);
         }
 
         /* Footer Info */
@@ -226,12 +226,12 @@ class HomeInterface(BaseInterface):
 
         .footer-info p {
             margin: 8px 0;
-            color: var(--wb-gray);
+            color: var(--ds-gray);
             font-size: 14px;
         }
 
         .footer-info strong {
-            color: var(--wb-navy);
+            color: var(--ds-navy);
         }
         """
 

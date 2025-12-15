@@ -164,7 +164,7 @@ class MapInterface(BaseInterface):
             background: #f8f9fa;
         }
 
-        /* Navigation - World Bank style */
+        /* Navigation - Design System style */
         .map-nav {
             background: white;
             padding: 12px 24px;
@@ -225,7 +225,7 @@ class MapInterface(BaseInterface):
             right: 0;
         }
 
-        /* Control Panel - World Bank style */
+        /* Control Panel - Design System style */
         .control-panel {
             position: absolute;
             top: 62px;
@@ -540,7 +540,7 @@ class MapInterface(BaseInterface):
                     map.removeLayer(currentLayer);
                 }
 
-                // Add features with World Bank blue styling
+                // Add features with Design System blue styling
                 currentLayer = L.geoJSON(geojson, {
                     style: function(feature) {
                         return {

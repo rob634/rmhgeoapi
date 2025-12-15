@@ -1,6 +1,5 @@
 # Claude Context - Azure Geospatial ETL Pipeline
 
-**Author**: Robert and Geospatial Claude Legion
 **Date**: 05 DEC 2025
 **Primary Documentation**: Start here for all Claude instances
 

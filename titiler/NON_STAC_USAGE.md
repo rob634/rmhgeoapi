@@ -1,7 +1,6 @@
 # TiTiler Non-STAC Usage (Direct COG Access)
 
 **Date**: 28 OCT 2025
-**Author**: Robert and Geospatial Claude Legion
 **Purpose**: How to use TiTiler without STAC, directly with COG URLs
 
 ## Overview

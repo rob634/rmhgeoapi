@@ -20,6 +20,8 @@ import logging
 import os
 
 from infrastructure.janitor_repository import JanitorRepository
+from infrastructure.service_bus import ServiceBusRepository
+from core.schema.queue import TaskQueueMessage
 from util_logger import LoggerFactory, ComponentType
 
 logger = LoggerFactory.create_logger(ComponentType.SERVICE, "JanitorService")
@@ -40,6 +42,10 @@ class JanitorConfig:
     # Task watchdog settings
     task_timeout_minutes: int = 30  # Azure Functions max is 10-30 min
 
+    # Orphaned queued task settings (14 DEC 2025 - message loss recovery)
+    orphaned_queued_timeout_minutes: int = 10  # Tasks stuck in QUEUED > this are orphaned
+    orphaned_queued_max_retries: int = 3  # Max re-queue attempts before marking failed
+
     # Job health settings
     job_stale_hours: int = 24  # Jobs shouldn't take more than a day
 
@@ -54,6 +60,8 @@ class JanitorConfig:
         """Load configuration from environment variables."""
         return cls(
             task_timeout_minutes=int(os.environ.get("JANITOR_TASK_TIMEOUT_MINUTES", "30")),
+            orphaned_queued_timeout_minutes=int(os.environ.get("JANITOR_ORPHANED_QUEUED_TIMEOUT_MINUTES", "10")),
+            orphaned_queued_max_retries=int(os.environ.get("JANITOR_ORPHANED_QUEUED_MAX_RETRIES", "3")),
             job_stale_hours=int(os.environ.get("JANITOR_JOB_STALE_HOURS", "24")),
             queued_timeout_hours=int(os.environ.get("JANITOR_QUEUED_TIMEOUT_HOURS", "1")),
             enabled=os.environ.get("JANITOR_ENABLED", "true").lower() == "true"
@@ -147,6 +155,66 @@ class JanitorService:
             f"task_timeout={self.config.task_timeout_minutes}min, "
             f"job_stale={self.config.job_stale_hours}h"
         )
+
+    # ========================================================================
+    # HELPER METHODS FOR ORPHANED TASK RECOVERY (14 DEC 2025)
+    # ========================================================================
+
+    def _get_queue_for_task(self, task_type: str) -> str:
+        """
+        Determine the correct Service Bus queue for a task type.
+
+        Uses the same routing logic as CoreMachine.
+
+        Args:
+            task_type: Type of task (e.g., 'validate_raster', 'create_cog')
+
+        Returns:
+            Queue name ('raster-tasks', 'vector-tasks', or 'geospatial-jobs')
+        """
+        from config.defaults import TaskRoutingDefaults
+
+        if task_type in TaskRoutingDefaults.RASTER_TASKS:
+            return "raster-tasks"
+        elif task_type in TaskRoutingDefaults.VECTOR_TASKS:
+            return "vector-tasks"
+        else:
+            # Default to jobs queue for unknown types
+            return "geospatial-jobs"
+
+    def _increment_task_retry_count(self, task_id: str) -> bool:
+        """
+        Increment retry count for a task in the database.
+
+        Args:
+            task_id: Task ID to update
+
+        Returns:
+            True if successful, False otherwise
+        """
+        from psycopg import sql
+
+        query = sql.SQL("""
+            UPDATE {schema}.tasks
+            SET retry_count = retry_count + 1,
+                updated_at = NOW()
+            WHERE task_id = %s
+            RETURNING task_id, retry_count
+        """).format(schema=sql.Identifier("app"))
+
+        try:
+            with self.repo._error_context("increment task retry count"):
+                result = self.repo._execute_query(query, (task_id,), fetch='one')
+                if result:
+                    logger.debug(
+                        f"[JANITOR] Incremented retry_count for task {task_id[:16]}... "
+                        f"to {result['retry_count']}"
+                    )
+                    return True
+                return False
+        except Exception as e:
+            logger.error(f"[JANITOR] Failed to increment retry count for {task_id[:16]}...: {e}")
+            return False
 
     # ========================================================================
     # TASK WATCHDOG
@@ -250,6 +318,125 @@ class JanitorService:
                 )
 
             logger.warning(f"[JANITOR] Task watchdog complete: marked {fixed_count} stale tasks as FAILED")
+
+            # ================================================================
+            # PART 2: ORPHANED QUEUED TASK RECOVERY (14 DEC 2025)
+            # ================================================================
+            # Tasks stuck in QUEUED status may have lost their Service Bus messages
+            # Re-queue them to recover from message delivery failures
+            logger.info(
+                f"[JANITOR] Checking for orphaned QUEUED tasks "
+                f"(>{self.config.orphaned_queued_timeout_minutes}min)"
+            )
+
+            orphaned_tasks = self.repo.get_orphaned_queued_tasks(
+                timeout_minutes=self.config.orphaned_queued_timeout_minutes,
+                limit=50
+            )
+
+            if orphaned_tasks:
+                logger.warning(f"[JANITOR] Found {len(orphaned_tasks)} orphaned QUEUED tasks - attempting recovery")
+
+                # Get Service Bus repository for re-queuing
+                service_bus = ServiceBusRepository()
+
+                requeued_count = 0
+                failed_count = 0
+
+                for task in orphaned_tasks:
+                    task_id = task['task_id']
+                    retry_count = task.get('retry_count', 0)
+                    minutes_stuck = round(task.get('minutes_stuck', 0), 1)
+
+                    logger.info(
+                        f"[JANITOR] Processing orphaned task: task_id={task_id[:16]}..., "
+                        f"job_id={task['parent_job_id'][:16]}..., "
+                        f"task_type={task.get('task_type')}, "
+                        f"retry_count={retry_count}, stuck={minutes_stuck}min"
+                    )
+
+                    if retry_count < self.config.orphaned_queued_max_retries:
+                        # Under retry limit - re-queue the task
+                        try:
+                            # Determine queue based on task type
+                            queue_name = self._get_queue_for_task(task.get('task_type', ''))
+
+                            # Build TaskQueueMessage
+                            message = TaskQueueMessage(
+                                task_id=task_id,
+                                parent_job_id=task['parent_job_id'],
+                                job_type=task.get('job_type', ''),
+                                task_type=task.get('task_type', ''),
+                                stage=task.get('stage', 1),
+                                task_index=task.get('task_index', 0),
+                                parameters=task.get('parameters', {})
+                            )
+
+                            # Send to queue
+                            message_id = service_bus.send_message(queue_name, message)
+
+                            # Increment retry count in database
+                            self._increment_task_retry_count(task_id)
+
+                            requeued_count += 1
+                            result.items_fixed += 1
+                            result.actions_taken.append({
+                                "action": "requeue_orphaned_task",
+                                "task_id": task_id,
+                                "parent_job_id": task['parent_job_id'],
+                                "task_type": task.get('task_type'),
+                                "queue": queue_name,
+                                "retry_count": retry_count + 1,
+                                "minutes_stuck": minutes_stuck,
+                                "message_id": message_id
+                            })
+
+                            logger.info(
+                                f"[JANITOR] ✅ Re-queued orphaned task: task_id={task_id[:16]}..., "
+                                f"queue={queue_name}, retry={retry_count + 1}/{self.config.orphaned_queued_max_retries}"
+                            )
+
+                        except Exception as requeue_error:
+                            logger.error(
+                                f"[JANITOR] ❌ Failed to re-queue task {task_id[:16]}...: {requeue_error}"
+                            )
+                            result.actions_taken.append({
+                                "action": "requeue_failed",
+                                "task_id": task_id,
+                                "error": str(requeue_error)
+                            })
+                    else:
+                        # Max retries exceeded - mark as failed
+                        error_msg = (
+                            f"[JANITOR] Orphaned task exceeded max re-queue attempts "
+                            f"({self.config.orphaned_queued_max_retries}). "
+                            f"Message likely lost {retry_count + 1} times."
+                        )
+
+                        self.repo.mark_tasks_as_failed([task_id], error_msg)
+                        failed_count += 1
+                        result.items_fixed += 1
+                        result.actions_taken.append({
+                            "action": "mark_orphaned_task_failed",
+                            "task_id": task_id,
+                            "parent_job_id": task['parent_job_id'],
+                            "task_type": task.get('task_type'),
+                            "retry_count": retry_count,
+                            "reason": "max_retries_exceeded"
+                        })
+
+                        logger.warning(
+                            f"[JANITOR] ❌ Marked orphaned task FAILED (max retries): "
+                            f"task_id={task_id[:16]}..., retries={retry_count}"
+                        )
+
+                logger.warning(
+                    f"[JANITOR] Orphaned task recovery complete: "
+                    f"re-queued={requeued_count}, failed={failed_count}"
+                )
+            else:
+                logger.info("[JANITOR] No orphaned QUEUED tasks found")
+
             logger.debug(f"[JANITOR] task_watchdog: Success - scanned={result.items_scanned}, fixed={result.items_fixed}")
             result.complete(success=True)
 

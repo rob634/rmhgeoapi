@@ -76,7 +76,6 @@ Multi-Stage Workflow:
 1. Stage 1: [Description]
 2. Stage 2: [Description]
 
-Author: Robert and Geospatial Claude Legion
 Date: [DD MMM YYYY]
 """
 
@@ -522,6 +521,5 @@ If you must migrate an existing job:
 
 ---
 
-**Author**: Robert and Geospatial Claude Legion
 **Date**: 05 DEC 2025
 **Status**: Production-Ready QA/Deployment Documentation

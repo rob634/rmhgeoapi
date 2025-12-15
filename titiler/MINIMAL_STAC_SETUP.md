@@ -1,7 +1,6 @@
 # Minimal STAC Setup for Single GeoTIFF
 
 **Date**: 28 OCT 2025
-**Author**: Robert and Geospatial Claude Legion
 **Purpose**: Minimal STAC records needed to test TiTiler-pgstac with one GeoTIFF
 
 ## Overview

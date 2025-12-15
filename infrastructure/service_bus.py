@@ -125,8 +125,15 @@ class ServiceBusRepository(IQueueRepository):
                     logger.debug(f"Connection string length: {len(connection_string)} chars")
 
                     try:
-                        self.client = ServiceBusClient.from_connection_string(connection_string)
-                        logger.info("✅ ServiceBusClient created from connection string")
+                        # SDK retry policy: 5 retries, exponential backoff (14 DEC 2025)
+                        self.client = ServiceBusClient.from_connection_string(
+                            connection_string,
+                            retry_total=5,
+                            retry_backoff_factor=0.5,
+                            retry_backoff_max=60,
+                            retry_mode='exponential'
+                        )
+                        logger.info("✅ ServiceBusClient created from connection string (retry_total=5)")
                     except Exception as cs_error:
                         logger.error(f"❌ Failed to create client from connection string: {cs_error}")
                         raise
@@ -163,11 +170,16 @@ class ServiceBusRepository(IQueueRepository):
 
                     try:
                         logger.debug(f"📦 Creating ServiceBusClient with namespace: {fully_qualified_namespace}")
+                        # SDK retry policy: 5 retries, exponential backoff (14 DEC 2025)
                         self.client = ServiceBusClient(
                             fully_qualified_namespace=fully_qualified_namespace,
-                            credential=self.credential
+                            credential=self.credential,
+                            retry_total=5,
+                            retry_backoff_factor=0.5,
+                            retry_backoff_max=60,
+                            retry_mode='exponential'
                         )
-                        logger.info("✅ ServiceBusClient created successfully")
+                        logger.info("✅ ServiceBusClient created successfully (retry_total=5)")
                     except Exception as client_error:
                         logger.error(f"❌ Failed to create ServiceBusClient: {client_error}")
                         logger.error(f"Namespace used: {fully_qualified_namespace}")
@@ -175,11 +187,16 @@ class ServiceBusRepository(IQueueRepository):
 
                     # Async client for batch operations
                     try:
+                        # SDK retry policy: 5 retries, exponential backoff (14 DEC 2025)
                         self.async_client = AsyncServiceBusClient(
                             fully_qualified_namespace=fully_qualified_namespace,
-                            credential=self.credential
+                            credential=self.credential,
+                            retry_total=5,
+                            retry_backoff_factor=0.5,
+                            retry_backoff_max=60,
+                            retry_mode='exponential'
                         )
-                        logger.debug("✅ AsyncServiceBusClient created")
+                        logger.debug("✅ AsyncServiceBusClient created (retry_total=5)")
                     except Exception as async_error:
                         logger.warning(f"⚠️ Failed to create AsyncServiceBusClient: {async_error}")
                         self.async_client = None
@@ -210,30 +227,168 @@ class ServiceBusRepository(IQueueRepository):
             cls._instance = cls()
         return cls._instance
 
+    def _check_sender_health(self, sender: ServiceBusSender, queue_name: str) -> dict:
+        """
+        Check sender health and AMQP connection state.
+
+        Returns dict with health status and diagnostic info.
+        Added 14 DEC 2025 for debugging message loss issues.
+        """
+        health = {
+            "queue": queue_name,
+            "healthy": False,
+            "running": False,
+            "has_handler": False,
+            "client_ready": False,
+            "shutdown": False,
+            "issues": []
+        }
+
+        try:
+            # Check _running flag
+            health["running"] = getattr(sender, '_running', False)
+            if not health["running"]:
+                health["issues"].append("sender._running is False")
+
+            # Check _shutdown flag
+            shutdown_event = getattr(sender, '_shutdown', None)
+            if shutdown_event:
+                health["shutdown"] = shutdown_event.is_set()
+                if health["shutdown"]:
+                    health["issues"].append("sender._shutdown is set")
+
+            # Check handler exists
+            handler = getattr(sender, '_handler', None)
+            health["has_handler"] = handler is not None
+            if not handler:
+                health["issues"].append("sender._handler is None")
+            else:
+                # Check client_ready if available
+                try:
+                    health["client_ready"] = handler.client_ready() if hasattr(handler, 'client_ready') else True
+                    if not health["client_ready"]:
+                        health["issues"].append("handler.client_ready() is False")
+                except Exception as ready_err:
+                    health["issues"].append(f"client_ready check failed: {ready_err}")
+
+            # Overall health
+            health["healthy"] = (
+                health["running"] and
+                health["has_handler"] and
+                health["client_ready"] and
+                not health["shutdown"] and
+                len(health["issues"]) == 0
+            )
+
+        except Exception as e:
+            health["issues"].append(f"Health check error: {e}")
+
+        return health
+
     def _get_sender(self, queue_or_topic: str) -> ServiceBusSender:
-        """Get or create a message sender with error handling."""
-        if queue_or_topic not in self._senders:
-            logger.debug(f"🚌 Creating new sender for queue: {queue_or_topic}")
+        """
+        Get or create a message sender with connection warmup.
+
+        CRITICAL FIX (14 DEC 2025):
+        The Azure Service Bus SDK creates senders with lazy AMQP connections.
+        If we send a message immediately after creating a sender, the message
+        can be lost during AMQP link establishment (SDK reports success but
+        message never arrives).
+
+        Solution: Explicitly open the sender connection before caching it.
+        This ensures the AMQP link is ATTACHED before any messages are sent.
+
+        ENHANCED (14 DEC 2025): Added health checks and fail-loud behavior.
+        """
+        # Check if we have a cached sender
+        if queue_or_topic in self._senders:
+            sender = self._senders[queue_or_topic]
+
+            # ENHANCED: Verify cached sender is healthy before reusing
+            health = self._check_sender_health(sender, queue_or_topic)
+            if health["healthy"]:
+                logger.debug(f"♻️ Reusing healthy sender for queue: {queue_or_topic}")
+                return sender
+            else:
+                # Cached sender is unhealthy - remove and create new one
+                logger.warning(
+                    f"⚠️ Cached sender unhealthy for {queue_or_topic}, recreating. Issues: {health['issues']}",
+                    extra={
+                        'queue': queue_or_topic,
+                        'sender_health': health,
+                        'action': 'recreate_sender'
+                    }
+                )
+                try:
+                    sender.close()
+                except Exception as close_err:
+                    logger.debug(f"Error closing unhealthy sender: {close_err}")
+                del self._senders[queue_or_topic]
+
+        # Create new sender
+        logger.debug(f"🚌 Creating new sender for queue: {queue_or_topic}")
+        try:
+            sender = self.client.get_queue_sender(queue_or_topic)
+            logger.debug(f"📡 Warming up sender connection (establishing AMQP link)...")
+
+            # CRITICAL: Open the sender connection BEFORE caching
+            # This ensures the AMQP link is ATTACHED, not DETACHED
+            # Without this, messages sent immediately after creation can be lost
             try:
-                sender = self.client.get_queue_sender(queue_or_topic)
-                logger.debug(f"✅ Sender created for queue: {queue_or_topic}")
-                self._senders[queue_or_topic] = sender
-            except Exception as sender_error:
-                logger.error(f"❌ Failed to create sender for queue '{queue_or_topic}': {sender_error}")
-                logger.error(f"Error type: {type(sender_error).__name__}")
+                # _open() is the SDK's internal method to establish AMQP connection
+                # It's safe to call and ensures the link is ready for messages
+                sender._open()
 
-                # Check for specific error types
-                error_msg = str(sender_error).lower()
-                if 'not found' in error_msg or '404' in error_msg:
-                    logger.error(f"Queue '{queue_or_topic}' does not exist in Service Bus namespace")
-                elif 'unauthorized' in error_msg or '401' in error_msg:
-                    logger.error(f"Authentication failed - check managed identity or connection string")
-                elif 'forbidden' in error_msg or '403' in error_msg:
-                    logger.error(f"Access denied to queue '{queue_or_topic}' - check permissions")
+                # ENHANCED: Verify warmup succeeded
+                health = self._check_sender_health(sender, queue_or_topic)
+                if health["healthy"]:
+                    logger.info(f"✅ Sender AMQP link established and verified for queue: {queue_or_topic}")
+                else:
+                    # FAIL LOUD: Don't silently continue with unhealthy sender
+                    logger.error(
+                        f"❌ Sender warmup completed but health check failed for {queue_or_topic}. Issues: {health['issues']}",
+                        extra={
+                            'queue': queue_or_topic,
+                            'sender_health': health,
+                            'error_source': 'infrastructure'
+                        }
+                    )
+                    raise RuntimeError(f"Sender health check failed after warmup: {health['issues']}")
 
-                raise RuntimeError(f"Cannot create sender for queue '{queue_or_topic}': {sender_error}")
-        else:
-            logger.debug(f"♻️ Reusing existing sender for queue: {queue_or_topic}")
+            except Exception as warmup_error:
+                # FAIL LOUD: Don't continue with failed warmup
+                logger.error(
+                    f"❌ Sender warmup FAILED for {queue_or_topic}: {warmup_error}",
+                    extra={
+                        'queue': queue_or_topic,
+                        'error_type': type(warmup_error).__name__,
+                        'error_source': 'infrastructure'
+                    }
+                )
+                # Close the failed sender
+                try:
+                    sender.close()
+                except:
+                    pass
+                raise RuntimeError(f"Sender warmup failed for {queue_or_topic}: {warmup_error}")
+
+            logger.debug(f"✅ Sender created and cached for queue: {queue_or_topic}")
+            self._senders[queue_or_topic] = sender
+
+        except Exception as sender_error:
+            logger.error(f"❌ Failed to create sender for queue '{queue_or_topic}': {sender_error}")
+            logger.error(f"Error type: {type(sender_error).__name__}")
+
+            # Check for specific error types
+            error_msg = str(sender_error).lower()
+            if 'not found' in error_msg or '404' in error_msg:
+                logger.error(f"Queue '{queue_or_topic}' does not exist in Service Bus namespace")
+            elif 'unauthorized' in error_msg or '401' in error_msg:
+                logger.error(f"Authentication failed - check managed identity or connection string")
+            elif 'forbidden' in error_msg or '403' in error_msg:
+                logger.error(f"Access denied to queue '{queue_or_topic}' - check permissions")
+
+            raise RuntimeError(f"Cannot create sender for queue '{queue_or_topic}': {sender_error}")
 
         return self._senders[queue_or_topic]
 
@@ -327,15 +482,61 @@ class ServiceBusRepository(IQueueRepository):
             try:
                 logger.debug(f"📮 Send attempt {attempt + 1}/{self.max_retries}")
 
+                # ENHANCED (14 DEC 2025): Check sender health before each send attempt
+                health = self._check_sender_health(sender, queue_name)
+                if not health["healthy"]:
+                    logger.warning(
+                        f"⚠️ Sender unhealthy before send attempt {attempt + 1}. Issues: {health['issues']}",
+                        extra={
+                            'queue': queue_name,
+                            'sender_health': health,
+                            'attempt': attempt + 1
+                        }
+                    )
+                    # Try to get a fresh sender
+                    if queue_name in self._senders:
+                        del self._senders[queue_name]
+                    sender = self._get_sender(queue_name)
+                    # Re-check health after getting new sender
+                    health = self._check_sender_health(sender, queue_name)
+                    logger.info(f"🔄 Got fresh sender, health: {health}")
+
+                logger.debug(
+                    f"📡 Sender state before send: running={health.get('running')}, "
+                    f"has_handler={health.get('has_handler')}, client_ready={health.get('client_ready')}"
+                )
+
                 # Step 5: Send the message
-                logger.debug(f"📤 Sending message without context manager (sender is cached)")
+                logger.debug(f"📤 Calling send_messages() on queue: {queue_name}")
+                send_start = time.time()
                 sender.send_messages(sb_message)
-                logger.debug(f"✅ send_messages() completed successfully")
+                send_elapsed = (time.time() - send_start) * 1000
+                logger.debug(f"✅ send_messages() returned in {send_elapsed:.2f}ms")
+
+                # ENHANCED: Check sender health AFTER send to detect issues
+                post_health = self._check_sender_health(sender, queue_name)
+                if not post_health["healthy"]:
+                    logger.warning(
+                        f"⚠️ Sender became unhealthy AFTER send! Issues: {post_health['issues']}",
+                        extra={
+                            'queue': queue_name,
+                            'sender_health_post': post_health,
+                            'send_elapsed_ms': send_elapsed
+                        }
+                    )
 
                 # Step 6: Generate message ID for compatibility
                 try:
                     message_id = sb_message.message_id or f"sb_{datetime.now(timezone.utc).timestamp()}"
-                    logger.info(f"✅ Message sent to Service Bus. ID: {message_id}")
+                    logger.info(
+                        f"✅ Message sent to {queue_name}. ID: {message_id}, elapsed: {send_elapsed:.2f}ms",
+                        extra={
+                            'queue': queue_name,
+                            'message_id': message_id,
+                            'send_elapsed_ms': send_elapsed,
+                            'sender_healthy_post': post_health.get('healthy', False)
+                        }
+                    )
                     return message_id
                 except Exception as id_error:
                     logger.warning(f"⚠️ Could not get message_id, using timestamp: {id_error}")
@@ -1399,30 +1600,29 @@ class ServiceBusRepository(IQueueRepository):
     def __del__(self):
         """Clean up resources on deletion."""
         if hasattr(self, '_initialized'):
-            # Close all senders
-            for sender in self._senders.values():
+            # Close all senders (with logging instead of silent swallow)
+            for queue_name, sender in self._senders.items():
                 try:
                     sender.close()
-                except:
-                    pass
+                    logger.debug(f"✅ Closed sender for queue: {queue_name}")
+                except Exception as close_err:
+                    # Log but don't raise - we're in __del__
+                    logger.warning(f"⚠️ Error closing sender for {queue_name}: {close_err}")
 
-            # Close all receivers
-            for receiver in self._receivers.values():
-                try:
-                    receiver.close()
-                except:
-                    pass
+            # NOTE: Receivers are NOT cached (created fresh each time)
+            # So there's no self._receivers to close
 
             # Close clients
             if hasattr(self, 'client'):
                 try:
                     self.client.close()
-                except:
-                    pass
+                    logger.debug("✅ Closed ServiceBusClient")
+                except Exception as client_err:
+                    logger.warning(f"⚠️ Error closing ServiceBusClient: {client_err}")
 
             if hasattr(self, 'async_client') and self.async_client:
                 # Note: Async cleanup requires event loop
-                pass
+                logger.debug("⚠️ AsyncServiceBusClient cleanup skipped (requires event loop)")
 
 
 # Factory function for dependency injection

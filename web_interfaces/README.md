@@ -1,8 +1,6 @@
 # Web Interfaces Module
 
-**Author**: Robert and Geospatial Claude Legion
 **Date**: 15 NOV 2025
-**Design System**: World Bank Data Catalog inspired
 
 ## Overview
 
@@ -28,7 +26,7 @@ All web interfaces are accessible via a single dynamic route:
 
 ```
 BaseInterface (Abstract)
-    ├── Common CSS (World Bank colors, typography)
+    ├── Common CSS (Design System colors, typography)
     ├── Common JS (API utilities, error handling)
     ├── wrap_html() - Template wrapper
     └── render() - Abstract method (implemented by subclasses)
@@ -64,7 +62,7 @@ web_interfaces/
 
 ## Design System
 
-### World Bank Color Palette
+### Design System Color Palette
 
 Inspired by [datacatalog.worldbank.org](https://datacatalog.worldbank.org/home):
 
@@ -184,7 +182,7 @@ Inspired by [datacatalog.worldbank.org](https://datacatalog.worldbank.org/home):
 **Current Status**:
 - Static HTML version exists in Azure Storage $web container
 - Needs to be migrated to web_interfaces module for consistency
-- Will use same World Bank design system
+- Will use same Design System design system
 
 ### 4. API Documentation ⏳
 
@@ -272,7 +270,7 @@ The global navigation bar (rendered by `BaseInterface._render_navbar()`) include
 
 **wrap_html(title, content, custom_css, custom_js)**:
 - Wraps your content in full HTML document
-- Includes common CSS (World Bank colors, reset, utilities)
+- Includes common CSS (Design System colors, reset, utilities)
 - Includes common JS (API utilities, error handling)
 - Adds navigation bar automatically
 - Handles responsive design
@@ -318,7 +316,7 @@ https://rmhazuregeoapi-{hash}.eastus-01.azurewebsites.net/api/interface/jobs
 ## Recent Changes
 
 ### 15 NOV 2025
-- ✅ World Bank design system implemented across all interfaces
+- ✅ Design System design system implemented across all interfaces
 - ✅ "Vector Viewer" renamed to "OGC Features" in navbar
 - ✅ "Staging Container" placeholder added to navbar
 - ✅ STAC collection links made clickable with icons (🔗📄⬆️🏠)
@@ -327,7 +325,7 @@ https://rmhazuregeoapi-{hash}.eastus-01.azurewebsites.net/api/interface/jobs
 
 ### Key Design Decisions
 
-**Why World Bank Design?**
+**Why Design System Design?**
 - Professional, data-focused aesthetic
 - Clean and accessible
 - Familiar to data professionals
@@ -350,7 +348,7 @@ https://rmhazuregeoapi-{hash}.eastus-01.azurewebsites.net/api/interface/jobs
 ### Short Term
 1. **Make STAC items clickable** - Click to see full STAC item metadata
 2. **Job detail view** - Click job row to see full task breakdown
-3. **Implement Vector Viewer** - Migrate from $web, add World Bank styling
+3. **Implement Vector Viewer** - Migrate from $web, add Design System styling
 4. **Add pagination** - For jobs table and collections grid
 
 ### Medium Term
@@ -374,7 +372,7 @@ https://rmhazuregeoapi-{hash}.eastus-01.azurewebsites.net/api/interface/jobs
 ## Contributing
 
 When adding new interfaces:
-1. Follow the World Bank design system
+1. Follow the Design System design system
 2. Use the provided CSS variables
 3. Implement responsive design (mobile-friendly)
 4. Add proper error handling

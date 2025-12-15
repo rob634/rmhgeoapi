@@ -1,7 +1,6 @@
 # PgSTAC Schema Setup Required
 
 **Date**: 28 OCT 2025
-**Author**: Robert and Geospatial Claude Legion
 **Status**: ⚠️ SETUP REQUIRED
 
 ## Current Situation

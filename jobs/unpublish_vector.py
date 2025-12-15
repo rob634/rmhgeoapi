@@ -1,24 +1,25 @@
 """
-UnpublishVectorJob - Surgical removal of vector STAC items and PostGIS tables.
+UnpublishVectorJob - Surgical removal of vector PostGIS tables and metadata.
 
-Reverses process_vector workflow.
-Removes STAC items and optionally drops PostGIS tables.
+Primary data source is geo.table_metadata (OGC Features source of truth).
+STAC is optional - deleted if linked in metadata.
 
 Three-Stage Workflow:
-    Stage 1 (inventory): Query STAC item, extract PostGIS table reference
-    Stage 2 (drop_table): Drop PostGIS table if requested
-    Stage 3 (cleanup): Delete STAC item, cleanup empty collection, audit record
+    Stage 1 (inventory): Query geo.table_metadata for ETL/STAC linkage info
+    Stage 2 (drop_table): Drop PostGIS table and delete metadata row
+    Stage 3 (cleanup): Delete STAC item if linked, record audit
 
 Safety Features:
     - dry_run=True by default (preview only, no deletions)
-    - drop_table=True by default (removes PostGIS table)
-    - Pre-flight validation confirms STAC item exists
-    - Idempotent table drop (succeeds if already dropped)
+    - Pre-flight validation confirms table exists
+    - Idempotent operations (succeed if already deleted)
     - System collections protected (STACDefaults.SYSTEM_COLLECTIONS)
     - Full audit trail in app.unpublish_jobs table
 
 Exports:
     UnpublishVectorJob: Vector unpublish workflow implementation
+
+Date: 13 DEC 2025 - Refactored to use PostGIS table as primary source (not STAC)
 """
 
 from typing import List, Dict, Any
@@ -30,21 +31,20 @@ class UnpublishVectorJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
     """
     Unpublish vector job using JobBaseMixin pattern.
 
-    Removes vector STAC item and associated PostGIS table:
-    - STAC item from pgstac.items
-    - PostGIS table from geo.{table_name}
+    Removes vector data in order:
+    1. Query geo.table_metadata for ETL/STAC linkage info
+    2. DROP PostGIS table + DELETE metadata row
+    3. Delete STAC item if linked, record audit
 
-    Three-Stage Workflow:
-    1. Stage 1 (inventory): Query STAC item, extract table reference
-    2. Stage 2 (drop_table): Drop PostGIS table (if drop_table=True)
-    3. Stage 3 (cleanup): Delete STAC item, audit, cleanup collection
+    Primary identifier: table_name (not stac_item_id!)
+    STAC is optional metadata, not required.
     """
 
     # ========================================================================
     # DECLARATIVE CONFIGURATION
     # ========================================================================
     job_type = "unpublish_vector"
-    description = "Remove vector STAC item and optionally drop PostGIS table"
+    description = "Remove PostGIS vector table, metadata, and optional STAC item"
 
     # Stage definitions
     stages = [
@@ -69,18 +69,15 @@ class UnpublishVectorJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
     ]
 
     # Declarative parameter validation
+    # PRIMARY IDENTIFIER: table_name (not stac_item_id!)
     parameters_schema = {
-        "stac_item_id": {
+        "table_name": {
             "type": "str",
             "required": True
         },
-        "collection_id": {
+        "schema_name": {
             "type": "str",
-            "required": True
-        },
-        "drop_table": {
-            "type": "bool",
-            "default": True  # Drop PostGIS table by default
+            "default": "geo"  # Can be overridden, defaults to geo schema
         },
         "dry_run": {
             "type": "bool",
@@ -88,13 +85,15 @@ class UnpublishVectorJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
         }
     }
 
-    # Pre-flight validation - fail fast if STAC item doesn't exist
+    # Pre-flight validation - use existing table_exists validator
+    # No STAC requirement! PostGIS table is the primary source.
     resource_validators = [
         {
-            "type": "stac_item_exists",
-            "item_id_param": "stac_item_id",
-            "collection_id_param": "collection_id",
-            "error": "STAC item not found in collection - cannot unpublish"
+            "type": "table_exists",
+            "table_param": "table_name",
+            "schema_param": "schema_name",
+            "default_schema": "geo",
+            "error": "PostGIS table not found - cannot unpublish"
         }
     ]
 
@@ -111,65 +110,52 @@ class UnpublishVectorJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
         """
         Generate task parameters for each stage.
 
-        Stage 1: Single inventory task
-        Stage 2: Single table drop task (skipped if drop_table=False)
-        Stage 3: Single cleanup task
+        Stage 1: Inventory - query geo.table_metadata
+        Stage 2: Drop table + delete metadata row
+        Stage 3: Cleanup - delete STAC if linked, audit
 
         Args:
             stage: Stage number (1, 2, or 3)
-            job_params: Job parameters (stac_item_id, collection_id, drop_table, dry_run)
+            job_params: Job parameters (table_name, schema_name, dry_run)
             job_id: Job ID for task ID generation
             previous_results: Results from previous stage
 
         Returns:
             List of task parameter dicts
         """
+        # Get schema from params or use default
+        schema_name = job_params.get("schema_name", "geo")
+        table_name = job_params.get("table_name")
+        dry_run = job_params.get("dry_run", True)
+
         if stage == 1:
-            # Stage 1: Inventory - query STAC item and extract table reference
+            # Stage 1: Inventory - query geo.table_metadata for ETL/STAC linkage
             return [{
                 "task_id": f"{job_id[:8]}-s1-inventory",
                 "task_type": "inventory_vector_item",
                 "parameters": {
-                    "stac_item_id": job_params["stac_item_id"],
-                    "collection_id": job_params["collection_id"],
-                    "dry_run": job_params.get("dry_run", True)
+                    "table_name": table_name,
+                    "schema_name": schema_name,
+                    "dry_run": dry_run
                 }
             }]
 
         elif stage == 2:
-            # Stage 2: Drop PostGIS table (if requested)
-            drop_table = job_params.get("drop_table", True)
-            dry_run = job_params.get("dry_run", True)
-
-            # Skip table drop if not requested
-            if not drop_table:
-                return []
-
-            # Extract table info from stage 1 results
-            if not previous_results:
-                return []
-
-            inventory_result = previous_results[0].get("result", {})
-            table_name = inventory_result.get("postgis_table")
-
-            if not table_name:
-                # No table reference found - just skip this stage
-                return []
-
+            # Stage 2: Drop PostGIS table and delete metadata row
             return [{
                 "task_id": f"{job_id[:8]}-s2-drop",
                 "task_type": "drop_postgis_table",
                 "parameters": {
                     "table_name": table_name,
-                    "schema_name": inventory_result.get("schema_name", "geo"),
+                    "schema_name": schema_name,
                     "dry_run": dry_run,
-                    "stac_item_id": job_params["stac_item_id"]
+                    "delete_metadata": True  # Also delete from geo.table_metadata
                 }
             }]
 
         elif stage == 3:
-            # Stage 3: Cleanup - delete STAC item, audit, cleanup empty collection
-            # Gather inventory data from stage 1
+            # Stage 3: Cleanup - delete STAC if linked, record audit
+            # Get inventory data from stage 1 for STAC linkage info
             inventory_data = {}
             table_dropped = False
 
@@ -184,17 +170,19 @@ class UnpublishVectorJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
                 "task_id": f"{job_id[:8]}-s3-cleanup",
                 "task_type": "delete_stac_and_audit",
                 "parameters": {
-                    "stac_item_id": job_params["stac_item_id"],
-                    "collection_id": job_params["collection_id"],
-                    "dry_run": job_params.get("dry_run", True),
+                    # Use STAC info from inventory if available
+                    "stac_item_id": inventory_data.get("stac_item_id"),
+                    "collection_id": inventory_data.get("stac_collection_id"),
+                    "dry_run": dry_run,
                     "unpublish_job_id": job_id,
                     "unpublish_type": "vector",
                     # Pass through inventory data for audit record
-                    "original_job_id": inventory_data.get("original_job_id"),
-                    "original_job_type": inventory_data.get("original_job_type"),
+                    "original_job_id": inventory_data.get("etl_job_id"),
+                    "original_job_type": inventory_data.get("original_job_type", "process_vector"),
                     "original_parameters": inventory_data.get("original_parameters"),
-                    "postgis_table": inventory_data.get("postgis_table"),
-                    "table_dropped": table_dropped
+                    "postgis_table": f"{schema_name}.{table_name}",
+                    "table_dropped": table_dropped,
+                    "metadata_snapshot": inventory_data.get("metadata_snapshot")
                 }
             }]
 
@@ -223,37 +211,49 @@ class UnpublishVectorJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
         )
 
         if context:
-            # Extract cleanup result
-            cleanup_results = [
-                r for r in context.task_results
-                if r.get("task_type") == "delete_stac_and_audit"
-            ]
+            # Extract results from each stage
+            inventory_data = {}
+            table_dropped = False
+            stac_deleted = False
+            dry_run = True
 
-            if cleanup_results:
-                cleanup = cleanup_results[0].get("result", {})
-                dry_run = cleanup.get("dry_run", True)
+            for result in context.task_results:
+                task_type = result.get("task_type")
+                task_result = result.get("result", {})
 
-                if dry_run:
-                    logger.info(
-                        f"🔍 DRY RUN - Unpublish vector job {context.job_id[:16]}... "
-                        f"previewed (no deletions)"
-                    )
-                else:
-                    logger.info(
-                        f"✅ Unpublish vector job {context.job_id[:16]}... completed - "
-                        f"STAC item {cleanup.get('stac_item_id')} deleted"
-                    )
+                if task_type == "inventory_vector_item":
+                    inventory_data = task_result
+                elif task_type == "drop_postgis_table":
+                    table_dropped = task_result.get("table_dropped", False)
+                elif task_type == "delete_stac_and_audit":
+                    stac_deleted = task_result.get("stac_item_deleted", False)
+                    dry_run = task_result.get("dry_run", True)
 
-                return {
-                    "job_type": "unpublish_vector",
-                    "status": "completed",
-                    "dry_run": dry_run,
-                    "stac_item_id": cleanup.get("stac_item_id"),
-                    "collection_id": cleanup.get("collection_id"),
-                    "postgis_table": cleanup.get("postgis_table"),
-                    "table_dropped": cleanup.get("table_dropped", False),
-                    "collection_deleted": cleanup.get("collection_deleted", False)
-                }
+            table_name = inventory_data.get("table_name", "unknown")
+
+            if dry_run:
+                logger.info(
+                    f"🔍 DRY RUN - Unpublish vector job {context.job_id[:16]}... "
+                    f"previewed table '{table_name}' (no deletions)"
+                )
+            else:
+                logger.info(
+                    f"✅ Unpublish vector job {context.job_id[:16]}... completed - "
+                    f"table '{table_name}' dropped={table_dropped}, stac_deleted={stac_deleted}"
+                )
+
+            return {
+                "job_type": "unpublish_vector",
+                "status": "completed",
+                "dry_run": dry_run,
+                "table_name": table_name,
+                "schema_name": inventory_data.get("schema_name", "geo"),
+                "table_dropped": table_dropped,
+                "metadata_deleted": inventory_data.get("metadata_found", False),
+                "stac_item_deleted": stac_deleted,
+                "stac_item_id": inventory_data.get("stac_item_id"),
+                "etl_job_id": inventory_data.get("etl_job_id")
+            }
 
         logger.info("✅ Unpublish vector job completed (no context provided)")
 

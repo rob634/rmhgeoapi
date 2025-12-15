@@ -2,7 +2,6 @@
 
 **Date**: 03 DEC 2025
 **Status**: Production
-**Author**: Robert Harrison
 **Purpose**: Operational runbook with actual values for setting up managed identity database access
 **Audience**: DevOps, Database Administrators
 

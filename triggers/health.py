@@ -9,12 +9,12 @@ Components Monitored:
     - Database Configuration
     - Database Connectivity
     - DuckDB
-    - VSI Support
     - Jobs Registry
     - PgSTAC
     - System Reference Tables
-    - Table Metadata Registry
     - Schema Summary (07 DEC 2025) - All schemas, tables, row counts
+    - TiTiler (13 DEC 2025) - Raster tile server health
+    - OGC Features (13 DEC 2025) - Vector feature API health
 
 Debug Mode Features (DEBUG_MODE=true):
     - config_sources: Shows env var vs default sources for all config values
@@ -181,36 +181,6 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                 "checked_at": datetime.now(timezone.utc).isoformat()
             }
 
-        # Check rasterio VSI (Virtual File System) support (optional but important for Big Raster ETL)
-        # Controlled by ENABLE_VSI_HEALTH_CHECK environment variable (default: false)
-        if config.enable_vsi_health_check:
-            try:
-                self.logger.info("🔍 Starting VSI capability check...")
-                vsi_health = self._check_vsi_support()
-                self.logger.info(f"📊 VSI check result: {vsi_health.get('status', 'unknown')}")
-                health_data["components"]["vsi"] = vsi_health
-                # Note: VSI is optional but required for Big Raster ETL - don't fail overall health
-                if vsi_health["status"] == "error":
-                    health_data["errors"].append("Rasterio VSI unavailable (impacts Big Raster ETL workflow)")
-            except Exception as vsi_error:
-                self.logger.error(f"❌ VSI check failed with exception: {vsi_error}")
-                health_data["components"]["vsi"] = {
-                    "component": "vsi_support",
-                    "status": "error",
-                    "details": {"exception": str(vsi_error), "error_type": type(vsi_error).__name__},
-                    "checked_at": datetime.now(timezone.utc).isoformat()
-                }
-        else:
-            health_data["components"]["vsi"] = {
-                "component": "vsi_support",
-                "status": "disabled",
-                "details": {
-                    "message": "VSI check disabled via config - rasterio still available",
-                    "enable_with": "Set ENABLE_VSI_HEALTH_CHECK=true"
-                },
-                "checked_at": datetime.now(timezone.utc).isoformat()
-            }
-
         # Check jobs registry (critical for job processing)
         jobs_health = self._check_jobs_registry()
         health_data["components"]["jobs"] = jobs_health
@@ -243,17 +213,25 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
             if system_tables_health["status"] == "error":
                 health_data["errors"].append("System reference tables unavailable (ISO3 country attribution disabled)")
 
-            # Check geo.table_metadata registry (06 DEC 2025)
-            # This is the source of truth for vector table metadata
-            table_metadata_health = self._check_table_metadata_registry()
-            health_data["components"]["table_metadata_registry"] = table_metadata_health
-            # Note: table_metadata is important but not critical - don't fail overall health
-            if table_metadata_health["status"] == "error":
-                health_data["errors"].append("geo.table_metadata unavailable (OGC collection properties will be limited)")
-
             # Schema summary for remote database inspection (07 DEC 2025)
             schema_summary_health = self._check_schema_summary()
             health_data["components"]["schema_summary"] = schema_summary_health
+
+        # Check TiTiler raster tile server (13 DEC 2025)
+        # TiTiler is always an external Docker app - check its health endpoints
+        titiler_health = self._check_titiler_health()
+        health_data["components"]["titiler"] = titiler_health
+        # TiTiler is optional for core ETL - don't fail overall health
+        if titiler_health.get("status") == "unhealthy":
+            health_data["errors"].append("TiTiler unavailable (raster tile visualization disabled)")
+
+        # Check OGC Features API (13 DEC 2025)
+        # Can be self-hosted or external - check its health endpoint
+        ogc_features_health = self._check_ogc_features_health()
+        health_data["components"]["ogc_features"] = ogc_features_health
+        # OGC Features is optional for core ETL - don't fail overall health
+        if ogc_features_health.get("status") == "unhealthy":
+            health_data["errors"].append("OGC Features API unavailable (vector feature queries disabled)")
 
         # Debug status - always include (07 DEC 2025)
         health_data["debug_status"] = config.get_debug_status()
@@ -987,123 +965,6 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
             description="DuckDB analytical engine for serverless queries and GeoParquet exports"
         )
 
-    def _check_vsi_support(self) -> Dict[str, Any]:
-        """
-        Check rasterio VSI (Virtual File System) support (critical for Big Raster ETL).
-
-        VSI allows reading rasters directly from cloud storage without downloading to /tmp.
-        This is REQUIRED for Big Raster ETL workflow to avoid /tmp disk space exhaustion
-        (Azure Functions /tmp is limited to ~500MB).
-
-        Tests:
-        - /vsicurl/ - HTTP/HTTPS access (works with SAS URLs)
-        - GDAL drivers available
-        - Connection to cloud storage
-
-        Returns:
-            Dict with VSI capability status and test results
-        """
-        def check_vsi():
-            try:
-                import rasterio
-                from rasterio.env import Env
-                from infrastructure.factory import RepositoryFactory
-                from config import get_config
-
-                # Get configuration
-                config = get_config()
-
-                # Get BlobRepository to generate SAS URL
-                blob_repo = RepositoryFactory.create_blob_repository()
-
-                # Use configured test file and container
-                test_blob = config.vsi_test_file
-                test_container = config.vsi_test_container
-
-                # Generate SAS URL (4 hour expiry for health check stability)
-                test_url = blob_repo.get_blob_url_with_sas(
-                    container_name=test_container,
-                    blob_name=test_blob,
-                    hours=4
-                )
-
-                vsi_path = f"/vsicurl/{test_url}"
-
-                # Test with timeout to prevent hanging
-                with Env(GDAL_HTTP_TIMEOUT=10, CPL_VSIL_CURL_ALLOWED_EXTENSIONS=".tif,.tiff"):
-                    try:
-                        with rasterio.open(vsi_path) as src:
-                            # Successfully opened via /vsicurl/
-                            width = src.width
-                            height = src.height
-                            bands = src.count
-                            driver = src.driver
-
-                            return {
-                                "status": "healthy",
-                                "vsicurl_supported": True,
-                                "gdal_version": rasterio.__gdal_version__,
-                                "rasterio_version": rasterio.__version__,
-                                "test_results": {
-                                    "test_file": test_blob,
-                                    "container": test_container,
-                                    "file_size": f"{width}x{height}",
-                                    "bands": bands,
-                                    "driver": driver,
-                                    "test_status": "success"
-                                },
-                                "capabilities": {
-                                    "http_streaming": True,
-                                    "https_streaming": True,
-                                    "cloud_optimized_geotiff": True,
-                                    "azure_blob_sas_compatible": True
-                                },
-                                "big_raster_etl_ready": True,
-                                "note": f"/vsicurl/ works with Azure Blob Storage SAS URLs - tested with {test_container}/{test_blob}",
-                                "config_source": "config.vsi_test_file, config.vsi_test_container"
-                            }
-                    except Exception as open_error:
-                        # Failed to open file via /vsicurl/
-                        return {
-                            "status": "error",
-                            "vsicurl_supported": False,
-                            "gdal_version": rasterio.__gdal_version__,
-                            "rasterio_version": rasterio.__version__,
-                            "error": f"Failed to open test file: {str(open_error)[:200]}",
-                            "error_type": type(open_error).__name__,
-                            "test_url": f"{test_container}/{test_blob}",
-                            "test_container": test_container,
-                            "big_raster_etl_ready": False,
-                            "impact": "Big Raster ETL will fail - cannot read from cloud storage without downloading"
-                        }
-
-            except ImportError as e:
-                # Rasterio not installed
-                return {
-                    "status": "not_installed",
-                    "error": "Rasterio not installed",
-                    "install_command": "pip install rasterio>=1.3.0",
-                    "big_raster_etl_ready": False,
-                    "impact": "Big Raster ETL completely unavailable"
-                }
-            except Exception as e:
-                # Other errors during initialization
-                import traceback
-                return {
-                    "status": "error",
-                    "error": str(e)[:200],
-                    "error_type": type(e).__name__,
-                    "traceback": traceback.format_exc()[:500],
-                    "big_raster_etl_ready": False,
-                    "impact": "Big Raster ETL may be unavailable"
-                }
-
-        return self.check_component_health(
-            "vsi_support",
-            check_vsi,
-            description="GDAL/rasterio VSI for cloud-native raster streaming from Azure Blob Storage"
-        )
-
     def _check_jobs_registry(self) -> Dict[str, Any]:
         """
         Check jobs registry status and available job types.
@@ -1659,138 +1520,6 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
     # Moved to services/__init__.py (startup validation) and scripts/validate_config.py (pre-deployment)
     # Configuration validation doesn't belong in runtime health checks
 
-    def _check_table_metadata_registry(self) -> Dict[str, Any]:
-        """
-        Check geo.table_metadata registry table status (06 DEC 2025).
-
-        The geo.table_metadata table is the SOURCE OF TRUTH for vector table metadata.
-        It stores ETL traceability (job IDs, source files), STAC linkage, and cached
-        bounding boxes for OGC Features API performance optimization.
-
-        Created during schema rebuild (Step 5b in db_maintenance.py).
-        Populated during process_vector Stage 1.
-        STAC backlinks added during process_vector Stage 3.
-
-        Returns:
-            Dict with table_metadata registry health status including:
-            - exists: Whether geo.table_metadata table exists
-            - row_count: Number of registered tables
-            - sample_entries: Last 5 registered tables (for verification)
-            - columns: Required column availability check
-            - ready: Boolean indicating registry is ready for use
-        """
-        def check_table_metadata():
-            from infrastructure.postgresql import PostgreSQLRepository
-            from config import get_config
-
-            config = get_config()
-            repo = PostgreSQLRepository(schema_name='geo')
-
-            try:
-                with repo._get_connection() as conn:
-                    with conn.cursor() as cur:
-                        # Check if table exists
-                        cur.execute("""
-                            SELECT EXISTS (
-                                SELECT FROM information_schema.tables
-                                WHERE table_schema = 'geo'
-                                AND table_name = 'table_metadata'
-                            ) as table_exists
-                        """)
-                        table_exists = cur.fetchone()['table_exists']
-
-                        if not table_exists:
-                            return {
-                                "exists": False,
-                                "error": "geo.table_metadata table not found",
-                                "impact": "OGC collection properties will not include ETL traceability or cached bbox",
-                                "fix": "Run full-rebuild: POST /api/dbadmin/maintenance/full-rebuild?confirm=yes"
-                            }
-
-                        # Check required columns
-                        cur.execute("""
-                            SELECT column_name
-                            FROM information_schema.columns
-                            WHERE table_schema = 'geo' AND table_name = 'table_metadata'
-                        """)
-                        columns = [row['column_name'] for row in cur.fetchall()]
-
-                        required_columns = ['table_name', 'etl_job_id', 'source_file', 'source_format',
-                                          'source_crs', 'feature_count', 'bbox_minx', 'bbox_miny',
-                                          'bbox_maxx', 'bbox_maxy', 'stac_item_id', 'stac_collection_id']
-
-                        missing_columns = [col for col in required_columns if col not in columns]
-
-                        # Get row count - use pg_stat for performance (12 DEC 2025)
-                        cur.execute("""
-                            SELECT n_live_tup FROM pg_stat_user_tables
-                            WHERE schemaname = 'geo' AND relname = 'table_metadata'
-                        """)
-                        result = cur.fetchone()
-                        row_count = result['n_live_tup'] if result else 0
-
-                        # Get sample entries (last 5 registered)
-                        sample_entries = []
-                        try:
-                            cur.execute("""
-                                SELECT table_name, source_file, feature_count, created_at
-                                FROM geo.table_metadata
-                                ORDER BY created_at DESC
-                                LIMIT 5
-                            """)
-                            for row in cur.fetchall():
-                                sample_entries.append({
-                                    "table_name": row['table_name'],
-                                    "source_file": row['source_file'],
-                                    "feature_count": row['feature_count'],
-                                    "created_at": row['created_at'].isoformat() if row['created_at'] else None
-                                })
-                        except Exception:
-                            sample_entries = "error fetching samples"
-
-                        # Build result
-                        ready = len(missing_columns) == 0
-
-                        result = {
-                            "exists": True,
-                            "row_count": row_count,
-                            "sample_entries": sample_entries,
-                            "columns": {
-                                "total": len(columns),
-                                "required_present": len(required_columns) - len(missing_columns),
-                                "missing": missing_columns if missing_columns else None
-                            },
-                            "ready": ready,
-                            "criticality": "high"  # Required for vector ETL, OGC Features metadata
-                        }
-
-                        if missing_columns:
-                            result["warnings"] = [f"Missing columns: {', '.join(missing_columns)}"]
-                            result["impact"] = "Some metadata fields may not be available in OGC collections"
-                            result["fix"] = "Run full-rebuild to recreate table with all columns"
-
-                        if row_count == 0:
-                            result["note"] = "Registry is empty - will be populated when process_vector jobs run"
-
-                        return result
-
-            except Exception as e:
-                import traceback
-                return {
-                    "exists": False,
-                    "error": str(e)[:200],
-                    "error_type": type(e).__name__,
-                    "traceback": traceback.format_exc()[:500],
-                    "impact": "Table metadata registry check failed"
-                }
-
-        return self.check_component_health(
-            "table_metadata_registry",
-            check_table_metadata,
-            description="Vector table metadata registry for ETL traceability and OGC Features API"
-        )
-
-
     def _check_schema_summary(self) -> Dict[str, Any]:
         """
         Get comprehensive schema summary for remote database inspection (07 DEC 2025).
@@ -1922,6 +1651,216 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
             "schema_summary",
             check_schemas,
             description="Database schema inventory with table counts and STAC statistics"
+        )
+
+    def _check_titiler_health(self) -> Dict[str, Any]:
+        """
+        Check TiTiler tile server health (13 DEC 2025).
+
+        TiTiler is an external Docker container app that serves raster tiles.
+        Health logic:
+        - Both /livez and /health respond → healthy (green)
+        - Only /livez responds → warning (yellow) - app is alive but not fully ready
+        - Neither responds → unhealthy (red)
+
+        Returns:
+            Dict with TiTiler health status including:
+            - livez_status: Response from /livez endpoint
+            - health_status: Response from /health endpoint
+            - overall_status: healthy/warning/unhealthy based on combined results
+        """
+        def check_titiler():
+            import requests
+            from config import get_config
+
+            config = get_config()
+            titiler_url = config.titiler_base_url.rstrip('/')
+
+            # Check if URL is the placeholder default (not configured)
+            if titiler_url == "https://your-titiler-webapp-url":
+                return {
+                    "configured": False,
+                    "error": "TITILER_BASE_URL not configured (using placeholder default)",
+                    "impact": "Raster tile visualization unavailable",
+                    "fix": "Set TITILER_BASE_URL environment variable to your TiTiler deployment URL"
+                }
+
+            livez_ok = False
+            health_ok = False
+            livez_response = None
+            health_response = None
+            livez_error = None
+            health_error = None
+
+            # Check /livez endpoint (basic liveness probe)
+            try:
+                resp = requests.get(f"{titiler_url}/livez", timeout=10)
+                livez_ok = resp.status_code == 200
+                livez_response = {
+                    "status_code": resp.status_code,
+                    "ok": livez_ok
+                }
+            except requests.exceptions.Timeout:
+                livez_error = "Connection timed out (10s)"
+            except requests.exceptions.ConnectionError as e:
+                livez_error = f"Connection failed: {str(e)[:100]}"
+            except Exception as e:
+                livez_error = f"Error: {str(e)[:100]}"
+
+            # Check /healthz endpoint (full readiness probe)
+            try:
+                resp = requests.get(f"{titiler_url}/healthz", timeout=10)
+                health_ok = resp.status_code == 200
+                health_response = {
+                    "status_code": resp.status_code,
+                    "ok": health_ok
+                }
+                # Try to get health response body if JSON
+                try:
+                    health_response["body"] = resp.json()
+                except Exception:
+                    pass
+            except requests.exceptions.Timeout:
+                health_error = "Connection timed out (10s)"
+            except requests.exceptions.ConnectionError as e:
+                health_error = f"Connection failed: {str(e)[:100]}"
+            except Exception as e:
+                health_error = f"Error: {str(e)[:100]}"
+
+            # Determine overall status based on user requirements
+            # Both respond → healthy (green)
+            # Only livez responds → warning (yellow)
+            # Neither responds → unhealthy (red)
+            if livez_ok and health_ok:
+                overall_status = "healthy"
+                status_reason = "Both /livez and /healthz endpoints responding"
+            elif livez_ok and not health_ok:
+                overall_status = "warning"
+                status_reason = "App is alive (/livez OK) but not fully ready (/healthz failed)"
+            else:
+                overall_status = "unhealthy"
+                status_reason = "TiTiler not responding - neither /livez nor /healthz accessible"
+
+            result = {
+                "configured": True,
+                "base_url": titiler_url,
+                "livez": livez_response if livez_response else {"error": livez_error},
+                "health": health_response if health_response else {"error": health_error},
+                "overall_status": overall_status,
+                "status_reason": status_reason,
+                "purpose": "Raster tile server for COG visualization via TiTiler-pgstac"
+            }
+
+            # Add error field for unhealthy status to trigger proper reporting
+            if overall_status == "unhealthy":
+                result["error"] = status_reason
+
+            return result
+
+        return self.check_component_health(
+            "titiler",
+            check_titiler,
+            description="TiTiler-pgstac raster tile server for COG visualization"
+        )
+
+    def _check_ogc_features_health(self) -> Dict[str, Any]:
+        """
+        Check OGC Features API health (13 DEC 2025).
+
+        OGC Features can be self-hosted (same app) or external.
+        Checks the /health endpoint of the configured OGC/STAC API URL.
+
+        Returns:
+            Dict with OGC Features health status including:
+            - health_status: Response from /health endpoint
+            - is_self: Whether pointing to this same app
+        """
+        def check_ogc_features():
+            import requests
+            from config import get_config
+
+            config = get_config()
+            ogc_url = config.ogc_features_base_url.rstrip('/')
+
+            # Check if URL is the placeholder default (not configured)
+            if ogc_url == "https://your-ogc-stac-app-url":
+                return {
+                    "configured": False,
+                    "error": "OGC_STAC_APP_URL not configured (using placeholder default)",
+                    "impact": "OGC Features API reference URL unavailable",
+                    "fix": "Set OGC_STAC_APP_URL environment variable"
+                }
+
+            # Derive app base URL from ogc_features_base_url
+            # ogc_features_base_url may include /api/features path, strip it for health check
+            app_base_url = ogc_url
+            if app_base_url.endswith('/api/features'):
+                app_base_url = app_base_url[:-len('/api/features')]
+
+            # Check if this is self (same app)
+            etl_url = config.etl_app_base_url.rstrip('/')
+            is_self = app_base_url == etl_url
+
+            health_ok = False
+            health_response = None
+            health_error = None
+
+            # Check /api/health endpoint at app root
+            health_endpoint = f"{app_base_url}/api/health"
+            try:
+                resp = requests.get(health_endpoint, timeout=15)
+                health_ok = resp.status_code == 200
+                health_response = {
+                    "status_code": resp.status_code,
+                    "ok": health_ok
+                }
+                # Try to get health response status if JSON
+                try:
+                    body = resp.json()
+                    health_response["status"] = body.get("status", "unknown")
+                except Exception:
+                    pass
+            except requests.exceptions.Timeout:
+                health_error = "Connection timed out (15s)"
+            except requests.exceptions.ConnectionError as e:
+                health_error = f"Connection failed: {str(e)[:100]}"
+            except Exception as e:
+                health_error = f"Error: {str(e)[:100]}"
+
+            # Determine status
+            if health_ok:
+                overall_status = "healthy"
+                status_reason = "/api/health endpoint responding"
+            else:
+                overall_status = "unhealthy"
+                status_reason = health_error or "OGC Features API not responding"
+
+            result = {
+                "configured": True,
+                "features_url": ogc_url,
+                "app_base_url": app_base_url,
+                "is_self_hosted": is_self,
+                "health_endpoint": health_endpoint,
+                "health": health_response if health_response else {"error": health_error},
+                "overall_status": overall_status,
+                "status_reason": status_reason,
+                "purpose": "OGC API - Features for vector data queries"
+            }
+
+            # Add note about self-hosted
+            if is_self:
+                result["note"] = "OGC Features is self-hosted (same app as ETL)"
+
+            # Add error field for unhealthy status
+            if overall_status == "unhealthy":
+                result["error"] = status_reason
+
+            return result
+
+        return self.check_component_health(
+            "ogc_features",
+            check_ogc_features,
+            description="OGC API - Features for PostGIS vector queries"
         )
 
     def _get_config_sources(self) -> Dict[str, Any]:

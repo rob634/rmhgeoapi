@@ -1,8 +1,7 @@
 # Configuration for managed identity database access (eliminate passwords and key vault)
 
 **Date**: 10 Nov 2025
-**Audience**: Robert for his eservice requests in WB environments
-**Author**: Robert and Geospatial Claude Legion
+**Audience**: DevOps for eservice requests in corporate environments
 
 ## ETL Identity - Updated Permissions
 

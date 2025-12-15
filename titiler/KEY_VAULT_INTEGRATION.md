@@ -1,7 +1,6 @@
 # TiTiler Key Vault Integration Guide
 
 **Date**: 26 OCT 2025
-**Author**: Robert and Geospatial Claude Legion
 **Purpose**: Secure credential management for TiTiler using Azure Key Vault
 
 ## Overview

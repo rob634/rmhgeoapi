@@ -2670,18 +2670,22 @@ def _mark_task_failed_from_queue_error(task_id: str, parent_job_id: Optional[str
 # ============================================================================
 
 @app.timer_trigger(
-    schedule="0 */30 * * * *",  # Every 30 minutes (matches task timeout)
+    schedule="0 */10 * * * *",  # Every 10 minutes (14 DEC 2025 - faster orphan recovery)
     arg_name="timer",
     run_on_startup=False
 )
 def janitor_task_watchdog(timer: func.TimerRequest) -> None:
     """
     Detect and mark stale PROCESSING tasks as FAILED.
+    Also re-queues orphaned QUEUED tasks (message loss recovery).
 
     Tasks stuck in PROCESSING for > 30 minutes have silently failed
     (Azure Functions max execution time is 10-30 minutes).
 
-    Schedule: Every 30 minutes - no point checking more often than timeout
+    Tasks stuck in QUEUED for > 10 minutes have lost their Service Bus
+    message and need to be re-queued (defense against message loss).
+
+    Schedule: Every 10 minutes - faster detection of orphaned queued tasks
     """
     task_watchdog_handler(timer)
 

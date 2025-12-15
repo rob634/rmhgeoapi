@@ -1,7 +1,6 @@
 # Architecture Reference
 
 **Date**: 15 OCT 2025 (Updated with Job Declaration Pattern)
-**Author**: Robert and Geospatial Claude Legion
 **Purpose**: Deep technical specifications for the Azure Geospatial ETL Pipeline
 
 ## Table of Contents

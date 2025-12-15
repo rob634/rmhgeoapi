@@ -40,7 +40,7 @@ class DocsInterface(BaseInterface):
         """Documentation-specific styles."""
         return """
             .docs-header {
-                background: linear-gradient(135deg, var(--wb-navy) 0%, var(--wb-blue-dark) 100%);
+                background: linear-gradient(135deg, var(--ds-navy) 0%, var(--ds-blue-dark) 100%);
                 color: white;
                 padding: 30px;
                 border-radius: 8px;
@@ -82,9 +82,9 @@ class DocsInterface(BaseInterface):
             }
 
             .endpoint-header {
-                background: var(--wb-bg);
+                background: var(--ds-bg);
                 padding: 20px 24px;
-                border-bottom: 1px solid var(--wb-gray-light);
+                border-bottom: 1px solid var(--ds-gray-light);
                 display: flex;
                 align-items: center;
                 gap: 16px;
@@ -94,7 +94,7 @@ class DocsInterface(BaseInterface):
             .endpoint-header h2 {
                 margin: 0;
                 font-size: 20px;
-                color: var(--wb-navy);
+                color: var(--ds-navy);
             }
 
             .method-badge {
@@ -118,7 +118,7 @@ class DocsInterface(BaseInterface):
             .endpoint-path {
                 font-family: 'Monaco', 'Consolas', monospace;
                 font-size: 14px;
-                color: var(--wb-blue-primary);
+                color: var(--ds-blue-primary);
                 background: white;
                 padding: 4px 8px;
                 border-radius: 4px;
@@ -130,7 +130,7 @@ class DocsInterface(BaseInterface):
             }
 
             .endpoint-desc {
-                color: var(--wb-gray);
+                color: var(--ds-gray);
                 margin-bottom: 20px;
                 line-height: 1.6;
             }
@@ -141,10 +141,10 @@ class DocsInterface(BaseInterface):
 
             .params-section h3 {
                 font-size: 16px;
-                color: var(--wb-navy);
+                color: var(--ds-navy);
                 margin: 0 0 12px 0;
                 padding-bottom: 8px;
-                border-bottom: 1px solid var(--wb-gray-light);
+                border-bottom: 1px solid var(--ds-gray-light);
             }
 
             .params-table {
@@ -163,12 +163,12 @@ class DocsInterface(BaseInterface):
             .params-table th {
                 background: #f8f9fa;
                 font-weight: 600;
-                color: var(--wb-navy);
+                color: var(--ds-navy);
             }
 
             .param-name {
                 font-family: monospace;
-                color: var(--wb-blue-primary);
+                color: var(--ds-blue-primary);
                 font-weight: 600;
             }
 
@@ -238,9 +238,9 @@ class DocsInterface(BaseInterface):
             }
 
             .example-tab.active {
-                background: var(--wb-blue-primary);
+                background: var(--ds-blue-primary);
                 color: white;
-                border-color: var(--wb-blue-primary);
+                border-color: var(--ds-blue-primary);
             }
 
             .response-section {
@@ -249,7 +249,7 @@ class DocsInterface(BaseInterface):
 
             .response-section h4 {
                 font-size: 14px;
-                color: var(--wb-navy);
+                color: var(--ds-navy);
                 margin: 0 0 8px 0;
             }
 
@@ -282,7 +282,7 @@ class DocsInterface(BaseInterface):
 
             .toc h3 {
                 margin: 0 0 12px 0;
-                color: var(--wb-navy);
+                color: var(--ds-navy);
                 font-size: 16px;
             }
 
@@ -297,7 +297,7 @@ class DocsInterface(BaseInterface):
             }
 
             .toc a {
-                color: var(--wb-blue-primary);
+                color: var(--ds-blue-primary);
                 text-decoration: none;
             }
 
@@ -313,7 +313,7 @@ class DocsInterface(BaseInterface):
 
             .toc-section-title {
                 font-weight: 600;
-                color: var(--wb-navy);
+                color: var(--ds-navy);
                 font-size: 13px;
                 margin-bottom: 8px;
             }

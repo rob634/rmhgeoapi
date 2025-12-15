@@ -2,7 +2,6 @@
 
 **Date**: 03 DEC 2025
 **Purpose**: Assess freshness and accuracy of all WIKI_*.md files before transfer to Azure DevOps Wiki
-**Author**: Robert and Geospatial Claude Legion
 
 ---
 

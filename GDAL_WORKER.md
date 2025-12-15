@@ -1,7 +1,6 @@
 # GDAL Docker Worker - Implementation Guide
 
 **Date**: 12 DEC 2025
-**Author**: Robert and Geospatial Claude Legion
 **Status**: Phase 1 - rmhgeoapi Modifications
 
 ---

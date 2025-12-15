@@ -1,7 +1,6 @@
 # 📁 Documentation Has Been Restructured
 
 **Date**: 16 OCT 2025
-**Author**: Robert and Geospatial Claude Legion
 
 ## 🎯 Claude - Start Here!
 
@@ -54,7 +53,6 @@ cat docs_claude/ARCHITECTURE_REFERENCE.md
 
 ## Important Notes:
 - **USE MILITARY DATE FORMAT** (22 SEP 2025)
-- **Author Attribution**: "Robert and Geospatial Claude Legion"
 - **Update FILE_CATALOG.md** after any file changes
 
 ## 🔀 Git Workflow - Dev Branch Strategy (9 OCT 2025)

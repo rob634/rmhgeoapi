@@ -1,7 +1,6 @@
 # TiTiler Deployment Documentation
 
 **Date**: 7 NOV 2025 (Updated - Vanilla TiTiler Deployed!)
-**Author**: Robert and Geospatial Claude Legion
 
 ## Overview
 

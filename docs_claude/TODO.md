@@ -1,7 +1,6 @@
 # Active Tasks - Geospatial ETL Pipelines
 
 **Last Updated**: 11 DEC 2025 (Service Bus Queue Standardization Complete)
-**Author**: Robert and Geospatial Claude Legion
 
 **Note**: Completed tasks have been moved to `HISTORY2.md` (05 DEC 2025 cleanup)
 
@@ -301,7 +300,6 @@ with psycopg.connect(conn_str) as conn:
 **Status**: ✅ **IMPLEMENTED** (12 DEC 2025) - See Recently Completed
 **Priority**: 🟡 MEDIUM - Future Enhancement
 **Purpose**: Reverse raster/vector processing - remove STAC items and referenced data surgically
-**Designed By**: Robert and Geospatial Claude Legion
 
 > **Implementation Complete**: All code written and registered. Deploy and test with `dry_run=true`.
 > Files: `jobs/unpublish_raster.py`, `jobs/unpublish_vector.py`, `services/unpublish_handlers.py`, `core/models/unpublish.py`, `infrastructure/validators.py` (stac_item_exists, stac_collection_exists)

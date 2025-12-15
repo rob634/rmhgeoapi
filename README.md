@@ -832,4 +832,4 @@ curl -X POST "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.ne
 
 ## License
 
-Copyright © 2025 Robert Harrison and Geospatial Claude Legion
+MIT License

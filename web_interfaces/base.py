@@ -27,18 +27,17 @@ class BaseInterface(ABC):
     """
 
     # Common CSS used by all interfaces
-    # Design inspired by World Bank Data Catalog (https://datacatalog.worldbank.org)
     COMMON_CSS = """
-        /* World Bank Color Variables */
+        /* Design System Color Variables */
         :root {
-            --wb-blue-primary: #0071BC;
-            --wb-blue-dark: #245AAD;
-            --wb-navy: #053657;
-            --wb-cyan: #00A3DA;
-            --wb-gold: #FFC14D;
-            --wb-gray: #626F86;
-            --wb-gray-light: #e9ecef;
-            --wb-bg: #f8f9fa;
+            --ds-blue-primary: #0071BC;
+            --ds-blue-dark: #245AAD;
+            --ds-navy: #053657;
+            --ds-cyan: #00A3DA;
+            --ds-gold: #FFC14D;
+            --ds-gray: #626F86;
+            --ds-gray-light: #e9ecef;
+            --ds-bg: #f8f9fa;
         }
 
         /* CSS Reset */
@@ -50,10 +49,10 @@ class BaseInterface(ABC):
 
         body {
             font-family: "Open Sans", Arial, sans-serif;
-            background: var(--wb-bg);
+            background: var(--ds-bg);
             min-height: 100vh;
             padding: 20px;
-            color: var(--wb-navy);
+            color: var(--ds-navy);
             font-size: 14px;
             line-height: 1.6;
         }
@@ -65,8 +64,8 @@ class BaseInterface(ABC):
 
         /* Common spinner */
         .spinner {
-            border: 4px solid var(--wb-gray-light);
-            border-top: 4px solid var(--wb-blue-primary);
+            border: 4px solid var(--ds-gray-light);
+            border-top: 4px solid var(--ds-blue-primary);
             border-radius: 50%;
             width: 50px;
             height: 50px;
@@ -280,13 +279,6 @@ class BaseInterface(ABC):
                    onmouseover="this.style.color='#00A3DA'"
                    onmouseout="this.style.color='#0071BC'">
                     OGC Features
-                </a>
-                <a href="/api/interface/map"
-                   style="color: #0071BC; text-decoration: none; font-weight: 600;
-                          transition: color 0.2s;"
-                   onmouseover="this.style.color='#00A3DA'"
-                   onmouseout="this.style.color='#0071BC'">
-                    Map
                 </a>
                 <a href="/api/interface/pipeline"
                    style="color: #0071BC; text-decoration: none; font-weight: 600;

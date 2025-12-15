@@ -39,7 +39,7 @@ class PlatformInterface(BaseInterface):
         """Platform-specific styles."""
         return """
             .dashboard-header {
-                background: linear-gradient(135deg, var(--wb-navy) 0%, var(--wb-blue-dark) 100%);
+                background: linear-gradient(135deg, var(--ds-navy) 0%, var(--ds-blue-dark) 100%);
                 color: white;
                 padding: 30px;
                 border-radius: 8px;
@@ -66,11 +66,11 @@ class PlatformInterface(BaseInterface):
             }
 
             .section h2 {
-                color: var(--wb-navy);
+                color: var(--ds-navy);
                 font-size: 20px;
                 margin: 0 0 16px 0;
                 padding-bottom: 12px;
-                border-bottom: 2px solid var(--wb-blue-primary);
+                border-bottom: 2px solid var(--ds-blue-primary);
             }
 
             .config-grid {
@@ -80,14 +80,14 @@ class PlatformInterface(BaseInterface):
             }
 
             .config-card {
-                background: var(--wb-bg);
-                border: 1px solid var(--wb-gray-light);
+                background: var(--ds-bg);
+                border: 1px solid var(--ds-gray-light);
                 border-radius: 6px;
                 padding: 16px;
             }
 
             .config-card h3 {
-                color: var(--wb-blue-primary);
+                color: var(--ds-blue-primary);
                 font-size: 14px;
                 margin: 0 0 8px 0;
                 text-transform: uppercase;
@@ -112,7 +112,7 @@ class PlatformInterface(BaseInterface):
             }
 
             .tag {
-                background: var(--wb-blue-primary);
+                background: var(--ds-blue-primary);
                 color: white;
                 padding: 4px 12px;
                 border-radius: 20px;
@@ -137,13 +137,13 @@ class PlatformInterface(BaseInterface):
             .endpoint-table td {
                 padding: 12px;
                 text-align: left;
-                border-bottom: 1px solid var(--wb-gray-light);
+                border-bottom: 1px solid var(--ds-gray-light);
             }
 
             .endpoint-table th {
-                background: var(--wb-bg);
+                background: var(--ds-bg);
                 font-weight: 600;
-                color: var(--wb-navy);
+                color: var(--ds-navy);
             }
 
             .endpoint-table tr:hover {
@@ -163,7 +163,7 @@ class PlatformInterface(BaseInterface):
 
             .endpoint-path {
                 font-family: monospace;
-                color: var(--wb-blue-primary);
+                color: var(--ds-blue-primary);
             }
 
             .status-card {
@@ -263,7 +263,7 @@ class PlatformInterface(BaseInterface):
             <!-- DDH Configuration -->
             <div class="section">
                 <h2>DDH Naming Patterns</h2>
-                <p style="color: var(--wb-gray); margin-bottom: 16px;">
+                <p style="color: var(--ds-gray); margin-bottom: 16px;">
                     Platform translates DDH identifiers (dataset_id, resource_id, version_id) to CoreMachine outputs using these patterns:
                 </p>
                 <div class="config-grid">
@@ -301,7 +301,7 @@ class PlatformInterface(BaseInterface):
             <!-- Valid Containers -->
             <div class="section">
                 <h2>Valid Input Containers</h2>
-                <p style="color: var(--wb-gray); margin-bottom: 16px;">
+                <p style="color: var(--ds-gray); margin-bottom: 16px;">
                     DDH can submit data from these Bronze tier containers:
                 </p>
                 <div class="tag-list">
@@ -315,7 +315,7 @@ class PlatformInterface(BaseInterface):
             <!-- Access Levels -->
             <div class="section">
                 <h2>Access Levels</h2>
-                <p style="color: var(--wb-gray); margin-bottom: 16px;">
+                <p style="color: var(--ds-gray); margin-bottom: 16px;">
                     Data classification levels (for future APIM enforcement):
                 </p>
                 <div class="tag-list">
@@ -399,7 +399,7 @@ class PlatformInterface(BaseInterface):
             <!-- Request ID Generation -->
             <div class="section">
                 <h2>Request ID Generation</h2>
-                <p style="color: var(--wb-gray); margin-bottom: 16px;">
+                <p style="color: var(--ds-gray); margin-bottom: 16px;">
                     Platform generates deterministic, idempotent request IDs from DDH identifiers:
                 </p>
                 <div class="config-card">

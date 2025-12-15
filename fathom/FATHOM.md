@@ -1,7 +1,6 @@
 # Fathom Flood Hazard Data ETL Pipeline
 
 **Date**: 25 NOV 2025
-**Author**: Robert and Geospatial Claude Legion
 **Status**: Architecture & Discovery Phase
 
 ---

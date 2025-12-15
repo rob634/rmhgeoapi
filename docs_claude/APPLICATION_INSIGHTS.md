@@ -1,7 +1,6 @@
 # Application Insights Log Access - Definitive Guide
 
 **Date**: 12 DEC 2025
-**Author**: Robert and Geospatial Claude Legion
 **Purpose**: THE ONE CORRECT PATTERN for querying Azure Application Insights logs
 
 ---

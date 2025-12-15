@@ -4,8 +4,7 @@
 -- PURPOSE: Dedicated schema for H3 hexagonal grids (resolutions 2-7)
 -- SEPARATION: h3 schema = system data, geo schema = user data
 -- CREATED: 10 NOV 2025
--- AUTHOR: Robert and Geospatial Claude Legion
--- CONTEXT: World Bank Agricultural Geography Platform - H3 Grid Bootstrap
+-- CONTEXT: Agricultural Geography Platform - H3 Grid Bootstrap
 -- ============================================================================
 --
 -- This schema contains:
@@ -44,7 +43,7 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA h3 GRANT ALL PRIVILEGES ON SEQUENCES TO rob63
 -- ALTER DEFAULT PRIVILEGES IN SCHEMA h3 GRANT SELECT ON TABLES TO readonly_user;
 
 -- Schema comment (describes purpose and ownership)
-COMMENT ON SCHEMA h3 IS 'System-generated H3 hexagonal grids (resolutions 2-7) for World Bank Agricultural Geography Platform. Bootstrap data - read-only for users. Managed by CoreMachine bootstrap jobs.';
+COMMENT ON SCHEMA h3 IS 'System-generated H3 hexagonal grids (resolutions 2-7) for Agricultural Geography Platform. Bootstrap data - read-only for users. Managed by CoreMachine bootstrap jobs.';
 
 -- ============================================================================
 -- VERIFICATION QUERIES

@@ -1,7 +1,6 @@
 # TiTiler Storage Access Requirements
 
 **Date**: 26 OCT 2025
-**Author**: Robert and Geospatial Claude Legion
 **Purpose**: Document storage permissions required for TiTiler Container App
 
 ## Current Status ⚠️

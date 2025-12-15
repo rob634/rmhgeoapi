@@ -3,7 +3,6 @@
 -- ============================================================================
 -- PURPOSE: Track completion status of H3 operation batches for resumable jobs
 -- CREATED: 26 NOV 2025
--- AUTHOR: Robert and Geospatial Claude Legion
 -- SCHEMA: h3 (system-generated grids, separate from user data in geo schema)
 -- DEPENDENCIES: h3 schema (created by 00_create_h3_schema.sql)
 -- ============================================================================

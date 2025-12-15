@@ -1,7 +1,6 @@
 # TiTiler Environment Variables Reference
 
 **Date**: 26 OCT 2025
-**Author**: Robert and Geospatial Claude Legion
 **Purpose**: Complete reference of environment variables for TiTiler-PgSTAC container
 
 ## Overview

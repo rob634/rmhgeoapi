@@ -4,7 +4,6 @@
 -- PURPOSE: Store H3 hexagonal grids with spatial indexing for geospatial queries
 -- CREATED: 9 NOV 2025
 -- UPDATED: 10 NOV 2025 - Moved to h3 schema, added parent tracking columns
--- AUTHOR: Robert and Geospatial Claude Legion
 -- SCHEMA: h3 (system-generated grids, separate from user data in geo schema)
 -- DEPENDENCIES: PostGIS extension, h3 schema (created by 00_create_h3_schema.sql)
 -- ============================================================================
@@ -91,7 +90,7 @@ CREATE INDEX IF NOT EXISTS idx_h3_grids_grid_resolution
 ON h3.grids (grid_id, resolution);
 
 -- Table comment
-COMMENT ON TABLE h3.grids IS 'System-generated H3 hexagonal grid cells (resolutions 2-7) for World Bank Agricultural Geography Platform. Bootstrap data created via cascading hierarchy (res 2→3→4→5→6→7). Read-only for users.';
+COMMENT ON TABLE h3.grids IS 'System-generated H3 hexagonal grid cells (resolutions 2-7) for Agricultural Geography Platform. Bootstrap data created via cascading hierarchy (res 2→3→4→5→6→7). Read-only for users.';
 
 -- Column comments
 COMMENT ON COLUMN h3.grids.h3_index IS 'H3 cell index (64-bit unsigned integer stored as signed bigint)';

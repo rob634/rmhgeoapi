@@ -3,9 +3,9 @@
 **Date**: 30 NOV 2025
 **Purpose**: Enable VS Code Claude on QA environment to understand and validate infrastructure components
 **Audience**: Claude Code in QA environment
-## Context 
-Development Data Hub (DDH) is World Bank's (WB) data repository that manages metadata and access etc etc and it needs a geospatial platform. This application is designed to be a stand-alone geospatial backend that we can integrate into other applications through our Platform abstraction layer. 
-Your mission is to deploy this application in the QA environment in our World Bank Azure tenant. This application works in Azure sandbox environment and must be deployed in WB Azure tenant. Your first task is to read this document in detail to understand the application. We then want to configure basic files in this folder. Finally, I will *copy the code* into the folder and we will begin configuration review. 
+## Context
+Development Data Hub (DDH) is the primary data repository that manages metadata and access. This application is designed to be a stand-alone geospatial backend that integrates into other applications through our Platform abstraction layer.
+Your mission is to deploy this application in the QA environment in the corporate Azure tenant. This application works in a sandbox environment and must be deployed in the corporate Azure tenant. Your first task is to read this document in detail to understand the application. We then want to configure basic files in this folder. Finally, the code will be copied into the folder and we will begin configuration review. 
 
 ---
 

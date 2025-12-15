@@ -3,7 +3,6 @@
 -- ============================================================================
 -- PURPOSE: Store reference sets of parent H3 indices for cascading operations
 -- CREATED: 10 NOV 2025
--- AUTHOR: Robert and Geospatial Claude Legion
 -- SCHEMA: h3 (system-generated grids)
 -- DEPENDENCIES: h3 schema (created by 00_create_h3_schema.sql)
 -- ============================================================================

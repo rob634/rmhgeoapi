@@ -107,7 +107,12 @@ class StacInterface(BaseInterface):
 
             <!-- Collection Detail View (hidden by default) -->
             <div id="detail-view" class="hidden">
-                <button class="back-button" onclick="showCollectionsList()">← Back to Collections</button>
+                <div class="detail-nav">
+                    <button class="back-button" onclick="showCollectionsList()">← Back to Collections</button>
+                    <a id="titiler-viewer-btn" class="titiler-button hidden" href="#" target="_blank">
+                        🗺️ Open in TiTiler Viewer
+                    </a>
+                </div>
 
                 <div class="detail-header">
                     <h2 id="detail-title">Collection Name</h2>
@@ -131,6 +136,7 @@ class StacInterface(BaseInterface):
                             <th>Geometry</th>
                             <th>Assets</th>
                             <th>Properties</th>
+                            <th>Preview</th>
                         </tr>
                     </thead>
                     <tbody id="items-tbody">
@@ -148,7 +154,7 @@ class StacInterface(BaseInterface):
         """
 
     def _generate_custom_css(self) -> str:
-        """Generate custom CSS for STAC dashboard - World Bank inspired."""
+        """Generate custom CSS for STAC dashboard."""
         return """
         .dashboard-header {
             background: white;
@@ -343,6 +349,63 @@ class StacInterface(BaseInterface):
             background: #f8f9fa;
             border-color: #0071BC;
             color: #00A3DA;
+        }
+
+        /* Detail Navigation */
+        .detail-nav {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        /* TiTiler Button */
+        .titiler-button {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 12px 24px;
+            background: linear-gradient(135deg, #10B981 0%, #059669 100%);
+            border: none;
+            color: white;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 15px;
+            font-weight: 600;
+            text-decoration: none;
+            transition: all 0.2s;
+            box-shadow: 0 2px 8px rgba(16, 185, 129, 0.3);
+        }
+
+        .titiler-button:hover {
+            background: linear-gradient(135deg, #059669 0%, #047857 100%);
+            box-shadow: 0 4px 12px rgba(16, 185, 129, 0.4);
+            transform: translateY(-1px);
+        }
+
+        /* Preview button in table */
+        .preview-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 6px 12px;
+            background: #10B981;
+            color: white;
+            border-radius: 4px;
+            text-decoration: none;
+            font-size: 12px;
+            font-weight: 600;
+            transition: background 0.2s;
+        }
+
+        .preview-link:hover {
+            background: #059669;
+        }
+
+        .no-preview {
+            color: #9CA3AF;
+            font-size: 12px;
+            font-style: italic;
         }
 
         /* Items Table */
@@ -671,6 +734,10 @@ class StacInterface(BaseInterface):
             const table = document.getElementById('items-table');
             const tbody = document.getElementById('items-tbody');
             const emptyState = document.getElementById('items-empty-state');
+            const titilerBtn = document.getElementById('titiler-viewer-btn');
+
+            // Hide TiTiler button initially
+            titilerBtn.classList.add('hidden');
 
             // Show loading
             spinner.classList.remove('hidden');
@@ -688,11 +755,35 @@ class StacInterface(BaseInterface):
                     return;
                 }
 
-                // Render items
+                // Find first preview link for the header button (exclude system-rasters)
+                let firstPreviewUrl = null;
+                if (collectionId !== 'system-rasters') {
+                    for (const item of items) {
+                        const previewLink = (item.links || []).find(l => l.rel === 'preview');
+                        if (previewLink?.href) {
+                            firstPreviewUrl = previewLink.href;
+                            break;
+                        }
+                    }
+                }
+
+                // Show TiTiler button if we have a preview
+                if (firstPreviewUrl) {
+                    titilerBtn.href = firstPreviewUrl;
+                    titilerBtn.classList.remove('hidden');
+                }
+
+                // Render items with preview links
                 tbody.innerHTML = items.map(item => {
                     const assetCount = Object.keys(item.assets || {}).length;
                     const propCount = Object.keys(item.properties || {}).length;
                     const geomType = item.geometry?.type || 'None';
+
+                    // Find preview link for this item
+                    const previewLink = (item.links || []).find(l => l.rel === 'preview');
+                    const previewHtml = previewLink?.href
+                        ? `<a href="${previewLink.href}" target="_blank" class="preview-link">🗺️ View</a>`
+                        : '<span class="no-preview">—</span>';
 
                     return `
                         <tr>
@@ -700,6 +791,7 @@ class StacInterface(BaseInterface):
                             <td>${geomType}</td>
                             <td>${assetCount} asset${assetCount !== 1 ? 's' : ''}</td>
                             <td>${propCount} propert${propCount !== 1 ? 'ies' : 'y'}</td>
+                            <td>${previewHtml}</td>
                         </tr>
                     `;
                 }).join('');
@@ -717,6 +809,8 @@ class StacInterface(BaseInterface):
         function showCollectionsList() {
             document.getElementById('detail-view').classList.add('hidden');
             document.getElementById('collections-view').classList.remove('hidden');
+            // Reset TiTiler button
+            document.getElementById('titiler-viewer-btn').classList.add('hidden');
         }
 
         // Initialize on page load

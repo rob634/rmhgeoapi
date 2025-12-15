@@ -1,7 +1,6 @@
 # TiTiler Web App Deployment
 
 **Date**: 28 OCT 2025
-**Author**: Robert and Geospatial Claude Legion
 **Status**: Active Deployment ✅
 
 ## Overview

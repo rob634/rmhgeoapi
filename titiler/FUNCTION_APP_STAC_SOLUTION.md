@@ -1,7 +1,6 @@
 # Using Your Function App for STAC Management
 
 **Date**: 28 OCT 2025
-**Author**: Robert and Geospatial Claude Legion
 **Purpose**: Use existing function app STAC API to catalog COGs for TiTiler
 
 ## Solution: No Direct Database Access Needed! 🎉

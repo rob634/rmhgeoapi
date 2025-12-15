@@ -1,7 +1,6 @@
 # OGC Features API - Table Metadata Integration
 
 **Date**: 06 DEC 2025
-**Author**: Robert and Geospatial Claude Legion
 **Status**: Implementation Complete - Ready for Standalone OGC App Integration
 
 ---

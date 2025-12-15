@@ -1,7 +1,6 @@
 # OGC Features API - Implementation TODO
 
 **Date**: 29 OCT 2025
-**Author**: Robert and Geospatial Claude Legion
 **Status**: In Progress
 
 ## Overview

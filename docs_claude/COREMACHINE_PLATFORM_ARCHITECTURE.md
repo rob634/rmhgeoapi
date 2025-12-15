@@ -1,7 +1,6 @@
 # CoreMachine + Platform Architecture
 
 **Date**: 26 OCT 2025
-**Author**: Robert and Geospatial Claude Legion
 **Purpose**: Two-layer architecture combining Platform-as-a-Service with CoreMachine orchestration
 
 ---

@@ -182,7 +182,7 @@ class JobsInterface(BaseInterface):
 
         .filter-select:focus {
             outline: none;
-            border-color: var(--wb-blue-primary);
+            border-color: var(--ds-blue-primary);
             box-shadow: 0 0 0 3px rgba(0, 113, 188, 0.1);
         }
 
@@ -220,7 +220,7 @@ class JobsInterface(BaseInterface):
         }
 
         .stat-queued { color: #6b7280; }
-        .stat-processing { color: var(--wb-blue-primary); }
+        .stat-processing { color: var(--ds-blue-primary); }
         .stat-completed { color: #10b981; }
         .stat-failed { color: #ef4444; }
 
@@ -270,7 +270,7 @@ class JobsInterface(BaseInterface):
 
         .status-processing {
             background: #dbeafe;
-            color: var(--wb-blue-primary);
+            color: var(--ds-blue-primary);
         }
 
         .status-completed {
@@ -307,7 +307,7 @@ class JobsInterface(BaseInterface):
 
         .task-count-processing {
             background: #dbeafe;
-            color: var(--wb-blue-primary);
+            color: var(--ds-blue-primary);
         }
 
         .task-count-completed {
@@ -340,7 +340,7 @@ class JobsInterface(BaseInterface):
             width: 40px;
             height: 40px;
             border: 4px solid #f3f4f6;
-            border-top-color: var(--wb-blue-primary);
+            border-top-color: var(--ds-blue-primary);
             border-radius: 50%;
             animation: spin 0.8s linear infinite;
         }

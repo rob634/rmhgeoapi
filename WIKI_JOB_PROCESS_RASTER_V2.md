@@ -1,7 +1,6 @@
 # Process Raster V2 - JobBaseMixin Implementation
 
 **Date**: 28 NOV 2025
-**Author**: Robert and Geospatial Claude Legion
 **Status**: NEW - Clean slate implementation
 
 ---

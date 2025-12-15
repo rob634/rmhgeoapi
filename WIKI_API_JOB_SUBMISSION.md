@@ -1,5 +1,7 @@
 # API Job Submission Guide
 
+> **Navigation**: [Quick Start](WIKI_QUICK_START.md) | [Platform API](WIKI_PLATFORM_API.md) | [All Jobs](WIKI_API_JOB_SUBMISSION.md) | [Errors](WIKI_API_ERRORS.md) | [Glossary](WIKI_API_GLOSSARY.md)
+
 **Date**: 27 NOV 2025
 **Purpose**: Quick reference for submitting jobs via REST API
 **Wiki**: Azure DevOps Wiki - API reference documentation
@@ -33,7 +35,7 @@ This application provides **two ways to submit geospatial processing jobs**, des
 
 **Pattern**: `/api/platform/request`
 
-**Who uses it**: DDH (Data Discovery Hub), external applications, non-technical users
+**Who uses it**: DDH (Development Data Hub), external applications, non-technical users
 
 **Characteristics**:
 - Anti-Corruption Layer (ACL) that translates external identifiers to CoreMachine parameters

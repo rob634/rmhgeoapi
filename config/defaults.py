@@ -117,9 +117,9 @@ class StorageDefaults:
     SILVER_RASTERS = "silver-rasters"
     SILVER_COGS = "silver-cogs"
     SILVER_TILES = "silver-tiles"
-    SILVER_MOSAICJSON = "silver-mosaicjson"
-    SILVER_STAC_ASSETS = "silver-stac-assets"
-    SILVER_MISC = "silver-misc"
+    SILVER_MOSAICJSON = "silver-cogs"  # MosaicJSON stored alongside COGs (15 DEC 2025)
+    SILVER_STAC_ASSETS = "silver-cogs"  # Consolidated into silver-cogs (15 DEC 2025)
+    SILVER_MISC = "silver-cogs"  # Consolidated into silver-cogs (15 DEC 2025)
     SILVER_TEMP = "silver-temp"
 
     # SilverExt tier (airgapped external)

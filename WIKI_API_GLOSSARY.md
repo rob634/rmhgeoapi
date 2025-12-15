@@ -1,5 +1,7 @@
 # Geospatial Platform Glossary
 
+> **Navigation**: [Quick Start](WIKI_QUICK_START.md) | [Platform API](WIKI_PLATFORM_API.md) | [All Jobs](WIKI_API_JOB_SUBMISSION.md) | [Errors](WIKI_API_ERRORS.md) | [Glossary](WIKI_API_GLOSSARY.md)
+
 **Date**: 24 NOV 2025
 **Status**: Reference Documentation
 **Wiki**: Azure DevOps Wiki - Terminology reference
@@ -25,7 +27,7 @@ This document provides clear definitions for technical terms used throughout the
 | COG | Cloud-Optimized GeoTIFF | GeoTIFF file format optimized for cloud storage access |
 | CRS | Coordinate Reference System | System that defines how coordinates map to locations on Earth |
 | CSV | Comma-Separated Values | Simple text file format for tabular data |
-| DDH | Data Discovery Hub | External application that integrates with the platform |
+| DDH | Development Data Hub | External application that integrates with the platform |
 | DEM | Digital Elevation Model | Raster dataset representing terrain elevation |
 | DLQ | Dead-Letter Queue | Queue that stores messages that could not be processed |
 | EPSG | European Petroleum Survey Group | Organization that maintains coordinate system definitions (for example, EPSG:4326) |

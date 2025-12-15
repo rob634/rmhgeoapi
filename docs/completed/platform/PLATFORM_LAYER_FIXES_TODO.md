@@ -6,7 +6,7 @@
 
 ## 🎯 Context
 
-The Platform orchestration layer was added on **25 OCT 2025** to create a "Platform-as-a-Service" layer above CoreMachine. This implements the fractal "turtle above CoreMachine" pattern where external applications (like DDH - Data Discovery Hub) can submit high-level requests that get translated into CoreMachine jobs.
+The Platform orchestration layer was added on **25 OCT 2025** to create a "Platform-as-a-Service" layer above CoreMachine. This implements the fractal "turtle above CoreMachine" pattern where external applications (like DDH - Development Data Hub) can submit high-level requests that get translated into CoreMachine jobs.
 
 **Architecture Pattern**:
 ```

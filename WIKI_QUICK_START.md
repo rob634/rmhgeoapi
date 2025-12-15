@@ -1,6 +1,8 @@
 # Quick Start Guide
 
-**Date**: 24 NOV 2025
+> **Navigation**: [Quick Start](WIKI_QUICK_START.md) | [Platform API](WIKI_PLATFORM_API.md) | [All Jobs](WIKI_API_JOB_SUBMISSION.md) | [Errors](WIKI_API_ERRORS.md) | [Glossary](WIKI_API_GLOSSARY.md)
+
+**Date**: 14 DEC 2025
 **Status**: Reference Documentation
 **Wiki**: Azure DevOps Wiki - Getting started guide
 **Purpose**: Get new developers running their first job in 5 minutes
@@ -223,7 +225,7 @@ For complete parameter documentation, see [WIKI_API_JOB_SUBMISSION.md](WIKI_API_
 ### Workflow 2: Process Raster Data
 
 1. Upload GeoTIFF to Bronze container
-2. Submit `process_raster` job
+2. Submit `process_raster_v2` job (recommended) - see [WIKI_JOB_PROCESS_RASTER_V2.md](WIKI_JOB_PROCESS_RASTER_V2.md)
 3. Check job status until completed
 4. Access COG via TiTiler URLs in job result
 
@@ -257,11 +259,10 @@ For complete parameter documentation, see [WIKI_API_JOB_SUBMISSION.md](WIKI_API_
 - **[WIKI_TECHNICAL_OVERVIEW.md](WIKI_TECHNICAL_OVERVIEW.md)** - Architecture and technology stack
 - **[WIKI_API_SERVICE_BUS.md](WIKI_API_SERVICE_BUS.md)** - Service Bus configuration
 
-### Workflow Trace Documentation
+### Job Development
 
-- **[WIKI_API_INGEST_VECTOR_TRACETHROUGH.md](WIKI_API_INGEST_VECTOR_TRACETHROUGH.md)** - Vector ingestion workflow details
-- **[WIKI_API_PROCESS_RASTER_TRACETHROUGH.md](WIKI_API_PROCESS_RASTER_TRACETHROUGH.md)** - Raster processing workflow details
-- **[WIKI_API_PROCESS_RASTER_COLLECTION_TRACETHROUGH.md](WIKI_API_PROCESS_RASTER_COLLECTION_TRACETHROUGH.md)** - Collection processing workflow details
+- **[WIKI_JOB_PROCESS_RASTER_V2.md](WIKI_JOB_PROCESS_RASTER_V2.md)** - Raster processing with JobBaseMixin pattern
+- **[WIKI_PLATFORM_API.md](WIKI_PLATFORM_API.md)** - DDH integration API (canonical)
 
 ### Support
 
@@ -283,4 +284,4 @@ After completing this quick start:
 
 ---
 
-**Last Updated**: 03 DEC 2025
+**Last Updated**: 14 DEC 2025

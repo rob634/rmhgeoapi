@@ -87,6 +87,33 @@
         .status-indicator[data-status="disabled"] { fill: #D1D5DB; stroke: #9CA3AF; }
 
         .component:hover .comp-box { filter: brightness(0.95); }
+
+        /* Tooltip styles */
+        .diagram-tooltip {
+            position: absolute;
+            background: #1F2937;
+            color: white;
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-family: 'Courier New', monospace;
+            pointer-events: none;
+            z-index: 1000;
+            white-space: nowrap;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            opacity: 0;
+            transition: opacity 0.2s;
+        }
+        .diagram-tooltip.visible { opacity: 1; }
+        .diagram-tooltip::after {
+            content: '';
+            position: absolute;
+            top: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            border: 6px solid transparent;
+            border-top-color: #1F2937;
+        }
         .component { cursor: pointer; }
 
         /* Labels */
@@ -154,8 +181,9 @@
             <button onclick="setWithOneUnhealthy()">Service Bus Failure</button>
         </div>
 
-        <div class="architecture-diagram">
+        <div class="architecture-diagram" style="position: relative;">
             <h3>System Architecture</h3>
+            <div id="diagram-tooltip" class="diagram-tooltip"></div>
             <div class="diagram-legend">
                 <span class="legend-item"><span class="legend-dot healthy"></span> Healthy</span>
                 <span class="legend-item"><span class="legend-dot warning"></span> Warning</span>
@@ -182,7 +210,7 @@
                 <text x="657" y="214" class="diagram-header-label">ETL Pipelines</text>
 
                 <!-- Platform API -->
-                <g class="component" id="comp-platform-api">
+                <g class="component" id="comp-platform-api" data-tooltip="rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net">
                     <rect x="30" y="320" width="100" height="60" rx="6" class="comp-box funcapp"/>
                     <text x="80" y="345" class="comp-icon">⚡</text>
                     <text x="80" y="365" class="comp-label">Platform API</text>
@@ -193,7 +221,7 @@
                 <text x="145" y="340" class="flow-label">Queue Job</text>
 
                 <!-- Job Queues -->
-                <g class="component" id="comp-job-queues">
+                <g class="component" id="comp-job-queues" data-tooltip="rmhazure.servicebus.windows.net">
                     <rect x="180" y="320" width="100" height="60" rx="6" class="comp-box servicebus"/>
                     <text x="230" y="345" class="comp-icon">📨</text>
                     <text x="230" y="365" class="comp-label">Job Queues</text>
@@ -204,7 +232,7 @@
                 <text x="295" y="340" class="flow-label">Trigger</text>
 
                 <!-- Orchestrator -->
-                <g class="component" id="comp-orchestrator">
+                <g class="component" id="comp-orchestrator" data-tooltip="rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net">
                     <rect x="330" y="320" width="110" height="60" rx="6" class="comp-box funcapp"/>
                     <text x="385" y="345" class="comp-icon">⚡</text>
                     <text x="385" y="365" class="comp-label">Orchestrator</text>
@@ -216,7 +244,7 @@
                 <text x="395" y="445" class="flow-label">Update State</text>
 
                 <!-- Job Tables - vertically aligned with Orchestrator, horizontally with Task Tables -->
-                <g class="component" id="comp-job-tables">
+                <g class="component" id="comp-job-tables" data-tooltip="rmhpgflex.postgres.database.azure.com (app.jobs)">
                     <rect x="335" y="510" width="100" height="60" rx="6" class="comp-box postgres"/>
                     <text x="385" y="535" class="comp-icon">🐘</text>
                     <text x="385" y="555" class="comp-label">Job Tables</text>
@@ -230,7 +258,7 @@
                 <path d="M 440 360 L 520 435" class="flow-arrow inactive" marker-end="url(#arrowhead-grey)"/>
 
                 <!-- Parallel Queue -->
-                <g class="component" id="comp-parallel-queue">
+                <g class="component" id="comp-parallel-queue" data-tooltip="rmhazure.servicebus.windows.net (vector-tasks)">
                     <rect x="520" y="235" width="100" height="60" rx="6" class="comp-box servicebus"/>
                     <text x="570" y="260" class="comp-icon">📨</text>
                     <text x="570" y="280" class="comp-label">Parallel Queue</text>
@@ -240,7 +268,7 @@
                 <path d="M 620 265 L 680 265" class="flow-arrow" marker-end="url(#arrowhead)"/>
 
                 <!-- I/O Worker -->
-                <g class="component" id="comp-io-worker">
+                <g class="component" id="comp-io-worker" data-tooltip="rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net">
                     <rect x="680" y="235" width="110" height="60" rx="6" class="comp-box funcapp"/>
                     <text x="735" y="260" class="comp-icon">⚡</text>
                     <text x="735" y="280" class="comp-label">I/O Optimized</text>
@@ -248,7 +276,7 @@
                 </g>
 
                 <!-- Compute Queue -->
-                <g class="component" id="comp-compute-queue">
+                <g class="component" id="comp-compute-queue" data-tooltip="rmhazure.servicebus.windows.net (raster-tasks)">
                     <rect x="520" y="320" width="100" height="60" rx="6" class="comp-box servicebus"/>
                     <text x="570" y="345" class="comp-icon">📨</text>
                     <text x="570" y="365" class="comp-label">Compute Queue</text>
@@ -258,7 +286,7 @@
                 <path d="M 620 350 L 680 350" class="flow-arrow" marker-end="url(#arrowhead)"/>
 
                 <!-- Compute Worker -->
-                <g class="component" id="comp-compute-worker">
+                <g class="component" id="comp-compute-worker" data-tooltip="rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net">
                     <rect x="680" y="320" width="110" height="60" rx="6" class="comp-box funcapp"/>
                     <text x="735" y="345" class="comp-icon">⚡</text>
                     <text x="735" y="365" class="comp-label">Compute Worker</text>
@@ -266,7 +294,7 @@
                 </g>
 
                 <!-- Long Queue - NOT IMPLEMENTED -->
-                <g class="component disabled" id="comp-long-queue">
+                <g class="component disabled" id="comp-long-queue" data-tooltip="(not implemented)">
                     <rect x="520" y="405" width="100" height="60" rx="6" class="comp-box inactive"/>
                     <text x="570" y="430" class="comp-icon disabled">📨</text>
                     <text x="570" y="450" class="comp-label disabled">Long Queue</text>
@@ -276,7 +304,7 @@
                 <path d="M 620 435 L 680 435" class="flow-arrow inactive" marker-end="url(#arrowhead-grey)"/>
 
                 <!-- Long Worker - NOT IMPLEMENTED -->
-                <g class="component disabled" id="comp-container">
+                <g class="component disabled" id="comp-container" data-tooltip="(not implemented)">
                     <rect x="680" y="405" width="110" height="60" rx="6" class="comp-box inactive"/>
                     <text x="735" y="430" class="comp-icon disabled">🐳</text>
                     <text x="735" y="450" class="comp-label disabled">Long Worker</text>
@@ -288,7 +316,7 @@
                 <text x="835" y="340" class="flow-label">Task Complete</text>
 
                 <!-- Task Tables -->
-                <g class="component" id="comp-task-tables">
+                <g class="component" id="comp-task-tables" data-tooltip="rmhpgflex.postgres.database.azure.com (app.tasks)">
                     <rect x="820" y="510" width="100" height="60" rx="6" class="comp-box postgres"/>
                     <text x="870" y="535" class="comp-icon">🐘</text>
                     <text x="870" y="555" class="comp-label">Task Tables</text>
@@ -301,7 +329,7 @@
 
                 <!-- TOP ROW: TiTiler-pgstac and OGC Features -->
                 <!-- TiTiler-pgstac: above Output Data (x=735 center) -->
-                <g class="component" id="comp-titiler">
+                <g class="component" id="comp-titiler" data-tooltip="rmhtitiler-ghcyd7g0bxdvc2hc.eastus-01.azurewebsites.net">
                     <rect x="685" y="5" width="100" height="60" rx="6" class="comp-box appservice"/>
                     <text x="735" y="30" class="comp-icon">🐳</text>
                     <text x="735" y="50" class="comp-label">TiTiler-pgstac</text>
@@ -309,7 +337,7 @@
                 </g>
 
                 <!-- OGC Features: above PostGIS (x=870 center) -->
-                <g class="component" id="comp-ogc-features">
+                <g class="component" id="comp-ogc-features" data-tooltip="rmhogcstac-b4f5ccetf0a7hwe9.eastus-01.azurewebsites.net">
                     <rect x="820" y="5" width="100" height="60" rx="6" class="comp-box funcapp"/>
                     <text x="870" y="30" class="comp-icon">⚡</text>
                     <text x="870" y="50" class="comp-label">OGC Features</text>
@@ -318,7 +346,7 @@
 
                 <!-- STORAGE ROW: Input/Output/PostGIS -->
                 <!-- Input Data: aligned with queues (x=570 center) -->
-                <g class="component" id="comp-input-storage">
+                <g class="component" id="comp-input-storage" data-tooltip="rmhazuregeo (bronze)">
                     <rect x="520" y="95" width="100" height="60" rx="6" class="comp-box storage"/>
                     <text x="570" y="120" class="comp-icon">📦</text>
                     <text x="570" y="140" class="comp-label">Input Data</text>
@@ -326,7 +354,7 @@
                 </g>
 
                 <!-- Output Data: aligned with workers (x=735 center) -->
-                <g class="component" id="comp-output-storage">
+                <g class="component" id="comp-output-storage" data-tooltip="rmhazuregeo (silver)">
                     <rect x="685" y="95" width="100" height="60" rx="6" class="comp-box storage"/>
                     <text x="735" y="120" class="comp-icon">📦</text>
                     <text x="735" y="140" class="comp-label">Output Data</text>
@@ -334,7 +362,7 @@
                 </g>
 
                 <!-- PostGIS - horizontally aligned with storage -->
-                <g class="component" id="comp-output-tables">
+                <g class="component" id="comp-output-tables" data-tooltip="rmhpgflex.postgres.database.azure.com (geo schema)">
                     <rect x="820" y="95" width="100" height="60" rx="6" class="comp-box postgres"/>
                     <text x="870" y="120" class="comp-icon">🐘</text>
                     <text x="870" y="140" class="comp-label">PostGIS</text>
@@ -343,7 +371,7 @@
 
                 <!-- ========== NEW COLUMN: Zarr/xarray (NOT IMPLEMENTED - grey) ========== -->
                 <!-- TiTiler-xarray: above Zarr Store (x=1005 center) - NOT IMPLEMENTED -->
-                <g class="component disabled" id="comp-titiler-xarray">
+                <g class="component disabled" id="comp-titiler-xarray" data-tooltip="(not implemented)">
                     <rect x="955" y="5" width="100" height="60" rx="6" class="comp-box inactive"/>
                     <text x="1005" y="30" class="comp-icon disabled">🐳</text>
                     <text x="1005" y="50" class="comp-label disabled">TiTiler-xarray</text>
@@ -351,7 +379,7 @@
                 </g>
 
                 <!-- Zarr Store: to the right of PostGIS (x=1005 center) - NOT IMPLEMENTED -->
-                <g class="component disabled" id="comp-zarr-store">
+                <g class="component disabled" id="comp-zarr-store" data-tooltip="(not implemented)">
                     <rect x="955" y="95" width="100" height="60" rx="6" class="comp-box inactive"/>
                     <text x="1005" y="120" class="comp-icon disabled">📦</text>
                     <text x="1005" y="140" class="comp-label disabled">Zarr Store</text>
@@ -450,6 +478,34 @@
 
         // Start with simulated real status
         setMixedStatus();
+
+        // Tooltip functionality
+        const tooltip = document.getElementById('diagram-tooltip');
+        const svgContainer = document.querySelector('.architecture-diagram');
+
+        document.querySelectorAll('.component[data-tooltip]').forEach(component => {
+            component.addEventListener('mouseenter', (e) => {
+                const tooltipText = component.getAttribute('data-tooltip');
+                if (tooltipText) {
+                    tooltip.textContent = tooltipText;
+                    tooltip.classList.add('visible');
+                }
+            });
+
+            component.addEventListener('mousemove', (e) => {
+                const containerRect = svgContainer.getBoundingClientRect();
+                const x = e.clientX - containerRect.left;
+                const y = e.clientY - containerRect.top;
+
+                // Position tooltip above cursor
+                tooltip.style.left = (x - tooltip.offsetWidth / 2) + 'px';
+                tooltip.style.top = (y - tooltip.offsetHeight - 15) + 'px';
+            });
+
+            component.addEventListener('mouseleave', () => {
+                tooltip.classList.remove('visible');
+            });
+        });
     </script>
 </body>
 </html>

@@ -3,7 +3,7 @@
 **Date**: 29 OCT 2025
 **Author**: Robert and Geospatial Claude Legion
 **Purpose**: Comprehensive research findings for implementing OpenAPI specification on Platform layer
-**Target Client**: DDH (Data Discovery Hub) via Azure API Management (APIM)
+**Target Client**: DDH (Development Data Hub) via Azure API Management (APIM)
 
 ---
 

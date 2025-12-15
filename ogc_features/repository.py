@@ -5,6 +5,10 @@ PostGIS data access with ST_AsGeoJSON optimization and spatial filtering.
 
 Exports:
     OGCFeaturesRepository: Repository for querying PostGIS vector data with SQL injection prevention
+
+Dependencies:
+    psycopg: PostgreSQL database access
+    ogc_features.config: OGCFeaturesConfig
 """
 
 import logging

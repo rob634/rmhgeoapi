@@ -22,7 +22,7 @@
                      │
                      ▼
 ┌─────────────────────────────────────────────────────┐
-│              DDH (Data Discovery Hub)               │
+│              DDH (Development Data Hub)             │
 │                                                      │
 │  • Manages ALL user-facing metadata                 │
 │  • Provides search/discovery UI                     │

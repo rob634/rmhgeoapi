@@ -5,11 +5,16 @@ Abstract base class and common utilities for all web interface modules.
 
 Exports:
     BaseInterface: Abstract base class with common HTML utilities and navigation
+
+Dependencies:
+    azure.functions: HTTP request handling
 """
 
 from abc import ABC, abstractmethod
 from typing import Dict, Any
 import azure.functions as func
+
+from config import __version__
 
 
 class BaseInterface(ABC):
@@ -253,7 +258,7 @@ class BaseInterface(ABC):
             This is called automatically by wrap_html() unless
             include_navbar=False is specified.
         """
-        return """
+        return f"""
         <nav style="background: white; padding: 15px 30px; border-radius: 3px;
                     box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin-bottom: 20px;
                     display: flex; justify-content: space-between; align-items: center;
@@ -263,22 +268,22 @@ class BaseInterface(ABC):
                       text-decoration: none; transition: color 0.2s;"
                onmouseover="this.style.color='#0071BC'"
                onmouseout="this.style.color='#053657'">
-                Geospatial API
+                Geospatial API v{__version__}
             </a>
             <div style="display: flex; gap: 20px;">
-                <a href="/api/interface/stac"
+                <a href="/api/interface/health"
                    style="color: #0071BC; text-decoration: none; font-weight: 600;
                           transition: color 0.2s;"
                    onmouseover="this.style.color='#00A3DA'"
                    onmouseout="this.style.color='#0071BC'">
-                    STAC
+                    System Status
                 </a>
-                <a href="/api/interface/vector"
+                <a href="/api/interface/platform"
                    style="color: #0071BC; text-decoration: none; font-weight: 600;
                           transition: color 0.2s;"
                    onmouseover="this.style.color='#00A3DA'"
                    onmouseout="this.style.color='#0071BC'">
-                    OGC Features
+                    Platform
                 </a>
                 <a href="/api/interface/pipeline"
                    style="color: #0071BC; text-decoration: none; font-weight: 600;
@@ -294,12 +299,19 @@ class BaseInterface(ABC):
                    onmouseout="this.style.color='#0071BC'">
                     Jobs
                 </a>
-                <a href="/api/interface/platform"
+                <a href="/api/interface/stac"
                    style="color: #0071BC; text-decoration: none; font-weight: 600;
                           transition: color 0.2s;"
                    onmouseover="this.style.color='#00A3DA'"
                    onmouseout="this.style.color='#0071BC'">
-                    Platform
+                    STAC
+                </a>
+                <a href="/api/interface/vector"
+                   style="color: #0071BC; text-decoration: none; font-weight: 600;
+                          transition: color 0.2s;"
+                   onmouseover="this.style.color='#00A3DA'"
+                   onmouseout="this.style.color='#0071BC'">
+                    OGC Features
                 </a>
                 <a href="/api/interface/docs"
                    style="color: #0071BC; text-decoration: none; font-weight: 600;
@@ -307,13 +319,6 @@ class BaseInterface(ABC):
                    onmouseover="this.style.color='#00A3DA'"
                    onmouseout="this.style.color='#0071BC'">
                     API Docs
-                </a>
-                <a href="/api/interface/health"
-                   style="color: #0071BC; text-decoration: none; font-weight: 600;
-                          transition: color 0.2s;"
-                   onmouseover="this.style.color='#00A3DA'"
-                   onmouseout="this.style.color='#0071BC'">
-                    Health
                 </a>
             </div>
         </nav>

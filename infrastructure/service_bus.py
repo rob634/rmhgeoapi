@@ -19,6 +19,12 @@ Performance:
 
 Exports:
     ServiceBusRepository: Singleton implementation for Service Bus operations
+
+Dependencies:
+    azure.servicebus: Service Bus SDK for messaging
+    azure.identity: DefaultAzureCredential for authentication
+    infrastructure.interface_repository: IQueueRepository interface
+    util_logger: Structured logging
 """
 
 from azure.servicebus import ServiceBusClient, ServiceBusMessage, ServiceBusSender, ServiceBusReceiver
@@ -997,6 +1003,60 @@ class ServiceBusRepository(IQueueRepository):
                 }
             )
             raise
+
+    def message_exists_for_task(self, queue_name: str, task_id: str, max_peek: int = 100) -> bool:
+        """
+        Check if a message exists in the queue for a specific task.
+
+        Peeks at messages (without removing them) and searches for a message
+        with matching task_id. Used by janitor to verify if message was lost
+        before re-queuing orphaned tasks.
+
+        Args:
+            queue_name: Queue to search
+            task_id: Task ID to look for
+            max_peek: Maximum messages to peek (default 100)
+
+        Returns:
+            True if message found, False if not found
+
+        Note:
+            - Peek is limited, so very deep queue messages may not be found
+            - False negative possible if message is beyond max_peek depth
+            - This is a best-effort check, not a guarantee
+        """
+        logger.debug(
+            f"[JANITOR] 🔍 Searching queue '{queue_name}' for task_id={task_id[:16]}... "
+            f"(max_peek={max_peek})"
+        )
+
+        try:
+            messages = self.peek_messages(queue_name, max_messages=max_peek)
+
+            for msg in messages:
+                content = msg.get('content', {})
+                msg_task_id = content.get('task_id', '')
+
+                if msg_task_id == task_id:
+                    logger.info(
+                        f"[JANITOR] ✅ Message FOUND for task_id={task_id[:16]}... "
+                        f"in queue '{queue_name}' (sequence={msg.get('sequence_number')})"
+                    )
+                    return True
+
+            logger.info(
+                f"[JANITOR] ❌ Message NOT FOUND for task_id={task_id[:16]}... "
+                f"in queue '{queue_name}' (searched {len(messages)} messages)"
+            )
+            return False
+
+        except Exception as e:
+            # On error, assume message might exist to avoid duplicate sends
+            logger.warning(
+                f"[JANITOR] ⚠️ Error checking queue '{queue_name}' for task_id={task_id[:16]}...: {e}. "
+                f"Assuming message exists to avoid duplicates."
+            )
+            return True  # Safe default: don't re-queue if we can't check
 
     def get_queue_length(self, queue_name: str) -> int:
         """

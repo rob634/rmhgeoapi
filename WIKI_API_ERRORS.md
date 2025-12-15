@@ -1,5 +1,7 @@
 # API Error Reference
 
+> **Navigation**: [Quick Start](WIKI_QUICK_START.md) | [Platform API](WIKI_PLATFORM_API.md) | [All Jobs](WIKI_API_JOB_SUBMISSION.md) | [Errors](WIKI_API_ERRORS.md) | [Glossary](WIKI_API_GLOSSARY.md)
+
 **Date**: 29 NOV 2025
 **Purpose**: Comprehensive reference for API error responses, internal error handling, and Application Insights telemetry
 **Wiki**: Azure DevOps Wiki - Error handling documentation

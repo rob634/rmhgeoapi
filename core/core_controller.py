@@ -12,6 +12,12 @@ Architecture:
 
 Exports:
     CoreController: Abstract base class for job controllers
+
+Dependencies:
+    util_logger: LoggerFactory, ComponentType
+    core.models: JobExecutionContext, TaskDefinition, TaskResult, StageResultContract, StageExecutionContext
+    core.schema: WorkflowDefinition, get_workflow_definition
+    utils.contract_validator: enforce_contract
 """
 
 from abc import ABC, abstractmethod

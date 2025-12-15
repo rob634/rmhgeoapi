@@ -62,6 +62,7 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
         health_data = {
             "status": "healthy",
             "components": {},
+            "warnings": [],  # Track degraded/warning components
             "environment": {
                 "bronze_storage_account": config.storage.bronze.account_name,
                 "python_version": sys.version.split()[0],
@@ -222,8 +223,14 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
         titiler_health = self._check_titiler_health()
         health_data["components"]["titiler"] = titiler_health
         # TiTiler is optional for core ETL - don't fail overall health
-        if titiler_health.get("status") == "unhealthy":
+        titiler_status = titiler_health.get("status")
+        if titiler_status == "unhealthy":
             health_data["errors"].append("TiTiler unavailable (raster tile visualization disabled)")
+        elif titiler_status == "warning":
+            health_data["warnings"].append("TiTiler degraded - alive but /healthz failing (PGSTAC connection issue?)")
+            # Set overall status to degraded if not already unhealthy
+            if health_data["status"] == "healthy":
+                health_data["status"] = "degraded"
 
         # Check OGC Features API (13 DEC 2025)
         # Can be self-hosted or external - check its health endpoint
@@ -248,11 +255,15 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
     def handle_request(self, req: func.HttpRequest) -> func.HttpResponse:
         """
         Override to provide proper HTTP status codes for health checks.
-        
+
         Returns:
-            - 200 OK when all components are healthy
-            - 503 Service Unavailable when any component is unhealthy  
+            - 200 OK when all components are healthy or degraded (app functional)
+            - 503 Service Unavailable when any critical component is unhealthy
             - 500 Internal Server Error for unexpected errors
+
+        Note: "degraded" status returns 200 because the app is still functional,
+        just with some optional components (TiTiler, OGC Features) having issues.
+        Azure health probes should treat 200 as healthy.
         """
         import json
         from datetime import datetime, timezone
@@ -278,10 +289,11 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
             health_data = self.process_request(req)
             
             # Determine HTTP status code based on health status
-            if health_data["status"] == "healthy":
-                status_code = 200  # OK
+            # "degraded" returns 200 because app is functional (optional components have issues)
+            if health_data["status"] in ("healthy", "degraded"):
+                status_code = 200  # OK - app is functional
             elif health_data["status"] == "unhealthy":
-                status_code = 503  # Service Unavailable
+                status_code = 503  # Service Unavailable - critical components failing
             else:
                 status_code = 500  # Internal Server Error (unexpected status)
             
@@ -1729,7 +1741,7 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
 
             # Determine overall status based on user requirements
             # Both respond → healthy (green)
-            # Only livez responds → warning (yellow)
+            # Only livez responds → warning (yellow) - app is alive but degraded
             # Neither responds → unhealthy (red)
             if livez_ok and health_ok:
                 overall_status = "healthy"
@@ -1748,7 +1760,9 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                 "health": health_response if health_response else {"error": health_error},
                 "overall_status": overall_status,
                 "status_reason": status_reason,
-                "purpose": "Raster tile server for COG visualization via TiTiler-pgstac"
+                "purpose": "Raster tile server for COG visualization via TiTiler-pgstac",
+                # Use _status for wrapper to pick up warning/unhealthy states
+                "_status": overall_status
             }
 
             # Add error field for unhealthy status to trigger proper reporting
@@ -1801,11 +1815,25 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
             etl_url = config.etl_app_base_url.rstrip('/')
             is_self = app_base_url == etl_url
 
+            # If self-hosted, skip HTTP check to avoid recursive timeout
+            # If this health endpoint is responding, OGC Features is also working
+            if is_self:
+                return {
+                    "configured": True,
+                    "features_url": ogc_url,
+                    "app_base_url": app_base_url,
+                    "is_self_hosted": True,
+                    "overall_status": "healthy",
+                    "status_reason": "Self-hosted - if this health check responds, OGC Features is available",
+                    "purpose": "OGC API - Features for vector data queries",
+                    "note": "Skipped HTTP health check to avoid recursive call (same app)"
+                }
+
             health_ok = False
             health_response = None
             health_error = None
 
-            # Check /api/health endpoint at app root
+            # Check /api/health endpoint at app root (only for external OGC Features apps)
             health_endpoint = f"{app_base_url}/api/health"
             try:
                 resp = requests.get(health_endpoint, timeout=15)
@@ -1839,17 +1867,13 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                 "configured": True,
                 "features_url": ogc_url,
                 "app_base_url": app_base_url,
-                "is_self_hosted": is_self,
+                "is_self_hosted": False,
                 "health_endpoint": health_endpoint,
                 "health": health_response if health_response else {"error": health_error},
                 "overall_status": overall_status,
                 "status_reason": status_reason,
                 "purpose": "OGC API - Features for vector data queries"
             }
-
-            # Add note about self-hosted
-            if is_self:
-                result["note"] = "OGC Features is self-hosted (same app as ETL)"
 
             # Add error field for unhealthy status
             if overall_status == "unhealthy":

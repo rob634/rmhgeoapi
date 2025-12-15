@@ -5,6 +5,12 @@ Azure Functions HTTP endpoint handlers for OGC API - Features Core endpoints.
 
 Exports:
     get_ogc_triggers: Returns list of trigger configurations for route registration
+
+Dependencies:
+    azure.functions: Azure Functions SDK
+    ogc_features.config: OGCFeaturesConfig
+    ogc_features.service: OGCFeaturesService
+    ogc_features.models: OGCQueryParameters
 """
 
 import azure.functions as func

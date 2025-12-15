@@ -12,6 +12,18 @@ Exports:
     AppConfig: Main configuration class
     get_config: Singleton accessor
 
+Dependencies:
+    pydantic: BaseModel for configuration validation
+    config.storage_config: StorageConfig
+    config.database_config: DatabaseConfig, BusinessDatabaseConfig
+    config.raster_config: RasterConfig
+    config.vector_config: VectorConfig
+    config.queue_config: QueueConfig
+    config.analytics_config: AnalyticsConfig
+    config.h3_config: H3Config
+    config.platform_config: PlatformConfig
+    config.defaults: Default value constants
+
 Pattern:
     Composition over inheritance - domain configs are composed, not inherited.
 

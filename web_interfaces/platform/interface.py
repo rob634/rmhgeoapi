@@ -1,7 +1,7 @@
 """
 Platform Configuration Interface.
 
-Shows DDH (Data Discovery Hub) integration configuration, Platform API endpoints,
+Shows DDH (Development Data Hub) integration configuration, Platform API endpoints,
 and system health status.
 
 The Platform layer is an Anti-Corruption Layer (ACL) that translates DDH requests
@@ -236,7 +236,7 @@ class PlatformInterface(BaseInterface):
         <div class="container">
             <header class="dashboard-header">
                 <h1>Platform Configuration</h1>
-                <p class="subtitle">DDH (Data Discovery Hub) Integration Settings</p>
+                <p class="subtitle">DDH (Development Data Hub) Integration Settings</p>
             </header>
 
             <!-- Platform Health Status -->
@@ -304,12 +304,10 @@ class PlatformInterface(BaseInterface):
                 <p style="color: var(--ds-gray); margin-bottom: 16px;">
                     DDH can submit data from these Bronze tier containers:
                 </p>
-                <div class="tag-list">
-                    <span class="tag bronze">bronze-vectors</span>
-                    <span class="tag bronze">bronze-rasters</span>
-                    <span class="tag bronze">bronze-misc</span>
-                    <span class="tag bronze">bronze-temp</span>
+                <div id="bronze-containers" class="tag-list">
+                    <span class="tag" style="background: #ccc;">Loading...</span>
                 </div>
+                <p id="bronze-account" style="font-size: 12px; color: #666; margin-top: 12px;"></p>
             </div>
 
             <!-- Access Levels -->
@@ -452,6 +450,47 @@ class PlatformInterface(BaseInterface):
             }
         }
 
+        // Load Bronze containers from storage API
+        async function loadBronzeContainers() {
+            const containersEl = document.getElementById('bronze-containers');
+            const accountEl = document.getElementById('bronze-account');
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/api/storage/containers?zone=bronze`);
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+
+                const data = await response.json();
+                const bronzeData = data.zones?.bronze;
+
+                if (bronzeData && bronzeData.containers && bronzeData.containers.length > 0) {
+                    // Build tags for each container
+                    containersEl.innerHTML = bronzeData.containers
+                        .map(name => `<span class="tag bronze">${name}</span>`)
+                        .join('');
+
+                    // Show storage account info
+                    accountEl.textContent = `Storage Account: ${bronzeData.account} (${bronzeData.container_count} containers)`;
+                } else if (bronzeData?.error) {
+                    containersEl.innerHTML = `<span class="tag" style="background: #f8d7da; color: #721c24;">Error: ${bronzeData.error}</span>`;
+                    accountEl.textContent = '';
+                } else {
+                    containersEl.innerHTML = '<span class="tag" style="background: #fff3cd; color: #856404;">No containers found</span>';
+                    accountEl.textContent = '';
+                }
+
+            } catch (error) {
+                console.error('Failed to load Bronze containers:', error);
+                containersEl.innerHTML = `<span class="tag" style="background: #f8d7da; color: #721c24;">Failed to load containers</span>`;
+                accountEl.textContent = '';
+            }
+        }
+
         // Load on page ready
-        document.addEventListener('DOMContentLoaded', loadPlatformHealth);
+        document.addEventListener('DOMContentLoaded', () => {
+            loadPlatformHealth();
+            loadBronzeContainers();
+        });
         """

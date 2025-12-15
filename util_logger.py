@@ -18,6 +18,11 @@ Exports:
     log_exceptions: Exception logging decorator
     get_memory_stats: Memory statistics helper
     log_memory_checkpoint: Memory checkpoint logger
+
+Dependencies:
+    Standard library only (logging, enum, dataclasses, json)
+    Optional: psutil (lazy import for memory tracking in debug mode)
+    Optional: config (lazy import for debug mode check)
 """
 
 from enum import Enum

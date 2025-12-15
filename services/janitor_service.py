@@ -43,7 +43,7 @@ class JanitorConfig:
     task_timeout_minutes: int = 30  # Azure Functions max is 10-30 min
 
     # Orphaned queued task settings (14 DEC 2025 - message loss recovery)
-    orphaned_queued_timeout_minutes: int = 10  # Tasks stuck in QUEUED > this are orphaned
+    orphaned_queued_timeout_minutes: int = 5  # Tasks stuck in QUEUED > this are orphaned
     orphaned_queued_max_retries: int = 3  # Max re-queue attempts before marking failed
 
     # Job health settings
@@ -60,7 +60,7 @@ class JanitorConfig:
         """Load configuration from environment variables."""
         return cls(
             task_timeout_minutes=int(os.environ.get("JANITOR_TASK_TIMEOUT_MINUTES", "30")),
-            orphaned_queued_timeout_minutes=int(os.environ.get("JANITOR_ORPHANED_QUEUED_TIMEOUT_MINUTES", "10")),
+            orphaned_queued_timeout_minutes=int(os.environ.get("JANITOR_ORPHANED_QUEUED_TIMEOUT_MINUTES", "5")),
             orphaned_queued_max_retries=int(os.environ.get("JANITOR_ORPHANED_QUEUED_MAX_RETRIES", "3")),
             job_stale_hours=int(os.environ.get("JANITOR_JOB_STALE_HOURS", "24")),
             queued_timeout_hours=int(os.environ.get("JANITOR_QUEUED_TIMEOUT_HOURS", "1")),
@@ -222,110 +222,86 @@ class JanitorService:
 
     def run_task_watchdog(self) -> JanitorRunResult:
         """
-        Detect and fix stale PROCESSING tasks.
+        Detect and fix stale PROCESSING tasks + recover orphaned QUEUED tasks.
 
-        Tasks stuck in PROCESSING state beyond the configured timeout
-        (default 30 minutes) are marked as FAILED with an error message.
+        Two independent checks:
+        1. Tasks stuck in PROCESSING > 30 min → mark FAILED (function timed out)
+        2. Tasks stuck in QUEUED > 5 min → peek queue, re-queue if message lost
 
         Returns:
             JanitorRunResult with statistics and actions taken
         """
         result = JanitorRunResult(run_type="task_watchdog", success=False)
-        logger.debug("[JANITOR] task_watchdog: Creating JanitorRunResult object")
+        logger.info(
+            f"[JANITOR] ========== TASK WATCHDOG STARTING =========="
+        )
 
         # Create audit record FIRST before doing any work
         result.run_id = self._start_run(result)
-        logger.debug(f"[JANITOR] task_watchdog: Audit record created with run_id={result.run_id}")
 
         if not self.config.enabled:
-            logger.info("[JANITOR] Janitor disabled via configuration - skipping task watchdog")
-            logger.debug("[JANITOR] task_watchdog: JANITOR_ENABLED=false, returning early")
+            logger.info("[JANITOR] Janitor disabled via configuration - skipping")
             result.complete(success=True)
             self._complete_run(result)
             return result
 
         try:
+            # ================================================================
+            # PART 1: STALE PROCESSING TASKS (tasks that timed out)
+            # ================================================================
             logger.info(
-                f"[JANITOR] Starting task watchdog (timeout: {self.config.task_timeout_minutes} min)"
-            )
-            logger.debug(
-                f"[JANITOR] task_watchdog: Querying for tasks with status='PROCESSING' "
-                f"AND updated_at < NOW() - INTERVAL '{self.config.task_timeout_minutes} minutes'"
+                f"[JANITOR] PART 1: Checking for stale PROCESSING tasks "
+                f"(>{self.config.task_timeout_minutes}min)"
             )
 
-            # Find stale tasks
             stale_tasks = self.repo.get_stale_processing_tasks(
                 timeout_minutes=self.config.task_timeout_minutes
             )
-            result.items_scanned = len(stale_tasks)
-            logger.debug(f"[JANITOR] task_watchdog: Query returned {len(stale_tasks)} stale tasks")
+            result.items_scanned += len(stale_tasks)
 
-            if not stale_tasks:
-                logger.info("[JANITOR] No stale tasks found - system healthy")
-                logger.debug("[JANITOR] task_watchdog: No stale tasks, completing with success=True")
-                result.complete(success=True)
-                self._complete_run(result)
-                return result
+            if stale_tasks:
+                logger.warning(f"[JANITOR] Found {len(stale_tasks)} stale PROCESSING tasks")
 
-            logger.warning(f"[JANITOR] Found {len(stale_tasks)} stale PROCESSING tasks")
+                # Log each stale task with full details
+                for i, task in enumerate(stale_tasks, 1):
+                    minutes_stuck = round(task.get('minutes_stuck', 0), 1)
+                    logger.warning(
+                        f"[JANITOR] Stale PROCESSING {i}/{len(stale_tasks)}: "
+                        f"task_id={task['task_id']}, "
+                        f"job_id={task['parent_job_id'][:16]}..., "
+                        f"task_type={task.get('task_type')}, "
+                        f"stuck={minutes_stuck}min"
+                    )
 
-            # Log each stale task with full details BEFORE fixing
-            for i, task in enumerate(stale_tasks, 1):
-                minutes_stuck = round(task.get('minutes_stuck', 0), 1)
-                logger.warning(
-                    f"[JANITOR] Stale task {i}/{len(stale_tasks)}: "
-                    f"task_id={task['task_id']}, "
-                    f"job_id={task['parent_job_id'][:16]}..., "
-                    f"job_type={task.get('job_type')}, "
-                    f"task_type={task.get('task_type')}, "
-                    f"stage={task.get('stage')}, "
-                    f"stuck_for={minutes_stuck}min, "
-                    f"retry_count={task.get('retry_count', 0)}, "
-                    f"updated_at={task.get('updated_at')}"
+                # Mark tasks as failed
+                task_ids = [t['task_id'] for t in stale_tasks]
+                error_message = (
+                    f"[JANITOR] Task exceeded {self.config.task_timeout_minutes} minute timeout. "
+                    f"Azure Functions max execution time is 10-30 minutes."
                 )
 
-            # Mark tasks as failed
-            task_ids = [t['task_id'] for t in stale_tasks]
-            logger.debug(f"[JANITOR] task_watchdog: Preparing to mark {len(task_ids)} tasks as FAILED")
-            error_message = (
-                f"[JANITOR] Silent failure detected - task exceeded "
-                f"{self.config.task_timeout_minutes} minute timeout. "
-                f"Azure Functions max execution time is 10-30 minutes."
-            )
-            logger.debug(f"[JANITOR] task_watchdog: Error message: {error_message[:80]}...")
+                fixed_count = self.repo.mark_tasks_as_failed(task_ids, error_message)
+                result.items_fixed += fixed_count
 
-            logger.debug(f"[JANITOR] task_watchdog: Executing batch UPDATE for {len(task_ids)} tasks")
-            fixed_count = self.repo.mark_tasks_as_failed(task_ids, error_message)
-            result.items_fixed = fixed_count
-            logger.debug(f"[JANITOR] task_watchdog: Batch UPDATE completed, {fixed_count} rows affected")
+                for task in stale_tasks:
+                    result.actions_taken.append({
+                        "action": "mark_processing_task_failed",
+                        "task_id": task['task_id'],
+                        "parent_job_id": task['parent_job_id'],
+                        "task_type": task.get('task_type'),
+                        "minutes_stuck": round(task.get('minutes_stuck', 0), 1),
+                        "reason": "exceeded_processing_timeout"
+                    })
 
-            # Record actions and log each fix
-            for task in stale_tasks:
-                minutes_stuck = round(task.get('minutes_stuck', 0), 1)
-                result.actions_taken.append({
-                    "action": "mark_task_failed",
-                    "task_id": task['task_id'],
-                    "parent_job_id": task['parent_job_id'],
-                    "job_type": task.get('job_type'),
-                    "task_type": task.get('task_type'),
-                    "stage": task.get('stage'),
-                    "minutes_stuck": minutes_stuck,
-                    "reason": "exceeded_timeout"
-                })
-                logger.info(
-                    f"[JANITOR] Marked task FAILED: task_id={task['task_id']}, "
-                    f"job_id={task['parent_job_id'][:16]}..., stuck={minutes_stuck}min"
-                )
-
-            logger.warning(f"[JANITOR] Task watchdog complete: marked {fixed_count} stale tasks as FAILED")
+                logger.warning(f"[JANITOR] Marked {fixed_count} stale PROCESSING tasks as FAILED")
+            else:
+                logger.info("[JANITOR] No stale PROCESSING tasks found ✓")
 
             # ================================================================
-            # PART 2: ORPHANED QUEUED TASK RECOVERY (14 DEC 2025)
+            # PART 2: ORPHANED QUEUED TASKS (messages lost in Service Bus)
             # ================================================================
-            # Tasks stuck in QUEUED status may have lost their Service Bus messages
-            # Re-queue them to recover from message delivery failures
             logger.info(
-                f"[JANITOR] Checking for orphaned QUEUED tasks "
+                f"[JANITOR] PART 2: Checking for orphaned QUEUED tasks "
                 f"(>{self.config.orphaned_queued_timeout_minutes}min)"
             )
 
@@ -333,40 +309,69 @@ class JanitorService:
                 timeout_minutes=self.config.orphaned_queued_timeout_minutes,
                 limit=50
             )
+            result.items_scanned += len(orphaned_tasks)
 
             if orphaned_tasks:
-                logger.warning(f"[JANITOR] Found {len(orphaned_tasks)} orphaned QUEUED tasks - attempting recovery")
+                logger.warning(
+                    f"[JANITOR] Found {len(orphaned_tasks)} potentially orphaned QUEUED tasks - "
+                    f"verifying queue messages..."
+                )
 
-                # Get Service Bus repository for re-queuing
+                # Get Service Bus repository for peek and re-queue
                 service_bus = ServiceBusRepository()
 
                 requeued_count = 0
+                skipped_count = 0
                 failed_count = 0
 
                 for task in orphaned_tasks:
                     task_id = task['task_id']
                     retry_count = task.get('retry_count', 0)
                     minutes_stuck = round(task.get('minutes_stuck', 0), 1)
+                    task_type = task.get('task_type', '')
+                    queue_name = self._get_queue_for_task(task_type)
 
                     logger.info(
-                        f"[JANITOR] Processing orphaned task: task_id={task_id[:16]}..., "
+                        f"[JANITOR] Checking orphaned task: task_id={task_id}, "
                         f"job_id={task['parent_job_id'][:16]}..., "
-                        f"task_type={task.get('task_type')}, "
+                        f"task_type={task_type}, queue={queue_name}, "
                         f"retry_count={retry_count}, stuck={minutes_stuck}min"
+                    )
+
+                    # PEEK QUEUE to verify message is actually missing
+                    message_exists = service_bus.message_exists_for_task(queue_name, task_id)
+
+                    if message_exists:
+                        # Message found - not orphaned, just slow
+                        logger.info(
+                            f"[JANITOR] ⏳ Task {task_id[:16]}... has message in queue - "
+                            f"skipping (workers may be busy)"
+                        )
+                        skipped_count += 1
+                        result.actions_taken.append({
+                            "action": "skip_queued_task",
+                            "task_id": task_id,
+                            "queue": queue_name,
+                            "reason": "message_exists_in_queue",
+                            "minutes_stuck": minutes_stuck
+                        })
+                        continue
+
+                    # Message NOT found - truly orphaned
+                    logger.warning(
+                        f"[JANITOR] 🚨 Message LOST for task {task_id[:16]}... - "
+                        f"not found in queue '{queue_name}'"
                     )
 
                     if retry_count < self.config.orphaned_queued_max_retries:
                         # Under retry limit - re-queue the task
                         try:
-                            # Determine queue based on task type
-                            queue_name = self._get_queue_for_task(task.get('task_type', ''))
-
                             # Build TaskQueueMessage
                             message = TaskQueueMessage(
                                 task_id=task_id,
                                 parent_job_id=task['parent_job_id'],
                                 job_type=task.get('job_type', ''),
-                                task_type=task.get('task_type', ''),
+                                task_type=task_type,
                                 stage=task.get('stage', 1),
                                 task_index=task.get('task_index', 0),
                                 parameters=task.get('parameters', {})
@@ -384,7 +389,7 @@ class JanitorService:
                                 "action": "requeue_orphaned_task",
                                 "task_id": task_id,
                                 "parent_job_id": task['parent_job_id'],
-                                "task_type": task.get('task_type'),
+                                "task_type": task_type,
                                 "queue": queue_name,
                                 "retry_count": retry_count + 1,
                                 "minutes_stuck": minutes_stuck,
@@ -392,13 +397,14 @@ class JanitorService:
                             })
 
                             logger.info(
-                                f"[JANITOR] ✅ Re-queued orphaned task: task_id={task_id[:16]}..., "
-                                f"queue={queue_name}, retry={retry_count + 1}/{self.config.orphaned_queued_max_retries}"
+                                f"[JANITOR] ✅ Re-queued orphaned task: task_id={task_id}, "
+                                f"queue={queue_name}, retry={retry_count + 1}/{self.config.orphaned_queued_max_retries}, "
+                                f"message_id={message_id}"
                             )
 
                         except Exception as requeue_error:
                             logger.error(
-                                f"[JANITOR] ❌ Failed to re-queue task {task_id[:16]}...: {requeue_error}"
+                                f"[JANITOR] ❌ Failed to re-queue task {task_id}: {requeue_error}"
                             )
                             result.actions_taken.append({
                                 "action": "requeue_failed",
@@ -410,7 +416,7 @@ class JanitorService:
                         error_msg = (
                             f"[JANITOR] Orphaned task exceeded max re-queue attempts "
                             f"({self.config.orphaned_queued_max_retries}). "
-                            f"Message likely lost {retry_count + 1} times."
+                            f"Message lost {retry_count + 1} times - giving up."
                         )
 
                         self.repo.mark_tasks_as_failed([task_id], error_msg)
@@ -420,24 +426,32 @@ class JanitorService:
                             "action": "mark_orphaned_task_failed",
                             "task_id": task_id,
                             "parent_job_id": task['parent_job_id'],
-                            "task_type": task.get('task_type'),
+                            "task_type": task_type,
                             "retry_count": retry_count,
                             "reason": "max_retries_exceeded"
                         })
 
                         logger.warning(
                             f"[JANITOR] ❌ Marked orphaned task FAILED (max retries): "
-                            f"task_id={task_id[:16]}..., retries={retry_count}"
+                            f"task_id={task_id}, retries={retry_count}"
                         )
 
-                logger.warning(
-                    f"[JANITOR] Orphaned task recovery complete: "
-                    f"re-queued={requeued_count}, failed={failed_count}"
+                logger.info(
+                    f"[JANITOR] Orphaned QUEUED task recovery complete: "
+                    f"re-queued={requeued_count}, skipped={skipped_count}, failed={failed_count}"
                 )
             else:
-                logger.info("[JANITOR] No orphaned QUEUED tasks found")
+                logger.info("[JANITOR] No orphaned QUEUED tasks found ✓")
 
-            logger.debug(f"[JANITOR] task_watchdog: Success - scanned={result.items_scanned}, fixed={result.items_fixed}")
+            # ================================================================
+            # SUMMARY
+            # ================================================================
+            logger.info(
+                f"[JANITOR] ========== TASK WATCHDOG COMPLETE ==========\n"
+                f"[JANITOR] Scanned: {result.items_scanned} tasks\n"
+                f"[JANITOR] Fixed: {result.items_fixed} tasks\n"
+                f"[JANITOR] Actions: {len(result.actions_taken)}"
+            )
             result.complete(success=True)
 
         except Exception as e:
@@ -446,9 +460,7 @@ class JanitorService:
             logger.error(f"[JANITOR] Traceback: {traceback.format_exc()}")
             result.complete(success=False, error=str(e))
 
-        logger.debug(f"[JANITOR] task_watchdog: Logging run to janitor_runs table")
         self._complete_run(result)
-        logger.debug(f"[JANITOR] task_watchdog: Run complete, returning result")
         return result
 
     # ========================================================================

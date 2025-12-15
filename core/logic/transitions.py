@@ -11,6 +11,9 @@ Exports:
     get_task_terminal_states: Get terminal states for tasks
     is_job_terminal: Check if job is in terminal state
     is_task_terminal: Check if task is in terminal state
+
+Dependencies:
+    core.models.enums: JobStatus, TaskStatus
 """
 
 from typing import List

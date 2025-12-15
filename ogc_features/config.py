@@ -6,6 +6,10 @@ Standalone configuration management for OGC Features API with environment-based 
 Exports:
     OGCFeaturesConfig: Pydantic configuration model for OGC Features API settings
     get_ogc_config: Singleton function for accessing configuration instance
+
+Dependencies:
+    pydantic: Configuration validation
+    Standard library: os for environment variables
 """
 
 import os

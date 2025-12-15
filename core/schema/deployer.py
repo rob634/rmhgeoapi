@@ -15,6 +15,11 @@ Exports:
     SchemaManagerFactory: Factory for creating schema managers
     SchemaManagementError: Schema operation error
     InsufficientPrivilegesError: Permission error
+
+Dependencies:
+    psycopg: PostgreSQL database access
+    config: Application configuration
+    util_logger: Structured logging
 """
 
 import psycopg

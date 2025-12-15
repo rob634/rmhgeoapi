@@ -19,15 +19,24 @@ Authentication Hierarchy:
 4. Visual Studio Code
 5. Azure PowerShell
 
+Exports:
+    IBlobRepository: Abstract interface for blob operations
+    BlobRepository: Singleton blob storage implementation
+
+Dependencies:
+    azure.storage.blob: Blob Storage SDK
+    azure.identity: DefaultAzureCredential for authentication
+    util_logger: Structured logging
+    infrastructure.decorators_blob: Validation decorators
+
 Usage:
     from .factory import RepositoryFactory
 
     # Get authenticated repository
     blob_repo = RepositoryFactory.create_blob_repository()
-    
+
     # Use without worrying about credentials
     data = blob_repo.read_blob('bronze', 'path/to/file.tif')
-    
 """
 
 # ============================================================================

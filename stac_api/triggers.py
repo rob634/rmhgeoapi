@@ -1,5 +1,5 @@
 """
-STAC API HTTP Triggers
+STAC API HTTP Triggers.
 
 Azure Functions HTTP handlers for STAC API v1.0.0 endpoints.
 
@@ -20,6 +20,14 @@ Integration (in function_app.py):
             methods=trigger['methods'],
             auth_level=func.AuthLevel.ANONYMOUS
         )(trigger['handler'])
+
+Exports:
+    get_stac_triggers: Returns list of trigger configurations for route registration
+
+Dependencies:
+    azure.functions: Azure Functions SDK
+    stac_api.config: STAC configuration
+    stac_api.service: STACAPIService
 
 Updated: 11 NOV 2025 - Added all STAC v1.0.0 endpoints
 """

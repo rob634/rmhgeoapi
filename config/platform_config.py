@@ -2,7 +2,7 @@
 Platform Layer Configuration.
 
 Provides configuration for the Platform layer which acts as an Anti-Corruption
-Layer (ACL) between DDH (Data Discovery Hub) and CoreMachine.
+Layer (ACL) between DDH (Development Data Hub) and CoreMachine.
 
 Architecture:
     DDH (external, unstable API) -> Platform (translator) -> CoreMachine (internal, stable)

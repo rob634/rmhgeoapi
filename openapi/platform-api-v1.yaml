@@ -5,7 +5,7 @@ info:
   description: |
     **Platform-as-a-Service for Geospatial Data Processing**
 
-    This API provides data processing services for DDH (Data Discovery Hub) and partners.
+    This API provides data processing services for DDH (Development Data Hub) and partners.
     Submit raw geospatial data, receive processed REST API endpoints.
 
     **Key Features:**
@@ -566,7 +566,7 @@ components:
             Used for tracking, quotas, and client-specific behavior.
 
             **Known Clients:**
-            - "ddh" - Data Discovery Hub (primary client)
+            - "ddh" - Development Data Hub (primary client)
             - "analytics" - Analytics application (future)
             - "mobile" - Mobile app (future)
           example: "ddh"

@@ -11,6 +11,10 @@ Key Features:
 Exports:
     JobSubmissionTrigger: Job submission trigger class
     submit_job_trigger: Singleton trigger instance
+
+Dependencies:
+    azure.functions: Azure Functions SDK
+    triggers.http_base: JobManagementTrigger base class
 """
 
 from typing import Dict, Any, List

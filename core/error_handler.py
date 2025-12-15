@@ -7,6 +7,9 @@ CoreMachine operations. Eliminates duplicate try-catch patterns.
 Exports:
     CoreMachineErrorHandler: Context manager for operation error handling
     log_nested_error: Helper for preserving exception context in cleanup
+
+Dependencies:
+    exceptions: ContractViolationError
 """
 
 from contextlib import contextmanager

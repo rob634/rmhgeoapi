@@ -5,6 +5,11 @@ Business logic orchestration for OGC API - Features endpoints.
 
 Exports:
     OGCFeaturesService: Service coordinating HTTP triggers and repository layer with Pydantic models
+
+Dependencies:
+    ogc_features.config: OGCFeaturesConfig
+    ogc_features.repository: OGCFeaturesRepository
+    ogc_features.models: Pydantic models for OGC responses
 """
 
 import logging

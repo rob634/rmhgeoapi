@@ -10,6 +10,11 @@ Key Pattern:
 
 Exports:
     OrchestrationManager: Manages dynamic task creation for controllers
+
+Dependencies:
+    core.models: TaskDefinition
+    core.schema: OrchestrationInstruction, OrchestrationAction, FileOrchestrationItem, OrchestrationItem
+    util_logger: LoggerFactory, ComponentType
 """
 
 from typing import Dict, Any, List, Optional, Tuple

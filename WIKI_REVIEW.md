@@ -1,6 +1,8 @@
 # WIKI Documentation Review
 
-**Date**: 03 DEC 2025
+> **Navigation**: [Quick Start](WIKI_QUICK_START.md) | [Platform API](WIKI_PLATFORM_API.md) | [All Jobs](WIKI_API_JOB_SUBMISSION.md) | [Errors](WIKI_API_ERRORS.md) | [Glossary](WIKI_API_GLOSSARY.md)
+
+**Date**: 14 DEC 2025
 **Purpose**: Assess freshness and accuracy of all WIKI_*.md files before transfer to Azure DevOps Wiki
 
 ---
@@ -9,23 +11,58 @@
 
 | File | Lines | Last Updated | Status | Action Needed |
 |------|-------|--------------|--------|---------------|
+| **WIKI_PLATFORM_API.md** | ~560 | 14 DEC 2025 | ✅ CANONICAL | DDH integration guide |
 | WIKI_QUICK_START.md | 286 | 24 NOV 2025 | ✅ CURRENT | Minor update (add process_raster_v2) |
-| WIKI_TECHNICAL_OVERVIEW.md | 698 | 18 NOV 2025 | ✅ CURRENT | None |
-| WIKI_API_JOB_SUBMISSION.md | 1611 | 28 NOV 2025 | ✅ CURRENT | None |
-| WIKI_API_DATABASE.md | 442 | 24 NOV 2025 | ✅ CURRENT | None |
+| WIKI_ONBOARDING.md | 300+ | 18 NOV 2025 | ✅ CURRENT | Deep architecture intro |
+| WIKI_TECHNICAL_OVERVIEW.md | 698 | 07 DEC 2025 | ✅ CURRENT | Distributed patterns |
+| WIKI_API_JOB_SUBMISSION.md | 1611 | 28 NOV 2025 | ✅ CURRENT | All job types reference |
+| WIKI_API_DATABASE.md | 776 | 11 DEC 2025 | ✅ CURRENT | None |
 | WIKI_API_ERRORS.md | 848 | 29 NOV 2025 | ✅ CURRENT | None |
 | WIKI_API_GLOSSARY.md | 262 | 24 NOV 2025 | ✅ CURRENT | None |
 | WIKI_API_SERVICE_BUS.md | 1467 | 24 NOV 2025 | ✅ CURRENT | None |
-| WIKI_API_STORAGE.md | 514 | 24 NOV 2025 | ✅ CURRENT | None |
-| WIKI_JOB_PROCESS_RASTER_V2.md | 378 | 28 NOV 2025 | ✅ CURRENT | None - this IS the v2 doc |
-| WIKI_SCHEMA_REBUILD_SQL.md | 636 | 25 NOV 2025 | ✅ CURRENT | None |
-| WIKI_API_PROCESS_RASTER_TRACETHROUGH.md | 1442 | 22 NOV 2025 | ⚠️ OUTDATED | Update to v2 or archive |
-| WIKI_API_PROCESS_RASTER_COLLECTION_TRACETHROUGH.md | ~1300 | 22 NOV 2025 | ⚠️ OUTDATED | Update to v2 or archive |
+| WIKI_API_STORAGE.md | 714 | 08 DEC 2025 | ✅ CURRENT | None |
+| WIKI_JOB_PROCESS_RASTER_V2.md | 378 | 28 NOV 2025 | ✅ CURRENT | JobBaseMixin pattern |
+| WIKI_SCHEMA_REBUILD_SQL.md | 636 | 07 DEC 2025 | ✅ CURRENT | None |
+
+**Archived Files** (in docs/archive/):
+- WIKI_API_PROCESS_RASTER_TRACETHROUGH.md - Outdated v1 trace
+- WIKI_API_PROCESS_RASTER_COLLECTION_TRACETHROUGH.md - Outdated v1 trace
+- WIKI_API_INGEST_VECTOR_TRACETHROUGH.md - Outdated
 
 **Status Legend**:
+- ✅ CANONICAL - Primary authoritative guide
 - ✅ CURRENT - Documentation matches current codebase
 - ⚠️ OUTDATED - References deprecated code/patterns
-- ❌ OBSOLETE - Should be archived, no longer relevant
+
+---
+
+## Recommended Reading Paths
+
+Choose your path based on your role:
+
+### New Developer Path
+Start here to understand the system from scratch.
+```
+WIKI_QUICK_START.md → WIKI_ONBOARDING.md → WIKI_API_GLOSSARY.md
+```
+
+### DDH Integration Path
+For external application developers integrating with the Platform API.
+```
+WIKI_PLATFORM_API.md (canonical) → WIKI_API_ERRORS.md
+```
+
+### DevOps Path
+For infrastructure setup and maintenance.
+```
+WIKI_API_DATABASE.md → WIKI_API_STORAGE.md → WIKI_API_SERVICE_BUS.md
+```
+
+### Job Development Path
+For creating new geospatial processing jobs.
+```
+WIKI_API_JOB_SUBMISSION.md → WIKI_JOB_PROCESS_RASTER_V2.md
+```
 
 ---
 

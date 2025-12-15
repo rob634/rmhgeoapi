@@ -23,12 +23,21 @@ Usage:
     tier = CogTier.VISUALIZATION
     queue = QueueNames.JOBS
 
+    # Get version
+    from config import __version__
+    print(f"Version: {__version__}")
+
     # Debug output
     from config import debug_config
     info = debug_config()  # Passwords masked
 
 Created: 20 NOV 2025 as part of config.py god object refactoring
 """
+
+# ============================================================================
+# VERSION
+# ============================================================================
+__version__ = "0.4.1"
 
 from typing import Optional
 
@@ -169,6 +178,9 @@ def debug_config() -> dict:
 # ============================================================================
 
 __all__ = [
+    # Version
+    '__version__',
+
     # Defaults (single source of truth)
     'AzureDefaults',
     'DatabaseDefaults',

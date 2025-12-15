@@ -2,6 +2,11 @@
 Converter Helper Functions - Pure utility functions for converting data to GeoDataFrames.
 
 These functions are used by converter classes but are independent and reusable.
+
+Exports:
+    xy_df_to_gdf: Convert lat/lon DataFrame to GeoDataFrame with Points
+    wkt_df_to_gdf: Convert WKT column DataFrame to GeoDataFrame
+    extract_from_zip: Extract files from zip archive to temp directory
 """
 
 from io import BytesIO

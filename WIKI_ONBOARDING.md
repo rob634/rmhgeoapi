@@ -1,5 +1,7 @@
 # Geospatial ETL Pipeline - Developer Onboarding
 
+> **Navigation**: [Quick Start](WIKI_QUICK_START.md) | [Platform API](WIKI_PLATFORM_API.md) | [All Jobs](WIKI_API_JOB_SUBMISSION.md) | [Errors](WIKI_API_ERRORS.md) | [Glossary](WIKI_API_GLOSSARY.md)
+
 **Last Updated**: 18 NOV 2025
 **Purpose**: Comprehensive onboarding guide for new developers joining the geospatial data platform team
 

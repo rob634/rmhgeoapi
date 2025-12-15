@@ -13,6 +13,10 @@ Exports:
     BaseHttpTrigger: Base class for HTTP triggers
     JobManagementTrigger: Base class for job management
     SystemMonitoringTrigger: Base class for monitoring
+
+Dependencies:
+    azure.functions: Azure Functions SDK
+    util_logger: LoggerFactory, ComponentType, LogLevel, LogContext
 """
 
 from abc import ABC, abstractmethod

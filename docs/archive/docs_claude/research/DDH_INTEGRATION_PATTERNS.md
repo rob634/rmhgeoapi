@@ -4,7 +4,7 @@
 **Author**: Robert and Geospatial Claude Legion
 **Purpose**: Define access patterns for DDH (primary) and future applications
 
-## DDH (Data Discovery Hub) - Primary Client
+## DDH (Development Data Hub) - Primary Client
 
 DDH is the main data catalog application that:
 - Manages user-submitted datasets with rich metadata
@@ -258,7 +258,7 @@ class ClientConfiguration(BaseModel):
 REGISTERED_CLIENTS = {
     "ddh_v1": ClientConfiguration(
         client_id="ddh_v1",
-        client_name="Data Discovery Hub",
+        client_name="Development Data Hub",
         access_pattern="catalog",
         auth_method="webhook_token",
         auth_config={"token_header": "X-DDH-Token"},

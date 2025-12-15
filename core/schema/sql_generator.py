@@ -7,6 +7,11 @@ Pydantic models are the single source of truth for schema.
 
 Exports:
     PydanticToSQL: Generator class for SQL DDL from Pydantic models
+
+Dependencies:
+    pydantic: Model introspection
+    psycopg: SQL composition
+    core.models: JobRecord, TaskRecord, and status enums
 """
 
 from typing import Dict, List, Optional, Type, get_args, get_origin, Any, Union

@@ -8,6 +8,12 @@ Handles the complete workflow of preparing and uploading vector data to PostGIS:
 
 Exports:
     VectorToPostGISHandler: Main handler class for PostGIS vector operations
+
+Dependencies:
+    geopandas: GeoDataFrame handling
+    psycopg: PostgreSQL database access
+    config: Application configuration
+    util_logger: Structured logging
 """
 
 from typing import List, Dict, Any, Literal

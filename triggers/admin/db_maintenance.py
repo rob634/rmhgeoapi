@@ -3,6 +3,9 @@ Database Maintenance Admin Trigger.
 
 Database maintenance operations with SQL injection prevention.
 
+Consolidated endpoint pattern (15 DEC 2025):
+    POST /api/dbadmin/maintenance?action={nuke|redeploy|cleanup|full-rebuild}&target={app|pgstac}
+
 Exports:
     AdminDbMaintenanceTrigger: HTTP trigger class for maintenance operations
     admin_db_maintenance_trigger: Singleton instance of AdminDbMaintenanceTrigger
@@ -11,6 +14,7 @@ Exports:
 import azure.functions as func
 import json
 import logging
+from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, List, Optional
 import traceback
@@ -26,15 +30,66 @@ from util_logger import LoggerFactory, ComponentType
 logger = LoggerFactory.create_logger(ComponentType.TRIGGER, "AdminDbMaintenance")
 
 
+@dataclass
+class RouteDefinition:
+    """Route configuration for registry pattern."""
+    route: str
+    methods: list
+    handler: str
+    description: str
+
+
 class AdminDbMaintenanceTrigger:
     """
     Admin trigger for PostgreSQL maintenance operations.
 
     Singleton pattern for consistent configuration across requests.
     All operations require confirmation parameters.
+
+    Consolidated API (15 DEC 2025):
+        POST /api/dbadmin/maintenance?action={nuke|redeploy|cleanup|full-rebuild|check-prerequisites}&target={app|pgstac}&confirm=yes
     """
 
     _instance: Optional['AdminDbMaintenanceTrigger'] = None
+
+    # ========================================================================
+    # ROUTE REGISTRY - Single source of truth for function_app.py
+    # ========================================================================
+    ROUTES = [
+        RouteDefinition(
+            route="dbadmin/maintenance",
+            methods=["POST", "GET"],
+            handler="handle_maintenance",
+            description="Consolidated maintenance: ?action={nuke|redeploy|cleanup|full-rebuild|check-prerequisites}&target={app|pgstac}"
+        ),
+        RouteDefinition(
+            route="dbadmin/geo",
+            methods=["GET", "POST"],
+            handler="handle_geo",
+            description="Consolidated geo ops: ?type={tables|metadata|orphans} or ?action=unpublish"
+        ),
+    ]
+
+    # ========================================================================
+    # OPERATIONS REGISTRY - Maps action param to handler method
+    # ========================================================================
+    OPERATIONS = {
+        "nuke": "_nuke_schema",
+        "redeploy": "_redeploy_schema",
+        "cleanup": "_cleanup_old_records",
+        "full-rebuild": "_full_rebuild",
+        "check-prerequisites": "_check_pgstac_prerequisites",
+    }
+
+    GEO_READ_OPERATIONS = {
+        "tables": "_list_geo_tables",
+        "metadata": "_list_metadata",
+        "orphans": "_check_geo_orphans",
+    }
+
+    GEO_WRITE_OPERATIONS = {
+        "unpublish": "_unpublish_geo_table",
+    }
 
     def __new__(cls):
         """Singleton pattern - reuse instance across requests."""
@@ -66,72 +121,154 @@ class AdminDbMaintenanceTrigger:
             self._db_repo = repos['job_repo']
         return self._db_repo
 
-    def handle_request(self, req: func.HttpRequest) -> func.HttpResponse:
+    def handle_maintenance(self, req: func.HttpRequest) -> func.HttpResponse:
         """
-        Route admin database maintenance requests.
+        Consolidated maintenance endpoint (15 DEC 2025).
 
-        Routes:
-            POST /api/dbadmin/maintenance/nuke
-            POST /api/dbadmin/maintenance/redeploy
-            POST /api/dbadmin/maintenance/cleanup
+        POST /api/dbadmin/maintenance?action={nuke|redeploy|cleanup|full-rebuild|check-prerequisites}&target={app|pgstac}&confirm=yes
 
-        Args:
-            req: Azure Function HTTP request
+        Query Parameters:
+            action: Operation to perform (required)
+                - nuke: Drop all schema objects (DESTRUCTIVE)
+                - redeploy: Drop and recreate schema (target determines which)
+                - cleanup: Remove old completed jobs/tasks
+                - full-rebuild: Atomic rebuild of both app+pgstac schemas
+                - check-prerequisites: Verify pgstac requirements
+            target: Schema target (default: app)
+                - app: Application schema (jobs, tasks)
+                - pgstac: STAC catalog schema
+            confirm: Must be 'yes' for destructive operations
+            days: For cleanup, records older than N days (default: 30)
 
         Returns:
             JSON response with operation results
         """
         try:
-            # Determine operation from path
-            # Handle current routes (/api/dbadmin/maintenance/*) and deprecated routes (/api/db/*)
-            url = req.url
+            action = req.params.get('action')
+            target = req.params.get('target', 'app')
 
-            # Extract operation name
-            if '/dbadmin/maintenance/' in url:
-                # Current route pattern (16 NOV 2025)
-                path = url.split('/dbadmin/maintenance/')[-1].split('?')[0].strip('/')
-            elif 'dbadmin/maintenance/' in url:
-                # Current route pattern (no leading slash)
-                path = url.split('dbadmin/maintenance/')[-1].split('?')[0].strip('/')
-            elif '/db/maintenance/' in url:
-                # Deprecated route pattern
-                path = url.split('/db/maintenance/')[-1].split('?')[0].strip('/')
-            elif 'db/maintenance/' in url:
-                # Deprecated route pattern (no leading slash)
-                path = url.split('db/maintenance/')[-1].split('?')[0].strip('/')
-            elif '/db/schema/' in url:
-                # Deprecated route pattern (old)
-                path = url.split('/db/schema/')[-1].split('?')[0].strip('/')
-            elif 'db/schema/' in url:
-                # Deprecated route pattern (old, no leading slash)
-                path = url.split('db/schema/')[-1].split('?')[0].strip('/')
-            else:
-                path = ''
+            logger.info(f"📥 Maintenance request: action={action}, target={target}")
 
-            logger.info(f"📥 Admin DB Maintenance request: url={url}, operation={path}")
-
-            # Route to appropriate handler
-            if path == 'nuke':
-                return self._nuke_schema(req)
-            elif path == 'redeploy':
-                return self._redeploy_schema(req)
-            elif path == 'pgstac/redeploy' or path == 'redeploy-pgstac':
-                return self._redeploy_pgstac_schema(req)
-            elif path == 'pgstac/check-prerequisites' or path == 'check-prerequisites':
-                return self._check_pgstac_prerequisites(req)
-            elif path == 'full-rebuild':
-                return self._full_rebuild(req)
-            elif path == 'cleanup':
-                return self._cleanup_old_records(req)
-            else:
+            # Validate action parameter
+            if not action:
                 return func.HttpResponse(
-                    body=json.dumps({'error': f'Unknown operation: {path}', 'url': url}),
-                    status_code=404,
+                    body=json.dumps({
+                        'error': "action parameter required",
+                        'valid_actions': list(self.OPERATIONS.keys()),
+                        'usage': 'POST /api/dbadmin/maintenance?action={action}&target={app|pgstac}&confirm=yes',
+                        'timestamp': datetime.now(timezone.utc).isoformat()
+                    }),
+                    status_code=400,
                     mimetype='application/json'
                 )
 
+            # Handle pgstac-specific redeploy
+            if action == 'redeploy' and target == 'pgstac':
+                return self._redeploy_pgstac_schema(req)
+
+            if action not in self.OPERATIONS:
+                return func.HttpResponse(
+                    body=json.dumps({
+                        'error': f"Invalid action: '{action}'",
+                        'valid_actions': list(self.OPERATIONS.keys()),
+                        'usage': 'POST /api/dbadmin/maintenance?action={action}&target={app|pgstac}&confirm=yes',
+                        'timestamp': datetime.now(timezone.utc).isoformat()
+                    }),
+                    status_code=400,
+                    mimetype='application/json'
+                )
+
+            # Dispatch to handler method from registry
+            handler_method = getattr(self, self.OPERATIONS[action])
+            return handler_method(req)
+
         except Exception as e:
-            logger.error(f"❌ Error in AdminDbMaintenanceTrigger: {e}")
+            logger.error(f"❌ Error in handle_maintenance: {e}")
+            logger.error(traceback.format_exc())
+            return func.HttpResponse(
+                body=json.dumps({
+                    'error': str(e),
+                    'timestamp': datetime.now(timezone.utc).isoformat()
+                }),
+                status_code=500,
+                mimetype='application/json'
+            )
+
+    def handle_geo(self, req: func.HttpRequest) -> func.HttpResponse:
+        """
+        Consolidated geo schema operations (15 DEC 2025).
+
+        GET /api/dbadmin/geo?type={tables|metadata|orphans}
+        POST /api/dbadmin/geo?action=unpublish&table_name={name}&confirm=yes
+
+        GET Query Parameters:
+            type: Read operation type (default: tables)
+                - tables: List geo tables with tracking status
+                - metadata: List geo.table_metadata records
+                - orphans: Check for orphaned tables/metadata
+
+        POST Query Parameters:
+            action: Write operation (required)
+                - unpublish: Cascade delete table
+            table_name: Table to unpublish (required for unpublish)
+            confirm: Must be 'yes' for destructive operations
+
+        Returns:
+            JSON response with requested data
+        """
+        try:
+            if req.method == 'POST':
+                # Write operations
+                action = req.params.get('action')
+                logger.info(f"📥 Geo write request: action={action}")
+
+                if not action:
+                    return func.HttpResponse(
+                        body=json.dumps({
+                            'error': "action parameter required for POST",
+                            'valid_actions': list(self.GEO_WRITE_OPERATIONS.keys()),
+                            'usage': 'POST /api/dbadmin/geo?action=unpublish&table_name={name}&confirm=yes',
+                            'timestamp': datetime.now(timezone.utc).isoformat()
+                        }),
+                        status_code=400,
+                        mimetype='application/json'
+                    )
+
+                if action not in self.GEO_WRITE_OPERATIONS:
+                    return func.HttpResponse(
+                        body=json.dumps({
+                            'error': f"Invalid action: '{action}'",
+                            'valid_actions': list(self.GEO_WRITE_OPERATIONS.keys()),
+                            'timestamp': datetime.now(timezone.utc).isoformat()
+                        }),
+                        status_code=400,
+                        mimetype='application/json'
+                    )
+
+                handler_method = getattr(self, self.GEO_WRITE_OPERATIONS[action])
+                return handler_method(req)
+
+            else:
+                # Read operations (GET)
+                op_type = req.params.get('type', 'tables')
+                logger.info(f"📥 Geo read request: type={op_type}")
+
+                if op_type not in self.GEO_READ_OPERATIONS:
+                    return func.HttpResponse(
+                        body=json.dumps({
+                            'error': f"Invalid type: '{op_type}'",
+                            'valid_types': list(self.GEO_READ_OPERATIONS.keys()),
+                            'timestamp': datetime.now(timezone.utc).isoformat()
+                        }),
+                        status_code=400,
+                        mimetype='application/json'
+                    )
+
+                handler_method = getattr(self, self.GEO_READ_OPERATIONS[op_type])
+                return handler_method(req)
+
+        except Exception as e:
+            logger.error(f"❌ Error in handle_geo: {e}")
             logger.error(traceback.format_exc())
             return func.HttpResponse(
                 body=json.dumps({

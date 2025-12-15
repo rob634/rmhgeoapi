@@ -139,18 +139,19 @@ def log_memory_checkpoint(logger: logging.Logger, checkpoint_name: str, **extra_
 class ComponentType(Enum):
     """
     Component types aligned with pyramid architecture layers.
-    
+
     Each layer has specific logging needs and levels.
     NO "UTIL" or other non-architectural types.
     """
     CONTROLLER = "controller"  # Job orchestration layer
-    SERVICE = "service"        # Business logic layer  
+    SERVICE = "service"        # Business logic layer
     REPOSITORY = "repository"  # Data access layer
     FACTORY = "factory"        # Object creation layer
     SCHEMA = "schema"          # Foundation layer
     TRIGGER = "trigger"        # Entry point layer
     ADAPTER = "adapter"        # External integration layer
     VALIDATOR = "validator"    # Validation layer (import validator, etc.)
+    JOB = "job"                # Job class layer (15 DEC 2025)
 
 
 # ============================================================================

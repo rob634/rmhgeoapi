@@ -3,6 +3,10 @@ Database Diagnostics Admin Trigger.
 
 Database diagnostics and system testing endpoints.
 
+Consolidated endpoint pattern (15 DEC 2025):
+    GET /api/dbadmin/diagnostics?type={stats|enums|functions|all|config|errors}
+    GET /api/dbadmin/diagnostics?type=lineage&job_id={job_id}
+
 Exports:
     AdminDbDiagnosticsTrigger: HTTP trigger class for diagnostics
     admin_db_diagnostics_trigger: Singleton instance of AdminDbDiagnosticsTrigger
@@ -11,6 +15,7 @@ Exports:
 import azure.functions as func
 import json
 import logging
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional
 import traceback
@@ -22,14 +27,59 @@ from config import get_config
 logger = LoggerFactory.create_logger(ComponentType.TRIGGER, "AdminDbDiagnostics")
 
 
+# ============================================================================
+# ROUTE REGISTRY PATTERN (15 DEC 2025)
+# ============================================================================
+# Single source of truth for route definitions.
+# Used by function_app.py to register routes dynamically.
+# ============================================================================
+
+@dataclass
+class RouteDefinition:
+    """Route configuration for registry pattern."""
+    route: str
+    methods: list
+    handler: str  # Method name on trigger class
+    description: str
+
+
 class AdminDbDiagnosticsTrigger:
     """
     Admin trigger for database diagnostics and testing.
 
     Singleton pattern for consistent configuration across requests.
+
+    Consolidated API (15 DEC 2025):
+        GET /api/dbadmin/diagnostics?type={stats|enums|functions|all|config|errors}
+        GET /api/dbadmin/diagnostics?type=lineage&job_id={job_id}
     """
 
     _instance: Optional['AdminDbDiagnosticsTrigger'] = None
+
+    # ========================================================================
+    # ROUTE REGISTRY - Single source of truth for function_app.py
+    # ========================================================================
+    ROUTES = [
+        RouteDefinition(
+            route="dbadmin/diagnostics",
+            methods=["GET"],
+            handler="handle_diagnostics",
+            description="Consolidated diagnostics: ?type={stats|enums|functions|all|config|errors|lineage}"
+        ),
+    ]
+
+    # ========================================================================
+    # OPERATIONS REGISTRY - Maps type param to handler method
+    # ========================================================================
+    OPERATIONS = {
+        "stats": "_get_stats",
+        "enums": "_get_enum_diagnostic",
+        "functions": "_test_functions",
+        "all": "_get_all_diagnostics",
+        "config": "_get_config_audit",
+        "lineage": "_get_etl_lineage",
+        "errors": "_get_error_aggregation",
+    }
 
     def __new__(cls):
         """Singleton pattern - reuse instance across requests."""
@@ -62,93 +112,68 @@ class AdminDbDiagnosticsTrigger:
             self._db_repo = repos['job_repo']
         return self._db_repo
 
-    def handle_request(self, req: func.HttpRequest) -> func.HttpResponse:
+    def handle_diagnostics(self, req: func.HttpRequest) -> func.HttpResponse:
         """
-        Route admin database diagnostics requests.
+        Consolidated diagnostics endpoint (15 DEC 2025).
 
-        Routes:
-            GET /api/admin/db/stats
-            GET /api/admin/db/diagnostics/enums
-            GET /api/admin/db/diagnostics/functions
-            GET /api/admin/db/diagnostics/all
+        GET /api/dbadmin/diagnostics?type={stats|enums|functions|all|config|errors}
+        GET /api/dbadmin/diagnostics?type=lineage&job_id={job_id}
 
-        Args:
-            req: Azure Function HTTP request
+        Query Parameters:
+            type: Diagnostic type (required)
+                - stats: Database statistics
+                - enums: PostgreSQL enum diagnostics
+                - functions: Test PostgreSQL functions
+                - all: All diagnostics combined
+                - config: Configuration audit
+                - lineage: ETL lineage (requires job_id)
+                - errors: Error aggregation
+            job_id: Required when type=lineage
+            hours: For errors type (default: 24)
+            limit: For errors type (default: 10)
 
         Returns:
             JSON response with diagnostic results
         """
         try:
-            # Parse route to determine operation
-            # Azure Functions provides URL without /api/ prefix in route
-            # URL format: dbadmin/stats or dbadmin/diagnostics/enums
-            url = req.url
+            diag_type = req.params.get('type', 'all')
 
-            # Extract path after dbadmin/
-            if '/dbadmin/' in url:
-                path = url.split('/dbadmin/')[-1].strip('/')
-            elif 'dbadmin/' in url:
-                path = url.split('dbadmin/')[-1].strip('/')
-            else:
-                path = ''
+            logger.info(f"📥 Diagnostics request: type={diag_type}")
 
-            # Strip query string if present
-            if '?' in path:
-                path = path.split('?')[0].strip('/')
-
-            path_parts = path.split('/') if path else []
-
-            logger.info(f"📥 Admin DB Diagnostics request: url={url}, path={path}, parts={path_parts}, method={req.method}")
-
-            # Route to appropriate handler
-            if path_parts[0] == 'stats':
-                return self._get_stats(req)
-
-            elif path_parts[0] == 'diagnostics':
-                if len(path_parts) < 2:
-                    return func.HttpResponse(
-                        body=json.dumps({'error': 'Invalid diagnostics path'}),
-                        status_code=400,
-                        mimetype='application/json'
-                    )
-
-                diagnostic_type = path_parts[1]
-
-                if diagnostic_type == 'enums':
-                    return self._get_enum_diagnostic(req)
-                elif diagnostic_type == 'functions':
-                    return self._test_functions(req)
-                elif diagnostic_type == 'all':
-                    return self._get_all_diagnostics(req)
-                elif diagnostic_type == 'config':
-                    return self._get_config_audit(req)
-                elif diagnostic_type == 'lineage':
-                    # Lineage requires job_id: /diagnostics/lineage/{job_id}
-                    if len(path_parts) < 3:
-                        return func.HttpResponse(
-                            body=json.dumps({'error': 'job_id required: /diagnostics/lineage/{job_id}'}),
-                            status_code=400,
-                            mimetype='application/json'
-                        )
-                    job_id = path_parts[2]
-                    return self._get_etl_lineage(req, job_id)
-                elif diagnostic_type == 'errors':
-                    return self._get_error_aggregation(req)
-                else:
-                    return func.HttpResponse(
-                        body=json.dumps({'error': f'Unknown diagnostic type: {diagnostic_type}'}),
-                        status_code=404,
-                        mimetype='application/json'
-                    )
-            else:
+            # Validate type parameter
+            if diag_type not in self.OPERATIONS:
                 return func.HttpResponse(
-                    body=json.dumps({'error': f'Unknown operation: {path_parts[0]}'}),
-                    status_code=404,
+                    body=json.dumps({
+                        'error': f"Invalid diagnostic type: '{diag_type}'",
+                        'valid_types': list(self.OPERATIONS.keys()),
+                        'usage': 'GET /api/dbadmin/diagnostics?type={type}',
+                        'timestamp': datetime.now(timezone.utc).isoformat()
+                    }),
+                    status_code=400,
                     mimetype='application/json'
                 )
 
+            # Special handling for lineage (requires job_id)
+            if diag_type == 'lineage':
+                job_id = req.params.get('job_id')
+                if not job_id:
+                    return func.HttpResponse(
+                        body=json.dumps({
+                            'error': "job_id parameter required for lineage diagnostic",
+                            'usage': 'GET /api/dbadmin/diagnostics?type=lineage&job_id={job_id}',
+                            'timestamp': datetime.now(timezone.utc).isoformat()
+                        }),
+                        status_code=400,
+                        mimetype='application/json'
+                    )
+                return self._get_etl_lineage(req, job_id)
+
+            # Dispatch to handler method from registry
+            handler_method = getattr(self, self.OPERATIONS[diag_type])
+            return handler_method(req)
+
         except Exception as e:
-            logger.error(f"❌ Error in AdminDbDiagnosticsTrigger: {e}")
+            logger.error(f"❌ Error in handle_diagnostics: {e}")
             logger.error(traceback.format_exc())
             return func.HttpResponse(
                 body=json.dumps({

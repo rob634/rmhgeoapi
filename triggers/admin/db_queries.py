@@ -3,6 +3,9 @@ Database Queries Admin Trigger.
 
 PostgreSQL query analysis and connection monitoring.
 
+Consolidated endpoint pattern (15 DEC 2025):
+    GET /api/dbadmin/activity?type={running|slow|locks|connections}
+
 Exports:
     AdminDbQueriesTrigger: HTTP trigger class for query analysis
     admin_db_queries_trigger: Singleton instance of AdminDbQueriesTrigger
@@ -11,6 +14,7 @@ Exports:
 import azure.functions as func
 import json
 import logging
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional
 import traceback
@@ -21,14 +25,48 @@ from util_logger import LoggerFactory, ComponentType
 logger = LoggerFactory.create_logger(ComponentType.TRIGGER, "AdminDbQueries")
 
 
+@dataclass
+class RouteDefinition:
+    """Route configuration for registry pattern."""
+    route: str
+    methods: list
+    handler: str
+    description: str
+
+
 class AdminDbQueriesTrigger:
     """
     Admin trigger for PostgreSQL query analysis.
 
     Singleton pattern for consistent configuration across requests.
+
+    Consolidated API (15 DEC 2025):
+        GET /api/dbadmin/activity?type={running|slow|locks|connections}
     """
 
     _instance: Optional['AdminDbQueriesTrigger'] = None
+
+    # ========================================================================
+    # ROUTE REGISTRY - Single source of truth for function_app.py
+    # ========================================================================
+    ROUTES = [
+        RouteDefinition(
+            route="dbadmin/activity",
+            methods=["GET"],
+            handler="handle_activity",
+            description="Consolidated activity: ?type={running|slow|locks|connections}"
+        ),
+    ]
+
+    # ========================================================================
+    # OPERATIONS REGISTRY - Maps type param to handler method
+    # ========================================================================
+    OPERATIONS = {
+        "running": "_get_running_queries",
+        "slow": "_get_slow_queries",
+        "locks": "_get_locks",
+        "connections": "_get_connections",
+    }
 
     def __new__(cls):
         """Singleton pattern - reuse instance across requests."""
@@ -60,46 +98,42 @@ class AdminDbQueriesTrigger:
             self._db_repo = repos['job_repo']
         return self._db_repo
 
-    def handle_request(self, req: func.HttpRequest) -> func.HttpResponse:
+    def handle_activity(self, req: func.HttpRequest) -> func.HttpResponse:
         """
-        Route admin database query analysis requests.
+        Consolidated activity endpoint with type parameter.
 
-        Routes:
-            GET /api/db/queries/running
-            GET /api/db/queries/slow
-            GET /api/db/locks
-            GET /api/db/connections
+        GET /api/dbadmin/activity?type={running|slow|locks|connections}
 
-        Args:
-            req: Azure Function HTTP request
+        Query Parameters:
+            type: Activity type (default: running)
+                - running: Currently running queries
+                - slow: Slow query statistics (requires pg_stat_statements)
+                - locks: Current database locks
+                - connections: Connection statistics
 
         Returns:
-            JSON response with query analysis
+            JSON response with requested activity data
         """
         try:
-            # Determine operation from path
-            path = req.url.split('/api/db/')[-1].strip('/')
+            activity_type = req.params.get('type', 'running')
+            logger.info(f"📥 DB Activity request: type={activity_type}")
 
-            logger.info(f"📥 Admin DB Queries request: {path}")
-
-            # Route to appropriate handler
-            if path == 'queries/running':
-                return self._get_running_queries(req)
-            elif path == 'queries/slow':
-                return self._get_slow_queries(req)
-            elif path == 'locks':
-                return self._get_locks(req)
-            elif path == 'connections':
-                return self._get_connections(req)
-            else:
+            if activity_type not in self.OPERATIONS:
                 return func.HttpResponse(
-                    body=json.dumps({'error': f'Unknown operation: {path}'}),
-                    status_code=404,
+                    body=json.dumps({
+                        'error': f"Unknown activity type: {activity_type}",
+                        'valid_types': list(self.OPERATIONS.keys()),
+                        'timestamp': datetime.now(timezone.utc).isoformat()
+                    }),
+                    status_code=400,
                     mimetype='application/json'
                 )
 
+            handler_method = getattr(self, self.OPERATIONS[activity_type])
+            return handler_method(req)
+
         except Exception as e:
-            logger.error(f"❌ Error in AdminDbQueriesTrigger: {e}")
+            logger.error(f"❌ Error in handle_activity: {e}")
             logger.error(traceback.format_exc())
             return func.HttpResponse(
                 body=json.dumps({

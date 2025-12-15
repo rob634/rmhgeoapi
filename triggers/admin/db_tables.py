@@ -3,6 +3,9 @@ Database Tables Admin Trigger.
 
 Table-level inspection of PostgreSQL tables with PostGIS support.
 
+Consolidated endpoint pattern (15 DEC 2025):
+    GET /api/dbadmin/tables/{table_identifier}?type={details|sample|columns|indexes}
+
 Exports:
     AdminDbTablesTrigger: HTTP trigger class for table operations
     admin_db_tables_trigger: Singleton instance of AdminDbTablesTrigger
@@ -11,6 +14,7 @@ Exports:
 import azure.functions as func
 import json
 import logging
+from dataclasses import dataclass
 from datetime import datetime, timezone, date
 from typing import Dict, Any, List, Optional
 import traceback
@@ -20,6 +24,15 @@ from infrastructure import RepositoryFactory, PostgreSQLRepository
 from util_logger import LoggerFactory, ComponentType
 
 logger = LoggerFactory.create_logger(ComponentType.TRIGGER, "AdminDbTables")
+
+
+@dataclass
+class RouteDefinition:
+    """Route configuration for registry pattern."""
+    route: str
+    methods: list
+    handler: str
+    description: str
 
 
 def json_serial(obj):
@@ -37,9 +50,34 @@ class AdminDbTablesTrigger:
 
     Singleton pattern for consistent configuration across requests.
     Handles geometry columns gracefully for geo schema.
+
+    Consolidated API (15 DEC 2025):
+        GET /api/dbadmin/tables/{table_identifier}?type={details|sample|columns|indexes}
     """
 
     _instance: Optional['AdminDbTablesTrigger'] = None
+
+    # ========================================================================
+    # ROUTE REGISTRY - Single source of truth for function_app.py
+    # ========================================================================
+    ROUTES = [
+        RouteDefinition(
+            route="dbadmin/tables/{table_identifier}",
+            methods=["GET"],
+            handler="handle_tables",
+            description="Consolidated table ops: ?type={details|sample|columns|indexes}"
+        ),
+    ]
+
+    # ========================================================================
+    # OPERATIONS REGISTRY - Maps type param to handler method
+    # ========================================================================
+    OPERATIONS = {
+        "details": "_get_table_details",
+        "sample": "_get_table_sample",
+        "columns": "_get_table_columns",
+        "indexes": "_get_table_indexes",
+    }
 
     def __new__(cls):
         """Singleton pattern - reuse instance across requests."""
@@ -71,21 +109,24 @@ class AdminDbTablesTrigger:
             self._db_repo = repos['job_repo']
         return self._db_repo
 
-    def handle_request(self, req: func.HttpRequest) -> func.HttpResponse:
+    def handle_tables(self, req: func.HttpRequest) -> func.HttpResponse:
         """
-        Route admin database table requests.
+        Consolidated table endpoint with type parameter.
 
-        Routes:
-            GET /api/admin/db/tables/{schema}.{table}
-            GET /api/admin/db/tables/{schema}.{table}/sample
-            GET /api/admin/db/tables/{schema}.{table}/columns
-            GET /api/admin/db/tables/{schema}.{table}/indexes
+        GET /api/dbadmin/tables/{table_identifier}?type={details|sample|columns|indexes}
 
-        Args:
-            req: Azure Function HTTP request
+        Path Parameters:
+            table_identifier: Schema.table format (e.g., "geo.parcels")
+
+        Query Parameters:
+            type: Operation type (default: details)
+                - details: Table statistics and overview
+                - sample: Sample rows with geometry conversion
+                - columns: Column definitions
+                - indexes: Index definitions
 
         Returns:
-            JSON response with table information
+            JSON response with requested table data
         """
         try:
             # Parse schema.table from route
@@ -98,30 +139,26 @@ class AdminDbTablesTrigger:
                 )
 
             schema_name, table_name = table_param.split('.', 1)
+            op_type = req.params.get('type', 'details')
 
-            # Get path suffix to determine operation
-            path = req.url.split(f'/tables/{table_param}')[-1].strip('/')
+            logger.info(f"📥 Table request: {schema_name}.{table_name}, type={op_type}")
 
-            logger.info(f"📥 Admin DB Tables request: schema={schema_name}, table={table_name}, operation={path or 'details'}")
-
-            # Route to appropriate handler
-            if not path:
-                return self._get_table_details(req, schema_name, table_name)
-            elif path == 'sample':
-                return self._get_table_sample(req, schema_name, table_name)
-            elif path == 'columns':
-                return self._get_table_columns(req, schema_name, table_name)
-            elif path == 'indexes':
-                return self._get_table_indexes(req, schema_name, table_name)
-            else:
+            if op_type not in self.OPERATIONS:
                 return func.HttpResponse(
-                    body=json.dumps({'error': f'Unknown operation: {path}'}),
-                    status_code=404,
+                    body=json.dumps({
+                        'error': f"Unknown operation type: {op_type}",
+                        'valid_types': list(self.OPERATIONS.keys()),
+                        'timestamp': datetime.now(timezone.utc).isoformat()
+                    }),
+                    status_code=400,
                     mimetype='application/json'
                 )
 
+            handler_method = getattr(self, self.OPERATIONS[op_type])
+            return handler_method(req, schema_name, table_name)
+
         except Exception as e:
-            logger.error(f"❌ Error in AdminDbTablesTrigger: {e}")
+            logger.error(f"❌ Error in handle_tables: {e}")
             logger.error(traceback.format_exc())
             return func.HttpResponse(
                 body=json.dumps({

@@ -408,54 +408,20 @@ def db_schema_tables(req: func.HttpRequest) -> func.HttpResponse:
     return admin_db_schemas_trigger.handle_request(req)
 
 
-# Table-level operations
+# Table-level operations - CONSOLIDATED (15 DEC 2025)
+# GET /api/dbadmin/tables/{schema}.{table}?type={details|sample|columns|indexes}
 @app.route(route="dbadmin/tables/{table_identifier}", methods=["GET"])
-def db_table_details(req: func.HttpRequest) -> func.HttpResponse:
-    """Get table details: GET /api/dbadmin/tables/{schema}.{table}"""
-    return admin_db_tables_trigger.handle_request(req)
+def db_tables(req: func.HttpRequest) -> func.HttpResponse:
+    """Consolidated table ops: ?type={details|sample|columns|indexes}"""
+    return admin_db_tables_trigger.handle_tables(req)
 
 
-@app.route(route="dbadmin/tables/{table_identifier}/sample", methods=["GET"])
-def db_table_sample(req: func.HttpRequest) -> func.HttpResponse:
-    """Sample table rows: GET /api/dbadmin/tables/{schema}.{table}/sample"""
-    return admin_db_tables_trigger.handle_request(req)
-
-
-@app.route(route="dbadmin/tables/{table_identifier}/columns", methods=["GET"])
-def db_table_columns(req: func.HttpRequest) -> func.HttpResponse:
-    """Get table columns: GET /api/dbadmin/tables/{schema}.{table}/columns"""
-    return admin_db_tables_trigger.handle_request(req)
-
-
-@app.route(route="dbadmin/tables/{table_identifier}/indexes", methods=["GET"])
-def db_table_indexes(req: func.HttpRequest) -> func.HttpResponse:
-    """Get table indexes: GET /api/dbadmin/tables/{schema}.{table}/indexes"""
-    return admin_db_tables_trigger.handle_request(req)
-
-
-# Query analysis
-@app.route(route="dbadmin/queries/running", methods=["GET"])
-def db_queries_running(req: func.HttpRequest) -> func.HttpResponse:
-    """Get running queries: GET /api/dbadmin/queries/running"""
-    return admin_db_queries_trigger.handle_request(req)
-
-
-@app.route(route="dbadmin/queries/slow", methods=["GET"])
-def db_queries_slow(req: func.HttpRequest) -> func.HttpResponse:
-    """Get slow queries: GET /api/dbadmin/queries/slow"""
-    return admin_db_queries_trigger.handle_request(req)
-
-
-@app.route(route="dbadmin/locks", methods=["GET"])
-def db_locks(req: func.HttpRequest) -> func.HttpResponse:
-    """Get database locks: GET /api/dbadmin/locks"""
-    return admin_db_queries_trigger.handle_request(req)
-
-
-@app.route(route="dbadmin/connections", methods=["GET"])
-def db_connections(req: func.HttpRequest) -> func.HttpResponse:
-    """Get connection stats: GET /api/dbadmin/connections"""
-    return admin_db_queries_trigger.handle_request(req)
+# Query analysis - CONSOLIDATED (15 DEC 2025)
+# GET /api/dbadmin/activity?type={running|slow|locks|connections}
+@app.route(route="dbadmin/activity", methods=["GET"])
+def db_activity(req: func.HttpRequest) -> func.HttpResponse:
+    """Consolidated DB activity: ?type={running|slow|locks|connections}"""
+    return admin_db_queries_trigger.handle_activity(req)
 
 
 # Health and performance
@@ -471,50 +437,28 @@ def db_health_performance(req: func.HttpRequest) -> func.HttpResponse:
     return admin_db_health_trigger.handle_request(req)
 
 
-# Maintenance operations (Keep for QA, remove for UAT/PROD)
-@app.route(route="dbadmin/maintenance/nuke", methods=["POST"])
-def db_maintenance_nuke(req: func.HttpRequest) -> func.HttpResponse:
-    """⚠️ FCO - Keep for QA, remove before UAT. POST /api/dbadmin/maintenance/nuke?confirm=yes"""
-    return admin_db_maintenance_trigger.handle_request(req)
+# ============================================================================
+# CONSOLIDATED MAINTENANCE ENDPOINT (15 DEC 2025)
+# ============================================================================
+# Replaces 6 separate routes with single parameterized endpoint:
+#   OLD: /dbadmin/maintenance/nuke, /redeploy, /cleanup, /pgstac/redeploy, /pgstac/check-prerequisites, /full-rebuild
+#   NEW: /dbadmin/maintenance?action={nuke|redeploy|cleanup|full-rebuild|check-prerequisites}&target={app|pgstac}
+# ============================================================================
 
-
-@app.route(route="dbadmin/maintenance/redeploy", methods=["POST"])
-def db_maintenance_redeploy(req: func.HttpRequest) -> func.HttpResponse:
-    """⚠️ FCO - Keep for QA, remove before UAT. POST /api/dbadmin/maintenance/redeploy?confirm=yes"""
-    return admin_db_maintenance_trigger.handle_request(req)
-
-
-@app.route(route="dbadmin/maintenance/cleanup", methods=["POST"])
-def db_maintenance_cleanup(req: func.HttpRequest) -> func.HttpResponse:
-    """⚠️ FCO - Keep for QA, remove before UAT. POST /api/dbadmin/maintenance/cleanup?confirm=yes&days=30"""
-    return admin_db_maintenance_trigger.handle_request(req)
-
-
-@app.route(route="dbadmin/maintenance/pgstac/redeploy", methods=["POST"])
-def db_maintenance_pgstac_redeploy(req: func.HttpRequest) -> func.HttpResponse:
-    """⚠️ FCO - Keep for QA, remove before UAT. POST /api/dbadmin/maintenance/pgstac/redeploy?confirm=yes"""
-    return admin_db_maintenance_trigger.handle_request(req)
-
-
-@app.route(route="dbadmin/maintenance/pgstac/check-prerequisites", methods=["GET", "POST"])
-def db_maintenance_pgstac_check_prerequisites(req: func.HttpRequest) -> func.HttpResponse:
-    """Check DBA prerequisites for pypgstac in corporate/QA environments (5 DEC 2025).
-
-    GET /api/dbadmin/maintenance/pgstac/check-prerequisites?identity=rmhpgflexadmin
-
-    Returns whether roles exist and are granted to the managed identity.
+@app.route(route="dbadmin/maintenance", methods=["POST", "GET"])
+def admin_maintenance(req: func.HttpRequest) -> func.HttpResponse:
     """
-    return admin_db_maintenance_trigger.handle_request(req)
+    Consolidated maintenance endpoint.
 
+    POST /api/dbadmin/maintenance?action={nuke|redeploy|cleanup|full-rebuild|check-prerequisites}&target={app|pgstac}&confirm=yes
 
-@app.route(route="dbadmin/maintenance/full-rebuild", methods=["POST"])
-def db_maintenance_full_rebuild(req: func.HttpRequest) -> func.HttpResponse:
-    """⚠️ FCO - Keep for QA, remove before UAT. POST /api/dbadmin/maintenance/full-rebuild?confirm=yes
-
-    Full infrastructure rebuild: Atomically nuke and redeploy BOTH app and pgstac schemas.
-    Preserves geo schema (business data) and h3 schema (static bootstrap data).
+    Query Parameters:
+        action: nuke | redeploy | cleanup | full-rebuild | check-prerequisites
+        target: app | pgstac (default: app)
+        confirm: yes (required for destructive operations)
+        days: For cleanup (default: 30)
     """
-    return admin_db_maintenance_trigger.handle_request(req)
+    return admin_db_maintenance_trigger.handle_maintenance(req)
 
 
 # ============================================================================
@@ -525,116 +469,20 @@ def db_maintenance_full_rebuild(req: func.HttpRequest) -> func.HttpResponse:
 # (tables that exist after a full-rebuild wipes app/pgstac schemas).
 # ============================================================================
 
-@app.route(route="dbadmin/geo/tables", methods=["GET"])
-def list_geo_tables(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    List all tables in the geo schema with metadata tracking status.
-
-    GET /api/dbadmin/geo/tables
-
-    Returns tables with tracking info (has_metadata, has_stac_item).
-    Useful for discovering orphaned tables after a full-rebuild.
-
-    Response:
-        {
-            "tables": [
-                {"table_name": "world_countries", "has_metadata": true, "has_stac_item": true, ...},
-                {"table_name": "orphaned_test", "has_metadata": false, "has_stac_item": false, ...}
-            ],
-            "summary": {"total": 2, "tracked": 1, "orphaned": 1}
-        }
-    """
-    return admin_db_maintenance_trigger._list_geo_tables(req)
+# CONSOLIDATED (15 DEC 2025) - 4 routes → 1 route
+# GET /api/dbadmin/geo?type={tables|metadata|orphans}
+# POST /api/dbadmin/geo?action=unpublish&table_name={name}&confirm=yes
+@app.route(route="dbadmin/geo", methods=["GET", "POST"])
+def dbadmin_geo(req: func.HttpRequest) -> func.HttpResponse:
+    """Consolidated geo ops: ?type={tables|metadata|orphans} or ?action=unpublish"""
+    return admin_db_maintenance_trigger.handle_geo(req)
 
 
-@app.route(route="dbadmin/geo/unpublish", methods=["POST"])
-def unpublish_geo_table(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    Cascade delete a vector table from geo schema.
-
-    POST /api/dbadmin/geo/unpublish?table_name={name}&confirm=yes
-
-    Handles both tracked and orphaned tables:
-    - Tracked: Delete STAC item -> Delete metadata row -> DROP TABLE
-    - Orphaned: Just DROP TABLE (with warnings)
-
-    Query Parameters:
-        table_name: Table name in geo schema (without 'geo.' prefix)
-        confirm: Must be "yes" to execute (safety)
-
-    Response:
-        {
-            "success": true,
-            "table_name": "world_countries",
-            "deleted": {
-                "stac_item": "postgis-geo-world_countries",
-                "metadata_row": true,
-                "geo_table": true
-            },
-            "warnings": [...],
-            "was_orphaned": false
-        }
-    """
-    return admin_db_maintenance_trigger._unpublish_geo_table(req)
-
-
-@app.route(route="dbadmin/geo/metadata", methods=["GET"])
-def list_geo_metadata(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    List all records in geo.table_metadata with filtering options.
-
-    GET /api/dbadmin/geo/metadata
-    GET /api/dbadmin/geo/metadata?job_id=abc123
-    GET /api/dbadmin/geo/metadata?has_stac=true
-    GET /api/dbadmin/geo/metadata?limit=50&offset=0
-
-    Query Parameters:
-        job_id: Filter by ETL job ID
-        has_stac: Filter by STAC linkage (true/false)
-        limit: Max records (default: 100, max: 500)
-        offset: Pagination offset (default: 0)
-
-    Response:
-        {
-            "metadata": [{...}],
-            "total": 15,
-            "limit": 100,
-            "offset": 0,
-            "filters_applied": {...}
-        }
-    """
-    return admin_db_maintenance_trigger._list_metadata(req)
-
-
-@app.route(route="dbadmin/geo/orphans", methods=["GET"])
-def check_geo_orphans(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    Check for orphaned tables and metadata in geo schema.
-
-    GET /api/dbadmin/geo/orphans
-
-    Detects:
-    - Orphaned Tables: Tables in geo schema without metadata records
-    - Orphaned Metadata: Metadata records for non-existent tables
-
-    Detection only - does NOT delete anything.
-
-    Response:
-        {
-            "success": true,
-            "orphaned_tables": [...],
-            "orphaned_metadata": [...],
-            "tracked_tables": [...],
-            "summary": {
-                "total_geo_tables": 3,
-                "tracked": 2,
-                "orphaned_tables": 1,
-                "orphaned_metadata": 0,
-                "health_status": "ORPHANS_DETECTED"
-            }
-        }
-    """
-    return admin_db_maintenance_trigger._check_geo_orphans(req)
+# Note: Original endpoint docstrings preserved as comments for reference:
+# GET  /api/dbadmin/geo?type=tables    - List geo tables with tracking status
+# GET  /api/dbadmin/geo?type=metadata  - List geo.table_metadata records
+# GET  /api/dbadmin/geo?type=orphans   - Check for orphaned tables/metadata
+# POST /api/dbadmin/geo?action=unpublish&table_name={name}&confirm=yes - Cascade delete
 
 
 # ============================================================================
@@ -662,44 +510,19 @@ def check_geo_orphans(req: func.HttpRequest) -> func.HttpResponse:
 # Reference: API_CONSOLIDATION_STATUS.md section "Service Bus Admin (6 functions)"
 # ============================================================================
 
-@app.route(route="servicebus/queues", methods=["GET"])
-def servicebus_admin_list_queues(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    ⚠️ DEV ONLY - REMOVE BEFORE QA
-    List all Service Bus queues: GET /api/servicebus/queues
-    Production: Use Azure Portal → Service Bus → Queues
-    """
-    return servicebus_admin_trigger.handle_request(req)
+# CONSOLIDATED (15 DEC 2025) - 6 routes → 2 routes
+# GET /api/servicebus?type={queues|health}
+@app.route(route="servicebus", methods=["GET"])
+def servicebus_global(req: func.HttpRequest) -> func.HttpResponse:
+    """Consolidated global ops: ?type={queues|health}"""
+    return servicebus_admin_trigger.handle_global(req)
 
 
-@app.route(route="servicebus/queues/{queue_name}", methods=["GET"])
-def servicebus_admin_queue_details(req: func.HttpRequest) -> func.HttpResponse:
-    """Get queue details: GET /api/servicebus/queues/{queue_name}"""
-    return servicebus_admin_trigger.handle_request(req)
-
-
-@app.route(route="servicebus/queues/{queue_name}/peek", methods=["GET"])
-def servicebus_admin_peek_messages(req: func.HttpRequest) -> func.HttpResponse:
-    """Peek active messages: GET /api/servicebus/queues/{queue_name}/peek?limit=10"""
-    return servicebus_admin_trigger.handle_request(req)
-
-
-@app.route(route="servicebus/queues/{queue_name}/deadletter", methods=["GET"])
-def servicebus_admin_peek_deadletter(req: func.HttpRequest) -> func.HttpResponse:
-    """Peek dead letter messages: GET /api/servicebus/queues/{queue_name}/deadletter?limit=10"""
-    return servicebus_admin_trigger.handle_request(req)
-
-
-@app.route(route="servicebus/health", methods=["GET"])
-def servicebus_admin_health(req: func.HttpRequest) -> func.HttpResponse:
-    """Get Service Bus health: GET /api/servicebus/health"""
-    return servicebus_admin_trigger.handle_request(req)
-
-
-@app.route(route="servicebus/queues/{queue_name}/nuke", methods=["POST"])
-def servicebus_admin_nuke_queue(req: func.HttpRequest) -> func.HttpResponse:
-    """🚨 NUCLEAR: Clear queue messages: POST /api/servicebus/queues/{queue_name}/nuke?confirm=yes&target=all"""
-    return servicebus_admin_trigger.handle_request(req)
+# GET|POST /api/servicebus/queue/{queue_name}?type={details|peek|deadletter|nuke}
+@app.route(route="servicebus/queue/{queue_name}", methods=["GET", "POST"])
+def servicebus_queue(req: func.HttpRequest) -> func.HttpResponse:
+    """Consolidated queue ops: ?type={details|peek|deadletter|nuke}"""
+    return servicebus_admin_trigger.handle_queue(req)
 
 
 # ============================================================================
@@ -743,27 +566,19 @@ def curated_dataset_by_id(req: func.HttpRequest) -> func.HttpResponse:
     return curated_admin_trigger.handle_request(req)
 
 
-@app.route(route="curated/datasets/{dataset_id}/update", methods=["POST"])
-def curated_dataset_update(req: func.HttpRequest) -> func.HttpResponse:
-    """Trigger manual update: POST /api/curated/datasets/{id}/update"""
-    return curated_admin_trigger.handle_request(req)
+# CONSOLIDATED (15 DEC 2025) - 4 action routes → 1 route
+# Trigger routes internally based on action path segment
+@app.route(route="curated/datasets/{dataset_id}/{action}", methods=["GET", "POST"])
+def curated_dataset_action(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Consolidated curated dataset actions.
 
-
-@app.route(route="curated/datasets/{dataset_id}/history", methods=["GET"])
-def curated_dataset_history(req: func.HttpRequest) -> func.HttpResponse:
-    """Get update history: GET /api/curated/datasets/{id}/history?limit=20"""
-    return curated_admin_trigger.handle_request(req)
-
-
-@app.route(route="curated/datasets/{dataset_id}/enable", methods=["POST"])
-def curated_dataset_enable(req: func.HttpRequest) -> func.HttpResponse:
-    """Enable scheduled updates: POST /api/curated/datasets/{id}/enable"""
-    return curated_admin_trigger.handle_request(req)
-
-
-@app.route(route="curated/datasets/{dataset_id}/disable", methods=["POST"])
-def curated_dataset_disable(req: func.HttpRequest) -> func.HttpResponse:
-    """Disable scheduled updates: POST /api/curated/datasets/{id}/disable"""
+    Actions (via path):
+        POST /api/curated/datasets/{id}/update  - Trigger manual update
+        GET  /api/curated/datasets/{id}/history - Get update history
+        POST /api/curated/datasets/{id}/enable  - Enable scheduled updates
+        POST /api/curated/datasets/{id}/disable - Disable scheduled updates
+    """
     return curated_admin_trigger.handle_request(req)
 
 
@@ -837,28 +652,29 @@ def admin_query_orchestration_jobs_for_request(req: func.HttpRequest) -> func.Ht
     return admin_db_data_trigger.handle_request(req)
 
 
-@app.route(route="dbadmin/stats", methods=["GET"])
-def admin_database_stats(req: func.HttpRequest) -> func.HttpResponse:
-    """Database statistics and health metrics: GET /api/admin/db/stats"""
-    return admin_db_diagnostics_trigger.handle_request(req)
+# ============================================================================
+# CONSOLIDATED DIAGNOSTICS ENDPOINT (15 DEC 2025)
+# ============================================================================
+# Replaces 4 separate routes with single parameterized endpoint:
+#   OLD: /dbadmin/stats, /dbadmin/diagnostics/enums, /dbadmin/diagnostics/functions, /dbadmin/diagnostics/all
+#   NEW: /dbadmin/diagnostics?type={stats|enums|functions|all|config|errors|lineage}
+# ============================================================================
 
+@app.route(route="dbadmin/diagnostics", methods=["GET"])
+def admin_diagnostics(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Consolidated diagnostics endpoint.
 
-@app.route(route="dbadmin/diagnostics/enums", methods=["GET"])
-def admin_diagnose_enums(req: func.HttpRequest) -> func.HttpResponse:
-    """Diagnose PostgreSQL enum types: GET /api/admin/db/diagnostics/enums"""
-    return admin_db_diagnostics_trigger.handle_request(req)
+    GET /api/dbadmin/diagnostics?type={stats|enums|functions|all|config|errors}
+    GET /api/dbadmin/diagnostics?type=lineage&job_id={job_id}
 
-
-@app.route(route="dbadmin/diagnostics/functions", methods=["GET"])
-def admin_test_functions(req: func.HttpRequest) -> func.HttpResponse:
-    """Test PostgreSQL functions: GET /api/admin/db/diagnostics/functions"""
-    return admin_db_diagnostics_trigger.handle_request(req)
-
-
-@app.route(route="dbadmin/diagnostics/all", methods=["GET"])
-def admin_all_diagnostics(req: func.HttpRequest) -> func.HttpResponse:
-    """Get all diagnostics: GET /api/admin/db/diagnostics/all"""
-    return admin_db_diagnostics_trigger.handle_request(req)
+    Query Parameters:
+        type: stats | enums | functions | all | config | lineage | errors
+        job_id: Required when type=lineage
+        hours: For errors (default: 24)
+        limit: For errors (default: 10)
+    """
+    return admin_db_diagnostics_trigger.handle_diagnostics(req)
 
 
 # H3 Debug and Bootstrap Monitoring (12 NOV 2025)

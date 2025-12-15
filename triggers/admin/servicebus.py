@@ -3,6 +3,10 @@ Service Bus Admin HTTP Trigger.
 
 Service Bus queue monitoring and management endpoints.
 
+Consolidated endpoint pattern (15 DEC 2025):
+    GET /api/servicebus?type={queues|health}
+    GET|POST /api/servicebus/queue/{queue_name}?type={details|peek|deadletter|nuke}
+
 Exports:
     ServiceBusAdminTrigger: HTTP trigger class for Service Bus operations
     servicebus_admin_trigger: Singleton instance of ServiceBusAdminTrigger
@@ -12,6 +16,7 @@ import azure.functions as func
 import json
 import os
 import traceback
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional
 
@@ -25,13 +30,59 @@ from config import AppConfig
 from config.defaults import QueueDefaults
 
 
+@dataclass
+class RouteDefinition:
+    """Route configuration for registry pattern."""
+    route: str
+    methods: list
+    handler: str
+    description: str
+
+
 class ServiceBusAdminTrigger:
     """
     Service Bus admin trigger for queue monitoring and management.
 
     Provides read-only inspection endpoints and a nuclear button for clearing queues.
     Follows patterns established in Phase 1 database admin implementation.
+
+    Consolidated API (15 DEC 2025):
+        GET /api/servicebus?type={queues|health}
+        GET|POST /api/servicebus/queue/{queue_name}?type={details|peek|deadletter|nuke}
     """
+
+    # ========================================================================
+    # ROUTE REGISTRY - Single source of truth for function_app.py
+    # ========================================================================
+    ROUTES = [
+        RouteDefinition(
+            route="servicebus",
+            methods=["GET"],
+            handler="handle_global",
+            description="Global ops: ?type={queues|health}"
+        ),
+        RouteDefinition(
+            route="servicebus/queue/{queue_name}",
+            methods=["GET", "POST"],
+            handler="handle_queue",
+            description="Queue ops: ?type={details|peek|deadletter|nuke}"
+        ),
+    ]
+
+    # ========================================================================
+    # OPERATIONS REGISTRIES - Maps type param to handler method
+    # ========================================================================
+    GLOBAL_OPERATIONS = {
+        "queues": "_list_queues",
+        "health": "_get_health",
+    }
+
+    QUEUE_OPERATIONS = {
+        "details": "_get_queue_details",
+        "peek": "_peek_messages",
+        "deadletter": "_peek_deadletter",
+        "nuke": "_nuke_queue",
+    }
 
     def __init__(self):
         """Initialize Service Bus admin trigger with lazy-loaded clients."""
@@ -129,68 +180,108 @@ class ServiceBusAdminTrigger:
 
         return self._service_bus_client
 
-    def handle_request(self, req: func.HttpRequest) -> func.HttpResponse:
+    def handle_global(self, req: func.HttpRequest) -> func.HttpResponse:
         """
-        Route Service Bus admin requests to appropriate handler.
+        Consolidated global Service Bus operations.
 
-        Routes:
-        - GET  /queues                 → _list_queues()
-        - GET  /queues/{queue}         → _get_queue_details()
-        - GET  /queues/{queue}/peek    → _peek_messages()
-        - GET  /queues/{queue}/deadletter → _peek_deadletter()
-        - GET  /health                 → _get_health()
-        - POST /queues/{queue}/nuke    → _nuke_queue()
+        GET /api/servicebus?type={queues|health}
+
+        Query Parameters:
+            type: Operation type (default: queues)
+                - queues: List all queues with metrics
+                - health: Service Bus health check
+
+        Returns:
+            JSON response with requested data
         """
         try:
-            # Parse route path
-            route_params = req.route_params
-            path = req.url.split('/api/servicebus/')[-1] if '/api/servicebus/' in req.url else ''
+            op_type = req.params.get('type', 'queues')
+            self.logger.info(f"📥 Service Bus global request: type={op_type}")
 
-            self.logger.info(f"📥 Service Bus Admin request: path={path}, method={req.method}")
-
-            # Route to appropriate handler
-            if path == 'queues' and req.method == 'GET':
-                return self._list_queues(req)
-
-            elif path == 'health' and req.method == 'GET':
-                return self._get_health(req)
-
-            elif path.startswith('queues/') and '/' not in path[7:]:
-                # queues/{queue}
-                queue_name = path[7:]
-                if req.method == 'GET':
-                    return self._get_queue_details(req, queue_name)
-                else:
-                    return func.HttpResponse(
-                        body=json.dumps({'error': 'Method not allowed'}),
-                        status_code=405,
-                        mimetype='application/json'
-                    )
-
-            elif path.startswith('queues/') and '/peek' in path:
-                # queues/{queue}/peek
-                queue_name = path.split('/')[1]
-                return self._peek_messages(req, queue_name)
-
-            elif path.startswith('queues/') and '/deadletter' in path:
-                # queues/{queue}/deadletter
-                queue_name = path.split('/')[1]
-                return self._peek_deadletter(req, queue_name)
-
-            elif path.startswith('queues/') and '/nuke' in path:
-                # queues/{queue}/nuke
-                queue_name = path.split('/')[1]
-                return self._nuke_queue(req, queue_name)
-
-            else:
+            if op_type not in self.GLOBAL_OPERATIONS:
                 return func.HttpResponse(
-                    body=json.dumps({'error': f'Unknown route: {path}'}),
-                    status_code=404,
+                    body=json.dumps({
+                        'error': f"Unknown operation type: {op_type}",
+                        'valid_types': list(self.GLOBAL_OPERATIONS.keys()),
+                        'timestamp': datetime.now(timezone.utc).isoformat()
+                    }),
+                    status_code=400,
                     mimetype='application/json'
                 )
 
+            handler_method = getattr(self, self.GLOBAL_OPERATIONS[op_type])
+            return handler_method(req)
+
         except Exception as e:
-            self.logger.error(f"❌ Error in Service Bus admin request: {e}")
+            self.logger.error(f"❌ Error in handle_global: {e}")
+            self.logger.error(traceback.format_exc())
+            return func.HttpResponse(
+                body=json.dumps({
+                    'error': str(e),
+                    'timestamp': datetime.now(timezone.utc).isoformat()
+                }),
+                status_code=500,
+                mimetype='application/json'
+            )
+
+    def handle_queue(self, req: func.HttpRequest) -> func.HttpResponse:
+        """
+        Consolidated queue-specific Service Bus operations.
+
+        GET|POST /api/servicebus/queue/{queue_name}?type={details|peek|deadletter|nuke}
+
+        Path Parameters:
+            queue_name: Name of the Service Bus queue
+
+        Query Parameters:
+            type: Operation type (default: details)
+                - details: Queue properties and metrics (GET)
+                - peek: Preview active messages (GET)
+                - deadletter: Preview dead letter messages (GET)
+                - nuke: Clear queue messages (POST, requires confirm=yes)
+
+        Returns:
+            JSON response with requested data
+        """
+        try:
+            queue_name = req.route_params.get('queue_name')
+            if not queue_name:
+                return func.HttpResponse(
+                    body=json.dumps({'error': 'queue_name is required'}),
+                    status_code=400,
+                    mimetype='application/json'
+                )
+
+            op_type = req.params.get('type', 'details')
+            self.logger.info(f"📥 Service Bus queue request: queue={queue_name}, type={op_type}")
+
+            if op_type not in self.QUEUE_OPERATIONS:
+                return func.HttpResponse(
+                    body=json.dumps({
+                        'error': f"Unknown operation type: {op_type}",
+                        'valid_types': list(self.QUEUE_OPERATIONS.keys()),
+                        'timestamp': datetime.now(timezone.utc).isoformat()
+                    }),
+                    status_code=400,
+                    mimetype='application/json'
+                )
+
+            # Check method for nuke operation
+            if op_type == 'nuke' and req.method != 'POST':
+                return func.HttpResponse(
+                    body=json.dumps({
+                        'error': 'nuke operation requires POST method',
+                        'timestamp': datetime.now(timezone.utc).isoformat()
+                    }),
+                    status_code=405,
+                    mimetype='application/json'
+                )
+
+            handler_method = getattr(self, self.QUEUE_OPERATIONS[op_type])
+            return handler_method(req, queue_name)
+
+        except Exception as e:
+            self.logger.error(f"❌ Error in handle_queue: {e}")
             self.logger.error(traceback.format_exc())
             return func.HttpResponse(
                 body=json.dumps({

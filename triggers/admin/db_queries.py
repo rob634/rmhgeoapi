@@ -148,7 +148,7 @@ class AdminDbQueriesTrigger:
         """
         Get currently running queries.
 
-        GET /api/admin/db/queries/running?limit=50
+        GET /api/dbadmin/queries/running?limit=50
 
         Query Parameters:
             limit: Max queries to return (default: 50)
@@ -244,7 +244,7 @@ class AdminDbQueriesTrigger:
         """
         Get slow query statistics.
 
-        GET /api/admin/db/queries/slow?limit=20
+        GET /api/dbadmin/queries/slow?limit=20
 
         Requires: pg_stat_statements extension
 
@@ -352,7 +352,7 @@ class AdminDbQueriesTrigger:
         """
         Get current database locks.
 
-        GET /api/admin/db/locks
+        GET /api/dbadmin/locks
 
         Returns:
             {
@@ -447,7 +447,7 @@ class AdminDbQueriesTrigger:
         """
         Get connection statistics.
 
-        GET /api/admin/db/connections
+        GET /api/dbadmin/connections
 
         Returns:
             {

@@ -65,9 +65,9 @@ class AdminDbSchemasTrigger:
         Route admin database schema requests.
 
         Routes:
-            GET /api/db/schemas
-            GET /api/db/schemas/{schema_name}
-            GET /api/db/schemas/{schema_name}/tables
+            GET /api/dbadmin/schemas
+            GET /api/dbadmin/schemas/{schema_name}
+            GET /api/dbadmin/schemas/{schema_name}/tables
 
         Args:
             req: Azure Function HTTP request
@@ -79,21 +79,21 @@ class AdminDbSchemasTrigger:
             # Get route path
             route = req.route_params
             schema_name = route.get('schema_name')
-            path = req.url.split('/api/db/schemas')[-1].strip('/')
+            path = req.url.split('/api/dbadmin/schemas')[-1].strip('/')
 
             logger.info(f"📥 Admin DB Schemas request: path={path}, schema={schema_name}")
 
             # Route to appropriate handler
             if not path:
-                # GET /api/admin/db/schemas
+                # GET /api/dbadmin/schemas
                 return self._list_schemas(req)
             elif '/' in path:
-                # GET /api/admin/db/schemas/{schema_name}/tables
+                # GET /api/dbadmin/schemas/{schema_name}/tables
                 parts = path.split('/')
                 schema = parts[0]
                 return self._list_schema_tables(req, schema)
             else:
-                # GET /api/admin/db/schemas/{schema_name}
+                # GET /api/dbadmin/schemas/{schema_name}
                 return self._get_schema_details(req, path)
 
         except Exception as e:
@@ -112,7 +112,7 @@ class AdminDbSchemasTrigger:
         """
         List all schemas with sizes and table counts.
 
-        GET /api/admin/db/schemas
+        GET /api/dbadmin/schemas
 
         Returns:
             {
@@ -200,7 +200,7 @@ class AdminDbSchemasTrigger:
         """
         Get detailed information about a specific schema.
 
-        GET /api/admin/db/schemas/{schema_name}
+        GET /api/dbadmin/schemas/{schema_name}
 
         Args:
             schema_name: Name of schema (app, geo, pgstac, public)
@@ -298,7 +298,7 @@ class AdminDbSchemasTrigger:
         """
         List all tables in a schema with row counts and sizes.
 
-        GET /api/admin/db/schemas/{schema_name}/tables
+        GET /api/dbadmin/schemas/{schema_name}/tables
 
         Args:
             schema_name: Name of schema

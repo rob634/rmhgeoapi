@@ -50,6 +50,7 @@ def _convert_csv(
 
     Raises:
         ValueError: If neither lat/lon nor wkt_column provided
+        ValueError: If specified columns don't exist in CSV (GAP-008b)
     """
     if not (wkt_column or (lat_name and lon_name)):
         raise ValueError(
@@ -58,6 +59,31 @@ def _convert_csv(
 
     # Read CSV to DataFrame
     df = pd.read_csv(data)
+
+    # GAP-008b FIX (15 DEC 2025): Validate that specified columns exist in the CSV
+    # This gives a clear error message when parameters don't match file contents
+    csv_columns = list(df.columns)
+
+    if wkt_column:
+        if wkt_column not in csv_columns:
+            raise ValueError(
+                f"WKT column '{wkt_column}' not found in CSV file. "
+                f"Available columns: {csv_columns[:20]}{'...' if len(csv_columns) > 20 else ''}"
+            )
+    else:
+        missing_cols = []
+        if lat_name not in csv_columns:
+            missing_cols.append(f"lat_name='{lat_name}'")
+        if lon_name not in csv_columns:
+            missing_cols.append(f"lon_name='{lon_name}'")
+
+        if missing_cols:
+            raise ValueError(
+                f"Geometry column(s) not found in CSV file: {', '.join(missing_cols)}. "
+                f"Available columns: {csv_columns[:20]}{'...' if len(csv_columns) > 20 else ''}"
+            )
+
+    logger.info(f"✅ CSV column validation passed: using {'wkt_column=' + wkt_column if wkt_column else f'lat={lat_name}, lon={lon_name}'}")
 
     # Convert based on provided parameters
     if wkt_column:

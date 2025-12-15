@@ -65,8 +65,8 @@ class AdminDbHealthTrigger:
         Route admin database health requests.
 
         Routes:
-            GET /api/db/health
-            GET /api/db/health/performance
+            GET /api/dbadmin/health
+            GET /api/dbadmin/health/performance
 
         Args:
             req: Azure Function HTTP request
@@ -76,7 +76,7 @@ class AdminDbHealthTrigger:
         """
         try:
             # Determine operation from path
-            path = req.url.split('/api/db/health')[-1].strip('/')
+            path = req.url.split('/api/dbadmin/health')[-1].strip('/')
 
             logger.info(f"📥 Admin DB Health request: {path or 'main'}")
 
@@ -108,7 +108,7 @@ class AdminDbHealthTrigger:
         """
         Get overall database health.
 
-        GET /api/admin/db/health
+        GET /api/dbadmin/health
 
         Returns:
             {
@@ -294,7 +294,7 @@ class AdminDbHealthTrigger:
         """
         Get database performance metrics.
 
-        GET /api/admin/db/health/performance
+        GET /api/dbadmin/health/performance
 
         Returns:
             {

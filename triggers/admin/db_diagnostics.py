@@ -188,7 +188,7 @@ class AdminDbDiagnosticsTrigger:
         """
         Get comprehensive database statistics.
 
-        GET /api/admin/db/stats
+        GET /api/dbadmin/stats
 
         Returns:
             {
@@ -329,7 +329,7 @@ class AdminDbDiagnosticsTrigger:
         """
         Diagnose PostgreSQL enum types.
 
-        GET /api/admin/db/diagnostics/enums
+        GET /api/dbadmin/diagnostics/enums
 
         Returns:
             {
@@ -445,7 +445,7 @@ class AdminDbDiagnosticsTrigger:
         """
         Test PostgreSQL functions availability.
 
-        GET /api/admin/db/diagnostics/functions
+        GET /api/dbadmin/diagnostics/functions
 
         Returns:
             {
@@ -551,7 +551,7 @@ class AdminDbDiagnosticsTrigger:
         """
         Get all diagnostics (stats + enums + functions).
 
-        GET /api/admin/db/diagnostics/all
+        GET /api/dbadmin/diagnostics/all
 
         Returns:
             {

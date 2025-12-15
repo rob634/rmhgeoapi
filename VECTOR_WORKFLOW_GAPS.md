@@ -25,7 +25,20 @@
 - **GAP-004**: Added `StateManager.fail_all_job_tasks()` method, integrated into CoreMachine stage advancement failure handler
 - **GAP-005**: Expanded exception handling to categorize MemoryError, OSError, TimeoutError, ConnectionError as retryable
 - **GAP-006**: Added Pydantic models `ProcessVectorStage1Result` and `ProcessVectorStage1Data` to validate Stage 1 results before Stage 2 fan-out
-- **GAP-007**: Added pre-flight file size check (300MB limit) before downloading to prevent OOM
+- **GAP-007**: Added pre-flight file size check (2GB limit, raised from 300MB per user request) before downloading to prevent OOM
+
+### Bug Fixes Discovered During Testing (15 DEC 2025)
+
+| Bug | Status | Location |
+|-----|--------|----------|
+| **BUG-001**: Permanent task failures not marked in DB | ✅ FIXED | `core/machine.py:1146-1190` |
+| **GAP-008a**: CSV lat/lon validation at submission | ✅ FIXED | `infrastructure/validators.py:1308-1385`, `jobs/process_vector.py:159-173` |
+| **GAP-008b**: CSV column validation at runtime | ✅ FIXED | `services/vector/converters.py:63-86` |
+
+- **BUG-001**: When handler returns `{success: False, retryable: False}`, task was logged as permanent failure but DB status never updated. Now calls `mark_task_failed()` + `mark_job_failed()`.
+- **GAP-008a**: New `csv_geometry_params` validator added to `resource_validators`. CSV files now fail at submission with 400 if missing lat_name/lon_name OR wkt_column.
+- **GAP-008b**: CSV converter now validates that specified column names exist in the actual file. Clear error: "Column 'xxx' not found. Available columns: [...]"
+- **GAP-008 (task params)**: Added `lat_name`, `lon_name`, `wkt_column` to task parameters in `create_tasks_for_stage()` so they propagate to the converter
 
 ---
 

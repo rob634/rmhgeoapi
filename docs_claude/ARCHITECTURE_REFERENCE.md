@@ -1240,6 +1240,83 @@ class TaskResult(BaseModel):
 
 ## Error Handling Strategy
 
+### Contract Violations vs Business Errors
+
+**CRITICAL DISTINCTION** (26 SEP 2025)
+
+#### Contract Violations (Programming Bugs)
+- **Type**: `ContractViolationError` (inherits from `TypeError`)
+- **When**: Wrong types passed, missing required fields, interface violations
+- **Handling**: NEVER catch these - let them bubble up to crash the function
+- **Purpose**: Find bugs during development, not runtime failures
+
+**Examples**:
+```python
+# Contract violation - wrong type passed
+if not isinstance(job_id, str):
+    raise ContractViolationError(
+        f"job_id must be str, got {type(job_id).__name__}"
+    )
+
+# Contract violation - wrong return type from method
+if not isinstance(result, (dict, TaskResult)):
+    raise ContractViolationError(
+        f"Handler returned {type(result).__name__} instead of TaskResult"
+    )
+```
+
+#### Business Logic Errors (Expected Runtime Failures)
+- **Type**: `BusinessLogicError` and subclasses
+- **When**: Normal failures during operation (network issues, missing resources)
+- **Handling**: Catch and handle gracefully
+- **Purpose**: Keep system running despite expected issues
+
+**Subclasses**:
+- `ServiceBusError` - Service Bus communication failures
+- `DatabaseError` - Database operation failures
+- `TaskExecutionError` - Task failed during execution
+- `ResourceNotFoundError` - Resource doesn't exist
+- `ValidationError` - Business validation failed
+
+**Examples**:
+```python
+# Business error - Service Bus unavailable
+except ServiceBusError as e:
+    logger.warning(f"Service Bus temporarily unavailable: {e}")
+    return {"success": False, "retry": True}
+
+# Business error - File not found in blob storage
+except ResourceNotFoundError as e:
+    logger.info(f"Expected resource not found: {e}")
+    return {"success": False, "error": str(e)}
+```
+
+### Implementation Pattern
+
+```python
+try:
+    # Validate contracts first
+    if not isinstance(param, expected_type):
+        raise ContractViolationError("...")
+
+    # Execute business logic
+    result = do_work(param)
+
+except ContractViolationError:
+    # Let contract violations bubble up (bugs)
+    raise
+
+except BusinessLogicError as e:
+    # Handle expected business failures gracefully
+    logger.warning(f"Business failure: {e}")
+    return handle_business_failure(e)
+
+except Exception as e:
+    # Log unexpected errors with full details
+    logger.error(f"Unexpected: {e}\n{traceback.format_exc()}")
+    return handle_unexpected_error(e)
+```
+
 ### Current Development Mode
 - **Fail-Fast**: Any task failure immediately fails entire job
 - **No Retries**: `maxDequeueCount: 1` in host.json
@@ -1261,7 +1338,7 @@ class ErrorHandler:
             return ErrorCategory.THROTTLING
         else:
             return ErrorCategory.PERMANENT
-    
+
     @staticmethod
     def should_retry(category: ErrorCategory, retry_count: int) -> bool:
         if category == ErrorCategory.PERMANENT:

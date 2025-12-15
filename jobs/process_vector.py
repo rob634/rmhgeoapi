@@ -82,7 +82,24 @@ class ProcessVectorJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
         'converter_params': {
             'type': 'dict',
             'default': {},
-            'description': 'File-specific params (e.g., CSV lat/lon columns)'
+            'description': 'File-specific params (alternative to top-level lat_name/lon_name)'
+        },
+        # CSV-specific geometry column parameters (GAP-008a - 15 DEC 2025)
+        # Required for CSV files - must provide (lat_name AND lon_name) OR wkt_column
+        'lat_name': {
+            'type': 'str',
+            'default': None,
+            'description': 'CSV latitude column name (required with lon_name for point geometry)'
+        },
+        'lon_name': {
+            'type': 'str',
+            'default': None,
+            'description': 'CSV longitude column name (required with lat_name for point geometry)'
+        },
+        'wkt_column': {
+            'type': 'str',
+            'default': None,
+            'description': 'CSV WKT geometry column name (alternative to lat_name/lon_name)'
         },
         'geometry_params': {
             'type': 'dict',
@@ -155,6 +172,21 @@ class ProcessVectorJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
             'default_schema': 'geo',
             'allow_overwrite_param': 'overwrite',
             'error': "Table already exists in geo schema. Use 'overwrite': true to replace existing data, or choose a different table_name."
+        },
+        {
+            # GAP-008a FIX (15 DEC 2025): Validate CSV geometry params at submission
+            # CSV files MUST provide lat/lon OR wkt column names - fail fast!
+            'type': 'csv_geometry_params',
+            'file_extension_param': 'file_extension',
+            'lat_param': 'lat_name',
+            'lon_param': 'lon_name',
+            'wkt_param': 'wkt_column',
+            'converter_params_field': 'converter_params',
+            'error': (
+                "CSV files require geometry column parameters. Provide either:\n"
+                "  • 'lat_name' AND 'lon_name' for point geometry (e.g., lat_name='latitude', lon_name='longitude')\n"
+                "  • OR 'wkt_column' for WKT geometry strings (e.g., wkt_column='geom_wkt')"
+            )
         }
     ]
 
@@ -230,6 +262,10 @@ class ProcessVectorJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
                     'converter_params': job_params.get('converter_params', {}),
                     'geometry_params': job_params.get('geometry_params', {}),
                     'indexes': job_params.get('indexes', {'spatial': True, 'attributes': [], 'temporal': []}),
+                    # CSV geometry column params (GAP-008 - 15 DEC 2025)
+                    'lat_name': job_params.get('lat_name'),
+                    'lon_name': job_params.get('lon_name'),
+                    'wkt_column': job_params.get('wkt_column'),
                     # User-provided metadata (09 DEC 2025)
                     'title': job_params.get('title'),
                     'description': job_params.get('description'),

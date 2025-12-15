@@ -1148,7 +1148,38 @@ class CoreMachine:
                     f"❌ Task failed with permanent error ({error_type}) - NOT retrying: "
                     f"{result.error_details}"
                 )
-                # Mark task as permanently failed (no retry)
+
+                # BUG FIX (15 DEC 2025): Actually mark task as failed in database!
+                # Previously this just returned without updating task status
+                try:
+                    self.state_manager.mark_task_failed(
+                        task_message.task_id,
+                        f"Permanent failure ({error_type}): {result.error_details}"
+                    )
+                    self.state_manager.mark_job_failed(
+                        task_message.parent_job_id,
+                        f"Task {task_message.task_id[:16]}... failed permanently: {result.error_details}"
+                    )
+                    self.logger.info(
+                        f"✅ Task and job marked as FAILED (permanent error)",
+                        extra={
+                            'checkpoint': 'PERMANENT_FAILURE_MARKED',
+                            'task_id': task_message.task_id,
+                            'job_id': task_message.parent_job_id,
+                            'error_type': error_type
+                        }
+                    )
+                except Exception as mark_error:
+                    self.logger.error(
+                        f"❌ Failed to mark task/job as failed: {mark_error}",
+                        extra={
+                            'checkpoint': 'PERMANENT_FAILURE_MARK_ERROR',
+                            'task_id': task_message.task_id,
+                            'job_id': task_message.parent_job_id,
+                            'mark_error': str(mark_error)
+                        }
+                    )
+
                 return {
                     'success': False,
                     'error': result.error_details,

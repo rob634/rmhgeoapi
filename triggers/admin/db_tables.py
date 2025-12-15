@@ -173,7 +173,7 @@ class AdminDbTablesTrigger:
         """
         Get complete table details.
 
-        GET /api/admin/db/tables/{schema}.{table}
+        GET /api/dbadmin/tables/{schema}.{table}
 
         Returns:
             {
@@ -305,7 +305,7 @@ class AdminDbTablesTrigger:
         """
         Get sample rows from table.
 
-        GET /api/admin/db/tables/{schema}.{table}/sample?limit=10&offset=0&order_by=id
+        GET /api/dbadmin/tables/{schema}.{table}/sample?limit=10&offset=0&order_by=id
 
         Query Parameters:
             limit: Number of rows (default: 10, max: 100)
@@ -445,7 +445,7 @@ class AdminDbTablesTrigger:
         """
         Get detailed column information for table.
 
-        GET /api/admin/db/tables/{schema}.{table}/columns
+        GET /api/dbadmin/tables/{schema}.{table}/columns
 
         Returns:
             {
@@ -537,7 +537,7 @@ class AdminDbTablesTrigger:
         """
         Get index information for table.
 
-        GET /api/admin/db/tables/{schema}.{table}/indexes
+        GET /api/dbadmin/tables/{schema}.{table}/indexes
 
         Returns:
             {

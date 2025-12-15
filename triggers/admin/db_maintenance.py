@@ -283,7 +283,7 @@ class AdminDbMaintenanceTrigger:
         """
         Drop all schema objects (DESTRUCTIVE).
 
-        POST /api/admin/db/maintenance/nuke?confirm=yes
+        POST /api/dbadmin/maintenance/nuke?confirm=yes
 
         Query Parameters:
             confirm: Must be "yes" (required)
@@ -304,7 +304,7 @@ class AdminDbMaintenanceTrigger:
             return func.HttpResponse(
                 body=json.dumps({
                     'error': 'Schema nuke requires explicit confirmation',
-                    'usage': 'POST /api/admin/db/maintenance/nuke?confirm=yes',
+                    'usage': 'POST /api/dbadmin/maintenance/nuke?confirm=yes',
                     'warning': 'This will DESTROY ALL DATA in app schema'
                 }),
                 status_code=400,
@@ -485,7 +485,7 @@ class AdminDbMaintenanceTrigger:
         """
         Nuke and redeploy schema in one operation (DESTRUCTIVE).
 
-        POST /api/admin/db/maintenance/redeploy?confirm=yes
+        POST /api/dbadmin/maintenance/redeploy?confirm=yes
 
         Query Parameters:
             confirm: Must be "yes" (required)
@@ -502,7 +502,6 @@ class AdminDbMaintenanceTrigger:
                 "timestamp": "2025-11-03T..."
             }
 
-        Note: This migrates the existing /api/db/schema/redeploy endpoint
         """
         confirm = req.params.get('confirm')
 
@@ -510,7 +509,7 @@ class AdminDbMaintenanceTrigger:
             return func.HttpResponse(
                 body=json.dumps({
                     'error': 'Schema redeploy requires explicit confirmation',
-                    'usage': 'POST /api/admin/db/maintenance/redeploy?confirm=yes',
+                    'usage': 'POST /api/dbadmin/maintenance/redeploy?confirm=yes',
                     'warning': 'This will DESTROY ALL DATA and rebuild the schema'
                 }),
                 status_code=400,
@@ -1682,7 +1681,7 @@ class AdminDbMaintenanceTrigger:
         """
         Clean up old completed jobs and tasks.
 
-        POST /api/admin/db/maintenance/cleanup?confirm=yes&days=30
+        POST /api/dbadmin/maintenance/cleanup?confirm=yes&days=30
 
         Query Parameters:
             confirm: Must be "yes" (required)
@@ -1706,7 +1705,7 @@ class AdminDbMaintenanceTrigger:
             return func.HttpResponse(
                 body=json.dumps({
                     'error': 'Cleanup requires explicit confirmation',
-                    'usage': f'POST /api/admin/db/maintenance/cleanup?confirm=yes&days={days}',
+                    'usage': f'POST /api/dbadmin/maintenance/cleanup?confirm=yes&days={days}',
                     'warning': f'This will DELETE all completed jobs older than {days} days'
                 }),
                 status_code=400,

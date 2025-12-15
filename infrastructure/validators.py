@@ -1301,6 +1301,91 @@ def validate_stac_item_not_exists(params: Dict[str, Any], config: Dict[str, Any]
 
 
 # ============================================================================
+# CSV GEOMETRY PARAMETER VALIDATORS (GAP-008a - 15 DEC 2025)
+# ============================================================================
+
+
+@register_validator("csv_geometry_params")
+def validate_csv_geometry_params(params: Dict[str, Any], config: Dict[str, Any]) -> ValidatorResult:
+    """
+    Validate that CSV files have required geometry parameters.
+
+    CSV files MUST have either:
+    - Both 'lat_name' AND 'lon_name' parameters (for point geometry from coordinates)
+    - OR 'wkt_column' parameter (for WKT geometry strings)
+
+    This prevents jobs from being created that will fail at runtime in the
+    CSV converter when it tries to create geometry without knowing the columns.
+
+    Config options:
+        file_extension_param: str - Parameter for file extension (default: 'file_extension')
+        lat_param: str - Parameter for latitude column name (default: 'lat_name')
+        lon_param: str - Parameter for longitude column name (default: 'lon_name')
+        wkt_param: str - Parameter for WKT column name (default: 'wkt_column')
+        converter_params_field: str - Field containing converter params (default: 'converter_params')
+        error: str - Optional custom error message
+
+    GAP-008a FIX (15 DEC 2025): Fail fast at job submission instead of runtime.
+
+    Example:
+        resource_validators = [
+            {
+                'type': 'csv_geometry_params',
+                'error': 'CSV files require geometry parameters'
+            }
+        ]
+    """
+    # Get param names from config
+    file_ext_param = config.get('file_extension_param', 'file_extension')
+    lat_param = config.get('lat_param', 'lat_name')
+    lon_param = config.get('lon_param', 'lon_name')
+    wkt_param = config.get('wkt_param', 'wkt_column')
+    converter_params_field = config.get('converter_params_field', 'converter_params')
+
+    # Get actual values from params
+    file_extension = params.get(file_ext_param, '').lower()
+
+    # Only validate for CSV files
+    if file_extension != 'csv':
+        logger.debug(f"✅ csv_geometry_params: Skipped (file_extension='{file_extension}' is not CSV)")
+        return ValidatorResult(valid=True, message=None)
+
+    # Check for geometry params - can be at top level or in converter_params
+    lat_name = params.get(lat_param)
+    lon_name = params.get(lon_param)
+    wkt_column = params.get(wkt_param)
+
+    # Also check converter_params dict (Platform API nesting)
+    converter_params = params.get(converter_params_field, {}) or {}
+    if isinstance(converter_params, dict):
+        lat_name = lat_name or converter_params.get('lat_name')
+        lon_name = lon_name or converter_params.get('lon_name')
+        wkt_column = wkt_column or converter_params.get('wkt_column')
+
+    # Validation logic: need (lat AND lon) OR wkt
+    has_lat_lon = lat_name and lon_name
+    has_wkt = wkt_column
+
+    if has_lat_lon or has_wkt:
+        if has_wkt:
+            logger.debug(f"✅ csv_geometry_params: Valid (wkt_column='{wkt_column}')")
+        else:
+            logger.debug(f"✅ csv_geometry_params: Valid (lat='{lat_name}', lon='{lon_name}')")
+        return ValidatorResult(valid=True, message=None)
+
+    # Build helpful error message
+    error_msg = config.get('error') or (
+        f"CSV file requires geometry parameters. Provide either:\n"
+        f"  • 'lat_name' AND 'lon_name' for point geometry from coordinates, OR\n"
+        f"  • 'wkt_column' for WKT geometry strings.\n"
+        f"Current params: lat_name={lat_name}, lon_name={lon_name}, wkt_column={wkt_column}"
+    )
+
+    logger.warning(f"❌ csv_geometry_params: FAILED - {error_msg}")
+    return ValidatorResult(valid=False, message=error_msg)
+
+
+# ============================================================================
 # HELPER FUNCTIONS
 # ============================================================================
 

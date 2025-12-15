@@ -67,14 +67,14 @@ class AdminDbDataTrigger:
         Route admin database data requests.
 
         Routes:
-            GET /api/admin/db/jobs
-            GET /api/admin/db/jobs/{job_id}
-            GET /api/admin/db/tasks
-            GET /api/admin/db/tasks/{job_id}
-            GET /api/admin/db/platform/requests
-            GET /api/admin/db/platform/requests/{request_id}
-            GET /api/admin/db/platform/orchestration
-            GET /api/admin/db/platform/orchestration/{request_id}
+            GET /api/dbadmin/jobs
+            GET /api/dbadmin/jobs/{job_id}
+            GET /api/dbadmin/tasks
+            GET /api/dbadmin/tasks/{job_id}
+            GET /api/dbadmin/platform/requests
+            GET /api/dbadmin/platform/requests/{request_id}
+            GET /api/dbadmin/platform/orchestration
+            GET /api/dbadmin/platform/orchestration/{request_id}
 
         Args:
             req: Azure Function HTTP request
@@ -221,7 +221,7 @@ class AdminDbDataTrigger:
         """
         Query jobs with optional filtering.
 
-        GET /api/admin/db/jobs?limit=100&status=processing&hours=24&job_type=process_raster
+        GET /api/dbadmin/jobs?limit=100&status=processing&hours=24&job_type=process_raster
 
         Query Parameters:
             limit: Number of results (default: 10, max: 1000)
@@ -330,7 +330,7 @@ class AdminDbDataTrigger:
         """
         Get specific job by ID.
 
-        GET /api/admin/db/jobs/{job_id}
+        GET /api/dbadmin/jobs/{job_id}
 
         Args:
             job_id: Job ID (64-char hex SHA256 hash)
@@ -420,7 +420,7 @@ class AdminDbDataTrigger:
         """
         Query tasks with optional filtering.
 
-        GET /api/admin/db/tasks?limit=50&status=failed&stage=2
+        GET /api/dbadmin/tasks?limit=50&status=failed&stage=2
 
         Query Parameters:
             limit: Number of results (default: 50, max: 1000)
@@ -537,7 +537,7 @@ class AdminDbDataTrigger:
         """
         Get all tasks for a specific job.
 
-        GET /api/admin/db/tasks/{job_id}
+        GET /api/dbadmin/tasks/{job_id}
 
         Args:
             job_id: Job ID (64-char hex SHA256 hash)
@@ -630,7 +630,7 @@ class AdminDbDataTrigger:
         """
         Query Platform API requests with filtering.
 
-        GET /api/admin/db/platform/requests?limit=100&dataset_id=xyz
+        GET /api/dbadmin/platform/requests?limit=100&dataset_id=xyz
 
         UPDATED 26 NOV 2025: Simplified to match thin tracking pattern.
         - api_requests now in app schema (not platform schema)
@@ -736,7 +736,7 @@ class AdminDbDataTrigger:
         """
         Get specific Platform API request by ID.
 
-        GET /api/admin/db/platform/requests/{request_id}
+        GET /api/dbadmin/platform/requests/{request_id}
 
         UPDATED 26 NOV 2025: Simplified to match thin tracking pattern.
         - api_requests now in app schema (not platform schema)
@@ -833,7 +833,7 @@ class AdminDbDataTrigger:
         Platform now uses thin tracking pattern:
         - 1:1 mapping: api_requests.job_id → CoreMachine job
         - No separate orchestration table needed
-        - Use /api/admin/db/platform/requests instead
+        - Use /api/dbadmin/platform/requests instead
 
         Returns deprecation notice.
         """
@@ -844,7 +844,7 @@ class AdminDbDataTrigger:
                 'error': 'Endpoint deprecated',
                 'message': 'orchestration_jobs table was removed on 22 NOV 2025',
                 'reason': 'Platform now uses thin tracking pattern (1:1 api_request → job mapping)',
-                'alternative': 'Use GET /api/admin/db/platform/requests - includes job_id for CoreMachine lookup',
+                'alternative': 'Use GET /api/dbadmin/platform/requests - includes job_id for CoreMachine lookup',
                 'timestamp': datetime.now(timezone.utc).isoformat()
             }),
             status_code=410,  # 410 Gone - resource no longer available
@@ -858,7 +858,7 @@ class AdminDbDataTrigger:
         Platform now uses thin tracking pattern:
         - 1:1 mapping: api_requests.job_id → CoreMachine job
         - No separate orchestration table needed
-        - Use /api/admin/db/platform/requests/{request_id} instead
+        - Use /api/dbadmin/platform/requests/{request_id} instead
 
         Returns deprecation notice.
         """
@@ -869,7 +869,7 @@ class AdminDbDataTrigger:
                 'error': 'Endpoint deprecated',
                 'message': 'orchestration_jobs table was removed on 22 NOV 2025',
                 'reason': 'Platform now uses thin tracking pattern (1:1 api_request → job mapping)',
-                'alternative': f'Use GET /api/admin/db/platform/requests/{request_id} - includes job_id for CoreMachine lookup',
+                'alternative': f'Use GET /api/dbadmin/platform/requests/{request_id} - includes job_id for CoreMachine lookup',
                 'request_id': request_id,
                 'timestamp': datetime.now(timezone.utc).isoformat()
             }),

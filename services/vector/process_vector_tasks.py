@@ -90,7 +90,18 @@ def process_vector_prepare(parameters: Dict[str, Any]) -> Dict[str, Any]:
     table_name = parameters['table_name']
     schema = parameters.get('schema', 'geo')
     chunk_size = parameters.get('chunk_size')
-    converter_params = parameters.get('converter_params', {})
+    converter_params = parameters.get('converter_params', {}) or {}
+
+    # GAP-008a/008b (15 DEC 2025): Merge top-level CSV geometry params into converter_params
+    # Top-level params take precedence over nested converter_params for discoverability
+    if file_extension == 'csv':
+        if parameters.get('lat_name'):
+            converter_params['lat_name'] = parameters['lat_name']
+        if parameters.get('lon_name'):
+            converter_params['lon_name'] = parameters['lon_name']
+        if parameters.get('wkt_column'):
+            converter_params['wkt_column'] = parameters['wkt_column']
+
     geometry_params = parameters.get('geometry_params', {})
     indexes = parameters.get('indexes', {'spatial': True, 'attributes': [], 'temporal': []})
 
@@ -108,7 +119,8 @@ def process_vector_prepare(parameters: Dict[str, Any]) -> Dict[str, Any]:
     # Azure Functions have memory limits - large files cause OOM before useful error
     # GeoDataFrames typically expand 3-5x in memory vs source file size
     # B3 Basic: ~1.75GB available, Premium: up to 14GB
-    MAX_FILE_SIZE_MB = 300  # ~1GB in memory after GDF expansion
+    # Raised to 2GB per user request (15 DEC 2025) - acled_export.csv (1.3GB) needs to work
+    MAX_FILE_SIZE_MB = 2048  # 2GB limit
     blob_repo = BlobRepository.for_zone("bronze")
 
     try:

@@ -12,6 +12,8 @@ Dependencies:
     web_interfaces: InterfaceRegistry
 """
 
+import os
+import json
 import azure.functions as func
 from web_interfaces.base import BaseInterface
 from web_interfaces import InterfaceRegistry
@@ -41,7 +43,8 @@ class HealthInterface(BaseInterface):
         """
         content = self._generate_html_content()
         custom_css = self._generate_custom_css()
-        custom_js = self._generate_custom_js()
+        tooltips = self._get_component_tooltips()
+        custom_js = self._generate_custom_js(tooltips)
 
         return self.wrap_html(
             title="System Health Dashboard",
@@ -49,6 +52,68 @@ class HealthInterface(BaseInterface):
             custom_css=custom_css,
             custom_js=custom_js
         )
+
+    def _get_component_tooltips(self) -> dict:
+        """
+        Generate dynamic tooltips from environment/config.
+
+        Returns tooltip text for each component based on actual configuration.
+        Falls back to generic descriptions if config values aren't available.
+        """
+        # Get values from environment (these are available at runtime)
+        website_hostname = os.environ.get('WEBSITE_HOSTNAME', 'Function App')
+        service_bus_ns = os.environ.get('SERVICE_BUS_NAMESPACE', '')
+        if not service_bus_ns:
+            # Try to extract from connection string
+            conn_str = os.environ.get('ServiceBusConnection', '')
+            if 'Endpoint=sb://' in conn_str:
+                try:
+                    service_bus_ns = conn_str.split('Endpoint=sb://')[1].split('/')[0]
+                except (IndexError, AttributeError):
+                    service_bus_ns = 'Service Bus'
+            else:
+                service_bus_ns = 'Service Bus'
+
+        postgis_host = os.environ.get('POSTGIS_HOST', 'PostgreSQL Server')
+        storage_account = os.environ.get('BRONZE_STORAGE_ACCOUNT', os.environ.get('AZURE_STORAGE_ACCOUNT', 'Storage Account'))
+        titiler_url = os.environ.get('TITILER_BASE_URL', 'TiTiler Server')
+        # Clean up TiTiler URL for display (remove https://)
+        if titiler_url.startswith('https://'):
+            titiler_url = titiler_url[8:]
+        if titiler_url.startswith('http://'):
+            titiler_url = titiler_url[7:]
+
+        return {
+            # Platform API and workers (all same Function App)
+            'comp-platform-api': website_hostname,
+            'comp-orchestrator': website_hostname,
+            'comp-io-worker': website_hostname,
+            'comp-compute-worker': website_hostname,
+
+            # Service Bus queues
+            'comp-job-queues': service_bus_ns,
+            'comp-parallel-queue': f"{service_bus_ns} (vector-tasks)",
+            'comp-compute-queue': f"{service_bus_ns} (raster-tasks)",
+            'comp-long-queue': '(not implemented)',
+
+            # Database
+            'comp-job-tables': f"{postgis_host} (app.jobs)",
+            'comp-task-tables': f"{postgis_host} (app.tasks)",
+            'comp-output-tables': f"{postgis_host} (geo schema)",
+
+            # Storage
+            'comp-input-storage': f"{storage_account} (bronze)",
+            'comp-output-storage': f"{storage_account} (silver)",
+
+            # External services
+            'comp-titiler': titiler_url,
+            'comp-ogc-features': website_hostname,
+
+            # Not implemented
+            'comp-container': '(not implemented)',
+            'comp-titiler-xarray': '(not implemented)',
+            'comp-zarr-store': '(not implemented)',
+        }
 
     def _generate_html_content(self) -> str:
         """Generate HTML content structure."""
@@ -956,15 +1021,35 @@ class HealthInterface(BaseInterface):
         }
         """
 
-    def _generate_custom_js(self) -> str:
+    def _generate_custom_js(self, tooltips: dict) -> str:
         """Generate custom JavaScript for Health Dashboard."""
-        return """
+        tooltips_json = json.dumps(tooltips)
+
+        # Inject dynamic tooltips at the start, then use regular string for the rest
+        return f"""
+        // Dynamic component tooltips from server config
+        const COMPONENT_TOOLTIPS = {tooltips_json};
+
+        // Apply dynamic tooltips on page load
+        function applyDynamicTooltips() {{
+            Object.entries(COMPONENT_TOOLTIPS).forEach(([compId, tooltipText]) => {{
+                const component = document.getElementById(compId);
+                if (component) {{
+                    component.setAttribute('data-tooltip', tooltipText);
+                }}
+            }});
+        }}
+
         // Load health data on page load
-        document.addEventListener('DOMContentLoaded', loadHealth);
+        document.addEventListener('DOMContentLoaded', () => {{
+            applyDynamicTooltips();
+            loadHealth();
+            setupDiagramClickHandlers();
+        }});
 
         // Component mapping: SVG component ID -> health API component name
         // Maps diagram components to /api/health response components
-        const COMPONENT_MAPPING = {
+        const COMPONENT_MAPPING = {{
             'comp-platform-api': 'deployment_config',    // API deployment configuration
             'comp-job-queues': 'service_bus',            // Azure Service Bus queues
             'comp-orchestrator': 'jobs',                 // Job orchestration/registry
@@ -981,62 +1066,59 @@ class HealthInterface(BaseInterface):
             'comp-output-tables': 'pgstac',              // PostGIS/pgstac output
             'comp-titiler': 'titiler',                   // TiTiler-pgstac raster tile server
             'comp-ogc-features': 'ogc_features'          // OGC Features API
-        };
+        }};
 
         // Update architecture diagram status indicators
-        function updateDiagramStatus(components) {
+        function updateDiagramStatus(components) {{
             if (!components) return;
 
             // Update each component in the diagram
-            Object.entries(COMPONENT_MAPPING).forEach(([svgId, healthKey]) => {
+            Object.entries(COMPONENT_MAPPING).forEach(([svgId, healthKey]) => {{
                 const component = components[healthKey];
-                const indicator = document.querySelector(`#${svgId} .status-indicator`);
+                const indicator = document.querySelector(`#${{svgId}} .status-indicator`);
 
-                if (indicator) {
+                if (indicator) {{
                     let status = 'unknown';
-                    if (component) {
+                    if (component) {{
                         // For TiTiler and OGC Features, check details.overall_status for nuanced status
                         // (these components can have warning state: livez OK but health not OK)
-                        if (component.details && component.details.overall_status) {
+                        if (component.details && component.details.overall_status) {{
                             status = component.details.overall_status;
-                        } else {
+                        }} else {{
                             status = component.status || 'unknown';
-                        }
+                        }}
                         // Normalize status values
                         if (status === 'error') status = 'unhealthy';
                         if (status === 'partial') status = 'warning';
                         if (status === 'disabled' || status === 'deprecated') status = 'unknown';
-                    }
+                    }}
                     indicator.setAttribute('data-status', status);
-                }
-            });
-        }
+                }}
+            }});
+        }}
 
         // Click handler for diagram components
-        function setupDiagramClickHandlers() {
-            document.querySelectorAll('.architecture-diagram .component').forEach(comp => {
-                comp.addEventListener('click', () => {
+        function setupDiagramClickHandlers() {{
+            document.querySelectorAll('.architecture-diagram .component').forEach(comp => {{
+                comp.addEventListener('click', () => {{
                     const healthKey = COMPONENT_MAPPING[comp.id];
-                    if (healthKey) {
+                    if (healthKey) {{
                         // Scroll to and highlight the corresponding component card
-                        const card = document.querySelector(`[data-component-key="${healthKey}"]`);
-                        if (card) {
-                            card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        const card = document.querySelector(`[data-component-key="${{healthKey}}"]`);
+                        if (card) {{
+                            card.scrollIntoView({{ behavior: 'smooth', block: 'center' }});
                             card.style.boxShadow = '0 0 0 3px #0071BC';
-                            setTimeout(() => {
+                            setTimeout(() => {{
                                 card.style.boxShadow = '';
-                            }, 2000);
-                        }
-                    }
-                });
-            });
-        }
-
-        // Initialize diagram handlers
-        document.addEventListener('DOMContentLoaded', setupDiagramClickHandlers);
+                            }}, 2000);
+                        }}
+                    }}
+                }});
+            }});
+        }}
 
         // Load health data from API
-        async function loadHealth() {
+        async function loadHealth() {{
             const refreshBtn = document.getElementById('refresh-btn');
             const overallStatus = document.getElementById('overall-status');
             const errorBanner = document.getElementById('error-banner');
@@ -1050,8 +1132,8 @@ class HealthInterface(BaseInterface):
             errorBanner.classList.add('hidden');
             componentsGrid.innerHTML = '';
 
-            try {
-                const data = await fetchJSON(`${API_BASE_URL}/api/health`);
+            try {{
+                const data = await fetchJSON(`${{API_BASE_URL}}/api/health`);
 
                 // Render overall status
                 renderOverallStatus(data);
@@ -1074,80 +1156,80 @@ class HealthInterface(BaseInterface):
                 // Update last checked timestamp
                 updateLastChecked(data.timestamp);
 
-            } catch (error) {
+            }} catch (error) {{
                 console.error('Error loading health data:', error);
                 overallStatus.className = 'overall-status unhealthy';
                 overallStatus.innerHTML = `
                     <span class="status-icon">&#x274C;</span>
                     <div>
                         <div>Failed to load health data</div>
-                        <div class="status-details">${error.message || 'Unknown error'}</div>
+                        <div class="status-details">${{error.message || 'Unknown error'}}</div>
                     </div>
                 `;
                 errorBanner.classList.remove('hidden');
                 document.getElementById('error-message').textContent = error.message || 'Failed to fetch health endpoint';
-            } finally {
+            }} finally {{
                 refreshBtn.disabled = false;
                 refreshBtn.textContent = 'Refresh';
-            }
-        }
+            }}
+        }}
 
         // Render overall status banner
-        function renderOverallStatus(data) {
+        function renderOverallStatus(data) {{
             const overallStatus = document.getElementById('overall-status');
             const status = data.status || 'unknown';
             const errors = data.errors || [];
-            const components = data.components || {};
+            const components = data.components || {{}};
             const componentCount = Object.keys(components).length;
 
             let statusIcon, statusText;
-            if (status === 'healthy') {
+            if (status === 'healthy') {{
                 statusIcon = '&#x2705;';
                 statusText = 'All Systems Operational';
-            } else if (status === 'unhealthy') {
+            }} else if (status === 'unhealthy') {{
                 statusIcon = '&#x274C;';
                 statusText = 'System Issues Detected';
-            } else {
+            }} else {{
                 statusIcon = '&#x26A0;';
                 statusText = 'Unknown Status';
-            }
+            }}
 
-            overallStatus.className = `overall-status ${status}`;
+            overallStatus.className = `overall-status ${{status}}`;
             overallStatus.innerHTML = `
-                <span class="status-icon">${statusIcon}</span>
+                <span class="status-icon">${{statusIcon}}</span>
                 <div>
-                    <div>${statusText}</div>
-                    <div class="status-details">${componentCount} components checked ${errors.length > 0 ? '&bull; ' + errors.length + ' warning(s)' : ''}</div>
+                    <div>${{statusText}}</div>
+                    <div class="status-details">${{componentCount}} components checked ${{errors.length > 0 ? '&bull; ' + errors.length + ' warning(s)' : ''}}</div>
                 </div>
             `;
-        }
+        }}
 
         // Render environment info section
-        function renderEnvironmentInfo(data) {
+        function renderEnvironmentInfo(data) {{
             const envInfo = document.getElementById('environment-info');
-            const env = data.environment || {};
+            const env = data.environment || {{}};
 
-            if (Object.keys(env).length === 0) {
+            if (Object.keys(env).length === 0) {{
                 envInfo.classList.add('hidden');
                 return;
-            }
+            }}
 
             envInfo.classList.remove('hidden');
             envInfo.innerHTML = `
                 <h3>Environment</h3>
                 <div class="env-grid">
-                    ${Object.entries(env).map(([key, value]) => `
+                    ${{Object.entries(env).map(([key, value]) => `
                         <div class="env-item">
-                            <div class="env-label">${formatLabel(key)}</div>
-                            <div class="env-value">${value || 'N/A'}</div>
+                            <div class="env-label">${{formatLabel(key)}}</div>
+                            <div class="env-value">${{value || 'N/A'}}</div>
                         </div>
-                    `).join('')}
+                    `).join('')}}
                 </div>
             `;
-        }
+        }}
 
         // Render identity info section
-        function renderIdentityInfo(data) {
+        function renderIdentityInfo(data) {{
             const identity = data.identity;
             if (!identity) return;
 
@@ -1157,146 +1239,146 @@ class HealthInterface(BaseInterface):
                 <div class="identity-section">
                     <h3>Authentication & Identity</h3>
                     <div class="identity-grid">
-                        ${identity.database ? `
+                        ${{identity.database ? `
                             <div class="identity-card">
                                 <h4>Database Authentication</h4>
-                                <div class="identity-item"><strong>Method:</strong> ${identity.database.auth_method || 'N/A'}</div>
-                                <div class="identity-item"><strong>Managed Identity:</strong> ${identity.database.use_managed_identity ? 'Yes' : 'No'}</div>
-                                ${identity.database.admin_identity_name ? `<div class="identity-item"><strong>Identity:</strong> ${identity.database.admin_identity_name}</div>` : ''}
+                                <div class="identity-item"><strong>Method:</strong> ${{identity.database.auth_method || 'N/A'}}</div>
+                                <div class="identity-item"><strong>Managed Identity:</strong> ${{identity.database.use_managed_identity ? 'Yes' : 'No'}}</div>
+                                ${{identity.database.admin_identity_name ? `<div class="identity-item"><strong>Identity:</strong> ${{identity.database.admin_identity_name}}</div>` : ''}}
                             </div>
-                        ` : ''}
-                        ${identity.storage ? `
+                        ` : ''}}
+                        ${{identity.storage ? `
                             <div class="identity-card">
                                 <h4>Storage Authentication</h4>
-                                <div class="identity-item"><strong>Method:</strong> ${identity.storage.auth_method || 'N/A'}</div>
+                                <div class="identity-item"><strong>Method:</strong> ${{identity.storage.auth_method || 'N/A'}}</div>
                             </div>
-                        ` : ''}
+                        ` : ''}}
                     </div>
                 </div>
             `;
 
             envInfo.insertAdjacentHTML('afterend', identityHtml);
-        }
+        }}
 
         // Render component cards
-        function renderComponents(components) {
+        function renderComponents(components) {{
             const grid = document.getElementById('components-grid');
 
-            if (!components || Object.keys(components).length === 0) {
+            if (!components || Object.keys(components).length === 0) {{
                 grid.innerHTML = '<p style="color: #626F86; text-align: center; padding: 40px;">No components to display</p>';
                 return;
-            }
+            }}
 
             // Sort components: healthy first, then unhealthy, then disabled/deprecated
-            const sortOrder = { healthy: 0, partial: 1, warning: 2, unhealthy: 3, error: 4, disabled: 5, deprecated: 6 };
-            const sortedComponents = Object.entries(components).sort((a, b) => {
+            const sortOrder = {{ healthy: 0, partial: 1, warning: 2, unhealthy: 3, error: 4, disabled: 5, deprecated: 6 }};
+            const sortedComponents = Object.entries(components).sort((a, b) => {{
                 const statusA = sortOrder[a[1].status] ?? 99;
                 const statusB = sortOrder[b[1].status] ?? 99;
                 return statusA - statusB;
-            });
+            }});
 
-            grid.innerHTML = sortedComponents.map(([name, component]) => {
+            grid.innerHTML = sortedComponents.map(([name, component]) => {{
                 const status = component.status || 'unknown';
                 const description = component.description || '';
-                const details = component.details || {};
+                const details = component.details || {{}};
                 const checkedAt = component.checked_at;
 
                 return `
-                    <div class="component-card ${status}" data-component-key="${name}">
-                        <div class="component-header" onclick="toggleDetails('${name}')">
+                    <div class="component-card ${{status}}" data-component-key="${{name}}">
+                        <div class="component-header" onclick="toggleDetails('${{name}}')">
                             <div>
-                                <div class="component-name">${formatLabel(name)}</div>
-                                ${description ? `<div class="component-description">${description}</div>` : ''}
+                                <div class="component-name">${{formatLabel(name)}}</div>
+                                ${{description ? `<div class="component-description">${{description}}</div>` : ''}}
                             </div>
                             <div style="display: flex; align-items: center; gap: 10px;">
-                                <span class="status-badge ${status}">${getStatusIcon(status)} ${status}</span>
+                                <span class="status-badge ${{status}}">${{getStatusIcon(status)}} ${{status}}</span>
                                 <span class="expand-indicator">&#x25BC;</span>
                             </div>
                         </div>
-                        <div class="component-details" id="details-${name}">
+                        <div class="component-details" id="details-${{name}}">
                             <div class="details-content">
-                                ${checkedAt ? `
+                                ${{checkedAt ? `
                                     <div class="detail-section">
                                         <div class="detail-label">Last Checked</div>
-                                        <div class="detail-value">${new Date(checkedAt).toLocaleString()}</div>
+                                        <div class="detail-value">${{new Date(checkedAt).toLocaleString()}}</div>
                                     </div>
-                                ` : ''}
-                                ${Object.keys(details).length > 0 ? `
+                                ` : ''}}
+                                ${{Object.keys(details).length > 0 ? `
                                     <div class="detail-section">
                                         <div class="detail-label">Details</div>
-                                        <div class="detail-json">${JSON.stringify(details, null, 2)}</div>
+                                        <div class="detail-json">${{JSON.stringify(details, null, 2)}}</div>
                                     </div>
-                                ` : '<div class="detail-value" style="color: #626F86;">No additional details available</div>'}
+                                ` : '<div class="detail-value" style="color: #626F86;">No additional details available</div>'}}
                             </div>
                         </div>
                     </div>
                 `;
-            }).join('');
-        }
+            }}).join('');
+        }}
 
         // Render debug info if DEBUG_MODE=true
-        function renderDebugInfo(data) {
+        function renderDebugInfo(data) {{
             const debugInfo = document.getElementById('debug-info');
 
-            if (!data._debug_mode) {
+            if (!data._debug_mode) {{
                 debugInfo.classList.add('hidden');
                 return;
-            }
+            }}
 
             debugInfo.classList.remove('hidden');
             debugInfo.innerHTML = `
                 <h3>Debug Mode Active</h3>
-                <p style="margin-bottom: 10px; font-size: 13px;">${data._debug_notice || 'DEBUG_MODE=true'}</p>
-                ${data.config_sources ? `
+                <p style="margin-bottom: 10px; font-size: 13px;">${{data._debug_notice || 'DEBUG_MODE=true'}}</p>
+                ${{data.config_sources ? `
                     <div class="detail-section">
                         <div class="detail-label">Configuration Sources</div>
-                        <div class="detail-json">${JSON.stringify(data.config_sources, null, 2)}</div>
+                        <div class="detail-json">${{JSON.stringify(data.config_sources, null, 2)}}</div>
                     </div>
-                ` : ''}
-                ${data.debug_status ? `
+                ` : ''}}
+                ${{data.debug_status ? `
                     <div class="detail-section" style="margin-top: 15px;">
                         <div class="detail-label">Debug Status</div>
-                        <div class="detail-json">${JSON.stringify(data.debug_status, null, 2)}</div>
+                        <div class="detail-json">${{JSON.stringify(data.debug_status, null, 2)}}</div>
                     </div>
-                ` : ''}
+                ` : ''}}
             `;
-        }
+        }}
 
         // Toggle component details
-        function toggleDetails(name) {
-            const details = document.getElementById(`details-${name}`);
+        function toggleDetails(name) {{
+            const details = document.getElementById(`details-${{name}}`);
             const header = details.previousElementSibling;
 
-            if (details.classList.contains('expanded')) {
+            if (details.classList.contains('expanded')) {{
                 details.classList.remove('expanded');
                 header.classList.remove('expanded');
-            } else {
+            }} else {{
                 details.classList.add('expanded');
                 header.classList.add('expanded');
-            }
-        }
+            }}
+        }}
 
         // Update last checked timestamp
-        function updateLastChecked(timestamp) {
+        function updateLastChecked(timestamp) {{
             const lastChecked = document.getElementById('last-checked');
-            if (timestamp) {
-                lastChecked.textContent = `Last checked: ${new Date(timestamp).toLocaleString()}`;
-            } else {
-                lastChecked.textContent = `Last checked: ${new Date().toLocaleString()}`;
-            }
-        }
+            if (timestamp) {{
+                lastChecked.textContent = `Last checked: ${{new Date(timestamp).toLocaleString()}}`;
+            }} else {{
+                lastChecked.textContent = `Last checked: ${{new Date().toLocaleString()}}`;
+            }}
+        }}
 
         // Format label (snake_case to Title Case)
-        function formatLabel(str) {
+        function formatLabel(str) {{
             return str
                 .split('_')
                 .map(word => word.charAt(0).toUpperCase() + word.slice(1))
                 .join(' ');
-        }
+        }}
 
         // Get status icon
-        function getStatusIcon(status) {
-            switch (status) {
+        function getStatusIcon(status) {{
+            switch (status) {{
                 case 'healthy': return '&#x2705;';
                 case 'unhealthy':
                 case 'error': return '&#x274C;';
@@ -1305,23 +1387,23 @@ class HealthInterface(BaseInterface):
                 case 'warning':
                 case 'partial': return '&#x26A0;';
                 default: return '&#x2753;';
-            }
-        }
+            }}
+        }}
 
         // Tooltip functionality
         const tooltip = document.getElementById('diagram-tooltip');
         const diagramContainer = document.querySelector('.architecture-diagram');
 
-        document.querySelectorAll('.component[data-tooltip]').forEach(component => {
-            component.addEventListener('mouseenter', (e) => {
+        document.querySelectorAll('.component[data-tooltip]').forEach(component => {{
+            component.addEventListener('mouseenter', (e) => {{
                 const tooltipText = component.getAttribute('data-tooltip');
-                if (tooltipText) {
+                if (tooltipText) {{
                     tooltip.textContent = tooltipText;
                     tooltip.classList.add('visible');
-                }
-            });
+                }}
+            }});
 
-            component.addEventListener('mousemove', (e) => {
+            component.addEventListener('mousemove', (e) => {{
                 const containerRect = diagramContainer.getBoundingClientRect();
                 const x = e.clientX - containerRect.left;
                 const y = e.clientY - containerRect.top;
@@ -1329,10 +1411,10 @@ class HealthInterface(BaseInterface):
                 // Position tooltip above cursor
                 tooltip.style.left = (x - tooltip.offsetWidth / 2) + 'px';
                 tooltip.style.top = (y - tooltip.offsetHeight - 15) + 'px';
-            });
+            }});
 
-            component.addEventListener('mouseleave', () => {
+            component.addEventListener('mouseleave', () => {{
                 tooltip.classList.remove('visible');
-            });
-        });
+            }});
+        }});
         """

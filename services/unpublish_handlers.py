@@ -401,6 +401,26 @@ def drop_postgis_table(params: Dict[str, Any], context: Optional[Dict[str, Any]]
                 "error_type": "ValidationError"
             }
 
+        # Curated table protection (15 DEC 2025)
+        # Tables with curated_ prefix are system-managed and cannot be dropped
+        # via normal unpublish workflow. Use curated dataset management API instead.
+        force_curated = params.get('force_curated', False)
+        if table_name.startswith('curated_') and not force_curated:
+            logger.warning(
+                f"Attempted to drop protected curated table: {table_name}. "
+                f"Use force_curated=True or curated dataset management API."
+            )
+            return {
+                "success": False,
+                "error": f"Cannot drop curated table '{table_name}'. "
+                         f"Curated tables are system-managed and protected. "
+                         f"Use the curated dataset management API instead, "
+                         f"or pass force_curated=True if authorized.",
+                "error_type": "ProtectedTableError",
+                "table_name": table_name,
+                "is_curated": True
+            }
+
         if dry_run:
             logger.info(
                 f"[DRY-RUN] Would drop table: {schema_name}.{table_name}"

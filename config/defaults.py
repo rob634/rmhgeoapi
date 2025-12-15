@@ -317,6 +317,12 @@ class TaskRoutingDefaults:
         "delete_blob",
         "drop_postgis_table",
         "delete_stac_and_audit",
+        # Curated dataset update handlers (15 DEC 2025)
+        # Lightweight: HTTP calls, DB operations, file downloads
+        "curated_check_source",
+        "curated_fetch_data",
+        "curated_etl_process",
+        "curated_finalize",
     ]
 
 

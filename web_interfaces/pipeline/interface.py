@@ -165,108 +165,6 @@ class PipelineInterface(BaseInterface):
                 text-transform: uppercase;
             }
 
-            /* Recent Jobs Table */
-            .jobs-table {
-                width: 100%;
-                border-collapse: collapse;
-                font-size: 14px;
-            }
-
-            .jobs-table th,
-            .jobs-table td {
-                padding: 12px;
-                text-align: left;
-                border-bottom: 1px solid var(--ds-gray-light);
-            }
-
-            .jobs-table th {
-                background: var(--ds-bg);
-                font-weight: 600;
-                color: var(--ds-navy);
-            }
-
-            .jobs-table tr:hover {
-                background: #f8f9fa;
-            }
-
-            .status-badge {
-                display: inline-block;
-                padding: 4px 10px;
-                border-radius: 12px;
-                font-size: 12px;
-                font-weight: 600;
-            }
-
-            .status-badge.completed {
-                background: #d4edda;
-                color: #155724;
-            }
-
-            .status-badge.processing {
-                background: #cce5ff;
-                color: #004085;
-            }
-
-            .status-badge.pending {
-                background: #fff3cd;
-                color: #856404;
-            }
-
-            .status-badge.failed {
-                background: #f8d7da;
-                color: #721c24;
-            }
-
-            .job-type {
-                font-family: monospace;
-                background: var(--ds-bg);
-                padding: 2px 8px;
-                border-radius: 4px;
-                font-size: 12px;
-            }
-
-            .job-id {
-                font-family: monospace;
-                font-size: 12px;
-                color: var(--ds-gray);
-            }
-
-            .job-id a {
-                color: var(--ds-blue-primary);
-                text-decoration: none;
-            }
-
-            .job-id a:hover {
-                text-decoration: underline;
-            }
-
-            .refresh-btn {
-                background: var(--ds-blue-primary);
-                color: white;
-                border: none;
-                padding: 8px 16px;
-                border-radius: 4px;
-                cursor: pointer;
-                font-size: 14px;
-                margin-bottom: 16px;
-            }
-
-            .refresh-btn:hover {
-                background: var(--ds-blue-dark);
-            }
-
-            .loading {
-                text-align: center;
-                padding: 40px;
-                color: var(--ds-gray);
-            }
-
-            .empty-state {
-                text-align: center;
-                padding: 40px;
-                color: var(--ds-gray);
-            }
-
             /* Custom pipelines section */
             .coming-soon {
                 background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
@@ -284,6 +182,219 @@ class PipelineInterface(BaseInterface):
             .coming-soon p {
                 color: var(--ds-gray);
                 margin: 0;
+            }
+
+            /* Jobs Filter Bar */
+            .filter-bar {
+                background: var(--ds-bg);
+                border-radius: 8px;
+                padding: 1rem;
+                margin-bottom: 1rem;
+                display: flex;
+                gap: 1.5rem;
+                align-items: flex-end;
+                flex-wrap: wrap;
+            }
+
+            .filter-group {
+                display: flex;
+                flex-direction: column;
+                gap: 0.5rem;
+                min-width: 120px;
+            }
+
+            .filter-group label {
+                font-size: 0.875rem;
+                font-weight: 500;
+                color: #374151;
+            }
+
+            .filter-select {
+                padding: 0.5rem 0.75rem;
+                border: 1px solid #d1d5db;
+                border-radius: 6px;
+                font-size: 0.875rem;
+                background: white;
+                cursor: pointer;
+            }
+
+            .filter-select:focus {
+                outline: none;
+                border-color: var(--ds-blue-primary);
+                box-shadow: 0 0 0 3px rgba(0, 113, 188, 0.1);
+            }
+
+            .filter-actions {
+                display: flex;
+                gap: 0.75rem;
+                margin-left: auto;
+            }
+
+            /* Jobs Stats Banner */
+            .stats-banner {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+                gap: 1rem;
+                margin-bottom: 1rem;
+            }
+
+            .stat-card {
+                background: var(--ds-bg);
+                border-radius: 8px;
+                padding: 1rem;
+                text-align: center;
+            }
+
+            .stat-card .stat-label {
+                font-size: 0.75rem;
+                color: #6b7280;
+                margin-bottom: 0.25rem;
+                text-transform: uppercase;
+            }
+
+            .stat-card .stat-value {
+                font-size: 1.5rem;
+                font-weight: 700;
+                color: #1f2937;
+            }
+
+            .stat-queued { color: #6b7280 !important; }
+            .stat-processing { color: var(--ds-blue-primary) !important; }
+            .stat-completed { color: #10b981 !important; }
+            .stat-failed { color: #ef4444 !important; }
+
+            /* Jobs Table */
+            .data-table {
+                width: 100%;
+                border-collapse: collapse;
+                font-size: 14px;
+            }
+
+            .data-table thead {
+                background: var(--ds-bg);
+            }
+
+            .data-table th {
+                padding: 1rem;
+                text-align: left;
+                font-size: 0.875rem;
+                font-weight: 600;
+                color: #374151;
+                border-bottom: 2px solid #e5e7eb;
+            }
+
+            .data-table td {
+                padding: 1rem;
+                border-bottom: 1px solid #e5e7eb;
+                font-size: 0.875rem;
+            }
+
+            .data-table tbody tr:hover {
+                background: #f9fafb;
+            }
+
+            .status-badge {
+                padding: 0.25rem 0.75rem;
+                border-radius: 12px;
+                font-size: 0.75rem;
+                font-weight: 600;
+                text-transform: uppercase;
+            }
+
+            .status-queued {
+                background: #f3f4f6;
+                color: #6b7280;
+            }
+
+            .status-processing {
+                background: #dbeafe;
+                color: var(--ds-blue-primary);
+            }
+
+            .status-completed {
+                background: #d1fae5;
+                color: #059669;
+            }
+
+            .status-failed {
+                background: #fee2e2;
+                color: #dc2626;
+            }
+
+            .stage-badge {
+                font-size: 0.875rem;
+                color: #6b7280;
+            }
+
+            .task-summary {
+                display: flex;
+                gap: 0.5rem;
+                font-size: 0.75rem;
+            }
+
+            .task-count {
+                padding: 0.125rem 0.5rem;
+                border-radius: 4px;
+                font-weight: 600;
+            }
+
+            .task-count-queued {
+                background: #f3f4f6;
+                color: #6b7280;
+            }
+
+            .task-count-processing {
+                background: #dbeafe;
+                color: var(--ds-blue-primary);
+            }
+
+            .task-count-completed {
+                background: #d1fae5;
+                color: #059669;
+            }
+
+            .task-count-failed {
+                background: #fee2e2;
+                color: #dc2626;
+            }
+
+            .job-id-short {
+                font-family: 'Monaco', 'Courier New', monospace;
+                font-size: 0.75rem;
+                color: #6b7280;
+            }
+
+            .loading-state {
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                padding: 3rem;
+            }
+
+            .spinner {
+                width: 40px;
+                height: 40px;
+                border: 4px solid #f3f4f6;
+                border-top-color: var(--ds-blue-primary);
+                border-radius: 50%;
+                animation: spin 0.8s linear infinite;
+            }
+
+            @keyframes spin {
+                to { transform: rotate(360deg); }
+            }
+
+            .error-state {
+                padding: 2rem;
+                background: #fee2e2;
+                border-radius: 8px;
+                text-align: center;
+            }
+
+            .error-message {
+                color: #dc2626;
+                margin-bottom: 1rem;
             }
         """
 
@@ -395,15 +506,92 @@ class PipelineInterface(BaseInterface):
                 </div>
             </div>
 
-            <!-- Recent Jobs -->
+            <!-- Recent Jobs (Full Jobs Interface) -->
             <div class="section">
-                <h2>Recent Pipeline Jobs</h2>
-                <button class="refresh-btn" onclick="loadRecentJobs()">Refresh</button>
-                <div id="jobs-container">
-                    <div class="loading">
-                        <div class="spinner"></div>
-                        <p>Loading recent jobs...</p>
+                <h2>Recent Jobs</h2>
+
+                <!-- Filter Bar -->
+                <div class="filter-bar">
+                    <div class="filter-group">
+                        <label for="statusFilter">Status:</label>
+                        <select id="statusFilter" class="filter-select">
+                            <option value="">All</option>
+                            <option value="queued">Queued</option>
+                            <option value="processing">Processing</option>
+                            <option value="completed">Completed</option>
+                            <option value="failed">Failed</option>
+                        </select>
                     </div>
+
+                    <div class="filter-group">
+                        <label for="limitFilter">Limit:</label>
+                        <select id="limitFilter" class="filter-select">
+                            <option value="10">10</option>
+                            <option value="25" selected>25</option>
+                            <option value="50">50</option>
+                            <option value="100">100</option>
+                        </select>
+                    </div>
+
+                    <div class="filter-actions">
+                        <button id="refreshBtn" class="btn btn-primary">Refresh</button>
+                        <button id="clearFiltersBtn" class="btn btn-secondary">Clear Filters</button>
+                    </div>
+                </div>
+
+                <!-- Loading State -->
+                <div id="loadingState" class="loading-state">
+                    <div class="spinner"></div>
+                    <p>Loading jobs...</p>
+                </div>
+
+                <!-- Error State -->
+                <div id="errorState" class="error-state" style="display: none;">
+                    <p class="error-message"></p>
+                    <button id="retryBtn" class="btn btn-primary">Retry</button>
+                </div>
+
+                <!-- Jobs Table -->
+                <div id="jobsTableContainer" style="display: none;">
+                    <div class="stats-banner">
+                        <div class="stat-card">
+                            <div class="stat-label">Total Jobs</div>
+                            <div class="stat-value" id="totalJobs">0</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">Queued</div>
+                            <div class="stat-value stat-queued" id="queuedJobs">0</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">Processing</div>
+                            <div class="stat-value stat-processing" id="processingJobs">0</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">Completed</div>
+                            <div class="stat-value stat-completed" id="completedJobs">0</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">Failed</div>
+                            <div class="stat-value stat-failed" id="failedJobs">0</div>
+                        </div>
+                    </div>
+
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Job ID</th>
+                                <th>Job Type</th>
+                                <th>Status</th>
+                                <th>Stage</th>
+                                <th>Tasks</th>
+                                <th>Created</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="jobsTableBody">
+                            <!-- Populated by JavaScript -->
+                        </tbody>
+                    </table>
                 </div>
             </div>
         </div>
@@ -412,7 +600,7 @@ class PipelineInterface(BaseInterface):
     def _generate_js(self) -> str:
         """JavaScript for loading job data."""
         return """
-        // Pipeline job types to track
+        // Pipeline job types to track for stats
         const PIPELINE_TYPES = [
             'process_vector',
             'process_raster_v2',
@@ -420,73 +608,90 @@ class PipelineInterface(BaseInterface):
             'process_large_raster_v2'
         ];
 
-        async function loadRecentJobs() {
-            const container = document.getElementById('jobs-container');
-            container.innerHTML = '<div class="loading"><div class="spinner"></div><p>Loading...</p></div>';
+        // Job filters
+        let currentFilters = {
+            status: '',
+            limit: 25
+        };
+
+        // Load jobs on page load
+        document.addEventListener('DOMContentLoaded', () => {
+            loadJobs();
+
+            // Event listeners for job filters
+            document.getElementById('refreshBtn').addEventListener('click', loadJobs);
+            document.getElementById('statusFilter').addEventListener('change', (e) => {
+                currentFilters.status = e.target.value;
+                loadJobs();
+            });
+            document.getElementById('limitFilter').addEventListener('change', (e) => {
+                currentFilters.limit = parseInt(e.target.value);
+                loadJobs();
+            });
+            document.getElementById('clearFiltersBtn').addEventListener('click', () => {
+                currentFilters = { status: '', limit: 25 };
+                document.getElementById('statusFilter').value = '';
+                document.getElementById('limitFilter').value = '25';
+                loadJobs();
+            });
+            document.getElementById('retryBtn').addEventListener('click', loadJobs);
+        });
+
+        async function loadJobs() {
+            const loadingState = document.getElementById('loadingState');
+            const errorState = document.getElementById('errorState');
+            const tableContainer = document.getElementById('jobsTableContainer');
+
+            // Show loading
+            loadingState.style.display = 'flex';
+            errorState.style.display = 'none';
+            tableContainer.style.display = 'none';
 
             try {
-                // Fetch recent jobs
-                const response = await fetch(`${API_BASE_URL}/api/dbadmin/jobs?limit=20&hours=48`);
-                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                // Build query string
+                const params = new URLSearchParams();
+                if (currentFilters.status) params.append('status', currentFilters.status);
+                params.append('limit', currentFilters.limit);
+
+                const response = await fetch(`/api/dbadmin/jobs?${params.toString()}`);
+                if (!response.ok) throw new Error(`HTTP ${response.status}: ${response.statusText}`);
 
                 const data = await response.json();
                 const jobs = data.jobs || [];
 
-                // Filter to pipeline jobs only
-                const pipelineJobs = jobs.filter(job =>
-                    PIPELINE_TYPES.some(type => job.job_type && job.job_type.includes(type.replace('_', '')))
-                    || PIPELINE_TYPES.includes(job.job_type)
-                );
-
-                if (pipelineJobs.length === 0) {
-                    container.innerHTML = '<div class="empty-state"><p>No recent pipeline jobs found.</p></div>';
-                    return;
-                }
-
-                // Build table
-                let html = `
-                    <table class="jobs-table">
-                        <thead>
-                            <tr>
-                                <th>Job ID</th>
-                                <th>Type</th>
-                                <th>Status</th>
-                                <th>Stage</th>
-                                <th>Created</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                `;
-
-                pipelineJobs.forEach(job => {
-                    const statusClass = job.status || 'pending';
-                    const jobId = job.job_id || job.id;
-                    const shortId = jobId ? jobId.substring(0, 12) + '...' : '--';
-                    const created = job.created_at ? new Date(job.created_at).toLocaleString() : '--';
-
-                    html += `
-                        <tr>
-                            <td class="job-id">
-                                <a href="/api/interface/jobs?job_id=${jobId}" title="${jobId}">${shortId}</a>
-                            </td>
-                            <td><span class="job-type">${job.job_type || '--'}</span></td>
-                            <td><span class="status-badge ${statusClass}">${job.status || 'unknown'}</span></td>
-                            <td>${job.current_stage || job.stage || '--'}</td>
-                            <td>${created}</td>
-                        </tr>
-                    `;
-                });
-
-                html += '</tbody></table>';
-                container.innerHTML = html;
-
                 // Update stats
+                updateJobStats(jobs);
+
+                // Update pipeline card stats
                 updatePipelineStats(jobs);
+
+                // Render table
+                renderJobsTable(jobs);
+
+                // Show table
+                loadingState.style.display = 'none';
+                tableContainer.style.display = 'block';
 
             } catch (error) {
                 console.error('Failed to load jobs:', error);
-                container.innerHTML = `<div class="empty-state"><p>Error loading jobs: ${error.message}</p></div>`;
+                loadingState.style.display = 'none';
+                errorState.style.display = 'block';
+                errorState.querySelector('.error-message').textContent = 'Failed to load jobs: ' + error.message;
             }
+        }
+
+        function updateJobStats(jobs) {
+            const stats = jobs.reduce((acc, job) => {
+                acc.total++;
+                acc[job.status] = (acc[job.status] || 0) + 1;
+                return acc;
+            }, { total: 0, queued: 0, processing: 0, completed: 0, failed: 0 });
+
+            document.getElementById('totalJobs').textContent = stats.total;
+            document.getElementById('queuedJobs').textContent = stats.queued;
+            document.getElementById('processingJobs').textContent = stats.processing;
+            document.getElementById('completedJobs').textContent = stats.completed;
+            document.getElementById('failedJobs').textContent = stats.failed;
         }
 
         function updatePipelineStats(jobs) {
@@ -521,8 +726,46 @@ class PipelineInterface(BaseInterface):
                 collectionJobs.length > 0 ? Math.round(collectionSuccess / collectionJobs.length * 100) + '%' : '--';
         }
 
-        // Load on page ready
-        document.addEventListener('DOMContentLoaded', () => {
-            loadRecentJobs();
-        });
+        function renderJobsTable(jobs) {
+            const tbody = document.getElementById('jobsTableBody');
+            tbody.innerHTML = '';
+
+            if (jobs.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 2rem;">No jobs found</td></tr>';
+                return;
+            }
+
+            jobs.forEach(job => {
+                const row = document.createElement('tr');
+
+                // Job ID (short version) - API returns job_id, not id
+                const jobId = job.job_id || job.id;
+                const jobIdShort = jobId ? jobId.substring(0, 8) : '--';
+                const createdAt = job.created_at ? new Date(job.created_at).toLocaleString() : '--';
+
+                // Task counts
+                const taskCounts = job.task_counts || { queued: 0, processing: 0, completed: 0, failed: 0 };
+
+                row.innerHTML = `
+                    <td><span class="job-id-short" title="${jobId}">${jobIdShort}</span></td>
+                    <td>${job.job_type || '--'}</td>
+                    <td><span class="status-badge status-${job.status || 'unknown'}">${job.status || 'unknown'}</span></td>
+                    <td><span class="stage-badge">Stage ${job.stage || 0}/${job.total_stages || '?'}</span></td>
+                    <td>
+                        <div class="task-summary">
+                            ${taskCounts.queued > 0 ? `<span class="task-count task-count-queued">Q:${taskCounts.queued}</span>` : ''}
+                            ${taskCounts.processing > 0 ? `<span class="task-count task-count-processing">P:${taskCounts.processing}</span>` : ''}
+                            ${taskCounts.completed > 0 ? `<span class="task-count task-count-completed">C:${taskCounts.completed}</span>` : ''}
+                            ${taskCounts.failed > 0 ? `<span class="task-count task-count-failed">F:${taskCounts.failed}</span>` : ''}
+                        </div>
+                    </td>
+                    <td>${createdAt}</td>
+                    <td>
+                        <a href="/api/interface/tasks?job_id=${jobId}" class="btn btn-sm btn-primary">View Tasks</a>
+                    </td>
+                `;
+
+                tbody.appendChild(row);
+            });
+        }
         """

@@ -52,6 +52,9 @@ from .inventory_container_contents import InventoryContainerContentsJob
 from .unpublish_raster import UnpublishRasterJob
 from .unpublish_vector import UnpublishVectorJob
 
+# Curated dataset update (15 DEC 2025)
+from .curated_update import CuratedDatasetUpdateJob
+
 # ARCHIVED (07 DEC 2025) - replaced by inventory_container_contents
 # from .container_list import ListContainerContentsWorkflow
 # from .container_list_diamond import ListContainerContentsDiamondWorkflow
@@ -86,6 +89,9 @@ ALL_JOBS = {
     # Unpublish workflows - surgical data removal (12 DEC 2025)
     "unpublish_raster": UnpublishRasterJob,
     "unpublish_vector": UnpublishVectorJob,
+
+    # Curated dataset update (15 DEC 2025)
+    "curated_dataset_update": CuratedDatasetUpdateJob,
 
     # ARCHIVED (07 DEC 2025) - use inventory_container_contents instead
     # "list_container_contents": ListContainerContentsWorkflow,

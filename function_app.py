@@ -224,6 +224,10 @@ from triggers.admin.db_diagnostics import admin_db_diagnostics_trigger
 from triggers.admin.servicebus import servicebus_admin_trigger
 from triggers.admin.h3_debug import admin_h3_debug_trigger
 
+# Curated Dataset Admin (15 DEC 2025) - System-managed geospatial data
+from triggers.curated.admin import curated_admin_trigger
+from triggers.curated.scheduler import curated_scheduler_trigger
+
 # Platform Service Layer triggers (25 OCT 2025)
 from triggers.trigger_platform import (
     platform_request_submit,
@@ -705,6 +709,66 @@ def servicebus_admin_nuke_queue(req: func.HttpRequest) -> func.HttpResponse:
 
 # ============================================================================
 # END DATABASE ADMIN API ENDPOINTS
+# ============================================================================
+
+
+# ============================================================================
+# CURATED DATASET MANAGEMENT ENDPOINTS (15 DEC 2025)
+# ============================================================================
+# CRUD operations for curated (system-managed) datasets.
+# These are official geospatial data sources that update automatically.
+# Examples: WDPA, Admin0 boundaries, other authoritative sources.
+# ============================================================================
+
+@app.route(route="curated/datasets", methods=["GET", "POST"])
+def curated_datasets(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Curated datasets CRUD.
+
+    GET /api/curated/datasets - List all curated datasets
+    POST /api/curated/datasets - Create new dataset (body: JSON)
+    """
+    return curated_admin_trigger.handle_request(req)
+
+
+@app.route(route="curated/datasets/{dataset_id}", methods=["GET", "PUT", "DELETE"])
+def curated_dataset_by_id(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Single curated dataset operations.
+
+    GET /api/curated/datasets/{id} - Get dataset
+    PUT /api/curated/datasets/{id} - Update dataset
+    DELETE /api/curated/datasets/{id}?confirm=yes - Delete registry entry
+    """
+    return curated_admin_trigger.handle_request(req)
+
+
+@app.route(route="curated/datasets/{dataset_id}/update", methods=["POST"])
+def curated_dataset_update(req: func.HttpRequest) -> func.HttpResponse:
+    """Trigger manual update: POST /api/curated/datasets/{id}/update"""
+    return curated_admin_trigger.handle_request(req)
+
+
+@app.route(route="curated/datasets/{dataset_id}/history", methods=["GET"])
+def curated_dataset_history(req: func.HttpRequest) -> func.HttpResponse:
+    """Get update history: GET /api/curated/datasets/{id}/history?limit=20"""
+    return curated_admin_trigger.handle_request(req)
+
+
+@app.route(route="curated/datasets/{dataset_id}/enable", methods=["POST"])
+def curated_dataset_enable(req: func.HttpRequest) -> func.HttpResponse:
+    """Enable scheduled updates: POST /api/curated/datasets/{id}/enable"""
+    return curated_admin_trigger.handle_request(req)
+
+
+@app.route(route="curated/datasets/{dataset_id}/disable", methods=["POST"])
+def curated_dataset_disable(req: func.HttpRequest) -> func.HttpResponse:
+    """Disable scheduled updates: POST /api/curated/datasets/{id}/disable"""
+    return curated_admin_trigger.handle_request(req)
+
+
+# ============================================================================
+# END CURATED DATASET MANAGEMENT ENDPOINTS
 # ============================================================================
 
 
@@ -2766,6 +2830,31 @@ def geo_orphan_check_timer(timer: func.TimerRequest) -> None:
         )
     else:
         timer_logger.error(f"⏰ Timer: Geo orphan check failed - {result.get('error')}")
+
+
+# ============================================================================
+# CURATED DATASET SCHEDULER (15 DEC 2025)
+# ============================================================================
+# Daily timer trigger to check for curated datasets that need updating.
+# Runs at 2 AM UTC - datasets checked against their update_schedule.
+# Submits curated_dataset_update jobs for datasets that are due.
+# ============================================================================
+
+@app.timer_trigger(
+    schedule="0 0 2 * * *",  # Daily at 2 AM UTC
+    arg_name="timer",
+    run_on_startup=False
+)
+def curated_dataset_scheduler(timer: func.TimerRequest) -> None:
+    """
+    Timer trigger: Check curated datasets for updates daily at 2 AM.
+
+    Checks all enabled datasets with schedules and submits update jobs
+    for those that are due.
+
+    Schedule: Daily at 2 AM UTC (most datasets update weekly at most)
+    """
+    curated_scheduler_trigger.handle_timer(timer)
 
 
 # ============================================================================

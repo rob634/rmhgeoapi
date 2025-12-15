@@ -1775,6 +1775,28 @@ class AdminDbMaintenanceTrigger:
                 mimetype='application/json'
             )
 
+        # Curated table protection (15 DEC 2025)
+        # Tables with curated_ prefix are system-managed and cannot be unpublished
+        # via this admin endpoint. Use curated dataset management API instead.
+        force_curated = req.params.get('force') == 'curated'
+        if table_name.startswith('curated_') and not force_curated:
+            logger.warning(
+                f"Attempted to unpublish protected curated table: {table_name}. "
+                f"Use force=curated or curated dataset management API."
+            )
+            return func.HttpResponse(
+                body=json.dumps({
+                    "error": f"Cannot unpublish curated table '{table_name}'",
+                    "message": "Curated tables are system-managed and protected. "
+                               "Use the curated dataset management API instead.",
+                    "table_name": table_name,
+                    "is_curated": True,
+                    "bypass_hint": "Add &force=curated if you have authorization to drop curated tables"
+                }),
+                status_code=403,
+                mimetype='application/json'
+            )
+
         logger.info(f"🗑️ Unpublishing geo table: {table_name}")
 
         result = {

@@ -133,6 +133,14 @@ from .unpublish_handlers import (
     delete_stac_and_audit,
 )
 
+# Curated dataset update handlers (15 DEC 2025)
+from jobs.curated_update import (
+    curated_check_source,
+    curated_fetch_data,
+    curated_etl_process,
+    curated_finalize,
+)
+
 # ============================================================================
 # STAC METADATA HELPER (25 NOV 2025)
 # ============================================================================
@@ -220,6 +228,11 @@ ALL_HANDLERS = {
     "delete_blob": delete_blob,  # Stage 2: Delete blob from Azure Storage
     "drop_postgis_table": drop_postgis_table,  # Stage 2: DROP TABLE IF EXISTS
     "delete_stac_and_audit": delete_stac_and_audit,  # Stage 3: Delete STAC item, audit
+    # Curated dataset update handlers (15 DEC 2025)
+    "curated_check_source": curated_check_source,  # Stage 1: Check source for updates
+    "curated_fetch_data": curated_fetch_data,  # Stage 2: Download data
+    "curated_etl_process": curated_etl_process,  # Stage 3: ETL to PostGIS
+    "curated_finalize": curated_finalize,  # Stage 4: Update registry, log
 }
 
 # ============================================================================

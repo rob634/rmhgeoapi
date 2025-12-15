@@ -146,13 +146,14 @@ class DuckDBRepository(IDuckDBRepository):
         """
         self.connection_type = connection_type
         self.database_path = database_path
-        # Get storage account from config if not provided (08 DEC 2025)
+        # Get storage account from env var directly to avoid coupling to full AppConfig
+        # This prevents requiring PostgreSQL env vars just to use DuckDB (15 DEC 2025)
         if storage_account_name:
             self.storage_account_name = storage_account_name
         else:
-            from config import get_config
-            config = get_config()
-            self.storage_account_name = config.storage.gold.account_name
+            # Read directly from env var - same source as StorageConfig.gold.account_name
+            # Default to "rmhazuregeo" for local development (matches production account)
+            self.storage_account_name = os.getenv("GOLD_STORAGE_ACCOUNT", "rmhazuregeo")
         self._conn: Optional[duckdb.DuckDBPyConnection] = None
         self._extensions_loaded: bool = False
         self._managed_identity_enabled: bool = False  # Track if credential_chain succeeded

@@ -122,3 +122,131 @@ class JobCompletionResult(BaseModel):
     total_tasks: int = Field(..., description="Total tasks across all stages")
     completed_tasks: int = Field(..., description="Number of completed tasks")
     task_results: Optional[Dict[str, Any]] = Field(default=None, description="Aggregated task results")
+
+
+# ============================================================================
+# PROCESS_VECTOR STAGE RESULT MODELS (GAP-006 FIX - 15 DEC 2025)
+# ============================================================================
+
+
+class ProcessVectorStage1Data(BaseModel):
+    """
+    Validated structure for process_vector Stage 1 result data.
+
+    GAP-006 FIX: Ensures Stage 2 receives well-formed data from Stage 1.
+    Prevents KeyError, AttributeError, or silent empty values.
+
+    This is the 'result' field inside the task result wrapper.
+    """
+
+    model_config = ConfigDict(extra="allow")  # Allow extra fields for forward compat
+
+    chunk_paths: List[str] = Field(
+        ...,
+        min_length=1,
+        description="Paths to pickled chunk files in Silver zone"
+    )
+    total_features: int = Field(
+        ...,
+        gt=0,
+        description="Total features loaded from source file"
+    )
+    num_chunks: int = Field(
+        ...,
+        gt=0,
+        description="Number of chunks created"
+    )
+    table_name: str = Field(
+        ...,
+        min_length=1,
+        description="Target PostGIS table name"
+    )
+    schema: str = Field(
+        default="geo",
+        description="Target PostGIS schema"
+    )
+    columns: List[str] = Field(
+        default_factory=list,
+        description="Column names (excluding reserved: id, geom, etl_batch_id)"
+    )
+    geometry_type: str = Field(
+        default="GEOMETRY",
+        description="PostGIS geometry type (POINT, POLYGON, MULTIPOLYGON, etc.)"
+    )
+    srid: int = Field(
+        default=4326,
+        description="Spatial Reference ID (always 4326 after reprojection)"
+    )
+    chunk_size_used: Optional[int] = Field(
+        default=None,
+        description="Actual rows per chunk"
+    )
+    source_file: Optional[str] = Field(
+        default=None,
+        description="Original source file path"
+    )
+    source_crs: Optional[str] = Field(
+        default=None,
+        description="Original CRS before reprojection"
+    )
+
+
+class ProcessVectorStage1Result(BaseModel):
+    """
+    Full task result wrapper for process_vector Stage 1.
+
+    GAP-006 FIX: Validates the complete task result structure.
+
+    Example input:
+        {
+            "success": True,
+            "result": {
+                "chunk_paths": ["pickles/abc123/chunk_0.pkl", ...],
+                "total_features": 50000,
+                "num_chunks": 5,
+                "table_name": "my_table",
+                ...
+            }
+        }
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    success: bool = Field(..., description="Whether Stage 1 succeeded")
+    result: ProcessVectorStage1Data = Field(
+        ...,
+        description="Stage 1 output data"
+    )
+    error: Optional[str] = Field(
+        default=None,
+        description="Error message if success=False"
+    )
+
+    @field_validator('result', mode='before')
+    @classmethod
+    def validate_result_on_success(cls, v, info):
+        """Ensure result is present when success=True."""
+        # This runs before the model validates 'result' itself
+        # info.data contains already-validated fields
+        return v
+
+
+class ProcessVectorStage2Result(BaseModel):
+    """
+    Validated structure for process_vector Stage 2 (upload) result.
+
+    Used for aggregating upload results in finalize_job().
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    success: bool = Field(..., description="Whether chunk upload succeeded")
+    result: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Upload result data"
+    )
+    rows_inserted: int = Field(default=0, ge=0, description="Rows inserted in this chunk")
+    rows_deleted: int = Field(default=0, ge=0, description="Rows deleted (idempotency)")
+    batch_id: Optional[str] = Field(default=None, description="Idempotency batch ID")
+    chunk_index: Optional[int] = Field(default=None, ge=0, description="Chunk number")
+    error: Optional[str] = Field(default=None, description="Error if failed")

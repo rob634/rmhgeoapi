@@ -340,6 +340,17 @@ logger.info(f"   ✅ Platform callback registered (will be connected on Platform
 # Initialize function app with HTTP auth level
 app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
 
+# ============================================================================
+# BLUEPRINT REGISTRATIONS (15 DEC 2025)
+# ============================================================================
+# DEV/Admin endpoints moved to separate Blueprint modules for better organization
+from routes import admin_db_bp, admin_servicebus_bp
+
+app.register_functions(admin_db_bp)
+app.register_functions(admin_servicebus_bp)
+
+logger.info("✅ Blueprints registered: admin_db, admin_servicebus")
+
 
 
 
@@ -357,181 +368,12 @@ def livez(req: func.HttpRequest) -> func.HttpResponse:
 
 
 # ============================================================================
-# DATABASE ADMIN API ENDPOINTS (FCO - For Claude Only) - 29 endpoints
+# DATABASE ADMIN + SERVICE BUS ENDPOINTS - MOVED TO BLUEPRINTS (15 DEC 2025)
 # ============================================================================
-# 🔧 ENDPOINT LIFECYCLE (16 NOV 2025):
-# - ✅ DEV: Active - Claude needs HTTP access for debugging
-# - ✅ QA: Active - Useful for testing and validation
-# - ⚠️ UAT: REMOVE - No admin endpoints in user testing
-# - 🚫 PRODUCTION: REMOVE - Security risk, use Azure Portal/Log Analytics instead
-#
-# Why these exist:
-# - Corporate network blocks direct PostgreSQL access (no DBeaver, no pgAdmin)
-# - Claude Code needs HTTP visibility into database state for development
-# - Rapid debugging without context switching to Azure Portal
-#
-# Production Replacement (UAT and beyond):
-# - Use Azure Log Analytics (KQL queries on app_jobs, app_tasks tables)
-# - Use Azure Portal: Database monitoring for health/performance metrics
-# - Use Application Insights: Query execution traces and errors
-# - External apps (DDH) will use separate /api/jobs/* endpoints with APIM security
-#
-# Security Risk:
-# - These endpoints expose sensitive database internals (schema, tables, queries)
-# - App uses RBAC + Managed Identity (no function keys), auth_level set at app level
-# - MUST BE REMOVED before UAT deployment to prevent data exposure
-#
-# Count: 29 endpoints total (17 schema/table, 4 query, 2 health, 3 maintenance, 3 diagnostics)
-# All routes use /api/dbadmin/* prefix for clarity (standardized 16 NOV 2025)
-# ============================================================================
-
-# Schema-level operations (3 endpoints - Keep for QA, remove for UAT/PROD)
-@app.route(route="dbadmin/schemas", methods=["GET"])
-def db_schemas_list(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    ⚠️ FCO (For Claude Only) - Keep for QA, remove before UAT
-    List all schemas: GET /api/dbadmin/schemas
-    Production: Use Azure Portal → PostgreSQL → Schemas
-    """
-    return admin_db_schemas_trigger.handle_request(req)
-
-
-@app.route(route="dbadmin/schemas/{schema_name}", methods=["GET"])
-def db_schema_details(req: func.HttpRequest) -> func.HttpResponse:
-    """⚠️ FCO - Keep for QA, remove before UAT. GET /api/dbadmin/schemas/{schema_name}"""
-    return admin_db_schemas_trigger.handle_request(req)
-
-
-@app.route(route="dbadmin/schemas/{schema_name}/tables", methods=["GET"])
-def db_schema_tables(req: func.HttpRequest) -> func.HttpResponse:
-    """⚠️ FCO - Keep for QA, remove before UAT. GET /api/dbadmin/schemas/{schema_name}/tables"""
-    return admin_db_schemas_trigger.handle_request(req)
-
-
-# Table-level operations - CONSOLIDATED (15 DEC 2025)
-# GET /api/dbadmin/tables/{schema}.{table}?type={details|sample|columns|indexes}
-@app.route(route="dbadmin/tables/{table_identifier}", methods=["GET"])
-def db_tables(req: func.HttpRequest) -> func.HttpResponse:
-    """Consolidated table ops: ?type={details|sample|columns|indexes}"""
-    return admin_db_tables_trigger.handle_tables(req)
-
-
-# Query analysis - CONSOLIDATED (15 DEC 2025)
-# GET /api/dbadmin/activity?type={running|slow|locks|connections}
-@app.route(route="dbadmin/activity", methods=["GET"])
-def db_activity(req: func.HttpRequest) -> func.HttpResponse:
-    """Consolidated DB activity: ?type={running|slow|locks|connections}"""
-    return admin_db_queries_trigger.handle_activity(req)
-
-
-# Health and performance
-@app.route(route="dbadmin/health", methods=["GET"])
-def db_health(req: func.HttpRequest) -> func.HttpResponse:
-    """Get database health: GET /api/dbadmin/health"""
-    return admin_db_health_trigger.handle_request(req)
-
-
-@app.route(route="dbadmin/health/performance", methods=["GET"])
-def db_health_performance(req: func.HttpRequest) -> func.HttpResponse:
-    """Get performance metrics: GET /api/dbadmin/health/performance"""
-    return admin_db_health_trigger.handle_request(req)
-
-
-# ============================================================================
-# CONSOLIDATED MAINTENANCE ENDPOINT (15 DEC 2025)
-# ============================================================================
-# Replaces 6 separate routes with single parameterized endpoint:
-#   OLD: /dbadmin/maintenance/nuke, /redeploy, /cleanup, /pgstac/redeploy, /pgstac/check-prerequisites, /full-rebuild
-#   NEW: /dbadmin/maintenance?action={nuke|redeploy|cleanup|full-rebuild|check-prerequisites}&target={app|pgstac}
-# ============================================================================
-
-@app.route(route="dbadmin/maintenance", methods=["POST", "GET"])
-def admin_maintenance(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    Consolidated maintenance endpoint.
-
-    POST /api/dbadmin/maintenance?action={nuke|redeploy|cleanup|full-rebuild|check-prerequisites}&target={app|pgstac}&confirm=yes
-
-    Query Parameters:
-        action: nuke | redeploy | cleanup | full-rebuild | check-prerequisites
-        target: app | pgstac (default: app)
-        confirm: yes (required for destructive operations)
-        days: For cleanup (default: 30)
-    """
-    return admin_db_maintenance_trigger.handle_maintenance(req)
-
-
-# ============================================================================
-# GEO SCHEMA MANAGEMENT ENDPOINTS (10 DEC 2025)
-# ============================================================================
-# Tools for managing vector tables in the geo schema.
-# Handles both tracked tables (with metadata) and orphaned tables
-# (tables that exist after a full-rebuild wipes app/pgstac schemas).
-# ============================================================================
-
-# CONSOLIDATED (15 DEC 2025) - 4 routes → 1 route
-# GET /api/dbadmin/geo?type={tables|metadata|orphans}
-# POST /api/dbadmin/geo?action=unpublish&table_name={name}&confirm=yes
-@app.route(route="dbadmin/geo", methods=["GET", "POST"])
-def dbadmin_geo(req: func.HttpRequest) -> func.HttpResponse:
-    """Consolidated geo ops: ?type={tables|metadata|orphans} or ?action=unpublish"""
-    return admin_db_maintenance_trigger.handle_geo(req)
-
-
-# Note: Original endpoint docstrings preserved as comments for reference:
-# GET  /api/dbadmin/geo?type=tables    - List geo tables with tracking status
-# GET  /api/dbadmin/geo?type=metadata  - List geo.table_metadata records
-# GET  /api/dbadmin/geo?type=orphans   - Check for orphaned tables/metadata
-# POST /api/dbadmin/geo?action=unpublish&table_name={name}&confirm=yes - Cascade delete
-
-
-# ============================================================================
-# SERVICE BUS ADMIN API ENDPOINTS - Phase 2 (04 NOV 2025)
-# ============================================================================
-# ⚠️ DEVELOPMENT ONLY - REMOVE BEFORE QA/PRODUCTION DEPLOYMENT
-#
-# Why these exist:
-# - Corporate network restricts Azure Portal access during development
-# - Claude Code needs HTTP visibility into Service Bus queue state
-# - Quick queue inspection and troubleshooting without portal context switching
-#
-# Production Replacement:
-# - Use Azure Portal: Service Bus → Queues → [Queue Name] → Messages
-# - Use Azure Monitor: Queue metrics, dead-letter tracking, message counts
-# - Use Application Insights: Message processing traces and errors
-#
-# Security Risk:
-# - These endpoints expose queue internals (message contents, counts)
-# - Nuclear button can clear queues (data loss)
-# - Anonymous auth level (func.AuthLevel.ANONYMOUS) is intentional for dev
-# - MUST BE REMOVED before corporate/QA deployment
-#
-# Count: 6 endpoints total (5 inspection + 1 nuclear button)
-# Reference: API_CONSOLIDATION_STATUS.md section "Service Bus Admin (6 functions)"
-# ============================================================================
-
-# CONSOLIDATED (15 DEC 2025) - 6 routes → 2 routes
-# GET /api/servicebus?type={queues|health}
-@app.route(route="servicebus", methods=["GET"])
-def servicebus_global(req: func.HttpRequest) -> func.HttpResponse:
-    """Consolidated global ops: ?type={queues|health}"""
-    return servicebus_admin_trigger.handle_global(req)
-
-
-# GET|POST /api/servicebus/queue/{queue_name}?type={details|peek|deadletter|nuke}
-@app.route(route="servicebus/queue/{queue_name}", methods=["GET", "POST"])
-def servicebus_queue(req: func.HttpRequest) -> func.HttpResponse:
-    """Consolidated queue ops: ?type={details|peek|deadletter|nuke}"""
-    return servicebus_admin_trigger.handle_queue(req)
-
-
-# ============================================================================
-# END SERVICE BUS ADMIN API ENDPOINTS
-# ============================================================================
-
-
-# ============================================================================
-# END DATABASE ADMIN API ENDPOINTS
+# All dbadmin/* and servicebus/* routes moved to:
+#   - routes/admin_db.py (19 routes)
+#   - routes/admin_servicebus.py (2 routes)
+# Registered via app.register_functions() above
 # ============================================================================
 
 
@@ -602,79 +444,16 @@ def get_job_status(req: func.HttpRequest) -> func.HttpResponse:
 
 
 
-# Database Query Endpoints - Phase 2 Database Monitoring
-@app.route(route="dbadmin/jobs", methods=["GET"])
-def admin_query_jobs(req: func.HttpRequest) -> func.HttpResponse:
-    """Query jobs with filtering: GET /api/admin/db/jobs?limit=10&status=processing&hours=24"""
-    return admin_db_data_trigger.handle_request(req)
-
-
-@app.route(route="dbadmin/jobs/{job_id}", methods=["GET"])
-def admin_query_job_by_id(req: func.HttpRequest) -> func.HttpResponse:
-    """Get specific job by ID: GET /api/admin/db/jobs/{job_id}"""
-    return admin_db_data_trigger.handle_request(req)
-
-
-@app.route(route="dbadmin/tasks", methods=["GET"])
-def admin_query_tasks(req: func.HttpRequest) -> func.HttpResponse:
-    """Query tasks with filtering: GET /api/admin/db/tasks?status=failed&limit=20"""
-    return admin_db_data_trigger.handle_request(req)
-
-
-@app.route(route="dbadmin/tasks/{job_id}", methods=["GET"])
-def admin_query_tasks_for_job(req: func.HttpRequest) -> func.HttpResponse:
-    """Get all tasks for a job: GET /api/admin/db/tasks/{job_id}"""
-    return admin_db_data_trigger.handle_request(req)
-
-
-# Platform Layer Query Endpoints (29 OCT 2025 - Migrated to Admin API 10 NOV 2025)
-@app.route(route="dbadmin/platform/requests", methods=["GET"])
-def admin_query_api_requests(req: func.HttpRequest) -> func.HttpResponse:
-    """Query API requests with filtering: GET /api/admin/db/platform/requests?limit=10&status=processing"""
-    return admin_db_data_trigger.handle_request(req)
-
-
-@app.route(route="dbadmin/platform/requests/{request_id}", methods=["GET"])
-def admin_query_api_request_by_id(req: func.HttpRequest) -> func.HttpResponse:
-    """Get specific API request by ID: GET /api/admin/db/platform/requests/{request_id}"""
-    return admin_db_data_trigger.handle_request(req)
-
-
-@app.route(route="dbadmin/platform/orchestration", methods=["GET"])
-def admin_query_orchestration_jobs(req: func.HttpRequest) -> func.HttpResponse:
-    """Query orchestration jobs with filtering: GET /api/admin/db/platform/orchestration?request_id={request_id}"""
-    return admin_db_data_trigger.handle_request(req)
-
-
-@app.route(route="dbadmin/platform/orchestration/{request_id}", methods=["GET"])
-def admin_query_orchestration_jobs_for_request(req: func.HttpRequest) -> func.HttpResponse:
-    """Get orchestration jobs for specific request: GET /api/admin/db/platform/orchestration/{request_id}"""
-    return admin_db_data_trigger.handle_request(req)
-
-
 # ============================================================================
-# CONSOLIDATED DIAGNOSTICS ENDPOINT (15 DEC 2025)
+# DATABASE ADMIN DATA/DIAGNOSTICS - MOVED TO BLUEPRINTS (15 DEC 2025)
 # ============================================================================
-# Replaces 4 separate routes with single parameterized endpoint:
-#   OLD: /dbadmin/stats, /dbadmin/diagnostics/enums, /dbadmin/diagnostics/functions, /dbadmin/diagnostics/all
-#   NEW: /dbadmin/diagnostics?type={stats|enums|functions|all|config|errors|lineage}
+# Routes moved to routes/admin_db.py:
+#   - dbadmin/jobs, dbadmin/jobs/{job_id}
+#   - dbadmin/tasks, dbadmin/tasks/{job_id}
+#   - dbadmin/platform/requests, dbadmin/platform/requests/{request_id}
+#   - dbadmin/platform/orchestration, dbadmin/platform/orchestration/{request_id}
+#   - dbadmin/diagnostics?type={stats|enums|functions|all|config|errors|lineage}
 # ============================================================================
-
-@app.route(route="dbadmin/diagnostics", methods=["GET"])
-def admin_diagnostics(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    Consolidated diagnostics endpoint.
-
-    GET /api/dbadmin/diagnostics?type={stats|enums|functions|all|config|errors}
-    GET /api/dbadmin/diagnostics?type=lineage&job_id={job_id}
-
-    Query Parameters:
-        type: stats | enums | functions | all | config | lineage | errors
-        job_id: Required when type=lineage
-        hours: For errors (default: 24)
-        limit: For errors (default: 10)
-    """
-    return admin_db_diagnostics_trigger.handle_diagnostics(req)
 
 
 # H3 Debug and Bootstrap Monitoring (12 NOV 2025)
@@ -1937,118 +1716,7 @@ def web_interface_unified(req: func.HttpRequest) -> func.HttpResponse:
 
 
 
-@app.route(route="dbadmin/debug/all", methods=["GET"])
-def debug_dump_all(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    🔍 DEBUG: Dump all jobs and tasks for debugging.
-    GET /api/dbadmin/debug/all?limit=100
-
-    Returns complete data from both jobs and tasks tables for debugging.
-    Perfect for when you don't have DBeaver access.
-    """
-    limit = int(req.params.get('limit', '100'))
-
-    # Initialize response variables
-    jobs = []
-    tasks = []
-
-    try:
-        repos = RepositoryFactory.create_repositories()
-        job_repo = repos['job_repo']
-
-        if isinstance(job_repo, PostgreSQLRepository):
-            # FIX: _get_connection() is a context manager, use with statement
-            with job_repo._get_connection() as conn:
-                # Use DictCursor for easier column access by name
-                from psycopg.rows import dict_row
-                with conn.cursor(row_factory=dict_row) as cursor:
-                    # Get all jobs
-                    cursor.execute(f"""
-                        SELECT
-                            job_id, job_type, status, stage, total_stages,
-                            parameters, stage_results, result_data, error_details,
-                            created_at, updated_at
-                        FROM {job_repo.schema_name}.jobs
-                        ORDER BY created_at DESC
-                        LIMIT %s
-                    """, (limit,))
-
-                    for row in cursor.fetchall():
-                        jobs.append({
-                            "job_id": row["job_id"],
-                            "job_type": row["job_type"],
-                            "status": row["status"],
-                            "stage": row["stage"],
-                            "total_stages": row["total_stages"],
-                            "parameters": row["parameters"],
-                            "stage_results": row["stage_results"],
-                            "result_data": row["result_data"],
-                            "error_details": row["error_details"],
-                            "created_at": row["created_at"].isoformat() if row["created_at"] else None,
-                            "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None
-                        })
-
-                    # Get all tasks
-                    cursor.execute(f"""
-                        SELECT
-                            task_id, parent_job_id, task_type, status, stage,
-                            parameters, result_data, error_details, retry_count,
-                            created_at, updated_at
-                        FROM {job_repo.schema_name}.tasks
-                        ORDER BY created_at DESC
-                        LIMIT %s
-                    """, (limit,))
-
-                    for row in cursor.fetchall():
-                        tasks.append({
-                            "task_id": row["task_id"],
-                            "parent_job_id": row["parent_job_id"],
-                            "task_type": row["task_type"],
-                            "status": row["status"],
-                            "stage": row["stage"],
-                            "parameters": row["parameters"],
-                            "result_data": row["result_data"],
-                            "error_details": row["error_details"],
-                            "retry_count": row["retry_count"],
-                            "created_at": row["created_at"].isoformat() if row["created_at"] else None,
-                            "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None
-                        })
-        else:
-            # If not PostgreSQL, return error explaining why
-            return func.HttpResponse(
-                body=json.dumps({
-                    "error": f"Repository type {type(job_repo).__name__} not supported for debug dump",
-                    "timestamp": datetime.now(timezone.utc).isoformat()
-                }),
-                status_code=501,  # Not Implemented
-                headers={'Content-Type': 'application/json'}
-            )
-
-        # Return success response (moved outside if block)
-        return func.HttpResponse(
-            body=json.dumps({
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "jobs_count": len(jobs),
-                "tasks_count": len(tasks),
-                "jobs": jobs,
-                "tasks": tasks
-            }, default=str),
-            status_code=200,
-            headers={'Content-Type': 'application/json'}
-        )
-
-    except Exception as e:
-        import traceback
-        return func.HttpResponse(
-            body=json.dumps({
-                "error": f"Debug dump failed: {str(e)}",
-                "error_type": type(e).__name__,
-                "traceback": traceback.format_exc(),
-                "timestamp": datetime.now(timezone.utc).isoformat()
-            }),
-            status_code=500,
-            headers={'Content-Type': 'application/json'}
-        )
+# dbadmin/debug/all - MOVED TO routes/admin_db.py (15 DEC 2025)
 
 
 # ============================================================================

@@ -245,15 +245,41 @@ class ProcessVectorJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
             if not previous_results:
                 raise ValueError("Stage 2 requires Stage 1 results for fan-out")
 
-            # Extract chunk paths from Stage 1 result
-            stage_1_result = previous_results[0]
-            if not stage_1_result.get('success'):
-                raise ValueError(f"Stage 1 failed: {stage_1_result.get('error')}")
+            # GAP-006 FIX (15 DEC 2025): Validate Stage 1 result structure with Pydantic
+            # This catches malformed results early with clear error messages
+            from pydantic import ValidationError
+            from core.models.results import ProcessVectorStage1Result
 
-            result_data = stage_1_result.get('result', {})
-            chunk_paths = result_data.get('chunk_paths', [])
-            table_name = result_data.get('table_name')
-            schema = result_data.get('schema', 'geo')
+            raw_result = previous_results[0]
+
+            try:
+                # Validate full structure - Pydantic will raise if fields missing/invalid
+                validated_result = ProcessVectorStage1Result(**raw_result)
+            except ValidationError as e:
+                # Convert Pydantic errors to actionable message
+                error_details = "; ".join(
+                    f"{err['loc']}: {err['msg']}" for err in e.errors()
+                )
+                raise ValueError(
+                    f"Stage 1 result validation failed (GAP-006): {error_details}. "
+                    f"Raw result keys: {list(raw_result.keys()) if isinstance(raw_result, dict) else 'NOT_A_DICT'}. "
+                    f"This indicates Stage 1 returned malformed data."
+                )
+
+            # Check for explicit failure
+            if not validated_result.success:
+                raise ValueError(f"Stage 1 failed: {validated_result.error or 'unknown error'}")
+
+            # Extract validated data - guaranteed to exist and be non-empty by Pydantic
+            stage_1_data = validated_result.result
+            chunk_paths = stage_1_data.chunk_paths  # Guaranteed min_length=1
+            table_name = stage_1_data.table_name    # Guaranteed min_length=1
+            schema = stage_1_data.schema
+
+            logger.info(
+                f"[{job_id[:8]}] Stage 2 fan-out: {len(chunk_paths)} chunks to upload "
+                f"to {schema}.{table_name} (validated via GAP-006 Pydantic model)"
+            )
 
             # Create one task per chunk with deterministic ID
             tasks = []

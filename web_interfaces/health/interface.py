@@ -17,6 +17,7 @@ import json
 import azure.functions as func
 from web_interfaces.base import BaseInterface
 from web_interfaces import InterfaceRegistry
+from config import get_config, __version__
 
 
 @InterfaceRegistry.register('health')
@@ -55,64 +56,101 @@ class HealthInterface(BaseInterface):
 
     def _get_component_tooltips(self) -> dict:
         """
-        Generate dynamic tooltips from environment/config.
+        Generate dynamic tooltips from application config.
 
-        Returns tooltip text for each component based on actual configuration.
-        Falls back to generic descriptions if config values aren't available.
+        Returns tooltip text for each architecture component based on actual
+        configuration values from the config module (Pydantic-validated settings).
+
+        Tooltip Format:
+            - Resource name/hostname
+            - Schema/container names in parentheses
+            - Queue names for Service Bus components
+
+        Returns:
+            Dictionary mapping SVG component IDs to tooltip text strings
+
+        Raises:
+            Exception: If config fails to load (no fallback - fail fast)
         """
-        # Get values from environment (these are available at runtime)
-        website_hostname = os.environ.get('WEBSITE_HOSTNAME', 'Function App')
-        service_bus_ns = os.environ.get('SERVICE_BUS_NAMESPACE', '')
-        if not service_bus_ns:
-            # Try to extract from connection string
-            conn_str = os.environ.get('ServiceBusConnection', '')
-            if 'Endpoint=sb://' in conn_str:
-                try:
-                    service_bus_ns = conn_str.split('Endpoint=sb://')[1].split('/')[0]
-                except (IndexError, AttributeError):
-                    service_bus_ns = 'Service Bus'
-            else:
-                service_bus_ns = 'Service Bus'
+        config = get_config()
 
-        postgis_host = os.environ.get('POSTGIS_HOST', 'PostgreSQL Server')
-        storage_account = os.environ.get('BRONZE_STORAGE_ACCOUNT', os.environ.get('AZURE_STORAGE_ACCOUNT', 'Storage Account'))
-        titiler_url = os.environ.get('TITILER_BASE_URL', 'TiTiler Server')
-        # Clean up TiTiler URL for display (remove https://)
+        # Website hostname from Azure environment
+        website_hostname = os.environ.get('WEBSITE_HOSTNAME', 'localhost')
+
+        # Service Bus namespace - extract from connection string if needed
+        service_bus_ns = config.queues.namespace or ''
+        if not service_bus_ns:
+            conn_str = config.queues.connection_string or ''
+            if 'Endpoint=sb://' in conn_str:
+                service_bus_ns = conn_str.split('Endpoint=sb://')[1].split('/')[0]
+            else:
+                service_bus_ns = 'Service Bus (namespace not configured)'
+
+        # Database info
+        db_host = config.database.host
+        db_name = config.database.database
+        app_schema = config.database.app_schema
+        geo_schema = config.database.postgis_schema
+        pgstac_schema = config.database.pgstac_schema
+
+        # Storage accounts
+        bronze_account = config.storage.bronze.account_name
+        silver_account = config.storage.silver.account_name
+        bronze_rasters = config.storage.bronze.rasters
+        silver_cogs = config.storage.silver.cogs
+
+        # TiTiler URL - clean up for display
+        titiler_url = config.titiler_base_url
         if titiler_url.startswith('https://'):
             titiler_url = titiler_url[8:]
         if titiler_url.startswith('http://'):
             titiler_url = titiler_url[7:]
 
+        # Queue names from config
+        jobs_queue = config.queues.jobs_queue
+        raster_queue = config.queues.raster_tasks_queue
+        vector_queue = config.queues.vector_tasks_queue
+        long_queue = config.queues.long_running_raster_tasks_queue
+
+        # OGC Features URL - clean up for display
+        ogc_url = config.ogc_features_base_url
+        if ogc_url.startswith('https://'):
+            ogc_url = ogc_url[8:]
+        if ogc_url.startswith('http://'):
+            ogc_url = ogc_url[7:]
+        # Remove /api/features suffix for cleaner display
+        ogc_url = ogc_url.replace('/api/features', '')
+
         return {
-            # Platform API and workers (all same Function App)
-            'comp-platform-api': website_hostname,
-            'comp-orchestrator': website_hostname,
-            'comp-io-worker': website_hostname,
-            'comp-compute-worker': website_hostname,
+            # Platform API and workers (all same Function App in standalone mode)
+            'comp-platform-api': f"{website_hostname}\nEndpoints: /api/platform/*, /api/jobs/*",
+            'comp-orchestrator': f"{website_hostname}\nListens: {jobs_queue}",
+            'comp-io-worker': f"{website_hostname}\nListens: {vector_queue}",
+            'comp-compute-worker': f"{website_hostname}\nListens: {raster_queue}",
 
             # Service Bus queues
-            'comp-job-queues': service_bus_ns,
-            'comp-parallel-queue': f"{service_bus_ns} (vector-tasks)",
-            'comp-compute-queue': f"{service_bus_ns} (raster-tasks)",
-            'comp-long-queue': '(not implemented)',
+            'comp-job-queues': f"{service_bus_ns}\nQueue: {jobs_queue}",
+            'comp-parallel-queue': f"{service_bus_ns}\nQueue: {vector_queue}",
+            'comp-compute-queue': f"{service_bus_ns}\nQueue: {raster_queue}",
+            'comp-long-queue': f"Queue: {long_queue}\n(Docker worker - not implemented)",
 
             # Database
-            'comp-job-tables': f"{postgis_host} (app.jobs)",
-            'comp-task-tables': f"{postgis_host} (app.tasks)",
-            'comp-output-tables': f"{postgis_host} (geo schema)",
+            'comp-job-tables': f"{db_host}\nDB: {db_name}\nSchema: {app_schema}.jobs",
+            'comp-task-tables': f"{db_host}\nDB: {db_name}\nSchema: {app_schema}.tasks",
+            'comp-output-tables': f"{db_host}\nDB: {db_name}\nSchemas: {geo_schema}, {pgstac_schema}",
 
             # Storage
-            'comp-input-storage': f"{storage_account} (bronze)",
-            'comp-output-storage': f"{storage_account} (silver)",
+            'comp-input-storage': f"{bronze_account}\nContainer: {bronze_rasters}",
+            'comp-output-storage': f"{silver_account}\nContainer: {silver_cogs}",
 
             # External services
-            'comp-titiler': titiler_url,
-            'comp-ogc-features': website_hostname,
+            'comp-titiler': f"{titiler_url}\nMode: {config.titiler_mode}",
+            'comp-ogc-features': f"{ogc_url}\nOGC API - Features",
 
             # Not implemented
-            'comp-container': '(not implemented)',
-            'comp-titiler-xarray': '(not implemented)',
-            'comp-zarr-store': '(not implemented)',
+            'comp-container': f"Docker Worker\nQueue: {long_queue}\n(not implemented)",
+            'comp-titiler-xarray': "TiTiler-xarray\n(not implemented)",
+            'comp-zarr-store': "Zarr Store\n(not implemented)",
         }
 
     def _generate_html_content(self) -> str:
@@ -529,13 +567,15 @@ class HealthInterface(BaseInterface):
             position: absolute;
             background: #1F2937;
             color: white;
-            padding: 8px 12px;
+            padding: 10px 14px;
             border-radius: 6px;
-            font-size: 12px;
+            font-size: 11px;
             font-family: 'Courier New', monospace;
             pointer-events: none;
             z-index: 1000;
-            white-space: nowrap;
+            white-space: pre-line;
+            line-height: 1.4;
+            max-width: 350px;
             box-shadow: 0 4px 12px rgba(0,0,0,0.3);
             opacity: 0;
             transition: opacity 0.2s;

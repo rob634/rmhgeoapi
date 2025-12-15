@@ -923,3 +923,70 @@ class StateManager:
                 }
             )
             return False
+
+    def fail_all_job_tasks(
+        self,
+        job_id: str,
+        error_msg: str
+    ) -> int:
+        """
+        Mark all non-terminal tasks for a job as FAILED.
+
+        GAP-004 FIX (15 DEC 2025): When a job is marked failed (e.g., due to stage
+        advancement failure), sibling tasks in PROCESSING or QUEUED state should
+        also be failed to prevent orphan tasks and wasted compute.
+
+        Safe method that won't raise exceptions.
+
+        Args:
+            job_id: Job identifier
+            error_msg: Error message to set on all failed tasks
+
+        Returns:
+            Number of tasks marked as failed
+        """
+        try:
+            from psycopg import sql
+
+            with self.repos['task_repo']._get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        sql.SQL("""
+                            UPDATE {schema}.tasks
+                            SET status = 'failed',
+                                error_details = %s,
+                                updated_at = NOW()
+                            WHERE parent_job_id = %s
+                              AND status NOT IN ('completed', 'failed')
+                            RETURNING task_id, status
+                        """).format(schema=sql.Identifier("app")),
+                        (error_msg, job_id)
+                    )
+                    failed_tasks = cur.fetchall()
+                    conn.commit()
+
+                    failed_count = len(failed_tasks)
+                    if failed_count > 0:
+                        self.logger.warning(
+                            f"GAP-004: Marked {failed_count} orphan tasks as FAILED for job {job_id[:16]}...",
+                            extra={
+                                'checkpoint': 'STATE_ORPHAN_TASKS_FAILED',
+                                'job_id': job_id,
+                                'failed_count': failed_count,
+                                'task_ids': [t['task_id'] for t in failed_tasks[:10]]  # Log first 10
+                            }
+                        )
+                    return failed_count
+
+        except Exception as e:
+            self.logger.error(
+                f"Failed to fail orphan tasks for job {job_id[:16]}...: {e}",
+                extra={
+                    'checkpoint': 'STATE_FAIL_ORPHAN_TASKS_ERROR',
+                    'error_source': 'state',
+                    'job_id': job_id,
+                    'error_type': type(e).__name__,
+                    'error_message': str(e)
+                }
+            )
+            return 0

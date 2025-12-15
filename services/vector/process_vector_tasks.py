@@ -104,8 +104,38 @@ def process_vector_prepare(parameters: Dict[str, Any]) -> Dict[str, Any]:
 
     logger.info(f"[{job_id[:8]}] Stage 1: Preparing vector data from {blob_name}")
 
-    # Step 1: Download source file from Bronze zone (08 DEC 2025)
+    # GAP-007 FIX (15 DEC 2025): Pre-flight file size check
+    # Azure Functions have memory limits - large files cause OOM before useful error
+    # GeoDataFrames typically expand 3-5x in memory vs source file size
+    # B3 Basic: ~1.75GB available, Premium: up to 14GB
+    MAX_FILE_SIZE_MB = 300  # ~1GB in memory after GDF expansion
     blob_repo = BlobRepository.for_zone("bronze")
+
+    try:
+        blob_properties = blob_repo.get_blob_properties(container_name, blob_name)
+        blob_size_bytes = blob_properties.get('size', 0)
+        blob_size_mb = blob_size_bytes / (1024 * 1024)
+
+        logger.info(
+            f"[{job_id[:8]}] Source file size: {blob_size_mb:.1f}MB "
+            f"(limit: {MAX_FILE_SIZE_MB}MB)"
+        )
+
+        if blob_size_mb > MAX_FILE_SIZE_MB:
+            raise ValueError(
+                f"Source file too large for in-memory processing: {blob_size_mb:.1f}MB. "
+                f"Maximum supported: {MAX_FILE_SIZE_MB}MB. "
+                f"GeoDataFrames expand 3-5x in memory vs source file size. "
+                f"Consider splitting the file or using a streaming approach for files > {MAX_FILE_SIZE_MB}MB."
+            )
+    except ValueError:
+        # Re-raise size errors
+        raise
+    except Exception as e:
+        # Non-fatal: If we can't get properties, proceed with download and hope for the best
+        logger.warning(f"[{job_id[:8]}] ⚠️ Could not get blob properties (non-fatal): {e}")
+
+    # Step 1: Download source file from Bronze zone (08 DEC 2025)
     file_data = blob_repo.read_blob_to_stream(container_name, blob_name)
 
     # Step 2: Convert to GeoDataFrame
@@ -127,6 +157,15 @@ def process_vector_prepare(parameters: Dict[str, Any]) -> Dict[str, Any]:
     total_features = len(gdf)
     logger.info(f"[{job_id[:8]}] Loaded {total_features} features")
 
+    # GAP-002 FIX (15 DEC 2025): Validate source file contains features
+    # Empty source files would create empty tables and silently "succeed"
+    if total_features == 0:
+        raise ValueError(
+            f"Source file '{blob_name}' contains 0 features. "
+            f"File may be empty, corrupted, or in wrong format for extension '{file_extension}'. "
+            f"Converter used: {converters[file_extension].__name__}."
+        )
+
     # Capture original CRS before reprojection (06 DEC 2025)
     # This is stored in table_metadata for data lineage tracking
     original_crs = str(gdf.crs) if gdf.crs else "unknown"
@@ -135,6 +174,24 @@ def process_vector_prepare(parameters: Dict[str, Any]) -> Dict[str, Any]:
     # Step 3: Validate and prepare GeoDataFrame (reprojects to EPSG:4326)
     handler = VectorToPostGISHandler()
     validated_gdf = handler.prepare_gdf(gdf, geometry_params=geometry_params)
+
+    # GAP-002 FIX (15 DEC 2025): Validate features remain after geometry validation
+    # prepare_gdf can filter out features with invalid/null geometries
+    validated_count = len(validated_gdf)
+    if validated_count == 0:
+        raise ValueError(
+            f"All {total_features} features filtered out during geometry validation. "
+            f"geometry_params: {geometry_params}. "
+            f"Common causes: all NULL geometries, invalid coordinates, CRS reprojection failures. "
+            f"Check source data geometry validity."
+        )
+
+    if validated_count < total_features:
+        filtered_count = total_features - validated_count
+        logger.warning(
+            f"[{job_id[:8]}] ⚠️ {filtered_count} features ({filtered_count/total_features*100:.1f}%) "
+            f"filtered out during validation. {validated_count} features remaining."
+        )
 
     # Get metadata
     geometry_type = validated_gdf.geometry.iloc[0].geom_type.upper()
@@ -460,8 +517,70 @@ def process_vector_upload(parameters: Dict[str, Any]) -> Dict[str, Any]:
             "retryable": False  # Data errors require investigation
         }
 
+    except psycopg.IntegrityError as e:
+        # Constraint violations (duplicate keys, foreign key issues)
+        error_msg = f"Database constraint violation in chunk {chunk_index}: {e}"
+        logger.error(f"{error_msg}\n{traceback.format_exc()}")
+        return {
+            "success": False,
+            "error": error_msg,
+            "error_type": "IntegrityError",
+            "chunk_index": chunk_index,
+            "chunk_path": chunk_path,
+            "batch_id": batch_id,
+            "table": f"{schema}.{table_name}",
+            "retryable": False  # Constraint violations are permanent
+        }
+
+    except (MemoryError, OSError) as e:
+        # GAP-005 FIX (15 DEC 2025): Memory/IO errors are often transient
+        # OSError includes network issues, disk I/O errors, etc.
+        error_msg = f"Resource error uploading chunk {chunk_index}: {e}"
+        logger.error(f"{error_msg}\n{traceback.format_exc()}")
+        return {
+            "success": False,
+            "error": error_msg,
+            "error_type": type(e).__name__,
+            "chunk_index": chunk_index,
+            "chunk_path": chunk_path,
+            "batch_id": batch_id,
+            "table": f"{schema}.{table_name}",
+            "retryable": True  # Resource errors often resolve on retry
+        }
+
+    except (TimeoutError, ConnectionError) as e:
+        # GAP-005 FIX (15 DEC 2025): Network timeouts are transient
+        error_msg = f"Network error uploading chunk {chunk_index}: {e}"
+        logger.error(f"{error_msg}\n{traceback.format_exc()}")
+        return {
+            "success": False,
+            "error": error_msg,
+            "error_type": type(e).__name__,
+            "chunk_index": chunk_index,
+            "chunk_path": chunk_path,
+            "batch_id": batch_id,
+            "table": f"{schema}.{table_name}",
+            "retryable": True  # Network issues are transient
+        }
+
+    except (ValueError, TypeError, KeyError) as e:
+        # GAP-005 FIX (15 DEC 2025): Programming/data errors are permanent
+        error_msg = f"Data/programming error in chunk {chunk_index}: {e}"
+        logger.error(f"{error_msg}\n{traceback.format_exc()}")
+        return {
+            "success": False,
+            "error": error_msg,
+            "error_type": type(e).__name__,
+            "chunk_index": chunk_index,
+            "chunk_path": chunk_path,
+            "batch_id": batch_id,
+            "table": f"{schema}.{table_name}",
+            "retryable": False  # Programming errors won't resolve on retry
+        }
+
     except Exception as e:
-        # Unexpected errors
+        # GAP-005 FIX (15 DEC 2025): Unknown errors - default to retryable
+        # Let Service Bus retry logic handle these - better to retry than fail permanently
         error_msg = f"Unexpected error uploading chunk {chunk_index}: {e}"
         logger.error(f"{error_msg}\n{traceback.format_exc()}")
         return {
@@ -473,5 +592,5 @@ def process_vector_upload(parameters: Dict[str, Any]) -> Dict[str, Any]:
             "batch_id": batch_id,
             "table": f"{schema}.{table_name}",
             "traceback": traceback.format_exc(),
-            "retryable": False  # Unknown errors require investigation
+            "retryable": True  # Unknown errors - retry cautiously via Service Bus
         }

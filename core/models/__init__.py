@@ -44,7 +44,11 @@ from .results import (
     TaskResult,
     StageResultContract,
     StageAdvancementResult,
-    JobCompletionResult
+    JobCompletionResult,
+    # GAP-006 FIX (15 DEC 2025): Process vector stage result validation models
+    ProcessVectorStage1Data,
+    ProcessVectorStage1Result,
+    ProcessVectorStage2Result
 )
 
 # Platform models (simplified 22 NOV 2025 - thin tracking only)
@@ -112,6 +116,10 @@ __all__ = [
     'StageResultContract',
     'StageAdvancementResult',
     'JobCompletionResult',
+    # GAP-006 FIX (15 DEC 2025)
+    'ProcessVectorStage1Data',
+    'ProcessVectorStage1Result',
+    'ProcessVectorStage2Result',
 
     # Platform models (simplified 22 NOV 2025 - thin tracking)
     'ApiRequest',

@@ -1061,6 +1061,22 @@ class CoreMachine:
                                 f"❌ Job {task_message.parent_job_id[:16]}... marked as FAILED "
                                 f"due to stage advancement failure"
                             )
+
+                            # GAP-004 FIX (15 DEC 2025): Also fail all orphan tasks for this job
+                            # This prevents sibling tasks from continuing to process after job fails
+                            orphan_error_msg = (
+                                f"Task orphaned: parent job {task_message.parent_job_id[:16]}... "
+                                f"failed during stage {task_message.stage + 1} advancement"
+                            )
+                            orphan_count = self.state_manager.fail_all_job_tasks(
+                                task_message.parent_job_id,
+                                orphan_error_msg
+                            )
+                            if orphan_count > 0:
+                                self.logger.warning(
+                                    f"GAP-004: Cleaned up {orphan_count} orphan tasks for failed job"
+                                )
+
                         except Exception as cleanup_error:
                             # 28 NOV 2025: Preserve both primary and cleanup error context
                             log_nested_error(

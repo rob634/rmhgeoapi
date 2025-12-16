@@ -122,13 +122,18 @@ class UnpublishRasterJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
         """
         if stage == 1:
             # Stage 1: Inventory - query STAC item and extract blob list
+            # Pass through _stac_item from validator for handler to use
             return [{
                 "task_id": f"{job_id[:8]}-s1-inventory",
                 "task_type": "inventory_raster_item",
                 "parameters": {
                     "stac_item_id": job_params["stac_item_id"],
                     "collection_id": job_params["collection_id"],
-                    "dry_run": job_params.get("dry_run", True)
+                    "dry_run": job_params.get("dry_run", True),
+                    # Pass through validated STAC item data from resource_validators
+                    "_stac_item": job_params.get("_stac_item"),
+                    "_stac_item_assets": job_params.get("_stac_item_assets"),
+                    "_stac_original_job_id": job_params.get("_stac_original_job_id")
                 }
             }]
 
@@ -139,7 +144,10 @@ class UnpublishRasterJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
                 # No blobs to delete - return empty list
                 return []
 
-            inventory_result = previous_results[0].get("result", {})
+            # IMPORTANT: CoreMachine._get_completed_stage_results() returns
+            # result_data dicts DIRECTLY, not TaskRecord objects.
+            # So previous_results[0] IS the inventory result dict.
+            inventory_result = previous_results[0]
             blobs_to_delete = inventory_result.get("blobs_to_delete", [])
             dry_run = job_params.get("dry_run", True)
 
@@ -166,14 +174,21 @@ class UnpublishRasterJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
 
         elif stage == 3:
             # Stage 3: Cleanup - delete STAC item, audit, cleanup empty collection
-            # Pass through all job params plus inventory data
-            inventory_data = {}
-            if previous_results:
-                # Find the inventory result (from stage 1, passed through stage 2)
-                for result in previous_results:
-                    if result.get("task_type") == "inventory_raster_item":
-                        inventory_data = result.get("result", {})
-                        break
+            #
+            # IMPORTANT: At Stage 3, previous_results contains Stage 2 results
+            # (delete_blob tasks), NOT Stage 1 inventory results!
+            #
+            # Get inventory data from job_params._stac_item (set by validator)
+            stac_item = job_params.get("_stac_item", {})
+            properties = stac_item.get("properties", {}) if stac_item else {}
+
+            # Extract original job info from STAC item properties
+            original_job_id = properties.get("app:job_id")
+            original_job_type = properties.get("app:job_type")
+
+            # previous_results from Stage 2 are delete_blob result dicts
+            # Each contains: {blob_deleted: bool, blob_path: str, etc.}
+            blobs_deleted = previous_results if previous_results else []
 
             return [{
                 "task_id": f"{job_id[:8]}-s3-cleanup",
@@ -185,10 +200,10 @@ class UnpublishRasterJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
                     "unpublish_job_id": job_id,
                     "unpublish_type": "raster",
                     # Pass through inventory data for audit record
-                    "original_job_id": inventory_data.get("original_job_id"),
-                    "original_job_type": inventory_data.get("original_job_type"),
-                    "original_parameters": inventory_data.get("original_parameters"),
-                    "blobs_deleted": inventory_data.get("blobs_to_delete", [])
+                    "original_job_id": original_job_id,
+                    "original_job_type": original_job_type,
+                    "original_parameters": None,  # Not stored in STAC item
+                    "blobs_deleted": blobs_deleted
                 }
             }]
 
@@ -217,14 +232,15 @@ class UnpublishRasterJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
         )
 
         if context:
-            # Extract cleanup result
+            # Extract cleanup result - task_results are objects with attributes
             cleanup_results = [
                 r for r in context.task_results
-                if r.get("task_type") == "delete_stac_and_audit"
+                if getattr(r, "task_type", None) == "delete_stac_and_audit"
             ]
 
             if cleanup_results:
-                cleanup = cleanup_results[0].get("result", {})
+                # Access result_data as attribute, then treat as dict
+                cleanup = getattr(cleanup_results[0], "result_data", {}) or {}
                 dry_run = cleanup.get("dry_run", True)
 
                 if dry_run:

@@ -432,7 +432,9 @@ def drop_postgis_table(params: Dict[str, Any], context: Optional[Dict[str, Any]]
                 "metadata_deleted": False,
                 "dry_run": True,
                 "table_name": table_name,
-                "schema_name": schema_name
+                "schema_name": schema_name,
+                # Pass through Stage 1 inventory data for Stage 3
+                "_inventory_data": params.get("_inventory_data", {})
             }
 
         repo = PostgreSQLRepository()
@@ -487,7 +489,9 @@ def drop_postgis_table(params: Dict[str, Any], context: Optional[Dict[str, Any]]
             "metadata_deleted": metadata_deleted,
             "already_gone": not exists,
             "table_name": table_name,
-            "schema_name": schema_name
+            "schema_name": schema_name,
+            # Pass through Stage 1 inventory data for Stage 3
+            "_inventory_data": params.get("_inventory_data", {})
         }
 
     except Exception as e:

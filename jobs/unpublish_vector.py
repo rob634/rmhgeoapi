@@ -142,6 +142,12 @@ class UnpublishVectorJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
 
         elif stage == 2:
             # Stage 2: Drop PostGIS table and delete metadata row
+            #
+            # IMPORTANT: previous_results at Stage 2 contains Stage 1 results directly.
+            # CoreMachine._get_completed_stage_results() returns result_data dicts.
+            # We need to pass Stage 1 inventory data through to Stage 3 via task params.
+            inventory_data = previous_results[0] if previous_results else {}
+
             return [{
                 "task_id": f"{job_id[:8]}-s2-drop",
                 "task_type": "drop_postgis_table",
@@ -149,22 +155,22 @@ class UnpublishVectorJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
                     "table_name": table_name,
                     "schema_name": schema_name,
                     "dry_run": dry_run,
-                    "delete_metadata": True  # Also delete from geo.table_metadata
+                    "delete_metadata": True,  # Also delete from geo.table_metadata
+                    # Pass through Stage 1 inventory data for Stage 3
+                    "_inventory_data": inventory_data
                 }
             }]
 
         elif stage == 3:
             # Stage 3: Cleanup - delete STAC if linked, record audit
-            # Get inventory data from stage 1 for STAC linkage info
-            inventory_data = {}
-            table_dropped = False
+            #
+            # IMPORTANT: previous_results at Stage 3 contains Stage 2 results.
+            # The Stage 2 handler should have passed through _inventory_data.
+            stage2_result = previous_results[0] if previous_results else {}
 
-            if previous_results:
-                for result in previous_results:
-                    if result.get("task_type") == "inventory_vector_item":
-                        inventory_data = result.get("result", {})
-                    elif result.get("task_type") == "drop_postgis_table":
-                        table_dropped = result.get("result", {}).get("table_dropped", False)
+            # Extract inventory data passed through from Stage 2
+            inventory_data = stage2_result.get("_inventory_data", {})
+            table_dropped = stage2_result.get("table_dropped", False)
 
             return [{
                 "task_id": f"{job_id[:8]}-s3-cleanup",
@@ -211,15 +217,15 @@ class UnpublishVectorJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
         )
 
         if context:
-            # Extract results from each stage
+            # Extract results from each stage - task_results are objects with attributes
             inventory_data = {}
             table_dropped = False
             stac_deleted = False
             dry_run = True
 
             for result in context.task_results:
-                task_type = result.get("task_type")
-                task_result = result.get("result", {})
+                task_type = getattr(result, "task_type", None)
+                task_result = getattr(result, "result_data", {}) or {}
 
                 if task_type == "inventory_vector_item":
                     inventory_data = task_result

@@ -738,11 +738,19 @@ class CoreMachine:
 
         # Step 1.5: Update task status to PROCESSING before execution
         try:
-            # DIAGNOSTIC: Get current status before attempting update (11 NOV 2025)
+            # GAP-2 FIX (16 DEC 2025): Log at INFO level for visibility in troubleshooting
+            # This confirms the task exists and shows its current status before handler execution
             current_status = self.state_manager.get_task_current_status(task_message.task_id)
-            self.logger.debug(
-                f"🔍 [STATUS-UPDATE] Task {task_message.task_id[:16]} current status: {current_status}, "
-                f"attempting update to PROCESSING..."
+            self.logger.info(
+                f"🔍 [STATUS-UPDATE] Task {task_message.task_id[:16]}... current status: {current_status}, "
+                f"updating to PROCESSING (core/machine.py:process_task_message)",
+                extra={
+                    'checkpoint': 'TASK_STATUS_PRE_UPDATE',
+                    'task_id': task_message.task_id,
+                    'job_id': task_message.parent_job_id,
+                    'current_status': str(current_status) if current_status else 'NOT_FOUND',
+                    'target_status': 'PROCESSING'
+                }
             )
 
             success = self.state_manager.update_task_status_direct(
@@ -750,7 +758,16 @@ class CoreMachine:
                 TaskStatus.PROCESSING
             )
             if success:
-                self.logger.debug(f"✅ Task {task_message.task_id[:16]} → PROCESSING (update successful)")
+                self.logger.info(
+                    f"✅ [STATUS-UPDATE] Task {task_message.task_id[:16]}... → PROCESSING",
+                    extra={
+                        'checkpoint': 'TASK_STATUS_UPDATE_SUCCESS',
+                        'task_id': task_message.task_id,
+                        'job_id': task_message.parent_job_id,
+                        'from_status': str(current_status) if current_status else 'NOT_FOUND',
+                        'to_status': 'PROCESSING'
+                    }
+                )
             else:
                 # FP2 FIX: Fail-fast if status update fails (don't execute handler)
                 error_msg = (

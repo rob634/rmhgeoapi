@@ -509,7 +509,7 @@ def h3_stats(req: func.HttpRequest) -> func.HttpResponse:
             ORDER BY resolution
         """
 
-        with repo.get_connection() as conn:
+        with repo._get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(query)
                 rows = cur.fetchall()
@@ -1847,6 +1847,23 @@ if _app_mode.listens_to_jobs_queue:
         correlation_id = str(uuid.uuid4())[:8]
         start_time = time.time()
 
+        # GAP-1 FIX (16 DEC 2025): Log Service Bus message metadata IMMEDIATELY
+        # This confirms the trigger fired and provides traceability even if parsing fails
+        logger.info(
+            f"[{correlation_id}] 📥 SERVICE BUS MESSAGE RECEIVED (geospatial-jobs)",
+            extra={
+                'checkpoint': 'MESSAGE_RECEIVED',
+                'correlation_id': correlation_id,
+                'queue_name': 'geospatial-jobs',
+                'message_id': msg.message_id,
+                'sequence_number': msg.sequence_number,
+                'delivery_count': msg.delivery_count,
+                'enqueued_time': msg.enqueued_time_utc.isoformat() if msg.enqueued_time_utc else None,
+                'content_type': msg.content_type,
+                'lock_token': str(msg.lock_token)[:16] if msg.lock_token else None
+            }
+        )
+
         logger.info(
             f"[{correlation_id}] 🤖 COREMACHINE JOB TRIGGER (Service Bus)",
             extra={
@@ -1983,6 +2000,23 @@ if _app_mode.listens_to_raster_tasks:
         correlation_id = str(uuid.uuid4())[:8]
         start_time = time.time()
 
+        # GAP-1 FIX (16 DEC 2025): Log Service Bus message metadata IMMEDIATELY
+        # This confirms the trigger fired and provides traceability even if parsing fails
+        logger.info(
+            f"[{correlation_id}] 📥 SERVICE BUS MESSAGE RECEIVED (raster-tasks)",
+            extra={
+                'checkpoint': 'MESSAGE_RECEIVED',
+                'correlation_id': correlation_id,
+                'queue_name': 'raster-tasks',
+                'message_id': msg.message_id,
+                'sequence_number': msg.sequence_number,
+                'delivery_count': msg.delivery_count,
+                'enqueued_time': msg.enqueued_time_utc.isoformat() if msg.enqueued_time_utc else None,
+                'content_type': msg.content_type,
+                'lock_token': str(msg.lock_token)[:16] if msg.lock_token else None
+            }
+        )
+
         logger.info(
             f"[{correlation_id}] 🗺️ RASTER TASK TRIGGER (raster-tasks queue)",
             extra={
@@ -2018,12 +2052,46 @@ if _app_mode.listens_to_raster_tasks:
             logger.error(f"[{correlation_id}] 📍 Exception message: {e}")
             logger.error(f"[{correlation_id}] 📍 Full traceback:\n{traceback.format_exc()}")
 
+            # SILENT-1 FIX (16 DEC 2025): Mark task/job as FAILED if exception occurs
+            # This handles cases where exception happens BEFORE CoreMachine processes the task
+            task_id = None
+            job_id = None
+
             if 'task_message' in locals() and task_message:
+                task_id = task_message.task_id
+                job_id = task_message.parent_job_id
                 logger.error(f"[{correlation_id}] 📋 Task ID: {task_message.task_id}")
                 logger.error(f"[{correlation_id}] 📋 Task Type: {task_message.task_type}")
                 logger.error(f"[{correlation_id}] 📋 Job ID: {task_message.parent_job_id}")
+            else:
+                # Try to extract from raw message for logging
+                task_id, job_id = _extract_task_id_from_raw_message(
+                    msg.get_body().decode('utf-8') if msg else '',
+                    correlation_id
+                )
 
-            logger.warning(f"[{correlation_id}] ⚠️ Function completing (CoreMachine handled failure internally)")
+            # Mark task and job as FAILED in database
+            if task_id or job_id:
+                try:
+                    repos = RepositoryFactory.create_repositories()
+                    error_msg = f"Raster task trigger exception: {type(e).__name__}: {e}"
+
+                    if task_id:
+                        repos['task_repo'].mark_task_failed(task_id, error_msg)
+                        logger.info(f"[{correlation_id}] ✅ Task {task_id[:16]}... marked as FAILED")
+
+                    if job_id:
+                        repos['job_repo'].mark_failed(job_id, f"Task {task_id[:16] if task_id else 'unknown'}... failed: {error_msg}")
+                        logger.info(f"[{correlation_id}] ✅ Job {job_id[:16]}... marked as FAILED")
+
+                except Exception as cleanup_error:
+                    logger.error(f"[{correlation_id}] ❌ Failed to mark task/job as FAILED: {cleanup_error}")
+                    logger.error(f"[{correlation_id}] 💀 Task/Job may be stuck - janitor will recover after timeout")
+            else:
+                logger.error(f"[{correlation_id}] ⚠️ No task_id/job_id available - cannot mark as FAILED")
+                logger.error(f"[{correlation_id}] 📍 Exception occurred before message parsing")
+
+            logger.warning(f"[{correlation_id}] ⚠️ Function completing (failure logged and marked in DB)")
 
 
 # Vector Tasks Queue Trigger - Vector worker/platform_vector/standalone modes
@@ -2049,6 +2117,23 @@ if _app_mode.listens_to_vector_tasks:
         """
         correlation_id = str(uuid.uuid4())[:8]
         start_time = time.time()
+
+        # GAP-1 FIX (16 DEC 2025): Log Service Bus message metadata IMMEDIATELY
+        # This confirms the trigger fired and provides traceability even if parsing fails
+        logger.info(
+            f"[{correlation_id}] 📥 SERVICE BUS MESSAGE RECEIVED (vector-tasks)",
+            extra={
+                'checkpoint': 'MESSAGE_RECEIVED',
+                'correlation_id': correlation_id,
+                'queue_name': 'vector-tasks',
+                'message_id': msg.message_id,
+                'sequence_number': msg.sequence_number,
+                'delivery_count': msg.delivery_count,
+                'enqueued_time': msg.enqueued_time_utc.isoformat() if msg.enqueued_time_utc else None,
+                'content_type': msg.content_type,
+                'lock_token': str(msg.lock_token)[:16] if msg.lock_token else None
+            }
+        )
 
         logger.info(
             f"[{correlation_id}] 📍 VECTOR TASK TRIGGER (vector-tasks queue)",
@@ -2085,12 +2170,46 @@ if _app_mode.listens_to_vector_tasks:
             logger.error(f"[{correlation_id}] 📍 Exception message: {e}")
             logger.error(f"[{correlation_id}] 📍 Full traceback:\n{traceback.format_exc()}")
 
+            # SILENT-1 FIX (16 DEC 2025): Mark task/job as FAILED if exception occurs
+            # This handles cases where exception happens BEFORE CoreMachine processes the task
+            task_id = None
+            job_id = None
+
             if 'task_message' in locals() and task_message:
+                task_id = task_message.task_id
+                job_id = task_message.parent_job_id
                 logger.error(f"[{correlation_id}] 📋 Task ID: {task_message.task_id}")
                 logger.error(f"[{correlation_id}] 📋 Task Type: {task_message.task_type}")
                 logger.error(f"[{correlation_id}] 📋 Job ID: {task_message.parent_job_id}")
+            else:
+                # Try to extract from raw message for logging
+                task_id, job_id = _extract_task_id_from_raw_message(
+                    msg.get_body().decode('utf-8') if msg else '',
+                    correlation_id
+                )
 
-            logger.warning(f"[{correlation_id}] ⚠️ Function completing (CoreMachine handled failure internally)")
+            # Mark task and job as FAILED in database
+            if task_id or job_id:
+                try:
+                    repos = RepositoryFactory.create_repositories()
+                    error_msg = f"Vector task trigger exception: {type(e).__name__}: {e}"
+
+                    if task_id:
+                        repos['task_repo'].mark_task_failed(task_id, error_msg)
+                        logger.info(f"[{correlation_id}] ✅ Task {task_id[:16]}... marked as FAILED")
+
+                    if job_id:
+                        repos['job_repo'].mark_failed(job_id, f"Task {task_id[:16] if task_id else 'unknown'}... failed: {error_msg}")
+                        logger.info(f"[{correlation_id}] ✅ Job {job_id[:16]}... marked as FAILED")
+
+                except Exception as cleanup_error:
+                    logger.error(f"[{correlation_id}] ❌ Failed to mark task/job as FAILED: {cleanup_error}")
+                    logger.error(f"[{correlation_id}] 💀 Task/Job may be stuck - janitor will recover after timeout")
+            else:
+                logger.error(f"[{correlation_id}] ⚠️ No task_id/job_id available - cannot mark as FAILED")
+                logger.error(f"[{correlation_id}] 📍 Exception occurred before message parsing")
+
+            logger.warning(f"[{correlation_id}] ⚠️ Function completing (failure logged and marked in DB)")
 
 
 # ============================================================================

@@ -202,14 +202,16 @@ class BootstrapH3LandGridPyramidJob(JobBaseMixin, JobBase):  # Mixin FIRST for c
                 raise ValueError("Stage 2 requires Stage 1 results")
 
             # Extract parent count from Stage 1 result
-            # Use cells_generated (not cells_inserted) to handle idempotent reruns
-            # ON CONFLICT DO NOTHING means cells_inserted=0 when grid already exists
+            # IMPORTANT: Use cells_inserted (actual cells in grid after filtering)
+            # cells_generated = total before filtering, cells_inserted = actual parents
+            # For country filter: cells_generated=5882 (global), cells_inserted=5 (Albania)
             stage1_result = previous_results[0].get('result', {})
             cells_generated = stage1_result.get('cells_generated', 0)
             cells_inserted = stage1_result.get('cells_inserted', 0)
 
-            # Use generated count (total cells in grid) not inserted count (new cells this run)
-            parent_count = cells_generated if cells_generated > 0 else cells_inserted
+            # Use INSERTED count (actual parents in grid) not GENERATED count (pre-filter)
+            # This fixes batch count for country-filtered grids (5 batches, not 589)
+            parent_count = cells_inserted if cells_inserted > 0 else cells_generated
             if parent_count == 0:
                 raise ValueError("Stage 1 generated 0 cells - cannot cascade (check spatial filter)")
 
@@ -269,6 +271,32 @@ class BootstrapH3LandGridPyramidJob(JobBaseMixin, JobBase):  # Mixin FIRST for c
             # Determine resolutions to verify (res 2 + target resolutions)
             all_resolutions = [2] + target_resolutions
 
+            # Calculate expected cell counts DYNAMICALLY based on actual base count
+            # For filtered grids (country/bbox), we can't use hardcoded global estimates
+            # Use H3 multiplier: each parent has 7 children
+            # Find Stage 1 result to get actual base count
+            stage1_result = None
+            for result in previous_results:
+                if isinstance(result, dict) and result.get('result', {}).get('resolution') == 2:
+                    stage1_result = result.get('result', {})
+                    break
+
+            # Get actual base cell count from Stage 1
+            base_cell_count = stage1_result.get('cells_inserted', 0) if stage1_result else 0
+
+            # Calculate expected counts dynamically if we have base count
+            # H3 multiplier: 7 children per parent per resolution level
+            if base_cell_count > 0:
+                expected_cells = {2: base_cell_count}
+                for res in target_resolutions:
+                    # Each res N cell has 7 children at res N+1
+                    # Cumulative from res 2: 7^(res-2) multiplier
+                    multiplier = 7 ** (res - 2)
+                    expected_cells[res] = base_cell_count * multiplier
+            else:
+                # Fallback to global estimates if base count unknown
+                expected_cells = {k: v for k, v in BootstrapH3LandGridPyramidJob.EXPECTED_CELLS.items() if k in all_resolutions}
+
             return [
                 {
                     "task_id": f"{job_id[:8]}-s3-finalize",
@@ -276,8 +304,9 @@ class BootstrapH3LandGridPyramidJob(JobBaseMixin, JobBase):  # Mixin FIRST for c
                     "parameters": {
                         "grid_id_prefix": grid_id_prefix,
                         "resolutions": all_resolutions,
-                        "expected_cells": {k: v for k, v in BootstrapH3LandGridPyramidJob.EXPECTED_CELLS.items() if k in all_resolutions},
-                        "source_job_id": job_id
+                        "expected_cells": expected_cells,
+                        "source_job_id": job_id,
+                        "base_cell_count": base_cell_count  # Pass for logging/debugging
                     }
                 }
             ]

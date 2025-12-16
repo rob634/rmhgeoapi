@@ -3,11 +3,18 @@ Task monitoring interface module.
 
 Web dashboard for viewing tasks of a specific job with workflow visualization.
 
-Features (15 DEC 2025):
+Features (16 DEC 2025):
     - Visual workflow diagram showing predefined stages
-    - Task counts per stage with status colors
+    - Task counts per stage with status colors (P/Q/R/C/F)
     - Auto-refresh capability
     - Expandable task detail sections
+
+Task Status Legend:
+    - P (Pending): Task record created, message sent to queue
+    - Q (Queued): Queue trigger received and opened message
+    - R (Processing): Task handler actively running
+    - C (Completed): Task finished successfully
+    - F (Failed): Task encountered an error
 
 Exports:
     TasksInterface: Task monitoring dashboard with workflow visualization
@@ -335,6 +342,11 @@ class TasksInterface(BaseInterface):
             border-radius: 10px;
         }
 
+        .count-pending {
+            background: #f3e8ff;
+            color: #9333ea;
+        }
+
         .count-queued {
             background: #e5e7eb;
             color: #6b7280;
@@ -372,6 +384,11 @@ class TasksInterface(BaseInterface):
             font-weight: 600;
             text-transform: uppercase;
             letter-spacing: 0.5px;
+        }
+
+        .status-pending {
+            background: #f3e8ff;
+            color: #9333ea;
         }
 
         .status-queued {
@@ -693,11 +710,12 @@ class TasksInterface(BaseInterface):
         // Render job summary card
         function renderJobSummary(job) {{
             const taskCounts = job.result_data?.tasks_by_status || {{}};
+            const pending = taskCounts.pending || 0;
             const queued = taskCounts.queued || 0;
             const processing = taskCounts.processing || 0;
             const completed = taskCounts.completed || 0;
             const failed = taskCounts.failed || 0;
-            const total = queued + processing + completed + failed;
+            const total = pending + queued + processing + completed + failed;
 
             let statusClass = 'status-' + (job.status || 'queued');
             let html = '';
@@ -759,7 +777,7 @@ class TasksInterface(BaseInterface):
             tasks.forEach(task => {{
                 const stage = task.stage || 0;
                 if (!tasksByStage[stage]) {{
-                    tasksByStage[stage] = {{ queued: 0, processing: 0, completed: 0, failed: 0 }};
+                    tasksByStage[stage] = {{ pending: 0, queued: 0, processing: 0, completed: 0, failed: 0 }};
                 }}
                 tasksByStage[stage][task.status] = (tasksByStage[stage][task.status] || 0) + 1;
             }});
@@ -770,19 +788,22 @@ class TasksInterface(BaseInterface):
             `;
 
             workflowDef.stages.forEach((stage, index) => {{
-                const stageCounts = tasksByStage[stage.number] || {{ queued: 0, processing: 0, completed: 0, failed: 0 }};
-                const totalTasks = stageCounts.queued + stageCounts.processing + stageCounts.completed + stageCounts.failed;
+                const stageCounts = tasksByStage[stage.number] || {{ pending: 0, queued: 0, processing: 0, completed: 0, failed: 0 }};
+                const totalTasks = stageCounts.pending + stageCounts.queued + stageCounts.processing + stageCounts.completed + stageCounts.failed;
 
                 // Determine stage status
+                // Priority: failed > processing > queued > pending > completed > no-tasks
                 let stageStatus = 'pending';
                 if (stageCounts.failed > 0) {{
                     stageStatus = 'failed';
                 }} else if (stageCounts.processing > 0) {{
                     stageStatus = 'active';
-                }} else if (stageCounts.completed > 0 && stageCounts.queued === 0 && stageCounts.processing === 0) {{
-                    stageStatus = 'completed';
                 }} else if (stageCounts.queued > 0) {{
                     stageStatus = 'active';
+                }} else if (stageCounts.pending > 0) {{
+                    stageStatus = 'active';
+                }} else if (stageCounts.completed > 0) {{
+                    stageStatus = 'completed';
                 }}
 
                 // Add arrow before stage (except first)
@@ -801,11 +822,14 @@ class TasksInterface(BaseInterface):
                 if (totalTasks === 0) {{
                     html += `<span class="count-badge count-queued">No tasks</span>`;
                 }} else {{
+                    if (stageCounts.pending > 0) {{
+                        html += `<span class="count-badge count-pending">P:${{stageCounts.pending}}</span>`;
+                    }}
                     if (stageCounts.queued > 0) {{
                         html += `<span class="count-badge count-queued">Q:${{stageCounts.queued}}</span>`;
                     }}
                     if (stageCounts.processing > 0) {{
-                        html += `<span class="count-badge count-processing">P:${{stageCounts.processing}}</span>`;
+                        html += `<span class="count-badge count-processing">R:${{stageCounts.processing}}</span>`;
                     }}
                     if (stageCounts.completed > 0) {{
                         html += `<span class="count-badge count-completed">C:${{stageCounts.completed}}</span>`;
@@ -832,7 +856,7 @@ class TasksInterface(BaseInterface):
             tasks.forEach(task => {{
                 const stage = task.stage || 0;
                 if (!tasksByStage[stage]) {{
-                    tasksByStage[stage] = {{ queued: 0, processing: 0, completed: 0, failed: 0, taskType: task.task_type }};
+                    tasksByStage[stage] = {{ pending: 0, queued: 0, processing: 0, completed: 0, failed: 0, taskType: task.task_type }};
                 }}
                 tasksByStage[stage][task.status] = (tasksByStage[stage][task.status] || 0) + 1;
             }});
@@ -846,13 +870,14 @@ class TasksInterface(BaseInterface):
 
             stages.forEach((stageNum, index) => {{
                 const stageCounts = tasksByStage[stageNum];
-                const totalTasks = stageCounts.queued + stageCounts.processing + stageCounts.completed + stageCounts.failed;
+                const totalTasks = stageCounts.pending + stageCounts.queued + stageCounts.processing + stageCounts.completed + stageCounts.failed;
 
                 let stageStatus = 'pending';
                 if (stageCounts.failed > 0) stageStatus = 'failed';
                 else if (stageCounts.processing > 0) stageStatus = 'active';
-                else if (stageCounts.completed > 0 && stageCounts.queued === 0) stageStatus = 'completed';
                 else if (stageCounts.queued > 0) stageStatus = 'active';
+                else if (stageCounts.pending > 0) stageStatus = 'active';
+                else if (stageCounts.completed > 0) stageStatus = 'completed';
 
                 if (index > 0) {{
                     html += `<div class="stage-arrow">&#8594;</div>`;
@@ -866,8 +891,9 @@ class TasksInterface(BaseInterface):
                         <div class="stage-counts">
                 `;
 
+                if (stageCounts.pending > 0) html += `<span class="count-badge count-pending">P:${{stageCounts.pending}}</span>`;
                 if (stageCounts.queued > 0) html += `<span class="count-badge count-queued">Q:${{stageCounts.queued}}</span>`;
-                if (stageCounts.processing > 0) html += `<span class="count-badge count-processing">P:${{stageCounts.processing}}</span>`;
+                if (stageCounts.processing > 0) html += `<span class="count-badge count-processing">R:${{stageCounts.processing}}</span>`;
                 if (stageCounts.completed > 0) html += `<span class="count-badge count-completed">C:${{stageCounts.completed}}</span>`;
                 if (stageCounts.failed > 0) html += `<span class="count-badge count-failed">F:${{stageCounts.failed}}</span>`;
 
@@ -898,18 +924,20 @@ class TasksInterface(BaseInterface):
             const stages = Object.keys(tasksByStage).sort((a, b) => parseInt(a) - parseInt(b));
             stages.forEach(stage => {{
                 const stageTasks = tasksByStage[stage];
-                const failed = stageTasks.filter(t => t.status === 'failed').length;
-                const completed = stageTasks.filter(t => t.status === 'completed').length;
-                const processing = stageTasks.filter(t => t.status === 'processing').length;
+                const pending = stageTasks.filter(t => t.status === 'pending').length;
                 const queued = stageTasks.filter(t => t.status === 'queued').length;
+                const processing = stageTasks.filter(t => t.status === 'processing').length;
+                const completed = stageTasks.filter(t => t.status === 'completed').length;
+                const failed = stageTasks.filter(t => t.status === 'failed').length;
 
                 html += `
                     <div class="stage-group" id="stage-group-${{stage}}">
                         <div class="stage-header" onclick="toggleStage('stage-${{stage}}')">
                             <h4>Stage ${{stage}} (${{stageTasks.length}} tasks)</h4>
                             <div class="stage-stats">
+                                <span style="color: #9333ea;">P:${{pending}}</span>
                                 <span style="color: #626F86;">Q:${{queued}}</span>
-                                <span style="color: #F59E0B;">P:${{processing}}</span>
+                                <span style="color: #F59E0B;">R:${{processing}}</span>
                                 <span style="color: #10B981;">C:${{completed}}</span>
                                 <span style="color: #DC2626;">F:${{failed}}</span>
                                 <span style="font-size: 10px;">&#9660;</span>

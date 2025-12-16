@@ -2043,8 +2043,7 @@ if _app_mode.listens_to_raster_tasks:
                 repos = RepositoryFactory.create_repositories()
                 success = repos['task_repo'].update_task_status_with_validation(
                     task_message.task_id,
-                    TaskStatus.QUEUED,
-                    allowed_from_statuses=[TaskStatus.PENDING, TaskStatus.QUEUED]  # Allow QUEUED for retries
+                    TaskStatus.QUEUED
                 )
                 if success:
                     logger.info(
@@ -2191,8 +2190,7 @@ if _app_mode.listens_to_vector_tasks:
                 repos = RepositoryFactory.create_repositories()
                 success = repos['task_repo'].update_task_status_with_validation(
                     task_message.task_id,
-                    TaskStatus.QUEUED,
-                    allowed_from_statuses=[TaskStatus.PENDING, TaskStatus.QUEUED]  # Allow QUEUED for retries
+                    TaskStatus.QUEUED
                 )
                 if success:
                     logger.info(

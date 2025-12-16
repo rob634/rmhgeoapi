@@ -221,9 +221,12 @@ class JanitorService:
             logger.error(f"[JANITOR] Failed to increment retry count for {task_id[:16]}...: {e}")
             return False
 
-    def _reset_task_to_queued(self, task_id: str) -> bool:
+    def _reset_task_to_pending(self, task_id: str) -> bool:
         """
-        Reset a PROCESSING task back to QUEUED status for re-queue.
+        Reset a PROCESSING task back to PENDING status for re-queue.
+
+        16 DEC 2025: Changed from QUEUED to PENDING for honest message tracking.
+        Task goes to PENDING, message is re-sent, trigger confirms PENDING→QUEUED.
 
         Used for PROCESSING tasks that timed out without ever starting
         (heartbeat is None), allowing them to be retried.
@@ -238,24 +241,24 @@ class JanitorService:
 
         query = sql.SQL("""
             UPDATE {schema}.tasks
-            SET status = 'QUEUED',
+            SET status = 'pending',
                 updated_at = NOW()
             WHERE task_id = %s
-            AND status = 'PROCESSING'
+            AND status = 'processing'
             RETURNING task_id, status
         """).format(schema=sql.Identifier("app"))
 
         try:
-            with self.repo._error_context("reset task to QUEUED"):
+            with self.repo._error_context("reset task to PENDING"):
                 result = self.repo._execute_query(query, (task_id,), fetch='one')
                 if result:
                     logger.debug(
-                        f"[JANITOR] Reset task {task_id[:16]}... from PROCESSING to QUEUED"
+                        f"[JANITOR] Reset task {task_id[:16]}... from PROCESSING to PENDING"
                     )
                     return True
                 return False
         except Exception as e:
-            logger.error(f"[JANITOR] Failed to reset task {task_id[:16]}... to QUEUED: {e}")
+            logger.error(f"[JANITOR] Failed to reset task {task_id[:16]}... to PENDING: {e}")
             return False
 
     # ========================================================================
@@ -353,9 +356,9 @@ class JanitorService:
                                 parameters=task.get('parameters', {})
                             )
 
-                            # Reset status to QUEUED first
-                            if not self._reset_task_to_queued(task_id):
-                                logger.error(f"[JANITOR] Failed to reset task {task_id[:16]}... to QUEUED")
+                            # Reset status to PENDING first (16 DEC 2025)
+                            if not self._reset_task_to_pending(task_id):
+                                logger.error(f"[JANITOR] Failed to reset task {task_id[:16]}... to PENDING")
                                 continue
 
                             # Send to queue

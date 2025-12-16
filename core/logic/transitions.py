@@ -76,7 +76,8 @@ def can_task_transition(current: TaskStatus, target: TaskStatus) -> bool:
         TaskStatus.PROCESSING: [
             TaskStatus.COMPLETED,
             TaskStatus.FAILED,
-            TaskStatus.CANCELLED
+            TaskStatus.CANCELLED,
+            TaskStatus.PENDING  # 16 DEC 2025: Janitor can reset stuck PROCESSING to PENDING
         ],
         TaskStatus.FAILED: [TaskStatus.RETRYING, TaskStatus.PENDING_RETRY],
         TaskStatus.RETRYING: [TaskStatus.PROCESSING],

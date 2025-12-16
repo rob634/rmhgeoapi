@@ -475,6 +475,69 @@ def admin_h3_debug(req: func.HttpRequest) -> func.HttpResponse:
     return admin_h3_debug_trigger.handle_request(req)
 
 
+# H3 Stats API for web interface (16 DEC 2025)
+@app.route(route="h3/stats", methods=["GET"])
+def h3_stats(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Get H3 grid cell counts by resolution: GET /api/h3/stats
+
+    Returns cell counts for each resolution level (2-7) in the h3.grids table.
+
+    Response:
+        {
+            "stats": {
+                "2": 12345,
+                "3": 86412,
+                ...
+            },
+            "timestamp": "2025-12-16T00:00:00Z"
+        }
+    """
+    import json
+    from datetime import datetime, timezone
+
+    try:
+        from infrastructure.postgresql import PostgreSQLRepository
+
+        repo = PostgreSQLRepository(schema_name='h3')
+
+        # Query cell counts by resolution
+        query = """
+            SELECT resolution, COUNT(*) as count
+            FROM h3.grids
+            GROUP BY resolution
+            ORDER BY resolution
+        """
+
+        with repo.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(query)
+                rows = cur.fetchall()
+
+        # Build stats dict
+        stats = {str(row[0]): row[1] for row in rows}
+
+        return func.HttpResponse(
+            json.dumps({
+                "stats": stats,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }),
+            mimetype="application/json",
+            status_code=200
+        )
+
+    except Exception as e:
+        return func.HttpResponse(
+            json.dumps({
+                "error": str(e),
+                "stats": {},
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }),
+            mimetype="application/json",
+            status_code=200  # Return 200 with empty stats so UI doesn't break
+        )
+
+
 # 🚨 NUCLEAR RED BUTTON - DEVELOPMENT ONLY (⚠️ DEPRECATED - COMMENTED OUT 16 NOV 2025)
 # Use /api/dbadmin/maintenance/nuke instead
 # @app.route(route="db/schema/nuke", methods=["POST"])

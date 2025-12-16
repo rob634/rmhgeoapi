@@ -198,6 +198,22 @@ def generate_h3_grid(task_params: dict) -> dict:
     spatial_filter_geometry = task_params.get('spatial_filter_geometry')
     spatial_filter_bbox = task_params.get('spatial_filter_bbox')
     filter_mode = task_params.get('filter_mode', 'intersects')
+    country_code = task_params.get('country_code')  # ISO3 country code for filtering
+
+    # If country_code provided, load country geometry from spatial_filter_table
+    if country_code and spatial_filter_table:
+        logger.info(f"🌍 Loading geometry for country: {country_code}")
+        country_geom_wkt = _load_country_geometry(
+            repo=repo,
+            spatial_filter_table=spatial_filter_table,
+            country_code=country_code
+        )
+        if country_geom_wkt:
+            # Use country geometry as the spatial filter
+            spatial_filter_geometry = country_geom_wkt
+            logger.info(f"   ✅ Loaded geometry for {country_code}")
+        else:
+            logger.warning(f"   ⚠️ Country {country_code} not found in {spatial_filter_table}")
 
     # Apply filters if any specified
     if any([spatial_filter_table, spatial_filter_geometry, spatial_filter_bbox]):
@@ -392,6 +408,56 @@ def _generate_from_cascade(
             })
 
     return cells, len(parent_batch)
+
+
+def _load_country_geometry(
+    repo: H3Repository,
+    spatial_filter_table: str,
+    country_code: str
+) -> Optional[str]:
+    """
+    Load country geometry from spatial filter table.
+
+    Queries the specified table for a country by ISO3 code and returns
+    its geometry as WKT for spatial filtering.
+
+    Args:
+        repo: H3Repository instance (for database connection)
+        spatial_filter_table: Full table name (e.g., 'geo.system_admin0')
+        country_code: ISO3 country code (e.g., 'ALB', 'USA')
+
+    Returns:
+        WKT geometry string if found, None otherwise
+    """
+    from psycopg import sql
+
+    # Parse schema.table
+    if '.' in spatial_filter_table:
+        schema, table = spatial_filter_table.split('.', 1)
+    else:
+        schema, table = 'geo', spatial_filter_table
+
+    query = sql.SQL("""
+        SELECT ST_AsText(geom) as geom_wkt
+        FROM {schema}.{table}
+        WHERE iso3 = %s
+        LIMIT 1
+    """).format(
+        schema=sql.Identifier(schema),
+        table=sql.Identifier(table)
+    )
+
+    try:
+        with repo._get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(query, (country_code,))
+                result = cur.fetchone()
+                if result:
+                    return result['geom_wkt']
+                return None
+    except Exception as e:
+        logger.error(f"❌ Failed to load country geometry: {e}")
+        return None
 
 
 def _apply_spatial_filters(

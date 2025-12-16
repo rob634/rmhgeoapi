@@ -309,6 +309,12 @@ try:
 except ImportError as e:
     logger.warning(f"⚠️ Could not import Platform interface: {e}")
 
+try:
+    from .h3 import interface as _h3
+    logger.info("✅ Imported H3 interface module")
+except ImportError as e:
+    logger.warning(f"⚠️ Could not import H3 interface: {e}")
+
 
 # Public API
 __all__ = [

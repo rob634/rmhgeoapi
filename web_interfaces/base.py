@@ -299,6 +299,13 @@ class BaseInterface(ABC):
                    onmouseout="this.style.color='#0071BC'">
                     Pipelines
                 </a>
+                <a href="/api/interface/h3"
+                   style="color: #8B5CF6; text-decoration: none; font-weight: 600;
+                          transition: color 0.2s;"
+                   onmouseover="this.style.color='#7C3AED'"
+                   onmouseout="this.style.color='#8B5CF6'">
+                    H3
+                </a>
                 <a href="/api/interface/stac"
                    style="color: #0071BC; text-decoration: none; font-weight: 600;
                           transition: color 0.2s;"

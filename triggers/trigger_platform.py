@@ -891,11 +891,13 @@ def _create_and_submit_job(
             canonical = f"{current_job_type}:{json.dumps(clean_params, sort_keys=True)}"
             job_id = hashlib.sha256(canonical.encode()).hexdigest()
 
-            # Create job record
+            # Create job record with correct total_stages from job class
             job_record = JobRecord(
                 job_id=job_id,
                 job_type=current_job_type,
                 status=JobStatus.QUEUED,
+                stage=1,
+                total_stages=len(job_class.stages),  # FIX: Set from job class stages definition
                 parameters=validated_params,
                 metadata={
                     'platform_request': platform_request_id,

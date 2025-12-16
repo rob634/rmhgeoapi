@@ -36,13 +36,19 @@ class TaskStatus(Enum):
     """
     Valid status values for tasks.
 
-    State transitions:
+    State transitions (16 DEC 2025 - PENDING status added):
+    - PENDING -> QUEUED (trigger confirms message received)
     - QUEUED -> PROCESSING -> COMPLETED
     - QUEUED -> PROCESSING -> FAILED
     - QUEUED -> PROCESSING -> FAILED -> RETRYING -> PROCESSING
+
+    PENDING vs QUEUED:
+    - PENDING: Task record created in DB, message sent to Service Bus, awaiting trigger confirmation
+    - QUEUED: Trigger received message, confirmed delivery, task ready for processing
     """
 
-    QUEUED = "queued"
+    PENDING = "pending"  # Task created, message sent but not yet confirmed by trigger
+    QUEUED = "queued"  # Trigger confirmed message receipt
     PROCESSING = "processing"
     COMPLETED = "completed"
     FAILED = "failed"

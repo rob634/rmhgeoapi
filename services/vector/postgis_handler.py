@@ -1246,6 +1246,12 @@ class VectorToPostGISHandler:
         with self._pg_repo._get_connection() as conn:
             with conn.cursor() as cur:
                 # Step 1: DELETE existing rows for this batch (IDEMPOTENCY)
+                # GAP-010 FIX (16 DEC 2025): Log batch_id at DELETE phase for idempotency verification
+                logger.info(
+                    f"[{batch_id}] DELETE+INSERT: Starting idempotent upsert "
+                    f"for batch_id={batch_id} into {schema}.{table_name}, inserting {len(chunk)} rows"
+                )
+
                 delete_stmt = sql.SQL("""
                     DELETE FROM {schema}.{table}
                     WHERE etl_batch_id = %s
@@ -1256,8 +1262,11 @@ class VectorToPostGISHandler:
                 cur.execute(delete_stmt, (batch_id,))
                 rows_deleted = cur.rowcount
 
-                if rows_deleted > 0:
-                    logger.info(f"🔄 Deleted {rows_deleted} existing rows for batch {batch_id} (idempotent re-run)")
+                # GAP-010 FIX (16 DEC 2025): Always log DELETE result for audit trail
+                logger.info(
+                    f"[{batch_id}] DELETE phase: removed {rows_deleted} existing rows "
+                    f"from {schema}.{table_name}"
+                )
 
                 # Step 2: INSERT new rows with batch_id
                 # Skip reserved columns that we create in our schema

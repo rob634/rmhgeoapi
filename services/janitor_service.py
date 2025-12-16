@@ -42,6 +42,10 @@ class JanitorConfig:
     # Task watchdog settings
     task_timeout_minutes: int = 30  # Azure Functions max is 10-30 min
 
+    # Orphaned pending task settings (16 DEC 2025 - PENDING status tracking)
+    # PENDING = task created, message sent but trigger hasn't confirmed receipt yet
+    orphaned_pending_timeout_minutes: int = 2  # Message should reach trigger within seconds
+
     # Orphaned queued task settings (14 DEC 2025 - message loss recovery)
     orphaned_queued_timeout_minutes: int = 5  # Tasks stuck in QUEUED > this are orphaned
     orphaned_queued_max_retries: int = 3  # Max re-queue attempts before marking failed
@@ -60,6 +64,7 @@ class JanitorConfig:
         """Load configuration from environment variables."""
         return cls(
             task_timeout_minutes=int(os.environ.get("JANITOR_TASK_TIMEOUT_MINUTES", "30")),
+            orphaned_pending_timeout_minutes=int(os.environ.get("JANITOR_ORPHANED_PENDING_TIMEOUT_MINUTES", "2")),
             orphaned_queued_timeout_minutes=int(os.environ.get("JANITOR_ORPHANED_QUEUED_TIMEOUT_MINUTES", "5")),
             orphaned_queued_max_retries=int(os.environ.get("JANITOR_ORPHANED_QUEUED_MAX_RETRIES", "3")),
             job_stale_hours=int(os.environ.get("JANITOR_JOB_STALE_HOURS", "24")),
@@ -576,6 +581,128 @@ class JanitorService:
                 )
             else:
                 logger.info("[JANITOR] No orphaned QUEUED tasks found ✓")
+
+            # ================================================================
+            # PART 3: ORPHANED PENDING TASKS (16 DEC 2025 - PENDING status)
+            # Tasks stuck in PENDING = message never reached trigger
+            # ================================================================
+            logger.info(
+                f"[JANITOR] PART 3: Checking for orphaned PENDING tasks "
+                f"(>{self.config.orphaned_pending_timeout_minutes}min)"
+            )
+
+            orphaned_pending = self.repo.get_orphaned_pending_tasks(
+                timeout_minutes=self.config.orphaned_pending_timeout_minutes,
+                limit=50
+            )
+            result.items_scanned += len(orphaned_pending)
+
+            if orphaned_pending:
+                logger.warning(
+                    f"[JANITOR] Found {len(orphaned_pending)} orphaned PENDING tasks - "
+                    f"message likely never reached trigger"
+                )
+
+                # Get Service Bus for re-queuing
+                service_bus = ServiceBusRepository()
+
+                pending_requeued = 0
+                pending_failed = 0
+
+                for task in orphaned_pending:
+                    task_id = task['task_id']
+                    retry_count = task.get('retry_count', 0)
+                    minutes_stuck = round(task.get('minutes_stuck', 0), 1)
+                    task_type = task.get('task_type', '')
+                    queue_name = self._get_queue_for_task(task_type)
+
+                    logger.warning(
+                        f"[JANITOR] Orphaned PENDING task: task_id={task_id[:16]}..., "
+                        f"job_id={task['parent_job_id'][:16]}..., "
+                        f"task_type={task_type}, queue={queue_name}, "
+                        f"retry_count={retry_count}, stuck={minutes_stuck}min"
+                    )
+
+                    if retry_count < self.config.orphaned_queued_max_retries:
+                        # Under retry limit - re-send the message
+                        try:
+                            # Build TaskQueueMessage
+                            message = TaskQueueMessage(
+                                task_id=task_id,
+                                parent_job_id=task['parent_job_id'],
+                                job_type=task.get('job_type', ''),
+                                task_type=task_type,
+                                stage=task.get('stage', 1),
+                                task_index=task.get('task_index', 0),
+                                parameters=task.get('parameters', {})
+                            )
+
+                            # Send to queue (task stays in PENDING - trigger will update to QUEUED)
+                            message_id = service_bus.send_message(queue_name, message)
+
+                            # Increment retry count in database
+                            self._increment_task_retry_count(task_id)
+
+                            pending_requeued += 1
+                            result.items_fixed += 1
+                            result.actions_taken.append({
+                                "action": "resend_pending_task",
+                                "task_id": task_id,
+                                "parent_job_id": task['parent_job_id'],
+                                "task_type": task_type,
+                                "queue": queue_name,
+                                "retry_count": retry_count + 1,
+                                "minutes_stuck": minutes_stuck,
+                                "message_id": message_id,
+                                "reason": "message_never_reached_trigger"
+                            })
+
+                            logger.info(
+                                f"[JANITOR] ✅ Re-sent PENDING task message: task_id={task_id[:16]}..., "
+                                f"queue={queue_name}, retry={retry_count + 1}/{self.config.orphaned_queued_max_retries}, "
+                                f"message_id={message_id}"
+                            )
+
+                        except Exception as resend_error:
+                            logger.error(
+                                f"[JANITOR] ❌ Failed to re-send PENDING task {task_id[:16]}...: {resend_error}"
+                            )
+                            result.actions_taken.append({
+                                "action": "resend_pending_failed",
+                                "task_id": task_id,
+                                "error": str(resend_error)
+                            })
+                    else:
+                        # Max retries exceeded - mark as failed
+                        error_msg = (
+                            f"[JANITOR] PENDING task message never reached trigger. "
+                            f"Max retries ({self.config.orphaned_queued_max_retries}) exhausted - "
+                            f"message lost {retry_count + 1} times."
+                        )
+
+                        self.repo.mark_tasks_as_failed([task_id], error_msg)
+                        pending_failed += 1
+                        result.items_fixed += 1
+                        result.actions_taken.append({
+                            "action": "mark_pending_task_failed",
+                            "task_id": task_id,
+                            "parent_job_id": task['parent_job_id'],
+                            "task_type": task_type,
+                            "retry_count": retry_count,
+                            "reason": "max_retries_exceeded_pending"
+                        })
+
+                        logger.warning(
+                            f"[JANITOR] ❌ Marked PENDING task FAILED (max retries): "
+                            f"task_id={task_id[:16]}..., retries={retry_count}"
+                        )
+
+                logger.info(
+                    f"[JANITOR] Orphaned PENDING task recovery complete: "
+                    f"re-sent={pending_requeued}, failed={pending_failed}"
+                )
+            else:
+                logger.info("[JANITOR] No orphaned PENDING tasks found ✓")
 
             # ================================================================
             # SUMMARY

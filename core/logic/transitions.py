@@ -67,8 +67,11 @@ def can_task_transition(current: TaskStatus, target: TaskStatus) -> bool:
     if current == target:
         return True
 
-    # Define valid transitions
+    # Define valid transitions (16 DEC 2025 - PENDING added)
     transitions = {
+        # PENDING: Task created, awaiting trigger confirmation
+        TaskStatus.PENDING: [TaskStatus.QUEUED, TaskStatus.FAILED, TaskStatus.CANCELLED],
+        # QUEUED: Trigger confirmed receipt, ready for processing
         TaskStatus.QUEUED: [TaskStatus.PROCESSING, TaskStatus.CANCELLED],
         TaskStatus.PROCESSING: [
             TaskStatus.COMPLETED,
@@ -134,6 +137,7 @@ def get_task_active_states() -> List[TaskStatus]:
         List of active task statuses
     """
     return [
+        TaskStatus.PENDING,  # 16 DEC 2025: Task created, awaiting trigger confirmation
         TaskStatus.QUEUED,
         TaskStatus.PROCESSING,
         TaskStatus.RETRYING,

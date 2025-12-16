@@ -104,6 +104,61 @@ class JanitorRepository(PostgreSQLRepository):
             logger.info(f"[JANITOR] Found {count} orphaned QUEUED tasks (>{timeout_minutes}min)")
             return result or []
 
+    def get_orphaned_pending_tasks(
+        self,
+        timeout_minutes: int = 2,
+        limit: int = 50
+    ) -> List[Dict[str, Any]]:
+        """
+        Find tasks stuck in PENDING state beyond timeout (message never reached trigger).
+
+        These are tasks where:
+        - Status is PENDING (task created, message sent to Service Bus)
+        - Created more than timeout_minutes ago
+        - Trigger never confirmed receipt by updating to QUEUED
+
+        PENDING tasks should transition to QUEUED within seconds when the trigger
+        fires and processes the message. If stuck in PENDING, the message was lost.
+
+        Added: 16 DEC 2025 - PENDING status for honest message tracking
+
+        Args:
+            timeout_minutes: Minutes after which PENDING tasks are considered orphaned
+            limit: Maximum number of tasks to return
+
+        Returns:
+            List of orphaned task dicts with full task details for re-sending
+        """
+        query = sql.SQL("""
+            SELECT
+                t.task_id,
+                t.parent_job_id,
+                t.job_type,
+                t.task_type,
+                t.stage,
+                t.task_index,
+                t.status,
+                t.parameters,
+                t.retry_count,
+                t.created_at,
+                t.updated_at,
+                EXTRACT(EPOCH FROM (NOW() - t.created_at)) / 60 AS minutes_stuck
+            FROM {schema}.tasks t
+            WHERE t.status = 'pending'
+              AND t.created_at < NOW() - make_interval(mins => %s)
+            ORDER BY t.created_at ASC
+            LIMIT %s
+        """).format(schema=sql.Identifier(self.schema_name))
+
+        logger.debug(
+            f"[JANITOR] get_orphaned_pending_tasks: Executing query with timeout={timeout_minutes} minutes"
+        )
+        with self._error_context("get orphaned pending tasks"):
+            result = self._execute_query(query, (timeout_minutes, limit), fetch='all')
+            count = len(result) if result else 0
+            logger.info(f"[JANITOR] Found {count} orphaned PENDING tasks (>{timeout_minutes}min)")
+            return result or []
+
     def get_stale_processing_tasks(
         self,
         timeout_minutes: int = 30

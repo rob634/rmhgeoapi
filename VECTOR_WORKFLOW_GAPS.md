@@ -6,26 +6,32 @@
 
 ---
 
-## Implementation Status (15 DEC 2025)
+## Implementation Status (16 DEC 2025) - ALL GAPS CLOSED ✅
 
 | Gap | Priority | Status | Location |
 |-----|----------|--------|----------|
 | **GAP-001** | P0 | ✅ IMPLEMENTED | `jobs/process_vector.py:258-277` |
 | **GAP-002** | P0 | ✅ IMPLEMENTED | `services/vector/process_vector_tasks.py:130-164` |
-| **GAP-003** | P0 | ✅ ALREADY EXISTS | `services/janitor_service.py` + timer triggers |
+| **GAP-003** | P0 | ✅ ENHANCED | `services/janitor_service.py` + PROCESSING retry logic |
 | **GAP-004** | P0 | ✅ IMPLEMENTED | `core/state_manager.py:927-992`, `core/machine.py:1065-1078` |
 | **GAP-005** | P1 | ✅ IMPLEMENTED | `services/vector/process_vector_tasks.py:490-566` |
 | **GAP-006** | P1 | ✅ IMPLEMENTED | `core/models/results.py:127-252`, `jobs/process_vector.py:248-282` |
 | **GAP-007** | P1 | ✅ IMPLEMENTED | `services/vector/process_vector_tasks.py:107-136` |
+| **GAP-008** | P2 | ✅ IMPLEMENTED | `services/vector/process_vector_tasks.py:499-538` |
+| **GAP-009** | P2 | ✅ IMPLEMENTED | `services/vector/process_vector_tasks.py:42-57, 194-195, 215-216` |
+| **GAP-010** | P2 | ✅ IMPLEMENTED | `services/vector/postgis_handler.py:1249-1269` |
 
 ### Summary of Changes
 - **GAP-001**: Added validation in `create_tasks_for_stage()` to fail if chunk_paths empty or table_name missing
 - **GAP-002**: Added validation after converter AND after `prepare_gdf()` to fail if 0 features
-- **GAP-003**: Already implemented! JanitorService has `run_task_watchdog()`, `run_job_health_check()`, `run_orphan_detection()`
+- **GAP-003**: Already implemented! JanitorService has `run_task_watchdog()`, `run_job_health_check()`, `run_orphan_detection()`. **ENHANCED (16 DEC 2025)**: Added PROCESSING timeout retry - tasks stuck in PROCESSING with no heartbeat are re-queued up to 3 times before marking failed
 - **GAP-004**: Added `StateManager.fail_all_job_tasks()` method, integrated into CoreMachine stage advancement failure handler
 - **GAP-005**: Expanded exception handling to categorize MemoryError, OSError, TimeoutError, ConnectionError as retryable
 - **GAP-006**: Added Pydantic models `ProcessVectorStage1Result` and `ProcessVectorStage1Data` to validate Stage 1 results before Stage 2 fan-out
 - **GAP-007**: Added pre-flight file size check (2GB limit, raised from 300MB per user request) before downloading to prevent OOM
+- **GAP-008**: Added timing per chunk with elapsed_seconds and rows_per_second in Stage 2 upload results
+- **GAP-009**: Added `_log_memory_usage()` helper, logs memory after GDF load and after validation
+- **GAP-010**: Added batch_id logging at DELETE phase showing operation start and DELETE result
 
 ### Bug Fixes Discovered During Testing (15 DEC 2025)
 
@@ -39,6 +45,17 @@
 - **GAP-008a**: New `csv_geometry_params` validator added to `resource_validators`. CSV files now fail at submission with 400 if missing lat_name/lon_name OR wkt_column.
 - **GAP-008b**: CSV converter now validates that specified column names exist in the actual file. Clear error: "Column 'xxx' not found. Available columns: [...]"
 - **GAP-008 (task params)**: Added `lat_name`, `lon_name`, `wkt_column` to task parameters in `create_tasks_for_stage()` so they propagate to the converter
+
+### Janitor Enhancement (16 DEC 2025)
+
+| Enhancement | Status | Location |
+|-------------|--------|----------|
+| **PROCESSING Timeout Retry** | ✅ IMPLEMENTED | `services/janitor_service.py:285-430`, `infrastructure/janitor_repository.py:123-143` |
+
+- **PROCESSING Timeout Retry**: Stale PROCESSING tasks (>30 min) with no heartbeat are now retried up to 3 times before marking failed
+  - If `heartbeat=None` (task never started) and `retry_count < 3`: reset to QUEUED, re-queue to Service Bus
+  - If heartbeat is set (task actually ran) or max retries exceeded: mark FAILED
+  - Distinguishes platform issues (retry) from code errors (fail immediately)
 
 ---
 
@@ -589,42 +606,39 @@ def _update_job_progress(self, job_id: str, stage: int, task_type: str):
 
 ---
 
-## Implementation Priority
+## Implementation Priority - ALL PHASES COMPLETE ✅
 
-### Phase 1: Quick Wins (P0 + P1 Low Effort)
-| Gap | Description | Effort |
+### Phase 1: Quick Wins (P0 + P1 Low Effort) ✅ COMPLETE
+| Gap | Description | Status |
 |-----|-------------|--------|
-| GAP-001 | Empty chunk_paths validation | 5 lines |
-| GAP-002 | Empty GeoDataFrame validation | 10 lines |
-| GAP-005 | Exception categorization | 20 lines |
-| GAP-007 | Pre-flight file size check | 15 lines |
+| GAP-001 | Empty chunk_paths validation | ✅ Done |
+| GAP-002 | Empty GeoDataFrame validation | ✅ Done |
+| GAP-005 | Exception categorization | ✅ Done |
+| GAP-007 | Pre-flight file size check | ✅ Done |
 
-**Total**: ~50 lines, 1-2 hours
-
-### Phase 2: Reliability (P0 Medium Effort)
-| Gap | Description | Effort |
+### Phase 2: Reliability (P0 Medium Effort) ✅ COMPLETE
+| Gap | Description | Status |
 |-----|-------------|--------|
-| GAP-003 | Stale task detector timer trigger | New file |
-| GAP-004 | Orphan task cleanup | StateManager method |
+| GAP-003 | Stale task detector + PROCESSING retry | ✅ Enhanced |
+| GAP-004 | Orphan task cleanup | ✅ Done |
 
-**Total**: ~100 lines + new trigger, 2-4 hours
-
-### Phase 3: Observability (P2)
-| Gap | Description | Effort |
+### Phase 3: Observability (P2) ✅ COMPLETE (16 DEC 2025)
+| Gap | Description | Status |
 |-----|-------------|--------|
-| GAP-008 | Timing per chunk | 10 lines |
-| GAP-009 | Memory logging | 15 lines |
-| GAP-010 | Batch ID logging | 5 lines |
+| GAP-008 | Timing per chunk | ✅ Done |
+| GAP-009 | Memory logging | ✅ Done |
+| GAP-010 | Batch ID logging | ✅ Done |
 
-**Total**: ~30 lines, 1 hour
-
-### Phase 4: Optional (P1 Medium + P3)
-| Gap | Description | Effort |
+### Phase 4: Completed Early (P1 Medium)
+| Gap | Description | Status |
 |-----|-------------|--------|
-| GAP-006 | Pydantic stage result models | New models |
-| GAP-012 | Progress tracking | CoreMachine changes |
+| GAP-006 | Pydantic stage result models | ✅ Done |
 
-**Total**: ~150 lines, 4-6 hours
+### Future Enhancements (P3 - Optional)
+| Gap | Description | Status |
+|-----|-------------|--------|
+| GAP-011 | Heartbeat | N/A - Use Janitor timer instead |
+| GAP-012 | Progress tracking (5/10 chunks) | Deferred - nice to have |
 
 ---
 

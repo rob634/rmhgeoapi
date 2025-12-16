@@ -300,11 +300,18 @@ class BaseInterface(ABC):
                     Pipelines
                 </a>
                 <a href="/api/interface/h3"
-                   style="color: #8B5CF6; text-decoration: none; font-weight: 600;
+                   style="color: #0071BC; text-decoration: none; font-weight: 600;
                           transition: color 0.2s;"
-                   onmouseover="this.style.color='#7C3AED'"
-                   onmouseout="this.style.color='#8B5CF6'">
+                   onmouseover="this.style.color='#00A3DA'"
+                   onmouseout="this.style.color='#0071BC'">
                     H3
+                </a>
+                <a href="/api/interface/queues"
+                   style="color: #0071BC; text-decoration: none; font-weight: 600;
+                          transition: color 0.2s;"
+                   onmouseover="this.style.color='#00A3DA'"
+                   onmouseout="this.style.color='#0071BC'">
+                    Queues
                 </a>
                 <a href="/api/interface/stac"
                    style="color: #0071BC; text-decoration: none; font-weight: 600;

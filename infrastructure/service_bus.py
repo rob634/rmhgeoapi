@@ -534,11 +534,33 @@ class ServiceBusRepository(IQueueRepository):
                 # Step 6: Generate message ID for compatibility
                 try:
                     message_id = sb_message.message_id or f"sb_{datetime.now(timezone.utc).timestamp()}"
+
+                    # 16 DEC 2025: Extract task_id/job_id for correlation with MESSAGE_RECEIVED logs
+                    # TaskQueueMessage has: task_id, parent_job_id
+                    # JobQueueMessage has: job_id
+                    task_id = getattr(message, 'task_id', None)
+                    parent_job_id = getattr(message, 'parent_job_id', None)
+                    job_id = getattr(message, 'job_id', None)
+
+                    # Build log message with available IDs
+                    id_parts = []
+                    if task_id:
+                        id_parts.append(f"task={task_id[:16]}...")
+                    if parent_job_id:
+                        id_parts.append(f"job={parent_job_id[:16]}...")
+                    elif job_id:
+                        id_parts.append(f"job={job_id[:16]}...")
+                    id_summary = ", ".join(id_parts) if id_parts else "no IDs"
+
                     logger.info(
-                        f"✅ Message sent to {queue_name}. ID: {message_id}, elapsed: {send_elapsed:.2f}ms",
+                        f"✅ Message sent to {queue_name}. ID: {message_id}, {id_summary}, elapsed: {send_elapsed:.2f}ms",
                         extra={
+                            'checkpoint': 'MESSAGE_SENT',
                             'queue': queue_name,
                             'message_id': message_id,
+                            'task_id': task_id,
+                            'parent_job_id': parent_job_id,
+                            'job_id': job_id,
                             'send_elapsed_ms': send_elapsed,
                             'sender_healthy_post': post_health.get('healthy', False)
                         }
@@ -1537,9 +1559,27 @@ class ServiceBusRepository(IQueueRepository):
                 errors=errors if errors else None
             )
 
+            # 16 DEC 2025: Extract sample task_id/job_id for correlation
+            sample_task_id = None
+            sample_job_id = None
+            if messages:
+                first_msg = messages[0]
+                sample_task_id = getattr(first_msg, 'task_id', None)
+                sample_job_id = getattr(first_msg, 'parent_job_id', None) or getattr(first_msg, 'job_id', None)
+
             logger.info(
                 f"✅ Batch send complete: {messages_sent}/{len(messages)} messages "
-                f"in {batch_count} batches, {elapsed_ms:.2f}ms"
+                f"in {batch_count} batches, {elapsed_ms:.2f}ms",
+                extra={
+                    'checkpoint': 'BATCH_SENT',
+                    'queue': queue_name,
+                    'messages_sent': messages_sent,
+                    'messages_total': len(messages),
+                    'batch_count': batch_count,
+                    'elapsed_ms': elapsed_ms,
+                    'sample_task_id': sample_task_id,
+                    'sample_job_id': sample_job_id
+                }
             )
 
             return result

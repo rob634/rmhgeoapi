@@ -315,6 +315,12 @@ try:
 except ImportError as e:
     logger.warning(f"⚠️ Could not import H3 interface: {e}")
 
+try:
+    from .queues import interface as _queues
+    logger.info("✅ Imported Queues interface module")
+except ImportError as e:
+    logger.warning(f"⚠️ Could not import Queues interface: {e}")
+
 
 # Public API
 __all__ = [

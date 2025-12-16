@@ -644,7 +644,7 @@ class TaskRepository(PostgreSQLTaskRepository):
         self,
         task_definitions: List[TaskDefinition],
         batch_id: Optional[str] = None,
-        initial_status: str = 'pending_queue'
+        initial_status: TaskStatus = TaskStatus.PENDING
     ) -> List[TaskRecord]:
         """
         Batch create tasks using PostgreSQL executemany.
@@ -653,7 +653,7 @@ class TaskRepository(PostgreSQLTaskRepository):
         Args:
             task_definitions: List of TaskDefinition objects (max 100)
             batch_id: Optional batch identifier for tracking
-            initial_status: Initial task status (default: pending_queue)
+            initial_status: Initial task status (default: PENDING - 16 DEC 2025)
 
         Returns:
             List of created TaskRecord objects
@@ -661,6 +661,9 @@ class TaskRepository(PostgreSQLTaskRepository):
         Raises:
             ValueError: If batch size exceeds limit
             RuntimeError: If database operation fails
+
+        Note (16 DEC 2025): Changed from raw string 'pending_queue' to TaskStatus.PENDING.
+        Tasks start as PENDING until trigger confirms receipt (QUEUED).
         """
         if len(task_definitions) > self.BATCH_SIZE:
             raise ValueError(f"Batch too large: {len(task_definitions)} > {self.BATCH_SIZE}")
@@ -677,11 +680,12 @@ class TaskRepository(PostgreSQLTaskRepository):
                 task_record = td.to_task_record()
 
                 # Prepare data tuple for SQL insert
+                # 16 DEC 2025: Use initial_status.value for enum compatibility
                 data.append((
                     task_record.task_id,
                     task_record.parent_job_id,
                     task_record.task_type,
-                    initial_status,  # Use initial_status instead of task_record.status
+                    initial_status.value,  # 16 DEC 2025: Use enum value, not raw string
                     task_record.stage_number,
                     json.dumps(task_record.parameters) if task_record.parameters else '{}',
                     batch_id,  # Add batch_id

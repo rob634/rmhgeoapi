@@ -48,7 +48,10 @@ class TaskRecord(TaskData):
     )
 
     # Status tracking (Database-specific)
-    status: TaskStatus = Field(default=TaskStatus.QUEUED, description="Current task status")
+    # 16 DEC 2025: Default changed from QUEUED to PENDING
+    # PENDING = task created, message sent but not yet confirmed by trigger
+    # QUEUED = trigger confirmed message receipt
+    status: TaskStatus = Field(default=TaskStatus.PENDING, description="Current task status")
 
     # Data fields (Database-specific)
     result_data: Optional[Dict[str, Any]] = Field(default=None, description="Task execution results")
@@ -83,6 +86,7 @@ class TaskRecord(TaskData):
         Validate task status transitions.
 
         Tasks follow linear progression (no cycling):
+        - PENDING → QUEUED (trigger confirms message receipt) [16 DEC 2025]
         - QUEUED → PROCESSING → COMPLETED/FAILED
         - Terminal states → Any (retry/recovery)
 
@@ -96,14 +100,20 @@ class TaskRecord(TaskData):
             True if transition is valid, False otherwise
 
         Examples:
-            Normal task lifecycle:
-            QUEUED → PROCESSING → COMPLETED
+            Normal task lifecycle (16 DEC 2025):
+            PENDING → QUEUED → PROCESSING → COMPLETED
 
             Failed task with retry:
-            QUEUED → PROCESSING → FAILED → QUEUED → PROCESSING → COMPLETED
+            PENDING → QUEUED → PROCESSING → FAILED → QUEUED → PROCESSING → COMPLETED
         """
         # Normalize current status to enum (handles string values from database)
         current = TaskStatus(self.status) if isinstance(self.status, str) else self.status
+
+        # 16 DEC 2025: PENDING transitions (message confirmation)
+        if current == TaskStatus.PENDING and new_status in [
+            TaskStatus.QUEUED, TaskStatus.FAILED, TaskStatus.CANCELLED
+        ]:
+            return True
 
         # Standard task lifecycle
         if current == TaskStatus.QUEUED and new_status == TaskStatus.PROCESSING:

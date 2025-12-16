@@ -120,7 +120,7 @@ class H3Interface(BaseInterface):
             border-radius: 3px;
             box-shadow: 0 1px 3px rgba(0,0,0,0.1);
             margin-bottom: 20px;
-            border-left: 4px solid #8B5CF6;
+            border-left: 4px solid #0071BC;
         }
 
         .dashboard-header h1 {
@@ -137,7 +137,7 @@ class H3Interface(BaseInterface):
         }
 
         .refresh-button {
-            background: #8B5CF6;
+            background: #0071BC;
             color: white;
             border: none;
             padding: 10px 20px;
@@ -149,7 +149,7 @@ class H3Interface(BaseInterface):
         }
 
         .refresh-button:hover {
-            background: #7C3AED;
+            background: #005a96;
         }
 
         /* Summary Card */
@@ -191,8 +191,8 @@ class H3Interface(BaseInterface):
             font-weight: 700;
         }
 
-        .summary-value.purple {
-            color: #8B5CF6;
+        .summary-value.highlight {
+            color: #0071BC;
         }
 
         /* Section Title */
@@ -229,8 +229,8 @@ class H3Interface(BaseInterface):
         }
 
         .resolution-card.has-data {
-            border-color: #8B5CF6;
-            background: linear-gradient(135deg, #F5F3FF 0%, #EDE9FE 100%);
+            border-color: #0071BC;
+            background: linear-gradient(135deg, #EBF5FF 0%, #DBEAFE 100%);
         }
 
         .resolution-card.no-data {
@@ -244,7 +244,7 @@ class H3Interface(BaseInterface):
             top: -12px;
             left: 50%;
             transform: translateX(-50%);
-            background: #8B5CF6;
+            background: #0071BC;
             color: white;
             padding: 4px 16px;
             border-radius: 12px;
@@ -259,7 +259,7 @@ class H3Interface(BaseInterface):
         .resolution-level {
             font-size: 48px;
             font-weight: 700;
-            color: #8B5CF6;
+            color: #0071BC;
             margin: 10px 0;
         }
 
@@ -415,7 +415,7 @@ class H3Interface(BaseInterface):
                 <div class="summary-grid">
                     <div class="summary-item">
                         <span class="summary-label">Total Cells</span>
-                        <span class="summary-value purple">${totalCells.toLocaleString()}</span>
+                        <span class="summary-value highlight">${totalCells.toLocaleString()}</span>
                     </div>
                     <div class="summary-item">
                         <span class="summary-label">Populated Levels</span>

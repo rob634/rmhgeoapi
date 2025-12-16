@@ -35,6 +35,28 @@ logger = LoggerFactory.create_logger(
 )
 
 
+# ============================================================================
+# GAP-009 FIX (16 DEC 2025): Memory Usage Logging Helper
+# ============================================================================
+
+def _log_memory_usage(gdf, label: str, job_id: str) -> float:
+    """
+    Log GeoDataFrame memory usage for debugging OOM issues.
+
+    Args:
+        gdf: GeoDataFrame to measure
+        label: Description of measurement point (e.g., "after_load", "after_validation")
+        job_id: Job ID for log correlation
+
+    Returns:
+        Memory usage in MB
+    """
+    mem_bytes = gdf.memory_usage(deep=True).sum()
+    mem_mb = mem_bytes / (1024 * 1024)
+    logger.info(f"[{job_id[:8]}] 📊 Memory usage ({label}): {mem_mb:.1f}MB ({len(gdf)} rows)")
+    return mem_mb
+
+
 def process_vector_prepare(parameters: Dict[str, Any]) -> Dict[str, Any]:
     """
     Stage 1: Prepare vector data for chunked upload with idempotent table creation.
@@ -169,6 +191,9 @@ def process_vector_prepare(parameters: Dict[str, Any]) -> Dict[str, Any]:
     total_features = len(gdf)
     logger.info(f"[{job_id[:8]}] Loaded {total_features} features")
 
+    # GAP-009 FIX (16 DEC 2025): Log memory usage after load
+    _log_memory_usage(gdf, "after_load", job_id)
+
     # GAP-002 FIX (15 DEC 2025): Validate source file contains features
     # Empty source files would create empty tables and silently "succeed"
     if total_features == 0:
@@ -186,6 +211,9 @@ def process_vector_prepare(parameters: Dict[str, Any]) -> Dict[str, Any]:
     # Step 3: Validate and prepare GeoDataFrame (reprojects to EPSG:4326)
     handler = VectorToPostGISHandler()
     validated_gdf = handler.prepare_gdf(gdf, geometry_params=geometry_params)
+
+    # GAP-009 FIX (16 DEC 2025): Log memory usage after validation
+    _log_memory_usage(validated_gdf, "after_validation", job_id)
 
     # GAP-002 FIX (15 DEC 2025): Validate features remain after geometry validation
     # prepare_gdf can filter out features with invalid/null geometries
@@ -451,6 +479,7 @@ def process_vector_upload(parameters: Dict[str, Any]) -> Dict[str, Any]:
         }
     """
     import psycopg
+    import time
     from .postgis_handler import VectorToPostGISHandler
 
     config = get_config()
@@ -467,6 +496,9 @@ def process_vector_upload(parameters: Dict[str, Any]) -> Dict[str, Any]:
 
     logger.info(f"[{job_id[:8]}] Stage 2: Uploading chunk {chunk_index} (batch_id: {batch_id})")
 
+    # GAP-008 FIX (16 DEC 2025): Track timing for performance analysis
+    start_time = time.time()
+
     try:
         # Step 1: Load pickled chunk from blob storage (silver zone - intermediate data)
         blob_repo = BlobRepository.for_zone("silver")
@@ -482,9 +514,14 @@ def process_vector_upload(parameters: Dict[str, Any]) -> Dict[str, Any]:
             batch_id=batch_id
         )
 
+        # GAP-008 FIX (16 DEC 2025): Calculate timing metrics
+        elapsed = time.time() - start_time
+        rows_per_second = result['rows_inserted'] / elapsed if elapsed > 0 else 0
+
         logger.info(
-            f"[{job_id[:8]}] Chunk {chunk_index} complete: "
-            f"deleted={result['rows_deleted']}, inserted={result['rows_inserted']}"
+            f"[{job_id[:8]}] ⏱️ Chunk {chunk_index} complete: "
+            f"deleted={result['rows_deleted']}, inserted={result['rows_inserted']} rows "
+            f"in {elapsed:.2f}s ({rows_per_second:.0f} rows/sec)"
         )
 
         return {
@@ -495,7 +532,10 @@ def process_vector_upload(parameters: Dict[str, Any]) -> Dict[str, Any]:
                 'batch_id': batch_id,
                 'chunk_index': chunk_index,
                 'chunk_path': chunk_path,
-                'table': f"{schema}.{table_name}"
+                'table': f"{schema}.{table_name}",
+                # GAP-008: Include timing in result for aggregation
+                'elapsed_seconds': round(elapsed, 2),
+                'rows_per_second': round(rows_per_second, 0)
             }
         }
 

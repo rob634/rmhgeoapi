@@ -2036,6 +2036,36 @@ if _app_mode.listens_to_raster_tasks:
             task_message.parameters['_correlation_id'] = correlation_id
             task_message.parameters['_processing_path'] = 'raster-tasks'
 
+            # 16 DEC 2025: PENDING → QUEUED - Confirm message received by trigger
+            # This proves the message was delivered and trigger fired
+            try:
+                from core.models.enums import TaskStatus
+                repos = RepositoryFactory.create_repositories()
+                success = repos['task_repo'].update_task_status_with_validation(
+                    task_message.task_id,
+                    TaskStatus.QUEUED,
+                    allowed_from_statuses=[TaskStatus.PENDING, TaskStatus.QUEUED]  # Allow QUEUED for retries
+                )
+                if success:
+                    logger.info(
+                        f"[{correlation_id}] ✅ PENDING → QUEUED confirmed for {task_message.task_id[:16]}...",
+                        extra={
+                            'checkpoint': 'PENDING_TO_QUEUED',
+                            'task_id': task_message.task_id,
+                            'queue': 'raster-tasks'
+                        }
+                    )
+                else:
+                    # Task may be in unexpected state - log but continue (janitor will handle)
+                    current = repos['task_repo'].get_task_status(task_message.task_id)
+                    logger.warning(
+                        f"[{correlation_id}] ⚠️ PENDING → QUEUED update returned False. "
+                        f"Current status: {current}. Continuing (janitor will recover if needed)."
+                    )
+            except Exception as status_error:
+                logger.error(f"[{correlation_id}] ❌ Failed PENDING → QUEUED update: {status_error}")
+                # Continue processing - fail-safe, janitor will handle orphans after MAX_RETRIES
+
             result = core_machine.process_task_message(task_message)
 
             elapsed = time.time() - start_time
@@ -2153,6 +2183,36 @@ if _app_mode.listens_to_vector_tasks:
                 task_message.parameters = {}
             task_message.parameters['_correlation_id'] = correlation_id
             task_message.parameters['_processing_path'] = 'vector-tasks'
+
+            # 16 DEC 2025: PENDING → QUEUED - Confirm message received by trigger
+            # This proves the message was delivered and trigger fired
+            try:
+                from core.models.enums import TaskStatus
+                repos = RepositoryFactory.create_repositories()
+                success = repos['task_repo'].update_task_status_with_validation(
+                    task_message.task_id,
+                    TaskStatus.QUEUED,
+                    allowed_from_statuses=[TaskStatus.PENDING, TaskStatus.QUEUED]  # Allow QUEUED for retries
+                )
+                if success:
+                    logger.info(
+                        f"[{correlation_id}] ✅ PENDING → QUEUED confirmed for {task_message.task_id[:16]}...",
+                        extra={
+                            'checkpoint': 'PENDING_TO_QUEUED',
+                            'task_id': task_message.task_id,
+                            'queue': 'vector-tasks'
+                        }
+                    )
+                else:
+                    # Task may be in unexpected state - log but continue (janitor will handle)
+                    current = repos['task_repo'].get_task_status(task_message.task_id)
+                    logger.warning(
+                        f"[{correlation_id}] ⚠️ PENDING → QUEUED update returned False. "
+                        f"Current status: {current}. Continuing (janitor will recover if needed)."
+                    )
+            except Exception as status_error:
+                logger.error(f"[{correlation_id}] ❌ Failed PENDING → QUEUED update: {status_error}")
+                # Continue processing - fail-safe, janitor will handle orphans after MAX_RETRIES
 
             result = core_machine.process_task_message(task_message)
 

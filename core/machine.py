@@ -305,12 +305,13 @@ class CoreMachine:
             task_record = self._task_definition_to_record(task_def, 0, queue_name)
             self.repos['task_repo'].create_task(task_record)
         """
+        # 16 DEC 2025: Tasks start as PENDING, trigger confirms QUEUED
         return TaskRecord(
             task_id=task_def.task_id,
             parent_job_id=task_def.parent_job_id,
             job_type=task_def.job_type,
             task_type=task_def.task_type,
-            status=TaskStatus.QUEUED,  # Always QUEUED (not 'pending_queue')
+            status=TaskStatus.PENDING,  # 16 DEC 2025: PENDING until trigger confirms receipt
             stage=task_def.stage,
             task_index=str(task_index),
             parameters=task_def.parameters,

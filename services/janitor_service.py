@@ -216,6 +216,43 @@ class JanitorService:
             logger.error(f"[JANITOR] Failed to increment retry count for {task_id[:16]}...: {e}")
             return False
 
+    def _reset_task_to_queued(self, task_id: str) -> bool:
+        """
+        Reset a PROCESSING task back to QUEUED status for re-queue.
+
+        Used for PROCESSING tasks that timed out without ever starting
+        (heartbeat is None), allowing them to be retried.
+
+        Args:
+            task_id: Task ID to reset
+
+        Returns:
+            True if successful, False otherwise
+        """
+        from psycopg import sql
+
+        query = sql.SQL("""
+            UPDATE {schema}.tasks
+            SET status = 'QUEUED',
+                updated_at = NOW()
+            WHERE task_id = %s
+            AND status = 'PROCESSING'
+            RETURNING task_id, status
+        """).format(schema=sql.Identifier("app"))
+
+        try:
+            with self.repo._error_context("reset task to QUEUED"):
+                result = self.repo._execute_query(query, (task_id,), fetch='one')
+                if result:
+                    logger.debug(
+                        f"[JANITOR] Reset task {task_id[:16]}... from PROCESSING to QUEUED"
+                    )
+                    return True
+                return False
+        except Exception as e:
+            logger.error(f"[JANITOR] Failed to reset task {task_id[:16]}... to QUEUED: {e}")
+            return False
+
     # ========================================================================
     # TASK WATCHDOG
     # ========================================================================
@@ -248,6 +285,7 @@ class JanitorService:
         try:
             # ================================================================
             # PART 1: STALE PROCESSING TASKS (tasks that timed out)
+            # 15 DEC 2025: Added retry logic for tasks that never started
             # ================================================================
             logger.info(
                 f"[JANITOR] PART 1: Checking for stale PROCESSING tasks "
@@ -262,38 +300,134 @@ class JanitorService:
             if stale_tasks:
                 logger.warning(f"[JANITOR] Found {len(stale_tasks)} stale PROCESSING tasks")
 
-                # Log each stale task with full details
+                # Get Service Bus for re-queuing
+                service_bus = ServiceBusRepository()
+
+                requeued_count = 0
+                failed_count = 0
+
                 for i, task in enumerate(stale_tasks, 1):
+                    task_id = task['task_id']
+                    retry_count = task.get('retry_count', 0)
+                    heartbeat = task.get('heartbeat')
                     minutes_stuck = round(task.get('minutes_stuck', 0), 1)
+                    task_type = task.get('task_type', '')
+
                     logger.warning(
                         f"[JANITOR] Stale PROCESSING {i}/{len(stale_tasks)}: "
-                        f"task_id={task['task_id']}, "
+                        f"task_id={task_id}, "
                         f"job_id={task['parent_job_id'][:16]}..., "
-                        f"task_type={task.get('task_type')}, "
-                        f"stuck={minutes_stuck}min"
+                        f"task_type={task_type}, "
+                        f"stuck={minutes_stuck}min, "
+                        f"heartbeat={'SET' if heartbeat else 'None'}, "
+                        f"retry_count={retry_count}"
                     )
 
-                # Mark tasks as failed
-                task_ids = [t['task_id'] for t in stale_tasks]
-                error_message = (
-                    f"[JANITOR] Task exceeded {self.config.task_timeout_minutes} minute timeout. "
-                    f"Azure Functions max execution time is 10-30 minutes."
+                    # RETRY LOGIC (15 DEC 2025):
+                    # - If heartbeat is None: task was never started (platform issue)
+                    # - If retry_count < max: we can retry
+                    # - If heartbeat is SET: task actually ran and failed (code error)
+                    can_retry = (
+                        heartbeat is None and
+                        retry_count < self.config.orphaned_queued_max_retries
+                    )
+
+                    if can_retry:
+                        # Task never started - re-queue for retry
+                        try:
+                            queue_name = self._get_queue_for_task(task_type)
+
+                            # Build TaskQueueMessage
+                            message = TaskQueueMessage(
+                                task_id=task_id,
+                                parent_job_id=task['parent_job_id'],
+                                job_type=task.get('job_type', ''),
+                                task_type=task_type,
+                                stage=task.get('stage', 1),
+                                task_index=task.get('task_index', 0),
+                                parameters=task.get('parameters', {})
+                            )
+
+                            # Reset status to QUEUED first
+                            if not self._reset_task_to_queued(task_id):
+                                logger.error(f"[JANITOR] Failed to reset task {task_id[:16]}... to QUEUED")
+                                continue
+
+                            # Send to queue
+                            message_id = service_bus.send_message(queue_name, message)
+
+                            # Increment retry count
+                            self._increment_task_retry_count(task_id)
+
+                            requeued_count += 1
+                            result.items_fixed += 1
+                            result.actions_taken.append({
+                                "action": "requeue_stale_processing_task",
+                                "task_id": task_id,
+                                "parent_job_id": task['parent_job_id'],
+                                "task_type": task_type,
+                                "queue": queue_name,
+                                "retry_count": retry_count + 1,
+                                "max_retries": self.config.orphaned_queued_max_retries,
+                                "minutes_stuck": minutes_stuck,
+                                "message_id": message_id,
+                                "reason": "processing_timeout_no_heartbeat"
+                            })
+
+                            logger.info(
+                                f"[JANITOR] ✅ Re-queued stale PROCESSING task: task_id={task_id[:16]}..., "
+                                f"queue={queue_name}, retry={retry_count + 1}/{self.config.orphaned_queued_max_retries}, "
+                                f"message_id={message_id}"
+                            )
+
+                        except Exception as requeue_error:
+                            logger.error(
+                                f"[JANITOR] ❌ Failed to re-queue stale task {task_id[:16]}...: {requeue_error}"
+                            )
+                            result.actions_taken.append({
+                                "action": "requeue_failed",
+                                "task_id": task_id,
+                                "error": str(requeue_error)
+                            })
+                    else:
+                        # Cannot retry - mark as FAILED
+                        if heartbeat:
+                            reason = "task_executed_but_timed_out"
+                            error_message = (
+                                f"[JANITOR] Task exceeded {self.config.task_timeout_minutes} minute timeout. "
+                                f"Task started executing (heartbeat set) but did not complete."
+                            )
+                        else:
+                            reason = "max_retries_exceeded"
+                            error_message = (
+                                f"[JANITOR] Task exceeded {self.config.task_timeout_minutes} minute timeout. "
+                                f"Max retries ({self.config.orphaned_queued_max_retries}) exhausted - "
+                                f"task failed {retry_count + 1} times without ever starting."
+                            )
+
+                        self.repo.mark_tasks_as_failed([task_id], error_message)
+                        failed_count += 1
+                        result.items_fixed += 1
+                        result.actions_taken.append({
+                            "action": "mark_processing_task_failed",
+                            "task_id": task_id,
+                            "parent_job_id": task['parent_job_id'],
+                            "task_type": task_type,
+                            "minutes_stuck": minutes_stuck,
+                            "retry_count": retry_count,
+                            "heartbeat_set": heartbeat is not None,
+                            "reason": reason
+                        })
+
+                        logger.warning(
+                            f"[JANITOR] ❌ Marked stale PROCESSING task FAILED: task_id={task_id[:16]}..., "
+                            f"reason={reason}, retries={retry_count}"
+                        )
+
+                logger.info(
+                    f"[JANITOR] Stale PROCESSING task handling complete: "
+                    f"re-queued={requeued_count}, failed={failed_count}"
                 )
-
-                fixed_count = self.repo.mark_tasks_as_failed(task_ids, error_message)
-                result.items_fixed += fixed_count
-
-                for task in stale_tasks:
-                    result.actions_taken.append({
-                        "action": "mark_processing_task_failed",
-                        "task_id": task['task_id'],
-                        "parent_job_id": task['parent_job_id'],
-                        "task_type": task.get('task_type'),
-                        "minutes_stuck": round(task.get('minutes_stuck', 0), 1),
-                        "reason": "exceeded_processing_timeout"
-                    })
-
-                logger.warning(f"[JANITOR] Marked {fixed_count} stale PROCESSING tasks as FAILED")
             else:
                 logger.info("[JANITOR] No stale PROCESSING tasks found ✓")
 

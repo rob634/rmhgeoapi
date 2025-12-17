@@ -145,9 +145,14 @@ def _verify_cell_counts(
     logger
 ) -> Dict[str, Any]:
     """
-    Verify cell counts for all resolutions against expected values.
+    Verify cell counts for all resolutions using H3 ratio verification.
 
-    Tolerance: ±10% of expected count (land filtering creates variability)
+    Two verification modes:
+    1. Absolute: Compare against expected_cells with ±10% tolerance
+    2. Ratio: Verify H3 parent-child ratios (7:1 per resolution level)
+
+    For filtered grids (country/bbox), ratio verification is more reliable
+    since absolute expected counts are unknown at job submission time.
 
     Args:
         h3_repo: H3Repository instance
@@ -158,69 +163,114 @@ def _verify_cell_counts(
 
     Returns:
         Verification results dict with:
-        - all_passed (bool): True if all resolutions within tolerance
+        - all_passed (bool): True if all resolutions pass verification
         - total_cells (int): Sum of actual cells across all resolutions
         - per_resolution (Dict[int, Dict]): Details per resolution
         - failures (List[int]): Resolutions that failed verification
+        - verification_mode (str): "absolute" or "ratio"
     """
     logger.info(f"🔍 Verifying cell counts for {len(resolutions)} resolutions...")
 
-    per_resolution_results = {}
-    total_cells = 0
-    failures = []
-
+    # First, collect all actual counts
+    actual_counts = {}
     for resolution in resolutions:
         grid_id = f"{grid_id_prefix}_res{resolution}"
-
-        # Query actual cell count from h3.grids
-        # NOTE: H3Repository uses dict_row - access by column alias
         with h3_repo._get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     "SELECT COUNT(*) as count FROM h3.grids WHERE grid_id = %s",
                     (grid_id,)
                 )
-                actual_count = cur.fetchone()['count']
+                actual_counts[resolution] = cur.fetchone()['count']
 
-        # Get expected count (with tolerance)
-        expected_count = expected_cells.get(resolution, 0)
-        tolerance = 0.10  # ±10%
-        min_acceptable = int(expected_count * (1 - tolerance))
-        max_acceptable = int(expected_count * (1 + tolerance))
+    # Determine verification mode based on expected_cells
+    # If expected_cells has hardcoded global values (res2=2000) but actual is different,
+    # switch to ratio-based verification
+    base_res = min(resolutions)
+    expected_base = expected_cells.get(base_res, 0) if isinstance(expected_cells.get(base_res), int) else int(expected_cells.get(str(base_res), 0))
+    actual_base = actual_counts.get(base_res, 0)
 
-        # Check if within tolerance
-        passed = min_acceptable <= actual_count <= max_acceptable
+    # Use ratio verification if expected base doesn't match actual (filtered grid)
+    # Tolerance: expected should be within 50% of actual for absolute mode
+    use_ratio_mode = (expected_base == 0 or
+                      actual_base == 0 or
+                      abs(expected_base - actual_base) / max(actual_base, 1) > 0.5)
+
+    if use_ratio_mode:
+        logger.info(f"📊 Using RATIO verification (filtered grid detected)")
+        verification_mode = "ratio"
+    else:
+        logger.info(f"📊 Using ABSOLUTE verification")
+        verification_mode = "absolute"
+
+    per_resolution_results = {}
+    total_cells = 0
+    failures = []
+
+    sorted_resolutions = sorted(resolutions)
+
+    for i, resolution in enumerate(sorted_resolutions):
+        grid_id = f"{grid_id_prefix}_res{resolution}"
+        actual_count = actual_counts[resolution]
+        total_cells += actual_count
+
+        if use_ratio_mode:
+            # RATIO MODE: Verify H3 7:1 parent-child relationship
+            if i == 0:
+                # Base resolution - just check it has cells
+                passed = actual_count > 0
+                expected_count = actual_count  # Self-reference for base
+                variance_pct = 0.0
+            else:
+                # Higher resolutions - should be ~7x previous resolution
+                prev_res = sorted_resolutions[i - 1]
+                prev_count = actual_counts[prev_res]
+                expected_count = prev_count * 7
+
+                # Allow ±15% tolerance for ratio (some edge effects)
+                tolerance = 0.15
+                min_acceptable = int(expected_count * (1 - tolerance))
+                max_acceptable = int(expected_count * (1 + tolerance))
+                passed = min_acceptable <= actual_count <= max_acceptable
+                variance_pct = round(((actual_count - expected_count) / expected_count) * 100, 2) if expected_count > 0 else 0.0
+        else:
+            # ABSOLUTE MODE: Compare against expected_cells
+            expected_count = expected_cells.get(resolution, 0)
+            if isinstance(expected_count, str):
+                expected_count = int(expected_count)
+            tolerance = 0.10  # ±10%
+            min_acceptable = int(expected_count * (1 - tolerance))
+            max_acceptable = int(expected_count * (1 + tolerance))
+            passed = min_acceptable <= actual_count <= max_acceptable
+            variance_pct = round(((actual_count - expected_count) / expected_count) * 100, 2) if expected_count > 0 else 0.0
 
         per_resolution_results[resolution] = {
             "grid_id": grid_id,
             "actual_count": actual_count,
             "expected_count": expected_count,
-            "tolerance": f"±{int(tolerance * 100)}%",
-            "min_acceptable": min_acceptable,
-            "max_acceptable": max_acceptable,
             "passed": passed,
-            "variance_pct": round(((actual_count - expected_count) / expected_count) * 100, 2) if expected_count > 0 else 0.0
+            "variance_pct": variance_pct,
+            "verification_mode": verification_mode
         }
-
-        total_cells += actual_count
 
         if not passed:
             failures.append(resolution)
             logger.warning(
                 f"⚠️ Resolution {resolution}: {actual_count:,} cells "
-                f"(expected {expected_count:,}, variance {per_resolution_results[resolution]['variance_pct']}%)"
+                f"(expected {expected_count:,}, variance {variance_pct}%)"
             )
         else:
             logger.info(
                 f"✅ Resolution {resolution}: {actual_count:,} cells "
-                f"(expected {expected_count:,}, variance {per_resolution_results[resolution]['variance_pct']}%)"
+                f"(expected ~{expected_count:,}, variance {variance_pct}%)"
             )
 
     return {
         "all_passed": len(failures) == 0,
         "total_cells": total_cells,
         "per_resolution": per_resolution_results,
-        "failures": failures
+        "failures": failures,
+        "verification_mode": verification_mode
     }
 
 

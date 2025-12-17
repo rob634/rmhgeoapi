@@ -1814,7 +1814,23 @@ def web_interface_unified(req: func.HttpRequest) -> func.HttpResponse:
 # See config/app_mode_config.py for mode definitions and queue mappings.
 # ============================================================================
 
+# 16 DEC 2025: Verbose logging for trigger registration
+logger.info("=" * 70)
+logger.info("🔌 SERVICE BUS TRIGGER REGISTRATION STARTING")
+logger.info("=" * 70)
+logger.info(f"   APP_MODE: {_app_mode.mode.value}")
+logger.info(f"   APP_NAME: {_app_mode.app_name}")
+logger.info(f"   listens_to_jobs_queue: {_app_mode.listens_to_jobs_queue}")
+logger.info(f"   listens_to_raster_tasks: {_app_mode.listens_to_raster_tasks}")
+logger.info(f"   listens_to_vector_tasks: {_app_mode.listens_to_vector_tasks}")
+logger.info("-" * 70)
+
 # Jobs Queue Trigger - Platform modes only (job orchestration + stage_complete signals)
+if _app_mode.listens_to_jobs_queue:
+    logger.info("✅ REGISTERING: geospatial-jobs queue trigger (job orchestration)")
+else:
+    logger.warning("⏭️ SKIPPING: geospatial-jobs queue trigger (APP_MODE=%s)", _app_mode.mode.value)
+
 if _app_mode.listens_to_jobs_queue:
     @app.service_bus_queue_trigger(
         arg_name="msg",
@@ -1978,6 +1994,11 @@ if _app_mode.listens_to_jobs_queue:
 
 # Raster Tasks Queue Trigger - Raster worker/platform_raster/standalone modes
 if _app_mode.listens_to_raster_tasks:
+    logger.info("✅ REGISTERING: raster-tasks queue trigger (GDAL/COG operations)")
+else:
+    logger.warning("⏭️ SKIPPING: raster-tasks queue trigger (APP_MODE=%s)", _app_mode.mode.value)
+
+if _app_mode.listens_to_raster_tasks:
     @app.service_bus_queue_trigger(
         arg_name="msg",
         queue_name="raster-tasks",
@@ -2124,6 +2145,32 @@ if _app_mode.listens_to_raster_tasks:
 
 
 # Vector Tasks Queue Trigger - Vector worker/platform_vector/standalone modes
+if _app_mode.listens_to_vector_tasks:
+    logger.info("✅ REGISTERING: vector-tasks queue trigger (PostGIS/geopandas operations)")
+else:
+    logger.warning("⏭️ SKIPPING: vector-tasks queue trigger (APP_MODE=%s)", _app_mode.mode.value)
+
+# 16 DEC 2025: Summary of trigger registration
+_registered_triggers = []
+if _app_mode.listens_to_jobs_queue:
+    _registered_triggers.append("geospatial-jobs")
+if _app_mode.listens_to_raster_tasks:
+    _registered_triggers.append("raster-tasks")
+if _app_mode.listens_to_vector_tasks:
+    _registered_triggers.append("vector-tasks")
+
+logger.info("-" * 70)
+logger.info(f"🔌 SERVICE BUS TRIGGER REGISTRATION COMPLETE")
+logger.info(f"   Triggers registered: {len(_registered_triggers)}/3")
+logger.info(f"   Queues: {_registered_triggers}")
+if len(_registered_triggers) == 0:
+    logger.error("❌ NO SERVICE BUS TRIGGERS REGISTERED - APP WILL NOT PROCESS MESSAGES!")
+elif len(_registered_triggers) < 3:
+    logger.warning(f"⚠️ Partial trigger registration (APP_MODE={_app_mode.mode.value})")
+else:
+    logger.info("✅ All 3 Service Bus triggers registered (standalone mode)")
+logger.info("=" * 70)
+
 if _app_mode.listens_to_vector_tasks:
     @app.service_bus_queue_trigger(
         arg_name="msg",

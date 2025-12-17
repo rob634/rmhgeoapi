@@ -323,6 +323,11 @@ class TaskRoutingDefaults:
         "curated_fetch_data",
         "curated_etl_process",
         "curated_finalize",
+        # H3 Aggregation handlers (17 DEC 2025)
+        # DB-bound operations: inventory, zonal stats, finalization
+        "h3_inventory_cells",
+        "h3_raster_zonal_stats",
+        "h3_aggregation_finalize",
     ]
 
 

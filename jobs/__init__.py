@@ -55,6 +55,9 @@ from .unpublish_vector import UnpublishVectorJob
 # Curated dataset update (15 DEC 2025)
 from .curated_update import CuratedDatasetUpdateJob
 
+# H3 Aggregation (17 DEC 2025)
+from .h3_raster_aggregation import H3RasterAggregationJob
+
 # ARCHIVED (07 DEC 2025) - replaced by inventory_container_contents
 # from .container_list import ListContainerContentsWorkflow
 # from .container_list_diamond import ListContainerContentsDiamondWorkflow
@@ -92,6 +95,9 @@ ALL_JOBS = {
 
     # Curated dataset update (15 DEC 2025)
     "curated_dataset_update": CuratedDatasetUpdateJob,
+
+    # H3 Aggregation (17 DEC 2025)
+    "h3_raster_aggregation": H3RasterAggregationJob,
 
     # ARCHIVED (07 DEC 2025) - use inventory_container_contents instead
     # "list_container_contents": ListContainerContentsWorkflow,

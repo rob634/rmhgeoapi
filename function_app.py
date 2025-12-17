@@ -458,10 +458,10 @@ def get_job_status(req: func.HttpRequest) -> func.HttpResponse:
 
 # H3 Debug and Bootstrap Monitoring (12 NOV 2025)
 # NOTE: Changed from /api/admin/h3 to /api/h3/debug because Azure Functions reserves /api/admin/* for built-in admin UI
-@app.route(route="h3/debug", methods=["GET"])
+@app.route(route="h3/debug", methods=["GET", "POST"])
 def admin_h3_debug(req: func.HttpRequest) -> func.HttpResponse:
     """
-    H3 debug operations: GET /api/h3/debug?operation={op}&{params}
+    H3 debug operations: GET/POST /api/h3/debug?operation={op}&{params}
 
     Available operations:
     - schema_status: Check h3 schema exists
@@ -471,6 +471,8 @@ def admin_h3_debug(req: func.HttpRequest) -> func.HttpResponse:
     - reference_filter_details: Details for specific filter (requires filter_name)
     - sample_cells: Sample cells from grid (requires grid_id)
     - parent_child_check: Validate hierarchy (requires parent_id)
+    - delete_grids: Delete grids by prefix (POST, requires confirm=yes)
+    - nuke_h3: Truncate all H3 tables (POST, requires confirm=yes)
     """
     return admin_h3_debug_trigger.handle_request(req)
 

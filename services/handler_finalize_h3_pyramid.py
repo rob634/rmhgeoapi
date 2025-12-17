@@ -147,12 +147,13 @@ def _verify_cell_counts(
     """
     Verify H3 cell counts using 7:1 ratio verification.
 
+    Uses NORMALIZED h3.cells table (not legacy h3.grids).
     H3 property: each parent cell has exactly 7 children.
     We verify each resolution has ~7× the cells of the previous resolution.
 
     Args:
         h3_repo: H3Repository instance
-        grid_id_prefix: Grid ID prefix (e.g., "land", "albania_test2")
+        grid_id_prefix: Grid ID prefix (for logging only - normalized schema uses resolution)
         resolutions: List of resolution levels to verify
         expected_cells: Dict mapping resolution → expected count (ignored, kept for API compat)
         logger: Logger instance
@@ -168,17 +169,11 @@ def _verify_cell_counts(
 
     logger.info(f"🔍 Verifying H3 ratios for {len(resolutions)} resolutions (±{TOLERANCE*100:.0f}% tolerance)")
 
-    # Get actual counts from database
+    # Get actual counts from NORMALIZED h3.cells table
     actual_counts = {}
     for resolution in resolutions:
-        grid_id = f"{grid_id_prefix}_res{resolution}"
-        with h3_repo._get_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT COUNT(*) as count FROM h3.grids WHERE grid_id = %s",
-                    (grid_id,)
-                )
-                actual_counts[resolution] = cur.fetchone()['count']
+        # Query by resolution (normalized schema - no grid_id)
+        actual_counts[resolution] = h3_repo.get_cell_count_by_resolution(resolution)
 
     # Verify ratios
     sorted_res = sorted(resolutions)
@@ -206,11 +201,12 @@ def _verify_cell_counts(
             passed = (1 - TOLERANCE) <= ratio <= (1 + TOLERANCE)
 
         per_resolution[res] = {
-            "grid_id": f"{grid_id_prefix}_res{res}",
-            "actual": actual,
-            "expected": expected,
+            "grid_id": f"{grid_id_prefix}_res{res}",  # For logging compatibility
+            "actual_count": actual,
+            "expected_count": expected,
             "ratio": round(ratio, 4),
-            "passed": passed
+            "passed": passed,
+            "variance_pct": round((ratio - 1.0) * 100, 2) if expected > 0 else 0
         }
 
         if passed:
@@ -315,8 +311,9 @@ def _update_grid_metadata(
 
 def _vacuum_analyze_grids(h3_repo, logger) -> bool:
     """
-    Run VACUUM ANALYZE on h3.grids table to optimize query performance.
+    Run VACUUM ANALYZE on h3.cells table to optimize query performance.
 
+    Uses NORMALIZED h3.cells table (not legacy h3.grids).
     VACUUM reclaims storage and updates statistics for the PostgreSQL query planner.
 
     Args:
@@ -326,14 +323,14 @@ def _vacuum_analyze_grids(h3_repo, logger) -> bool:
     Returns:
         True if VACUUM ANALYZE completed successfully
     """
-    logger.info("🧹 Running VACUUM ANALYZE on h3.grids...")
+    logger.info("🧹 Running VACUUM ANALYZE on h3.cells...")
 
     try:
         # VACUUM requires autocommit mode
         with h3_repo._get_connection() as conn:
             conn.autocommit = True
             with conn.cursor() as cur:
-                cur.execute("VACUUM ANALYZE h3.grids")
+                cur.execute("VACUUM ANALYZE h3.cells")
 
         logger.info("✅ VACUUM ANALYZE completed")
         return True

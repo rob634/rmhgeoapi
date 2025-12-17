@@ -87,7 +87,9 @@ class AdminH3DebugTrigger:
                             "reference_filters",
                             "reference_filter_details (requires filter_name param)",
                             "sample_cells (requires grid_id param)",
-                            "parent_child_check (requires parent_id param)"
+                            "parent_child_check (requires parent_id param)",
+                            "deploy_normalized_schema (requires confirm=yes)",
+                            "drop_normalized_schema (requires confirm=yes)"
                         ]
                     }),
                     status_code=400,
@@ -113,6 +115,10 @@ class AdminH3DebugTrigger:
                 return self._delete_grids(req)
             elif operation == 'nuke_h3':
                 return self._nuke_h3(req)
+            elif operation == 'deploy_normalized_schema':
+                return self._deploy_normalized_schema(req)
+            elif operation == 'drop_normalized_schema':
+                return self._drop_normalized_schema(req)
             else:
                 return func.HttpResponse(
                     json.dumps({
@@ -126,7 +132,9 @@ class AdminH3DebugTrigger:
                             "sample_cells",
                             "parent_child_check",
                             "delete_grids",
-                            "nuke_h3"
+                            "nuke_h3",
+                            "deploy_normalized_schema",
+                            "drop_normalized_schema"
                         ]
                     }),
                     status_code=404,
@@ -211,12 +219,31 @@ class AdminH3DebugTrigger:
                     """)
                     indexes = [dict(row) for row in cur.fetchall()]
 
+                    # Get schema ownership info
+                    cur.execute("""
+                        SELECT
+                            n.nspname as schema_name,
+                            pg_catalog.pg_get_userbyid(n.nspowner) as owner,
+                            current_user as current_user
+                        FROM pg_catalog.pg_namespace n
+                        WHERE n.nspname IN ('h3', 'app', 'geo', 'pgstac')
+                        ORDER BY n.nspname
+                    """)
+                    ownership = {row['schema_name']: row['owner'] for row in cur.fetchall()}
+
+                    # Check if current user can modify h3 schema
+                    cur.execute("SELECT current_user")
+                    current_user = cur.fetchone()['current_user']
+
             result = {
                 "schema_exists": True,
                 "tables": tables,
                 "table_counts": table_counts,
                 "index_count": len(indexes),
                 "indexes": indexes,
+                "schema_ownership": ownership,
+                "current_user": current_user,
+                "ownership_ok": ownership.get('h3') == current_user,
                 "timestamp": datetime.now(timezone.utc).isoformat()
             }
 
@@ -765,7 +792,11 @@ class AdminH3DebugTrigger:
 
     def _nuke_h3(self, req: func.HttpRequest) -> func.HttpResponse:
         """
-        Truncate all H3 tables (grids, grid_metadata, batch_progress, reference_filters).
+        Truncate all H3 tables (both legacy and normalized schema).
+
+        Tables truncated:
+            Legacy: grids, grid_metadata, batch_progress, reference_filters
+            Normalized: cells, cell_admin0, cell_admin1, zonal_stats, point_stats
 
         Query params:
             confirm: str - Must be "yes" to actually truncate
@@ -775,11 +806,17 @@ class AdminH3DebugTrigger:
         try:
             confirm = req.params.get('confirm', '').lower() == 'yes'
 
+            # All H3 tables (legacy + normalized)
+            all_tables = [
+                'grids', 'grid_metadata', 'batch_progress', 'reference_filters',  # Legacy
+                'cells', 'cell_admin0', 'cell_admin1', 'zonal_stats', 'point_stats'  # Normalized
+            ]
+
             with self.h3_repo._get_connection() as conn:
                 with conn.cursor() as cur:
                     # Count rows before
                     counts_before = {}
-                    for table in ['grids', 'grid_metadata', 'batch_progress', 'reference_filters']:
+                    for table in all_tables:
                         try:
                             cur.execute(f"SELECT COUNT(*) as count FROM h3.{table}")
                             counts_before[table] = cur.fetchone()['count']
@@ -800,8 +837,14 @@ class AdminH3DebugTrigger:
                             mimetype="application/json"
                         )
 
-                    # Truncate all tables
-                    for table in ['grids', 'grid_metadata', 'batch_progress', 'reference_filters']:
+                    # Truncate all tables (normalized first due to FK constraints)
+                    # Order: mapping tables → main tables
+                    truncate_order = [
+                        'cell_admin0', 'cell_admin1', 'zonal_stats', 'point_stats',  # Normalized mappings
+                        'cells',  # Normalized main
+                        'grids', 'grid_metadata', 'batch_progress', 'reference_filters'  # Legacy
+                    ]
+                    for table in truncate_order:
                         try:
                             cur.execute(f"TRUNCATE TABLE h3.{table} CASCADE")
                         except Exception as e:
@@ -816,7 +859,7 @@ class AdminH3DebugTrigger:
                     "success": True,
                     "rows_deleted": counts_before,
                     "total_rows": sum(counts_before.values()),
-                    "tables_truncated": list(counts_before.keys()),
+                    "tables_truncated": truncate_order,
                     "timestamp": datetime.now(timezone.utc).isoformat()
                 }),
                 mimetype="application/json"
@@ -826,6 +869,108 @@ class AdminH3DebugTrigger:
             logger.error(f"❌ Nuke H3 error: {e}")
             return func.HttpResponse(
                 json.dumps({"error": str(e)}),
+                status_code=500,
+                mimetype="application/json"
+            )
+
+    def _deploy_normalized_schema(self, req: func.HttpRequest) -> func.HttpResponse:
+        """
+        Deploy H3 normalized schema (cells, cell_admin0, cell_admin1, zonal_stats, point_stats).
+
+        Query params:
+            confirm: str - Must be "yes" to actually deploy
+
+        Returns:
+            Deployment results with steps and status
+        """
+        try:
+            confirm = req.params.get('confirm', '').lower() == 'yes'
+
+            if not confirm:
+                return func.HttpResponse(
+                    json.dumps({
+                        "error": "Deployment requires confirm=yes",
+                        "usage": "/api/admin/h3?operation=deploy_normalized_schema&confirm=yes",
+                        "warning": "This will CREATE h3.cells, h3.cell_admin0, h3.cell_admin1, h3.zonal_stats, h3.point_stats tables",
+                        "note": "Safe to run - uses IF NOT EXISTS, will not overwrite data"
+                    }),
+                    status_code=400,
+                    mimetype="application/json"
+                )
+
+            # Import and deploy
+            from infrastructure.h3_schema import H3SchemaDeployer
+
+            logger.info("🚀 Deploying H3 normalized schema...")
+            deployer = H3SchemaDeployer()
+            result = deployer.deploy_all()
+
+            status_code = 200 if result.get('success') else 500
+            logger.info(f"{'✅' if result.get('success') else '❌'} Schema deployment: {result}")
+
+            return func.HttpResponse(
+                json.dumps(result, default=str),
+                status_code=status_code,
+                mimetype="application/json"
+            )
+
+        except Exception as e:
+            logger.error(f"❌ Deploy normalized schema error: {e}\n{traceback.format_exc()}")
+            return func.HttpResponse(
+                json.dumps({
+                    "error": str(e),
+                    "traceback": traceback.format_exc()
+                }),
+                status_code=500,
+                mimetype="application/json"
+            )
+
+    def _drop_normalized_schema(self, req: func.HttpRequest) -> func.HttpResponse:
+        """
+        Drop H3 normalized schema tables (preserves legacy h3.grids).
+
+        Query params:
+            confirm: str - Must be "yes" to actually drop
+
+        WARNING: Destructive operation!
+        """
+        try:
+            confirm = req.params.get('confirm', '').lower() == 'yes'
+
+            if not confirm:
+                return func.HttpResponse(
+                    json.dumps({
+                        "error": "Drop requires confirm=yes",
+                        "usage": "/api/admin/h3?operation=drop_normalized_schema&confirm=yes",
+                        "warning": "DESTRUCTIVE: Will DROP h3.cells, cell_admin0, cell_admin1, zonal_stats, point_stats",
+                        "note": "Legacy h3.grids table will NOT be affected"
+                    }),
+                    status_code=400,
+                    mimetype="application/json"
+                )
+
+            # Import and drop
+            from infrastructure.h3_schema import H3SchemaDeployer
+
+            logger.warning("🔥 Dropping H3 normalized schema tables...")
+            deployer = H3SchemaDeployer()
+            result = deployer.drop_all(confirm=True)
+
+            logger.warning(f"Drop result: {result}")
+
+            return func.HttpResponse(
+                json.dumps(result, default=str),
+                status_code=200,
+                mimetype="application/json"
+            )
+
+        except Exception as e:
+            logger.error(f"❌ Drop normalized schema error: {e}\n{traceback.format_exc()}")
+            return func.HttpResponse(
+                json.dumps({
+                    "error": str(e),
+                    "traceback": traceback.format_exc()
+                }),
                 status_code=500,
                 mimetype="application/json"
             )

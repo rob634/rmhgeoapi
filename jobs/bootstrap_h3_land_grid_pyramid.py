@@ -201,16 +201,13 @@ class BootstrapH3LandGridPyramidJob(JobBaseMixin, JobBase):  # Mixin FIRST for c
             if not previous_results or len(previous_results) == 0:
                 raise ValueError("Stage 2 requires Stage 1 results")
 
-            # Query actual parent count from database (more reliable than Stage 1 result)
-            # This handles cases where COPY doesn't return accurate rowcount
+            # Query actual parent count from database (normalized schema: h3.cells by resolution)
             from infrastructure.h3_repository import H3Repository
             h3_repo = H3Repository()
-            parent_grid_id = f"{grid_id_prefix}_res2"
-            parent_ids = h3_repo.get_parent_ids(parent_grid_id)
-            parent_count = len(parent_ids)
+            parent_count = h3_repo.get_cell_count_by_resolution(resolution=2)
 
             if parent_count == 0:
-                raise ValueError(f"No cells found in {parent_grid_id} - cannot cascade")
+                raise ValueError(f"No cells found at resolution 2 - cannot cascade")
 
             # Calculate number of batches
             from math import ceil
@@ -235,18 +232,24 @@ class BootstrapH3LandGridPyramidJob(JobBaseMixin, JobBase):  # Mixin FIRST for c
 
                 batch_start = batch_idx * cascade_batch_size
 
+                task_params = {
+                    "parent_grid_id": f"{grid_id_prefix}_res2",
+                    "target_resolutions": target_resolutions,
+                    "grid_id_prefix": grid_id_prefix,
+                    "batch_start": batch_start,
+                    "batch_size": cascade_batch_size,
+                    "batch_index": batch_idx,  # For idempotency tracking
+                    "source_job_id": job_id
+                }
+
+                # Pass country_code for admin0 mappings in normalized schema
+                if country_filter:
+                    task_params["country_code"] = country_filter
+
                 tasks.append({
                     "task_id": batch_id,
                     "task_type": "cascade_h3_descendants",
-                    "parameters": {
-                        "parent_grid_id": f"{grid_id_prefix}_res2",
-                        "target_resolutions": target_resolutions,
-                        "grid_id_prefix": grid_id_prefix,
-                        "batch_start": batch_start,
-                        "batch_size": cascade_batch_size,
-                        "batch_index": batch_idx,  # For idempotency tracking
-                        "source_job_id": job_id
-                    }
+                    "parameters": task_params
                 })
 
             # Log idempotency status
@@ -375,8 +378,8 @@ class BootstrapH3LandGridPyramidJob(JobBaseMixin, JobBase):  # Mixin FIRST for c
         # Extract cascade statistics from Stage 2
         cascade_stats = {}
         if len(task_results) >= 2:
-            # Stage 2 results are list of task results (one per batch)
-            stage2_results = [tr for tr in task_results if tr.stage == 2]
+            # Stage 2 results are cascade tasks (task_type = "cascade_h3_descendants")
+            stage2_results = [tr for tr in task_results if tr.task_type == "cascade_h3_descendants"]
             cascade_stats = {
                 "batches_completed": len(stage2_results),
                 "batch_size": cascade_batch_size,

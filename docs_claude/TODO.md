@@ -66,9 +66,116 @@ curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/hea
 
 ## 🚨 HIGH PRIORITY
 
-### 1. Database Diagnostics & Remote Administration Enhancement (07 DEC 2025)
+### 1. OGC API Styles (17 DEC 2025)
 
-**Status**: 🔴 **NOW IMMEDIATE PRIORITY** - See IMMEDIATE section above
+**Status**: 📋 **PLANNING COMPLETE** - Ready for Implementation
+**Priority**: 🚨 HIGH - Required for Curated Datasets styling
+**Full Plan**: `/STYLE_IMPLEMENTATION.md`
+
+**Problem**: OGC Features serves vector data but no styling - clients must hardcode styles. Need server-side style management with multi-format output.
+
+**Solution**: OGC API - Styles extension with CartoSym-JSON canonical storage:
+```
+CartoSym-JSON (stored) → StyleTranslator → Leaflet / Mapbox GL / OpenLayers
+```
+
+**Architecture**:
+```
+GET /features/collections/{id}/styles         → list styles
+GET /features/collections/{id}/styles/{sid}   → style document
+      ?f=cartosym  → CartoSym-JSON (canonical)
+      ?f=leaflet   → Leaflet style object/function
+      ?f=mapbox    → Mapbox GL style layers
+```
+
+**Files to Create/Modify**:
+| File | Action | Purpose |
+|------|--------|---------|
+| `ogc_features/style_translator.py` | CREATE | CartoSym → Leaflet/Mapbox |
+| `ogc_features/triggers.py` | MODIFY | Add 2 trigger classes |
+| `ogc_features/repository.py` | MODIFY | Add style query methods |
+| `ogc_features/service.py` | MODIFY | Add style orchestration |
+| `ogc_features/models.py` | MODIFY | Add Pydantic models |
+| `core/schema/sql_generator.py` | MODIFY | Add `geo.feature_collection_styles` |
+| `function_app.py` | MODIFY | Register style routes |
+
+**Key Features**:
+- CartoSym-JSON storage in PostgreSQL JSONB
+- Data-driven styling with CQL2-JSON selectors
+- Auto-generated Leaflet style functions
+- Mapbox GL layer definitions
+- ETL integration for default style creation
+
+**Implementation Order**:
+1. [ ] Add Pydantic models to `models.py`
+2. [ ] Create `style_translator.py`
+3. [ ] Add repository methods
+4. [ ] Add service methods
+5. [ ] Add trigger classes
+6. [ ] Add schema for `geo.feature_collection_styles`
+7. [ ] Register routes in `function_app.py`
+8. [ ] Deploy and full-rebuild
+9. [ ] Test endpoints
+10. [ ] (Optional) ETL integration for auto-generated styles
+
+---
+
+### 2. Virtual Zarr / CMIP6 NetCDF Support (17 DEC 2025)
+
+**Status**: 📋 **PLANNING COMPLETE** - Ready for Implementation
+**Priority**: 🚨 HIGH - Client has 20-100GB CMIP6 NetCDF, exploring unnecessary Zarr conversion
+**Full Plan**: `/VIRTUAL_ZARR_IMPLEMENTATION.md`
+
+**Problem**: Client is about to spend weeks converting NetCDF to Zarr (2x storage, massive compute). Unnecessary - we can virtualize instead.
+
+**Solution**: Kerchunk reference files that make NetCDF accessible as virtual Zarr:
+```
+Client's Plan:   NetCDF → Physical Zarr (weeks, 2x storage)
+Our Solution:    NetCDF → Reference JSON (hours, trivial storage)
+```
+
+**Architecture**:
+```
+CMIP6 NetCDF (Bronze) → inventory_netcdf job → generate_virtual_zarr job → Kerchunk Refs (Silver)
+                                                                                    ↓
+Planetary Computer Zarr ──────────────────────────────────────────────────► TiTiler-xarray → Tiles
+```
+
+**New Components**:
+| Component | File | Purpose |
+|-----------|------|---------|
+| CMIP6 Parser | `services/netcdf_handlers/cmip6_parser.py` | Parse CMIP6 filenames |
+| Chunking Validator | `services/netcdf_handlers/handler_validate_netcdf.py` | Pre-flight check |
+| Reference Generator | `services/netcdf_handlers/handler_generate_kerchunk.py` | Single file → JSON ref |
+| Virtual Combiner | `services/netcdf_handlers/handler_combine_virtual.py` | Combine time series |
+| STAC Registration | `services/netcdf_handlers/handler_register_xarray_stac.py` | datacube extension |
+| Inventory Job | `jobs/inventory_netcdf.py` | Scan, parse, group CMIP6 files |
+| Generate Job | `jobs/generate_virtual_zarr.py` | Full pipeline orchestration |
+
+**Dependencies to Add**:
+```
+virtualizarr>=1.0.0
+kerchunk>=0.2.0
+h5netcdf>=1.3.0
+h5py>=3.10.0
+```
+
+**Implementation Order**:
+1. [ ] CMIP6 parser utility
+2. [ ] Chunking validator handler
+3. [ ] Reference generator handler
+4. [ ] Virtual combiner handler
+5. [ ] STAC registration handler (datacube extension)
+6. [ ] Inventory job
+7. [ ] Generate job
+8. [ ] Handler/job registration
+9. [ ] TiTiler-xarray configuration
+
+---
+
+### 3. Database Diagnostics & Remote Administration Enhancement (07 DEC 2025)
+
+**Status**: 🟡 **READY FOR IMPLEMENTATION**
 **Priority**: 🚨 HIGH - QA environment has no direct database access
 **Purpose**: HTTP-based database inspection, verbose pre-flight validation, DDH visibility
 
@@ -123,7 +230,7 @@ curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/hea
 
 ---
 
-### 2. Azure Data Factory Integration (29 NOV 2025)
+### 4. Azure Data Factory Integration (29 NOV 2025)
 
 **Status**: 📋 **READY FOR IMPLEMENTATION** - Phase 1 Code Complete
 **Purpose**: Enterprise ETL orchestration and audit logging
@@ -150,7 +257,7 @@ curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/hea
 
 ---
 
-### 2. Janitor Blob Cleanup (05 DEC 2025)
+### 5. Janitor Blob Cleanup (05 DEC 2025)
 
 **Status**: 🟡 **PARTIALLY COMPLETE**
 **Priority**: HIGH - Prevents orphaned intermediate files
@@ -763,4 +870,4 @@ See `HISTORY2.md` for items completed and moved from TODO.md:
 
 ---
 
-**Last Updated**: 13 DEC 2025 (UNPUBLISH Workflows implementation complete, Database Diagnostics is new immediate priority)
+**Last Updated**: 17 DEC 2025 (OGC API Styles added as HIGH priority #1)

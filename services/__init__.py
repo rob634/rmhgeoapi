@@ -141,6 +141,13 @@ from jobs.curated_update import (
     curated_finalize,
 )
 
+# H3 Aggregation handlers (17 DEC 2025)
+from .h3_aggregation import (
+    h3_inventory_cells,
+    h3_raster_zonal_stats,
+    h3_aggregation_finalize,
+)
+
 # ============================================================================
 # STAC METADATA HELPER (25 NOV 2025)
 # ============================================================================
@@ -233,6 +240,10 @@ ALL_HANDLERS = {
     "curated_fetch_data": curated_fetch_data,  # Stage 2: Download data
     "curated_etl_process": curated_etl_process,  # Stage 3: ETL to PostGIS
     "curated_finalize": curated_finalize,  # Stage 4: Update registry, log
+    # H3 Aggregation handlers (17 DEC 2025)
+    "h3_inventory_cells": h3_inventory_cells,  # Stage 1: Count cells, calculate batches
+    "h3_raster_zonal_stats": h3_raster_zonal_stats,  # Stage 2: Compute zonal stats from COG
+    "h3_aggregation_finalize": h3_aggregation_finalize,  # Stage 3: Update registry, verify counts
 }
 
 # ============================================================================

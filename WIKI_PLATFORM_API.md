@@ -36,12 +36,29 @@ https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net
 
 ## Endpoints Summary
 
+### Data Processing (Create)
+
 | Endpoint | Method | Purpose |
 |----------|--------|---------|
 | `/api/platform/raster` | POST | Single raster file processing |
 | `/api/platform/raster-collection` | POST | Multiple raster files (2-20 files) |
 | `/api/platform/submit` | POST | Generic submission (auto-detects data type) |
+
+### Status & Monitoring (Read)
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
 | `/api/platform/status/{request_id}` | GET | Check request/job status |
+| `/api/platform/health` | GET | Platform health check |
+| `/api/platform/stats` | GET | Aggregated job statistics |
+| `/api/platform/failures` | GET | Recent failures for troubleshooting |
+
+### Unpublish/Delete (Delete)
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/api/jobs/submit/unpublish_vector` | POST | Remove vector data (PostGIS + STAC) |
+| `/api/jobs/submit/unpublish_raster` | POST | Remove raster data (STAC + COG blobs) |
 
 ---
 
@@ -259,11 +276,11 @@ Generic submission endpoint that auto-detects data type from parameters.
 
 ### Supported Operations
 
-| Operation | Status |
-|-----------|--------|
-| `CREATE` | Production |
-| `UPDATE` | Phase 2 |
-| `DELETE` | Phase 2 |
+| Operation | Status | Notes |
+|-----------|--------|-------|
+| `CREATE` | Production | Via `/api/platform/submit` |
+| `UPDATE` | Production | Re-submit with same identifiers (idempotent overwrite) |
+| `DELETE` | Production | Via `/api/jobs/submit/unpublish_vector` or `unpublish_raster` |
 
 ---
 
@@ -545,6 +562,359 @@ https://rmhtitiler-.../cog/tiles/WebMercatorQuad/{z}/{x}/{y}.png?url=...
 
 ---
 
+## 5. Unpublish Vector Data
+
+### Endpoint
+```
+POST /api/jobs/submit/unpublish_vector
+```
+
+### Purpose
+Remove a vector dataset from the platform: drops PostGIS table, deletes metadata, and optionally removes STAC item.
+
+### Request Body
+
+```json
+{
+    "table_name": "city_parcels_v1_0",
+    "schema_name": "geo",
+    "dry_run": true
+}
+```
+
+### Parameters
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `table_name` | string | **Yes** | - | PostGIS table name to remove |
+| `schema_name` | string | No | `geo` | PostgreSQL schema containing the table |
+| `dry_run` | boolean | No | `true` | Preview mode - shows what would be deleted without executing |
+
+### Response (202 Accepted)
+
+```json
+{
+    "success": true,
+    "job_id": "abc123...",
+    "job_type": "unpublish_vector",
+    "message": "Vector unpublish job submitted (dry_run=true)",
+    "monitor_url": "/api/jobs/status/abc123..."
+}
+```
+
+### Example (curl)
+
+```bash
+# Preview what will be deleted (safe - dry_run=true by default)
+curl -X POST \
+  "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/jobs/submit/unpublish_vector" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "table_name": "city_parcels_v1_0",
+    "dry_run": true
+  }'
+
+# Actually delete (set dry_run=false)
+curl -X POST \
+  "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/jobs/submit/unpublish_vector" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "table_name": "city_parcels_v1_0",
+    "dry_run": false
+  }'
+```
+
+### Workflow Stages
+
+| Stage | Task | Description |
+|-------|------|-------------|
+| 1 | `inventory_vector` | Query `geo.table_metadata` for ETL/STAC linkage |
+| 2 | `drop_vector_table` | DROP PostGIS table + DELETE metadata row |
+| 3 | `cleanup_vector` | Delete STAC item if linked + create audit record |
+
+### Job Result (when completed)
+
+```json
+{
+    "job_result": {
+        "table_dropped": "geo.city_parcels_v1_0",
+        "metadata_deleted": true,
+        "stac_item_deleted": "city-parcels-v1-0",
+        "audit_record_id": "unpublish_abc123"
+    }
+}
+```
+
+---
+
+## 6. Unpublish Raster Data
+
+### Endpoint
+```
+POST /api/jobs/submit/unpublish_raster
+```
+
+### Purpose
+Remove a raster dataset from the platform: deletes STAC item and associated COG/MosaicJSON blobs from storage.
+
+### Request Body
+
+```json
+{
+    "stac_item_id": "aerial-imagery-2024-site-alpha-v1.0",
+    "collection_id": "aerial-imagery-2024",
+    "dry_run": true
+}
+```
+
+### Parameters
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `stac_item_id` | string | **Yes** | - | STAC item ID to remove |
+| `collection_id` | string | **Yes** | - | STAC collection containing the item |
+| `dry_run` | boolean | No | `true` | Preview mode - shows what would be deleted without executing |
+
+### Response (202 Accepted)
+
+```json
+{
+    "success": true,
+    "job_id": "def456...",
+    "job_type": "unpublish_raster",
+    "message": "Raster unpublish job submitted (dry_run=true)",
+    "monitor_url": "/api/jobs/status/def456..."
+}
+```
+
+### Example (curl)
+
+```bash
+# Preview what will be deleted (safe - dry_run=true by default)
+curl -X POST \
+  "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/jobs/submit/unpublish_raster" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "stac_item_id": "aerial-imagery-2024-site-alpha-v1.0",
+    "collection_id": "aerial-imagery-2024",
+    "dry_run": true
+  }'
+
+# Actually delete (set dry_run=false)
+curl -X POST \
+  "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/jobs/submit/unpublish_raster" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "stac_item_id": "aerial-imagery-2024-site-alpha-v1.0",
+    "collection_id": "aerial-imagery-2024",
+    "dry_run": false
+  }'
+```
+
+### Workflow Stages
+
+| Stage | Task | Description |
+|-------|------|-------------|
+| 1 | `inventory_raster` | Query STAC item, extract asset hrefs for deletion |
+| 2 | `delete_raster_blobs` | Fan-out deletion of COG/MosaicJSON blobs |
+| 3 | `cleanup_raster` | Delete STAC item + create audit record |
+
+### Job Result (when completed)
+
+```json
+{
+    "job_result": {
+        "stac_item_deleted": "aerial-imagery-2024-site-alpha-v1.0",
+        "blobs_deleted": [
+            "silver-cogs/aerial-imagery-2024/site-alpha/v1.0/site-alpha_cog_analysis.tif"
+        ],
+        "collection_cleanup": false,
+        "audit_record_id": "unpublish_def456"
+    }
+}
+```
+
+---
+
+## 7. Platform Operations
+
+### Health Check
+
+```
+GET /api/platform/health
+```
+
+Simplified health status for DDH consumption.
+
+```bash
+curl "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/platform/health"
+```
+
+**Response:**
+```json
+{
+    "status": "healthy",
+    "components": {
+        "job_processing": "ok",
+        "stac_catalog": "ok",
+        "storage": "ok"
+    },
+    "recent_activity": {
+        "jobs_24h": 15,
+        "completed": 14,
+        "failed": 1,
+        "success_rate": "93.3%"
+    }
+}
+```
+
+### Statistics
+
+```
+GET /api/platform/stats?hours=24
+```
+
+Aggregated job statistics over a time window.
+
+```bash
+curl "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/platform/stats?hours=24"
+```
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `hours` | integer | 24 | Time window for statistics |
+
+**Response:**
+```json
+{
+    "time_window_hours": 24,
+    "total_jobs": 15,
+    "by_status": {
+        "completed": 14,
+        "failed": 1,
+        "processing": 0
+    },
+    "by_data_type": {
+        "raster": 10,
+        "vector": 5
+    },
+    "avg_processing_time_seconds": 45.2
+}
+```
+
+### Recent Failures
+
+```
+GET /api/platform/failures?hours=24&limit=10
+```
+
+Recent failures for troubleshooting with sanitized error messages.
+
+```bash
+curl "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/platform/failures?hours=24&limit=10"
+```
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `hours` | integer | 24 | Time window to search |
+| `limit` | integer | 10 | Maximum failures to return |
+
+**Response:**
+```json
+{
+    "failures": [
+        {
+            "request_id": "abc123...",
+            "job_type": "process_raster_v2",
+            "failed_at": "2025-12-17T10:30:00Z",
+            "error_category": "validation",
+            "error_summary": "Invalid CRS: EPSG:0 not recognized"
+        }
+    ],
+    "total_failures": 1
+}
+```
+
+---
+
+## 8. Data Access URLs
+
+After successful processing, jobs return access URLs for the published data.
+
+### Vector Data Access
+
+When a vector job completes, the result includes:
+
+```json
+{
+    "job_result": {
+        "data_access": {
+            "postgis": {
+                "schema": "geo",
+                "table": "city_parcels_v1_0",
+                "connection": "See platform admin for credentials"
+            },
+            "ogc_features": {
+                "collection": "/api/features/collections/city_parcels_v1_0",
+                "items": "/api/features/collections/city_parcels_v1_0/items",
+                "bbox_query": "/api/features/collections/city_parcels_v1_0/items?bbox=-122.5,37.7,-122.4,37.8"
+            },
+            "web_map": "https://rmhazuregeo.z13.web.core.windows.net/?collection=city_parcels_v1_0"
+        }
+    }
+}
+```
+
+**Access Methods:**
+
+| Method | URL Pattern | Description |
+|--------|-------------|-------------|
+| **OGC Features API** | `/api/features/collections/{table}/items` | Standards-compliant GeoJSON API |
+| **Interactive Map** | `https://rmhazuregeo.z13.web.core.windows.net/` | Web map viewer |
+| **Direct PostGIS** | Connect to `rmhpgflex.postgres.database.azure.com` | SQL access |
+
+### Raster Data Access
+
+When a raster job completes, the result includes:
+
+```json
+{
+    "job_result": {
+        "cog": {
+            "blob_path": "silver-cogs/aerial-imagery-2024/site-alpha/v1.0/site-alpha_cog_analysis.tif",
+            "size_mb": 127.07
+        },
+        "stac": {
+            "collection_id": "aerial-imagery-2024",
+            "item_id": "aerial-imagery-2024-site-alpha-v1.0"
+        },
+        "share_url": "https://rmhtitiler-drhvfgbxf0dqc6f5.eastus-01.azurewebsites.net/cog/map?url=...",
+        "data_access": {
+            "stac_item": "/api/stac/collections/aerial-imagery-2024/items/aerial-imagery-2024-site-alpha-v1.0",
+            "stac_search": "/api/stac/search",
+            "tile_endpoint": "https://rmhtitiler-.../cog/tiles/WebMercatorQuad/{z}/{x}/{y}.png?url=...",
+            "preview": "https://rmhtitiler-.../cog/preview?url=..."
+        }
+    }
+}
+```
+
+**Access Methods:**
+
+| Method | URL Pattern | Description |
+|--------|-------------|-------------|
+| **STAC Item** | `/api/stac/collections/{collection}/items/{item}` | Metadata + asset links |
+| **STAC Search** | `/api/stac/search?bbox=...&datetime=...` | Spatial/temporal search |
+| **XYZ Tiles** | `https://rmhtitiler-.../cog/tiles/{z}/{x}/{y}.png?url=...` | For web maps (Leaflet, MapLibre) |
+| **Preview Image** | `https://rmhtitiler-.../cog/preview?url=...` | Quick thumbnail |
+| **Interactive Map** | `share_url` from job result | Full-screen map viewer |
+
+---
+
 ## Related Documentation
 
 - **CoreMachine API**: See `WIKI_API_JOB_SUBMISSION.md` for direct ETL access
@@ -554,6 +924,6 @@ https://rmhtitiler-.../cog/tiles/WebMercatorQuad/{z}/{x}/{y}.png?url=...
 
 ---
 
-**Last Updated**: 14 DEC 2025
+**Last Updated**: 17 DEC 2025
 **Function App**: rmhazuregeoapi
 **Region**: East US

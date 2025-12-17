@@ -740,3 +740,1059 @@ class H3Repository(PostgreSQLRepository):
             logger.debug(f"⚠️ Grid metadata not found: {grid_id}")
 
         return dict(result) if result else None
+
+    # ========================================================================
+    # NORMALIZED SCHEMA METHODS (h3.cells, h3.cell_admin0)
+    # ========================================================================
+    # These methods support the normalized H3 schema where:
+    # - h3.cells stores unique geometry per h3_index (PRIMARY KEY)
+    # - h3.cell_admin0 maps cells to countries (1:N relationship)
+    # ========================================================================
+
+    def insert_cells(
+        self,
+        cells: List[Dict[str, Any]],
+        source_job_id: Optional[str] = None
+    ) -> int:
+        """
+        Bulk insert H3 cells into normalized h3.cells table.
+
+        Uses COPY + staging for performance. Cells are deduplicated by h3_index
+        (PRIMARY KEY constraint with ON CONFLICT DO NOTHING).
+
+        Parameters:
+        ----------
+        cells : List[Dict[str, Any]]
+            List of H3 cell dictionaries with keys:
+            - h3_index: int (H3 cell index as 64-bit integer)
+            - resolution: int (H3 resolution level 0-15)
+            - geom_wkt: str (WKT POLYGON string)
+            - parent_h3_index: Optional[int] (immediate parent)
+            - is_land: Optional[bool] (land classification)
+
+        source_job_id : Optional[str]
+            Job ID that created these cells
+
+        Returns:
+        -------
+        int
+            Number of NEW rows inserted (excludes duplicates)
+        """
+        from io import StringIO
+        import time
+
+        if not cells:
+            logger.warning("⚠️ insert_cells called with empty cells list")
+            return 0
+
+        start_time = time.time()
+        cell_count = len(cells)
+        logger.info(f"📦 Bulk inserting {cell_count:,} cells into h3.cells...")
+
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                # STEP 1: Create temp staging table
+                cur.execute("""
+                    CREATE TEMP TABLE h3_cells_staging (
+                        h3_index BIGINT,
+                        resolution SMALLINT,
+                        geom_wkt TEXT,
+                        parent_h3_index BIGINT,
+                        is_land BOOLEAN
+                    ) ON COMMIT DROP
+                """)
+
+                # STEP 2: Build COPY data
+                buffer = StringIO()
+                for cell in cells:
+                    h3_index = cell['h3_index']
+                    resolution = cell['resolution']
+                    geom_wkt = cell['geom_wkt']
+                    parent_h3 = cell.get('parent_h3_index')
+                    parent_h3_str = str(parent_h3) if parent_h3 is not None else '\\N'
+                    is_land = cell.get('is_land')
+                    is_land_str = str(is_land).lower() if is_land is not None else '\\N'
+
+                    buffer.write(f"{h3_index}\t{resolution}\t{geom_wkt}\t{parent_h3_str}\t{is_land_str}\n")
+
+                buffer.seek(0)
+
+                # STEP 3: COPY to staging
+                with cur.copy("COPY h3_cells_staging (h3_index, resolution, geom_wkt, parent_h3_index, is_land) FROM STDIN") as copy:
+                    copy.write(buffer.read())
+
+                # STEP 4: INSERT into h3.cells with deduplication
+                cur.execute(sql.SQL("""
+                    WITH inserted AS (
+                        INSERT INTO {schema}.{table}
+                            (h3_index, resolution, geom, parent_h3_index, is_land, source_job_id)
+                        SELECT
+                            h3_index,
+                            resolution,
+                            ST_GeomFromText(geom_wkt, 4326),
+                            parent_h3_index,
+                            is_land,
+                            %s
+                        FROM h3_cells_staging
+                        ON CONFLICT (h3_index) DO NOTHING
+                        RETURNING 1
+                    )
+                    SELECT COUNT(*) FROM inserted
+                """).format(
+                    schema=sql.Identifier('h3'),
+                    table=sql.Identifier('cells')
+                ), (source_job_id,))
+
+                rowcount = cur.fetchone()['count']
+                conn.commit()
+
+        total_time = time.time() - start_time
+        rate = cell_count / total_time if total_time > 0 else 0
+        logger.info(f"✅ Inserted {rowcount:,} new cells into h3.cells in {total_time:.2f}s ({rate:,.0f} cells/sec)")
+        if rowcount < cell_count:
+            logger.info(f"   ({cell_count - rowcount:,} duplicates skipped)")
+
+        return rowcount
+
+    def insert_cell_admin0_mappings(
+        self,
+        mappings: List[Dict[str, Any]]
+    ) -> int:
+        """
+        Bulk insert H3 cell to country (admin0) mappings.
+
+        Parameters:
+        ----------
+        mappings : List[Dict[str, Any]]
+            List of mapping dictionaries with keys:
+            - h3_index: int (H3 cell index)
+            - iso3: str (ISO 3166-1 alpha-3 country code)
+            - coverage_pct: Optional[float] (0.0-1.0)
+
+        Returns:
+        -------
+        int
+            Number of mappings inserted
+        """
+        from io import StringIO
+        import time
+
+        if not mappings:
+            logger.warning("⚠️ insert_cell_admin0_mappings called with empty list")
+            return 0
+
+        start_time = time.time()
+        mapping_count = len(mappings)
+        logger.info(f"📦 Inserting {mapping_count:,} cell_admin0 mappings...")
+
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                # Create temp staging table
+                cur.execute("""
+                    CREATE TEMP TABLE admin0_staging (
+                        h3_index BIGINT,
+                        iso3 VARCHAR(3),
+                        coverage_pct NUMERIC(5,4)
+                    ) ON COMMIT DROP
+                """)
+
+                # Build COPY data
+                buffer = StringIO()
+                for m in mappings:
+                    h3_index = m['h3_index']
+                    iso3 = m['iso3']
+                    coverage_pct = m.get('coverage_pct')
+                    coverage_str = str(coverage_pct) if coverage_pct is not None else '\\N'
+                    buffer.write(f"{h3_index}\t{iso3}\t{coverage_str}\n")
+
+                buffer.seek(0)
+
+                # COPY to staging
+                with cur.copy("COPY admin0_staging (h3_index, iso3, coverage_pct) FROM STDIN") as copy:
+                    copy.write(buffer.read())
+
+                # INSERT with deduplication
+                cur.execute(sql.SQL("""
+                    WITH inserted AS (
+                        INSERT INTO {schema}.{table}
+                            (h3_index, iso3, coverage_pct)
+                        SELECT h3_index, iso3, coverage_pct
+                        FROM admin0_staging
+                        ON CONFLICT (h3_index, iso3) DO NOTHING
+                        RETURNING 1
+                    )
+                    SELECT COUNT(*) FROM inserted
+                """).format(
+                    schema=sql.Identifier('h3'),
+                    table=sql.Identifier('cell_admin0')
+                ))
+
+                rowcount = cur.fetchone()['count']
+                conn.commit()
+
+        total_time = time.time() - start_time
+        logger.info(f"✅ Inserted {rowcount:,} cell_admin0 mappings in {total_time:.2f}s")
+
+        return rowcount
+
+    def get_cells_by_resolution(
+        self,
+        resolution: int,
+        batch_start: int = 0,
+        batch_size: Optional[int] = None
+    ) -> List[Tuple[int, Optional[int]]]:
+        """
+        Load H3 cells by resolution from normalized h3.cells table.
+
+        Used for cascading children generation - replaces get_parent_cells
+        for normalized schema.
+
+        Parameters:
+        ----------
+        resolution : int
+            H3 resolution level (0-15)
+        batch_start : int
+            Starting offset for batch (default: 0)
+        batch_size : Optional[int]
+            Number of cells to return (default: None = all)
+
+        Returns:
+        -------
+        List[Tuple[int, Optional[int]]]
+            List of (h3_index, parent_h3_index) tuples
+        """
+        if batch_size is not None:
+            query = sql.SQL("""
+                SELECT h3_index, parent_h3_index
+                FROM {schema}.{table}
+                WHERE resolution = %s
+                ORDER BY h3_index
+                LIMIT %s OFFSET %s
+            """).format(
+                schema=sql.Identifier('h3'),
+                table=sql.Identifier('cells')
+            )
+            params = (resolution, batch_size, batch_start)
+        else:
+            query = sql.SQL("""
+                SELECT h3_index, parent_h3_index
+                FROM {schema}.{table}
+                WHERE resolution = %s
+                ORDER BY h3_index
+                OFFSET %s
+            """).format(
+                schema=sql.Identifier('h3'),
+                table=sql.Identifier('cells')
+            )
+            params = (resolution, batch_start)
+
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(query, params)
+                results = cur.fetchall()
+
+        cells = [(row['h3_index'], row['parent_h3_index']) for row in results]
+        logger.info(f"📊 Loaded {len(cells)} cells from h3.cells (resolution={resolution})")
+        return cells
+
+    def get_cell_count_by_resolution(self, resolution: int) -> int:
+        """
+        Count cells by resolution in normalized h3.cells table.
+
+        Parameters:
+        ----------
+        resolution : int
+            H3 resolution level (0-15)
+
+        Returns:
+        -------
+        int
+            Number of cells at this resolution
+        """
+        query = sql.SQL("""
+            SELECT COUNT(*) as count
+            FROM {schema}.{table}
+            WHERE resolution = %s
+        """).format(
+            schema=sql.Identifier('h3'),
+            table=sql.Identifier('cells')
+        )
+
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(query, (resolution,))
+                result = cur.fetchone()
+
+        count = result['count'] if result else 0
+        logger.debug(f"📊 Cell count for resolution {resolution}: {count:,}")
+        return count
+
+    def get_cells_with_admin0(
+        self,
+        iso3: str,
+        resolution: Optional[int] = None
+    ) -> List[int]:
+        """
+        Get H3 cell indices that belong to a country.
+
+        Parameters:
+        ----------
+        iso3 : str
+            ISO 3166-1 alpha-3 country code (e.g., 'ALB', 'MNE')
+        resolution : Optional[int]
+            Filter by resolution (optional)
+
+        Returns:
+        -------
+        List[int]
+            List of h3_index values for the country
+        """
+        if resolution is not None:
+            query = sql.SQL("""
+                SELECT c.h3_index
+                FROM {schema}.cells c
+                JOIN {schema}.cell_admin0 a ON c.h3_index = a.h3_index
+                WHERE a.iso3 = %s AND c.resolution = %s
+                ORDER BY c.h3_index
+            """).format(schema=sql.Identifier('h3'))
+            params = (iso3, resolution)
+        else:
+            query = sql.SQL("""
+                SELECT c.h3_index
+                FROM {schema}.cells c
+                JOIN {schema}.cell_admin0 a ON c.h3_index = a.h3_index
+                WHERE a.iso3 = %s
+                ORDER BY c.h3_index
+            """).format(schema=sql.Identifier('h3'))
+            params = (iso3,)
+
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(query, params)
+                results = cur.fetchall()
+
+        h3_indices = [row['h3_index'] for row in results]
+        logger.info(f"📊 Found {len(h3_indices)} cells for {iso3}" +
+                   (f" at resolution {resolution}" if resolution else ""))
+        return h3_indices
+
+    # ========================================================================
+    # STAT REGISTRY METHODS (h3.stat_registry)
+    # ========================================================================
+    # Methods for managing the metadata catalog of aggregation datasets.
+    # ========================================================================
+
+    def register_stat_dataset(
+        self,
+        id: str,
+        stat_category: str,
+        display_name: str,
+        description: Optional[str] = None,
+        source_name: Optional[str] = None,
+        source_url: Optional[str] = None,
+        source_license: Optional[str] = None,
+        resolution_range: Optional[List[int]] = None,
+        stat_types: Optional[List[str]] = None,
+        unit: Optional[str] = None
+    ) -> bool:
+        """
+        Register a new dataset in the stat_registry metadata catalog.
+
+        Creates an entry for a new aggregation dataset BEFORE computing stats.
+        This enables FK validation when inserting into zonal_stats/point_stats.
+
+        Parameters:
+        ----------
+        id : str
+            Unique dataset identifier (e.g., 'worldpop_2020', 'acled_2024')
+        stat_category : str
+            Category: 'raster_zonal', 'vector_point', 'vector_line',
+            'vector_polygon', 'planetary_computer', 'band_math'
+        display_name : str
+            Human-readable name (e.g., 'WorldPop 2020 Population')
+        description : Optional[str]
+            Detailed explanation of the dataset
+        source_name : Optional[str]
+            Data source organization (e.g., 'WorldPop', 'ACLED')
+        source_url : Optional[str]
+            Link to original data source
+        source_license : Optional[str]
+            License identifier (e.g., 'CC-BY-4.0', 'ODC-BY')
+        resolution_range : Optional[List[int]]
+            Available H3 resolutions (e.g., [5, 6, 7])
+        stat_types : Optional[List[str]]
+            Available stat types (e.g., ['mean', 'sum', 'count'])
+        unit : Optional[str]
+            Unit of measurement (e.g., 'people/km²', 'count')
+
+        Returns:
+        -------
+        bool
+            True if registered, False if already exists (conflict)
+
+        Example:
+        -------
+        >>> repo.register_stat_dataset(
+        ...     id='worldpop_2020',
+        ...     stat_category='raster_zonal',
+        ...     display_name='WorldPop 2020 Population Estimates',
+        ...     description='Gridded population estimates at 100m resolution',
+        ...     source_name='WorldPop',
+        ...     source_url='https://www.worldpop.org/',
+        ...     source_license='CC-BY-4.0',
+        ...     resolution_range=[5, 6, 7],
+        ...     stat_types=['sum', 'mean', 'count'],
+        ...     unit='people'
+        ... )
+        """
+        query = sql.SQL("""
+            INSERT INTO {schema}.{table} (
+                id, stat_category, display_name, description,
+                source_name, source_url, source_license,
+                resolution_range, stat_types, unit,
+                created_at, updated_at
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
+            ON CONFLICT (id) DO UPDATE SET
+                stat_category = EXCLUDED.stat_category,
+                display_name = EXCLUDED.display_name,
+                description = EXCLUDED.description,
+                source_name = EXCLUDED.source_name,
+                source_url = EXCLUDED.source_url,
+                source_license = EXCLUDED.source_license,
+                resolution_range = EXCLUDED.resolution_range,
+                stat_types = EXCLUDED.stat_types,
+                unit = EXCLUDED.unit,
+                updated_at = NOW()
+        """).format(
+            schema=sql.Identifier('h3'),
+            table=sql.Identifier('stat_registry')
+        )
+
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(query, (
+                    id, stat_category, display_name, description,
+                    source_name, source_url, source_license,
+                    resolution_range, stat_types, unit
+                ))
+                rowcount = cur.rowcount
+                conn.commit()
+
+        if rowcount > 0:
+            logger.info(f"✅ Registered stat dataset: {id} ({stat_category})")
+        else:
+            logger.info(f"📝 Updated stat dataset: {id}")
+
+        return rowcount > 0
+
+    def update_stat_registry_provenance(
+        self,
+        id: str,
+        job_id: str,
+        cell_count: int
+    ) -> bool:
+        """
+        Update provenance information after aggregation job completes.
+
+        Records when the dataset was last computed and by which job.
+
+        Parameters:
+        ----------
+        id : str
+            Dataset identifier (e.g., 'worldpop_2020')
+        job_id : str
+            Job ID that computed the stats
+        cell_count : int
+            Number of cells with this stat
+
+        Returns:
+        -------
+        bool
+            True if updated, False if dataset not found
+
+        Example:
+        -------
+        >>> repo.update_stat_registry_provenance(
+        ...     id='worldpop_2020',
+        ...     job_id='abc123...',
+        ...     cell_count=176472
+        ... )
+        """
+        query = sql.SQL("""
+            UPDATE {schema}.{table}
+            SET
+                last_aggregation_at = NOW(),
+                last_aggregation_job_id = %s,
+                cell_count = %s,
+                updated_at = NOW()
+            WHERE id = %s
+        """).format(
+            schema=sql.Identifier('h3'),
+            table=sql.Identifier('stat_registry')
+        )
+
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(query, (job_id, cell_count, id))
+                rowcount = cur.rowcount
+                conn.commit()
+
+        if rowcount > 0:
+            logger.info(f"✅ Updated provenance for {id}: job={job_id[:8]}..., cells={cell_count:,}")
+        else:
+            logger.warning(f"⚠️ Dataset not found in stat_registry: {id}")
+
+        return rowcount > 0
+
+    def get_stat_registry_entry(self, id: str) -> Optional[Dict[str, Any]]:
+        """
+        Get metadata for a registered dataset.
+
+        Parameters:
+        ----------
+        id : str
+            Dataset identifier
+
+        Returns:
+        -------
+        Optional[Dict[str, Any]]
+            Registry entry dict or None if not found
+        """
+        query = sql.SQL("""
+            SELECT
+                id, stat_category, display_name, description,
+                source_name, source_url, source_license,
+                resolution_range, stat_types, unit,
+                last_aggregation_at, last_aggregation_job_id, cell_count,
+                created_at, updated_at
+            FROM {schema}.{table}
+            WHERE id = %s
+        """).format(
+            schema=sql.Identifier('h3'),
+            table=sql.Identifier('stat_registry')
+        )
+
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(query, (id,))
+                result = cur.fetchone()
+
+        if result:
+            logger.debug(f"📊 Loaded stat registry entry: {id}")
+            return dict(result)
+        else:
+            logger.debug(f"⚠️ Stat registry entry not found: {id}")
+            return None
+
+    def list_registered_stats(
+        self,
+        category: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        List all registered datasets, optionally filtered by category.
+
+        Parameters:
+        ----------
+        category : Optional[str]
+            Filter by stat_category (e.g., 'raster_zonal', 'vector_point')
+
+        Returns:
+        -------
+        List[Dict[str, Any]]
+            List of registry entries
+
+        Example:
+        -------
+        >>> all_stats = repo.list_registered_stats()
+        >>> raster_stats = repo.list_registered_stats(category='raster_zonal')
+        """
+        if category:
+            query = sql.SQL("""
+                SELECT
+                    id, stat_category, display_name, description,
+                    source_name, source_license, unit,
+                    resolution_range, stat_types,
+                    last_aggregation_at, cell_count
+                FROM {schema}.{table}
+                WHERE stat_category = %s
+                ORDER BY id
+            """).format(
+                schema=sql.Identifier('h3'),
+                table=sql.Identifier('stat_registry')
+            )
+            params = (category,)
+        else:
+            query = sql.SQL("""
+                SELECT
+                    id, stat_category, display_name, description,
+                    source_name, source_license, unit,
+                    resolution_range, stat_types,
+                    last_aggregation_at, cell_count
+                FROM {schema}.{table}
+                ORDER BY stat_category, id
+            """).format(
+                schema=sql.Identifier('h3'),
+                table=sql.Identifier('stat_registry')
+            )
+            params = ()
+
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(query, params)
+                results = cur.fetchall()
+
+        entries = [dict(row) for row in results]
+        logger.info(f"📊 Found {len(entries)} registered stat datasets" +
+                   (f" (category={category})" if category else ""))
+        return entries
+
+    # ========================================================================
+    # AGGREGATION METHODS (h3.zonal_stats, h3.point_stats)
+    # ========================================================================
+    # Methods for aggregating data to H3 cells and storing results.
+    # ========================================================================
+
+    def get_cells_for_aggregation(
+        self,
+        resolution: int,
+        iso3: Optional[str] = None,
+        bbox: Optional[List[float]] = None,
+        polygon_wkt: Optional[str] = None,
+        batch_start: int = 0,
+        batch_size: Optional[int] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Load H3 cells for aggregation with spatial scope filtering.
+
+        Supports filtering by country (iso3), bounding box, or polygon.
+        Priority: iso3 → bbox → polygon_wkt → all cells.
+
+        Parameters:
+        ----------
+        resolution : int
+            H3 resolution level (0-15)
+        iso3 : Optional[str]
+            ISO 3166-1 alpha-3 country code (e.g., 'GRC', 'ALB')
+        bbox : Optional[List[float]]
+            Bounding box [minx, miny, maxx, maxy]
+        polygon_wkt : Optional[str]
+            WKT polygon for custom scope
+        batch_start : int
+            Starting offset for batch (default: 0)
+        batch_size : Optional[int]
+            Number of cells to return (default: None = all)
+
+        Returns:
+        -------
+        List[Dict[str, Any]]
+            List of cell dicts with keys:
+            - h3_index: int
+            - resolution: int
+            - geom_wkt: str (WKT for rasterio/shapely)
+
+        Example:
+        -------
+        >>> cells = repo.get_cells_for_aggregation(resolution=6, iso3='GRC')
+        >>> len(cells)
+        176472
+        >>> cells[0].keys()
+        dict_keys(['h3_index', 'resolution', 'geom_wkt'])
+        """
+        # Build query based on scope
+        if iso3:
+            # Filter by country via cell_admin0 mapping
+            base_query = sql.SQL("""
+                SELECT c.h3_index, c.resolution, ST_AsText(c.geom) as geom_wkt
+                FROM {schema}.cells c
+                JOIN {schema}.cell_admin0 a ON c.h3_index = a.h3_index
+                WHERE c.resolution = %s AND a.iso3 = %s
+                ORDER BY c.h3_index
+            """).format(schema=sql.Identifier('h3'))
+            base_params = [resolution, iso3]
+            scope_desc = f"iso3={iso3}"
+
+        elif bbox:
+            if len(bbox) != 4:
+                raise ValueError(f"bbox must be [minx, miny, maxx, maxy], got: {bbox}")
+            minx, miny, maxx, maxy = bbox
+            base_query = sql.SQL("""
+                SELECT c.h3_index, c.resolution, ST_AsText(c.geom) as geom_wkt
+                FROM {schema}.cells c
+                WHERE c.resolution = %s
+                  AND ST_Intersects(c.geom, ST_MakeEnvelope(%s, %s, %s, %s, 4326))
+                ORDER BY c.h3_index
+            """).format(schema=sql.Identifier('h3'))
+            base_params = [resolution, minx, miny, maxx, maxy]
+            scope_desc = f"bbox={bbox}"
+
+        elif polygon_wkt:
+            base_query = sql.SQL("""
+                SELECT c.h3_index, c.resolution, ST_AsText(c.geom) as geom_wkt
+                FROM {schema}.cells c
+                WHERE c.resolution = %s
+                  AND ST_Intersects(c.geom, ST_GeomFromText(%s, 4326))
+                ORDER BY c.h3_index
+            """).format(schema=sql.Identifier('h3'))
+            base_params = [resolution, polygon_wkt]
+            scope_desc = "polygon_wkt"
+
+        else:
+            # All cells at resolution
+            base_query = sql.SQL("""
+                SELECT c.h3_index, c.resolution, ST_AsText(c.geom) as geom_wkt
+                FROM {schema}.cells c
+                WHERE c.resolution = %s
+                ORDER BY c.h3_index
+            """).format(schema=sql.Identifier('h3'))
+            base_params = [resolution]
+            scope_desc = "global"
+
+        # Add LIMIT/OFFSET if batching
+        if batch_size is not None:
+            # Need to reconstruct query with LIMIT/OFFSET
+            query_str = base_query.as_string(self.repo) if hasattr(self, 'repo') else str(base_query)
+            # Append LIMIT/OFFSET to base query
+            full_query = sql.SQL("{} LIMIT %s OFFSET %s").format(base_query)
+            params = base_params + [batch_size, batch_start]
+        else:
+            full_query = sql.SQL("{} OFFSET %s").format(base_query)
+            params = base_params + [batch_start]
+
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(full_query, params)
+                results = cur.fetchall()
+
+        cells = [dict(row) for row in results]
+        logger.info(
+            f"📊 Loaded {len(cells):,} cells for aggregation "
+            f"(resolution={resolution}, scope={scope_desc}, batch={batch_start})"
+        )
+        return cells
+
+    def count_cells_for_aggregation(
+        self,
+        resolution: int,
+        iso3: Optional[str] = None,
+        bbox: Optional[List[float]] = None,
+        polygon_wkt: Optional[str] = None
+    ) -> int:
+        """
+        Count H3 cells matching aggregation scope.
+
+        Used for inventory stage to calculate batch ranges.
+
+        Parameters:
+        ----------
+        resolution : int
+            H3 resolution level (0-15)
+        iso3 : Optional[str]
+            ISO 3166-1 alpha-3 country code
+        bbox : Optional[List[float]]
+            Bounding box [minx, miny, maxx, maxy]
+        polygon_wkt : Optional[str]
+            WKT polygon for custom scope
+
+        Returns:
+        -------
+        int
+            Number of cells matching scope
+        """
+        # Build count query based on scope
+        if iso3:
+            query = sql.SQL("""
+                SELECT COUNT(*) as count
+                FROM {schema}.cells c
+                JOIN {schema}.cell_admin0 a ON c.h3_index = a.h3_index
+                WHERE c.resolution = %s AND a.iso3 = %s
+            """).format(schema=sql.Identifier('h3'))
+            params = (resolution, iso3)
+            scope_desc = f"iso3={iso3}"
+
+        elif bbox:
+            minx, miny, maxx, maxy = bbox
+            query = sql.SQL("""
+                SELECT COUNT(*) as count
+                FROM {schema}.cells c
+                WHERE c.resolution = %s
+                  AND ST_Intersects(c.geom, ST_MakeEnvelope(%s, %s, %s, %s, 4326))
+            """).format(schema=sql.Identifier('h3'))
+            params = (resolution, minx, miny, maxx, maxy)
+            scope_desc = f"bbox"
+
+        elif polygon_wkt:
+            query = sql.SQL("""
+                SELECT COUNT(*) as count
+                FROM {schema}.cells c
+                WHERE c.resolution = %s
+                  AND ST_Intersects(c.geom, ST_GeomFromText(%s, 4326))
+            """).format(schema=sql.Identifier('h3'))
+            params = (resolution, polygon_wkt)
+            scope_desc = "polygon_wkt"
+
+        else:
+            query = sql.SQL("""
+                SELECT COUNT(*) as count
+                FROM {schema}.cells c
+                WHERE c.resolution = %s
+            """).format(schema=sql.Identifier('h3'))
+            params = (resolution,)
+            scope_desc = "global"
+
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(query, params)
+                result = cur.fetchone()
+
+        count = result['count'] if result else 0
+        logger.info(f"📊 Cell count for aggregation: {count:,} (resolution={resolution}, scope={scope_desc})")
+        return count
+
+    def insert_zonal_stats_batch(
+        self,
+        stats: List[Dict[str, Any]],
+        append_history: bool = False,
+        source_job_id: Optional[str] = None
+    ) -> int:
+        """
+        Bulk insert zonal statistics into h3.zonal_stats.
+
+        Uses COPY + staging for performance. Default behavior overwrites
+        existing stats (ON CONFLICT DO UPDATE). Set append_history=True
+        to skip conflicts (preserves historical data).
+
+        Parameters:
+        ----------
+        stats : List[Dict[str, Any]]
+            List of stat dictionaries with keys:
+            - h3_index: int
+            - dataset_id: str
+            - band: str (default: 'default')
+            - stat_type: str ('mean', 'sum', 'min', 'max', 'count', 'std')
+            - value: float
+            - pixel_count: int (optional)
+            - nodata_count: int (optional)
+
+        append_history : bool
+            If True, skip conflicts (don't overwrite existing).
+            If False, update existing values (default).
+
+        source_job_id : Optional[str]
+            Job ID for tracking
+
+        Returns:
+        -------
+        int
+            Number of rows inserted/updated
+
+        Example:
+        -------
+        >>> stats = [
+        ...     {"h3_index": 123, "dataset_id": "worldpop_2020", "stat_type": "sum", "value": 1500.0},
+        ...     {"h3_index": 123, "dataset_id": "worldpop_2020", "stat_type": "mean", "value": 75.0}
+        ... ]
+        >>> rows = repo.insert_zonal_stats_batch(stats)
+        """
+        from io import StringIO
+        import time
+
+        if not stats:
+            logger.warning("⚠️ insert_zonal_stats_batch called with empty list")
+            return 0
+
+        start_time = time.time()
+        stat_count = len(stats)
+        logger.info(f"📦 Inserting {stat_count:,} zonal stats (append_history={append_history})...")
+
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                # Create temp staging table
+                cur.execute("""
+                    CREATE TEMP TABLE zonal_staging (
+                        h3_index BIGINT,
+                        dataset_id VARCHAR(100),
+                        band VARCHAR(50),
+                        stat_type VARCHAR(20),
+                        value DOUBLE PRECISION,
+                        pixel_count INTEGER,
+                        nodata_count INTEGER
+                    ) ON COMMIT DROP
+                """)
+
+                # Build COPY data
+                buffer = StringIO()
+                for stat in stats:
+                    h3_index = stat['h3_index']
+                    dataset_id = stat['dataset_id']
+                    band = stat.get('band', 'default')
+                    stat_type = stat['stat_type']
+                    value = stat.get('value')
+                    value_str = str(value) if value is not None else '\\N'
+                    pixel_count = stat.get('pixel_count')
+                    pixel_str = str(pixel_count) if pixel_count is not None else '\\N'
+                    nodata_count = stat.get('nodata_count')
+                    nodata_str = str(nodata_count) if nodata_count is not None else '\\N'
+
+                    buffer.write(f"{h3_index}\t{dataset_id}\t{band}\t{stat_type}\t{value_str}\t{pixel_str}\t{nodata_str}\n")
+
+                buffer.seek(0)
+
+                # COPY to staging
+                with cur.copy("COPY zonal_staging (h3_index, dataset_id, band, stat_type, value, pixel_count, nodata_count) FROM STDIN") as copy:
+                    copy.write(buffer.read())
+
+                # Insert with conflict handling
+                if append_history:
+                    # Skip conflicts (preserve existing)
+                    cur.execute(sql.SQL("""
+                        WITH inserted AS (
+                            INSERT INTO {schema}.{table}
+                                (h3_index, dataset_id, band, stat_type, value, pixel_count, nodata_count, source_job_id)
+                            SELECT
+                                h3_index, dataset_id, band, stat_type, value, pixel_count, nodata_count, %s
+                            FROM zonal_staging
+                            ON CONFLICT (h3_index, dataset_id, band, stat_type) DO NOTHING
+                            RETURNING 1
+                        )
+                        SELECT COUNT(*) FROM inserted
+                    """).format(
+                        schema=sql.Identifier('h3'),
+                        table=sql.Identifier('zonal_stats')
+                    ), (source_job_id,))
+                else:
+                    # Update existing (default behavior)
+                    cur.execute(sql.SQL("""
+                        WITH inserted AS (
+                            INSERT INTO {schema}.{table}
+                                (h3_index, dataset_id, band, stat_type, value, pixel_count, nodata_count, source_job_id, computed_at)
+                            SELECT
+                                h3_index, dataset_id, band, stat_type, value, pixel_count, nodata_count, %s, NOW()
+                            FROM zonal_staging
+                            ON CONFLICT (h3_index, dataset_id, band, stat_type) DO UPDATE SET
+                                value = EXCLUDED.value,
+                                pixel_count = EXCLUDED.pixel_count,
+                                nodata_count = EXCLUDED.nodata_count,
+                                source_job_id = EXCLUDED.source_job_id,
+                                computed_at = NOW()
+                            RETURNING 1
+                        )
+                        SELECT COUNT(*) FROM inserted
+                    """).format(
+                        schema=sql.Identifier('h3'),
+                        table=sql.Identifier('zonal_stats')
+                    ), (source_job_id,))
+
+                rowcount = cur.fetchone()['count']
+                conn.commit()
+
+        total_time = time.time() - start_time
+        rate = stat_count / total_time if total_time > 0 else 0
+        logger.info(f"✅ Inserted {rowcount:,} zonal stats in {total_time:.2f}s ({rate:,.0f} stats/sec)")
+
+        return rowcount
+
+    def insert_point_stats_batch(
+        self,
+        stats: List[Dict[str, Any]],
+        source_job_id: Optional[str] = None
+    ) -> int:
+        """
+        Bulk insert point aggregation stats into h3.point_stats.
+
+        Uses COPY + staging for performance. Updates existing counts
+        on conflict.
+
+        Parameters:
+        ----------
+        stats : List[Dict[str, Any]]
+            List of stat dictionaries with keys:
+            - h3_index: int
+            - source_id: str
+            - category: str (optional)
+            - count: int
+
+        source_job_id : Optional[str]
+            Job ID for tracking
+
+        Returns:
+        -------
+        int
+            Number of rows inserted/updated
+
+        Example:
+        -------
+        >>> stats = [
+        ...     {"h3_index": 123, "source_id": "osm_pois", "category": "restaurant", "count": 15},
+        ...     {"h3_index": 123, "source_id": "osm_pois", "category": "hospital", "count": 2}
+        ... ]
+        >>> rows = repo.insert_point_stats_batch(stats)
+        """
+        from io import StringIO
+        import time
+
+        if not stats:
+            logger.warning("⚠️ insert_point_stats_batch called with empty list")
+            return 0
+
+        start_time = time.time()
+        stat_count = len(stats)
+        logger.info(f"📦 Inserting {stat_count:,} point stats...")
+
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                # Create temp staging table
+                cur.execute("""
+                    CREATE TEMP TABLE point_staging (
+                        h3_index BIGINT,
+                        source_id VARCHAR(100),
+                        category VARCHAR(100),
+                        count INTEGER
+                    ) ON COMMIT DROP
+                """)
+
+                # Build COPY data
+                buffer = StringIO()
+                for stat in stats:
+                    h3_index = stat['h3_index']
+                    source_id = stat['source_id']
+                    category = stat.get('category')
+                    category_str = category if category else '\\N'
+                    count = stat.get('count', 0)
+
+                    buffer.write(f"{h3_index}\t{source_id}\t{category_str}\t{count}\n")
+
+                buffer.seek(0)
+
+                # COPY to staging
+                with cur.copy("COPY point_staging (h3_index, source_id, category, count) FROM STDIN") as copy:
+                    copy.write(buffer.read())
+
+                # Insert with conflict update
+                cur.execute(sql.SQL("""
+                    WITH inserted AS (
+                        INSERT INTO {schema}.{table}
+                            (h3_index, source_id, category, count, source_job_id, computed_at)
+                        SELECT
+                            h3_index, source_id, category, count, %s, NOW()
+                        FROM point_staging
+                        ON CONFLICT (h3_index, source_id, category) DO UPDATE SET
+                            count = EXCLUDED.count,
+                            source_job_id = EXCLUDED.source_job_id,
+                            computed_at = NOW()
+                        RETURNING 1
+                    )
+                    SELECT COUNT(*) FROM inserted
+                """).format(
+                    schema=sql.Identifier('h3'),
+                    table=sql.Identifier('point_stats')
+                ), (source_job_id,))
+
+                rowcount = cur.fetchone()['count']
+                conn.commit()
+
+        total_time = time.time() - start_time
+        rate = stat_count / total_time if total_time > 0 else 0
+        logger.info(f"✅ Inserted {rowcount:,} point stats in {total_time:.2f}s ({rate:,.0f} stats/sec)")
+
+        return rowcount

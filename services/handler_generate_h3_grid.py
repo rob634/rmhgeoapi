@@ -235,24 +235,45 @@ def generate_h3_grid(task_params: dict) -> dict:
         logger.info(f"   Cells removed: {cells_before_filter - len(cells):,}")
 
     # ========================================================================
-    # STEP 4: Insert cells to h3.grids
+    # STEP 4: Insert cells to NORMALIZED h3.cells + h3.cell_admin0
     # ========================================================================
-    logger.info(f"💾 Inserting {len(cells):,} cells to h3.grids...")
-    logger.info(f"   Target: h3.grids (grid_id={grid_id}, resolution={resolution})")
-    logger.info(f"   Note: ON CONFLICT clause will skip duplicates automatically")
+    logger.info(f"💾 Inserting {len(cells):,} cells to h3.cells (normalized schema)...")
+    logger.info(f"   Target: h3.cells (resolution={resolution})")
+    logger.info(f"   Note: ON CONFLICT (h3_index) skips duplicates - geometry stored ONCE")
 
     insert_start = time.time()
-    rows_inserted = repo.insert_h3_cells(
+
+    # Mark cells with is_land=True if filtered by country/land
+    for cell in cells:
+        cell['is_land'] = True  # All filtered cells are land
+
+    # Insert into h3.cells (unique geometry per h3_index)
+    rows_inserted = repo.insert_cells(
         cells=cells,
-        grid_id=grid_id,
-        grid_type=grid_type,
         source_job_id=job_id
     )
     insert_time = time.time() - insert_start
 
-    logger.info(f"✅ Insert complete in {insert_time:.2f}s")
-    logger.info(f"   Rows inserted: {rows_inserted:,}")
+    logger.info(f"✅ Insert to h3.cells complete in {insert_time:.2f}s")
+    logger.info(f"   New cells inserted: {rows_inserted:,}")
     logger.info(f"   Duplicates skipped: {len(cells) - rows_inserted:,}")
+
+    # ========================================================================
+    # STEP 4b: Insert country mappings to h3.cell_admin0 (if country_code provided)
+    # ========================================================================
+    admin0_mappings_inserted = 0
+    if country_code:
+        logger.info(f"🌍 Creating country mappings for {country_code}...")
+        admin0_mappings = [
+            {'h3_index': cell['h3_index'], 'iso3': country_code}
+            for cell in cells
+        ]
+        admin0_start = time.time()
+        admin0_mappings_inserted = repo.insert_cell_admin0_mappings(admin0_mappings)
+        admin0_time = time.time() - admin0_start
+        logger.info(f"✅ Insert to h3.cell_admin0 complete in {admin0_time:.2f}s")
+        logger.info(f"   Mappings inserted: {admin0_mappings_inserted:,}")
+        logger.info(f"   Duplicates skipped: {len(admin0_mappings) - admin0_mappings_inserted:,}")
 
     # ========================================================================
     # STEP 5: Return result
@@ -265,10 +286,11 @@ def generate_h3_grid(task_params: dict) -> dict:
             "cells_generated": cells_generated,
             "cells_filtered": cells_before_filter - len(cells) if filters_applied else 0,
             "cells_inserted": rows_inserted,
-            "grid_id": grid_id,
+            "admin0_mappings_inserted": admin0_mappings_inserted,
             "resolution": resolution,
             "generation_mode": generation_mode,
             "filters_applied": filters_applied,
+            "country_code": country_code,
             "processing_time_sec": round(elapsed_time, 2)
         }
     }

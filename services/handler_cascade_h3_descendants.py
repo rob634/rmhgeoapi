@@ -93,6 +93,7 @@ def cascade_h3_descendants(params: Dict[str, Any], context: Dict[str, Any] = Non
     batch_size = params.get('batch_size')  # None = process all remaining
     batch_index = params.get('batch_index', 0)  # For idempotency tracking
     source_job_id = params.get('source_job_id')
+    country_code = params.get('country_code')  # ISO3 code for admin0 mappings
 
     if not parent_grid_id:
         raise ValueError("parent_grid_id is required")
@@ -143,19 +144,21 @@ def cascade_h3_descendants(params: Dict[str, Any], context: Dict[str, Any] = Non
                 operation_type="cascade_h3_descendants"
             )
 
-        # STEP 2: Verify parent grid exists
-        logger.info(f"🔍 Verifying parent grid exists...")
-        if not h3_repo.grid_exists(parent_grid_id):
-            logger.error(f"❌ Parent grid '{parent_grid_id}' does not exist!")
+        # STEP 2: Verify parent cells exist at resolution 2 (normalized schema)
+        logger.info(f"🔍 Verifying parent cells exist at resolution 2...")
+        parent_count = h3_repo.get_cell_count_by_resolution(resolution=2)
+        if parent_count == 0:
+            logger.error(f"❌ No cells found at resolution 2!")
             return {
                 "success": False,
-                "error": f"Parent grid '{parent_grid_id}' not found. Cannot cascade."
+                "error": "No cells found at resolution 2. Cannot cascade."
             }
+        logger.info(f"   Found {parent_count:,} cells at resolution 2")
 
-        # STEP 3: Load parent cells (with batching)
-        logger.info(f"📥 Loading parent cells...")
-        parent_cells = h3_repo.get_parent_cells(
-            parent_grid_id=parent_grid_id,
+        # STEP 3: Load parent cells (with batching) from normalized h3.cells
+        logger.info(f"📥 Loading parent cells from h3.cells...")
+        parent_cells = h3_repo.get_cells_by_resolution(
+            resolution=2,
             batch_start=batch_start,
             batch_size=batch_size
         )
@@ -190,13 +193,14 @@ def cascade_h3_descendants(params: Dict[str, Any], context: Dict[str, Any] = Non
             logger.info(f"   → Resolution {target_res}...")
 
             # Generate descendants for this resolution
-            cells, rows_inserted = _cascade_batch(
+            cells, rows_inserted, admin0_inserted = _cascade_batch(
                 h3_repo=h3_repo,
                 parent_cells=parent_cells,
                 target_resolution=target_res,
                 grid_id=f"{grid_id_prefix}_res{target_res}",
                 source_job_id=source_job_id,
-                logger=logger
+                logger=logger,
+                country_code=country_code
             )
 
             cells_per_resolution[target_res] = len(cells)
@@ -269,8 +273,9 @@ def _cascade_batch(
     target_resolution: int,
     grid_id: str,
     source_job_id: str,
-    logger
-) -> Tuple[List[Dict[str, Any]], int]:
+    logger,
+    country_code: str = None
+) -> Tuple[List[Dict[str, Any]], int, int]:
     """
     Generate descendants at target resolution from batch of parent cells.
 
@@ -278,14 +283,16 @@ def _cascade_batch(
         h3_repo: H3Repository instance
         parent_cells: List of (h3_index, parent_res2) tuples
         target_resolution: Target resolution level
-        grid_id: Grid ID for descendants (e.g., "test_albania_res7")
+        grid_id: Grid ID for logging (normalized schema doesn't use grid_id)
         source_job_id: Job ID for tracking
         logger: Logger instance
+        country_code: Optional ISO3 code for admin0 mappings
 
     Returns:
-        Tuple of (cells_list, rows_inserted)
+        Tuple of (cells_list, rows_inserted, admin0_inserted)
         - cells_list: List of cell dicts with h3_index, resolution, geom_wkt
-        - rows_inserted: Number of rows actually inserted (excluding conflicts)
+        - rows_inserted: Number of cells inserted into h3.cells
+        - admin0_inserted: Number of mappings inserted into h3.cell_admin0
     """
     cells = []
 
@@ -324,17 +331,18 @@ def _cascade_batch(
 
     logger.debug(f"   Generated {len(cells):,} cells from {len(parent_cells):,} parents")
 
-    # Insert cells to h3.grids
-    rows_inserted = _insert_descendants(
+    # Insert cells to h3.cells (normalized schema)
+    rows_inserted, admin0_inserted = _insert_descendants(
         h3_repo=h3_repo,
         cells=cells,
         grid_id=grid_id,
         grid_type='land',  # Descendants inherit parent land membership
         source_job_id=source_job_id,
-        logger=logger
+        logger=logger,
+        country_code=country_code
     )
 
-    return cells, rows_inserted
+    return cells, rows_inserted, admin0_inserted
 
 
 def _insert_descendants(
@@ -343,31 +351,38 @@ def _insert_descendants(
     grid_id: str,
     grid_type: str,
     source_job_id: str,
-    logger
-) -> int:
+    logger,
+    country_code: str = None
+) -> Tuple[int, int]:
     """
-    Insert descendant cells to h3.grids with ON CONFLICT handling.
+    Insert descendant cells to NORMALIZED h3.cells with ON CONFLICT handling.
+
+    Also inserts admin0 mappings if country_code is provided.
 
     Args:
         h3_repo: H3Repository instance
-        cells: List of cell dicts (h3_index, resolution, geom_wkt, parent_res2)
-        grid_id: Grid ID for cells
+        cells: List of cell dicts (h3_index, resolution, geom_wkt, parent_h3_index)
+        grid_id: Grid ID (for logging only in normalized schema)
         grid_type: Grid type (e.g., "land")
         source_job_id: Job ID for tracking
         logger: Logger instance
+        country_code: Optional ISO3 code for admin0 mappings
 
     Returns:
-        Number of rows actually inserted (excluding conflicts)
+        Tuple of (cells_inserted, admin0_mappings_inserted)
     """
     if not cells:
-        return 0
+        return 0, 0
 
-    logger.debug(f"   Inserting {len(cells):,} cells to {grid_id}...")
+    logger.debug(f"   Inserting {len(cells):,} cells to h3.cells...")
 
-    rows_inserted = h3_repo.insert_h3_cells(
+    # Mark cells as land
+    for cell in cells:
+        cell['is_land'] = True
+
+    # Insert into h3.cells (normalized schema)
+    rows_inserted = h3_repo.insert_cells(
         cells=cells,
-        grid_id=grid_id,
-        grid_type=grid_type,
         source_job_id=source_job_id
     )
 
@@ -376,7 +391,17 @@ def _insert_descendants(
     if duplicates_skipped > 0:
         logger.debug(f"   Skipped {duplicates_skipped:,} duplicate cells (ON CONFLICT)")
 
-    return rows_inserted
+    # Insert admin0 mappings if country_code provided
+    admin0_inserted = 0
+    if country_code:
+        admin0_mappings = [
+            {'h3_index': cell['h3_index'], 'iso3': country_code}
+            for cell in cells
+        ]
+        admin0_inserted = h3_repo.insert_cell_admin0_mappings(admin0_mappings)
+        logger.debug(f"   Inserted {admin0_inserted:,} admin0 mappings for {country_code}")
+
+    return rows_inserted, admin0_inserted
 
 
 # ============================================================================

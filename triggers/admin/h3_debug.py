@@ -109,6 +109,10 @@ class AdminH3DebugTrigger:
                 return self._sample_cells(req)
             elif operation == 'parent_child_check':
                 return self._parent_child_check(req)
+            elif operation == 'delete_grids':
+                return self._delete_grids(req)
+            elif operation == 'nuke_h3':
+                return self._nuke_h3(req)
             else:
                 return func.HttpResponse(
                     json.dumps({
@@ -120,7 +124,9 @@ class AdminH3DebugTrigger:
                             "reference_filters",
                             "reference_filter_details",
                             "sample_cells",
-                            "parent_child_check"
+                            "parent_child_check",
+                            "delete_grids",
+                            "nuke_h3"
                         ]
                     }),
                     status_code=404,
@@ -660,6 +666,164 @@ class AdminH3DebugTrigger:
 
         except Exception as e:
             logger.error(f"❌ Parent-child check error: {e}")
+            return func.HttpResponse(
+                json.dumps({"error": str(e)}),
+                status_code=500,
+                mimetype="application/json"
+            )
+
+    def _delete_grids(self, req: func.HttpRequest) -> func.HttpResponse:
+        """
+        Delete grids by prefix from h3.grids and h3.grid_metadata.
+
+        Query params:
+            grid_id_prefix: str - Required, prefix to match (e.g., "test_albania")
+            confirm: str - Must be "yes" to actually delete
+
+        Example:
+            /api/h3/debug?operation=delete_grids&grid_id_prefix=test_albania&confirm=yes
+        """
+        try:
+            grid_id_prefix = req.params.get('grid_id_prefix')
+            confirm = req.params.get('confirm', '').lower() == 'yes'
+
+            if not grid_id_prefix:
+                return func.HttpResponse(
+                    json.dumps({
+                        "error": "grid_id_prefix parameter required",
+                        "usage": "?operation=delete_grids&grid_id_prefix=test_albania&confirm=yes"
+                    }),
+                    status_code=400,
+                    mimetype="application/json"
+                )
+
+            from psycopg import sql
+
+            with self.h3_repo._get_connection() as conn:
+                with conn.cursor() as cur:
+                    # Count grids to delete
+                    cur.execute("""
+                        SELECT COUNT(*) as count FROM h3.grids
+                        WHERE grid_id LIKE %s
+                    """, (f"{grid_id_prefix}%",))
+                    cells_to_delete = cur.fetchone()['count']
+
+                    cur.execute("""
+                        SELECT COUNT(*) as count FROM h3.grid_metadata
+                        WHERE grid_id LIKE %s
+                    """, (f"{grid_id_prefix}%",))
+                    metadata_to_delete = cur.fetchone()['count']
+
+                    if not confirm:
+                        return func.HttpResponse(
+                            json.dumps({
+                                "dry_run": True,
+                                "grid_id_prefix": grid_id_prefix,
+                                "cells_to_delete": cells_to_delete,
+                                "metadata_to_delete": metadata_to_delete,
+                                "message": "Add &confirm=yes to actually delete",
+                                "timestamp": datetime.now(timezone.utc).isoformat()
+                            }),
+                            mimetype="application/json"
+                        )
+
+                    # Actually delete
+                    cur.execute("""
+                        DELETE FROM h3.grids
+                        WHERE grid_id LIKE %s
+                    """, (f"{grid_id_prefix}%",))
+                    cells_deleted = cur.rowcount
+
+                    cur.execute("""
+                        DELETE FROM h3.grid_metadata
+                        WHERE grid_id LIKE %s
+                    """, (f"{grid_id_prefix}%",))
+                    metadata_deleted = cur.rowcount
+
+                conn.commit()
+
+            logger.info(f"🗑️ Deleted grids: {cells_deleted} cells, {metadata_deleted} metadata for prefix '{grid_id_prefix}'")
+
+            return func.HttpResponse(
+                json.dumps({
+                    "success": True,
+                    "grid_id_prefix": grid_id_prefix,
+                    "cells_deleted": cells_deleted,
+                    "metadata_deleted": metadata_deleted,
+                    "timestamp": datetime.now(timezone.utc).isoformat()
+                }),
+                mimetype="application/json"
+            )
+
+        except Exception as e:
+            logger.error(f"❌ Delete grids error: {e}")
+            return func.HttpResponse(
+                json.dumps({"error": str(e)}),
+                status_code=500,
+                mimetype="application/json"
+            )
+
+    def _nuke_h3(self, req: func.HttpRequest) -> func.HttpResponse:
+        """
+        Truncate all H3 tables (grids, grid_metadata, batch_progress, reference_filters).
+
+        Query params:
+            confirm: str - Must be "yes" to actually truncate
+
+        WARNING: This is destructive and cannot be undone!
+        """
+        try:
+            confirm = req.params.get('confirm', '').lower() == 'yes'
+
+            with self.h3_repo._get_connection() as conn:
+                with conn.cursor() as cur:
+                    # Count rows before
+                    counts_before = {}
+                    for table in ['grids', 'grid_metadata', 'batch_progress', 'reference_filters']:
+                        try:
+                            cur.execute(f"SELECT COUNT(*) as count FROM h3.{table}")
+                            counts_before[table] = cur.fetchone()['count']
+                        except Exception:
+                            counts_before[table] = 0
+
+                    if not confirm:
+                        return func.HttpResponse(
+                            json.dumps({
+                                "dry_run": True,
+                                "tables_to_truncate": list(counts_before.keys()),
+                                "rows_to_delete": counts_before,
+                                "total_rows": sum(counts_before.values()),
+                                "message": "Add &confirm=yes to actually truncate",
+                                "warning": "⚠️ This is DESTRUCTIVE and cannot be undone!",
+                                "timestamp": datetime.now(timezone.utc).isoformat()
+                            }),
+                            mimetype="application/json"
+                        )
+
+                    # Truncate all tables
+                    for table in ['grids', 'grid_metadata', 'batch_progress', 'reference_filters']:
+                        try:
+                            cur.execute(f"TRUNCATE TABLE h3.{table} CASCADE")
+                        except Exception as e:
+                            logger.warning(f"Could not truncate h3.{table}: {e}")
+
+                conn.commit()
+
+            logger.warning(f"🔥 NUKED H3 TABLES: {counts_before}")
+
+            return func.HttpResponse(
+                json.dumps({
+                    "success": True,
+                    "rows_deleted": counts_before,
+                    "total_rows": sum(counts_before.values()),
+                    "tables_truncated": list(counts_before.keys()),
+                    "timestamp": datetime.now(timezone.utc).isoformat()
+                }),
+                mimetype="application/json"
+            )
+
+        except Exception as e:
+            logger.error(f"❌ Nuke H3 error: {e}")
             return func.HttpResponse(
                 json.dumps({"error": str(e)}),
                 status_code=500,

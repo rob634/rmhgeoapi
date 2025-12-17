@@ -174,6 +174,31 @@ class ApiRequestRepository(PostgreSQLRepository):
             row = self._execute_query(query, (job_id,), fetch='one')
             return self._row_to_record(row) if row else None
 
+    def get_request_by_ddh_ids(
+        self,
+        dataset_id: str,
+        resource_id: str,
+        version_id: str
+    ) -> Optional[ApiRequest]:
+        """
+        Lookup Platform request by DDH identifiers.
+
+        Generates the request_id from DDH identifiers and performs lookup.
+        Useful for Platform unpublish endpoints that receive DDH IDs.
+
+        Args:
+            dataset_id: DDH dataset identifier
+            resource_id: DDH resource identifier
+            version_id: DDH version identifier
+
+        Returns:
+            ApiRequest or None if not found
+        """
+        from config import generate_platform_request_id
+
+        request_id = generate_platform_request_id(dataset_id, resource_id, version_id)
+        return self.get_request(request_id)
+
     def get_all_requests(
         self,
         limit: int = 100,

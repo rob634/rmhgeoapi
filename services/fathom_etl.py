@@ -260,11 +260,25 @@ def fathom_tile_inventory(params: dict, context: dict = None) -> dict:
         # Build output_name from phase1_group_key (already in correct format)
         output_name = row_dict["phase1_group_key"]
 
-        # return_period_files is already a dict from json_object_agg
+        # return_period_files from json_object_agg - handle various formats
         rp_files = row_dict["return_period_files"]
+        if rp_files is None:
+            logger.warning(f"   ⚠️ {output_name}: return_period_files is NULL - skipping")
+            continue
         if isinstance(rp_files, str):
             import json
-            rp_files = json.loads(rp_files)
+            # Handle empty string case
+            if not rp_files or rp_files.strip() == "":
+                logger.warning(f"   ⚠️ {output_name}: return_period_files is empty string - skipping")
+                continue
+            try:
+                rp_files = json.loads(rp_files)
+            except json.JSONDecodeError as e:
+                logger.warning(f"   ⚠️ {output_name}: Failed to parse return_period_files: {e} - skipping")
+                continue
+        if not rp_files:
+            logger.warning(f"   ⚠️ {output_name}: return_period_files is empty - skipping")
+            continue
 
         # Check for missing return periods
         missing_rps = [rp for rp in RETURN_PERIODS if rp not in rp_files]
@@ -652,11 +666,24 @@ def fathom_grid_inventory(params: dict, context: dict = None) -> dict:
         # Build output_name from phase2_group_key (already in correct format)
         output_name = row_dict["phase2_group_key"]
 
-        # tiles is already a list from json_agg
+        # tiles from json_agg - handle various formats
         tiles = row_dict["tiles"]
+        if tiles is None:
+            logger.warning(f"   ⚠️ {output_name}: tiles is NULL - skipping")
+            continue
         if isinstance(tiles, str):
             import json
-            tiles = json.loads(tiles)
+            if not tiles or tiles.strip() == "":
+                logger.warning(f"   ⚠️ {output_name}: tiles is empty string - skipping")
+                continue
+            try:
+                tiles = json.loads(tiles)
+            except json.JSONDecodeError as e:
+                logger.warning(f"   ⚠️ {output_name}: Failed to parse tiles: {e} - skipping")
+                continue
+        if not tiles:
+            logger.warning(f"   ⚠️ {output_name}: tiles is empty - skipping")
+            continue
 
         grid_groups.append({
             "output_name": output_name,

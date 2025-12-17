@@ -232,7 +232,9 @@ from triggers.curated.scheduler import curated_scheduler_trigger
 from triggers.trigger_platform import (
     platform_request_submit,
     platform_raster_submit,
-    platform_raster_collection_submit
+    platform_raster_collection_submit,
+    platform_unpublish_vector,
+    platform_unpublish_raster
 )
 from triggers.trigger_platform_status import (
     platform_request_status,
@@ -992,6 +994,79 @@ def platform_raster_collection(req: func.HttpRequest) -> func.HttpResponse:
     Note: file_name must be a list with at least 2 files.
     """
     return platform_raster_collection_submit(req)
+
+
+@app.route(route="platform/unpublish/vector", methods=["POST"])
+def platform_unpublish_vector_route(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Unpublish vector data via Platform layer.
+
+    POST /api/platform/unpublish/vector
+
+    Accepts DDH identifiers, request_id, or direct table_name (cleanup mode).
+    Translates to CoreMachine unpublish_vector job.
+
+    Body Options:
+        Option 1 - By DDH Identifiers (Preferred):
+        {
+            "dataset_id": "aerial-imagery-2024",
+            "resource_id": "site-alpha",
+            "version_id": "v1.0",
+            "dry_run": true
+        }
+
+        Option 2 - By Request ID:
+        {
+            "request_id": "a3f2c1b8e9d7f6a5...",
+            "dry_run": true
+        }
+
+        Option 3 - Cleanup Mode (direct table_name):
+        {
+            "table_name": "aerial_imagery_2024_site_alpha_v1_0",
+            "dry_run": true
+        }
+
+    Note: dry_run=true by default (preview mode, no deletions).
+    """
+    return platform_unpublish_vector(req)
+
+
+@app.route(route="platform/unpublish/raster", methods=["POST"])
+def platform_unpublish_raster_route(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Unpublish raster data via Platform layer.
+
+    POST /api/platform/unpublish/raster
+
+    Accepts DDH identifiers, request_id, or direct STAC identifiers (cleanup mode).
+    Translates to CoreMachine unpublish_raster job.
+
+    Body Options:
+        Option 1 - By DDH Identifiers (Preferred):
+        {
+            "dataset_id": "aerial-imagery-2024",
+            "resource_id": "site-alpha",
+            "version_id": "v1.0",
+            "dry_run": true
+        }
+
+        Option 2 - By Request ID:
+        {
+            "request_id": "a3f2c1b8e9d7f6a5...",
+            "dry_run": true
+        }
+
+        Option 3 - Cleanup Mode (direct STAC identifiers):
+        {
+            "stac_item_id": "aerial-imagery-2024-site-alpha-v1-0",
+            "collection_id": "aerial-imagery-2024",
+            "dry_run": true
+        }
+
+    Note: dry_run=true by default (preview mode, no deletions).
+    """
+    return platform_unpublish_raster(req)
 
 
 @app.route(route="stac/vector", methods=["POST"])

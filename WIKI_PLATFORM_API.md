@@ -57,8 +57,8 @@ https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net
 
 | Endpoint | Method | Purpose |
 |----------|--------|---------|
-| `/api/jobs/submit/unpublish_vector` | POST | Remove vector data (PostGIS + STAC) |
-| `/api/jobs/submit/unpublish_raster` | POST | Remove raster data (STAC + COG blobs) |
+| `/api/platform/unpublish/vector` | POST | Remove vector data (accepts DDH identifiers) |
+| `/api/platform/unpublish/raster` | POST | Remove raster data (accepts DDH identifiers) |
 
 ---
 
@@ -566,14 +566,33 @@ https://rmhtitiler-.../cog/tiles/WebMercatorQuad/{z}/{x}/{y}.png?url=...
 
 ### Endpoint
 ```
-POST /api/jobs/submit/unpublish_vector
+POST /api/platform/unpublish/vector
 ```
 
 ### Purpose
-Remove a vector dataset from the platform: drops PostGIS table, deletes metadata, and optionally removes STAC item.
+Remove a vector dataset from the platform via the Platform ACL layer. Accepts DDH identifiers, request_id, or direct table_name (cleanup mode). Drops PostGIS table, deletes metadata, and optionally removes STAC item.
 
-### Request Body
+### Request Body Options
 
+**Option 1: By DDH Identifiers (Preferred)**
+```json
+{
+    "dataset_id": "aerial-imagery-2024",
+    "resource_id": "site-alpha",
+    "version_id": "v1.0",
+    "dry_run": true
+}
+```
+
+**Option 2: By Request ID** (from original submission)
+```json
+{
+    "request_id": "a3f2c1b8e9d7f6a5c4b3a2e1d9c8b7a6",
+    "dry_run": true
+}
+```
+
+**Option 3: Cleanup Mode** (direct table_name - for orphaned data)
 ```json
 {
     "table_name": "city_parcels_v1_0",
@@ -586,7 +605,11 @@ Remove a vector dataset from the platform: drops PostGIS table, deletes metadata
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `table_name` | string | **Yes** | - | PostGIS table name to remove |
+| `dataset_id` | string | Option 1 | - | DDH dataset identifier |
+| `resource_id` | string | Option 1 | - | DDH resource identifier |
+| `version_id` | string | Option 1 | - | DDH version identifier |
+| `request_id` | string | Option 2 | - | Original platform request ID |
+| `table_name` | string | Option 3 | - | Direct PostGIS table name (cleanup mode) |
 | `schema_name` | string | No | `geo` | PostgreSQL schema containing the table |
 | `dry_run` | boolean | No | `true` | Preview mode - shows what would be deleted without executing |
 
@@ -595,34 +618,56 @@ Remove a vector dataset from the platform: drops PostGIS table, deletes metadata
 ```json
 {
     "success": true,
-    "job_id": "abc123...",
+    "request_id": "unpublish-abc123...",
+    "job_id": "def456...",
     "job_type": "unpublish_vector",
+    "mode": "platform",
+    "dry_run": true,
+    "table_name": "aerial_imagery_2024_site_alpha_v1_0",
     "message": "Vector unpublish job submitted (dry_run=true)",
-    "monitor_url": "/api/jobs/status/abc123..."
+    "monitor_url": "/api/platform/status/unpublish-abc123..."
 }
 ```
 
 ### Example (curl)
 
 ```bash
-# Preview what will be deleted (safe - dry_run=true by default)
+# Option 1: By DDH identifiers (preferred)
 curl -X POST \
-  "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/jobs/submit/unpublish_vector" \
+  "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/platform/unpublish/vector" \
   -H "Content-Type: application/json" \
   -d '{
-    "table_name": "city_parcels_v1_0",
+    "dataset_id": "aerial-imagery-2024",
+    "resource_id": "site-alpha",
+    "version_id": "v1.0",
     "dry_run": true
   }'
 
-# Actually delete (set dry_run=false)
+# Option 2: By request_id
 curl -X POST \
-  "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/jobs/submit/unpublish_vector" \
+  "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/platform/unpublish/vector" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "request_id": "a3f2c1b8e9d7f6a5c4b3a2e1d9c8b7a6",
+    "dry_run": false
+  }'
+
+# Option 3: Cleanup mode (direct table_name)
+curl -X POST \
+  "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/platform/unpublish/vector" \
   -H "Content-Type: application/json" \
   -d '{
     "table_name": "city_parcels_v1_0",
     "dry_run": false
   }'
 ```
+
+### Mode Behavior
+
+| Mode | Description |
+|------|-------------|
+| `platform` | Original request found - uses DDH identifiers to generate table name |
+| `cleanup` | No request found - uses provided identifiers directly (logs warning) |
 
 ### Workflow Stages
 
@@ -651,17 +696,36 @@ curl -X POST \
 
 ### Endpoint
 ```
-POST /api/jobs/submit/unpublish_raster
+POST /api/platform/unpublish/raster
 ```
 
 ### Purpose
-Remove a raster dataset from the platform: deletes STAC item and associated COG/MosaicJSON blobs from storage.
+Remove a raster dataset from the platform via the Platform ACL layer. Accepts DDH identifiers, request_id, or direct STAC identifiers (cleanup mode). Deletes STAC item and associated COG/MosaicJSON blobs from storage.
 
-### Request Body
+### Request Body Options
 
+**Option 1: By DDH Identifiers (Preferred)**
 ```json
 {
-    "stac_item_id": "aerial-imagery-2024-site-alpha-v1.0",
+    "dataset_id": "aerial-imagery-2024",
+    "resource_id": "site-alpha",
+    "version_id": "v1.0",
+    "dry_run": true
+}
+```
+
+**Option 2: By Request ID** (from original submission)
+```json
+{
+    "request_id": "a3f2c1b8e9d7f6a5c4b3a2e1d9c8b7a6",
+    "dry_run": true
+}
+```
+
+**Option 3: Cleanup Mode** (direct STAC identifiers - for orphaned data)
+```json
+{
+    "stac_item_id": "aerial-imagery-2024-site-alpha-v1-0",
     "collection_id": "aerial-imagery-2024",
     "dry_run": true
 }
@@ -671,8 +735,12 @@ Remove a raster dataset from the platform: deletes STAC item and associated COG/
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `stac_item_id` | string | **Yes** | - | STAC item ID to remove |
-| `collection_id` | string | **Yes** | - | STAC collection containing the item |
+| `dataset_id` | string | Option 1 | - | DDH dataset identifier |
+| `resource_id` | string | Option 1 | - | DDH resource identifier |
+| `version_id` | string | Option 1 | - | DDH version identifier |
+| `request_id` | string | Option 2 | - | Original platform request ID |
+| `stac_item_id` | string | Option 3 | - | Direct STAC item ID (cleanup mode) |
+| `collection_id` | string | Option 3 | - | Direct STAC collection ID (cleanup mode) |
 | `dry_run` | boolean | No | `true` | Preview mode - shows what would be deleted without executing |
 
 ### Response (202 Accepted)
@@ -680,36 +748,58 @@ Remove a raster dataset from the platform: deletes STAC item and associated COG/
 ```json
 {
     "success": true,
-    "job_id": "def456...",
+    "request_id": "unpublish-def456...",
+    "job_id": "ghi789...",
     "job_type": "unpublish_raster",
+    "mode": "platform",
+    "dry_run": true,
+    "stac_item_id": "aerial-imagery-2024-site-alpha-v1-0",
+    "collection_id": "aerial-imagery-2024",
     "message": "Raster unpublish job submitted (dry_run=true)",
-    "monitor_url": "/api/jobs/status/def456..."
+    "monitor_url": "/api/platform/status/unpublish-def456..."
 }
 ```
 
 ### Example (curl)
 
 ```bash
-# Preview what will be deleted (safe - dry_run=true by default)
+# Option 1: By DDH identifiers (preferred)
 curl -X POST \
-  "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/jobs/submit/unpublish_raster" \
+  "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/platform/unpublish/raster" \
   -H "Content-Type: application/json" \
   -d '{
-    "stac_item_id": "aerial-imagery-2024-site-alpha-v1.0",
-    "collection_id": "aerial-imagery-2024",
+    "dataset_id": "aerial-imagery-2024",
+    "resource_id": "site-alpha",
+    "version_id": "v1.0",
     "dry_run": true
   }'
 
-# Actually delete (set dry_run=false)
+# Option 2: By request_id
 curl -X POST \
-  "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/jobs/submit/unpublish_raster" \
+  "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/platform/unpublish/raster" \
   -H "Content-Type: application/json" \
   -d '{
-    "stac_item_id": "aerial-imagery-2024-site-alpha-v1.0",
+    "request_id": "a3f2c1b8e9d7f6a5c4b3a2e1d9c8b7a6",
+    "dry_run": false
+  }'
+
+# Option 3: Cleanup mode (direct STAC identifiers)
+curl -X POST \
+  "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/platform/unpublish/raster" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "stac_item_id": "aerial-imagery-2024-site-alpha-v1-0",
     "collection_id": "aerial-imagery-2024",
     "dry_run": false
   }'
 ```
+
+### Mode Behavior
+
+| Mode | Description |
+|------|-------------|
+| `platform` | Original request found - uses DDH identifiers to generate STAC IDs |
+| `cleanup` | No request found - uses provided identifiers directly (logs warning) |
 
 ### Workflow Stages
 
@@ -724,7 +814,7 @@ curl -X POST \
 ```json
 {
     "job_result": {
-        "stac_item_deleted": "aerial-imagery-2024-site-alpha-v1.0",
+        "stac_item_deleted": "aerial-imagery-2024-site-alpha-v1-0",
         "blobs_deleted": [
             "silver-cogs/aerial-imagery-2024/site-alpha/v1.0/site-alpha_cog_analysis.tif"
         ],

@@ -187,7 +187,7 @@ class H3Repository(PostgreSQLRepository):
                     table=sql.Identifier('grids')
                 ), (grid_id, grid_type, source_job_id))
 
-                rowcount = cur.fetchone()[0]
+                rowcount = cur.fetchone()['count']
                 insert_time = time.time() - insert_start
                 logger.debug(f"   INSERT...SELECT: {insert_time:.2f}s")
 

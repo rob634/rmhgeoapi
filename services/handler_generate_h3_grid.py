@@ -321,6 +321,13 @@ def _generate_from_base(resolution: int) -> List[Dict[str, Any]]:
             # Get geometry as WKT (cell_to_boundary returns [(lat, lng), ...])
             boundary = h3.cell_to_boundary(cell)
             coords = [(lng, lat) for lat, lng in boundary]  # Convert to (lng, lat) for WKT
+
+            # Skip cells that cross the antimeridian (180° longitude)
+            # These cells have longitude range > 180° and create wrapped polygons
+            lngs = [c[0] for c in coords]
+            if max(lngs) - min(lngs) > 180:
+                continue  # Skip antimeridian-crossing cells
+
             coords.append(coords[0])  # Close polygon
             polygon = Polygon(coords)
             geom_wkt = polygon.wkt
@@ -395,6 +402,13 @@ def _generate_from_cascade(
             # Get geometry as WKT (cell_to_boundary returns [(lat, lng), ...])
             boundary = h3.cell_to_boundary(child_index)
             coords = [(lng, lat) for lat, lng in boundary]  # Convert to (lng, lat) for WKT
+
+            # Skip cells that cross the antimeridian (180° longitude)
+            # These cells have longitude range > 180° and create wrapped polygons
+            lngs = [c[0] for c in coords]
+            if max(lngs) - min(lngs) > 180:
+                continue  # Skip antimeridian-crossing cells
+
             coords.append(coords[0])  # Close polygon
             polygon = Polygon(coords)
             geom_wkt = polygon.wkt

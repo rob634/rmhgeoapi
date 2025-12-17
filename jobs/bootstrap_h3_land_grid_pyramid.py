@@ -201,19 +201,16 @@ class BootstrapH3LandGridPyramidJob(JobBaseMixin, JobBase):  # Mixin FIRST for c
             if not previous_results or len(previous_results) == 0:
                 raise ValueError("Stage 2 requires Stage 1 results")
 
-            # Extract parent count from Stage 1 result
-            # IMPORTANT: Use cells_inserted (actual cells in grid after filtering)
-            # cells_generated = total before filtering, cells_inserted = actual parents
-            # For country filter: cells_generated=5882 (global), cells_inserted=5 (Albania)
-            stage1_result = previous_results[0].get('result', {})
-            cells_generated = stage1_result.get('cells_generated', 0)
-            cells_inserted = stage1_result.get('cells_inserted', 0)
+            # Query actual parent count from database (more reliable than Stage 1 result)
+            # This handles cases where COPY doesn't return accurate rowcount
+            from infrastructure.h3_repository import H3Repository
+            h3_repo = H3Repository()
+            parent_grid_id = f"{grid_id_prefix}_res2"
+            parent_ids = h3_repo.get_parent_ids(parent_grid_id)
+            parent_count = len(parent_ids)
 
-            # Use INSERTED count (actual parents in grid) not GENERATED count (pre-filter)
-            # This fixes batch count for country-filtered grids (5 batches, not 589)
-            parent_count = cells_inserted if cells_inserted > 0 else cells_generated
             if parent_count == 0:
-                raise ValueError("Stage 1 generated 0 cells - cannot cascade (check spatial filter)")
+                raise ValueError(f"No cells found in {parent_grid_id} - cannot cascade")
 
             # Calculate number of batches
             from math import ceil

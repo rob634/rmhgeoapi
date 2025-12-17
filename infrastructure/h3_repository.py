@@ -161,28 +161,33 @@ class H3Repository(PostgreSQLRepository):
                 logger.debug(f"   COPY to staging: {copy_time:.2f}s")
 
                 # STEP 4: INSERT...SELECT with geometry conversion
+                # Use RETURNING to get accurate count (psycopg3 rowcount unreliable with ON CONFLICT)
                 insert_start = time.time()
                 cur.execute(sql.SQL("""
-                    INSERT INTO {schema}.{table}
-                        (h3_index, resolution, geom, grid_id, grid_type,
-                         parent_res2, parent_h3_index, source_job_id)
-                    SELECT
-                        h3_index,
-                        resolution,
-                        ST_GeomFromText(geom_wkt, 4326),
-                        %s,
-                        %s,
-                        parent_res2,
-                        parent_h3_index,
-                        %s
-                    FROM h3_staging
-                    ON CONFLICT (h3_index, grid_id) DO NOTHING
+                    WITH inserted AS (
+                        INSERT INTO {schema}.{table}
+                            (h3_index, resolution, geom, grid_id, grid_type,
+                             parent_res2, parent_h3_index, source_job_id)
+                        SELECT
+                            h3_index,
+                            resolution,
+                            ST_GeomFromText(geom_wkt, 4326),
+                            %s,
+                            %s,
+                            parent_res2,
+                            parent_h3_index,
+                            %s
+                        FROM h3_staging
+                        ON CONFLICT (h3_index, grid_id) DO NOTHING
+                        RETURNING 1
+                    )
+                    SELECT COUNT(*) FROM inserted
                 """).format(
                     schema=sql.Identifier('h3'),
                     table=sql.Identifier('grids')
                 ), (grid_id, grid_type, source_job_id))
 
-                rowcount = cur.rowcount
+                rowcount = cur.fetchone()[0]
                 insert_time = time.time() - insert_start
                 logger.debug(f"   INSERT...SELECT: {insert_time:.2f}s")
 

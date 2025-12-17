@@ -268,11 +268,9 @@ class TaskRoutingDefaults:
         "create_mosaicjson",
         "create_stac_collection",
         # Fathom ETL (memory-intensive raster operations)
-        "fathom_tile_inventory",
-        "fathom_band_stack",
-        "fathom_grid_inventory",
-        "fathom_spatial_merge",
-        "fathom_stac_register",
+        # NOTE: Inventory handlers moved to VECTOR_TASKS (database queries)
+        "fathom_band_stack",     # Actual raster: Stack 8 return periods
+        "fathom_spatial_merge",  # Actual raster: Merge tiles band-by-band
     ]
 
     # Vector tasks → vector-tasks queue (high concurrency, DB-bound or lightweight)
@@ -307,6 +305,10 @@ class TaskRoutingDefaults:
         "fathom_scan_prefix",
         "fathom_assign_grid_cells",
         "fathom_inventory_summary",
+        # Fathom ETL inventory handlers (database queries, not raster ops)
+        "fathom_tile_inventory",   # Phase 1: Query DB for unprocessed tiles
+        "fathom_grid_inventory",   # Phase 2: Query DB for Phase 1 completed
+        "fathom_stac_register",    # Shared: Create STAC items (DB + HTTP)
         # Hello world and test handlers (lightweight)
         "hello_world_greeting",
         "hello_world_reply",

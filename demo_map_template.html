@@ -1,0 +1,674 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Map Template - Geospatial API</title>
+
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+          integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+          crossorigin=""/>
+
+    <!-- Google Fonts - Open Sans -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600;700&display=swap" rel="stylesheet">
+
+    <style>
+        /* Design System Color Variables */
+        :root {
+            --ds-blue-primary: #0071BC;
+            --ds-blue-dark: #245AAD;
+            --ds-navy: #053657;
+            --ds-cyan: #00A3DA;
+            --ds-gold: #FFC14D;
+            --ds-gray: #626F86;
+            --ds-gray-light: #e9ecef;
+            --ds-bg: #f8f9fa;
+        }
+
+        /* CSS Reset */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        html, body {
+            height: 100%;
+        }
+
+        body {
+            font-family: "Open Sans", Arial, sans-serif;
+            background: var(--ds-bg);
+            color: var(--ds-navy);
+            font-size: 14px;
+            line-height: 1.6;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* Navigation Bar */
+        .navbar {
+            background: white;
+            padding: 15px 30px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 3px solid var(--ds-blue-primary);
+            flex-shrink: 0;
+        }
+
+        .nav-brand {
+            font-size: 20px;
+            font-weight: 700;
+            color: var(--ds-navy);
+            text-decoration: none;
+            transition: color 0.2s;
+        }
+
+        .nav-brand:hover {
+            color: var(--ds-blue-primary);
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 20px;
+        }
+
+        .nav-links a {
+            color: var(--ds-blue-primary);
+            text-decoration: none;
+            font-weight: 600;
+            transition: color 0.2s;
+        }
+
+        .nav-links a:hover {
+            color: var(--ds-cyan);
+        }
+
+        .nav-links a.active {
+            color: var(--ds-navy);
+            border-bottom: 2px solid var(--ds-blue-primary);
+            padding-bottom: 2px;
+        }
+
+        /* Main Content Area */
+        .main-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            padding: 20px;
+            gap: 20px;
+            overflow: hidden;
+        }
+
+        /* Map Section */
+        .map-section {
+            flex: 1;
+            min-height: 400px;
+            display: flex;
+            flex-direction: column;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.08);
+            overflow: hidden;
+        }
+
+        .map-header {
+            padding: 15px 20px;
+            background: white;
+            border-bottom: 1px solid var(--ds-gray-light);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-shrink: 0;
+        }
+
+        .map-title {
+            font-size: 18px;
+            font-weight: 700;
+            color: var(--ds-navy);
+        }
+
+        .map-controls {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+        }
+
+        .control-group {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .control-group label {
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--ds-gray);
+        }
+
+        .control-group select,
+        .control-group input {
+            padding: 6px 12px;
+            border: 1px solid var(--ds-gray-light);
+            border-radius: 4px;
+            font-size: 13px;
+            color: var(--ds-navy);
+            background: white;
+        }
+
+        .control-group select:focus,
+        .control-group input:focus {
+            outline: none;
+            border-color: var(--ds-blue-primary);
+            box-shadow: 0 0 0 3px rgba(0, 113, 188, 0.1);
+        }
+
+        .btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 4px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .btn-primary {
+            background: var(--ds-blue-primary);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: var(--ds-blue-dark);
+        }
+
+        .btn-secondary {
+            background: white;
+            color: var(--ds-blue-primary);
+            border: 1px solid var(--ds-blue-primary);
+        }
+
+        .btn-secondary:hover {
+            background: var(--ds-bg);
+        }
+
+        /* Map Container */
+        #map {
+            flex: 1;
+            min-height: 300px;
+        }
+
+        /* Infographics Section (Placeholder) */
+        .infographics-section {
+            flex-shrink: 0;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.08);
+            padding: 20px;
+        }
+
+        .infographics-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid var(--ds-gray-light);
+        }
+
+        .infographics-title {
+            font-size: 16px;
+            font-weight: 700;
+            color: var(--ds-navy);
+        }
+
+        .infographics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+        }
+
+        .info-card {
+            background: var(--ds-bg);
+            border-radius: 6px;
+            padding: 20px;
+            text-align: center;
+            border: 2px dashed var(--ds-gray-light);
+            min-height: 100px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .info-card-placeholder {
+            color: var(--ds-gray);
+            font-size: 13px;
+        }
+
+        .info-card-icon {
+            font-size: 32px;
+            margin-bottom: 10px;
+            opacity: 0.3;
+        }
+
+        /* Feature Count Badge */
+        .feature-count {
+            background: var(--ds-blue-primary);
+            color: white;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        /* Status Message */
+        .status-bar {
+            padding: 8px 20px;
+            background: var(--ds-bg);
+            border-top: 1px solid var(--ds-gray-light);
+            font-size: 12px;
+            color: var(--ds-gray);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-shrink: 0;
+        }
+
+        .status-message {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #10b981;
+        }
+
+        .status-dot.loading {
+            background: var(--ds-gold);
+            animation: pulse 1s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        /* Spinner */
+        .spinner {
+            border: 3px solid var(--ds-gray-light);
+            border-top: 3px solid var(--ds-blue-primary);
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        /* Leaflet Popup Styling */
+        .leaflet-popup-content-wrapper {
+            border-radius: 6px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+
+        .leaflet-popup-content {
+            margin: 12px 16px;
+            font-family: "Open Sans", Arial, sans-serif;
+            font-size: 13px;
+            color: var(--ds-navy);
+        }
+
+        .popup-title {
+            font-weight: 700;
+            font-size: 14px;
+            margin-bottom: 8px;
+            color: var(--ds-navy);
+            border-bottom: 1px solid var(--ds-gray-light);
+            padding-bottom: 6px;
+        }
+
+        .popup-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 3px 0;
+        }
+
+        .popup-key {
+            color: var(--ds-gray);
+            font-weight: 600;
+        }
+
+        .popup-value {
+            color: var(--ds-navy);
+            max-width: 150px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .navbar {
+                flex-direction: column;
+                gap: 15px;
+                padding: 15px;
+            }
+
+            .nav-links {
+                flex-wrap: wrap;
+                justify-content: center;
+            }
+
+            .map-header {
+                flex-direction: column;
+                gap: 15px;
+                align-items: flex-start;
+            }
+
+            .map-controls {
+                flex-wrap: wrap;
+            }
+
+            .infographics-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Navigation Bar -->
+    <nav class="navbar">
+        <a href="#" class="nav-brand">Geospatial API v1.0</a>
+        <div class="nav-links">
+            <a href="#">System Status</a>
+            <a href="#">Platform</a>
+            <a href="#">Storage</a>
+            <a href="#">Pipelines</a>
+            <a href="#">H3</a>
+            <a href="#">Queues</a>
+            <a href="#">STAC</a>
+            <a href="#">OGC Features</a>
+            <a href="#" class="active">Map</a>
+            <a href="#">API Docs</a>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <div class="main-content">
+        <!-- Map Section -->
+        <div class="map-section">
+            <div class="map-header">
+                <div class="map-title">Interactive Map Viewer</div>
+                <div class="map-controls">
+                    <div class="control-group">
+                        <label for="collection">Collection:</label>
+                        <select id="collection">
+                            <option value="">Select collection...</option>
+                            <option value="demo_polygons">Demo Polygons</option>
+                            <option value="census_tracts">Census Tracts</option>
+                            <option value="land_parcels">Land Parcels</option>
+                        </select>
+                    </div>
+                    <div class="control-group">
+                        <label for="limit">Limit:</label>
+                        <select id="limit">
+                            <option value="50">50</option>
+                            <option value="100" selected>100</option>
+                            <option value="500">500</option>
+                            <option value="1000">1000</option>
+                        </select>
+                    </div>
+                    <button class="btn btn-primary" onclick="loadFeatures()">Load Features</button>
+                    <button class="btn btn-secondary" onclick="zoomToFeatures()">Zoom to Features</button>
+                    <span class="feature-count" id="featureCount">0 features</span>
+                </div>
+            </div>
+            <div id="map"></div>
+            <div class="status-bar">
+                <div class="status-message">
+                    <div class="status-dot" id="statusDot"></div>
+                    <span id="statusText">Ready</span>
+                </div>
+                <span id="coordinates">Lat: --, Lng: --</span>
+            </div>
+        </div>
+
+        <!-- Infographics Section (Placeholder) -->
+        <div class="infographics-section">
+            <div class="infographics-header">
+                <div class="infographics-title">Data Insights</div>
+                <span style="font-size: 12px; color: var(--ds-gray);">Coming Soon</span>
+            </div>
+            <div class="infographics-grid">
+                <div class="info-card">
+                    <div class="info-card-icon">📊</div>
+                    <div class="info-card-placeholder">Feature Statistics</div>
+                </div>
+                <div class="info-card">
+                    <div class="info-card-icon">🗺️</div>
+                    <div class="info-card-placeholder">Coverage Area</div>
+                </div>
+                <div class="info-card">
+                    <div class="info-card-icon">📈</div>
+                    <div class="info-card-placeholder">Temporal Analysis</div>
+                </div>
+                <div class="info-card">
+                    <div class="info-card-icon">🔍</div>
+                    <div class="info-card-placeholder">Attribute Summary</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+            integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+            crossorigin=""></script>
+
+    <script>
+        // Initialize map
+        const map = L.map('map').setView([39.8283, -98.5795], 4); // Center on US
+
+        // Add tile layer (OpenStreetMap)
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+            maxZoom: 19
+        }).addTo(map);
+
+        // Feature layer
+        let featureLayer = null;
+
+        // Demo GeoJSON data (sample polygons)
+        const demoData = {
+            "type": "FeatureCollection",
+            "features": [
+                {
+                    "type": "Feature",
+                    "properties": {
+                        "id": 1,
+                        "name": "Sample Region A",
+                        "area_km2": 1250.5,
+                        "population": 45000,
+                        "category": "urban"
+                    },
+                    "geometry": {
+                        "type": "Polygon",
+                        "coordinates": [[
+                            [-105.0, 40.0],
+                            [-104.0, 40.0],
+                            [-104.0, 41.0],
+                            [-105.0, 41.0],
+                            [-105.0, 40.0]
+                        ]]
+                    }
+                },
+                {
+                    "type": "Feature",
+                    "properties": {
+                        "id": 2,
+                        "name": "Sample Region B",
+                        "area_km2": 890.2,
+                        "population": 32000,
+                        "category": "suburban"
+                    },
+                    "geometry": {
+                        "type": "Polygon",
+                        "coordinates": [[
+                            [-103.5, 39.5],
+                            [-102.5, 39.5],
+                            [-102.5, 40.5],
+                            [-103.5, 40.5],
+                            [-103.5, 39.5]
+                        ]]
+                    }
+                },
+                {
+                    "type": "Feature",
+                    "properties": {
+                        "id": 3,
+                        "name": "Sample Region C",
+                        "area_km2": 2100.8,
+                        "population": 12000,
+                        "category": "rural"
+                    },
+                    "geometry": {
+                        "type": "Polygon",
+                        "coordinates": [[
+                            [-106.0, 38.5],
+                            [-104.5, 38.5],
+                            [-104.5, 39.5],
+                            [-106.0, 39.5],
+                            [-106.0, 38.5]
+                        ]]
+                    }
+                }
+            ]
+        };
+
+        // Style for features
+        const featureStyle = {
+            color: '#0071BC',
+            weight: 2,
+            fillColor: '#0071BC',
+            fillOpacity: 0.2
+        };
+
+        const highlightStyle = {
+            color: '#00A3DA',
+            weight: 3,
+            fillColor: '#00A3DA',
+            fillOpacity: 0.4
+        };
+
+        // Update status
+        function setStatus(message, isLoading = false) {
+            const statusDot = document.getElementById('statusDot');
+            const statusText = document.getElementById('statusText');
+
+            statusText.textContent = message;
+            statusDot.classList.toggle('loading', isLoading);
+        }
+
+        // Update feature count
+        function updateFeatureCount(count) {
+            document.getElementById('featureCount').textContent = `${count} feature${count !== 1 ? 's' : ''}`;
+        }
+
+        // Create popup content
+        function createPopupContent(properties) {
+            let html = `<div class="popup-title">${properties.name || 'Feature'}</div>`;
+
+            for (const [key, value] of Object.entries(properties)) {
+                if (key === 'name') continue;
+                html += `
+                    <div class="popup-row">
+                        <span class="popup-key">${key}:</span>
+                        <span class="popup-value">${value}</span>
+                    </div>
+                `;
+            }
+
+            return html;
+        }
+
+        // Load features
+        function loadFeatures() {
+            const collection = document.getElementById('collection').value;
+
+            if (!collection) {
+                alert('Please select a collection');
+                return;
+            }
+
+            setStatus('Loading features...', true);
+
+            // Simulate API call delay
+            setTimeout(() => {
+                // Clear existing layer
+                if (featureLayer) {
+                    map.removeLayer(featureLayer);
+                }
+
+                // Add demo data
+                featureLayer = L.geoJSON(demoData, {
+                    style: featureStyle,
+                    onEachFeature: (feature, layer) => {
+                        // Popup
+                        layer.bindPopup(createPopupContent(feature.properties));
+
+                        // Hover effects
+                        layer.on('mouseover', function() {
+                            this.setStyle(highlightStyle);
+                        });
+                        layer.on('mouseout', function() {
+                            this.setStyle(featureStyle);
+                        });
+                    }
+                }).addTo(map);
+
+                // Update UI
+                const count = demoData.features.length;
+                updateFeatureCount(count);
+                setStatus(`Loaded ${count} features from ${collection}`);
+
+                // Zoom to features
+                map.fitBounds(featureLayer.getBounds(), { padding: [50, 50] });
+
+            }, 500);
+        }
+
+        // Zoom to features
+        function zoomToFeatures() {
+            if (featureLayer) {
+                map.fitBounds(featureLayer.getBounds(), { padding: [50, 50] });
+                setStatus('Zoomed to features');
+            } else {
+                alert('No features loaded');
+            }
+        }
+
+        // Track mouse coordinates
+        map.on('mousemove', function(e) {
+            document.getElementById('coordinates').textContent =
+                `Lat: ${e.latlng.lat.toFixed(4)}, Lng: ${e.latlng.lng.toFixed(4)}`;
+        });
+
+        // Initial status
+        setStatus('Ready - Select a collection and click Load Features');
+    </script>
+</body>
+</html>

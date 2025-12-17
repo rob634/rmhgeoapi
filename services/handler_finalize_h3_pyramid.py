@@ -145,33 +145,30 @@ def _verify_cell_counts(
     logger
 ) -> Dict[str, Any]:
     """
-    Verify cell counts for all resolutions using H3 ratio verification.
+    Verify H3 cell counts using 7:1 ratio verification.
 
-    Two verification modes:
-    1. Absolute: Compare against expected_cells with ±10% tolerance
-    2. Ratio: Verify H3 parent-child ratios (7:1 per resolution level)
-
-    For filtered grids (country/bbox), ratio verification is more reliable
-    since absolute expected counts are unknown at job submission time.
+    H3 property: each parent cell has exactly 7 children.
+    We verify each resolution has ~7× the cells of the previous resolution.
 
     Args:
         h3_repo: H3Repository instance
-        grid_id_prefix: Grid ID prefix (e.g., "land")
+        grid_id_prefix: Grid ID prefix (e.g., "land", "albania_test2")
         resolutions: List of resolution levels to verify
-        expected_cells: Dict mapping resolution → expected cell count
+        expected_cells: Dict mapping resolution → expected count (ignored, kept for API compat)
         logger: Logger instance
 
     Returns:
         Verification results dict with:
-        - all_passed (bool): True if all resolutions pass verification
-        - total_cells (int): Sum of actual cells across all resolutions
-        - per_resolution (Dict[int, Dict]): Details per resolution
-        - failures (List[int]): Resolutions that failed verification
-        - verification_mode (str): "absolute" or "ratio"
+        - all_passed (bool): True if all resolutions pass
+        - total_cells (int): Sum of cells across all resolutions
+        - per_resolution (Dict): Details per resolution
+        - failures (List[int]): Resolutions that failed
     """
-    logger.info(f"🔍 Verifying cell counts for {len(resolutions)} resolutions...")
+    TOLERANCE = 0.05  # ±5% deviation allowed
 
-    # First, collect all actual counts
+    logger.info(f"🔍 Verifying H3 ratios for {len(resolutions)} resolutions (±{TOLERANCE*100:.0f}% tolerance)")
+
+    # Get actual counts from database
     actual_counts = {}
     for resolution in resolutions:
         grid_id = f"{grid_id_prefix}_res{resolution}"
@@ -183,94 +180,54 @@ def _verify_cell_counts(
                 )
                 actual_counts[resolution] = cur.fetchone()['count']
 
-    # Determine verification mode based on expected_cells
-    # If expected_cells has hardcoded global values (res2=2000) but actual is different,
-    # switch to ratio-based verification
-    base_res = min(resolutions)
-    expected_base = expected_cells.get(base_res, 0) if isinstance(expected_cells.get(base_res), int) else int(expected_cells.get(str(base_res), 0))
-    actual_base = actual_counts.get(base_res, 0)
-
-    # Use ratio verification if expected base doesn't match actual (filtered grid)
-    # Tolerance: expected should be within 50% of actual for absolute mode
-    use_ratio_mode = (expected_base == 0 or
-                      actual_base == 0 or
-                      abs(expected_base - actual_base) / max(actual_base, 1) > 0.5)
-
-    if use_ratio_mode:
-        logger.info(f"📊 Using RATIO verification (filtered grid detected)")
-        verification_mode = "ratio"
-    else:
-        logger.info(f"📊 Using ABSOLUTE verification")
-        verification_mode = "absolute"
-
-    per_resolution_results = {}
+    # Verify ratios
+    sorted_res = sorted(resolutions)
+    per_resolution = {}
     total_cells = 0
     failures = []
 
-    sorted_resolutions = sorted(resolutions)
+    for i, res in enumerate(sorted_res):
+        actual = actual_counts[res]
+        total_cells += actual
 
-    for i, resolution in enumerate(sorted_resolutions):
-        grid_id = f"{grid_id_prefix}_res{resolution}"
-        actual_count = actual_counts[resolution]
-        total_cells += actual_count
-
-        if use_ratio_mode:
-            # RATIO MODE: Verify H3 7:1 parent-child relationship
-            if i == 0:
-                # Base resolution - just check it has cells
-                passed = actual_count > 0
-                expected_count = actual_count  # Self-reference for base
-                variance_pct = 0.0
-            else:
-                # Higher resolutions - should be ~7x previous resolution
-                prev_res = sorted_resolutions[i - 1]
-                prev_count = actual_counts[prev_res]
-                expected_count = prev_count * 7
-
-                # Allow ±15% tolerance for ratio (some edge effects)
-                tolerance = 0.15
-                min_acceptable = int(expected_count * (1 - tolerance))
-                max_acceptable = int(expected_count * (1 + tolerance))
-                passed = min_acceptable <= actual_count <= max_acceptable
-                variance_pct = round(((actual_count - expected_count) / expected_count) * 100, 2) if expected_count > 0 else 0.0
+        if i == 0:
+            # Base resolution: just needs cells > 0
+            passed = actual > 0
+            expected = actual
+            ratio = 1.0
         else:
-            # ABSOLUTE MODE: Compare against expected_cells
-            expected_count = expected_cells.get(resolution, 0)
-            if isinstance(expected_count, str):
-                expected_count = int(expected_count)
-            tolerance = 0.10  # ±10%
-            min_acceptable = int(expected_count * (1 - tolerance))
-            max_acceptable = int(expected_count * (1 + tolerance))
-            passed = min_acceptable <= actual_count <= max_acceptable
-            variance_pct = round(((actual_count - expected_count) / expected_count) * 100, 2) if expected_count > 0 else 0.0
+            # Check 7:1 ratio with previous resolution
+            prev_res = sorted_res[i - 1]
+            prev_count = actual_counts[prev_res]
+            expected = prev_count * 7
+            ratio = actual / expected if expected > 0 else 0
 
-        per_resolution_results[resolution] = {
-            "grid_id": grid_id,
-            "actual_count": actual_count,
-            "expected_count": expected_count,
-            "passed": passed,
-            "variance_pct": variance_pct,
-            "verification_mode": verification_mode
+            # Pass if within ±5% of expected
+            passed = (1 - TOLERANCE) <= ratio <= (1 + TOLERANCE)
+
+        per_resolution[res] = {
+            "grid_id": f"{grid_id_prefix}_res{res}",
+            "actual": actual,
+            "expected": expected,
+            "ratio": round(ratio, 4),
+            "passed": passed
         }
 
-        if not passed:
-            failures.append(resolution)
-            logger.warning(
-                f"⚠️ Resolution {resolution}: {actual_count:,} cells "
-                f"(expected {expected_count:,}, variance {variance_pct}%)"
-            )
+        if passed:
+            logger.info(f"✅ Res {res}: {actual:,} cells (ratio: {ratio:.4f})")
         else:
-            logger.info(
-                f"✅ Resolution {resolution}: {actual_count:,} cells "
-                f"(expected ~{expected_count:,}, variance {variance_pct}%)"
-            )
+            failures.append(res)
+            logger.warning(f"❌ Res {res}: {actual:,} cells (expected {expected:,}, ratio: {ratio:.4f})")
+
+    all_passed = len(failures) == 0
+    logger.info(f"{'✅' if all_passed else '❌'} Verification: {total_cells:,} total cells, {len(failures)} failures")
 
     return {
-        "all_passed": len(failures) == 0,
+        "all_passed": all_passed,
         "total_cells": total_cells,
-        "per_resolution": per_resolution_results,
+        "per_resolution": per_resolution,
         "failures": failures,
-        "verification_mode": verification_mode
+        "tolerance": TOLERANCE
     }
 
 

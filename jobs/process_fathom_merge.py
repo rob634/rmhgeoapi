@@ -200,7 +200,8 @@ class ProcessFathomMergeJob(JobBaseMixin, JobBase):
                         "output_container": job_params.get("output_container", FathomDefaults.PHASE2_OUTPUT_CONTAINER),
                         "output_prefix": job_params.get("output_prefix", FathomDefaults.PHASE2_OUTPUT_PREFIX),
                         "region_code": job_params["region_code"],
-                        "force_reprocess": job_params.get("force_reprocess", False)
+                        "force_reprocess": job_params.get("force_reprocess", False),
+                        "job_id": job_id  # For tracking in app.etl_fathom
                     }
                 })
 

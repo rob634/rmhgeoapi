@@ -25,6 +25,10 @@ class DocsInterface(BaseInterface):
         - POST /api/platform/raster-collection - Multiple raster files
         - GET /api/platform/status/{request_id} - Check request status
         - GET /api/platform/health - Platform health check
+        - GET /api/platform/stats - Job statistics
+        - GET /api/platform/failures - Recent failures
+        - POST /api/jobs/submit/unpublish_vector - Remove vector data
+        - POST /api/jobs/submit/unpublish_raster - Remove raster data
     """
 
     def render(self, request: func.HttpRequest) -> str:
@@ -39,22 +43,25 @@ class DocsInterface(BaseInterface):
     def _generate_css(self) -> str:
         """Documentation-specific styles."""
         return """
-            .docs-header {
-                background: linear-gradient(135deg, var(--ds-navy) 0%, var(--ds-blue-dark) 100%);
-                color: white;
-                padding: 30px;
-                border-radius: 8px;
-                margin-bottom: 24px;
+            .dashboard-header {
+                background: white;
+                padding: 25px 30px;
+                border-radius: 3px;
+                box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+                margin-bottom: 20px;
+                border-left: 4px solid #0071BC;
             }
 
-            .docs-header h1 {
-                margin: 0 0 8px 0;
-                font-size: 28px;
+            .dashboard-header h1 {
+                color: #053657;
+                font-size: 24px;
+                margin-bottom: 8px;
+                font-weight: 700;
             }
 
             .subtitle {
-                opacity: 0.9;
-                font-size: 16px;
+                color: #626F86;
+                font-size: 14px;
                 margin: 0;
             }
 
@@ -335,7 +342,7 @@ class DocsInterface(BaseInterface):
         """Generate documentation content for Platform API."""
         return """
         <div class="container">
-            <header class="docs-header">
+            <header class="dashboard-header">
                 <h1>Platform API Documentation</h1>
                 <p class="subtitle">DDH Integration Endpoints for Geospatial Data Processing</p>
             </header>
@@ -364,6 +371,13 @@ class DocsInterface(BaseInterface):
                         <li><a href="#platform-health">GET /api/platform/health</a> - Platform health check</li>
                         <li><a href="#platform-stats">GET /api/platform/stats</a> - Job statistics</li>
                         <li><a href="#platform-failures">GET /api/platform/failures</a> - Recent failures</li>
+                    </ul>
+                </div>
+                <div class="toc-section">
+                    <div class="toc-section-title">Unpublish / Delete</div>
+                    <ul>
+                        <li><a href="#unpublish-vector">POST /api/jobs/submit/unpublish_vector</a> - Remove vector data</li>
+                        <li><a href="#unpublish-raster">POST /api/jobs/submit/unpublish_raster</a> - Remove raster data</li>
                     </ul>
                 </div>
             </div>
@@ -863,6 +877,270 @@ curl -X POST \\
     }
   ],
   <span class="key">"total_failures"</span>: 3
+}</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Unpublish Vector -->
+            <div id="unpublish-vector" class="endpoint-section">
+                <div class="endpoint-header">
+                    <span class="method-badge post">POST</span>
+                    <code class="endpoint-path">/api/jobs/submit/unpublish_vector</code>
+                    <h2>Unpublish Vector Data</h2>
+                </div>
+                <div class="endpoint-body">
+                    <p class="endpoint-desc">
+                        Remove a vector dataset from the platform. Drops the PostGIS table,
+                        deletes metadata from <code>geo.table_metadata</code>, and optionally removes
+                        the associated STAC item. Supports dry run mode for safe previewing.
+                    </p>
+
+                    <div class="params-section">
+                        <h3>Request Parameters</h3>
+                        <table class="params-table">
+                            <thead>
+                                <tr>
+                                    <th>Name</th>
+                                    <th>Type</th>
+                                    <th>Required</th>
+                                    <th>Description</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td><span class="param-name">table_name</span></td>
+                                    <td><span class="param-type">string</span></td>
+                                    <td><span class="param-required">Required</span></td>
+                                    <td>PostGIS table name to remove (e.g., "city_parcels_v1_0")</td>
+                                </tr>
+                                <tr>
+                                    <td><span class="param-name">schema_name</span></td>
+                                    <td><span class="param-type">string</span></td>
+                                    <td><span class="param-optional">Optional</span></td>
+                                    <td>PostgreSQL schema (default: "geo")</td>
+                                </tr>
+                                <tr>
+                                    <td><span class="param-name">dry_run</span></td>
+                                    <td><span class="param-type">boolean</span></td>
+                                    <td><span class="param-optional">Optional</span></td>
+                                    <td>Preview mode - shows what would be deleted without executing (default: true)</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <div class="params-section">
+                        <h3>Workflow Stages</h3>
+                        <table class="params-table">
+                            <thead>
+                                <tr>
+                                    <th>Stage</th>
+                                    <th>Task</th>
+                                    <th>Description</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td>1</td>
+                                    <td><code>inventory_vector</code></td>
+                                    <td>Query geo.table_metadata for ETL/STAC linkage</td>
+                                </tr>
+                                <tr>
+                                    <td>2</td>
+                                    <td><code>drop_vector_table</code></td>
+                                    <td>DROP PostGIS table + DELETE metadata row</td>
+                                </tr>
+                                <tr>
+                                    <td>3</td>
+                                    <td><code>cleanup_vector</code></td>
+                                    <td>Delete STAC item if linked + create audit record</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <div class="params-section">
+                        <h3>Example Request</h3>
+                        <div class="example-tabs">
+                            <button class="example-tab active" onclick="showExample('unpublish-vector', 'preview')">Preview (Dry Run)</button>
+                            <button class="example-tab" onclick="showExample('unpublish-vector', 'execute')">Execute Delete</button>
+                        </div>
+
+                        <div id="unpublish-vector-preview" class="code-block"><span class="comment"># Preview what will be deleted (safe - dry_run=true)</span>
+curl -X POST \\
+  ${API_BASE_URL}/api/jobs/submit/unpublish_vector \\
+  -H 'Content-Type: application/json' \\
+  -d '{
+    <span class="key">"table_name"</span>: <span class="string">"city_parcels_v1_0"</span>,
+    <span class="key">"dry_run"</span>: true
+  }'</div>
+
+                        <div id="unpublish-vector-execute" class="code-block" style="display: none;"><span class="comment"># Actually delete (set dry_run=false)</span>
+curl -X POST \\
+  ${API_BASE_URL}/api/jobs/submit/unpublish_vector \\
+  -H 'Content-Type: application/json' \\
+  -d '{
+    <span class="key">"table_name"</span>: <span class="string">"city_parcels_v1_0"</span>,
+    <span class="key">"dry_run"</span>: false
+  }'</div>
+                    </div>
+
+                    <div class="response-section">
+                        <h4>Response</h4>
+                        <span class="status-badge success">202 Accepted</span>
+                        <div class="code-block">{
+  <span class="key">"success"</span>: true,
+  <span class="key">"job_id"</span>: <span class="string">"abc123..."</span>,
+  <span class="key">"job_type"</span>: <span class="string">"unpublish_vector"</span>,
+  <span class="key">"message"</span>: <span class="string">"Vector unpublish job submitted (dry_run=true)"</span>,
+  <span class="key">"monitor_url"</span>: <span class="string">"/api/jobs/status/abc123..."</span>
+}</div>
+                    </div>
+
+                    <div class="response-section">
+                        <h4>Job Result (when completed)</h4>
+                        <div class="code-block">{
+  <span class="key">"job_result"</span>: {
+    <span class="key">"table_dropped"</span>: <span class="string">"geo.city_parcels_v1_0"</span>,
+    <span class="key">"metadata_deleted"</span>: true,
+    <span class="key">"stac_item_deleted"</span>: <span class="string">"city-parcels-v1-0"</span>,
+    <span class="key">"audit_record_id"</span>: <span class="string">"unpublish_abc123"</span>
+  }
+}</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Unpublish Raster -->
+            <div id="unpublish-raster" class="endpoint-section">
+                <div class="endpoint-header">
+                    <span class="method-badge post">POST</span>
+                    <code class="endpoint-path">/api/jobs/submit/unpublish_raster</code>
+                    <h2>Unpublish Raster Data</h2>
+                </div>
+                <div class="endpoint-body">
+                    <p class="endpoint-desc">
+                        Remove a raster dataset from the platform. Deletes the STAC item and
+                        associated COG/MosaicJSON blobs from Azure storage. Supports dry run mode
+                        for safe previewing.
+                    </p>
+
+                    <div class="params-section">
+                        <h3>Request Parameters</h3>
+                        <table class="params-table">
+                            <thead>
+                                <tr>
+                                    <th>Name</th>
+                                    <th>Type</th>
+                                    <th>Required</th>
+                                    <th>Description</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td><span class="param-name">stac_item_id</span></td>
+                                    <td><span class="param-type">string</span></td>
+                                    <td><span class="param-required">Required</span></td>
+                                    <td>STAC item ID to remove (e.g., "aerial-imagery-2024-site-alpha-v1.0")</td>
+                                </tr>
+                                <tr>
+                                    <td><span class="param-name">collection_id</span></td>
+                                    <td><span class="param-type">string</span></td>
+                                    <td><span class="param-required">Required</span></td>
+                                    <td>STAC collection containing the item (e.g., "aerial-imagery-2024")</td>
+                                </tr>
+                                <tr>
+                                    <td><span class="param-name">dry_run</span></td>
+                                    <td><span class="param-type">boolean</span></td>
+                                    <td><span class="param-optional">Optional</span></td>
+                                    <td>Preview mode - shows what would be deleted without executing (default: true)</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <div class="params-section">
+                        <h3>Workflow Stages</h3>
+                        <table class="params-table">
+                            <thead>
+                                <tr>
+                                    <th>Stage</th>
+                                    <th>Task</th>
+                                    <th>Description</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td>1</td>
+                                    <td><code>inventory_raster</code></td>
+                                    <td>Query STAC item, extract asset hrefs for deletion</td>
+                                </tr>
+                                <tr>
+                                    <td>2</td>
+                                    <td><code>delete_raster_blobs</code></td>
+                                    <td>Fan-out deletion of COG/MosaicJSON blobs</td>
+                                </tr>
+                                <tr>
+                                    <td>3</td>
+                                    <td><code>cleanup_raster</code></td>
+                                    <td>Delete STAC item + create audit record</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <div class="params-section">
+                        <h3>Example Request</h3>
+                        <div class="example-tabs">
+                            <button class="example-tab active" onclick="showExample('unpublish-raster', 'preview')">Preview (Dry Run)</button>
+                            <button class="example-tab" onclick="showExample('unpublish-raster', 'execute')">Execute Delete</button>
+                        </div>
+
+                        <div id="unpublish-raster-preview" class="code-block"><span class="comment"># Preview what will be deleted (safe - dry_run=true)</span>
+curl -X POST \\
+  ${API_BASE_URL}/api/jobs/submit/unpublish_raster \\
+  -H 'Content-Type: application/json' \\
+  -d '{
+    <span class="key">"stac_item_id"</span>: <span class="string">"aerial-imagery-2024-site-alpha-v1.0"</span>,
+    <span class="key">"collection_id"</span>: <span class="string">"aerial-imagery-2024"</span>,
+    <span class="key">"dry_run"</span>: true
+  }'</div>
+
+                        <div id="unpublish-raster-execute" class="code-block" style="display: none;"><span class="comment"># Actually delete (set dry_run=false)</span>
+curl -X POST \\
+  ${API_BASE_URL}/api/jobs/submit/unpublish_raster \\
+  -H 'Content-Type: application/json' \\
+  -d '{
+    <span class="key">"stac_item_id"</span>: <span class="string">"aerial-imagery-2024-site-alpha-v1.0"</span>,
+    <span class="key">"collection_id"</span>: <span class="string">"aerial-imagery-2024"</span>,
+    <span class="key">"dry_run"</span>: false
+  }'</div>
+                    </div>
+
+                    <div class="response-section">
+                        <h4>Response</h4>
+                        <span class="status-badge success">202 Accepted</span>
+                        <div class="code-block">{
+  <span class="key">"success"</span>: true,
+  <span class="key">"job_id"</span>: <span class="string">"def456..."</span>,
+  <span class="key">"job_type"</span>: <span class="string">"unpublish_raster"</span>,
+  <span class="key">"message"</span>: <span class="string">"Raster unpublish job submitted (dry_run=true)"</span>,
+  <span class="key">"monitor_url"</span>: <span class="string">"/api/jobs/status/def456..."</span>
+}</div>
+                    </div>
+
+                    <div class="response-section">
+                        <h4>Job Result (when completed)</h4>
+                        <div class="code-block">{
+  <span class="key">"job_result"</span>: {
+    <span class="key">"stac_item_deleted"</span>: <span class="string">"aerial-imagery-2024-site-alpha-v1.0"</span>,
+    <span class="key">"blobs_deleted"</span>: [
+      <span class="string">"silver-cogs/aerial-imagery-2024/site-alpha/v1.0/site-alpha_cog_analysis.tif"</span>
+    ],
+    <span class="key">"collection_cleanup"</span>: false,
+    <span class="key">"audit_record_id"</span>: <span class="string">"unpublish_def456"</span>
+  }
 }</div>
                     </div>
                 </div>

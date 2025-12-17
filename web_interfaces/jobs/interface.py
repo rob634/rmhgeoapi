@@ -52,10 +52,10 @@ class JobsInterface(BaseInterface):
         """Generate HTML content for Job Monitor dashboard."""
         return """
         <div class="container">
-            <div class="page-header">
-                <h1 class="page-title">Job Monitor</h1>
-                <p class="page-subtitle">Monitor jobs and tasks from app.jobs table</p>
-            </div>
+            <header class="dashboard-header">
+                <h1>Job Monitor</h1>
+                <p class="subtitle">Monitor jobs and tasks from app.jobs table</p>
+            </header>
 
             <!-- Filter Bar -->
             <div class="filter-bar">
@@ -146,6 +146,28 @@ class JobsInterface(BaseInterface):
     def _generate_custom_css(self) -> str:
         """Generate custom CSS for Job Monitor."""
         return """
+        .dashboard-header {
+            background: white;
+            padding: 25px 30px;
+            border-radius: 3px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+            border-left: 4px solid #0071BC;
+        }
+
+        .dashboard-header h1 {
+            color: #053657;
+            font-size: 24px;
+            margin-bottom: 8px;
+            font-weight: 700;
+        }
+
+        .subtitle {
+            color: #626F86;
+            font-size: 14px;
+            margin: 0;
+        }
+
         .filter-bar {
             background: white;
             border-radius: 8px;

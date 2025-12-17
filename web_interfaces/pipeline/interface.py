@@ -46,21 +46,24 @@ class PipelineInterface(BaseInterface):
         """Pipeline-specific styles."""
         return """
             .dashboard-header {
-                background: linear-gradient(135deg, var(--ds-navy) 0%, var(--ds-blue-dark) 100%);
-                color: white;
-                padding: 30px;
-                border-radius: 8px;
-                margin-bottom: 24px;
+                background: white;
+                padding: 25px 30px;
+                border-radius: 3px;
+                box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+                margin-bottom: 20px;
+                border-left: 4px solid #0071BC;
             }
 
             .dashboard-header h1 {
-                margin: 0 0 8px 0;
-                font-size: 28px;
+                color: #053657;
+                font-size: 24px;
+                margin-bottom: 8px;
+                font-weight: 700;
             }
 
             .subtitle {
-                opacity: 0.9;
-                font-size: 16px;
+                color: #626F86;
+                font-size: 14px;
                 margin: 0;
             }
 

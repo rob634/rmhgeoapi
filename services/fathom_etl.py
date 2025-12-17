@@ -1,14 +1,18 @@
 """
 Fathom ETL Task Handlers.
 
-Two-phase architecture for Fathom flood hazard data processing.
+DATABASE-DRIVEN ARCHITECTURE (17 DEC 2025):
+All inventory operations query app.etl_fathom table populated by
+InventoryFathomContainerJob. Processing state is tracked inline:
+- phase1_processed_at: Set by fathom_band_stack after successful COG creation
+- phase2_processed_at: Set by fathom_spatial_merge after successful merge
 
 Phase 1 (Band Stacking):
-    - fathom_tile_inventory: Group by tile + scenario
+    - fathom_tile_inventory: Query DB for unprocessed tiles
     - fathom_band_stack: Stack 8 return periods into multi-band COG
 
 Phase 2 (Spatial Merge):
-    - fathom_grid_inventory: Group by NxN grid cell
+    - fathom_grid_inventory: Query DB for Phase 1 completed, Phase 2 pending
     - fathom_spatial_merge: Merge tiles band-by-band
 
 Shared:
@@ -23,7 +27,6 @@ import re
 import tempfile
 from pathlib import Path
 from typing import Dict, Any, List, Optional
-from collections import defaultdict
 
 from util_logger import LoggerFactory, ComponentType
 from config import FathomDefaults
@@ -53,102 +56,6 @@ FLOOD_TYPE_MAP = {
 # =============================================================================
 # INTERNAL HELPER FUNCTIONS
 # =============================================================================
-
-def _parse_fathom_path(path: str) -> Optional[Dict[str, Any]]:
-    """
-    Parse Fathom file path from CSV file lists to extract metadata.
-
-    Handles full paths from Fathom CSV file lists which include a prefix:
-    - SSBN Flood Hazard Maps/Global flood hazard maps v3 2023/{region}/{flood_type}/...
-
-    Supports two path structures after the prefix:
-    1. Present-day (no SSP): flood_type/year/return_period/filename.tif
-       COASTAL_DEFENDED/2020/1in100/1in100-COASTAL-DEFENDED-2020_n04w006.tif
-
-    2. Future projection (with SSP): flood_type/year/ssp/return_period/filename.tif
-       COASTAL_DEFENDED/2030/SSP2_4.5/1in100/1in100-COASTAL-DEFENDED-2030-SSP2_4.5_n05w004.tif
-
-    Note: This parses CSV paths (with prefix). For blob paths, use
-    _parse_fathom_blob_path() in fathom_container_inventory.py instead.
-
-    Returns:
-        Parsed metadata dict or None if parsing fails
-    """
-    try:
-        parts = path.split("/")
-
-        # Find the flood type part (starts with known flood type prefix)
-        # Skip any leading path components (e.g., "SSBN Flood Hazard Maps/...")
-        flood_type_idx = None
-        for i, part in enumerate(parts):
-            if part in FLOOD_TYPE_MAP:
-                flood_type_idx = i
-                break
-
-        if flood_type_idx is None:
-            return None
-
-        # Re-slice from flood type onwards
-        parts = parts[flood_type_idx:]
-
-        if len(parts) < 4:
-            return None
-
-        flood_type_raw = parts[0]  # e.g., "COASTAL_DEFENDED"
-        year = int(parts[1])  # e.g., 2020 or 2030
-        filename = parts[-1]  # e.g., "1in100-COASTAL-DEFENDED-2020_n04w006.tif"
-
-        # Determine path structure based on number of parts
-        # 4 parts: flood_type/year/return_period/filename (no SSP)
-        # 5 parts: flood_type/year/ssp/return_period/filename (with SSP)
-        if len(parts) == 4:
-            # Present-day: flood_type/year/return_period/filename
-            return_period = parts[2]  # e.g., "1in100"
-            ssp_raw = None
-        elif len(parts) == 5:
-            # Future projection: flood_type/year/ssp/return_period/filename
-            ssp_raw = parts[2]  # e.g., "SSP2_4.5"
-            return_period = parts[3]  # e.g., "1in100"
-        else:
-            return None
-
-        # Validate return period format
-        if not return_period.startswith("1in"):
-            return None
-
-        # Extract tile coordinate from filename
-        # Pattern: ..._n04w006.tif or ..._s10e020.tif
-        tile_match = re.search(r"_([ns]\d+[ew]\d+)\.tif$", filename, re.IGNORECASE)
-        if not tile_match:
-            return None
-        tile = tile_match.group(1).lower()
-
-        # Normalize flood type
-        ft_info = FLOOD_TYPE_MAP.get(flood_type_raw, {})
-
-        # Normalize SSP
-        ssp = SSP_MAP.get(ssp_raw) if ssp_raw else None
-
-        # Build the normalized blob path (from flood_type onwards)
-        # This is the actual path in Azure blob storage
-        normalized_path = "/".join(parts)
-
-        return {
-            "path": normalized_path,  # Normalized path for blob storage
-            "original_path": path,    # Original path from CSV (for debugging)
-            "flood_type_raw": flood_type_raw,
-            "flood_type": ft_info.get("flood_type", "unknown"),
-            "defense": ft_info.get("defense", "unknown"),
-            "year": year,
-            "ssp_raw": ssp_raw,
-            "ssp": ssp,
-            "return_period": return_period,
-            "tile": tile
-        }
-
-    except Exception:
-        return None
-
 
 def _parse_tile_coordinate(tile: str) -> tuple:
     """
@@ -217,224 +124,170 @@ def _tile_to_grid_cell(tile: str, grid_size: int) -> str:
 
 def fathom_tile_inventory(params: dict, context: dict = None) -> dict:
     """
-    Parse Fathom file list and group by TILE + scenario (not country-wide).
+    Query app.etl_fathom to create tile_groups for Phase 1 processing.
 
-    Unlike fathom_inventory which groups all tiles for a scenario together,
-    this groups files so each output is a single 1×1 tile with 8 bands.
-
-    STAC-driven idempotency (03 DEC 2025):
-    - If collection_id provided, queries STAC for already-processed tiles
-    - Filters out tile_groups that already have STAC items
-    - Enables resumable global runs: interrupt → resume → skip completed
+    DATABASE-DRIVEN (17 DEC 2025):
+    - Queries app.etl_fathom table populated by InventoryFathomContainerJob
+    - Groups by phase1_group_key (tile + scenario)
+    - Filters by phase1_processed_at IS NULL for unprocessed records
+    - FAILS FAST if no records exist for region
 
     Args:
         params: Task parameters
-            - region_code: ISO country code (e.g., "CI")
-            - source_container: Container with source files
-            - file_list_csv: Path to CSV file (optional, auto-detected)
+            - region_code: ISO country code (e.g., "CI") - NOT USED, queries all
+            - source_container: Container filter (default: bronze-fathom)
             - flood_types: Filter by flood types (optional)
             - years: Filter by years (optional)
             - ssp_scenarios: Filter by SSP scenarios (optional)
             - bbox: Optional bounding box [west, south, east, north] to filter tiles
-            - collection_id: STAC collection ID for idempotency check
-            - skip_existing_stac: If True, skip tiles already in STAC (default: True)
+            - collection_id: STAC collection ID for output naming
             - dry_run: If True, only create inventory
 
     Returns:
         dict with tile_groups (one per tile+scenario combination)
     """
-    import pandas as pd
-    from infrastructure import BlobRepository
+    from infrastructure.postgresql import PostgreSQLRepository
 
     logger = LoggerFactory.create_logger(
         ComponentType.SERVICE,
         "fathom_tile_inventory"
     )
 
-    region_code = params["region_code"].upper()
+    # region_code is informational only - we query all unprocessed records
+    region_code = params.get("region_code", "ALL").upper()
     source_container = params.get("source_container", FathomDefaults.SOURCE_CONTAINER)
-    file_list_csv = params.get("file_list_csv")
     filter_flood_types = params.get("flood_types")
     filter_years = params.get("years")
     filter_ssp = params.get("ssp_scenarios")
     bbox = params.get("bbox")  # [west, south, east, north]
     collection_id = params.get("collection_id", FathomDefaults.PHASE1_COLLECTION_ID)
-    skip_existing_stac = params.get("skip_existing_stac", True)
     dry_run = params.get("dry_run", False)
 
-    logger.info(f"📋 Starting Fathom TILE inventory for region: {region_code}")
+    logger.info(f"📋 Starting Fathom TILE inventory from database")
+    logger.info(f"   Source container filter: {source_container}")
     if bbox:
         logger.info(f"   Spatial filter (bbox): {bbox}")
 
-    # Auto-detect CSV filename if not provided
-    # Bronze zone - source Fathom data
-    blob_repo = BlobRepository.for_zone("bronze")
-    if not file_list_csv:
-        # Use prefix filter to avoid listing millions of tiles
-        # CSV files are named like "CI_Côte_d'Ivoire_file_list.csv"
-        csv_blobs = blob_repo.list_blobs(source_container, prefix=f"{region_code}_")
-        matching = [b["name"] if isinstance(b, dict) else b for b in csv_blobs
-                   if (b["name"] if isinstance(b, dict) else b).endswith('_file_list.csv')]
+    # Build SQL query with filters
+    where_clauses = [
+        "phase1_processed_at IS NULL",
+        "source_container = %(source_container)s"
+    ]
+    query_params = {"source_container": source_container}
 
-        if not matching:
-            # Fallback: try without prefix in case naming varies (limited search)
-            logger.warning(f"No CSV found with prefix {region_code}_, trying root-level search...")
-            root_blobs = blob_repo.list_blobs(source_container, limit=1000)
-            matching = [b["name"] if isinstance(b, dict) else b for b in root_blobs
-                       if (b["name"] if isinstance(b, dict) else b).endswith('_file_list.csv') and
-                       (b["name"] if isinstance(b, dict) else b).startswith(f"{region_code}_")]
-
-        if not matching:
-            return {
-                "success": False,
-                "error": f"No file list CSV found for region {region_code}. Expected format: {region_code}_*_file_list.csv"
-            }
-        file_list_csv = matching[0]
-
-    logger.info(f"   Using file list: {file_list_csv}")
-
-    # Download and parse CSV
-    csv_bytes = blob_repo.read_blob(source_container, file_list_csv)
-
-    with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as tmp:
-        tmp.write(csv_bytes)
-        tmp_path = tmp.name
-
-    df = pd.read_csv(tmp_path)
-    Path(tmp_path).unlink()
-
-    logger.info(f"   Loaded {len(df)} file paths from CSV")
-
-    # Parse file paths
-    parsed_files = []
-    for path in df.iloc[:, 0]:
-        parsed = _parse_fathom_path(path)
-        if parsed:
-            parsed_files.append(parsed)
-
-    logger.info(f"   Parsed {len(parsed_files)} valid file records")
-
-    # Apply filters
     if filter_flood_types:
-        parsed_files = [f for f in parsed_files if f["flood_type_raw"] in filter_flood_types]
-        logger.info(f"   After flood_type filter: {len(parsed_files)} files")
+        # Convert raw flood types to normalized (e.g., COASTAL_DEFENDED → coastal, defended)
+        flood_type_conditions = []
+        for ft_raw in filter_flood_types:
+            if ft_raw in FLOOD_TYPE_MAP:
+                ft_info = FLOOD_TYPE_MAP[ft_raw]
+                flood_type_conditions.append(
+                    f"(flood_type = '{ft_info['flood_type']}' AND defense = '{ft_info['defense']}')"
+                )
+        if flood_type_conditions:
+            where_clauses.append(f"({' OR '.join(flood_type_conditions)})")
+        logger.info(f"   Filter: flood_types = {filter_flood_types}")
 
     if filter_years:
-        parsed_files = [f for f in parsed_files if f["year"] in filter_years]
-        logger.info(f"   After year filter: {len(parsed_files)} files")
+        where_clauses.append("year = ANY(%(years)s)")
+        query_params["years"] = filter_years
+        logger.info(f"   Filter: years = {filter_years}")
 
     if filter_ssp:
-        parsed_files = [f for f in parsed_files if f["ssp_raw"] in filter_ssp or f["ssp_raw"] is None]
-        logger.info(f"   After SSP filter: {len(parsed_files)} files")
+        # Normalize SSP values for query
+        normalized_ssp = [SSP_MAP.get(s, s) for s in filter_ssp]
+        where_clauses.append("(ssp = ANY(%(ssp)s) OR ssp IS NULL)")
+        query_params["ssp"] = normalized_ssp
+        logger.info(f"   Filter: ssp_scenarios = {filter_ssp}")
 
-    # Apply bbox filter if provided
     if bbox:
-        def _tile_in_bbox(tile: str, bbox: list) -> bool:
-            """Check if tile coordinate falls within bbox."""
-            try:
-                lat, lon = _parse_tile_coordinate(tile)
-                # Tile is 1x1 degree, check if tile origin is within bbox
-                # bbox = [west, south, east, north]
-                return (bbox[0] <= lon <= bbox[2]) and (bbox[1] <= lat <= bbox[3])
-            except ValueError:
-                return False
+        # Filter tiles by bbox - tile coordinate must be within bbox
+        # We'll filter in Python after query since tile parsing is complex
+        pass  # Applied post-query
 
-        before_count = len(parsed_files)
-        parsed_files = [f for f in parsed_files if _tile_in_bbox(f["tile"], bbox)]
-        logger.info(f"   After bbox filter: {len(parsed_files)} files (was {before_count})")
+    where_clause = " AND ".join(where_clauses)
 
-    # Group by TILE + flood_type + year + ssp (not just flood_type + year + ssp)
-    groups = defaultdict(lambda: {
-        "tile": None,
-        "flood_type_raw": None,
-        "flood_type": None,
-        "defense": None,
-        "year": None,
-        "ssp_raw": None,
-        "ssp": None,
-        "return_period_files": {}  # return_period → file_path (single file per RP)
-    })
+    # Query grouped by phase1_group_key with return_period_files aggregation
+    sql = f"""
+        SELECT
+            phase1_group_key,
+            tile,
+            flood_type,
+            defense,
+            year,
+            ssp,
+            json_object_agg(return_period, source_blob_path ORDER BY return_period) as return_period_files,
+            COUNT(*) as file_count
+        FROM app.etl_fathom
+        WHERE {where_clause}
+        GROUP BY phase1_group_key, tile, flood_type, defense, year, ssp
+        ORDER BY phase1_group_key
+    """
 
-    for f in parsed_files:
-        # Group key includes tile coordinate
-        key = (f["tile"], f["flood_type_raw"], f["year"], f["ssp_raw"])
-        group = groups[key]
+    repo = PostgreSQLRepository()
+    with repo._get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, query_params)
+            rows = cur.fetchall()
+            columns = [desc[0] for desc in cur.description]
 
-        group["tile"] = f["tile"]
-        group["flood_type_raw"] = f["flood_type_raw"]
-        group["flood_type"] = f["flood_type"]
-        group["defense"] = f["defense"]
-        group["year"] = f["year"]
-        group["ssp_raw"] = f["ssp_raw"]
-        group["ssp"] = f["ssp"]
-        # Each tile has exactly one file per return period
-        group["return_period_files"][f["return_period"]] = f["path"]
+    logger.info(f"   Query returned {len(rows)} tile groups")
 
-    # Convert to output format
+    # FAIL FAST if no records
+    if not rows:
+        error_msg = (
+            f"No unprocessed records found in app.etl_fathom for container '{source_container}'. "
+            f"Run inventory_fathom_container job first to populate the table."
+        )
+        logger.error(f"❌ {error_msg}")
+        raise ValueError(error_msg)
+
+    # Convert to tile_groups format
     tile_groups = []
-    for key, group in groups.items():
-        tile = group["tile"]
-        flood_type_slug = f"{group['flood_type']}-{group['defense']}"
-        year = group["year"]
+    for row in rows:
+        row_dict = dict(zip(columns, row))
 
-        if group["ssp"]:
-            output_name = f"{tile}_{flood_type_slug}_{year}_{group['ssp']}"
-        else:
-            output_name = f"{tile}_{flood_type_slug}_{year}"
+        # Apply bbox filter if provided
+        if bbox:
+            try:
+                lat, lon = _parse_tile_coordinate(row_dict["tile"])
+                # Check if tile origin is within bbox [west, south, east, north]
+                if not (bbox[0] <= lon <= bbox[2] and bbox[1] <= lat <= bbox[3]):
+                    continue
+            except ValueError:
+                continue
+
+        # Build output_name from phase1_group_key (already in correct format)
+        output_name = row_dict["phase1_group_key"]
+
+        # return_period_files is already a dict from json_object_agg
+        rp_files = row_dict["return_period_files"]
+        if isinstance(rp_files, str):
+            import json
+            rp_files = json.loads(rp_files)
 
         # Check for missing return periods
-        rp_files = group["return_period_files"]
         missing_rps = [rp for rp in RETURN_PERIODS if rp not in rp_files]
-
         if missing_rps:
             logger.warning(f"   ⚠️ {output_name}: Missing return periods: {missing_rps}")
 
+        # Reconstruct flood_type_raw for backward compatibility
+        flood_type = row_dict["flood_type"]
+        defense = row_dict["defense"]
+        flood_type_raw = f"{flood_type.upper()}_{defense.upper()}"
+
         tile_groups.append({
             "output_name": output_name,
-            "tile": tile,
-            "flood_type_raw": group["flood_type_raw"],
-            "flood_type": group["flood_type"],
-            "defense": group["defense"],
-            "year": group["year"],
-            "ssp_raw": group["ssp_raw"],
-            "ssp": group["ssp"],
+            "tile": row_dict["tile"],
+            "flood_type_raw": flood_type_raw,
+            "flood_type": flood_type,
+            "defense": defense,
+            "year": row_dict["year"],
+            "ssp_raw": None,  # Not stored in DB, not needed
+            "ssp": row_dict["ssp"],
             "return_period_files": rp_files,
-            "file_count": len(rp_files)
+            "file_count": row_dict["file_count"]
         })
-
-    # Sort for consistent ordering
-    tile_groups.sort(key=lambda x: x["output_name"])
-
-    # =========================================================================
-    # STAC-DRIVEN IDEMPOTENCY (03 DEC 2025)
-    # Query existing STAC items and filter out already-processed tile groups
-    # =========================================================================
-    skipped_count = 0
-    full_collection_id = f"{collection_id}-{region_code.lower()}"
-
-    if skip_existing_stac and not dry_run:
-        try:
-            from infrastructure.pgstac_bootstrap import PgStacBootstrap
-
-            stac = PgStacBootstrap()
-            existing_item_ids = stac.get_existing_item_ids(
-                collection_id=full_collection_id,
-                bbox=bbox  # Use same bbox filter for STAC query
-            )
-
-            if existing_item_ids:
-                before_count = len(tile_groups)
-                tile_groups = [
-                    g for g in tile_groups
-                    if g["output_name"] not in existing_item_ids
-                ]
-                skipped_count = before_count - len(tile_groups)
-                logger.info(
-                    f"   🔄 STAC idempotency: {skipped_count} tile groups already in STAC, "
-                    f"{len(tile_groups)} remaining to process"
-                )
-        except Exception as e:
-            logger.warning(f"   ⚠️ STAC idempotency check failed (will process all): {e}")
 
     # Summary statistics
     unique_tiles = len(set(g["tile"] for g in tile_groups))
@@ -442,17 +295,17 @@ def fathom_tile_inventory(params: dict, context: dict = None) -> dict:
     all_years = sorted(set(g["year"] for g in tile_groups)) if tile_groups else []
     total_files = sum(g["file_count"] for g in tile_groups)
 
-    logger.info(f"✅ Tile inventory complete:")
+    logger.info(f"✅ Tile inventory complete (database-driven):")
     logger.info(f"   Total source files: {total_files}")
     logger.info(f"   Unique tiles: {unique_tiles}")
     logger.info(f"   Tile groups (output COGs): {len(tile_groups)}")
-    if skipped_count > 0:
-        logger.info(f"   Skipped (already in STAC): {skipped_count}")
     logger.info(f"   Flood types: {all_flood_types}")
     logger.info(f"   Years: {all_years}")
 
     if dry_run:
         logger.info("   🔍 DRY RUN - no files will be processed")
+
+    full_collection_id = f"{collection_id}-{region_code.lower()}"
 
     return {
         "success": True,
@@ -465,9 +318,10 @@ def fathom_tile_inventory(params: dict, context: dict = None) -> dict:
             "flood_types": all_flood_types,
             "years": all_years,
             "dry_run": dry_run,
-            "skipped_existing_stac": skipped_count,
+            "skipped_existing_stac": 0,  # DB-driven idempotency via phase1_processed_at
             "stac_collection": full_collection_id,
-            "bbox": bbox
+            "bbox": bbox,
+            "source": "database"  # Indicate database-driven inventory
         }
     }
 
@@ -510,6 +364,7 @@ def fathom_band_stack(params: dict, context: dict = None) -> dict:
     output_prefix = params.get("output_prefix", FathomDefaults.PHASE1_OUTPUT_PREFIX)
     region_code = params["region_code"].lower()
     force_reprocess = params.get("force_reprocess", False)
+    job_id = params.get("job_id")  # For tracking in app.etl_fathom
 
     tile = tile_group["tile"]
     output_name = tile_group["output_name"]
@@ -628,6 +483,12 @@ def fathom_band_stack(params: dict, context: dict = None) -> dict:
 
         logger.info(f"   ☁️ Uploaded: {output_container}/{output_blob_path}")
 
+    # =========================================================================
+    # INLINE STATE UPDATE (17 DEC 2025)
+    # Update app.etl_fathom records for this phase1_group_key
+    # =========================================================================
+    _update_phase1_processed(output_name, output_blob_path, job_id, logger)
+
     return {
         "success": True,
         "result": {
@@ -652,222 +513,171 @@ def fathom_band_stack(params: dict, context: dict = None) -> dict:
     }
 
 
+def _update_phase1_processed(phase1_group_key: str, output_blob: str, job_id: Optional[str], logger) -> None:
+    """
+    Update app.etl_fathom records to mark Phase 1 as processed.
+
+    Args:
+        phase1_group_key: The group key (same as output_name)
+        output_blob: Path to the output COG
+        job_id: Job ID for tracking
+        logger: Logger instance
+    """
+    from infrastructure.postgresql import PostgreSQLRepository
+
+    try:
+        repo = PostgreSQLRepository()
+        with repo._get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE app.etl_fathom
+                    SET phase1_processed_at = NOW(),
+                        phase1_output_blob = %(output_blob)s,
+                        phase1_job_id = %(job_id)s,
+                        updated_at = NOW()
+                    WHERE phase1_group_key = %(group_key)s
+                    """,
+                    {
+                        "output_blob": output_blob,
+                        "job_id": job_id,
+                        "group_key": phase1_group_key
+                    }
+                )
+                updated_count = cur.rowcount
+                conn.commit()
+
+        logger.info(f"   📝 Updated {updated_count} records in app.etl_fathom (phase1_processed_at)")
+    except Exception as e:
+        # Log but don't fail - processing succeeded, tracking is secondary
+        logger.warning(f"   ⚠️ Failed to update app.etl_fathom: {e}")
+
+
 # =============================================================================
 # PHASE 2 HANDLERS: Spatial Merge (process_fathom_merge job)
 # =============================================================================
 
 def fathom_grid_inventory(params: dict, context: dict = None) -> dict:
     """
-    List Phase 1 outputs and group by NxN grid cell.
+    Query app.etl_fathom to create grid_groups for Phase 2 processing.
 
-    Reads the stacked COGs from Phase 1 and groups them into grid cells
-    for spatial merging.
-
-    STAC-driven idempotency (03 DEC 2025):
-    - If collection_id provided, queries STAC for already-processed grid cells
-    - Filters out grid_groups that already have STAC items
-    - Enables resumable global runs: interrupt → resume → skip completed
+    DATABASE-DRIVEN (17 DEC 2025):
+    - Queries app.etl_fathom for Phase 1 completed, Phase 2 pending records
+    - Groups by phase2_group_key (grid_cell + scenario)
+    - Uses phase1_output_blob for tile blob paths
+    - FAILS FAST if no Phase 1 completed records exist
 
     Args:
         params: Task parameters
-            - region_code: ISO country code
-            - grid_size: Grid cell size in degrees (default: 5)
-            - source_container: Container with Phase 1 outputs
-            - source_prefix: Folder prefix for Phase 1 outputs
+            - region_code: ISO country code (informational only)
+            - grid_size: Grid cell size in degrees (informational - DB already has grid_cell)
+            - source_container: Container filter (default: bronze-fathom)
             - bbox: Optional bounding box [west, south, east, north] to filter
-            - collection_id: STAC collection ID for idempotency check
-            - skip_existing_stac: If True, skip grid cells already in STAC (default: True)
+            - collection_id: STAC collection ID for output naming
 
     Returns:
         dict with grid_groups (one per grid cell + scenario)
     """
-    from infrastructure import BlobRepository
+    from infrastructure.postgresql import PostgreSQLRepository
 
     logger = LoggerFactory.create_logger(
         ComponentType.SERVICE,
         "fathom_grid_inventory"
     )
 
-    region_code = params["region_code"].lower()
+    region_code = params.get("region_code", "all").lower()
     grid_size = params.get("grid_size", FathomDefaults.DEFAULT_GRID_SIZE)
-    source_container = params.get("source_container", FathomDefaults.PHASE1_OUTPUT_CONTAINER)
-    source_prefix = params.get("source_prefix", FathomDefaults.PHASE1_OUTPUT_PREFIX)
+    source_container = params.get("source_container", FathomDefaults.SOURCE_CONTAINER)
     bbox = params.get("bbox")  # [west, south, east, north]
     collection_id = params.get("collection_id", FathomDefaults.PHASE2_COLLECTION_ID)
-    skip_existing_stac = params.get("skip_existing_stac", True)
 
-    logger.info(f"📋 Starting grid inventory for region: {region_code}")
+    logger.info(f"📋 Starting grid inventory from database")
     logger.info(f"   Grid size: {grid_size}×{grid_size} degrees")
     if bbox:
         logger.info(f"   Spatial filter (bbox): {bbox}")
 
-    # Silver zone - reading Phase 1 stacked COGs (processed data)
-    blob_repo = BlobRepository.for_zone("silver")
+    # Query Phase 1 completed, Phase 2 pending records grouped by phase2_group_key
+    sql = """
+        SELECT
+            phase2_group_key,
+            grid_cell,
+            flood_type,
+            defense,
+            year,
+            ssp,
+            json_agg(
+                json_build_object('tile', tile, 'blob_path', phase1_output_blob)
+                ORDER BY tile
+            ) as tiles,
+            COUNT(*) as tile_count
+        FROM app.etl_fathom
+        WHERE phase1_processed_at IS NOT NULL
+          AND phase2_processed_at IS NULL
+          AND grid_cell IS NOT NULL
+          AND phase1_output_blob IS NOT NULL
+          AND source_container = %(source_container)s
+        GROUP BY phase2_group_key, grid_cell, flood_type, defense, year, ssp
+        ORDER BY phase2_group_key
+    """
 
-    # List all stacked COGs for this region
-    prefix = f"{source_prefix}/{region_code}/"
-    all_blobs = blob_repo.list_blobs(source_container, prefix=prefix)
-    cog_blobs = [b for b in all_blobs if b.endswith('.tif')]
+    repo = PostgreSQLRepository()
+    with repo._get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, {"source_container": source_container})
+            rows = cur.fetchall()
+            columns = [desc[0] for desc in cur.description]
 
-    logger.info(f"   Found {len(cog_blobs)} stacked COGs")
+    logger.info(f"   Query returned {len(rows)} grid groups")
 
-    if not cog_blobs:
-        return {
-            "success": False,
-            "error": f"No stacked COGs found at {source_container}/{prefix}"
-        }
+    # FAIL FAST if no records
+    if not rows:
+        error_msg = (
+            f"No Phase 1 completed records found in app.etl_fathom for Phase 2 processing. "
+            f"Run process_fathom_stack job first to complete Phase 1."
+        )
+        logger.error(f"❌ {error_msg}")
+        raise ValueError(error_msg)
 
-    # Parse blob paths to extract tile and scenario info
-    # Path format: fathom-stacked/{region}/{tile}/{scenario}.tif
-    groups = defaultdict(lambda: {
-        "grid_cell": None,
-        "flood_type": None,
-        "defense": None,
-        "year": None,
-        "ssp": None,
-        "tiles": []  # List of (tile, blob_path) tuples
-    })
-
-    for blob_path in cog_blobs:
-        # Parse: fathom-stacked/ci/n04w006/n04w006_coastal-defended_2020.tif
-        parts = blob_path.split("/")
-        if len(parts) < 4:
-            continue
-
-        tile = parts[2]  # e.g., "n04w006"
-        filename = parts[3]  # e.g., "n04w006_coastal-defended_2020.tif"
-
-        # Parse filename: {tile}_{flood_type}-{defense}_{year}[_{ssp}].tif
-        name_parts = filename.replace(".tif", "").split("_")
-        if len(name_parts) < 3:
-            continue
-
-        # tile = name_parts[0]  # Already have from path
-        flood_defense = name_parts[1]  # e.g., "coastal-defended"
-        year = int(name_parts[2])  # e.g., 2020
-        ssp = name_parts[3] if len(name_parts) > 3 else None  # e.g., "ssp245"
-
-        flood_type, defense = flood_defense.split("-") if "-" in flood_defense else (flood_defense, "unknown")
-
-        # Calculate grid cell
-        grid_cell = _tile_to_grid_cell(tile, grid_size)
-
-        # Group key: grid_cell + scenario
-        key = (grid_cell, flood_type, defense, year, ssp)
-        group = groups[key]
-
-        group["grid_cell"] = grid_cell
-        group["flood_type"] = flood_type
-        group["defense"] = defense
-        group["year"] = year
-        group["ssp"] = ssp
-        group["tiles"].append({
-            "tile": tile,
-            "blob_path": blob_path
-        })
-
-    # Convert to output format
+    # Convert to grid_groups format
     grid_groups = []
-    for key, group in groups.items():
-        grid_cell = group["grid_cell"]
-        flood_type_slug = f"{group['flood_type']}-{group['defense']}"
-        year = group["year"]
+    for row in rows:
+        row_dict = dict(zip(columns, row))
+        grid_cell = row_dict["grid_cell"]
 
-        if group["ssp"]:
-            output_name = f"{grid_cell}_{flood_type_slug}_{year}_{group['ssp']}"
-        else:
-            output_name = f"{grid_cell}_{flood_type_slug}_{year}"
+        # Apply bbox filter if provided
+        if bbox:
+            if not _grid_cell_in_bbox(grid_cell, bbox):
+                continue
+
+        # Build output_name from phase2_group_key (already in correct format)
+        output_name = row_dict["phase2_group_key"]
+
+        # tiles is already a list from json_agg
+        tiles = row_dict["tiles"]
+        if isinstance(tiles, str):
+            import json
+            tiles = json.loads(tiles)
 
         grid_groups.append({
             "output_name": output_name,
             "grid_cell": grid_cell,
-            "flood_type": group["flood_type"],
-            "defense": group["defense"],
-            "year": group["year"],
-            "ssp": group["ssp"],
-            "tiles": group["tiles"],
-            "tile_count": len(group["tiles"])
+            "flood_type": row_dict["flood_type"],
+            "defense": row_dict["defense"],
+            "year": row_dict["year"],
+            "ssp": row_dict["ssp"],
+            "tiles": tiles,
+            "tile_count": row_dict["tile_count"]
         })
-
-    # Sort for consistent ordering
-    grid_groups.sort(key=lambda x: x["output_name"])
-
-    # Apply bbox filter if provided (filter grid cells by their center point)
-    if bbox:
-        def _grid_cell_in_bbox(grid_cell: str, bbox: list) -> bool:
-            """Check if grid cell overlaps with bbox."""
-            # Parse grid cell: "n00-n05_w010-w005"
-            try:
-                import re
-                match = re.match(r"([ns])(\d+)-([ns])(\d+)_([ew])(\d+)-([ew])(\d+)", grid_cell)
-                if not match:
-                    return True  # Can't parse, include it
-
-                lat_min_sign = 1 if match.group(1) == 'n' else -1
-                lat_min = int(match.group(2)) * lat_min_sign
-                lat_max_sign = 1 if match.group(3) == 'n' else -1
-                lat_max = int(match.group(4)) * lat_max_sign
-
-                lon_min_sign = -1 if match.group(5) == 'w' else 1
-                lon_min = int(match.group(6)) * lon_min_sign
-                lon_max_sign = -1 if match.group(7) == 'w' else 1
-                lon_max = int(match.group(8)) * lon_max_sign
-
-                # Check if grid cell bbox overlaps with filter bbox
-                # bbox = [west, south, east, north]
-                return not (
-                    lon_max < bbox[0] or  # Grid is west of bbox
-                    lon_min > bbox[2] or  # Grid is east of bbox
-                    lat_max < bbox[1] or  # Grid is south of bbox
-                    lat_min > bbox[3]     # Grid is north of bbox
-                )
-            except Exception:
-                return True  # On error, include it
-
-        before_count = len(grid_groups)
-        grid_groups = [g for g in grid_groups if _grid_cell_in_bbox(g["grid_cell"], bbox)]
-        logger.info(f"   After bbox filter: {len(grid_groups)} grid groups (was {before_count})")
-
-    # =========================================================================
-    # STAC-DRIVEN IDEMPOTENCY (03 DEC 2025)
-    # Query existing STAC items and filter out already-processed grid groups
-    # =========================================================================
-    skipped_count = 0
-    full_collection_id = f"{collection_id}-{region_code}"
-
-    if skip_existing_stac and grid_groups:
-        try:
-            from infrastructure.pgstac_bootstrap import PgStacBootstrap
-
-            stac = PgStacBootstrap()
-            existing_item_ids = stac.get_existing_item_ids(
-                collection_id=full_collection_id,
-                bbox=bbox  # Use same bbox filter for STAC query
-            )
-
-            if existing_item_ids:
-                before_count = len(grid_groups)
-                grid_groups = [
-                    g for g in grid_groups
-                    if g["output_name"] not in existing_item_ids
-                ]
-                skipped_count = before_count - len(grid_groups)
-                logger.info(
-                    f"   🔄 STAC idempotency: {skipped_count} grid groups already in STAC, "
-                    f"{len(grid_groups)} remaining to process"
-                )
-        except Exception as e:
-            logger.warning(f"   ⚠️ STAC idempotency check failed (will process all): {e}")
 
     unique_grid_cells = len(set(g["grid_cell"] for g in grid_groups)) if grid_groups else 0
     total_tiles = sum(g["tile_count"] for g in grid_groups)
 
-    logger.info(f"✅ Grid inventory complete:")
+    logger.info(f"✅ Grid inventory complete (database-driven):")
     logger.info(f"   Unique grid cells: {unique_grid_cells}")
     logger.info(f"   Grid groups (output COGs): {len(grid_groups)}")
-    if skipped_count > 0:
-        logger.info(f"   Skipped (already in STAC): {skipped_count}")
     logger.info(f"   Total source tiles: {total_tiles}")
+
+    full_collection_id = f"{collection_id}-{region_code}"
 
     return {
         "success": True,
@@ -878,11 +688,42 @@ def fathom_grid_inventory(params: dict, context: dict = None) -> dict:
             "grid_group_count": len(grid_groups),
             "grid_groups": grid_groups,
             "total_tiles": total_tiles,
-            "skipped_existing_stac": skipped_count,
+            "skipped_existing_stac": 0,  # DB-driven idempotency via phase2_processed_at
             "stac_collection": full_collection_id,
-            "bbox": bbox
+            "bbox": bbox,
+            "source": "database"  # Indicate database-driven inventory
         }
     }
+
+
+def _grid_cell_in_bbox(grid_cell: str, bbox: list) -> bool:
+    """Check if grid cell overlaps with bbox."""
+    # Parse grid cell: "n00-n05_w010-w005"
+    try:
+        match = re.match(r"([ns])(\d+)-([ns])(\d+)_([ew])(\d+)-([ew])(\d+)", grid_cell)
+        if not match:
+            return True  # Can't parse, include it
+
+        lat_min_sign = 1 if match.group(1) == 'n' else -1
+        lat_min = int(match.group(2)) * lat_min_sign
+        lat_max_sign = 1 if match.group(3) == 'n' else -1
+        lat_max = int(match.group(4)) * lat_max_sign
+
+        lon_min_sign = -1 if match.group(5) == 'w' else 1
+        lon_min = int(match.group(6)) * lon_min_sign
+        lon_max_sign = -1 if match.group(7) == 'w' else 1
+        lon_max = int(match.group(8)) * lon_max_sign
+
+        # Check if grid cell bbox overlaps with filter bbox
+        # bbox = [west, south, east, north]
+        return not (
+            lon_max < bbox[0] or  # Grid is west of bbox
+            lon_min > bbox[2] or  # Grid is east of bbox
+            lat_max < bbox[1] or  # Grid is south of bbox
+            lat_min > bbox[3]     # Grid is north of bbox
+        )
+    except Exception:
+        return True  # On error, include it
 
 
 def fathom_spatial_merge(params: dict, context: dict = None) -> dict:
@@ -924,6 +765,7 @@ def fathom_spatial_merge(params: dict, context: dict = None) -> dict:
     output_prefix = params.get("output_prefix", FathomDefaults.PHASE2_OUTPUT_PREFIX)
     region_code = params["region_code"].lower()
     force_reprocess = params.get("force_reprocess", False)
+    job_id = params.get("job_id")  # For tracking in app.etl_fathom
 
     grid_cell = grid_group["grid_cell"]
     output_name = grid_group["output_name"]
@@ -1066,6 +908,12 @@ def fathom_spatial_merge(params: dict, context: dict = None) -> dict:
 
         logger.info(f"   ☁️ Uploaded: {output_container}/{output_blob_path}")
 
+    # =========================================================================
+    # INLINE STATE UPDATE (17 DEC 2025)
+    # Update app.etl_fathom records for this phase2_group_key
+    # =========================================================================
+    _update_phase2_processed(output_name, output_blob_path, job_id, logger)
+
     return {
         "success": True,
         "result": {
@@ -1088,6 +936,46 @@ def fathom_spatial_merge(params: dict, context: dict = None) -> dict:
             }
         }
     }
+
+
+def _update_phase2_processed(phase2_group_key: str, output_blob: str, job_id: Optional[str], logger) -> None:
+    """
+    Update app.etl_fathom records to mark Phase 2 as processed.
+
+    Args:
+        phase2_group_key: The group key (same as output_name)
+        output_blob: Path to the output merged COG
+        job_id: Job ID for tracking
+        logger: Logger instance
+    """
+    from infrastructure.postgresql import PostgreSQLRepository
+
+    try:
+        repo = PostgreSQLRepository()
+        with repo._get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE app.etl_fathom
+                    SET phase2_processed_at = NOW(),
+                        phase2_output_blob = %(output_blob)s,
+                        phase2_job_id = %(job_id)s,
+                        updated_at = NOW()
+                    WHERE phase2_group_key = %(group_key)s
+                    """,
+                    {
+                        "output_blob": output_blob,
+                        "job_id": job_id,
+                        "group_key": phase2_group_key
+                    }
+                )
+                updated_count = cur.rowcount
+                conn.commit()
+
+        logger.info(f"   📝 Updated {updated_count} records in app.etl_fathom (phase2_processed_at)")
+    except Exception as e:
+        # Log but don't fail - processing succeeded, tracking is secondary
+        logger.warning(f"   ⚠️ Failed to update app.etl_fathom: {e}")
 
 
 # =============================================================================

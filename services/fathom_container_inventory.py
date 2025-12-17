@@ -519,10 +519,10 @@ def fathom_assign_grid_cells(params: Dict[str, Any]) -> Dict[str, Any]:
                                 -- Extract lat/lon, calculate grid bounds
                                 (
                                     SELECT
-                                        lat_dir || lpad(floor(lat::int / %s)::int * %s, 2, '0') || '-' ||
-                                        lat_dir || lpad((floor(lat::int / %s)::int + 1) * %s, 2, '0') || '_' ||
-                                        lon_dir || lpad(floor(lon::int / %s)::int * %s, 3, '0') || '-' ||
-                                        lon_dir || lpad((floor(lon::int / %s)::int + 1) * %s, 3, '0')
+                                        lat_dir || lpad((floor(lat::int / %s)::int * %s)::text, 2, '0') || '-' ||
+                                        lat_dir || lpad(((floor(lat::int / %s)::int + 1) * %s)::text, 2, '0') || '_' ||
+                                        lon_dir || lpad((floor(lon::int / %s)::int * %s)::text, 3, '0') || '-' ||
+                                        lon_dir || lpad(((floor(lon::int / %s)::int + 1) * %s)::text, 3, '0')
                                     FROM (
                                         SELECT
                                             substring(tile from 1 for 1) as lat_dir,
@@ -561,7 +561,7 @@ def fathom_assign_grid_cells(params: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "success": True,
         "result": {
-            "records_updated": updated,
+            "records_updated": grid_cell_updated,
             "grid_size": grid_size,
             "dry_run": False
         }

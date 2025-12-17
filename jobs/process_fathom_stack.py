@@ -78,13 +78,7 @@ class ProcessFathomStackJob(JobBaseMixin, JobBase):
             "type": "str",
             "required": False,
             "default": FathomDefaults.SOURCE_CONTAINER,
-            "description": "Source container with Fathom flood tiles"
-        },
-        "file_list_csv": {
-            "type": "str",
-            "required": False,
-            "default": None,
-            "description": "Path to CSV file with file list. If None, auto-detected."
+            "description": "Source container with Fathom flood tiles (used for inventory lookup)"
         },
         "output_container": {
             "type": "str",
@@ -168,20 +162,18 @@ class ProcessFathomStackJob(JobBaseMixin, JobBase):
         region_code = job_params["region_code"].lower()
 
         if stage == 1:
-            # Stage 1: Tile inventory
+            # Stage 1: Tile inventory (queries app.etl_fathom database)
             return [{
                 "task_id": f"{job_id[:8]}-s1-inventory",
                 "task_type": "fathom_tile_inventory",
                 "parameters": {
                     "region_code": job_params["region_code"],
                     "source_container": job_params.get("source_container", FathomDefaults.SOURCE_CONTAINER),
-                    "file_list_csv": job_params.get("file_list_csv"),
                     "flood_types": job_params.get("flood_types"),
                     "years": job_params.get("years"),
                     "ssp_scenarios": job_params.get("ssp_scenarios"),
                     "bbox": job_params.get("bbox"),  # Spatial filter
                     "collection_id": job_params.get("collection_id", FathomDefaults.PHASE1_COLLECTION_ID),
-                    "skip_existing_stac": job_params.get("skip_existing_stac", True),
                     "dry_run": job_params.get("dry_run", False)
                 }
             }]
@@ -216,7 +208,8 @@ class ProcessFathomStackJob(JobBaseMixin, JobBase):
                         "output_container": job_params.get("output_container", FathomDefaults.PHASE1_OUTPUT_CONTAINER),
                         "output_prefix": job_params.get("output_prefix", FathomDefaults.PHASE1_OUTPUT_PREFIX),
                         "region_code": job_params["region_code"],
-                        "force_reprocess": job_params.get("force_reprocess", False)
+                        "force_reprocess": job_params.get("force_reprocess", False),
+                        "job_id": job_id  # For tracking in app.etl_fathom
                     }
                 })
 

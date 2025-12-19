@@ -9,6 +9,7 @@ import logging
 from typing import Dict, Any, Optional, Tuple, List
 from dataclasses import dataclass, field
 from datetime import datetime
+import re
 
 from .config import XarrayAPIConfig, get_xarray_api_config
 from services.stac_client import STACClient, STACItem
@@ -65,6 +66,68 @@ class XarrayAPIService:
 
         return self.config.named_locations.get(location.lower())
 
+    def _validate_date(self, date_str: Optional[str], param_name: str) -> Optional[str]:
+        """
+        Validate ISO date string format.
+
+        Args:
+            date_str: Date string to validate (YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS)
+            param_name: Parameter name for error messages
+
+        Returns:
+            Error message if invalid, None if valid
+        """
+        if date_str is None:
+            return None
+
+        # Accept YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS formats
+        iso_pattern = r'^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}:\d{2}(Z|[+-]\d{2}:\d{2})?)?$'
+        if not re.match(iso_pattern, date_str):
+            return f"Invalid {param_name} format: '{date_str}'. Use ISO format (YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS)"
+
+        # Validate the date is parseable
+        try:
+            if 'T' in date_str:
+                datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+            else:
+                datetime.strptime(date_str, '%Y-%m-%d')
+        except ValueError:
+            return f"Invalid {param_name} date: '{date_str}'. Check month/day values."
+
+        return None
+
+    def _validate_bbox(self, bbox: str) -> Tuple[Optional[Tuple[float, float, float, float]], Optional[str]]:
+        """
+        Validate and parse bbox string.
+
+        Args:
+            bbox: Bounding box string "minx,miny,maxx,maxy"
+
+        Returns:
+            Tuple of (parsed_bbox, error_message). One will be None.
+        """
+        try:
+            parts = bbox.split(",")
+            if len(parts) != 4:
+                return None, f"Invalid bbox: expected 4 values, got {len(parts)}"
+
+            minx, miny, maxx, maxy = map(float, parts)
+
+            # Validate coordinate ranges
+            if not (-180 <= minx <= 180 and -180 <= maxx <= 180):
+                return None, f"Invalid bbox: longitude must be between -180 and 180"
+            if not (-90 <= miny <= 90 and -90 <= maxy <= 90):
+                return None, f"Invalid bbox: latitude must be between -90 and 90"
+            if minx >= maxx:
+                return None, f"Invalid bbox: minx ({minx}) must be less than maxx ({maxx})"
+            if miny >= maxy:
+                return None, f"Invalid bbox: miny ({miny}) must be less than maxy ({maxy})"
+
+            return (minx, miny, maxx, maxy), None
+
+        except ValueError:
+            return None, f"Invalid bbox format: '{bbox}'. Use 'minx,miny,maxx,maxy' with numeric values"
+
     async def _get_stac_item(
         self,
         collection_id: str,
@@ -101,6 +164,14 @@ class XarrayAPIService:
         Returns:
             XarrayServiceResponse with time-series JSON
         """
+        # Validate date ranges
+        date_error = self._validate_date(start_time, "start_time")
+        if date_error:
+            return XarrayServiceResponse(success=False, status_code=400, error=date_error)
+        date_error = self._validate_date(end_time, "end_time")
+        if date_error:
+            return XarrayServiceResponse(success=False, status_code=400, error=date_error)
+
         # Resolve location
         coords = self._resolve_location(location)
         if not coords:
@@ -215,16 +286,18 @@ class XarrayAPIService:
         Returns:
             XarrayServiceResponse with statistics JSON
         """
-        # Parse bbox
-        try:
-            parts = bbox.split(",")
-            bbox_tuple = (float(parts[0]), float(parts[1]), float(parts[2]), float(parts[3]))
-        except (ValueError, IndexError):
-            return XarrayServiceResponse(
-                success=False,
-                status_code=400,
-                error=f"Invalid bbox format: {bbox}. Use 'minx,miny,maxx,maxy'"
-            )
+        # Validate date ranges
+        date_error = self._validate_date(start_time, "start_time")
+        if date_error:
+            return XarrayServiceResponse(success=False, status_code=400, error=date_error)
+        date_error = self._validate_date(end_time, "end_time")
+        if date_error:
+            return XarrayServiceResponse(success=False, status_code=400, error=date_error)
+
+        # Validate and parse bbox
+        bbox_tuple, bbox_error = self._validate_bbox(bbox)
+        if bbox_error:
+            return XarrayServiceResponse(success=False, status_code=400, error=bbox_error)
 
         # Get STAC item
         item, error = await self._get_stac_item(collection_id, item_id)
@@ -324,16 +397,18 @@ class XarrayAPIService:
         Returns:
             XarrayServiceResponse with aggregated data
         """
-        # Parse bbox
-        try:
-            parts = bbox.split(",")
-            bbox_tuple = (float(parts[0]), float(parts[1]), float(parts[2]), float(parts[3]))
-        except (ValueError, IndexError):
-            return XarrayServiceResponse(
-                success=False,
-                status_code=400,
-                error=f"Invalid bbox format: {bbox}. Use 'minx,miny,maxx,maxy'"
-            )
+        # Validate date ranges
+        date_error = self._validate_date(start_time, "start_time")
+        if date_error:
+            return XarrayServiceResponse(success=False, status_code=400, error=date_error)
+        date_error = self._validate_date(end_time, "end_time")
+        if date_error:
+            return XarrayServiceResponse(success=False, status_code=400, error=date_error)
+
+        # Validate and parse bbox
+        bbox_tuple, bbox_error = self._validate_bbox(bbox)
+        if bbox_error:
+            return XarrayServiceResponse(success=False, status_code=400, error=bbox_error)
 
         # Get STAC item
         item, error = await self._get_stac_item(collection_id, item_id)

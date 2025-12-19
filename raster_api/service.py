@@ -65,6 +65,38 @@ class RasterAPIService:
         # Check named locations
         return self.config.named_locations.get(location.lower())
 
+    def _validate_bbox(self, bbox: str) -> Tuple[Optional[str], Optional[str]]:
+        """
+        Validate bbox string format.
+
+        Args:
+            bbox: Bounding box string "minx,miny,maxx,maxy"
+
+        Returns:
+            Tuple of (validated_bbox, error_message). One will be None.
+        """
+        try:
+            parts = bbox.split(",")
+            if len(parts) != 4:
+                return None, f"Invalid bbox: expected 4 values, got {len(parts)}"
+
+            minx, miny, maxx, maxy = map(float, parts)
+
+            # Validate coordinate ranges
+            if not (-180 <= minx <= 180 and -180 <= maxx <= 180):
+                return None, f"Invalid bbox: longitude must be between -180 and 180"
+            if not (-90 <= miny <= 90 and -90 <= maxy <= 90):
+                return None, f"Invalid bbox: latitude must be between -90 and 90"
+            if minx >= maxx:
+                return None, f"Invalid bbox: minx ({minx}) must be less than maxx ({maxx})"
+            if miny >= maxy:
+                return None, f"Invalid bbox: miny ({miny}) must be less than maxy ({maxy})"
+
+            return bbox, None  # Return original string for TiTiler
+
+        except ValueError:
+            return None, f"Invalid bbox format: '{bbox}'. Use 'minx,miny,maxx,maxy' with numeric values"
+
     async def _get_stac_item(
         self,
         collection_id: str,
@@ -112,6 +144,11 @@ class RasterAPIService:
         Returns:
             RasterServiceResponse with image bytes
         """
+        # Validate bbox
+        validated_bbox, bbox_error = self._validate_bbox(bbox)
+        if bbox_error:
+            return RasterServiceResponse(success=False, status_code=400, error=bbox_error)
+
         # Get STAC item
         item, error = await self._get_stac_item(collection_id, item_id)
         if error:

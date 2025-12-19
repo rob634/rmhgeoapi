@@ -258,6 +258,9 @@ from raster_api import get_raster_triggers
 # xarray API - Direct Zarr access for time-series (18 DEC 2025)
 from xarray_api import get_xarray_triggers
 
+# OGC Styles API - CartoSym-JSON style storage and multi-format output (18 DEC 2025)
+from ogc_styles import get_styles_triggers
+
 # Pipeline Dashboard - Container blob browser (21 NOV 2025) - Read-only UI operations
 from triggers.list_container_blobs import list_container_blobs_handler
 from triggers.get_blob_metadata import get_blob_metadata_handler
@@ -1618,6 +1621,44 @@ def ogc_features_items(req: func.HttpRequest) -> func.HttpResponse:
 def ogc_features_feature(req: func.HttpRequest) -> func.HttpResponse:
     """OGC Features single feature: GET /api/features/collections/{collection_id}/items/{feature_id}"""
     return _ogc_feature(req)
+
+
+# ============================================================================
+# OGC API - STYLES ENDPOINTS (18 DEC 2025)
+# ============================================================================
+#
+# OGC API - Styles extension for OGC Features collections.
+# Stores styles in CartoSym-JSON format with multi-format output.
+#
+# Standards Compliance:
+#   - OGC API - Styles: https://docs.ogc.org/DRAFTS/20-009.html
+#   - CartoSym-JSON: OGC canonical style format
+#
+# Output Formats (via ?f= parameter):
+#   - ?f=cartosym  - CartoSym-JSON (canonical storage format)
+#   - ?f=leaflet   - Leaflet style object (default for web clients)
+#   - ?f=mapbox    - Mapbox GL style layers
+#
+# Available Endpoints:
+#   GET  /api/features/collections/{id}/styles       - List styles
+#   GET  /api/features/collections/{id}/styles/{sid} - Get style (multi-format)
+
+# Get trigger configurations (contains handler references)
+_styles_triggers = get_styles_triggers()
+_styles_list = _styles_triggers[0]['handler']
+_styles_item = _styles_triggers[1]['handler']
+
+
+@app.route(route="features/collections/{collection_id}/styles", methods=["GET"])
+def ogc_styles_list(req: func.HttpRequest) -> func.HttpResponse:
+    """OGC Styles list: GET /api/features/collections/{collection_id}/styles"""
+    return _styles_list(req)
+
+
+@app.route(route="features/collections/{collection_id}/styles/{style_id}", methods=["GET"])
+def ogc_styles_item(req: func.HttpRequest) -> func.HttpResponse:
+    """OGC Styles get: GET /api/features/collections/{collection_id}/styles/{style_id}?f=leaflet|mapbox|cartosym"""
+    return _styles_item(req)
 
 
 # ============================================================================

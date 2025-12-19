@@ -1227,47 +1227,101 @@ class AdminDbMaintenanceTrigger:
                         else:
                             logger.info("⚠️  geo.system_admin0 not found (load country boundaries later)")
 
+                        # 0f. Create OGC API Styles table (18 DEC 2025)
+                        # Stores CartoSym-JSON styles for OGC Features collections
+                        # Serves multiple output formats: Leaflet, Mapbox GL
+                        cur.execute("""
+                            CREATE TABLE IF NOT EXISTS geo.feature_collection_styles (
+                                id SERIAL PRIMARY KEY,
+                                collection_id TEXT NOT NULL,           -- matches OGC Features collection (table name)
+                                style_id TEXT NOT NULL,                -- url-safe identifier (e.g., "default", "by-category")
+                                title TEXT,                            -- human-readable title
+                                description TEXT,                      -- style description
+                                style_spec JSONB NOT NULL,             -- CartoSym-JSON document
+                                is_default BOOLEAN DEFAULT false,      -- default style for collection
+                                created_at TIMESTAMPTZ DEFAULT now(),
+                                updated_at TIMESTAMPTZ DEFAULT now(),
+                                UNIQUE(collection_id, style_id)
+                            )
+                        """)
+
+                        # Index for fast lookups by collection
+                        cur.execute("""
+                            CREATE INDEX IF NOT EXISTS idx_styles_collection
+                            ON geo.feature_collection_styles(collection_id)
+                        """)
+
+                        # Ensure only one default per collection (partial unique index)
+                        cur.execute("""
+                            CREATE UNIQUE INDEX IF NOT EXISTS idx_styles_default
+                            ON geo.feature_collection_styles(collection_id)
+                            WHERE is_default = true
+                        """)
+
+                        logger.info("✅ Ensured geo.feature_collection_styles table exists")
+
                         # 1. Create h3 schema if it doesn't exist (04 DEC 2025)
                         # h3 schema stores static bootstrap H3 grid data
                         cur.execute("CREATE SCHEMA IF NOT EXISTS h3")
                         logger.info("✅ Ensured h3 schema exists")
 
-                        # 2. Grant USAGE on geo schema
-                        # Use sql.Identifier to safely inject the role name
-                        admin_ident = sql.Identifier(admin_identity)
-                        cur.execute(sql.SQL("GRANT USAGE ON SCHEMA geo TO {}").format(admin_ident))
-
-                        # 3. Grant SELECT on ALL existing tables in geo schema
-                        cur.execute(sql.SQL("GRANT SELECT ON ALL TABLES IN SCHEMA geo TO {}").format(admin_ident))
-
-                        # 4. Set default privileges for FUTURE tables created in geo schema
-                        # This ensures process_vector created tables auto-grant SELECT
-                        cur.execute(sql.SQL("ALTER DEFAULT PRIVILEGES IN SCHEMA geo GRANT SELECT ON TABLES TO {}").format(admin_ident))
-
-                        # 5. Grant on h3 schema (static bootstrap data)
-                        cur.execute(sql.SQL("GRANT USAGE ON SCHEMA h3 TO {}").format(admin_ident))
-                        cur.execute(sql.SQL("GRANT SELECT ON ALL TABLES IN SCHEMA h3 TO {}").format(admin_ident))
-                        cur.execute(sql.SQL("ALTER DEFAULT PRIVILEGES IN SCHEMA h3 GRANT SELECT ON TABLES TO {}").format(admin_ident))
-
+                        # COMMIT table/schema creation BEFORE grants (18 DEC 2025)
+                        # This ensures tables are created even if GRANTs fail
+                        # (e.g., when tables exist that we don't own)
                         conn.commit()
-                        logger.info(f"✅ Granted geo+h3 schema permissions to {admin_identity} (existing + future tables)")
+                        logger.info("✅ Committed geo/h3 schema and table changes")
 
-                step4["status"] = "success"
-                step4["schema_created"] = "geo, h3 (if not exists)"
-                step4["tables_created"] = ["geo.table_metadata (vector metadata registry)"]
-                step4["grants"] = [
-                    "USAGE ON SCHEMA geo",
-                    "SELECT ON ALL TABLES IN SCHEMA geo",
-                    "DEFAULT PRIVILEGES SELECT ON TABLES IN geo",
-                    "USAGE ON SCHEMA h3",
-                    "SELECT ON ALL TABLES IN SCHEMA h3",
-                    "DEFAULT PRIVILEGES SELECT ON TABLES IN h3"
-                ]
-                step4["granted_to"] = admin_identity
+                # Tables are now committed. GRANTs in separate block (18 DEC 2025)
+                # If GRANTs fail, tables still exist
+                grant_warnings = []
+                try:
+                    with geo_repo._get_connection() as grant_conn:
+                        with grant_conn.cursor() as grant_cur:
+                            # 2. Grant USAGE on geo schema
+                            admin_ident = sql.Identifier(admin_identity)
+                            grant_cur.execute(sql.SQL("GRANT USAGE ON SCHEMA geo TO {}").format(admin_ident))
+
+                            # 3. Grant SELECT on ALL existing tables in geo schema
+                            grant_cur.execute(sql.SQL("GRANT SELECT ON ALL TABLES IN SCHEMA geo TO {}").format(admin_ident))
+
+                            # 4. Set default privileges for FUTURE tables created in geo schema
+                            grant_cur.execute(sql.SQL("ALTER DEFAULT PRIVILEGES IN SCHEMA geo GRANT SELECT ON TABLES TO {}").format(admin_ident))
+
+                            # 5. Grant on h3 schema (static bootstrap data)
+                            grant_cur.execute(sql.SQL("GRANT USAGE ON SCHEMA h3 TO {}").format(admin_ident))
+                            grant_cur.execute(sql.SQL("GRANT SELECT ON ALL TABLES IN SCHEMA h3 TO {}").format(admin_ident))
+                            grant_cur.execute(sql.SQL("ALTER DEFAULT PRIVILEGES IN SCHEMA h3 GRANT SELECT ON TABLES TO {}").format(admin_ident))
+
+                            grant_conn.commit()
+                            logger.info(f"✅ Granted geo+h3 schema permissions to {admin_identity} (existing + future tables)")
+
+                except Exception as grant_err:
+                    # GRANTs failed but tables are already committed
+                    logger.warning(f"⚠️ GRANT statements failed (tables still created): {grant_err}")
+                    grant_warnings.append(str(grant_err))
+
+                if grant_warnings:
+                    step4["status"] = "partial"
+                    step4["tables_created"] = ["geo.table_metadata", "geo.feature_collection_styles"]
+                    step4["grant_warnings"] = grant_warnings
+                    step4["note"] = "Tables created but some GRANTs failed - may need manual permission fixes"
+                else:
+                    step4["status"] = "success"
+                    step4["schema_created"] = "geo, h3 (if not exists)"
+                    step4["tables_created"] = ["geo.table_metadata (vector metadata registry)", "geo.feature_collection_styles (OGC Styles)"]
+                    step4["grants"] = [
+                        "USAGE ON SCHEMA geo",
+                        "SELECT ON ALL TABLES IN SCHEMA geo",
+                        "DEFAULT PRIVILEGES SELECT ON TABLES IN geo",
+                        "USAGE ON SCHEMA h3",
+                        "SELECT ON ALL TABLES IN SCHEMA h3",
+                        "DEFAULT PRIVILEGES SELECT ON TABLES IN h3"
+                    ]
+                    step4["granted_to"] = admin_identity
 
             except Exception as e:
                 # Non-fatal error - log warning but continue
-                # The grants might fail if admin identity doesn't exist yet
+                # The table creation might fail if there's a fundamental DB issue
                 logger.warning(f"⚠️ Failed to ensure geo schema or grant permissions to {admin_identity}: {e}")
                 step4["status"] = "warning"
                 step4["error"] = str(e)

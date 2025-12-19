@@ -24,7 +24,7 @@ import logging
 from typing import Dict, Any, Optional, Union
 from dataclasses import dataclass
 
-from config.app_config import get_config
+from config import get_config
 
 logger = logging.getLogger(__name__)
 

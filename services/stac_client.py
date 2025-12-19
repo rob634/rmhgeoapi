@@ -22,12 +22,94 @@ from friendly collection/item identifiers.
 
 import httpx
 import logging
-from typing import Dict, Any, Optional, List
+import time
+from typing import Dict, Any, Optional, List, Tuple
 from dataclasses import dataclass, field
+from threading import Lock
 
-from config.app_config import get_config
+from config import get_config
 
 logger = logging.getLogger(__name__)
+
+
+# ============================================================================
+# TTL CACHE FOR STAC LOOKUPS
+# ============================================================================
+
+class TTLCache:
+    """
+    Simple thread-safe TTL cache for STAC item lookups.
+
+    Items expire after ttl_seconds and are cleaned up on access.
+    """
+
+    def __init__(self, ttl_seconds: int = 300, max_size: int = 1000):
+        """
+        Initialize cache.
+
+        Args:
+            ttl_seconds: Time-to-live in seconds (default 5 minutes)
+            max_size: Maximum cache entries before eviction
+        """
+        self.ttl_seconds = ttl_seconds
+        self.max_size = max_size
+        self._cache: Dict[str, Tuple[Any, float]] = {}
+        self._lock = Lock()
+
+    def get(self, key: str) -> Optional[Any]:
+        """Get item from cache if not expired."""
+        with self._lock:
+            if key not in self._cache:
+                return None
+
+            value, expiry = self._cache[key]
+            if time.time() > expiry:
+                del self._cache[key]
+                return None
+
+            return value
+
+    def set(self, key: str, value: Any) -> None:
+        """Set item in cache with TTL."""
+        with self._lock:
+            # Evict oldest entries if at max size
+            if len(self._cache) >= self.max_size:
+                self._evict_oldest()
+
+            expiry = time.time() + self.ttl_seconds
+            self._cache[key] = (value, expiry)
+
+    def _evict_oldest(self) -> None:
+        """Remove oldest 10% of entries."""
+        if not self._cache:
+            return
+
+        # Sort by expiry time and remove oldest
+        sorted_keys = sorted(self._cache.keys(), key=lambda k: self._cache[k][1])
+        to_remove = max(1, len(sorted_keys) // 10)
+        for key in sorted_keys[:to_remove]:
+            del self._cache[key]
+
+    def clear(self) -> None:
+        """Clear all cache entries."""
+        with self._lock:
+            self._cache.clear()
+
+    def stats(self) -> Dict[str, int]:
+        """Get cache statistics."""
+        with self._lock:
+            now = time.time()
+            valid = sum(1 for _, expiry in self._cache.values() if expiry > now)
+            return {
+                "total_entries": len(self._cache),
+                "valid_entries": valid,
+                "expired_entries": len(self._cache) - valid
+            }
+
+
+# Global cache instance (shared across requests in same process)
+_stac_item_cache = TTLCache(ttl_seconds=300, max_size=500)
+_stac_collection_cache = TTLCache(ttl_seconds=3600, max_size=100)  # Collections change rarely
 
 
 @dataclass
@@ -171,7 +253,8 @@ class STACClient:
     async def get_item(
         self,
         collection_id: str,
-        item_id: str
+        item_id: str,
+        use_cache: bool = True
     ) -> STACClientResponse:
         """
         Get a single STAC item by collection and item ID.
@@ -179,10 +262,24 @@ class STACClient:
         Args:
             collection_id: Collection identifier
             item_id: Item identifier
+            use_cache: Whether to use cache (default True)
 
         Returns:
             STACClientResponse with item or error
         """
+        cache_key = f"{collection_id}/{item_id}"
+
+        # Check cache first
+        if use_cache:
+            cached_item = _stac_item_cache.get(cache_key)
+            if cached_item is not None:
+                logger.debug(f"STAC cache hit: {cache_key}")
+                return STACClientResponse(
+                    success=True,
+                    status_code=200,
+                    item=cached_item
+                )
+
         url = f"{self.base_url}/collections/{collection_id}/items/{item_id}"
         client = await self._get_client()
 
@@ -214,6 +311,11 @@ class STACClient:
                 links=data.get("links", [])
             )
 
+            # Store in cache
+            if use_cache:
+                _stac_item_cache.set(cache_key, item)
+                logger.debug(f"STAC cache store: {cache_key}")
+
             return STACClientResponse(
                 success=True,
                 status_code=response.status_code,
@@ -240,16 +342,28 @@ class STACClient:
                 error=f"Unexpected error: {str(e)}"
             )
 
-    async def get_collection(self, collection_id: str) -> STACClientResponse:
+    async def get_collection(self, collection_id: str, use_cache: bool = True) -> STACClientResponse:
         """
         Get STAC collection metadata.
 
         Args:
             collection_id: Collection identifier
+            use_cache: Whether to use cache (default True)
 
         Returns:
             STACClientResponse with collection or error
         """
+        # Check cache first
+        if use_cache:
+            cached_collection = _stac_collection_cache.get(collection_id)
+            if cached_collection is not None:
+                logger.debug(f"STAC collection cache hit: {collection_id}")
+                return STACClientResponse(
+                    success=True,
+                    status_code=200,
+                    collection=cached_collection
+                )
+
         url = f"{self.base_url}/collections/{collection_id}"
         client = await self._get_client()
 
@@ -278,6 +392,11 @@ class STACClient:
                 extent=data.get("extent"),
                 links=data.get("links", [])
             )
+
+            # Store in cache
+            if use_cache:
+                _stac_collection_cache.set(collection_id, collection)
+                logger.debug(f"STAC collection cache store: {collection_id}")
 
             return STACClientResponse(
                 success=True,
@@ -380,3 +499,35 @@ class STACClient:
                 status_code=500,
                 error=f"Unexpected error: {str(e)}"
             )
+
+
+# ============================================================================
+# CACHE MANAGEMENT FUNCTIONS
+# ============================================================================
+
+def get_stac_cache_stats() -> Dict[str, Any]:
+    """
+    Get statistics for STAC caches.
+
+    Returns:
+        Dict with cache statistics for items and collections
+    """
+    return {
+        "item_cache": {
+            **_stac_item_cache.stats(),
+            "ttl_seconds": _stac_item_cache.ttl_seconds,
+            "max_size": _stac_item_cache.max_size
+        },
+        "collection_cache": {
+            **_stac_collection_cache.stats(),
+            "ttl_seconds": _stac_collection_cache.ttl_seconds,
+            "max_size": _stac_collection_cache.max_size
+        }
+    }
+
+
+def clear_stac_caches() -> None:
+    """Clear all STAC caches."""
+    _stac_item_cache.clear()
+    _stac_collection_cache.clear()
+    logger.info("STAC caches cleared")

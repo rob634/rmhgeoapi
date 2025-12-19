@@ -287,20 +287,40 @@
 
 ### Feature F3.2: Virtual Zarr Pipeline 📋 PLANNED
 
-**Deliverable**: Kerchunk references for NetCDF (eliminate physical conversion)
+**Deliverable**: Kerchunk reference files enabling cloud-native access to legacy NetCDF
+
+**Strategic Context**:
+Eliminates need for traditional THREDDS/OPeNDAP infrastructure. NetCDF files
+remain in blob storage unchanged; lightweight JSON references (~KB) enable
+TiTiler-xarray to serve data via modern cloud-optimized patterns.
+
+**Compute Profile**: Azure Function App (reference generation is I/O-bound, not compute-bound)
 
 | Story | Status | Description |
 |-------|--------|-------------|
-| S3.2.1 | ⬜ | CMIP6 filename parser |
-| S3.2.2 | ⬜ | Chunking validator (pre-flight) |
-| S3.2.3 | ⬜ | Reference generator (single file → Kerchunk JSON) |
-| S3.2.4 | ⬜ | Virtual combiner (time series references) |
-| S3.2.5 | ⬜ | STAC datacube registration |
-| S3.2.6 | ⬜ | Inventory job |
-| S3.2.7 | ⬜ | Generate job (full pipeline) |
-| S3.2.8 | ⬜ | TiTiler-xarray config |
+| S3.2.1 | ⬜ | CMIP6 filename parser (extract variable, model, scenario) |
+| S3.2.2 | ⬜ | Chunking validator (pre-flight NetCDF compatibility check) |
+| S3.2.3 | ⬜ | Reference generator (single NetCDF → Kerchunk JSON ~KB) |
+| S3.2.4 | ⬜ | Virtual combiner (merge time-series references) |
+| S3.2.5 | ⬜ | STAC datacube registration (xarray-compatible items) |
+| S3.2.6 | ⬜ | Inventory job (scan and group NetCDF files) |
+| S3.2.7 | ⬜ | Generate job (full reference pipeline) |
+| S3.2.8 | ⬜ | TiTiler-xarray configuration for virtual Zarr serving |
 
 **Dependencies**: `virtualizarr`, `kerchunk`, `h5netcdf`, `h5py`
+
+**Architecture**:
+```
+NetCDF Files (unchanged)     Reference Generation      TiTiler-xarray
+┌─────────────────────┐     ┌──────────────────┐     ┌────────────────┐
+│ tasmax_2015.nc      │     │                  │     │                │
+│ tasmax_2016.nc      │────▶│ Kerchunk JSON    │────▶│ /tiles/{z}/{x} │
+│ tasmax_2017.nc      │     │ (~5KB per file)  │     │ /point/{x},{y} │
+│ ...                 │     │                  │     │                │
+└─────────────────────┘     └──────────────────┘     └────────────────┘
+     Blob Storage              Blob Storage           Cloud-Native API
+     (no conversion)           (lightweight refs)     (no THREDDS)
+```
 
 ---
 

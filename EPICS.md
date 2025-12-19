@@ -9,17 +9,23 @@
 
 ## Quick Reference
 
-| Epic | Name | Status | Features |
-|------|------|--------|----------|
-| E1 | Vector Data as API | ✅ Complete | 4 |
-| E2 | Raster Data as API | 🚧 Partial | 7 |
-| E3 | Zarr/Climate Data as API | 🚧 Partial | 3 |
-| E4 | Managed Datasets | 🚧 Partial | 2 |
-| E5 | Vector Styling | 🚧 Partial | 2 |
-| E6 | Platform Observability | 🚧 Mostly Complete | 3 |
-| E7 | Data Externalization | 📋 Planned | 3 |
-| E8 | H3 Analytics Pipeline | 🚧 Partial | 6 |
-| E9 | DDH Platform Integration | 📋 Planned | 4 |
+**FY26 Target (ends 30 JUN 2026)**: E1 ✅, E2, E9, E7, E6
+
+| Priority | Epic | Name | Status | Features | WSJF |
+|:--------:|------|------|--------|:--------:|:----:|
+| — | E1 | Vector Data as API | ✅ Complete | 4 | — |
+| 1 | E2 | Raster Data as API | 🚧 Partial | 7 | TBD |
+| 2 | E9 | DDH Platform Integration | 📋 Planned | 4 | TBD |
+| 3 | E7 | Data Externalization | 📋 Planned | 3 | TBD |
+| 4 | E6 | Platform Observability | 🚧 Mostly Complete | 3 | TBD |
+| 5 | E3 | Zarr/Climate Data as API | 🚧 Partial | 3 | TBD |
+| 6 | E4 | Managed Datasets | 🚧 Partial | 2 | TBD |
+| 7 | E5 | Vector Styling | 🚧 Partial | 2 | TBD |
+| 8 | E8 | H3 Analytics Pipeline | 🚧 Partial | 6 | TBD |
+
+**Priority Notes**:
+- **E9 + E6 tightly coupled**: Observability enables Integration monitoring
+- **E9 requires elaboration**: ITSDA team (ITS Platform / DDH owner) has original requirements but no geospatial knowledge
 
 | Enabler | Name | Status | Enables |
 |---------|------|--------|---------|

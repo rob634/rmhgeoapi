@@ -247,7 +247,12 @@ async def configure_pgstac_roles(task_context: TaskContext) -> TaskResult:
 
         params = task_context.parameters
         roles = params.get("roles", ["pgstac_admin", "pgstac_ingest", "pgstac_read"])
-        app_user = params.get("app_user", "rob634")
+
+        # Get app_user from params or config - NO HARDCODED USERS
+        config = get_config()
+        app_user = params.get("app_user") or config.database.admin_identity_name
+        if not app_user:
+            raise ValueError("app_user not provided and database.admin_identity_name not configured")
 
         dsn = get_connection_string(as_admin=True)
         roles_created = []

@@ -244,7 +244,10 @@ def fathom_tile_inventory(params: dict, context: dict = None) -> dict:
 
     # Convert to tile_groups format
     tile_groups = []
-    for row in rows:
+    for idx, row in enumerate(rows):
+        if idx < 3:  # Log first 3 rows for debugging
+            logger.debug(f"   🔍 Row {idx}: columns={columns}")
+            logger.debug(f"   🔍 Row {idx}: values={[repr(v)[:100] for v in row]}")
         row_dict = dict(zip(columns, row))
 
         # Apply bbox filter if provided
@@ -262,6 +265,7 @@ def fathom_tile_inventory(params: dict, context: dict = None) -> dict:
 
         # return_period_files from json_object_agg - handle various formats
         rp_files = row_dict["return_period_files"]
+        logger.debug(f"   🔍 {output_name}: return_period_files type={type(rp_files).__name__}, value={repr(rp_files)[:200]}")
         if rp_files is None:
             logger.warning(f"   ⚠️ {output_name}: return_period_files is NULL - skipping")
             continue

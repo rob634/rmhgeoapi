@@ -41,3 +41,16 @@ h3>=4.0.0
 
 # AsyncPG - Async PostgreSQL driver for non-blocking database operations
 asyncpg>=0.29.0
+
+# xarray ecosystem - Service Layer API for Zarr direct access (18 DEC 2025)
+xarray>=2024.1.0
+zarr>=2.16.0
+fsspec>=2024.2.0
+adlfs>=2024.2.0           # Azure Blob storage backend for fsspec
+aiohttp>=3.9.0            # Async support for fsspec
+
+# HTTP client for TiTiler proxy (18 DEC 2025)
+httpx>=0.27.0
+
+# Image output for xarray API (18 DEC 2025)
+pillow>=10.0.0

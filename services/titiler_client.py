@@ -1,0 +1,452 @@
+# ============================================================================
+# CLAUDE CONTEXT - TITILER HTTP CLIENT
+# ============================================================================
+# EPOCH: 4 - ACTIVE
+# STATUS: Service Layer - TiTiler proxy client for raster operations
+# PURPOSE: HTTP client for TiTiler endpoints with STAC item URL resolution
+# LAST_REVIEWED: 18 DEC 2025
+# EXPORTS: TiTilerClient
+# DEPENDENCIES: httpx, config.app_config
+# ============================================================================
+"""
+TiTiler HTTP Client Service.
+
+Provides async HTTP client for TiTiler endpoints:
+- COG endpoints (/cog/...) for Cloud Optimized GeoTIFFs
+- xarray endpoints (/xarray/...) for Zarr files
+- PgSTAC endpoints (/searches/...) for mosaic queries
+
+Used by raster_api module for convenience wrapper endpoints.
+"""
+
+import httpx
+import logging
+from typing import Dict, Any, Optional, Union
+from dataclasses import dataclass
+
+from config.app_config import get_config
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class TiTilerResponse:
+    """Response wrapper for TiTiler API calls."""
+    success: bool
+    status_code: int
+    data: Optional[Union[Dict, bytes]] = None
+    content_type: Optional[str] = None
+    error: Optional[str] = None
+
+
+class TiTilerClient:
+    """
+    Async HTTP client for TiTiler tile server.
+
+    Supports three TiTiler deployment modes:
+    - vanilla: Basic COG tile serving
+    - pgstac: PgSTAC mosaic integration
+    - xarray: Zarr/NetCDF support
+
+    Usage:
+        client = TiTilerClient()
+
+        # Get COG info
+        response = await client.get_cog_info(cog_url)
+
+        # Get point value from Zarr
+        response = await client.get_xarray_point(zarr_url, lon, lat, variable, bidx=1)
+
+        # Extract bbox as GeoTIFF
+        response = await client.get_cog_bbox(cog_url, bbox, format="tif")
+    """
+
+    def __init__(self, base_url: Optional[str] = None, timeout: float = 30.0):
+        """
+        Initialize TiTiler client.
+
+        Args:
+            base_url: TiTiler server URL. If not provided, uses config.
+            timeout: Request timeout in seconds.
+        """
+        config = get_config()
+        self.base_url = (base_url or config.titiler_base_url).rstrip('/')
+        self.timeout = timeout
+        self._client: Optional[httpx.AsyncClient] = None
+
+    async def _get_client(self) -> httpx.AsyncClient:
+        """Get or create async HTTP client."""
+        if self._client is None or self._client.is_closed:
+            self._client = httpx.AsyncClient(
+                timeout=httpx.Timeout(self.timeout),
+                follow_redirects=True
+            )
+        return self._client
+
+    async def close(self):
+        """Close the HTTP client."""
+        if self._client and not self._client.is_closed:
+            await self._client.aclose()
+
+    async def _request(
+        self,
+        method: str,
+        endpoint: str,
+        params: Optional[Dict] = None,
+        json_body: Optional[Dict] = None,
+        return_binary: bool = False
+    ) -> TiTilerResponse:
+        """
+        Make HTTP request to TiTiler.
+
+        Args:
+            method: HTTP method (GET, POST)
+            endpoint: API endpoint path
+            params: Query parameters
+            json_body: JSON body for POST requests
+            return_binary: If True, return raw bytes instead of JSON
+
+        Returns:
+            TiTilerResponse with result or error
+        """
+        url = f"{self.base_url}{endpoint}"
+        client = await self._get_client()
+
+        try:
+            if method == "GET":
+                response = await client.get(url, params=params)
+            elif method == "POST":
+                response = await client.post(url, params=params, json=json_body)
+            else:
+                return TiTilerResponse(
+                    success=False,
+                    status_code=400,
+                    error=f"Unsupported HTTP method: {method}"
+                )
+
+            if response.status_code >= 400:
+                error_text = response.text[:500] if response.text else "Unknown error"
+                return TiTilerResponse(
+                    success=False,
+                    status_code=response.status_code,
+                    error=f"TiTiler error: {error_text}"
+                )
+
+            content_type = response.headers.get("content-type", "")
+
+            if return_binary:
+                return TiTilerResponse(
+                    success=True,
+                    status_code=response.status_code,
+                    data=response.content,
+                    content_type=content_type
+                )
+            else:
+                return TiTilerResponse(
+                    success=True,
+                    status_code=response.status_code,
+                    data=response.json() if "json" in content_type else {"raw": response.text},
+                    content_type=content_type
+                )
+
+        except httpx.TimeoutException:
+            return TiTilerResponse(
+                success=False,
+                status_code=504,
+                error=f"TiTiler request timeout after {self.timeout}s"
+            )
+        except httpx.RequestError as e:
+            return TiTilerResponse(
+                success=False,
+                status_code=500,
+                error=f"TiTiler request error: {str(e)}"
+            )
+        except Exception as e:
+            logger.exception(f"Unexpected error calling TiTiler: {e}")
+            return TiTilerResponse(
+                success=False,
+                status_code=500,
+                error=f"Unexpected error: {str(e)}"
+            )
+
+    # =========================================================================
+    # COG Endpoints
+    # =========================================================================
+
+    async def get_cog_info(self, url: str) -> TiTilerResponse:
+        """Get COG metadata/info."""
+        return await self._request("GET", "/cog/info", params={"url": url})
+
+    async def get_cog_statistics(self, url: str) -> TiTilerResponse:
+        """Get COG band statistics."""
+        return await self._request("GET", "/cog/statistics", params={"url": url})
+
+    async def get_cog_point(
+        self,
+        url: str,
+        lon: float,
+        lat: float,
+        **kwargs
+    ) -> TiTilerResponse:
+        """
+        Get COG value at a point.
+
+        Args:
+            url: COG URL
+            lon: Longitude
+            lat: Latitude
+            **kwargs: Additional TiTiler parameters
+        """
+        params = {"url": url, **kwargs}
+        return await self._request("GET", f"/cog/point/{lon},{lat}", params=params)
+
+    async def get_cog_bbox(
+        self,
+        url: str,
+        bbox: str,
+        format: str = "tif",
+        **kwargs
+    ) -> TiTilerResponse:
+        """
+        Extract COG bbox as image.
+
+        Args:
+            url: COG URL
+            bbox: Bounding box as "minx,miny,maxx,maxy"
+            format: Output format (tif, png, npy)
+            **kwargs: Additional TiTiler parameters (width, height, rescale, colormap_name)
+        """
+        params = {"url": url, **kwargs}
+        return await self._request(
+            "GET",
+            f"/cog/bbox/{bbox}.{format}",
+            params=params,
+            return_binary=True
+        )
+
+    async def get_cog_preview(
+        self,
+        url: str,
+        format: str = "png",
+        max_size: int = 512,
+        **kwargs
+    ) -> TiTilerResponse:
+        """
+        Get COG preview image.
+
+        Args:
+            url: COG URL
+            format: Output format (png, jpeg, webp)
+            max_size: Maximum dimension in pixels
+            **kwargs: Additional TiTiler parameters
+        """
+        params = {"url": url, "max_size": max_size, **kwargs}
+        return await self._request(
+            "GET",
+            f"/cog/preview.{format}",
+            params=params,
+            return_binary=True
+        )
+
+    async def get_cog_feature(
+        self,
+        url: str,
+        geometry: Dict,
+        format: str = "tif",
+        **kwargs
+    ) -> TiTilerResponse:
+        """
+        Extract COG clipped to GeoJSON geometry.
+
+        Args:
+            url: COG URL
+            geometry: GeoJSON geometry dict
+            format: Output format (tif, png, npy)
+            **kwargs: Additional TiTiler parameters
+        """
+        params = {"url": url, **kwargs}
+        feature = {
+            "type": "Feature",
+            "properties": {},
+            "geometry": geometry
+        }
+        return await self._request(
+            "POST",
+            f"/cog/feature.{format}",
+            params=params,
+            json_body=feature,
+            return_binary=True
+        )
+
+    # =========================================================================
+    # xarray Endpoints (Zarr)
+    # =========================================================================
+
+    async def get_xarray_info(
+        self,
+        url: str,
+        variable: Optional[str] = None,
+        decode_times: bool = False
+    ) -> TiTilerResponse:
+        """Get Zarr dataset info."""
+        params = {
+            "url": url,
+            "decode_times": str(decode_times).lower()
+        }
+        if variable:
+            params["variable"] = variable
+        return await self._request("GET", "/xarray/info", params=params)
+
+    async def get_xarray_point(
+        self,
+        url: str,
+        lon: float,
+        lat: float,
+        variable: str,
+        bidx: int = 1,
+        decode_times: bool = False,
+        **kwargs
+    ) -> TiTilerResponse:
+        """
+        Get Zarr value at a point for specific time index.
+
+        Args:
+            url: Zarr URL
+            lon: Longitude
+            lat: Latitude
+            variable: Variable name in dataset
+            bidx: Band/time index (1-based)
+            decode_times: Whether to decode time coordinates
+            **kwargs: Additional parameters
+        """
+        params = {
+            "url": url,
+            "variable": variable,
+            "bidx": bidx,
+            "decode_times": str(decode_times).lower(),
+            **kwargs
+        }
+        return await self._request("GET", f"/xarray/point/{lon},{lat}", params=params)
+
+    async def get_xarray_bbox(
+        self,
+        url: str,
+        bbox: str,
+        variable: str,
+        bidx: int = 1,
+        format: str = "tif",
+        decode_times: bool = False,
+        **kwargs
+    ) -> TiTilerResponse:
+        """
+        Extract Zarr bbox as image for specific time index.
+
+        Args:
+            url: Zarr URL
+            bbox: Bounding box as "minx,miny,maxx,maxy"
+            variable: Variable name
+            bidx: Band/time index (1-based)
+            format: Output format (tif, png, npy)
+            decode_times: Whether to decode time coordinates
+            **kwargs: Additional parameters (width, height, rescale, colormap_name)
+        """
+        params = {
+            "url": url,
+            "variable": variable,
+            "bidx": bidx,
+            "decode_times": str(decode_times).lower(),
+            **kwargs
+        }
+        return await self._request(
+            "GET",
+            f"/xarray/bbox/{bbox}.{format}",
+            params=params,
+            return_binary=True
+        )
+
+    async def get_xarray_preview(
+        self,
+        url: str,
+        variable: str,
+        bidx: int = 1,
+        format: str = "png",
+        max_size: int = 512,
+        decode_times: bool = False,
+        **kwargs
+    ) -> TiTilerResponse:
+        """
+        Get Zarr preview image for specific time index.
+
+        Args:
+            url: Zarr URL
+            variable: Variable name
+            bidx: Band/time index (1-based)
+            format: Output format (png, jpeg, webp)
+            max_size: Maximum dimension in pixels
+            decode_times: Whether to decode time coordinates
+            **kwargs: Additional parameters
+        """
+        params = {
+            "url": url,
+            "variable": variable,
+            "bidx": bidx,
+            "max_size": max_size,
+            "decode_times": str(decode_times).lower(),
+            **kwargs
+        }
+        return await self._request(
+            "GET",
+            f"/xarray/preview.{format}",
+            params=params,
+            return_binary=True
+        )
+
+    async def get_xarray_feature(
+        self,
+        url: str,
+        geometry: Dict,
+        variable: str,
+        bidx: int = 1,
+        format: str = "tif",
+        decode_times: bool = False,
+        **kwargs
+    ) -> TiTilerResponse:
+        """
+        Extract Zarr clipped to GeoJSON geometry.
+
+        Args:
+            url: Zarr URL
+            geometry: GeoJSON geometry dict
+            variable: Variable name
+            bidx: Band/time index (1-based)
+            format: Output format (tif, png, npy)
+            decode_times: Whether to decode time coordinates
+            **kwargs: Additional parameters
+        """
+        params = {
+            "url": url,
+            "variable": variable,
+            "bidx": bidx,
+            "decode_times": str(decode_times).lower(),
+            **kwargs
+        }
+        feature = {
+            "type": "Feature",
+            "properties": {},
+            "geometry": geometry
+        }
+        return await self._request(
+            "POST",
+            f"/xarray/feature.{format}",
+            params=params,
+            json_body=feature,
+            return_binary=True
+        )
+
+    # =========================================================================
+    # Health Check
+    # =========================================================================
+
+    async def health_check(self) -> TiTilerResponse:
+        """Check TiTiler server health."""
+        return await self._request("GET", "/healthz")

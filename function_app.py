@@ -252,6 +252,12 @@ from stac_api import get_stac_triggers
 # Vector Viewer - Standalone module (13 NOV 2025) - OGC Features API
 from vector_viewer import get_vector_viewer_triggers
 
+# Raster API - Service Layer convenience wrappers for TiTiler (18 DEC 2025)
+from raster_api import get_raster_triggers
+
+# xarray API - Direct Zarr access for time-series (18 DEC 2025)
+from xarray_api import get_xarray_triggers
+
 # Pipeline Dashboard - Container blob browser (21 NOV 2025) - Read-only UI operations
 from triggers.list_container_blobs import list_container_blobs_handler
 from triggers.get_blob_metadata import get_blob_metadata_handler
@@ -2756,3 +2762,140 @@ def cleanup_history(req: func.HttpRequest) -> func.HttpResponse:
         limit: Max records to return (default: 50, max: 200)
     """
     return janitor_history_handler(req)
+
+
+# ============================================================================
+# RASTER API - Service Layer Convenience Wrappers (18 DEC 2025)
+# ============================================================================
+# Convenience endpoints that look up STAC items and proxy to TiTiler.
+# Simplifies raster access by accepting collection/item IDs instead of URLs.
+#
+# Endpoints:
+#   GET /api/raster/extract/{collection}/{item}  - Extract bbox as image
+#   GET /api/raster/point/{collection}/{item}    - Point value query
+#   GET /api/raster/clip/{collection}/{item}     - Clip to geometry (POST supported)
+#   GET /api/raster/preview/{collection}/{item}  - Quick preview image
+# ============================================================================
+
+# Get trigger configurations
+_raster_triggers = get_raster_triggers()
+_raster_extract = _raster_triggers[0]['handler']
+_raster_point = _raster_triggers[1]['handler']
+_raster_clip = _raster_triggers[2]['handler']
+_raster_preview = _raster_triggers[3]['handler']
+
+
+@app.route(route="raster/extract/{collection}/{item}", methods=["GET"])
+def raster_api_extract(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Extract bbox from raster as image.
+
+    GET /api/raster/extract/{collection}/{item}?bbox={minx},{miny},{maxx},{maxy}
+        &format=tif|png|npy
+        &asset=data
+        &time_index=1
+        &colormap=viridis
+        &rescale=0,100
+    """
+    return _raster_extract(req)
+
+
+@app.route(route="raster/point/{collection}/{item}", methods=["GET"])
+def raster_api_point(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Get raster value at a point.
+
+    GET /api/raster/point/{collection}/{item}?location={name}|{lon},{lat}
+        &asset=data
+        &time_index=1
+    """
+    return _raster_point(req)
+
+
+@app.route(route="raster/clip/{collection}/{item}", methods=["GET", "POST"])
+def raster_api_clip(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Clip raster to geometry.
+
+    GET /api/raster/clip/{collection}/{item}?boundary_type=state&boundary_id=VA
+        &format=tif|png
+        &time_index=1
+
+    POST /api/raster/clip/{collection}/{item}
+        Body: GeoJSON geometry
+        ?format=tif|png
+    """
+    return _raster_clip(req)
+
+
+@app.route(route="raster/preview/{collection}/{item}", methods=["GET"])
+def raster_api_preview(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Get preview image of raster.
+
+    GET /api/raster/preview/{collection}/{item}?format=png|jpeg|webp
+        &asset=data
+        &time_index=1
+        &max_size=512
+        &colormap=viridis
+    """
+    return _raster_preview(req)
+
+
+# ============================================================================
+# XARRAY API - Direct Zarr Access for Time-Series (18 DEC 2025)
+# ============================================================================
+# Direct xarray access to Zarr datasets for time-series operations.
+# More efficient than TiTiler for multi-timestep queries (single read vs N requests).
+#
+# Endpoints:
+#   GET /api/xarray/point/{collection}/{item}       - Time-series at a point
+#   GET /api/xarray/statistics/{collection}/{item}  - Regional stats over time
+#   GET /api/xarray/aggregate/{collection}/{item}   - Temporal aggregation export
+# ============================================================================
+
+# Get trigger configurations
+_xarray_triggers = get_xarray_triggers()
+_xarray_point = _xarray_triggers[0]['handler']
+_xarray_statistics = _xarray_triggers[1]['handler']
+_xarray_aggregate = _xarray_triggers[2]['handler']
+
+
+@app.route(route="xarray/point/{collection}/{item}", methods=["GET"])
+def xarray_api_point(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Get time-series at a point.
+
+    GET /api/xarray/point/{collection}/{item}?location={name}|{lon},{lat}
+        &start_time=2015-01-01
+        &end_time=2015-12-31
+        &aggregation=none|daily|monthly|yearly
+    """
+    return _xarray_point(req)
+
+
+@app.route(route="xarray/statistics/{collection}/{item}", methods=["GET"])
+def xarray_api_statistics(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Get regional statistics over time.
+
+    GET /api/xarray/statistics/{collection}/{item}?bbox={minx},{miny},{maxx},{maxy}
+        &start_time=2015-01-01
+        &end_time=2015-12-31
+        &temporal_resolution=daily|monthly|yearly
+    """
+    return _xarray_statistics(req)
+
+
+@app.route(route="xarray/aggregate/{collection}/{item}", methods=["GET"])
+def xarray_api_aggregate(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Compute temporal aggregation and export.
+
+    GET /api/xarray/aggregate/{collection}/{item}?bbox={minx},{miny},{maxx},{maxy}
+        &start_time=2015-01-01
+        &end_time=2015-12-31
+        &aggregation=mean|max|min|sum
+        &format=json|tif|png|npy
+    """
+    return _xarray_aggregate(req)

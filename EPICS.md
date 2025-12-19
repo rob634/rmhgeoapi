@@ -15,7 +15,7 @@
 |:--------:|------|------|--------|:--------:|:----:|
 | — | E1 | Vector Data as API | ✅ Complete | 4 | — |
 | 1 | E2 | Raster Data as API | 🚧 Partial | 7 | 5.9 |
-| 2 | E9 | DDH Platform Integration | 📋 Planned | 4 | 3.2 |
+| 2 | E9 | DDH Platform Integration | 📋 Planned | 5 | 3.2 |
 | 3 | E7 | Data Externalization | 📋 Planned | 3 | 4.3 |
 | 4 | E6 | Platform Observability | 🚧 Mostly Complete | 3 | 11.3 |
 | 5 | E3 | Zarr/Climate Data as API | 🚧 Partial | 3 | 2.0 |
@@ -620,80 +620,109 @@ Source Data           H3 Aggregation          Output
 
 ## Epic E9: DDH Platform Integration 📋
 
-**Business Requirement**: Enable DDH application to consume geospatial platform services
+**Business Requirement**: Enable DDH application to consume geospatial platform data services
 **Status**: 📋 PLANNED
-**Owner**: DDH Team (with Robert coordination)
+**Owner**: ITSDA Team (DDH) + Geospatial Team (Platform)
 
-**Integration Points**:
+**Architectural Boundary**:
+> Platform exposes **DATA ACCESS APIs**; ETL orchestration is internal implementation.
+> DDH submits jobs via `/api/jobs/submit/*` and polls status via `/api/jobs/status/{id}`.
+> Push-based callbacks are not part of the supported integration contract.
+
+**Integration Contract**:
 ```
 DDH Application                    Geospatial Platform
 ┌─────────────────┐               ┌─────────────────────┐
 │                 │──── Submit ──▶│ /api/jobs/submit/*  │
 │  Data Hub       │               │ (vector, raster)    │
-│  Dashboard      │◀── Status ────│ /api/jobs/status/*  │
-│                 │               │ /api/platform/*     │
-│                 │──── Query ───▶│ /api/features/*     │
-│                 │               │ /api/raster/*       │
+│  Dashboard      │──── Poll ────▶│ /api/jobs/status/*  │
+│                 │               │                     │
+│                 │──── Query ───▶│ /api/features/*     │ DATA ACCESS
+│                 │               │ /api/raster/*       │ (primary surface)
+│                 │               │ /api/stac/*         │
 │                 │               │ /api/h3/*           │
 └─────────────────┘               └─────────────────────┘
 ```
 
-### Feature F9.1: API Contract & Documentation 📋 PLANNED
+---
 
-**Owner**: DDH Team + Robert
+### Feature F9.1: API Contract Documentation 📋 PLANNED
+
+**Owner**: Geospatial Team
 **Deliverable**: Formal API specification for cross-team development
 
 | Story | Status | Description |
 |-------|--------|-------------|
-| S9.1.1 | 📋 | Generate OpenAPI 3.0 spec from existing endpoints |
+| S9.1.1 | 📋 | Document data access endpoints (OGC Features, Raster, STAC, H3) |
 | S9.1.2 | 📋 | Document job submission request/response formats |
-| S9.1.3 | 📋 | Document STAC item structure for vectors/rasters |
-| S9.1.4 | 📋 | Document error response contract |
-| S9.1.5 | 📋 | Publish API docs (Swagger UI or static) |
+| S9.1.3 | 📋 | Document job status polling pattern and response schema |
+| S9.1.4 | 📋 | Document STAC item structure for vectors/rasters |
+| S9.1.5 | 📋 | Document error response contract |
+| S9.1.6 | 📋 | Generate OpenAPI 3.0 spec from existing endpoints |
+| S9.1.7 | 📋 | Publish API documentation (Swagger UI or static site) |
 
 ---
 
-### Feature F9.2: Job Lifecycle Callbacks 📋 PLANNED
+### Feature F9.2: Identity & Access Configuration 📋 PLANNED
 
-**Owner**: DDH Team (consumer) + Claude (implementation)
-**Deliverable**: Webhook notifications for job state changes
+**Owner**: Geospatial Team + ITSDA Team
+**Deliverable**: Service principals and access grants per environment
 
 | Story | Status | Description |
 |-------|--------|-------------|
-| S9.2.1 | 📋 | Design callback payload schema |
-| S9.2.2 | 📋 | Add callback_url parameter to job submission |
-| S9.2.3 | 📋 | Implement webhook POST on job completion |
-| S9.2.4 | 📋 | Implement webhook POST on job failure |
-| S9.2.5 | 📋 | Add retry logic for failed callbacks |
+| S9.2.1 | 📋 | Define authentication strategy (managed identity preferred) |
+| S9.2.2 | 📋 | Create DDH service principal for QA environment |
+| S9.2.3 | 📋 | Grant blob storage read access to DDH identity |
+| S9.2.4 | 📋 | Grant blob storage write access for job submissions |
+| S9.2.5 | 📋 | Configure API authentication middleware |
+| S9.2.6 | 📋 | Document identity setup for ITSDA team |
 
 ---
 
-### Feature F9.3: Authentication & Authorization 📋 PLANNED
+### Feature F9.3: Environment Provisioning 📋 PLANNED
 
-**Owner**: DDH Team + Robert
-**Deliverable**: Secure API access between systems
+**Owner**: Geospatial Team + ITSDA Team
+**Deliverable**: Replicate integration configuration across environments
 
 | Story | Status | Description |
 |-------|--------|-------------|
-| S9.3.1 | 📋 | Define auth strategy (API key, OAuth, managed identity) |
-| S9.3.2 | 📋 | Implement auth middleware |
-| S9.3.3 | 📋 | Create DDH service account/identity |
-| S9.3.4 | 📋 | Document auth setup for DDH team |
+| S9.3.1 | ✅ | QA environment baseline (current state) |
+| S9.3.2 | 📋 | Document QA configuration for replication |
+| S9.3.3 | 📋 | Provision UAT environment service principals |
+| S9.3.4 | 📋 | Provision UAT storage account access |
+| S9.3.5 | 📋 | Validate UAT integration end-to-end |
+| S9.3.6 | 📋 | Provision Production environment (post-UAT validation) |
+| S9.3.7 | 📋 | Document environment-specific connection strings |
 
 ---
 
-### Feature F9.4: Integration Testing 📋 PLANNED
+### Feature F9.4: Integration Verification 📋 PLANNED
 
-**Owner**: DDH Team + Robert
-**Deliverable**: End-to-end test suite validating integration
+**Owner**: ITSDA Team + Geospatial Team
+**Deliverable**: End-to-end test suite validating integration contract
 
 | Story | Status | Description |
 |-------|--------|-------------|
-| S9.4.1 | 📋 | Create integration test environment |
-| S9.4.2 | 📋 | Write vector ETL round-trip test |
-| S9.4.3 | 📋 | Write raster ETL round-trip test |
-| S9.4.4 | 📋 | Write OGC Features query test |
-| S9.4.5 | 📋 | Set up CI pipeline for integration tests |
+| S9.4.1 | 📋 | Define integration test scenarios with ITSDA |
+| S9.4.2 | 📋 | Write vector dataset publish round-trip test |
+| S9.4.3 | 📋 | Write raster dataset publish round-trip test |
+| S9.4.4 | 📋 | Write OGC Features query verification test |
+| S9.4.5 | 📋 | Write job status polling verification test |
+| S9.4.6 | 📋 | Document expected response times and SLAs |
+
+---
+
+### Feature F9.5: Job Completion Callbacks 🔵 BACKLOG
+
+**Status**: Deferred — polling pattern is the supported integration contract
+**Trigger**: Revisit if polling creates unacceptable API load or latency issues
+
+| Story | Status | Description |
+|-------|--------|-------------|
+| S9.5.1 | 🔵 | Design callback payload schema |
+| S9.5.2 | 🔵 | Add callback_url parameter to job submission |
+| S9.5.3 | 🔵 | Implement webhook POST on job completion/failure |
+| S9.5.4 | 🔵 | Add retry logic for failed callbacks |
 
 ---
 
@@ -851,8 +880,8 @@ Technical foundation that enables all Epics above.
 | **Total Epics** | **9** |
 | Completed Features | 17 |
 | Active Features | 6 |
-| Planned Features | 11 |
-| **Total Features** | **34** |
+| Planned Features | 12 |
+| **Total Features** | **35** |
 | Completed Enablers | 6 |
 | Backlog Enablers | 3 |
 

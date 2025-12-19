@@ -14,19 +14,40 @@
 | Priority | Epic | Name | Status | Features | WSJF |
 |:--------:|------|------|--------|:--------:|:----:|
 | — | E1 | Vector Data as API | ✅ Complete | 4 | — |
-| 1 | E2 | Raster Data as API | 🚧 Partial | 7 | TBD |
-| 2 | E9 | DDH Platform Integration | 📋 Planned | 4 | TBD |
-| 3 | E7 | Data Externalization | 📋 Planned | 3 | TBD |
-| 4 | E6 | Platform Observability | 🚧 Mostly Complete | 3 | TBD |
-| 5 | E3 | Zarr/Climate Data as API | 🚧 Partial | 3 | TBD |
-| 6 | E4 | Managed Datasets | 🚧 Partial | 2 | TBD |
-| 7 | E5 | Vector Styling | 🚧 Partial | 2 | TBD |
-| 8 | E8 | H3 Analytics Pipeline | 🚧 Partial | 6 | TBD |
+| 1 | E2 | Raster Data as API | 🚧 Partial | 7 | 5.9 |
+| 2 | E9 | DDH Platform Integration | 📋 Planned | 4 | 3.2 |
+| 3 | E7 | Data Externalization | 📋 Planned | 3 | 4.3 |
+| 4 | E6 | Platform Observability | 🚧 Mostly Complete | 3 | 11.3 |
+| 5 | E3 | Zarr/Climate Data as API | 🚧 Partial | 3 | 2.0 |
+| 6 | E4 | Managed Datasets | 🚧 Partial | 2 | 2.6 |
+| 7 | E5 | Vector Styling | 🚧 Partial | 2 | 3.7 |
+| 8 | E8 | H3 Analytics Pipeline | 🚧 Partial | 6 | 1.2 |
 
 **Priority Notes**:
 - **E9 + E6 tightly coupled**: Observability enables Integration monitoring
 - **E9 requires elaboration**: ITSDA team (ITS Platform / DDH owner) has original requirements but no geospatial knowledge
 - **E3, E4, E5, E8**: Nice-to-have for FY26 — E3 (Zarr/Climate) is top priority among these
+
+### WSJF Calculation
+
+**Formula**: WSJF = Cost of Delay ÷ Job Size (higher score = do first)
+
+**Cost of Delay** = Business Value + Time Criticality + Risk Reduction (each 1-21 Fibonacci)
+
+| Epic | Business Value | Time Crit | Risk Red | **CoD** | Job Size | **WSJF** |
+|------|:--------------:|:---------:|:--------:|:-------:|:--------:|:--------:|
+| E2 | 21 (foundation) | 13 (FATHOM waiting) | 13 (enables all) | **47** | 8 | **5.9** |
+| E9 | 21 (analytics FE needed) | 13 (ASAP) | 8 (alignment) | **42** | 13 | **3.2** |
+| E7 | 13 (public access) | 8 (after platform) | 13 (security/audit) | **34** | 8 | **4.3** |
+| E6 | 8 (internal) | 13 (E9 depends) | 13 (debugging) | **34** | 3 | **11.3** |
+| E3 | 13 (CMIP priority) | 5 ("stretch" positioning) | 8 (tech complexity) | **26** | 13 | **2.0** |
+| E4 | 5 (convenience) | 3 | 5 | **13** | 5 | **2.6** |
+| E5 | 5 (UX polish) | 3 | 3 | **11** | 3 | **3.7** |
+| E8 | 8 (analytics capability) | 3 | 5 | **16** | 13 | **1.2** |
+
+**WSJF-Ordered Sequence**: E6 (11.3) → E2 (5.9) → E7 (4.3) → E5 (3.7) → E9 (3.2) → E4 (2.6) → E3 (2.0) → E8 (1.2)
+
+**Strategic Override**: E6's high WSJF (small job, high value) makes sense — knock it out to enable E9. But E2 remains practical priority since it's foundational.
 
 | Enabler | Name | Status | Enables |
 |---------|------|--------|---------|

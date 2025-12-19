@@ -20,7 +20,7 @@
 | 4 | E6 | Platform Observability | 🚧 Mostly Complete | 3 | 11.3 |
 | 5 | E3 | Zarr/Climate Data as API | 🚧 Partial | 3 | 2.0 |
 | 6 | E4 | Managed Datasets | 🚧 Partial | 2 | 2.6 |
-| 7 | E5 | Vector Styling | 🚧 Partial | 2 | 3.7 |
+| 7 | E5 | OGC Styles | 🚧 Partial | 2 | 3.7 |
 | 8 | E8 | H3 Analytics Pipeline | 🚧 Partial | 6 | 1.2 |
 
 **Priority Notes**:
@@ -42,7 +42,7 @@
 | E6 | 8 (internal) | 13 (E9 depends) | 13 (debugging) | **34** | 3 | **11.3** |
 | E3 | 13 (CMIP priority) | 5 ("stretch" positioning) | 8 (tech complexity) | **26** | 13 | **2.0** |
 | E4 | 5 (convenience) | 3 | 5 | **13** | 5 | **2.6** |
-| E5 | 5 (UX polish) | 3 | 3 | **11** | 3 | **3.7** |
+| E5 | 5 (styling metadata) | 3 | 3 | **11** | 3 | **3.7** |
 | E8 | 8 (analytics capability) | 3 | 5 | **16** | 13 | **1.2** |
 
 **WSJF-Ordered Sequence**: E6 (11.3) → E2 (5.9) → E7 (4.3) → E5 (3.7) → E9 (3.2) → E4 (2.6) → E3 (2.0) → E8 (1.2)
@@ -356,10 +356,11 @@
 
 ---
 
-## Epic E5: Vector Styling 🚧
+## Epic E5: OGC Styles 🚧
 
-**Business Requirement**: Server-side map rendering styles
+**Business Requirement**: Support styling metadata for all data formats
 **Status**: 🚧 PARTIAL
+**Note**: Building capability first; population method (SLD ingest vs manual) TBD
 
 ### Feature F5.1: OGC API Styles ✅
 

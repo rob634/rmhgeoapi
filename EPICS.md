@@ -24,9 +24,9 @@
 | 8 | E8 | H3 Analytics Pipeline | 🚧 Partial | 6 | 1.2 |
 
 **Priority Notes**:
-- **E9 + E6 tightly coupled**: Observability enables Integration monitoring
-- **E9 requires elaboration**: ITSDA team (ITS Platform / DDH owner) has original requirements but no geospatial knowledge
-- **E3, E4, E5, E8**: Nice-to-have for FY26 — E3 (Zarr/Climate) is top priority among these
+- **E9 + E6 tightly coupled**: Observability enables integration monitoring
+- **E9 requires elaboration**: ITSDA team (ITS Platform / DDH owner) holds original requirements; limited geospatial domain knowledge
+- **E3, E4, E5, E8**: Secondary priority for FY26; E3 (Zarr/Climate) highest among this tier
 
 ### WSJF Calculation
 
@@ -36,18 +36,18 @@
 
 | Epic | Business Value | Time Crit | Risk Red | **CoD** | Job Size | **WSJF** |
 |------|:--------------:|:---------:|:--------:|:-------:|:--------:|:--------:|
-| E2 | 21 (foundation) | 13 (FATHOM waiting) | 13 (enables all) | **47** | 8 | **5.9** |
-| E9 | 21 (analytics FE needed) | 13 (ASAP) | 8 (alignment) | **42** | 13 | **3.2** |
-| E7 | 13 (public access) | 8 (after platform) | 13 (security/audit) | **34** | 8 | **4.3** |
-| E6 | 8 (internal) | 13 (E9 depends) | 13 (debugging) | **34** | 3 | **11.3** |
-| E3 | 13 (CMIP priority) | 5 ("stretch" positioning) | 8 (tech complexity) | **26** | 13 | **2.0** |
-| E4 | 5 (convenience) | 3 | 5 | **13** | 5 | **2.6** |
+| E2 | 21 (platform foundation) | 13 (FATHOM blocked) | 13 (enables downstream) | **47** | 8 | **5.9** |
+| E9 | 21 (analytics front-end) | 13 (high urgency) | 8 (stakeholder alignment) | **42** | 13 | **3.2** |
+| E7 | 13 (external access) | 8 (post-platform) | 13 (security/audit) | **34** | 8 | **4.3** |
+| E6 | 8 (internal tooling) | 13 (E9 dependency) | 13 (diagnostics) | **34** | 3 | **11.3** |
+| E3 | 13 (CMIP client priority) | 5 (secondary tier) | 8 (technical complexity) | **26** | 13 | **2.0** |
+| E4 | 5 (operational efficiency) | 3 | 5 | **13** | 5 | **2.6** |
 | E5 | 5 (styling metadata) | 3 | 3 | **11** | 3 | **3.7** |
 | E8 | 8 (analytics capability) | 3 | 5 | **16** | 13 | **1.2** |
 
 **WSJF-Ordered Sequence**: E6 (11.3) → E2 (5.9) → E7 (4.3) → E5 (3.7) → E9 (3.2) → E4 (2.6) → E3 (2.0) → E8 (1.2)
 
-**Strategic Override**: E6's high WSJF (small job, high value) makes sense — knock it out to enable E9. But E2 remains practical priority since it's foundational.
+**Strategic Override**: E6 scores highest due to small scope and high dependency value. However, E2 remains the practical starting point as platform foundation.
 
 | Enabler | Name | Status | Enables |
 |---------|------|--------|---------|
@@ -267,7 +267,7 @@
 
 ## Epic E3: Zarr/Climate Data as API 🚧
 
-**Business Requirement**: "Now do Zarr" + time-series access
+**Business Requirement**: Zarr/NetCDF data access with time-series query support
 **Status**: 🚧 PARTIAL
 
 ### Feature F3.1: xarray Service Layer ✅

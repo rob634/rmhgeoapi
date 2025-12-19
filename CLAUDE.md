@@ -28,6 +28,36 @@ All Claude-optimized documentation is in **`/docs_claude/`**.
 3. **NO "PRODUCTION READY"** unless explicitly instructed
 4. **GIT**: Work on `dev` branch, merge to `master` when stable
 
+---
+
+## 📋 SAFe AGILE FRAMEWORK
+
+**This project uses SAFe (Scaled Agile Framework) terminology for planning and tracking.**
+
+When planning work or discussing priorities with Robert, use SAFe language:
+
+| SAFe Term | Definition | Example |
+|-----------|------------|---------|
+| **Epic** | Large strategic initiative spanning multiple sprints | "Data Access Simplification" |
+| **Feature** | Deliverable capability within an Epic | "Service Layer API", "Reader App Migration" |
+| **Story** | Smallest unit of work (implementable in 1-3 days) | "Implement /api/raster/extract endpoint" |
+| **Enabler** | Technical foundation work | "Repository pattern enforcement" |
+| **Spike** | Research/investigation task | "Investigate Kerchunk performance" |
+
+### Planning Guidelines
+
+1. **Break Features into Stories** - Each Feature should have 3-8 Stories
+2. **Stories should be atomic** - Completable in 1-3 days, independently testable
+3. **Use acceptance criteria** - Define "done" for each Story
+4. **Track dependencies** - Note when Stories block other Stories
+
+### Encourage Robert to:
+- Frame requests as Features or Stories
+- Prioritize by business value (which Epic does this serve?)
+- Think in terms of increments, not big-bang releases
+
+**TODO.md follows this structure** - see `docs_claude/TODO.md` for the canonical backlog
+
 ### Git Commit Format
 ```
 Brief description

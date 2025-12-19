@@ -95,7 +95,7 @@ az postgres flexible-server show \
 ```bash
 # Get your current Azure user (must be Entra ID admin)
 az account show --query "user.name" --output tsv
-# Expected: rmhazure@rob634gmail.onmicrosoft.com
+# Expected: {managed_identity}@{tenant}.onmicrosoft.com
 
 # Get access token for PostgreSQL
 TOKEN=$(az account get-access-token --resource-type oss-rdbms --query accessToken --output tsv)
@@ -113,7 +113,7 @@ TOKEN=$(az account get-access-token --resource-type oss-rdbms --query accessToke
 
 PGPASSWORD="$TOKEN" psql \
     -h rmhpgflex.postgres.database.azure.com \
-    -U "rmhazure@rob634gmail.onmicrosoft.com" \
+    -U "{managed_identity}@{tenant}.onmicrosoft.com" \
     -d postgres \
     -c "SELECT * FROM pgaadauth_create_principal('rmhpgflexadmin', true, false);"
 ```
@@ -138,7 +138,7 @@ TOKEN=$(az account get-access-token --resource-type oss-rdbms --query accessToke
 
 PGPASSWORD="$TOKEN" psql \
     -h rmhpgflex.postgres.database.azure.com \
-    -U "rmhazure@rob634gmail.onmicrosoft.com" \
+    -U "{managed_identity}@{tenant}.onmicrosoft.com" \
     -d postgres \
     -c "SELECT * FROM pgaadauth_create_principal('rmhpgflexreader', false, false);"
 ```
@@ -155,7 +155,7 @@ TOKEN=$(az account get-access-token --resource-type oss-rdbms --query accessToke
 
 PGPASSWORD="$TOKEN" psql \
     -h rmhpgflex.postgres.database.azure.com \
-    -U "rmhazure@rob634gmail.onmicrosoft.com" \
+    -U "{managed_identity}@{tenant}.onmicrosoft.com" \
     -d postgres \
     -c "SELECT rolname, rolcanlogin, rolcreaterole, rolcreatedb FROM pg_roles WHERE rolname LIKE 'rmhpgflex%';"
 ```
@@ -180,7 +180,7 @@ Connect to `geopgflex` as schema owner:
 ```bash
 PGPASSWORD='<SCHEMA_OWNER_PASSWORD>' psql \
     -h rmhpgflex.postgres.database.azure.com \
-    -U rob634 \
+    -U {db_superuser} \
     -d geopgflex
 ```
 
@@ -424,7 +424,7 @@ PGPASSWORD="$TOKEN" psql -h ... -d postgres
 
 **Cause**: GRANT statements not run or not run by schema owner.
 
-**Solution**: Connect as schema owner (rob634) and re-run GRANT statements.
+**Solution**: Connect as schema owner ({db_superuser}) and re-run GRANT statements.
 
 ### Error: "Could not validate AAD user"
 
@@ -439,7 +439,7 @@ TOKEN=$(az account get-access-token --resource-type oss-rdbms --query accessToke
 
 PGPASSWORD="$TOKEN" psql \
     -h rmhpgflex.postgres.database.azure.com \
-    -U "rmhazure@rob634gmail.onmicrosoft.com" \
+    -U "{managed_identity}@{tenant}.onmicrosoft.com" \
     -d postgres \
     -c "SELECT proname FROM pg_proc WHERE proname LIKE 'pgaadauth%' ORDER BY proname;"
 ```

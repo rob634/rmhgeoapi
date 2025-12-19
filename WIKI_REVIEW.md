@@ -750,4 +750,38 @@ docs_claude/ (10 files - down from 14)
 
 ---
 
-**Last Updated**: 05 DEC 2025
+## Phase 7: Root .md File Cleanup (17 DEC 2025)
+
+### Files Archived
+
+**To `docs/archive/doc_review_dec2025/`** (8 files):
+| File | Reason |
+|------|--------|
+| `PYTHON_DOCUMENTATION_REVIEW_PLAN.md` | Review process complete |
+| `PHASE1_DOCUMENTATION_REVIEW.md` | Tier 1 P1 review complete |
+| `PHASE2_DOCUMENTATION_REVIEW.md` | Tier 1 P2/P3 review complete |
+| `PHASE3_DOCUMENTATION_REVIEW.md` | Tier 2 P1 review complete |
+| `PHASE4_DOCUMENTATION_REVIEW.md` | Tier 2 P2/P3 review complete |
+| `PHASE5_DOCUMENTATION_REVIEW.md` | Tier 3 review complete |
+| `STYLE.md` | Superseded by `STYLE_IMPLEMENTATION.md` |
+| `NETCDF.md` | Superseded by `VIRTUAL_ZARR_IMPLEMENTATION.md` |
+
+**To `docs/archive/completed/`** (1 file):
+| File | Reason |
+|------|--------|
+| `VECTOR_WORKFLOW_GAPS.md` | All 10 gaps closed (16 DEC 2025) |
+
+### Root .md File Summary (Post-Cleanup)
+
+**34 files → 25 files** (26% reduction)
+
+| Category | Count | Files |
+|----------|-------|-------|
+| WIKI files | 14 | All `WIKI_*.md` - ready for ADO Wiki |
+| Active development | 5 | STYLE_IMPLEMENTATION, VIRTUAL_ZARR_IMPLEMENTATION, GDAL_WORKER, CURATED_DATASETS, PRODUCTION_ARCHITECTURE |
+| Operational | 4 | DATABASE_IDENTITY_RUNBOOK, QA_CLAUDE, UI_INTERFACE, SCALE_OUT |
+| Core project | 2 | CLAUDE.md, README.md |
+
+---
+
+**Last Updated**: 17 DEC 2025

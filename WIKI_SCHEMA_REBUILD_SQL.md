@@ -46,7 +46,7 @@ curl -X POST "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.ne
 |----------|-------|
 | **Server** | `rmhpgflex.postgres.database.azure.com` |
 | **Database** | `geopgflex` |
-| **Admin User** | `rob634` (or Entra ID admin) |
+| **Admin User** | {db_superuser} (or Entra ID admin) |
 | **SSL Mode** | `require` |
 
 ### Required Extensions (MUST be created first!)
@@ -525,7 +525,7 @@ The `pgstac` schema is managed by the **pypgstac** library (v0.9.8). It cannot b
 export PGHOST=rmhpgflex.postgres.database.azure.com
 export PGPORT=5432
 export PGDATABASE=geopgflex
-export PGUSER=rob634
+export PGUSER={db_superuser}
 export PGPASSWORD='<your_password>'
 
 # Run pypgstac migrate
@@ -543,7 +543,7 @@ env.update({
     'PGHOST': 'rmhpgflex.postgres.database.azure.com',
     'PGPORT': '5432',
     'PGDATABASE': 'geopgflex',
-    'PGUSER': 'rob634',
+    'PGUSER': '{db_superuser}',
     'PGPASSWORD': '<your_password>'
 })
 

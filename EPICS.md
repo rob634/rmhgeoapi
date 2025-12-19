@@ -105,7 +105,7 @@ Abstract component names for ADO work items. Actual Azure resource names assigne
 | Logical Name | Purpose |
 |--------------|---------|
 | **DDH Application** | Data Hub Dashboard (consumer of platform APIs) |
-| **DDH Service Principal** | Azure AD identity for DDH access |
+| **DDH Managed Identity** | User-assigned managed identity for DDH access (no secrets) |
 | **CDN/WAF** | Cloudflare edge protection for external zone |
 | **Data Factory Instance** | ADF for blob-to-blob copy operations |
 
@@ -790,12 +790,31 @@ DDH Application                    Geospatial Platform
 
 | Story | Status | Description | Owner | Acceptance Criteria |
 |-------|--------|-------------|-------|---------------------|
-| S9.2.1 | 📋 | Define authentication strategy | Joint | Decision documented: managed identity vs API keys vs Azure AD |
-| S9.2.2 | 📋 | Create **DDH Service Principal** (QA) | DevOps | Service principal exists in Azure AD, client ID documented |
+| S9.2.1 | ✅ | Authentication strategy decided | — | **Managed Identity only** (see below) |
+| S9.2.2 | 📋 | Create **DDH Managed Identity** (QA) | DevOps | User-assigned managed identity exists, client ID documented |
 | S9.2.3 | 📋 | Grant read access to **Silver Storage Account** | DevOps | DDH identity has `Storage Blob Data Reader` on silver container |
 | S9.2.4 | 📋 | Grant write access to **Bronze Storage Account** | DevOps | DDH identity has `Storage Blob Data Contributor` on bronze container |
 | S9.2.5 | 📋 | Configure **ETL Function App** authentication | Claude | Function App validates DDH identity on `/api/jobs/*` endpoints |
-| S9.2.6 | 📋 | Document identity setup | DevOps | Runbook: how to create/rotate DDH credentials |
+| S9.2.6 | 📋 | Document identity setup | DevOps | Runbook: identity creation, role assignment, no secrets |
+
+### F9.2 Authentication Strategy (S9.2.1 Decision)
+
+**Principle**: No secrets. No tokens. Managed Identity only.
+
+| Scenario | Authentication Method |
+|----------|----------------------|
+| DDH → Platform APIs | DDH's managed identity + Azure AD token |
+| DDH → Bronze Storage (write) | DDH's managed identity + RBAC |
+| DDH → Silver Storage (read) | DDH's managed identity + RBAC |
+| Platform → Database | Platform's managed identity |
+| Platform → Storage | Platform's managed identity |
+| External APIs (if unavoidable) | Key Vault (exception only) |
+
+**Implementation**:
+- DDH Application must run in Azure (App Service, Container App, or Function App)
+- DDH gets a **user-assigned managed identity**
+- Platform grants RBAC roles to that identity
+- No client secrets, no API keys, no tokens in config
 
 ### F9.2 Access Matrix
 
@@ -810,8 +829,9 @@ DDH Application                    Geospatial Platform
 
 ### F9.2 Prerequisites
 
-- [ ] **Decision**: S9.2.1 must be completed before S9.2.2-S9.2.5 can proceed
-- [ ] **Azure AD Tenant**: Confirm DDH and Geospatial platform share same tenant (or configure cross-tenant access)
+- [x] **Decision**: S9.2.1 ✅ Managed Identity only — no secrets, no tokens
+- [ ] **Azure AD Tenant**: Confirm DDH and Geospatial platform share same tenant
+- [ ] **DDH Hosting**: DDH must run in Azure to use managed identity
 
 ---
 

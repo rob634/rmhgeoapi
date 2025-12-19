@@ -198,6 +198,8 @@
 
 **Key Files**: `jobs/process_large_raster_v2.py`
 
+**Note**: For files exceeding chunked processing limits, requires EN6 (Long-Running Task Infrastructure)
+
 ---
 
 ### Feature F2.7: Raster Collection Processing 📋 PLANNED
@@ -734,6 +736,27 @@ Technical foundation that enables all Epics above.
 
 # BACKLOG ENABLERS
 
+## Enabler EN6: Long-Running Task Infrastructure 📋 PLANNED
+
+**Purpose**: Docker-based worker for tasks exceeding Azure Functions 30-min timeout
+**What It Enables**: E2 (oversized rasters), E3 (large climate datasets)
+**Reference**: See architecture diagram at `/api/interface/health`
+
+| Task | Status | Description |
+|------|--------|-------------|
+| EN6.1 | 📋 | Create Docker image with GDAL/rasterio/xarray |
+| EN6.2 | 📋 | Deploy Azure Container App or Web App for Containers |
+| EN6.3 | 📋 | Create `long-running-raster-tasks` Service Bus queue |
+| EN6.4 | 📋 | Implement queue listener in Docker worker |
+| EN6.5 | 📋 | Add routing logic to dispatch oversized jobs |
+| EN6.6 | 📋 | Health check and monitoring integration |
+
+**Enables**:
+- F2.6 (Large Raster Support) - files exceeding chunked processing limits
+- F3.2 (Virtual Zarr Pipeline) - large NetCDF reference generation
+
+---
+
 ## Enabler: Repository Pattern Enforcement 🔵
 
 **Purpose**: Eliminate remaining direct database connections
@@ -793,7 +816,7 @@ Technical foundation that enables all Epics above.
 | Planned Features | 11 |
 | **Total Features** | **34** |
 | Completed Enablers | 6 |
-| Backlog Enablers | 2 |
+| Backlog Enablers | 3 |
 
 ## For Azure DevOps Import
 

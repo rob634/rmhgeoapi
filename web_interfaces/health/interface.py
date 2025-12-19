@@ -435,6 +435,14 @@ class HealthInterface(BaseInterface):
                 <!-- Components will be inserted here -->
             </div>
 
+            <!-- Schema Summary (from schema_summary component) -->
+            <div id="schema-summary" class="schema-summary hidden">
+                <h3>Database Schemas</h3>
+                <div id="schema-cards" class="schema-cards">
+                    <!-- Schema cards will be inserted here -->
+                </div>
+            </div>
+
             <!-- Debug Info (if DEBUG_MODE=true) -->
             <div id="debug-info" class="debug-info hidden"></div>
         </div>
@@ -1059,6 +1067,184 @@ class HealthInterface(BaseInterface):
         .identity-item strong {
             color: #053657;
         }
+
+        /* Schema Summary Section */
+        .schema-summary {
+            background: white;
+            border: 1px solid #e9ecef;
+            border-radius: 3px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+
+        .schema-summary h3 {
+            color: #053657;
+            font-size: 16px;
+            margin-bottom: 15px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .schema-cards {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+            gap: 15px;
+        }
+
+        .schema-card {
+            background: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 6px;
+            padding: 15px;
+            transition: all 0.2s;
+        }
+
+        .schema-card:hover {
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+
+        .schema-card.not-found {
+            opacity: 0.6;
+            border-style: dashed;
+        }
+
+        .schema-card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+
+        .schema-name {
+            font-size: 15px;
+            font-weight: 600;
+            color: #053657;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .schema-name .schema-icon {
+            font-size: 14px;
+        }
+
+        .schema-badge {
+            font-size: 10px;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .schema-badge.exists {
+            background: #D1FAE5;
+            color: #065F46;
+        }
+
+        .schema-badge.missing {
+            background: #FEE2E2;
+            color: #991B1B;
+        }
+
+        .schema-stats {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+        }
+
+        .schema-stat {
+            background: white;
+            padding: 8px 10px;
+            border-radius: 4px;
+            border: 1px solid #e9ecef;
+        }
+
+        .schema-stat.full-width {
+            grid-column: 1 / -1;
+        }
+
+        .stat-label {
+            font-size: 10px;
+            color: #626F86;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .stat-value {
+            font-size: 16px;
+            font-weight: 700;
+            color: #053657;
+            margin-top: 2px;
+        }
+
+        .stat-value.highlight {
+            color: #0071BC;
+        }
+
+        .schema-tables-list {
+            margin-top: 10px;
+            padding-top: 10px;
+            border-top: 1px solid #e9ecef;
+        }
+
+        .schema-tables-toggle {
+            font-size: 11px;
+            color: #0071BC;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .schema-tables-toggle:hover {
+            text-decoration: underline;
+        }
+
+        .schema-tables-content {
+            display: none;
+            margin-top: 8px;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .schema-tables-content.expanded {
+            display: block;
+        }
+
+        .table-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 4px 0;
+            font-size: 11px;
+            border-bottom: 1px solid #f0f0f0;
+        }
+
+        .table-row:last-child {
+            border-bottom: none;
+        }
+
+        .table-name {
+            color: #053657;
+            font-family: 'Courier New', monospace;
+        }
+
+        .table-count {
+            color: #626F86;
+            font-weight: 600;
+        }
+
+        /* Special highlights for STAC counts */
+        .stac-highlight {
+            background: linear-gradient(135deg, #F3E8FF 0%, #E8F4FD 100%);
+            border-color: #7C3AED;
+        }
+
+        .geo-highlight {
+            background: linear-gradient(135deg, #F0F7EE 0%, #E8F4FD 100%);
+            border-color: #5BB381;
+        }
         """
 
     def _generate_custom_js(self, tooltips: dict) -> str:
@@ -1189,6 +1375,9 @@ class HealthInterface(BaseInterface):
 
                 // Update architecture diagram
                 updateDiagramStatus(data.components);
+
+                // Render schema summary
+                renderSchemaSummary(data.components);
 
                 // Render debug info if present
                 renderDebugInfo(data);
@@ -1382,6 +1571,169 @@ class HealthInterface(BaseInterface):
                     </div>
                 ` : ''}}
             `;
+        }}
+
+        // Render schema summary section
+        function renderSchemaSummary(components) {{
+            const schemaSummary = document.getElementById('schema-summary');
+            const schemaCards = document.getElementById('schema-cards');
+
+            // Get schema_summary from components
+            const schemaSummaryData = components?.schema_summary?.details;
+            if (!schemaSummaryData || !schemaSummaryData.schemas) {{
+                schemaSummary.classList.add('hidden');
+                return;
+            }}
+
+            schemaSummary.classList.remove('hidden');
+
+            const schemas = schemaSummaryData.schemas;
+            const totalTables = schemaSummaryData.total_tables || 0;
+
+            // Schema icons and highlight classes
+            const schemaConfig = {{
+                'app': {{ icon: '&#x2699;', label: 'Application', highlight: '' }},
+                'geo': {{ icon: '&#x1F5FA;', label: 'PostGIS', highlight: 'geo-highlight' }},
+                'pgstac': {{ icon: '&#x1F4E6;', label: 'STAC Catalog', highlight: 'stac-highlight' }},
+                'h3': {{ icon: '&#x2B22;', label: 'H3 Hexagons', highlight: '' }}
+            }};
+
+            // Build schema cards HTML
+            let cardsHtml = '';
+
+            Object.entries(schemas).forEach(([schemaName, schemaData]) => {{
+                const config = schemaConfig[schemaName] || {{ icon: '&#x1F4C1;', label: schemaName, highlight: '' }};
+                const exists = schemaData.exists;
+                const tableCount = schemaData.table_count || 0;
+                const tables = schemaData.tables || [];
+                const rowCounts = schemaData.row_counts || {{}};
+
+                // Calculate total rows
+                let totalRows = 0;
+                Object.values(rowCounts).forEach(count => {{
+                    if (typeof count === 'number') totalRows += count;
+                }});
+
+                // Special stats for pgstac and geo
+                let specialStats = '';
+                if (schemaName === 'pgstac' && schemaData.stac_counts) {{
+                    const stacCounts = schemaData.stac_counts;
+                    specialStats = `
+                        <div class="schema-stat">
+                            <div class="stat-label">Collections</div>
+                            <div class="stat-value highlight">${{formatNumber(stacCounts.collections || 0)}}</div>
+                        </div>
+                        <div class="schema-stat">
+                            <div class="stat-label">Items</div>
+                            <div class="stat-value highlight">${{formatNumber(stacCounts.items || 0)}}</div>
+                        </div>
+                    `;
+                }} else if (schemaName === 'geo' && schemaData.geometry_columns !== undefined) {{
+                    specialStats = `
+                        <div class="schema-stat full-width">
+                            <div class="stat-label">Geometry Columns</div>
+                            <div class="stat-value highlight">${{schemaData.geometry_columns}}</div>
+                        </div>
+                    `;
+                }}
+
+                // Build tables list
+                let tablesListHtml = '';
+                if (tables.length > 0) {{
+                    const tableRows = tables.map(tableName => {{
+                        const count = rowCounts[tableName];
+                        return `
+                            <div class="table-row">
+                                <span class="table-name">${{tableName}}</span>
+                                <span class="table-count">${{typeof count === 'number' ? formatNumber(count) : '-'}}</span>
+                            </div>
+                        `;
+                    }}).join('');
+
+                    tablesListHtml = `
+                        <div class="schema-tables-list">
+                            <div class="schema-tables-toggle" onclick="toggleSchemaTables('${{schemaName}}')">
+                                <span>&#x25BC;</span> Show ${{tables.length}} tables
+                            </div>
+                            <div class="schema-tables-content" id="schema-tables-${{schemaName}}">
+                                ${{tableRows}}
+                            </div>
+                        </div>
+                    `;
+                }}
+
+                cardsHtml += `
+                    <div class="schema-card ${{exists ? config.highlight : 'not-found'}}">
+                        <div class="schema-card-header">
+                            <div class="schema-name">
+                                <span class="schema-icon">${{config.icon}}</span>
+                                ${{config.label}}
+                            </div>
+                            <span class="schema-badge ${{exists ? 'exists' : 'missing'}}">
+                                ${{exists ? 'Active' : 'Missing'}}
+                            </span>
+                        </div>
+                        ${{exists ? `
+                            <div class="schema-stats">
+                                <div class="schema-stat">
+                                    <div class="stat-label">Tables</div>
+                                    <div class="stat-value">${{tableCount}}</div>
+                                </div>
+                                <div class="schema-stat">
+                                    <div class="stat-label">Rows (approx)</div>
+                                    <div class="stat-value">${{formatNumber(totalRows)}}</div>
+                                </div>
+                                ${{specialStats}}
+                            </div>
+                            ${{tablesListHtml}}
+                        ` : `
+                            <div style="color: #991B1B; font-size: 12px;">
+                                Schema not found in database
+                            </div>
+                        `}}
+                    </div>
+                `;
+            }});
+
+            // Add summary card
+            cardsHtml = `
+                <div class="schema-card" style="background: linear-gradient(135deg, #E8F4FD 0%, #F8F9FA 100%); border-color: #0071BC;">
+                    <div class="schema-card-header">
+                        <div class="schema-name">
+                            <span class="schema-icon">&#x1F4CA;</span>
+                            Summary
+                        </div>
+                    </div>
+                    <div class="schema-stats">
+                        <div class="schema-stat full-width">
+                            <div class="stat-label">Total Tables</div>
+                            <div class="stat-value highlight">${{totalTables}}</div>
+                        </div>
+                    </div>
+                </div>
+            ` + cardsHtml;
+
+            schemaCards.innerHTML = cardsHtml;
+        }}
+
+        // Toggle schema tables visibility
+        function toggleSchemaTables(schemaName) {{
+            const content = document.getElementById(`schema-tables-${{schemaName}}`);
+            const toggle = content.previousElementSibling;
+
+            if (content.classList.contains('expanded')) {{
+                content.classList.remove('expanded');
+                toggle.innerHTML = `<span>&#x25BC;</span> Show ${{content.children.length}} tables`;
+            }} else {{
+                content.classList.add('expanded');
+                toggle.innerHTML = `<span>&#x25B2;</span> Hide tables`;
+            }}
+        }}
+
+        // Format number with commas
+        function formatNumber(num) {{
+            if (typeof num !== 'number') return num;
+            return num.toLocaleString();
         }}
 
         // Toggle component details

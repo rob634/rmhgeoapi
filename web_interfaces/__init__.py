@@ -321,6 +321,12 @@ try:
 except ImportError as e:
     logger.warning(f"⚠️ Could not import Queues interface: {e}")
 
+try:
+    from .zarr import interface as _zarr
+    logger.info("✅ Imported Zarr interface module")
+except ImportError as e:
+    logger.warning(f"⚠️ Could not import Zarr interface: {e}")
+
 
 # Public API
 __all__ = [

@@ -3,6 +3,7 @@
 **Last Updated**: 19 DEC 2025
 **Framework**: SAFe (Scaled Agile Framework)
 **Purpose**: Master reference for Azure DevOps Boards import
+**Source of Truth**: This file defines Epic/Feature numbers; TODO.md should align
 
 ---
 
@@ -11,7 +12,7 @@
 | Epic | Name | Status | Features |
 |------|------|--------|----------|
 | E1 | Vector Data as API | ✅ Complete | 4 |
-| E2 | Raster Data as API | ✅ Complete | 6 |
+| E2 | Raster Data as API | 🚧 Partial | 7 |
 | E3 | Zarr/Climate Data as API | 🟢 Partial | 3 |
 | E4 | Managed Datasets | 🟢 Partial | 2 |
 | E5 | Vector Styling | 🟢 Partial | 2 |
@@ -92,11 +93,11 @@
 
 ---
 
-## Epic E2: Raster Data as API ✅
+## Epic E2: Raster Data as API 🚧
 
 **Business Requirement**: "Make GeoTIFF available as API"
-**Status**: ✅ COMPLETE (with active enhancements)
-**Completed**: NOV 2025
+**Status**: 🚧 PARTIAL (collection/mosaic workflow pending)
+**Core Complete**: NOV 2025
 
 ### Feature F2.1: Raster ETL Pipeline ✅
 
@@ -160,18 +161,26 @@
 
 ---
 
-### Feature F2.5: Service Layer API ✅
+### Feature F2.5: Raster Data Extract API ✅
 
-**Deliverable**: Simplified raster query endpoints
+**Deliverable**: Pixel-level data access endpoints (distinct from tile service)
+
+**Access Pattern Distinction**:
+| F2.2: Tile Service | F2.5: Data Extract API |
+|--------------------|------------------------|
+| XYZ tiles for map rendering | Pixel values for analysis |
+| `/tiles/{z}/{x}/{y}` | `/api/raster/point`, `/extract`, `/clip` |
+| Visual consumption | Data consumption |
+| Pre-rendered, cached | On-demand, precise |
 
 | Story | Description |
 |-------|-------------|
 | S2.5.1 | Create TiTiler client service |
 | S2.5.2 | Create STAC client service with TTL cache |
-| S2.5.3 | Implement /api/raster/extract endpoint |
-| S2.5.4 | Implement /api/raster/point endpoint |
-| S2.5.5 | Implement /api/raster/clip endpoint |
-| S2.5.6 | Implement /api/raster/preview endpoint |
+| S2.5.3 | Implement /api/raster/extract endpoint (bbox → image) |
+| S2.5.4 | Implement /api/raster/point endpoint (lon/lat → value) |
+| S2.5.5 | Implement /api/raster/clip endpoint (geometry → masked image) |
+| S2.5.6 | Implement /api/raster/preview endpoint (quick thumbnail) |
 | S2.5.7 | Add error handling + validation |
 
 **Key Files**: `raster_api/`, `services/titiler_client.py`, `services/stac_client.py`
@@ -188,6 +197,30 @@
 | S2.6.2 | Implement chunked processing strategy |
 
 **Key Files**: `jobs/process_large_raster_v2.py`
+
+---
+
+### Feature F2.7: Raster Collection Processing 📋 PLANNED
+
+**Deliverable**: `process_raster_collection` job creating pgstac searches (unchanging mosaic URLs)
+
+**Distinction from F2.1**:
+| Aspect | F2.1: Individual TIF | F2.7: TIF Collection |
+|--------|---------------------|----------------------|
+| Input | Single blob | Manifest or folder |
+| ETL output | Single COG + STAC item | Multiple COGs + pgstac search |
+| API artifact | Item URL | **Search URL** (unchanging mosaic) |
+| Use case | One-off analysis layer | Basemap/tile service |
+
+| Story | Status | Description |
+|-------|--------|-------------|
+| S2.7.1 | 📋 | Design collection manifest schema |
+| S2.7.2 | 📋 | Create multi-file orchestration job |
+| S2.7.3 | 📋 | Implement pgstac search registration |
+| S2.7.4 | 📋 | Generate stable mosaic URL in job results |
+| S2.7.5 | 📋 | Add collection-level STAC metadata |
+
+**Key Files**: `jobs/process_raster_collection.py` (planned)
 
 ---
 
@@ -701,30 +734,16 @@ Technical foundation that enables all Epics above.
 
 # BACKLOG ENABLERS
 
-## Enabler: PgSTAC Repository Consolidation 🔵
-
-**Purpose**: Fix "Collection not found after insertion" - two classes manage pgSTAC data
-
-| Task | Status |
-|------|--------|
-| Rename PgStacInfrastructure → PgStacBootstrap | ⬜ |
-| Move data operations to PgStacRepository | ⬜ |
-| Remove duplicate methods | ⬜ |
-| Update StacMetadataService | ⬜ |
-
----
-
 ## Enabler: Repository Pattern Enforcement 🔵
 
-**Purpose**: Eliminate direct database connections
+**Purpose**: Eliminate remaining direct database connections
 
-| Task | Status |
-|------|--------|
-| Fix triggers/schema_pydantic_deploy.py | ⬜ |
-| Fix triggers/db_query.py | ⬜ |
-| Fix core/schema/deployer.py | ⬜ |
-| Create PgSTACRepository | ⬜ |
-| Update vector handlers | ⬜ |
+| Task | Status | Notes |
+|------|--------|-------|
+| Fix triggers/schema_pydantic_deploy.py | ⬜ | Has psycopg.connect |
+| Fix triggers/health.py | ⬜ | Has psycopg.connect |
+| Fix core/schema/sql_generator.py | ⬜ | Has psycopg.connect |
+| Fix core/schema/deployer.py | ⬜ | Review for direct connections |
 
 ---
 
@@ -741,22 +760,40 @@ Technical foundation that enables all Epics above.
 
 ---
 
+# COMPLETED ENABLERS (ADDITIONAL)
+
+## Enabler: PgSTAC Repository Consolidation ✅
+
+**Purpose**: Fix "Collection not found after insertion" - two classes manage pgSTAC data
+**Completed**: DEC 2025
+
+| Task | Status |
+|------|--------|
+| Rename PgStacInfrastructure → PgStacBootstrap | ✅ |
+| Create PgStacRepository | ✅ |
+| Move data operations to PgStacRepository | ✅ |
+| Remove duplicate methods | ✅ |
+
+**Key Files**: `infrastructure/pgstac_bootstrap.py`, `infrastructure/pgstac_repository.py`
+
+---
+
 # SUMMARY
 
 ## Counts
 
 | Category | Count |
 |----------|-------|
-| Completed Epics | 2 |
-| Active Epics | 5 |
+| Completed Epics | 1 |
+| Active Epics | 6 |
 | Planned Epics | 2 |
 | **Total Epics** | **9** |
 | Completed Features | 17 |
 | Active Features | 6 |
-| Planned Features | 10 |
-| **Total Features** | **33** |
-| Completed Enablers | 5 |
-| Backlog Enablers | 3 |
+| Planned Features | 11 |
+| **Total Features** | **34** |
+| Completed Enablers | 6 |
+| Backlog Enablers | 2 |
 
 ## For Azure DevOps Import
 
@@ -773,4 +810,4 @@ Technical foundation that enables all Epics above.
 
 ---
 
-**Last Updated**: 19 DEC 2025 (Added E9: DDH Platform Integration)
+**Last Updated**: 19 DEC 2025 (Added F2.7: Raster Collection Processing)

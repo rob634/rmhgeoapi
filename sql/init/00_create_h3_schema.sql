@@ -1,9 +1,26 @@
 -- ============================================================================
+-- ⚠️  DEPRECATED - DO NOT USE DIRECTLY
+-- ============================================================================
+-- This SQL file is DEPRECATED as of 17 DEC 2025.
+--
+-- USE INSTEAD:
+--   POST /api/admin/h3?operation=deploy_normalized_schema&confirm=yes
+--   POST /api/dbadmin/maintenance?action=full-rebuild&confirm=yes
+--
+-- The H3 schema is now deployed via H3SchemaDeployer which uses the
+-- configured managed identity (config.database.admin_identity_name).
+-- Running this SQL directly will create the schema with WRONG ownership.
+--
+-- This file is retained for HISTORICAL REFERENCE ONLY.
+-- ============================================================================
+
+-- ============================================================================
 -- H3 SCHEMA - System-generated H3 grids (Bootstrap Data)
 -- ============================================================================
 -- PURPOSE: Dedicated schema for H3 hexagonal grids (resolutions 2-7)
 -- SEPARATION: h3 schema = system data, geo schema = user data
 -- CREATED: 10 NOV 2025
+-- DEPRECATED: 17 DEC 2025 - Use H3SchemaDeployer instead
 -- CONTEXT: Agricultural Geography Platform - H3 Grid Bootstrap
 -- ============================================================================
 --
@@ -18,24 +35,19 @@
 -- - Backup strategy: Can backup h3 schema separately (rarely changes)
 -- - Namespace clarity: h3.grids vs geo.countries vs geo.user_table
 --
--- SECURITY MODEL:
--- - System user (rob634): Full control on h3 schema
--- - Future read-only users: SELECT-only on h3.* (no modifications)
--- - User data remains in geo schema (ingest_vector workflows)
---
 -- ============================================================================
 
 -- Create h3 schema if not exists (idempotent - safe to re-run)
 CREATE SCHEMA IF NOT EXISTS h3;
 
 -- Grant full permissions to system user
-GRANT ALL PRIVILEGES ON SCHEMA h3 TO rob634;
-GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA h3 TO rob634;
-GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA h3 TO rob634;
+GRANT ALL PRIVILEGES ON SCHEMA h3 TO {db_superuser};
+GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA h3 TO {db_superuser};
+GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA h3 TO {db_superuser};
 
 -- Set default privileges for future tables in h3 schema
-ALTER DEFAULT PRIVILEGES IN SCHEMA h3 GRANT ALL PRIVILEGES ON TABLES TO rob634;
-ALTER DEFAULT PRIVILEGES IN SCHEMA h3 GRANT ALL PRIVILEGES ON SEQUENCES TO rob634;
+ALTER DEFAULT PRIVILEGES IN SCHEMA h3 GRANT ALL PRIVILEGES ON TABLES TO {db_superuser};
+ALTER DEFAULT PRIVILEGES IN SCHEMA h3 GRANT ALL PRIVILEGES ON SEQUENCES TO {db_superuser};
 
 -- Future: Grant SELECT-only to read-only users (uncomment when needed)
 -- GRANT USAGE ON SCHEMA h3 TO readonly_user;
@@ -61,8 +73,8 @@ WHERE schema_name = 'h3';
 SELECT
     nspname as schema_name,
     nspowner::regrole as owner,
-    has_schema_privilege('rob634', nspname, 'USAGE') as has_usage,
-    has_schema_privilege('rob634', nspname, 'CREATE') as has_create
+    has_schema_privilege('{db_superuser}', nspname, 'USAGE') as has_usage,
+    has_schema_privilege('{db_superuser}', nspname, 'CREATE') as has_create
 FROM pg_namespace
 WHERE nspname = 'h3';
 
@@ -72,7 +84,7 @@ BEGIN
     IF EXISTS (SELECT 1 FROM information_schema.schemata WHERE schema_name = 'h3') THEN
         RAISE NOTICE '✅ H3 SCHEMA CREATED SUCCESSFULLY';
         RAISE NOTICE '   Schema: h3';
-        RAISE NOTICE '   Owner: rob634';
+        RAISE NOTICE '   Owner: {db_superuser}';
         RAISE NOTICE '   Purpose: System-generated H3 grids (resolutions 2-7)';
         RAISE NOTICE '   Next Step: Create tables (02_create_h3_grids_table.sql)';
     ELSE
@@ -86,13 +98,13 @@ END $$;
 --
 -- To deploy this schema:
 --
--- psql -h rmhpgflex.postgres.database.azure.com -U rob634 -d geopgflex \
+-- psql -h rmhpgflex.postgres.database.azure.com -U {db_superuser} -d geopgflex \
 --   < sql/init/00_create_h3_schema.sql
 --
 -- Or using PGPASSWORD:
 --
--- PGPASSWORD='B@lamb634@' psql -h rmhpgflex.postgres.database.azure.com \
---   -U rob634 -d geopgflex < sql/init/00_create_h3_schema.sql
+-- PGPASSWORD='{db_password}' psql -h rmhpgflex.postgres.database.azure.com \
+--   -U {db_superuser} -d geopgflex < sql/init/00_create_h3_schema.sql
 --
 -- Verify deployment:
 --

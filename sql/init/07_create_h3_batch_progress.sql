@@ -1,8 +1,18 @@
 -- ============================================================================
+-- ⚠️  DEPRECATED - DO NOT USE DIRECTLY
+-- ============================================================================
+-- This SQL file is DEPRECATED as of 17 DEC 2025.
+-- USE: POST /api/dbadmin/maintenance?action=full-rebuild&confirm=yes
+-- The H3 schema is now deployed via H3SchemaDeployer with managed identity.
+-- This file is retained for HISTORICAL REFERENCE ONLY.
+-- ============================================================================
+
+-- ============================================================================
 -- H3 BATCH PROGRESS TABLE - Batch-level idempotency tracking
 -- ============================================================================
 -- PURPOSE: Track completion status of H3 operation batches for resumable jobs
 -- CREATED: 26 NOV 2025
+-- DEPRECATED: 17 DEC 2025 - Use H3SchemaDeployer instead
 -- SCHEMA: h3 (system-generated grids, separate from user data in geo schema)
 -- DEPENDENCIES: h3 schema (created by 00_create_h3_schema.sql)
 -- ============================================================================
@@ -91,8 +101,8 @@ COMMENT ON COLUMN h3.batch_progress.items_inserted IS 'Number of items actually 
 COMMENT ON COLUMN h3.batch_progress.error_message IS 'Error details if batch failed (for debugging and retry decisions)';
 
 -- Grant permissions
-GRANT SELECT, INSERT, UPDATE, DELETE ON h3.batch_progress TO rob634;
-GRANT USAGE, SELECT ON SEQUENCE h3.batch_progress_id_seq TO rob634;
+GRANT SELECT, INSERT, UPDATE, DELETE ON h3.batch_progress TO {db_superuser};
+GRANT USAGE, SELECT ON SEQUENCE h3.batch_progress_id_seq TO {db_superuser};
 
 -- Verification query
 SELECT

@@ -181,7 +181,7 @@ class AdminH3DebugTrigger:
                         return func.HttpResponse(
                             json.dumps({
                                 "schema_exists": False,
-                                "error": "h3 schema does not exist - run sql/init/00_create_h3_schema.sql"
+                                "error": "h3 schema does not exist - use /api/admin/h3?operation=deploy_normalized_schema&confirm=yes or POST /api/dbadmin/maintenance?action=full-rebuild&confirm=yes"
                             }),
                             status_code=404,
                             mimetype="application/json"

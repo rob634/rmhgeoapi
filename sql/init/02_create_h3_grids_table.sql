@@ -1,9 +1,19 @@
 -- ============================================================================
+-- ⚠️  DEPRECATED - DO NOT USE DIRECTLY
+-- ============================================================================
+-- This SQL file is DEPRECATED as of 17 DEC 2025.
+-- USE: POST /api/dbadmin/maintenance?action=full-rebuild&confirm=yes
+-- The H3 schema is now deployed via H3SchemaDeployer with managed identity.
+-- This file is retained for HISTORICAL REFERENCE ONLY.
+-- ============================================================================
+
+-- ============================================================================
 -- H3 GRIDS TABLE - PostGIS storage for H3 hexagonal grid cells
 -- ============================================================================
 -- PURPOSE: Store H3 hexagonal grids with spatial indexing for geospatial queries
 -- CREATED: 9 NOV 2025
 -- UPDATED: 10 NOV 2025 - Moved to h3 schema, added parent tracking columns
+-- DEPRECATED: 17 DEC 2025 - Use H3SchemaDeployer instead
 -- SCHEMA: h3 (system-generated grids, separate from user data in geo schema)
 -- DEPENDENCIES: PostGIS extension, h3 schema (created by 00_create_h3_schema.sql)
 -- ============================================================================
@@ -108,8 +118,8 @@ COMMENT ON COLUMN h3.grids.country_code IS 'ISO 3166-1 alpha-3 country code (set
 COMMENT ON COLUMN h3.grids.admin_level_1 IS 'State/province name (future enhancement from Overture Maps)';
 
 -- Grant permissions (system user has full control, setup for future read-only users)
-GRANT SELECT, INSERT, UPDATE, DELETE ON h3.grids TO rob634;
-GRANT USAGE, SELECT ON SEQUENCE h3.grids_id_seq TO rob634;
+GRANT SELECT, INSERT, UPDATE, DELETE ON h3.grids TO {db_superuser};
+GRANT USAGE, SELECT ON SEQUENCE h3.grids_id_seq TO {db_superuser};
 
 -- Future: Grant SELECT-only to read-only users
 -- GRANT SELECT ON h3.grids TO readonly_user;

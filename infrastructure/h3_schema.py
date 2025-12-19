@@ -42,6 +42,7 @@ import traceback
 
 from infrastructure.postgresql import PostgreSQLRepository
 from util_logger import LoggerFactory, ComponentType
+from config import get_config
 
 logger = LoggerFactory.create_logger(ComponentType.REPOSITORY, "h3_schema")
 
@@ -61,6 +62,7 @@ class H3SchemaDeployer:
         h3.stat_registry - Metadata catalog for aggregation datasets
         h3.zonal_stats - Raster aggregation results (FK to stat_registry)
         h3.point_stats - Point-in-polygon counts (FK to stat_registry)
+        h3.batch_progress - Resumable job tracking for cascade operations
 
     All DDL uses psycopg.sql composition for injection safety.
     """
@@ -120,7 +122,10 @@ class H3SchemaDeployer:
                 # Step 7: Create h3.point_stats (point counts - FK to stat_registry)
                 self._deploy_point_stats_table(conn, results)
 
-                # Step 8: Grant permissions
+                # Step 8: Create h3.batch_progress (cascade job tracking)
+                self._deploy_batch_progress_table(conn, results)
+
+                # Step 9: Grant permissions
                 self._grant_permissions(conn, results)
 
                 conn.commit()
@@ -770,38 +775,175 @@ class H3SchemaDeployer:
             results["steps"].append(step)
 
     # ========================================================================
+    # h3.batch_progress - RESUMABLE JOB TRACKING
+    # ========================================================================
+
+    def _deploy_batch_progress_table(self, conn, results: Dict):
+        """
+        Create h3.batch_progress table - enables resumable H3 cascade jobs.
+
+        Tracks which batches have completed so failed jobs can resume from
+        where they left off rather than re-running completed work.
+
+        Columns:
+            id SERIAL PRIMARY KEY - Auto-increment ID
+            job_id VARCHAR(64) - CoreMachine job ID (SHA256)
+            batch_id VARCHAR(100) - Unique batch identifier
+            operation_type VARCHAR(50) - Handler operation type
+            stage_number INTEGER - Stage number in job
+            batch_index INTEGER - Zero-based batch index
+            status VARCHAR(20) - pending/processing/completed/failed
+            items_processed INTEGER - Number of items processed
+            items_inserted INTEGER - Number of items inserted (excludes duplicates)
+            error_message TEXT - Error details for failed batches
+            started_at TIMESTAMPTZ - When batch started
+            completed_at TIMESTAMPTZ - When batch completed
+            created_at TIMESTAMPTZ - Record creation time
+            updated_at TIMESTAMPTZ - Last update time
+
+        Unique constraint on (job_id, batch_id).
+        """
+        step = {"name": "create_h3_batch_progress", "status": "pending"}
+
+        try:
+            with conn.cursor() as cur:
+                # Create table
+                cur.execute(sql.SQL("""
+                    CREATE TABLE IF NOT EXISTS {schema}.{table} (
+                        -- Primary key
+                        id SERIAL PRIMARY KEY,
+
+                        -- Job and batch identification
+                        job_id VARCHAR(64) NOT NULL,
+                        batch_id VARCHAR(100) NOT NULL,
+
+                        -- Operation metadata
+                        operation_type VARCHAR(50) NOT NULL DEFAULT 'cascade',
+                        stage_number INTEGER NOT NULL DEFAULT 2,
+                        batch_index INTEGER,
+
+                        -- Status tracking
+                        status VARCHAR(20) NOT NULL DEFAULT 'pending'
+                            CONSTRAINT batch_progress_status_check
+                            CHECK (status IN ('pending', 'processing', 'completed', 'failed')),
+
+                        -- Completion metrics
+                        items_processed INTEGER DEFAULT 0,
+                        items_inserted INTEGER DEFAULT 0,
+
+                        -- Error tracking
+                        error_message TEXT,
+
+                        -- Timestamps
+                        started_at TIMESTAMPTZ,
+                        completed_at TIMESTAMPTZ,
+                        created_at TIMESTAMPTZ DEFAULT NOW(),
+                        updated_at TIMESTAMPTZ DEFAULT NOW(),
+
+                        -- Unique constraint for idempotency
+                        CONSTRAINT batch_progress_unique UNIQUE (job_id, batch_id)
+                    )
+                """).format(
+                    schema=sql.Identifier(self.SCHEMA_NAME),
+                    table=sql.Identifier("batch_progress")
+                ))
+
+                # Index on job_id for job queries
+                cur.execute(sql.SQL("""
+                    CREATE INDEX IF NOT EXISTS idx_h3_batch_progress_job_id
+                    ON {schema}.{table}(job_id)
+                """).format(
+                    schema=sql.Identifier(self.SCHEMA_NAME),
+                    table=sql.Identifier("batch_progress")
+                ))
+
+                # Index on status for incomplete batch queries
+                cur.execute(sql.SQL("""
+                    CREATE INDEX IF NOT EXISTS idx_h3_batch_progress_status
+                    ON {schema}.{table}(status)
+                """).format(
+                    schema=sql.Identifier(self.SCHEMA_NAME),
+                    table=sql.Identifier("batch_progress")
+                ))
+
+                # Composite index for common query pattern
+                cur.execute(sql.SQL("""
+                    CREATE INDEX IF NOT EXISTS idx_h3_batch_progress_job_stage
+                    ON {schema}.{table}(job_id, stage_number)
+                """).format(
+                    schema=sql.Identifier(self.SCHEMA_NAME),
+                    table=sql.Identifier("batch_progress")
+                ))
+
+                # Table comment
+                cur.execute(sql.SQL("""
+                    COMMENT ON TABLE {schema}.{table} IS
+                    'Batch-level completion tracking for resumable H3 cascade jobs. '
+                    'When a job fails partway through, only incomplete batches are re-executed. '
+                    'Part of 3-layer idempotency: DB constraints → batch tracking → handler checks.'
+                """).format(
+                    schema=sql.Identifier(self.SCHEMA_NAME),
+                    table=sql.Identifier("batch_progress")
+                ))
+
+            step["status"] = "success"
+            logger.info("Table h3.batch_progress created with indexes")
+
+        except Exception as e:
+            step["status"] = "failed"
+            step["error"] = str(e)
+            raise
+        finally:
+            results["steps"].append(step)
+
+    # ========================================================================
     # PERMISSIONS
     # ========================================================================
 
     def _grant_permissions(self, conn, results: Dict):
-        """Grant permissions on H3 schema to system user."""
+        """Grant permissions on H3 schema to configured admin identity."""
         step = {"name": "grant_permissions", "status": "pending"}
 
         try:
+            # Get admin identity from config - NO HARDCODED USERS
+            config = get_config()
+            admin_identity = config.database.admin_identity_name
+            if not admin_identity:
+                raise ValueError("database.admin_identity_name not configured - cannot grant permissions")
+
+            admin_ident = sql.Identifier(admin_identity)
+            schema_ident = sql.Identifier(self.SCHEMA_NAME)
+
             with conn.cursor() as cur:
                 # Grant schema usage
                 cur.execute(sql.SQL("""
-                    GRANT ALL PRIVILEGES ON SCHEMA {} TO rob634
-                """).format(sql.Identifier(self.SCHEMA_NAME)))
+                    GRANT ALL PRIVILEGES ON SCHEMA {} TO {}
+                """).format(schema_ident, admin_ident))
 
                 # Grant table permissions
                 cur.execute(sql.SQL("""
-                    GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA {} TO rob634
-                """).format(sql.Identifier(self.SCHEMA_NAME)))
+                    GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA {} TO {}
+                """).format(schema_ident, admin_ident))
 
                 # Grant sequence permissions
                 cur.execute(sql.SQL("""
-                    GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA {} TO rob634
-                """).format(sql.Identifier(self.SCHEMA_NAME)))
+                    GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA {} TO {}
+                """).format(schema_ident, admin_ident))
 
                 # Default privileges for future objects
                 cur.execute(sql.SQL("""
                     ALTER DEFAULT PRIVILEGES IN SCHEMA {}
-                    GRANT ALL PRIVILEGES ON TABLES TO rob634
-                """).format(sql.Identifier(self.SCHEMA_NAME)))
+                    GRANT ALL PRIVILEGES ON TABLES TO {}
+                """).format(schema_ident, admin_ident))
+
+                cur.execute(sql.SQL("""
+                    ALTER DEFAULT PRIVILEGES IN SCHEMA {}
+                    GRANT ALL PRIVILEGES ON SEQUENCES TO {}
+                """).format(schema_ident, admin_ident))
 
             step["status"] = "success"
-            logger.info("Permissions granted on h3 schema")
+            step["admin_identity"] = admin_identity
+            logger.info(f"Permissions granted on h3 schema to {admin_identity}")
 
         except Exception as e:
             step["status"] = "failed"
@@ -840,6 +982,7 @@ class H3SchemaDeployer:
         }
 
         tables_to_drop = [
+            "batch_progress",  # No FK dependencies
             "point_stats",
             "zonal_stats",
             "stat_registry",  # After stats tables (they reference it)
@@ -874,7 +1017,7 @@ class H3SchemaDeployer:
     def get_table_counts(self) -> Dict[str, int]:
         """Get row counts for all normalized H3 tables."""
         counts = {}
-        tables = ["cells", "cell_admin0", "cell_admin1", "stat_registry", "zonal_stats", "point_stats"]
+        tables = ["cells", "cell_admin0", "cell_admin1", "stat_registry", "zonal_stats", "point_stats", "batch_progress"]
 
         try:
             with self.repo._get_connection() as conn:

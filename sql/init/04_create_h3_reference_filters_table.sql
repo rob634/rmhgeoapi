@@ -1,8 +1,18 @@
 -- ============================================================================
+-- ⚠️  DEPRECATED - DO NOT USE DIRECTLY
+-- ============================================================================
+-- This SQL file is DEPRECATED as of 17 DEC 2025.
+-- USE: POST /api/dbadmin/maintenance?action=full-rebuild&confirm=yes
+-- The H3 schema is now deployed via H3SchemaDeployer with managed identity.
+-- This file is retained for HISTORICAL REFERENCE ONLY.
+-- ============================================================================
+
+-- ============================================================================
 -- H3 REFERENCE FILTERS TABLE - Store parent IDs for cascading children
 -- ============================================================================
 -- PURPOSE: Store reference sets of parent H3 indices for cascading operations
 -- CREATED: 10 NOV 2025
+-- DEPRECATED: 17 DEC 2025 - Use H3SchemaDeployer instead
 -- SCHEMA: h3 (system-generated grids)
 -- DEPENDENCIES: h3 schema (created by 00_create_h3_schema.sql)
 -- ============================================================================
@@ -58,8 +68,8 @@ COMMENT ON COLUMN h3.reference_filters.source_grid_id IS 'Source grid_id from h3
 COMMENT ON COLUMN h3.reference_filters.source_job_id IS 'CoreMachine job ID that created this filter (bootstrap_h3_land_grid_pyramid)';
 
 -- Grant permissions
-GRANT SELECT, INSERT, UPDATE, DELETE ON h3.reference_filters TO rob634;
-GRANT USAGE, SELECT ON SEQUENCE h3.reference_filters_id_seq TO rob634;
+GRANT SELECT, INSERT, UPDATE, DELETE ON h3.reference_filters TO {db_superuser};
+GRANT USAGE, SELECT ON SEQUENCE h3.reference_filters_id_seq TO {db_superuser};
 
 -- Future: Grant SELECT-only to read-only users
 -- GRANT SELECT ON h3.reference_filters TO readonly_user;

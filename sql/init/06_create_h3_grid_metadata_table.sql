@@ -1,8 +1,18 @@
 -- ============================================================================
+-- ⚠️  DEPRECATED - DO NOT USE DIRECTLY
+-- ============================================================================
+-- This SQL file is DEPRECATED as of 17 DEC 2025.
+-- USE: POST /api/dbadmin/maintenance?action=full-rebuild&confirm=yes
+-- The H3 schema is now deployed via H3SchemaDeployer with managed identity.
+-- This file is retained for HISTORICAL REFERENCE ONLY.
+-- ============================================================================
+
+-- ============================================================================
 -- H3 GRID METADATA TABLE - Track bootstrap progress and grid statistics
 -- ============================================================================
 -- PURPOSE: Store metadata about H3 grids for bootstrap status tracking and verification
 -- CREATED: 10 NOV 2025
+-- DEPRECATED: 17 DEC 2025 - Use H3SchemaDeployer instead
 -- SCHEMA: h3 (system-generated grids)
 -- DEPENDENCIES: h3 schema (created by 00_create_h3_schema.sql)
 -- ============================================================================
@@ -115,8 +125,8 @@ COMMENT ON COLUMN h3.grid_metadata.error_message IS 'Error message if status=fai
 COMMENT ON COLUMN h3.grid_metadata.retry_count IS 'Number of retry attempts (for transient failures)';
 
 -- Grant permissions
-GRANT SELECT, INSERT, UPDATE, DELETE ON h3.grid_metadata TO rob634;
-GRANT USAGE, SELECT ON SEQUENCE h3.grid_metadata_id_seq TO rob634;
+GRANT SELECT, INSERT, UPDATE, DELETE ON h3.grid_metadata TO {db_superuser};
+GRANT USAGE, SELECT ON SEQUENCE h3.grid_metadata_id_seq TO {db_superuser};
 
 -- Future: Grant SELECT-only to read-only users
 -- GRANT SELECT ON h3.grid_metadata TO readonly_user;

@@ -26,6 +26,7 @@
 **Priority Notes**:
 - **E9 + E6 tightly coupled**: Observability enables Integration monitoring
 - **E9 requires elaboration**: ITSDA team (ITS Platform / DDH owner) has original requirements but no geospatial knowledge
+- **E3, E4, E5, E8**: Nice-to-have for FY26 — E3 (Zarr/Climate) is top priority among these
 
 | Enabler | Name | Status | Enables |
 |---------|------|--------|---------|

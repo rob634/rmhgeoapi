@@ -16,6 +16,7 @@
 
 **Status Icons:**
 - ✅ Complete
+- 🚧 Partially Complete (some features done)
 - 🟢 In Progress
 - ⬜ Ready (refined, can start)
 - 📋 Planned (needs refinement)
@@ -83,7 +84,7 @@
 ## Epic E2: Managed Datasets
 
 **Business Outcome**: System-maintained datasets from external sources with auto-updates
-**Status**: 🟢 Partially Complete
+**Status**: 🚧 Partially Complete
 
 ### Feature F2.1: Managed Datasets Infrastructure ✅ COMPLETE
 
@@ -141,7 +142,7 @@
 ## Epic E4: Vector Styling System
 
 **Business Outcome**: Server-side OGC styles for map rendering
-**Status**: 🟢 Partially Complete
+**Status**: 🚧 Partially Complete
 
 ### Feature F4.1: OGC API Styles ✅ COMPLETE
 
@@ -166,7 +167,7 @@
 ## Epic E5: Platform Observability
 
 **Business Outcome**: Remote diagnostics without direct DB access
-**Status**: 🟢 Partially Complete
+**Status**: 🚧 Partially Complete
 
 ### Feature F5.1: Health & Diagnostics ✅ MOSTLY COMPLETE
 

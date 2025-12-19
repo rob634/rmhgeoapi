@@ -17,6 +17,8 @@
 | E5 | Vector Styling | 🟢 Partial | 2 |
 | E6 | Platform Observability | 🟢 Mostly Complete | 3 |
 | E7 | Data Externalization | 📋 Planned | 3 |
+| E8 | H3 Analytics Pipeline | 🟢 Partial | 6 |
+| E9 | DDH Platform Integration | 📋 Planned | 4 |
 
 ---
 
@@ -428,6 +430,200 @@ INTERNAL ZONE              EXTERNAL ZONE
 
 ---
 
+## Epic E8: H3 Analytics Pipeline 🟢
+
+**Business Requirement**: Columnar aggregations of raster/vector data to H3 hexagonal grid
+**Status**: 🟢 PARTIAL (Infrastructure complete, aggregation handlers in progress)
+
+**Architecture**:
+```
+Source Data           H3 Aggregation          Output
+┌─────────────┐       ┌───────────────┐       ┌─────────────────┐
+│ Rasters     │──────▶│ Zonal Stats   │──────▶│ PostgreSQL OLTP │
+│ (COGs)      │       │ (mean,sum,etc)│       │ (h3.zonal_stats)│
+├─────────────┤       ├───────────────┤       ├─────────────────┤
+│ Vectors     │──────▶│ Point Counts  │──────▶│ GeoParquet OLAP │
+│ (PostGIS)   │       │ (category agg)│       │ (DuckDB export) │
+└─────────────┘       └───────────────┘       └─────────────────┘
+```
+
+### Feature F8.1: H3 Grid Infrastructure ✅
+
+**Deliverable**: Normalized H3 schema with cell-country mappings
+
+| Story | Status | Description |
+|-------|--------|-------------|
+| S8.1.1 | ✅ | Design normalized schema (cells, cell_admin0, cell_admin1) |
+| S8.1.2 | ✅ | Create stat_registry metadata catalog |
+| S8.1.3 | ✅ | Create zonal_stats table for raster aggregations |
+| S8.1.4 | ✅ | Create point_stats table for vector aggregations |
+| S8.1.5 | ✅ | Create batch_progress table for idempotency |
+| S8.1.6 | ✅ | Implement H3Repository with COPY-based bulk inserts |
+
+**Key Files**: `infrastructure/h3_schema.py`, `infrastructure/h3_repository.py`, `infrastructure/h3_batch_tracking.py`
+
+---
+
+### Feature F8.2: Grid Bootstrap System ✅
+
+**Deliverable**: 3-stage cascade job generating res 2-7 pyramid
+
+| Story | Status | Description |
+|-------|--------|-------------|
+| S8.2.1 | ✅ | Create generate_h3_grid handler (base + cascade modes) |
+| S8.2.2 | ✅ | Create cascade_h3_descendants handler (multi-level) |
+| S8.2.3 | ✅ | Create finalize_h3_pyramid handler |
+| S8.2.4 | ✅ | Create bootstrap_h3_land_grid_pyramid job |
+| S8.2.5 | ✅ | Implement batch-level idempotency (resumable jobs) |
+| S8.2.6 | ✅ | Add country/bbox filtering for testing |
+
+**Key Files**: `jobs/bootstrap_h3_land_grid_pyramid.py`, `services/handler_generate_h3_grid.py`, `services/handler_cascade_h3_descendants.py`, `services/handler_finalize_h3_pyramid.py`
+
+**Expected Cell Counts** (land-filtered):
+- Res 2: ~2,000 | Res 3: ~14,000 | Res 4: ~98,000
+- Res 5: ~686,000 | Res 6: ~4.8M | Res 7: ~33.6M
+
+---
+
+### Feature F8.3: Raster→H3 Aggregation 🟢 IN PROGRESS
+
+**Deliverable**: Zonal statistics from COGs to H3 cells
+
+| Story | Status | Description |
+|-------|--------|-------------|
+| S8.3.1 | ✅ | Create h3_raster_aggregation job definition |
+| S8.3.2 | ✅ | Design 3-stage workflow (inventory → compute → finalize) |
+| S8.3.3 | ⬜ | Implement h3_inventory_cells handler |
+| S8.3.4 | ⬜ | Implement h3_raster_zonal_stats handler |
+| S8.3.5 | ⬜ | Implement h3_aggregation_finalize handler |
+| S8.3.6 | ✅ | Create insert_zonal_stats_batch() repository method |
+
+**Key Files**: `jobs/h3_raster_aggregation.py`
+
+**Stats Supported**: mean, sum, min, max, count, std, median
+
+---
+
+### Feature F8.4: Vector→H3 Aggregation ⬜ READY
+
+**Deliverable**: Point/polygon counts aggregated to H3 cells
+
+| Story | Status | Description |
+|-------|--------|-------------|
+| S8.4.1 | ⬜ | Create h3_vector_aggregation job |
+| S8.4.2 | ⬜ | Implement point-in-polygon handler |
+| S8.4.3 | ⬜ | Implement category grouping |
+| S8.4.4 | ✅ | Create insert_point_stats_batch() repository method |
+
+**Schema Ready**: `h3.point_stats` table exists
+
+---
+
+### Feature F8.5: GeoParquet Export 📋 PLANNED
+
+**Deliverable**: Columnar export for OLAP analytics
+
+| Story | Status | Description |
+|-------|--------|-------------|
+| S8.5.1 | 📋 | Design export job parameters |
+| S8.5.2 | 📋 | Implement PostgreSQL → GeoParquet writer |
+| S8.5.3 | 📋 | Add DuckDB/Databricks compatibility |
+| S8.5.4 | 📋 | Create export_h3_stats job |
+
+---
+
+### Feature F8.6: Analytics API 📋 PLANNED
+
+**Deliverable**: Query endpoints for H3 statistics
+
+| Story | Status | Description |
+|-------|--------|-------------|
+| S8.6.1 | 📋 | GET /api/h3/stats/{dataset_id} |
+| S8.6.2 | 📋 | GET /api/h3/stats/{dataset_id}/cells?iso3=&bbox= |
+| S8.6.3 | 📋 | GET /api/h3/registry (list all datasets) |
+| S8.6.4 | 📋 | Interactive H3 map interface |
+
+---
+
+## Epic E9: DDH Platform Integration 📋
+
+**Business Requirement**: Enable DDH application to consume geospatial platform services
+**Status**: 📋 PLANNED
+**Owner**: DDH Team (with Robert coordination)
+
+**Integration Points**:
+```
+DDH Application                    Geospatial Platform
+┌─────────────────┐               ┌─────────────────────┐
+│                 │──── Submit ──▶│ /api/jobs/submit/*  │
+│  Data Hub       │               │ (vector, raster)    │
+│  Dashboard      │◀── Status ────│ /api/jobs/status/*  │
+│                 │               │ /api/platform/*     │
+│                 │──── Query ───▶│ /api/features/*     │
+│                 │               │ /api/raster/*       │
+│                 │               │ /api/h3/*           │
+└─────────────────┘               └─────────────────────┘
+```
+
+### Feature F9.1: API Contract & Documentation 📋 PLANNED
+
+**Owner**: DDH Team + Robert
+**Deliverable**: Formal API specification for cross-team development
+
+| Story | Status | Description |
+|-------|--------|-------------|
+| S9.1.1 | 📋 | Generate OpenAPI 3.0 spec from existing endpoints |
+| S9.1.2 | 📋 | Document job submission request/response formats |
+| S9.1.3 | 📋 | Document STAC item structure for vectors/rasters |
+| S9.1.4 | 📋 | Document error response contract |
+| S9.1.5 | 📋 | Publish API docs (Swagger UI or static) |
+
+---
+
+### Feature F9.2: Job Lifecycle Callbacks 📋 PLANNED
+
+**Owner**: DDH Team (consumer) + Claude (implementation)
+**Deliverable**: Webhook notifications for job state changes
+
+| Story | Status | Description |
+|-------|--------|-------------|
+| S9.2.1 | 📋 | Design callback payload schema |
+| S9.2.2 | 📋 | Add callback_url parameter to job submission |
+| S9.2.3 | 📋 | Implement webhook POST on job completion |
+| S9.2.4 | 📋 | Implement webhook POST on job failure |
+| S9.2.5 | 📋 | Add retry logic for failed callbacks |
+
+---
+
+### Feature F9.3: Authentication & Authorization 📋 PLANNED
+
+**Owner**: DDH Team + Robert
+**Deliverable**: Secure API access between systems
+
+| Story | Status | Description |
+|-------|--------|-------------|
+| S9.3.1 | 📋 | Define auth strategy (API key, OAuth, managed identity) |
+| S9.3.2 | 📋 | Implement auth middleware |
+| S9.3.3 | 📋 | Create DDH service account/identity |
+| S9.3.4 | 📋 | Document auth setup for DDH team |
+
+---
+
+### Feature F9.4: Integration Testing 📋 PLANNED
+
+**Owner**: DDH Team + Robert
+**Deliverable**: End-to-end test suite validating integration
+
+| Story | Status | Description |
+|-------|--------|-------------|
+| S9.4.1 | 📋 | Create integration test environment |
+| S9.4.2 | 📋 | Write vector ETL round-trip test |
+| S9.4.3 | 📋 | Write raster ETL round-trip test |
+| S9.4.4 | 📋 | Write OGC Features query test |
+| S9.4.5 | 📋 | Set up CI pipeline for integration tests |
+
+---
+
 # COMPLETED ENABLERS
 
 Technical foundation that enables all Epics above.
@@ -552,13 +748,13 @@ Technical foundation that enables all Epics above.
 | Category | Count |
 |----------|-------|
 | Completed Epics | 2 |
-| Active Epics | 4 |
-| Planned Epics | 1 |
-| **Total Epics** | **7** |
-| Completed Features | 15 |
-| Active Features | 4 |
-| Planned Features | 4 |
-| **Total Features** | **23** |
+| Active Epics | 5 |
+| Planned Epics | 2 |
+| **Total Epics** | **9** |
+| Completed Features | 17 |
+| Active Features | 6 |
+| Planned Features | 10 |
+| **Total Features** | **33** |
 | Completed Enablers | 5 |
 | Backlog Enablers | 3 |
 
@@ -566,11 +762,15 @@ Technical foundation that enables all Epics above.
 
 | ADO Work Item Type | Maps To |
 |-------------------|---------|
-| Epic | Epic (E1-E7) |
+| Epic | Epic (E1-E9) |
 | Feature | Feature (F1.1, F2.1, etc.) |
 | User Story | Story (S1.1.1, S2.1.1, etc.) |
 | Task | Enabler tasks |
 
+**Cross-Team Assignment**:
+- E9 (DDH Platform Integration) → Assign to DDH Team in ADO
+- All other Epics → Assign to Geospatial Team
+
 ---
 
-**Last Updated**: 19 DEC 2025
+**Last Updated**: 19 DEC 2025 (Added E9: DDH Platform Integration)

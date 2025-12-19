@@ -840,7 +840,6 @@ Technical foundation that enables all Epics above.
 
 **Enables**:
 - F2.6 (Large Raster Support) - files exceeding chunked processing limits
-- F3.2 (Virtual Zarr Pipeline) - large NetCDF reference generation
 
 ---
 

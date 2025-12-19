@@ -1,6 +1,6 @@
 # Product Backlog - Geospatial ETL Platform
 
-**Last Updated**: 18 DEC 2025
+**Last Updated**: 19 DEC 2025
 **Framework**: SAFe (Scaled Agile Framework)
 
 ---
@@ -27,8 +27,8 @@
 
 **PI Objectives:**
 1. Complete Data Access Simplification (E1) - Reader App Migration
-2. Implement Data Publishing workflow (E2)
-3. Begin Climate Data Virtualization OR Vector Styling (client priority)
+2. Begin Data Externalization (E6) - Publishing workflow + ADF
+3. Climate Data Virtualization OR Vector Styling (client priority)
 
 ---
 
@@ -80,9 +80,9 @@
 
 ---
 
-## Epic E2: Data Governance & Publishing
+## Epic E2: Managed Datasets
 
-**Business Outcome**: Controlled data approval workflow with access tiers
+**Business Outcome**: System-maintained datasets from external sources with auto-updates
 **Status**: 🟢 Partially Complete
 
 ### Feature F2.1: Managed Datasets Infrastructure ✅ COMPLETE
@@ -102,49 +102,14 @@
 
 ---
 
-### Feature F2.2: Data Publishing Workflow 📋 PLANNED
-
-**Goal**: Human-approved data promotion with access control via storage zones
-
-**Terminology:**
-| Term | Definition |
-|------|------------|
-| **Published** | User-submitted data that passed human review |
-| **Managed** | System-maintained datasets from external sources |
-
-**Architecture:**
-```
-User Submits → [PENDING] → Human Review → APPROVE → Access Zone
-                                              ↓
-                              ┌───────────────┼───────────────┐
-                              ▼               ▼               ▼
-                         Internal Use    Internal Copy    External Zone
-                         (in-place)      (ADF copy)       (ADF to ext storage)
-```
-
-| Story | Status | Acceptance Criteria |
-|-------|--------|---------------------|
-| S2.2.1: Design publish schema | ⬜ | `app.publish_queue`, `app.published_datasets`, `app.publish_audit_log` |
-| S2.2.2: Create Publishing repository | ⬜ | CRUD for publish queue |
-| S2.2.3: Submit for review endpoint | ⬜ | `POST /api/publish/submit/{dataset_id}` |
-| S2.2.4: List pending reviews | ⬜ | `GET /api/publish/queue` |
-| S2.2.5: Approve endpoint (Action A) | ⬜ | `POST /api/publish/approve/{dataset_id}` - in-place |
-| S2.2.6: Reject endpoint | ⬜ | `POST /api/publish/reject/{dataset_id}` |
-| S2.2.7: Status check endpoint | ⬜ | `GET /api/publish/status/{dataset_id}` |
-| S2.2.8: Action B - internal copy | 📋 | ADF job for container/schema copy |
-| S2.2.9: Action C - external zone | 📋 | ADF job for external storage |
-| S2.2.10: Unpublish placeholder | 🔵 | Future enhancement |
-
----
-
-### Feature F2.3: Managed Dataset Handlers ⬜ READY
+### Feature F2.2: Managed Dataset Handlers ⬜ READY
 
 | Story | Status | Description |
 |-------|--------|-------------|
-| S2.3.1: Manual update trigger | ⬜ | Connect `/api/curated/datasets/{id}/update` to job |
-| S2.3.2: FATHOM handler | ⬜ | Flood data integration |
-| S2.3.3: Admin0 handler | 📋 | Natural Earth boundaries |
-| S2.3.4: Style integration | 📋 | Auto-create OGC styles (depends on E4) |
+| S2.2.1: Manual update trigger | ⬜ | Connect `/api/curated/datasets/{id}/update` to job |
+| S2.2.2: FATHOM handler | ⬜ | Flood data integration |
+| S2.2.3: Admin0 handler | 📋 | Natural Earth boundaries |
+| S2.2.4: Style integration | 📋 | Auto-create OGC styles (depends on E4) |
 
 ---
 
@@ -176,22 +141,25 @@ User Submits → [PENDING] → Human Review → APPROVE → Access Zone
 ## Epic E4: Vector Styling System
 
 **Business Outcome**: Server-side OGC styles for map rendering
-**Status**: 📋 Planned
+**Status**: 🟢 Partially Complete
 
-### Feature F4.1: OGC API Styles 📋 PLANNED
+### Feature F4.1: OGC API Styles ✅ COMPLETE
 
 **Solution**: CartoSym-JSON canonical storage with multi-format output
+**Module**: `ogc_styles/` (standalone module)
 
 | Story | Status | Acceptance Criteria |
 |-------|--------|---------------------|
-| S4.1.1: Pydantic models | ⬜ | CartoSym-JSON schema models |
-| S4.1.2: Style translator service | ⬜ | CartoSym → Leaflet/Mapbox GL |
-| S4.1.3: Repository methods | ⬜ | CRUD for `geo.feature_collection_styles` |
-| S4.1.4: Service orchestration | ⬜ | Style lookup and format conversion |
-| S4.1.5: List styles endpoint | ⬜ | `GET /features/collections/{id}/styles` |
-| S4.1.6: Get style endpoint | ⬜ | `GET /features/collections/{id}/styles/{sid}` |
-| S4.1.7: Schema migration | ⬜ | Add `geo.feature_collection_styles` table |
+| S4.1.1: Pydantic models | ✅ | `ogc_styles/models.py` - CartoSym-JSON schemas |
+| S4.1.2: Style translator service | ✅ | `ogc_styles/translator.py` - CartoSym → Leaflet/Mapbox GL |
+| S4.1.3: Repository methods | ✅ | `ogc_styles/repository.py` - CRUD for `geo.feature_collection_styles` |
+| S4.1.4: Service orchestration | ✅ | `ogc_styles/service.py` - Style lookup and format conversion |
+| S4.1.5: List styles endpoint | ✅ | `GET /features/collections/{id}/styles` |
+| S4.1.6: Get style endpoint | ✅ | `GET /features/collections/{id}/styles/{sid}?f=leaflet\|mapbox\|cartosym` |
+| S4.1.7: Schema migration | ✅ | `geo.feature_collection_styles` table in db_maintenance.py |
 | S4.1.8: ETL style integration | 📋 | Auto-create default styles on ingest |
+
+**Tested 18 DEC 2025**: All three output formats verified working (Leaflet, Mapbox GL, CartoSym-JSON)
 
 ---
 
@@ -212,22 +180,66 @@ User Submits → [PENDING] → Human Review → APPROVE → Access Zone
 
 ---
 
-## Epic E6: Enterprise Integration
+## Epic E6: Data Externalization
 
-**Business Outcome**: ADF pipelines for staging→production, audit logging
-**Status**: 📋 Ready
+**Business Outcome**: Controlled, audited data movement from internal to external access zones
+**Status**: 📋 Planned
 
-### Feature F6.1: Azure Data Factory Integration 📋 READY
+```
+INTERNAL ZONE              EXTERNAL ZONE
+(rmhazuregeo*)      →      (client-accessible)
+        ↓
+  Approval + ADF Copy
+        ↓
+  Cloudflare WAF/CDN
+        ↓
+   Public Access
+```
 
-**Code complete**, needs Azure resource creation.
+### Feature F6.1: Publishing Workflow 📋 PLANNED
+
+**Goal**: Human-approved data promotion with audit trail
+**Owner**: Claude (code)
 
 | Story | Status | Acceptance Criteria |
 |-------|--------|---------------------|
-| S6.1.1: Create ADF instance | ⬜ | `az datafactory create` |
-| S6.1.2: Create copy pipeline | ⬜ | `copy_staging_to_production` |
-| S6.1.3: Add env variables | ⬜ | ADF config in Function App |
-| S6.1.4: Test repository factory | ⬜ | `create_data_factory_repository()` works |
-| S6.1.5: Create promote_data job | ⬜ | Job triggers ADF pipeline |
+| S6.1.1: Design publish schema | ⬜ | `app.publish_queue`, `app.publish_audit_log` |
+| S6.1.2: Create publishing repository | ⬜ | CRUD for publish queue |
+| S6.1.3: Submit for review endpoint | ⬜ | `POST /api/publish/submit/{dataset_id}` |
+| S6.1.4: Approve/Reject endpoints | ⬜ | `POST /api/publish/approve`, `/reject` |
+| S6.1.5: Status check endpoint | ⬜ | `GET /api/publish/status/{dataset_id}` |
+| S6.1.6: Audit log queries | ⬜ | `GET /api/publish/audit` |
+
+---
+
+### Feature F6.2: ADF Data Movement 📋 PLANNED
+
+**Goal**: Automated blob copying between access zones
+**Owner**: Claude (code) + Robert (Azure config)
+
+| Story | Status | Acceptance Criteria |
+|-------|--------|---------------------|
+| S6.2.1: Create ADF instance | ⬜ | `az datafactory create` in rmhazure_rg |
+| S6.2.2: Design internal→external pipeline | ⬜ | Pipeline definition documented |
+| S6.2.3: Create blob-to-blob copy activity | ⬜ | Copy from rmhazuregeo* to external storage |
+| S6.2.4: Integrate approve trigger | ⬜ | Approval endpoint triggers ADF pipeline |
+| S6.2.5: Add copy status to audit log | ⬜ | Pipeline completion updates audit record |
+| S6.2.6: Add env variables | ⬜ | ADF config in Function App settings |
+
+---
+
+### Feature F6.3: External Delivery Infrastructure 📋 PLANNED
+
+**Goal**: Secure public access via CDN and WAF
+**Owner**: Robert (infrastructure)
+
+| Story | Status | Acceptance Criteria |
+|-------|--------|---------------------|
+| S6.3.1: Create external storage account | ⬜ | New storage account for public data |
+| S6.3.2: Configure Cloudflare WAF rules | ⬜ | Rate limiting, geo-blocking, bot protection |
+| S6.3.3: Set up CDN for static assets | ⬜ | Cloudflare caching configured |
+| S6.3.4: Configure custom domain | ⬜ | DNS pointing to Cloudflare |
+| S6.3.5: Validate end-to-end external access | ⬜ | Public URL serves data through WAF/CDN |
 
 ---
 
@@ -362,6 +374,7 @@ See `HISTORY.md` for full details:
 
 | Date | Item |
 |------|------|
+| 18 DEC 2025 | OGC API Styles module complete (E4.F4.1) |
 | 18 DEC 2025 | Service Layer API Phase 4 complete |
 | 12 DEC 2025 | Unpublish workflows implemented |
 | 11 DEC 2025 | Service Bus queue standardization |
@@ -370,4 +383,4 @@ See `HISTORY.md` for full details:
 
 ---
 
-**Last Updated**: 18 DEC 2025 (Restructured to SAFe framework)
+**Last Updated**: 19 DEC 2025 (Added E6: Data Externalization)

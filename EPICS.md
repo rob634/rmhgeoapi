@@ -13,12 +13,12 @@
 |------|------|--------|----------|
 | E1 | Vector Data as API | ✅ Complete | 4 |
 | E2 | Raster Data as API | 🚧 Partial | 7 |
-| E3 | Zarr/Climate Data as API | 🟢 Partial | 3 |
-| E4 | Managed Datasets | 🟢 Partial | 2 |
-| E5 | Vector Styling | 🟢 Partial | 2 |
-| E6 | Platform Observability | 🟢 Mostly Complete | 3 |
+| E3 | Zarr/Climate Data as API | 🚧 Partial | 3 |
+| E4 | Managed Datasets | 🚧 Partial | 2 |
+| E5 | Vector Styling | 🚧 Partial | 2 |
+| E6 | Platform Observability | 🚧 Mostly Complete | 3 |
 | E7 | Data Externalization | 📋 Planned | 3 |
-| E8 | H3 Analytics Pipeline | 🟢 Partial | 6 |
+| E8 | H3 Analytics Pipeline | 🚧 Partial | 6 |
 | E9 | DDH Platform Integration | 📋 Planned | 4 |
 
 ---
@@ -226,10 +226,10 @@
 
 # ACTIVE EPICS
 
-## Epic E3: Zarr/Climate Data as API 🟢
+## Epic E3: Zarr/Climate Data as API 🚧
 
 **Business Requirement**: "Now do Zarr" + time-series access
-**Status**: 🟢 PARTIAL
+**Status**: 🚧 PARTIAL
 
 ### Feature F3.1: xarray Service Layer ✅
 
@@ -280,10 +280,10 @@
 
 ---
 
-## Epic E4: Managed Datasets 🟢
+## Epic E4: Managed Datasets 🚧
 
 **Business Requirement**: Auto-updating external data sources
-**Status**: 🟢 PARTIAL
+**Status**: 🚧 PARTIAL
 
 ### Feature F4.1: Managed Infrastructure ✅
 
@@ -317,10 +317,10 @@
 
 ---
 
-## Epic E5: Vector Styling 🟢
+## Epic E5: Vector Styling 🚧
 
 **Business Requirement**: Server-side map rendering styles
-**Status**: 🟢 PARTIAL
+**Status**: 🚧 PARTIAL
 
 ### Feature F5.1: OGC API Styles ✅
 
@@ -353,10 +353,10 @@
 
 ---
 
-## Epic E6: Platform Observability 🟢
+## Epic E6: Platform Observability 🚧
 
 **Business Requirement**: Remote diagnostics without DB access
-**Status**: 🟢 MOSTLY COMPLETE
+**Status**: 🚧 MOSTLY COMPLETE
 
 ### Feature F6.1: Health & Diagnostics ✅
 
@@ -463,10 +463,10 @@ INTERNAL ZONE              EXTERNAL ZONE
 
 ---
 
-## Epic E8: H3 Analytics Pipeline 🟢
+## Epic E8: H3 Analytics Pipeline 🚧
 
 **Business Requirement**: Columnar aggregations of raster/vector data to H3 hexagonal grid
-**Status**: 🟢 PARTIAL (Infrastructure complete, aggregation handlers in progress)
+**Status**: 🚧 PARTIAL (Infrastructure complete, aggregation handlers in progress)
 
 **Architecture**:
 ```
@@ -518,7 +518,7 @@ Source Data           H3 Aggregation          Output
 
 ---
 
-### Feature F8.3: Raster→H3 Aggregation 🟢 IN PROGRESS
+### Feature F8.3: Raster→H3 Aggregation 🚧 IN PROGRESS
 
 **Deliverable**: Zonal statistics from COGs to H3 cells
 

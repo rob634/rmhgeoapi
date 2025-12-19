@@ -60,6 +60,57 @@
 
 ---
 
+# COMPONENT GLOSSARY
+
+Abstract component names for ADO work items. Actual Azure resource names assigned during implementation.
+
+## Storage
+
+| Logical Name | Purpose | Access Pattern |
+|--------------|---------|----------------|
+| **Bronze Storage Account** | Raw uploaded data | Write: ETL jobs, Read: processing |
+| **Silver Storage Account** | Processed COGs, Zarr | Write: ETL jobs, Read: TiTiler, APIs |
+| **External Storage Account** | Public-facing data | Write: ADF copy, Read: public CDN |
+
+## Compute
+
+| Logical Name | Purpose | Runtime |
+|--------------|---------|---------|
+| **ETL Function App** | Job orchestration, HTTP APIs | Azure Functions (Python) |
+| **Reader Function App** | Read-only data access APIs | Azure Functions (Python) |
+| **Long-Running Worker** | Tasks exceeding 30-min timeout | Docker container (not yet deployed) |
+| **TiTiler Raster Service** | COG tile serving | Container App |
+| **TiTiler Zarr Service** | Zarr/NetCDF tile serving | Container App (not yet deployed) |
+
+## Queues (Service Bus)
+
+| Logical Name | Purpose |
+|--------------|---------|
+| **Job Queue** | Initial job submission |
+| **Vector Task Queue** | Vector processing tasks |
+| **Raster Task Queue** | Raster processing tasks |
+| **Long-Running Task Queue** | Overflow to Docker worker |
+
+## Database
+
+| Logical Name | Purpose |
+|--------------|---------|
+| **App Database** | Job/task state, curated datasets (nukeable) |
+| **Business Database** | PostGIS geo schema, pgSTAC catalog (protected) |
+| **App Admin Identity** | Managed identity with DDL privileges |
+| **App Reader Identity** | Managed identity with read-only privileges |
+
+## External Systems
+
+| Logical Name | Purpose |
+|--------------|---------|
+| **DDH Application** | Data Hub Dashboard (consumer of platform APIs) |
+| **DDH Service Principal** | Azure AD identity for DDH access |
+| **CDN/WAF** | Cloudflare edge protection for external zone |
+| **Data Factory Instance** | ADF for blob-to-blob copy operations |
+
+---
+
 # COMPLETED EPICS
 
 ## Epic E1: Vector Data as API ✅
@@ -494,32 +545,81 @@ INTERNAL ZONE              EXTERNAL ZONE
 
 ### Feature F7.2: ADF Data Movement 📋 PLANNED
 
-**Owner**: Claude (code) + Robert (Azure config)
+**Owner**: DevOps (ADF infrastructure) + Claude (trigger integration)
 **Deliverable**: Blob copy pipelines with approval triggers
 
-| Story | Status | Acceptance Criteria |
-|-------|--------|---------------------|
-| S7.2.1 | ⬜ | Create ADF instance |
-| S7.2.2 | ⬜ | Design internal→external pipeline |
-| S7.2.3 | ⬜ | Create blob-to-blob copy activity |
-| S7.2.4 | ⬜ | Integrate approve trigger |
-| S7.2.5 | ⬜ | Add copy status to audit log |
-| S7.2.6 | ⬜ | Add env variables |
+| Story | Status | Description | Owner | Acceptance Criteria |
+|-------|--------|-------------|-------|---------------------|
+| S7.2.1 | ⬜ | Create **Data Factory Instance** | DevOps | ADF exists in resource group, managed identity enabled |
+| S7.2.2 | ⬜ | Grant ADF access to **Silver Storage Account** | DevOps | ADF identity has `Storage Blob Data Reader` |
+| S7.2.3 | ⬜ | Grant ADF access to **External Storage Account** | DevOps | ADF identity has `Storage Blob Data Contributor` |
+| S7.2.4 | ⬜ | Create blob-to-blob copy pipeline | DevOps | Pipeline accepts source/dest params, copies blob |
+| S7.2.5 | ⬜ | Create REST API trigger for pipeline | DevOps | Pipeline can be invoked via HTTP POST |
+| S7.2.6 | ⬜ | Integrate approve endpoint with ADF trigger | Claude | `/api/publish/approve` triggers ADF pipeline |
+| S7.2.7 | ⬜ | Add ADF status polling to audit log | Claude | Audit log updated with copy status |
+| S7.2.8 | ⬜ | Add ADF config to **ETL Function App** | DevOps | Environment variables for ADF endpoint + credentials |
+
+### F7.2 Pipeline Parameters
+
+```json
+{
+  "source_container": "silver",
+  "source_blob_path": "rasters/dataset-123/file.tif",
+  "destination_container": "public",
+  "destination_blob_path": "rasters/dataset-123/file.tif",
+  "dataset_id": "dataset-123",
+  "approved_by": "user@example.com",
+  "approved_at": "2025-12-19T12:00:00Z"
+}
+```
+
+### F7.2 Data Flow
+
+```
+Silver Storage ──ADF Copy──▶ External Storage ──CDN──▶ Public URL
+       │                            │
+       └── ADF Identity (Reader) ───┴── ADF Identity (Contributor)
+```
 
 ---
 
 ### Feature F7.3: External Delivery Infrastructure 📋 PLANNED
 
-**Owner**: Robert (infrastructure)
+**Owner**: DevOps (infrastructure)
 **Deliverable**: Cloudflare WAF/CDN, external storage
 
-| Story | Status | Acceptance Criteria |
-|-------|--------|---------------------|
-| S7.3.1 | ⬜ | Create external storage account |
-| S7.3.2 | ⬜ | Configure Cloudflare WAF rules |
-| S7.3.3 | ⬜ | Set up CDN for static assets |
-| S7.3.4 | ⬜ | Configure custom domain |
-| S7.3.5 | ⬜ | Validate end-to-end external access |
+| Story | Status | Description | Owner | Acceptance Criteria |
+|-------|--------|-------------|-------|---------------------|
+| S7.3.1 | ⬜ | Create **External Storage Account** | DevOps | Storage account exists, blob public access enabled |
+| S7.3.2 | ⬜ | Configure storage CORS | DevOps | CORS allows reads from approved domains |
+| S7.3.3 | ⬜ | Create Cloudflare zone | DevOps | Zone exists for external data domain |
+| S7.3.4 | ⬜ | Configure **CDN/WAF** caching rules | DevOps | COGs and vectors cached at edge |
+| S7.3.5 | ⬜ | Configure **CDN/WAF** security rules | DevOps | Rate limiting, bot protection enabled |
+| S7.3.6 | ⬜ | Configure custom domain DNS | DevOps | CNAME points to Cloudflare |
+| S7.3.7 | ⬜ | Validate end-to-end access | DevOps | Public URL serves data through CDN |
+
+### F7.3 Cloudflare Configuration
+
+**Caching Rules**:
+| Path Pattern | Cache TTL | Notes |
+|--------------|-----------|-------|
+| `*.tif`, `*.tiff` | 7 days | COG files rarely change |
+| `*.geojson` | 1 day | Vector exports |
+| `*.parquet` | 7 days | Analytics exports |
+| `*/metadata.json` | 1 hour | STAC-like metadata |
+
+**Security Rules**:
+| Rule | Setting | Rationale |
+|------|---------|-----------|
+| Rate Limiting | 1000 req/min per IP | Prevent abuse |
+| Bot Protection | Challenge suspicious | Block scrapers |
+| Hotlink Protection | Enabled | Prevent bandwidth theft |
+| Browser Integrity Check | Enabled | Block headless browsers |
+
+### F7.3 Dependencies
+
+- **Depends on**: S7.2.3 (ADF needs write access to External Storage)
+- **Blocked by**: None (can start immediately)
 
 ---
 
@@ -685,34 +785,77 @@ DDH Application                    Geospatial Platform
 
 ### Feature F9.2: Identity & Access Configuration 📋 PLANNED
 
-**Owner**: Geospatial Team + ITSDA Team
+**Owner**: DevOps (Azure config) + Geospatial Team (requirements)
 **Deliverable**: Service principals and access grants per environment
 
-| Story | Status | Description |
-|-------|--------|-------------|
-| S9.2.1 | 📋 | Define authentication strategy (managed identity preferred) |
-| S9.2.2 | 📋 | Create DDH service principal for QA environment |
-| S9.2.3 | 📋 | Grant blob storage read access to DDH identity |
-| S9.2.4 | 📋 | Grant blob storage write access for job submissions |
-| S9.2.5 | 📋 | Configure API authentication middleware |
-| S9.2.6 | 📋 | Document identity setup for ITSDA team |
+| Story | Status | Description | Owner | Acceptance Criteria |
+|-------|--------|-------------|-------|---------------------|
+| S9.2.1 | 📋 | Define authentication strategy | Joint | Decision documented: managed identity vs API keys vs Azure AD |
+| S9.2.2 | 📋 | Create **DDH Service Principal** (QA) | DevOps | Service principal exists in Azure AD, client ID documented |
+| S9.2.3 | 📋 | Grant read access to **Silver Storage Account** | DevOps | DDH identity has `Storage Blob Data Reader` on silver container |
+| S9.2.4 | 📋 | Grant write access to **Bronze Storage Account** | DevOps | DDH identity has `Storage Blob Data Contributor` on bronze container |
+| S9.2.5 | 📋 | Configure **ETL Function App** authentication | Claude | Function App validates DDH identity on `/api/jobs/*` endpoints |
+| S9.2.6 | 📋 | Document identity setup | DevOps | Runbook: how to create/rotate DDH credentials |
+
+### F9.2 Access Matrix
+
+| Component | DDH Read | DDH Write | Notes |
+|-----------|:--------:|:---------:|-------|
+| **Bronze Storage Account** | ❌ | ✅ | Upload raw data for processing |
+| **Silver Storage Account** | ✅ | ❌ | Read processed COGs, vectors |
+| **ETL Function App** `/api/jobs/*` | — | ✅ | Submit and monitor jobs |
+| **ETL Function App** `/api/features/*` | ✅ | ❌ | Query OGC Features |
+| **ETL Function App** `/api/raster/*` | ✅ | ❌ | Query raster extracts |
+| **ETL Function App** `/api/stac/*` | ✅ | ❌ | Query STAC catalog |
+
+### F9.2 Prerequisites
+
+- [ ] **Decision**: S9.2.1 must be completed before S9.2.2-S9.2.5 can proceed
+- [ ] **Azure AD Tenant**: Confirm DDH and Geospatial platform share same tenant (or configure cross-tenant access)
 
 ---
 
 ### Feature F9.3: Environment Provisioning 📋 PLANNED
 
-**Owner**: Geospatial Team + ITSDA Team
+**Owner**: DevOps (provisioning) + Geospatial Team (validation)
 **Deliverable**: Replicate integration configuration across environments
 
-| Story | Status | Description |
-|-------|--------|-------------|
-| S9.3.1 | ✅ | QA environment baseline (current state) |
-| S9.3.2 | 📋 | Document QA configuration for replication |
-| S9.3.3 | 📋 | Provision UAT environment service principals |
-| S9.3.4 | 📋 | Provision UAT storage account access |
-| S9.3.5 | 📋 | Validate UAT integration end-to-end |
-| S9.3.6 | 📋 | Provision Production environment (post-UAT validation) |
-| S9.3.7 | 📋 | Document environment-specific connection strings |
+| Story | Status | Description | Owner | Acceptance Criteria |
+|-------|--------|-------------|-------|---------------------|
+| S9.3.1 | ✅ | QA environment baseline | — | Current state operational |
+| S9.3.2 | 📋 | Document QA configuration | DevOps | Checklist covers all items in table below |
+| S9.3.3 | 📋 | Provision UAT service principals | DevOps | DDH identity exists in UAT Azure AD |
+| S9.3.4 | 📋 | Provision UAT storage access | DevOps | Grants match F9.2 Access Matrix |
+| S9.3.5 | 📋 | Validate UAT integration | Joint | DDH can submit job, poll status, query results |
+| S9.3.6 | 📋 | Provision Production | DevOps | Same as UAT, production resource group |
+| S9.3.7 | 📋 | Document connection strings | DevOps | Environment config template published |
+
+### F9.3 Configuration Checklist (S9.3.2 Deliverable)
+
+Export the following from QA for replication to UAT/Prod:
+
+| Category | Item | Example Value (Abstract) |
+|----------|------|--------------------------|
+| **Compute** | ETL Function App URL | `https://{etl-function-app}.azurewebsites.net` |
+| **Compute** | Reader Function App URL | `https://{reader-function-app}.azurewebsites.net` |
+| **Storage** | Bronze Storage Account | `{bronze-storage}.blob.core.windows.net` |
+| **Storage** | Silver Storage Account | `{silver-storage}.blob.core.windows.net` |
+| **Storage** | Bronze Container Name | `uploads` or similar |
+| **Storage** | Silver Container Name | `processed` or similar |
+| **Database** | PostgreSQL Host | `{pg-server}.postgres.database.azure.com` |
+| **Database** | Database Name | `{database-name}` |
+| **Queue** | Service Bus Namespace | `{servicebus-namespace}.servicebus.windows.net` |
+| **Identity** | DDH Service Principal Client ID | `{guid}` |
+| **Identity** | App Admin Managed Identity Client ID | `{guid}` |
+| **Tile Service** | TiTiler Raster URL | `https://{titiler-raster}.azurecontainerapps.io` |
+
+### F9.3 Environment Progression
+
+```
+QA (current) ──S9.3.2──▶ Document ──S9.3.3-4──▶ UAT ──S9.3.5──▶ Validate ──S9.3.6──▶ Prod
+                              │                                      │
+                              └──────── Iterate if issues ───────────┘
+```
 
 ---
 
@@ -828,15 +971,97 @@ Technical foundation that enables all Epics above.
 **Purpose**: Docker-based worker for tasks exceeding Azure Functions 30-min timeout
 **What It Enables**: E2 (oversized rasters), E3 (large climate datasets)
 **Reference**: See architecture diagram at `/api/interface/health`
+**Owner**: DevOps (infrastructure) + Claude (handler integration)
 
-| Task | Status | Description |
-|------|--------|-------------|
-| EN6.1 | 📋 | Create Docker image with GDAL/rasterio/xarray |
-| EN6.2 | 📋 | Deploy Azure Container App or Web App for Containers |
-| EN6.3 | 📋 | Create `long-running-raster-tasks` Service Bus queue |
-| EN6.4 | 📋 | Implement queue listener in Docker worker |
-| EN6.5 | 📋 | Add routing logic to dispatch oversized jobs |
-| EN6.6 | 📋 | Health check and monitoring integration |
+### EN6 Stories
+
+| Story | Status | Description | Owner | Acceptance Criteria |
+|-------|--------|-------------|-------|---------------------|
+| EN6.1 | 📋 | Create **Long-Running Worker** Docker image | DevOps | Image builds, contains GDAL 3.6+, rasterio, xarray, fsspec, adlfs |
+| EN6.2 | 📋 | Deploy **Long-Running Worker** to Azure | DevOps | Container runs, has managed identity, can access **Bronze/Silver Storage** |
+| EN6.3 | 📋 | Create **Long-Running Task Queue** | DevOps | Queue exists in Service Bus namespace, dead-letter enabled |
+| EN6.4 | 📋 | Implement queue listener | DevOps | Worker receives messages, logs receipt, acks on completion |
+| EN6.5 | 📋 | Integrate existing handlers | Claude | Worker calls `raster_cog.py` functions, writes to **Silver Storage** |
+| EN6.6 | 📋 | Add health endpoint | DevOps | `/health` returns 200, shows queue connection status |
+| EN6.7 | 📋 | Add routing logic in **ETL Function App** | Claude | Jobs exceeding size threshold route to **Long-Running Task Queue** |
+
+### EN6.1 Docker Image Specification
+
+```dockerfile
+# Base: Official GDAL image (includes Python + GDAL bindings)
+FROM ghcr.io/osgeo/gdal:ubuntu-small-3.6.4
+
+# Python dependencies (copy from ETL Function App requirements)
+COPY requirements-worker.txt .
+RUN pip install --no-cache-dir -r requirements-worker.txt
+
+# Required packages:
+# - rasterio>=1.3.0
+# - xarray>=2023.1.0
+# - zarr>=2.14.0
+# - fsspec>=2023.1.0
+# - adlfs>=2023.1.0  (Azure blob access)
+# - azure-servicebus>=7.11.0
+# - azure-identity>=1.14.0
+
+COPY worker/ /app/worker/
+WORKDIR /app
+CMD ["python", "-m", "worker.main"]
+```
+
+### EN6.4 Message Schema
+
+```json
+{
+  "task_id": "uuid",
+  "job_id": "uuid",
+  "task_type": "process_large_raster",
+  "parameters": {
+    "source_blob": "bronze://container/path/to/large.tif",
+    "destination_blob": "silver://container/path/to/output.tif",
+    "compression": "lzw",
+    "options": {}
+  },
+  "retry_count": 0,
+  "submitted_at": "2025-12-19T12:00:00Z"
+}
+```
+
+### EN6.4 Queue Listener Pattern
+
+```python
+# worker/main.py (skeleton)
+from azure.servicebus import ServiceBusClient
+from azure.identity import DefaultAzureCredential
+
+def process_message(message):
+    """Route to appropriate handler based on task_type."""
+    payload = json.loads(str(message))
+    task_type = payload["task_type"]
+
+    if task_type == "process_large_raster":
+        from handlers.raster_cog import process_cog
+        result = process_cog(payload["parameters"])
+    # ... other task types
+
+    # Report completion back to App Database
+    update_task_status(payload["task_id"], "completed", result)
+
+def main():
+    credential = DefaultAzureCredential()
+    client = ServiceBusClient(namespace, credential)
+    receiver = client.get_queue_receiver("long-running-raster-tasks")
+
+    for message in receiver:
+        try:
+            process_message(message)
+            receiver.complete_message(message)
+        except Exception as e:
+            receiver.dead_letter_message(message, reason=str(e))
+
+if __name__ == "__main__":
+    main()
+```
 
 **Enables**:
 - F2.6 (Large Raster Support) - files exceeding chunked processing limits
@@ -919,4 +1144,4 @@ Technical foundation that enables all Epics above.
 
 ---
 
-**Last Updated**: 19 DEC 2025 (Added F2.7: Raster Collection Processing)
+**Last Updated**: 19 DEC 2025 (Refined DevOps stories: EN6, F7.2, F7.3, F9.2, F9.3 + Component Glossary)

@@ -64,7 +64,7 @@ psql "host=rmhpgflex.postgres.database.azure.com \
 # psql "host=rmhpgflex.postgres.database.azure.com \
 #       port=5432 \
 #       dbname=geopgflex \
-#       user=rmhazure@rob634gmail.onmicrosoft.com \
+#       user={managed_identity}@{tenant}.onmicrosoft.com \
 #       sslmode=require"
 ```
 

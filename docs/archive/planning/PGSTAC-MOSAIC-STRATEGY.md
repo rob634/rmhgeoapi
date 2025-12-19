@@ -545,7 +545,7 @@ https://rmhtitiler-ghcyd7g0bxdvc2hc.eastus-01.azurewebsites.net/searches/2c065db
 TITILER_BASE_URL=https://rmhtitiler-ghcyd7g0bxdvc2hc.eastus-01.azurewebsites.net
 
 # pgSTAC database connection (for search registration validation)
-PGSTAC_DATABASE_URL=postgresql://rob634:B@lamb634@@rmhpgflex.postgres.database.azure.com:5432/geopgflex
+PGSTAC_DATABASE_URL=postgresql://{db_superuser}:{db_password}@rmhpgflex.postgres.database.azure.com:5432/geopgflex
 ```
 
 ### titilerpgstac (TiTiler Server)

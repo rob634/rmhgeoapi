@@ -155,7 +155,7 @@ Connect to the `geopgflex` database as the schema owner:
 ```bash
 PGPASSWORD='YOUR_PASSWORD' psql \
     -h rmhpgflex.postgres.database.azure.com \
-    -U rob634 \
+    -U {db_superuser} \
     -d geopgflex
 ```
 
@@ -284,7 +284,7 @@ Connect as the database administrator:
 ```bash
 PGPASSWORD='YOUR_PASSWORD' psql \
     -h rmhpgflex.postgres.database.azure.com \
-    -U rob634 \
+    -U {db_superuser} \
     -d postgres
 ```
 
@@ -301,7 +301,7 @@ PGPASSWORD='YOUR_PASSWORD' psql \
 -- Create the database
 CREATE DATABASE ddhgeodb
     WITH
-    OWNER = rob634
+    OWNER = {db_superuser}
     ENCODING = 'UTF8'
     LC_COLLATE = 'en_US.utf8'
     LC_CTYPE = 'en_US.utf8'
@@ -316,7 +316,7 @@ Now connect to the new database to enable PostGIS:
 ```bash
 PGPASSWORD='YOUR_PASSWORD' psql \
     -h rmhpgflex.postgres.database.azure.com \
-    -U rob634 \
+    -U {db_superuser} \
     -d ddhgeodb
 ```
 
@@ -387,7 +387,7 @@ Connect to the business database:
 ```bash
 PGPASSWORD='YOUR_PASSWORD' psql \
     -h rmhpgflex.postgres.database.azure.com \
-    -U rob634 \
+    -U {db_superuser} \
     -d ddhgeodb
 ```
 
@@ -565,7 +565,7 @@ PGPASSWORD="$TOKEN" psql -h ... -d postgres
 
 **Cause**: You are not connected as the schema owner.
 
-**Solution**: Connect as `rob634` (or whoever owns the schema) to run GRANT statements.
+**Solution**: Connect as {db_superuser} (or whoever owns the schema) to run GRANT statements.
 
 ### Error: "password authentication failed"
 

@@ -22,8 +22,8 @@ TiTiler has been deployed as an Azure Web App (App Service) instead of Container
 ```bash
 POSTGRES_HOST=rmhpgflex.postgres.database.azure.com
 POSTGRES_PORT=5432
-POSTGRES_USER=rob634
-POSTGRES_PASS=B@lamb634@    # Hardcoded for simplicity
+POSTGRES_USER={db_superuser}
+POSTGRES_PASS={db_password}    # Hardcoded for simplicity
 POSTGRES_DBNAME=postgres
 POSTGRES_SCHEMA=pgstac       # STAC tables schema
 ```

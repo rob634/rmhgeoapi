@@ -66,10 +66,131 @@ curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/hea
 
 ## 🚨 HIGH PRIORITY
 
-### 1. OGC API Styles (17 DEC 2025)
+### 1. Service Layer API - Raster & xarray Endpoints (18 DEC 2025)
 
 **Status**: 📋 **PLANNING COMPLETE** - Ready for Implementation
-**Priority**: 🚨 HIGH - Required for Curated Datasets styling
+**Priority**: 🚨 HIGH - Convenience wrappers for TiTiler + direct Zarr access
+**Full Plan**: `/SERVICE-LAYER-API-DESIGN.md`
+
+**Problem**: TiTiler requires full blob URLs, complex parameters (`bidx`, `decode_times`, `variable`). Time-series queries require N HTTP requests (slow).
+
+**Solution**: Two new API layers:
+- `/api/raster/` - TiTiler proxy with STAC item lookup (single time-slice operations)
+- `/api/xarray/` - Direct Zarr access for time-series and temporal aggregation
+
+**Strategy**: Build in `rmhazuregeoapi` first, validate, then migrate to `rmhogcstac`.
+
+---
+
+#### Phase 1: Foundation (Clients + Infrastructure)
+
+| Step | Task | Files |
+|------|------|-------|
+| 1.1 | Add xarray dependencies to requirements.txt | `requirements.txt` |
+| 1.2 | Create TiTiler HTTP client service | `services/titiler_client.py` |
+| 1.3 | Create internal STAC client | `services/stac_client.py` |
+| 1.4 | Create xarray/Zarr reader service | `services/xarray_reader.py` |
+| 1.5 | Add TITILER_BASE_URL to config if not present | `config/settings.py` |
+
+**Dependencies to Add**:
+```
+xarray
+zarr
+fsspec
+adlfs
+aiohttp
+httpx[http2]
+```
+
+---
+
+#### Phase 2: Raster API (`/api/raster/...`)
+
+| Step | Task | Endpoint |
+|------|------|----------|
+| 2.1 | Create raster router module | `raster_api/__init__.py` |
+| 2.2 | Implement extract endpoint | `GET /api/raster/extract/{collection}/{item}` |
+| 2.3 | Implement point endpoint | `GET /api/raster/point/{collection}/{item}` |
+| 2.4 | Implement clip endpoint | `GET /api/raster/clip/{collection}/{item}` |
+| 2.5 | Implement preview endpoint | `GET /api/raster/preview/{collection}/{item}` |
+| 2.6 | Register routes in function_app.py | `function_app.py` |
+| 2.7 | Test locally with existing STAC items | Manual testing |
+
+**Deliverable**: Four `/api/raster/` endpoints proxying TiTiler.
+
+---
+
+#### Phase 3: xarray API (`/api/xarray/...`)
+
+| Step | Task | Endpoint |
+|------|------|----------|
+| 3.1 | Create xarray router module | `xarray_api/__init__.py` |
+| 3.2 | Implement point time-series | `GET /api/xarray/point/{collection}/{item}` |
+| 3.3 | Implement statistics | `GET /api/xarray/statistics/{collection}/{item}` |
+| 3.4 | Implement aggregate | `GET /api/xarray/aggregate/{collection}/{item}` |
+| 3.5 | Add GeoTIFF/PNG output helpers | `xarray_api/output.py` |
+| 3.6 | Register routes in function_app.py | `function_app.py` |
+| 3.7 | Test locally with Zarr files | Manual testing |
+
+**Deliverable**: Three `/api/xarray/` endpoints with direct Zarr access.
+
+---
+
+#### Phase 4: Polish + Deploy
+
+| Step | Task |
+|------|------|
+| 4.1 | Add error handling (missing items, invalid params) |
+| 4.2 | Add request validation (bbox format, date ranges) |
+| 4.3 | Add caching for STAC lookups |
+| 4.4 | Deploy to rmhazuregeoapi and test |
+| 4.5 | Document API |
+
+---
+
+#### Phase 5: Migration to rmhogcstac
+
+| Step | Task |
+|------|------|
+| 5.1 | Copy `raster_api/` and `xarray_api/` modules |
+| 5.2 | Copy service clients |
+| 5.3 | Update requirements.txt in rmhogcstac |
+| 5.4 | Register routes in rmhogcstac function_app.py |
+| 5.5 | Remove from rmhazuregeoapi (optional) |
+| 5.6 | Deploy rmhogcstac and validate |
+
+**Deliverable**: Clean separation - read-only queries in rmhogcstac, ETL in rmhazuregeoapi.
+
+---
+
+#### File Structure (New)
+
+```
+rmhazuregeoapi/
+├── services/
+│   ├── titiler_client.py      # Phase 1.2
+│   ├── stac_client.py         # Phase 1.3
+│   └── xarray_reader.py       # Phase 1.4
+├── raster_api/                 # Phase 2
+│   ├── __init__.py
+│   ├── config.py
+│   ├── service.py
+│   └── triggers.py
+├── xarray_api/                 # Phase 3
+│   ├── __init__.py
+│   ├── config.py
+│   ├── service.py
+│   ├── output.py
+│   └── triggers.py
+└── function_app.py            # Register new routes
+```
+
+---
+
+### 2. OGC API Styles (17 DEC 2025)
+
+**Status**: 📋 **PLANNING COMPLETE** - Ready for Implementation
+**Priority**: HIGH - Required for Curated Datasets styling
 **Full Plan**: `/STYLE_IMPLEMENTATION.md`
 
 **Problem**: OGC Features serves vector data but no styling - clients must hardcode styles. Need server-side style management with multi-format output.
@@ -120,7 +241,7 @@ GET /features/collections/{id}/styles/{sid}   → style document
 
 ---
 
-### 2. Virtual Zarr / CMIP6 NetCDF Support (17 DEC 2025)
+### 3. Virtual Zarr / CMIP6 NetCDF Support (17 DEC 2025)
 
 **Status**: 📋 **PLANNING COMPLETE** - Ready for Implementation
 **Priority**: 🚨 HIGH - Client has 20-100GB CMIP6 NetCDF, exploring unnecessary Zarr conversion
@@ -173,7 +294,7 @@ h5py>=3.10.0
 
 ---
 
-### 3. Database Diagnostics & Remote Administration Enhancement (07 DEC 2025)
+### 4. Database Diagnostics & Remote Administration Enhancement (07 DEC 2025)
 
 **Status**: 🟡 **READY FOR IMPLEMENTATION**
 **Priority**: 🚨 HIGH - QA environment has no direct database access
@@ -230,7 +351,7 @@ h5py>=3.10.0
 
 ---
 
-### 4. Azure Data Factory Integration (29 NOV 2025)
+### 5. Azure Data Factory Integration (29 NOV 2025)
 
 **Status**: 📋 **READY FOR IMPLEMENTATION** - Phase 1 Code Complete
 **Purpose**: Enterprise ETL orchestration and audit logging
@@ -257,7 +378,7 @@ h5py>=3.10.0
 
 ---
 
-### 5. Janitor Blob Cleanup (05 DEC 2025)
+### 6. Janitor Blob Cleanup (05 DEC 2025)
 
 **Status**: 🟡 **PARTIALLY COMPLETE**
 **Priority**: HIGH - Prevents orphaned intermediate files
@@ -870,4 +991,4 @@ See `HISTORY2.md` for items completed and moved from TODO.md:
 
 ---
 
-**Last Updated**: 17 DEC 2025 (OGC API Styles added as HIGH priority #1)
+**Last Updated**: 18 DEC 2025 (Service Layer API - Raster & xarray added as HIGH priority #1)

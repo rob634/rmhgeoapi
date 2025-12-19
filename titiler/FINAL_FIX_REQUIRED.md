@@ -27,14 +27,14 @@
 }
 ```
 
-**Diagnosis**: User `rob634` can connect to PostgreSQL but doesn't have permissions to see/use the `pgstac` schema.
+**Diagnosis**: User {db_superuser} can connect to PostgreSQL but doesn't have permissions to see/use the `pgstac` schema.
 
 ### Why This Happens
 PostgreSQL has two levels of access:
 1. **Connection** (✅ Working now with SSL)
 2. **Schema Usage** (❌ Missing permissions)
 
-Even though rob634 can connect, the pgstac schema is not in their search path or they lack USAGE permission.
+Even though {db_superuser} can connect, the pgstac schema is not in their search path or they lack USAGE permission.
 
 ## The Fix: Grant Schema Permissions
 
@@ -46,20 +46,20 @@ When you have database access, run these SQL commands:
 \c postgres
 
 -- Grant usage on schema
-GRANT USAGE ON SCHEMA pgstac TO rob634;
+GRANT USAGE ON SCHEMA pgstac TO {db_superuser};
 
 -- Grant select on all tables
-GRANT SELECT ON ALL TABLES IN SCHEMA pgstac TO rob634;
+GRANT SELECT ON ALL TABLES IN SCHEMA pgstac TO {db_superuser};
 
 -- Grant execute on all functions
-GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA pgstac TO rob634;
+GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA pgstac TO {db_superuser};
 
 -- Make it persist for future objects
 ALTER DEFAULT PRIVILEGES IN SCHEMA pgstac
-  GRANT SELECT ON TABLES TO rob634;
+  GRANT SELECT ON TABLES TO {db_superuser};
 
 ALTER DEFAULT PRIVILEGES IN SCHEMA pgstac
-  GRANT EXECUTE ON FUNCTIONS TO rob634;
+  GRANT EXECUTE ON FUNCTIONS TO {db_superuser};
 ```
 
 ### Option 2: Add to pgstac_read Role (Cleaner)
@@ -67,8 +67,8 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA pgstac
 -- Connect to database
 \c postgres
 
--- Add rob634 to the pgstac_read role
-GRANT pgstac_read TO rob634;
+-- Add {db_superuser} to the pgstac_read role
+GRANT pgstac_read TO {db_superuser};
 ```
 
 The `pgstac_read` role was created by PgSTAC installation and already has all necessary read permissions.
@@ -77,12 +77,12 @@ The `pgstac_read` role was created by PgSTAC installation and already has all ne
 
 Run this SQL to verify permissions:
 ```sql
--- Check if rob634 has usage on pgstac schema
-SELECT has_schema_privilege('rob634', 'pgstac', 'USAGE');
+-- Check if {db_superuser} has usage on pgstac schema
+SELECT has_schema_privilege('{db_superuser}', 'pgstac', 'USAGE');
 -- Should return: true
 
--- Check if rob634 can read pgstac tables
-SELECT has_table_privilege('rob634', 'pgstac.collections', 'SELECT');
+-- Check if {db_superuser} can read pgstac tables
+SELECT has_table_privilege('{db_superuser}', 'pgstac.collections', 'SELECT');
 -- Should return: true
 ```
 
@@ -124,7 +124,7 @@ curl "https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/sta
 
 ## Alternative: Use Same User as Function App
 
-If you don't want to grant permissions to rob634, you could configure TiTiler to use the same PostgreSQL user as your function app:
+If you don't want to grant permissions to {db_superuser}, you could configure TiTiler to use the same PostgreSQL user as your function app:
 
 ```bash
 # Find what user the function app uses
@@ -148,8 +148,8 @@ az webapp config appsettings set \
 ```bash
 POSTGRES_HOST=rmhpgflex.postgres.database.azure.com
 POSTGRES_PORT=5432
-POSTGRES_USER=rob634
-POSTGRES_PASS=B@lamb634@
+POSTGRES_USER={db_superuser}
+POSTGRES_PASS={db_password}
 POSTGRES_DBNAME=postgres
 POSTGRES_SCHEMA=pgstac
 PGSSLMODE=require              # ← Added today (SSL fix)
@@ -157,7 +157,7 @@ PGSSLMODE=require              # ← Added today (SSL fix)
 
 ### What Still Needs SQL:
 ```sql
-GRANT pgstac_read TO rob634;   # ← Run this when you have DB access
+GRANT pgstac_read TO {db_superuser};   # ← Run this when you have DB access
 ```
 
 ## Current Status
@@ -170,7 +170,7 @@ GRANT pgstac_read TO rob634;   # ← Run this when you have DB access
 | SSL Connection | ✅ | Fixed with PGSSLMODE=require |
 | Network/Firewall | ✅ | Azure services allowed |
 | PostgreSQL Connection | ✅ | Health shows database_online: true |
-| Schema Permissions | ❌ | **Need: GRANT pgstac_read TO rob634** |
+| Schema Permissions | ❌ | **Need: GRANT pgstac_read TO {db_superuser}** |
 
 ## One Command Fix
 
@@ -178,21 +178,21 @@ When you're on a network with database access:
 
 ```bash
 # Connect and grant permissions (one line)
-PGPASSWORD='B@lamb634@' psql -h rmhpgflex.postgres.database.azure.com -U rob634 -d postgres -c "GRANT pgstac_read TO rob634;"
+PGPASSWORD='{db_password}' psql -h rmhpgflex.postgres.database.azure.com -U {db_superuser} -d postgres -c "GRANT pgstac_read TO {db_superuser};"
 ```
 
-Wait, rob634 can't grant themselves permissions! You'll need to connect as an admin user:
+Wait, {db_superuser} can't grant themselves permissions! You'll need to connect as an admin user:
 
 ```bash
 # Connect as PostgreSQL admin
-PGPASSWORD='<admin_password>' psql -h rmhpgflex.postgres.database.azure.com -U <admin_user> -d postgres -c "GRANT pgstac_read TO rob634;"
+PGPASSWORD='<admin_password>' psql -h rmhpgflex.postgres.database.azure.com -U <admin_user> -d postgres -c "GRANT pgstac_read TO {db_superuser};"
 ```
 
 ## Next Steps
 
 1. When you have database access (not public network)
 2. Connect as PostgreSQL admin user
-3. Run: `GRANT pgstac_read TO rob634;`
+3. Run: `GRANT pgstac_read TO {db_superuser};`
 4. Test TiTiler endpoints
 5. Generate tiles! 🎉
 

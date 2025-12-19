@@ -229,7 +229,7 @@ curl "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/jo
 
 ```sql
 -- Connect to PostgreSQL
-PGPASSWORD='B@lamb634@' psql -h rmhpgflex.postgres.database.azure.com -U rob634 -d geopgflex
+PGPASSWORD='{db_password}' psql -h rmhpgflex.postgres.database.azure.com -U {db_superuser} -d geopgflex
 
 -- Check res 2 base (should be ~10-20 cells for Albania)
 SELECT COUNT(*) FROM h3.grids WHERE grid_id = 'test_albania_res2';

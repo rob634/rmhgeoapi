@@ -73,7 +73,7 @@ Reference: [Microsoft Learn - Manage Microsoft Entra Users](https://learn.micros
 ```bash
 # Get your current Azure user (must be Entra ID admin on the PostgreSQL server)
 az account show --query "user.name" --output tsv
-# Output: rmhazure@rob634gmail.onmicrosoft.com
+# Output: {managed_identity}@{tenant}.onmicrosoft.com
 
 # Get access token for PostgreSQL
 TOKEN=$(az account get-access-token --resource-type oss-rdbms --query accessToken --output tsv)
@@ -93,7 +93,7 @@ TOKEN=$(az account get-access-token --resource-type oss-rdbms --query accessToke
 
 PGPASSWORD="$TOKEN" psql \
     -h rmhpgflex.postgres.database.azure.com \
-    -U "rmhazure@rob634gmail.onmicrosoft.com" \
+    -U "{managed_identity}@{tenant}.onmicrosoft.com" \
     -d postgres \
     -c "SELECT * FROM pgaadauth_create_principal('rmhpgflexadmin', true, false);"
 ```
@@ -134,7 +134,7 @@ TOKEN=$(az account get-access-token --resource-type oss-rdbms --query accessToke
 
 PGPASSWORD="$TOKEN" psql \
     -h rmhpgflex.postgres.database.azure.com \
-    -U "rmhazure@rob634gmail.onmicrosoft.com" \
+    -U "{managed_identity}@{tenant}.onmicrosoft.com" \
     -d postgres \
     -c "SELECT rolname, rolcanlogin, rolcreaterole, rolcreatedb FROM pg_roles WHERE rolname = 'rmhpgflexadmin';"
 ```
@@ -156,10 +156,10 @@ Now connect to the **geopgflex** database (as the schema owner) and grant full p
 These grants provide **full read/write** access including INSERT, UPDATE, DELETE, and schema management.
 
 ```bash
-# Connect as schema owner (rob634) to grant permissions
-PGPASSWORD='B@lamb634@' psql \
+# Connect as schema owner ({db_superuser}) to grant permissions
+PGPASSWORD='{db_password}' psql \
     -h rmhpgflex.postgres.database.azure.com \
-    -U rob634 \
+    -U {db_superuser} \
     -d geopgflex \
     -c "
 -- ============================================================================
@@ -242,9 +242,9 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA silver GRANT ALL PRIVILEGES ON FUNCTIONS TO r
 ### Verify Permissions
 
 ```bash
-PGPASSWORD='B@lamb634@' psql \
+PGPASSWORD='{db_password}' psql \
     -h rmhpgflex.postgres.database.azure.com \
-    -U rob634 \
+    -U {db_superuser} \
     -d geopgflex \
     -c "
 SELECT

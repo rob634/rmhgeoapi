@@ -38,7 +38,7 @@ docker pull ghcr.io/stac-utils/pgstac:v0.8.5
 docker run --rm ghcr.io/stac-utils/pgstac:v0.8.5 cat /opt/src/pgstac/sql/pgstac.sql > pgstac.sql
 
 # Connect to your PostgreSQL and run the SQL
-psql "postgresql://rob634:B@lamb634@@rmhpgflex.postgres.database.azure.com:5432/postgres" -f pgstac.sql
+psql "postgresql://{db_superuser}:{db_password}@rmhpgflex.postgres.database.azure.com:5432/postgres" -f pgstac.sql
 ```
 
 ### Step 2: Create Minimal STAC Collection
@@ -253,17 +253,17 @@ SELECT 'Item count:' as check, count(*)::text as result FROM pgstac.items;
 curl -o pgstac.sql https://raw.githubusercontent.com/stac-utils/pgstac/v0.8.5/sql/pgstac.sql
 
 # Connect to PostgreSQL
-export PGPASSWORD='B@lamb634@'
+export PGPASSWORD='{db_password}'
 
 # Install PgSTAC schema
 psql -h rmhpgflex.postgres.database.azure.com \
-  -U rob634 \
+  -U {db_superuser} \
   -d postgres \
   -f pgstac.sql
 
 # Create collection and item
 psql -h rmhpgflex.postgres.database.azure.com \
-  -U rob634 \
+  -U {db_superuser} \
   -d postgres \
   -f setup_minimal_stac.sql
 ```

@@ -5,7 +5,7 @@
 
 ## Important Discovery 🔍
 
-**You said**: "I can see everything in DBeaver with rob634 when on my home network"
+**You said**: "I can see everything in DBeaver with {db_superuser} when on my home network"
 
 This is very interesting! It means one of two things:
 
@@ -22,8 +22,8 @@ PostgreSQL might have different permissions based on connection source:
 - Azure Web App IP has restricted access
 - Check `pg_hba.conf` equivalent in Azure
 
-### Possibility 3: rob634 Actually Has Permissions
-If rob634 can see pgstac in DBeaver, permissions might be fine. The issue could be:
+### Possibility 3: {db_superuser} Actually Has Permissions
+If {db_superuser} can see pgstac in DBeaver, permissions might be fine. The issue could be:
 - TiTiler's search_path doesn't include pgstac
 - TiTiler's connection string is slightly different
 - SSL mode difference causing schema visibility issues
@@ -35,7 +35,7 @@ If rob634 can see pgstac in DBeaver, permissions might be fine. The issue could 
 In DBeaver when you're home:
 1. Right-click your connection → "Edit Connection"
 2. Check these settings:
-   - **User**: Is it really "rob634"?
+   - **User**: Is it really "{db_superuser}"?
    - **Database**: Is it "postgres"?
    - **Properties tab**: Any special parameters?
    - **SSH tunnel**: Are you using SSH tunneling?
@@ -52,8 +52,8 @@ When you're home and connected with DBeaver:
 Or copy/paste the contents of `check_permissions.sql` directly into DBeaver's SQL editor.
 
 **Key sections to look at**:
-- Section 3: "Does rob634 have USAGE on pgstac schema?"
-- Section 6: "Is rob634 member of pgstac_read role?"
+- Section 3: "Does {db_superuser} have USAGE on pgstac schema?"
+- Section 6: "Is {db_superuser} member of pgstac_read role?"
 - Section 12: "Test calling pgstac.all_collections() function"
 
 ### Step 3: Compare Connection Details
@@ -80,7 +80,7 @@ ORDER BY schema_name;
 
 Compare this to TiTiler's environment:
 ```bash
-POSTGRES_USER=rob634
+POSTGRES_USER={db_superuser}
 POSTGRES_DBNAME=postgres
 POSTGRES_SCHEMA=pgstac
 ```
@@ -101,13 +101,13 @@ az webapp config appsettings set \
     POSTGRES_PASS=actual_password
 ```
 
-### Scenario B: rob634 Has Permissions, But Schema Not In Search Path
+### Scenario B: {db_superuser} Has Permissions, But Schema Not In Search Path
 **Symptom**: You can query `pgstac.collections` but not just `collections`
 **Solution**: Add pgstac to search path
 
 ```sql
--- Run as admin or rob634 (if allowed)
-ALTER USER rob634 SET search_path TO public, pgstac;
+-- Run as admin or {db_superuser} (if allowed)
+ALTER USER {db_superuser} SET search_path TO public, pgstac;
 ```
 
 Then restart TiTiler:
@@ -152,11 +152,11 @@ az postgres flexible-server firewall-rule create \
 | Test | Expected Result | What It Means |
 |------|----------------|---------------|
 | DBeaver: `SELECT * FROM pgstac.collections` | Works | Schema exists and is accessible |
-| DBeaver: `SELECT current_user` | Returns 'rob634' | Confirms you're using rob634 |
-| DBeaver: `SELECT * FROM pgstac.all_collections()` | Works | rob634 can execute pgstac functions |
+| DBeaver: `SELECT current_user` | Returns '{db_superuser}' | Confirms you're using {db_superuser} |
+| DBeaver: `SELECT * FROM pgstac.all_collections()` | Works | {db_superuser} can execute pgstac functions |
 | DBeaver: `SHOW search_path` | Contains 'pgstac' | Schema in default path |
-| SQL: `has_schema_privilege('rob634', 'pgstac', 'USAGE')` | Returns true | rob634 has schema access |
-| SQL: `pg_has_role('rob634', 'pgstac_read', 'MEMBER')` | Returns true | rob634 in pgstac_read role |
+| SQL: `has_schema_privilege('{db_superuser}', 'pgstac', 'USAGE')` | Returns true | {db_superuser} has schema access |
+| SQL: `pg_has_role('{db_superuser}', 'pgstac_read', 'MEMBER')` | Returns true | {db_superuser} in pgstac_read role |
 
 ## What to Send Me
 
@@ -178,22 +178,22 @@ When you're home and can run the diagnostic script, send me:
 SELECT
     current_user,
     current_database(),
-    has_schema_privilege('rob634', 'pgstac', 'USAGE') AS can_use_pgstac,
-    pg_has_role('rob634', 'pgstac_read', 'MEMBER') AS is_pgstac_reader;
+    has_schema_privilege('{db_superuser}', 'pgstac', 'USAGE') AS can_use_pgstac,
+    pg_has_role('{db_superuser}', 'pgstac_read', 'MEMBER') AS is_pgstac_reader;
 ```
 
 ## Quick Fix Commands (When Home)
 
-### If rob634 lacks permissions:
+### If {db_superuser} lacks permissions:
 ```sql
 -- Connect as admin
-GRANT pgstac_read TO rob634;
+GRANT pgstac_read TO {db_superuser};
 ```
 
 ### If search_path is the issue:
 ```sql
--- Connect as admin or rob634
-ALTER USER rob634 SET search_path TO public, pgstac;
+-- Connect as admin or {db_superuser}
+ALTER USER {db_superuser} SET search_path TO public, pgstac;
 ```
 
 ### Test immediately:
@@ -217,7 +217,7 @@ curl "https://rmhtitiler-ghcyd7g0bxdvc2hc.eastus-01.azurewebsites.net/collection
 
 Based on "I can see everything in DBeaver":
 
-**Hypothesis**: rob634 probably DOES have permissions, but either:
+**Hypothesis**: {db_superuser} probably DOES have permissions, but either:
 - TiTiler's connection has a different search_path
 - TiTiler is missing `POSTGRES_SCHEMA=pgstac` (wait, we set this!)
 - There's a subtle difference in how TiTiler's psycopg library interprets the schema
@@ -225,7 +225,7 @@ Based on "I can see everything in DBeaver":
 **Quick test when home**:
 ```sql
 -- See if this is a search_path issue
-ALTER USER rob634 SET search_path TO public, pgstac;
+ALTER USER {db_superuser} SET search_path TO public, pgstac;
 ```
 
 Then restart TiTiler and test again!
@@ -237,7 +237,7 @@ Then restart TiTiler and test again!
 2. Run `check_permissions.sql`
 3. Note the results from sections 3, 6, 10, and 12
 4. If section 12 works, it's likely a search_path issue
-5. Run `ALTER USER rob634 SET search_path TO public, pgstac;`
+5. Run `ALTER USER {db_superuser} SET search_path TO public, pgstac;`
 6. Restart TiTiler
 7. Test!
 

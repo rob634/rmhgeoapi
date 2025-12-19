@@ -391,7 +391,7 @@ SELECT EXISTS(SELECT 1 FROM pg_extension WHERE extname = 'btree_gist');
 
 **Example Error**:
 ```
-connection failed: no pg_hba.conf entry for host "X.X.X.X", user "rob634", database "geopgflex", no encryption
+connection failed: no pg_hba.conf entry for host "X.X.X.X", user "{db_superuser}", database "geopgflex", no encryption
 ```
 
 **Solution**: Verify module uses `config.postgis_connection_string` instead of building its own.

@@ -407,7 +407,7 @@ curl -X POST https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/
 **Test 3.1: Table Already Exists**
 ```bash
 # Create table manually
-psql -h rmhpgflex.postgres.database.azure.com -U rob634 -d geopgflex -c \
+psql -h rmhpgflex.postgres.database.azure.com -U {db_superuser} -d geopgflex -c \
   "CREATE TABLE geo.test_exists (id SERIAL PRIMARY KEY);"
 
 # Submit job with table_name: "test_exists"

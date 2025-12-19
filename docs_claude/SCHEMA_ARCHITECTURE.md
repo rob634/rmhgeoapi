@@ -379,7 +379,7 @@ curl -X POST "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.ne
 
 ### H3 Schema (manual)
 ```bash
-PGPASSWORD='...' psql -h rmhpgflex.postgres.database.azure.com -U rob634 -d geopgflex \
+PGPASSWORD='...' psql -h rmhpgflex.postgres.database.azure.com -U {db_superuser} -d geopgflex \
   < sql/init/00_create_h3_schema.sql
 ```
 
@@ -439,7 +439,7 @@ DB_ADMIN_MANAGED_IDENTITY_CLIENT_ID=12345678-1234-1234-1234-123456789abc  # Clie
 DB_ADMIN_MANAGED_IDENTITY_NAME=rmhpgflexadmin                              # PostgreSQL user name (default)
 
 # Password Authentication (LOCAL DEVELOPMENT ONLY)
-POSTGIS_USER=rob634
+POSTGIS_USER={db_superuser}
 POSTGIS_PASSWORD=your_password_here
 ```
 

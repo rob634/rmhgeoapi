@@ -44,7 +44,7 @@ GOLD_CONTAINER_NAME=gold-geoparquet   # Analytics exports
 ```bash
 POSTGIS_HOST=rmhpgflex.postgres.database.azure.com
 POSTGIS_PORT=5432
-POSTGIS_USER=rob634
+POSTGIS_USER={db_superuser}
 POSTGIS_PASSWORD=<password>           # Optional with managed identity
 POSTGIS_DATABASE=geopgflex
 POSTGIS_SCHEMA=geo

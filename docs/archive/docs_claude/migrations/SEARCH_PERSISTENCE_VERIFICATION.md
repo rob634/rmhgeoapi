@@ -196,9 +196,9 @@ echo ""
 
 # Database connection
 DB_HOST="rmhpgflex.postgres.database.azure.com"
-DB_USER="rob634"
+DB_USER="{db_superuser}"
 DB_NAME="geopgflex"
-export PGPASSWORD='B@lamb634@'
+export PGPASSWORD='{db_password}'
 
 # API URLs
 FUNCTION_APP="https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net"

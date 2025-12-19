@@ -42,11 +42,11 @@ az login
     "managedByTenants": [],
     "name": "rmhazure",
     "state": "Enabled",
-    "tenantDefaultDomain": "rob634gmail.onmicrosoft.com",
+    "tenantDefaultDomain": "{tenant}.onmicrosoft.com",
     "tenantDisplayName": "Rob634",
     "tenantId": "086aef7e-db12-4161-8a9f-777deb499cfa",
     "user": {
-      "name": "rob634@gmail.com",
+      "name": "{admin_email}",
       "type": "user"
     }
   }
@@ -65,7 +65,7 @@ az ad signed-in-user show --query "{userPrincipalName: userPrincipalName, object
 ```
 UserPrincipalName                                  ObjectId
 -------------------------------------------------  ------------------------------------
-rob634_gmail.com#EXT#@rob634gmail.onmicrosoft.com  e6eec2c3-fa55-467a-81c7-1c0c0bb1d29d
+{admin_email}#EXT#@{tenant}.onmicrosoft.com  e6eec2c3-fa55-467a-81c7-1c0c0bb1d29d
 ```
 
 ### Step 3: Find Application Insights Configuration

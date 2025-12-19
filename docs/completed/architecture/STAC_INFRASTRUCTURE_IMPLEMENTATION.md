@@ -123,7 +123,7 @@ POST /api/stac/setup?confirm=yes&drop=true
 PGHOST=rmhpgflex.postgres.database.azure.com
 PGPORT=5432
 PGDATABASE=rmhgeo
-PGUSER=rob634
+PGUSER={db_superuser}
 PGPASSWORD=<from_keyvault>
 ```
 

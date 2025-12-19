@@ -891,7 +891,7 @@ GET /searches/6ee588d7.../tiles/WebMercatorQuad/16/12345/23456?assets=data
 
 ```sql
 -- Connect to PostgreSQL
-psql "host=rmhpgflex.postgres.database.azure.com port=5432 dbname=geopgflex user=rob634 sslmode=require"
+psql "host=rmhpgflex.postgres.database.azure.com port=5432 dbname=geopgflex user={db_superuser} sslmode=require"
 
 -- Check if searches table exists
 \dt pgstac.searches
@@ -956,7 +956,7 @@ curl -X POST "https://rmhazuregeoapi-.../api/jobs/submit/create_stac_collection"
 curl "https://rmhazuregeoapi-.../api/jobs/status/{JOB_ID}"
 
 # Verify search was created
-PGPASSWORD='...' psql -h rmhpgflex.postgres.database.azure.com -U rob634 -d geopgflex \
+PGPASSWORD='...' psql -h rmhpgflex.postgres.database.azure.com -U {db_superuser} -d geopgflex \
   -c "SELECT hash, search->>'collections', metadata FROM pgstac.searches WHERE search->>'collections' LIKE '%test_collection%';"
 ```
 

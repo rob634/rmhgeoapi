@@ -23,7 +23,7 @@ This guide documents how to enable **Azure App Service Easy Auth** (Authenticati
 **Current Configuration**:
 - **Provider**: Microsoft (Azure AD / Entra ID)
 - **Tenant**: Personal Azure subscription (`086aef7e-db12-4161-8a9f-777deb499cfa`)
-- **User**: `rmhazure@rob634gmail.onmicrosoft.com`
+- **User**: `{managed_identity}@{tenant}.onmicrosoft.com`
 - **App Registration**: `rmhazuregeoapi-easyauth`
 - **Access**: Single-tenant (only users in your Azure AD tenant)
 
@@ -139,7 +139,7 @@ az account show --query "{subscription:name, user:user.name, tenant:tenantId}" -
 ```
 Subscription    User                                  Tenant
 --------------  ------------------------------------  ------------------------------------
-rmhazure        rmhazure@rob634gmail.onmicrosoft.com  086aef7e-db12-4161-8a9f-777deb499cfa
+rmhazure        {managed_identity}@{tenant}.onmicrosoft.com  086aef7e-db12-4161-8a9f-777deb499cfa
 ```
 
 ### Step 1: Create App Registration
@@ -267,7 +267,7 @@ https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/health
    - URL: `https://login.microsoftonline.com/...`
 
 2. **Login screen**
-   - Enter: `rmhazure@rob634gmail.onmicrosoft.com`
+   - Enter: `{managed_identity}@{tenant}.onmicrosoft.com`
    - (Or your Azure AD account)
 
 3. **MS Authenticator prompt** (if configured)
@@ -295,7 +295,7 @@ https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/health
 
 **Look for Easy Auth headers**:
 ```
-X-MS-CLIENT-PRINCIPAL-NAME: rmhazure@rob634gmail.onmicrosoft.com
+X-MS-CLIENT-PRINCIPAL-NAME: {managed_identity}@{tenant}.onmicrosoft.com
 X-MS-CLIENT-PRINCIPAL-ID: {your-user-guid}
 X-MS-CLIENT-PRINCIPAL-IDP: aad
 X-MS-TOKEN-AAD-ACCESS-TOKEN: eyJ0eXAiOiJKV1QiLCJhbGc...
@@ -1009,7 +1009,7 @@ https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/.auth/login/
 
 **Authenticated User**:
 ```
-rmhazure@rob634gmail.onmicrosoft.com
+{managed_identity}@{tenant}.onmicrosoft.com
 ```
 
 ### Headers Available in Code

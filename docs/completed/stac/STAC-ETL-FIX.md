@@ -290,8 +290,8 @@ curl -X POST "http://localhost:5000/jobs/submit" \
   }'
 
 # 2. Check the STAC item asset href
-PGPASSWORD='B@lamb634@' psql -h rmhpgflex.postgres.database.azure.com \
-  -U rob634 -d geopgflex \
+PGPASSWORD='{db_password}' psql -h rmhpgflex.postgres.database.azure.com \
+  -U {db_superuser} -d geopgflex \
   -c "SELECT content->'assets'->'data'->>'href' FROM pgstac.items ORDER BY datetime DESC LIMIT 1;"
 
 # Expected output: /vsiaz/silver-cogs/filename.tif

@@ -100,10 +100,10 @@ Building a cloud-native, multi-resolution geospatial data platform for agricultu
   CREATE SCHEMA IF NOT EXISTS h3;
 
   -- Grant permissions
-  -- System user (rob634) has full control
-  GRANT ALL PRIVILEGES ON SCHEMA h3 TO rob634;
-  GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA h3 TO rob634;
-  GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA h3 TO rob634;
+  -- System user ({db_superuser}) has full control
+  GRANT ALL PRIVILEGES ON SCHEMA h3 TO {db_superuser};
+  GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA h3 TO {db_superuser};
+  GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA h3 TO {db_superuser};
 
   -- Future: Grant SELECT-only to read-only users
   -- GRANT USAGE ON SCHEMA h3 TO readonly_user;
@@ -132,7 +132,7 @@ Building a cloud-native, multi-resolution geospatial data platform for agricultu
 - [ ] **Deploy schema to PostgreSQL (FIRST STEP)**
   ```bash
   # Run BEFORE any other H3 operations
-  psql -h rmhpgflex.postgres.database.azure.com -U rob634 -d geopgflex \
+  psql -h rmhpgflex.postgres.database.azure.com -U {db_superuser} -d geopgflex \
     < sql/init/00_create_h3_schema.sql
   ```
 
@@ -393,8 +393,8 @@ cursor.execute(query, (h3_index, resolution, geom_wkt))
   COMMENT ON COLUMN h3.grids.parent_h3_index IS 'Immediate parent H3 index (for hierarchical traversal)';
 
   -- Grant permissions
-  GRANT SELECT, INSERT, UPDATE, DELETE ON h3.grids TO rob634;
-  GRANT USAGE, SELECT ON SEQUENCE h3.grids_id_seq TO rob634;
+  GRANT SELECT, INSERT, UPDATE, DELETE ON h3.grids TO {db_superuser};
+  GRANT USAGE, SELECT ON SEQUENCE h3.grids_id_seq TO {db_superuser};
   ```
 
 - [x] **Create `sql/init/04_create_h3_reference_filters_table.sql`** ✅ COMPLETED (10 NOV 2025) - Stores parent ID arrays for cascade
@@ -433,8 +433,8 @@ cursor.execute(query, (h3_index, resolution, geom_wkt))
   COMMENT ON COLUMN h3.reference_filters.spatial_filter_sql IS 'SQL query used to generate filter (for reproducibility)';
 
   -- Grant permissions
-  GRANT SELECT, INSERT, UPDATE, DELETE ON h3.reference_filters TO rob634;
-  GRANT USAGE, SELECT ON SEQUENCE h3.reference_filters_id_seq TO rob634;
+  GRANT SELECT, INSERT, UPDATE, DELETE ON h3.reference_filters TO {db_superuser};
+  GRANT USAGE, SELECT ON SEQUENCE h3.reference_filters_id_seq TO {db_superuser};
   ```
 
 - [x] **Create `sql/init/06_create_h3_grid_metadata_table.sql`** ✅ COMPLETED (10 NOV 2025) - Bootstrap status and statistics tracking
@@ -473,8 +473,8 @@ cursor.execute(query, (h3_index, resolution, geom_wkt))
   COMMENT ON COLUMN h3.grid_metadata.generation_status IS 'Bootstrap status: complete, in_progress, failed';
 
   -- Grant permissions
-  GRANT SELECT, INSERT, UPDATE, DELETE ON h3.grid_metadata TO rob634;
-  GRANT USAGE, SELECT ON SEQUENCE h3.grid_metadata_id_seq TO rob634;
+  GRANT SELECT, INSERT, UPDATE, DELETE ON h3.grid_metadata TO {db_superuser};
+  GRANT USAGE, SELECT ON SEQUENCE h3.grid_metadata_id_seq TO {db_superuser};
   ```
 
 - [x] **Deploy schema updates to PostgreSQL** ✅ COMPLETED (10 NOV 2025) - All 3 tables deployed successfully

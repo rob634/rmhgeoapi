@@ -207,7 +207,7 @@ We've created two scripts to verify this:
 
 ```bash
 # 1. Check database
-PGPASSWORD='B@lamb634@' psql -h rmhpgflex.postgres.database.azure.com -U rob634 -d geopgflex \
+PGPASSWORD='{db_password}' psql -h rmhpgflex.postgres.database.azure.com -U {db_superuser} -d geopgflex \
   -c "SELECT COUNT(*) FROM pgstac.searches;"
 
 # If count > 0: Searches ARE persistent

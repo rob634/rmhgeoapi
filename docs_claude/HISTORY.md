@@ -2303,7 +2303,7 @@ urllib.request.urlopen("https://oryxsdks-cdn.azureedge.net/")
 **Resolution**:
 - ✅ Found backup in `rmhgeoapi_TEMP_EXCLUDED/.git_backup`
 - ✅ Successfully restored 147 commits of history
-- ✅ Verified remote GitHub connection: `https://github.com/rob634/rmhgeoapi.git`
+- ✅ Verified remote GitHub connection: `https://github.com/{github_user}/rmhgeoapi.git`
 - ✅ Currently on `dev` branch as per documentation standards
 
 ### VSICURL Implementation for Big Raster ETL

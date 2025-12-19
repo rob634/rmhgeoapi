@@ -63,7 +63,7 @@ Deploy this schema:
 
 ```bash
 # Run via psql or your database tool
-psql -h rmhpgflex.postgres.database.azure.com -U rob634 -d geopgflex -f infrastructure/sql/platform_schema.sql
+psql -h rmhpgflex.postgres.database.azure.com -U {db_superuser} -d geopgflex -f infrastructure/sql/platform_schema.sql
 ```
 
 ### Step 2: Create Platform Models (45 minutes)

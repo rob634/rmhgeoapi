@@ -274,8 +274,8 @@ class STACRepository:
 #### Database Permissions
 ```sql
 -- Grant our app user access to PgSTAC
-GRANT pgstac_ingest TO rob634;
-GRANT USAGE ON SCHEMA pgstac TO rob634;
+GRANT pgstac_ingest TO {db_superuser};
+GRANT USAGE ON SCHEMA pgstac TO {db_superuser};
 ```
 
 ### Integration Points with Existing System

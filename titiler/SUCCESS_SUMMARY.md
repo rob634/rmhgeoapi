@@ -52,20 +52,20 @@
 **Diagnosis**:
 - PgSTAC schema exists in database (verified via function app)
 - TiTiler is connecting to the same PostgreSQL instance
-- **Issue**: User `rob634` (TiTiler's DB user) lacks permissions to access `pgstac` schema
+- **Issue**: User {db_superuser} (TiTiler's DB user) lacks permissions to access `pgstac` schema
 
 ## Solution Required
 
-Grant `rob634` user permissions to the `pgstac` schema:
+Grant {db_superuser} user permissions to the `pgstac` schema:
 
 ```sql
 -- Connect to PostgreSQL when you have direct access
-GRANT USAGE ON SCHEMA pgstac TO rob634;
-GRANT SELECT ON ALL TABLES IN SCHEMA pgstac TO rob634;
-GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA pgstac TO rob634;
+GRANT USAGE ON SCHEMA pgstac TO {db_superuser};
+GRANT SELECT ON ALL TABLES IN SCHEMA pgstac TO {db_superuser};
+GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA pgstac TO {db_superuser};
 
--- Or add rob634 to pgstac_read role
-GRANT pgstac_read TO rob634;
+-- Or add {db_superuser} to pgstac_read role
+GRANT pgstac_read TO {db_superuser};
 ```
 
 **Alternative**: Check if the function app can grant permissions:
@@ -97,7 +97,7 @@ curl -X POST "https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net
 
 ### ❌ TiTiler Endpoints (Need Permissions)
 ```bash
-# These will fail until rob634 has pgstac permissions
+# These will fail until {db_superuser} has pgstac permissions
 curl "https://rmhtitiler-ghcyd7g0bxdvc2hc.eastus-01.azurewebsites.net/searches/register"
 curl "https://rmhtitiler-ghcyd7g0bxdvc2hc.eastus-01.azurewebsites.net/collections"
 ```
@@ -109,18 +109,18 @@ curl "https://rmhtitiler-ghcyd7g0bxdvc2hc.eastus-01.azurewebsites.net/collection
 -- Connect to rmhpgflex.postgres.database.azure.com as admin
 -- Database: postgres
 
--- Grant read access to rob634
-GRANT USAGE ON SCHEMA pgstac TO rob634;
-GRANT SELECT ON ALL TABLES IN SCHEMA pgstac TO rob634;
-GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA pgstac TO rob634;
+-- Grant read access to {db_superuser}
+GRANT USAGE ON SCHEMA pgstac TO {db_superuser};
+GRANT SELECT ON ALL TABLES IN SCHEMA pgstac TO {db_superuser};
+GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA pgstac TO {db_superuser};
 
 -- Make grants persistent for future tables
-ALTER DEFAULT PRIVILEGES IN SCHEMA pgstac GRANT SELECT ON TABLES TO rob634;
-ALTER DEFAULT PRIVILEGES IN SCHEMA pgstac GRANT EXECUTE ON FUNCTIONS TO rob634;
+ALTER DEFAULT PRIVILEGES IN SCHEMA pgstac GRANT SELECT ON TABLES TO {db_superuser};
+ALTER DEFAULT PRIVILEGES IN SCHEMA pgstac GRANT EXECUTE ON FUNCTIONS TO {db_superuser};
 ```
 
 ### Option 2: Use Admin User for TiTiler
-If rob634 is just a regular user, update TiTiler to use the PostgreSQL admin user:
+If {db_superuser} is just a regular user, update TiTiler to use the PostgreSQL admin user:
 
 ```bash
 # Get the admin username (usually postgres or similar)
@@ -167,7 +167,7 @@ Function App STAC API (/api/stac/extract)
        ↓
 PostgreSQL (rmhpgflex.postgres.database.azure.com)
        ├── pgstac schema (accessible by function app user)
-       └── rob634 user (❌ needs GRANT USAGE ON SCHEMA pgstac)
+       └── {db_superuser} user (❌ needs GRANT USAGE ON SCHEMA pgstac)
        ↓
 TiTiler Web App (trying to read from pgstac)
        ↓
@@ -187,10 +187,10 @@ TiTiler Web App (trying to read from pgstac)
 
 **Quick Fix**:
 ```sql
-GRANT pgstac_read TO rob634;
+GRANT pgstac_read TO {db_superuser};
 -- OR --
-GRANT USAGE ON SCHEMA pgstac TO rob634;
-GRANT SELECT ON ALL TABLES IN SCHEMA pgstac TO rob634;
+GRANT USAGE ON SCHEMA pgstac TO {db_superuser};
+GRANT SELECT ON ALL TABLES IN SCHEMA pgstac TO {db_superuser};
 ```
 
 ## Files Created

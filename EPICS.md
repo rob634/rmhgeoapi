@@ -21,6 +21,15 @@
 | E8 | H3 Analytics Pipeline | 🚧 Partial | 6 |
 | E9 | DDH Platform Integration | 📋 Planned | 4 |
 
+| Enabler | Name | Status | Enables |
+|---------|------|--------|---------|
+| EN1 | Job Orchestration Engine | ✅ Complete | E1, E2, E3 |
+| EN2 | Database Architecture | ✅ Complete | All |
+| EN3 | Azure Platform Integration | ✅ Complete | All |
+| EN4 | Configuration System | ✅ Complete | All |
+| EN5 | Pre-flight Validation | ✅ Complete | E1, E2 |
+| EN6 | Long-Running Task Infrastructure | 📋 Planned | E2, E3 |
+
 ---
 
 # COMPLETED EPICS

@@ -18,14 +18,15 @@
 | 2 | E9 | DDH Platform Integration | 🚧 Partial | 8 | 4.8 |
 | 3 | E7 | Data Externalization | 📋 Planned | 3 | 4.3 |
 | 4 | E3 | Zarr/Climate Data as API | 🚧 Partial | 3 | 2.0 |
-| 5 | E4 | Managed Datasets | 🚧 Partial | 2 | 2.6 |
+| 5 | E4 | Partner Data Pipelines | 🚧 Partial | 3 | 2.6 |
 | 6 | E5 | OGC Styles | 🚧 Partial | 2 | 3.7 |
 | 7 | E8 | H3 Analytics Pipeline | 🚧 Partial | 6 | 1.2 |
 
 **Priority Notes**:
 - **E9 includes Observability**: Merged E6 into E9 — observability is app-to-app monitoring for integration
 - **E9 requires ITSDA coordination**: See ITSDA dependency tags on stories below
-- **E3, E4, E5, E8**: Secondary priority for FY26; E3 (Zarr/Climate) highest among this tier
+- **E4 + E3 synergy**: FATHOM pipeline (E4) drives Zarr/xarray capabilities (E3) — "future ready" patterns
+- **E3, E4, E5, E8**: Secondary priority for FY26; E4 (FATHOM) may elevate based on partner timeline
 
 ### WSJF Calculation
 
@@ -388,12 +389,18 @@ NetCDF Files (unchanged)     Reference Generation      TiTiler-xarray
 
 ---
 
-## Epic E4: Managed Datasets 🚧
+## Epic E4: Partner Data Pipelines 🚧
 
-**Business Requirement**: Auto-updating external data sources
-**Status**: 🚧 PARTIAL
+**Business Requirement**: Custom ETL pipelines for strategic partners with modern, cloud-native data patterns
+**Status**: 🚧 PARTIAL (infrastructure complete, FATHOM pipeline in progress)
+**Key Partner**: FATHOM (flood risk analytics)
 
-### Feature F4.1: Managed Infrastructure ✅
+**Strategic Context**:
+> Partners like FATHOM are embracing "future ready" data patterns — Zarr-first, cloud-optimized,
+> analysis-ready. E4 builds partner-specific pipelines that align with these modern standards
+> while leveraging our core ETL infrastructure.
+
+### Feature F4.1: Pipeline Infrastructure ✅
 
 **Deliverable**: Registry, scheduler, update job framework
 
@@ -406,22 +413,57 @@ NetCDF Files (unchanged)     Reference Generation      TiTiler-xarray
 | S4.1.5 | Implement HTTP CRUD endpoints |
 | S4.1.6 | Create timer scheduler (2 AM UTC) |
 | S4.1.7 | Create 4-stage update job |
-| S4.1.8 | Implement WDPA handler |
+| S4.1.8 | Implement WDPA handler (reference implementation) |
 
 **Key Files**: `core/models/curated.py`, `infrastructure/curated_repository.py`, `services/curated/`, `jobs/curated_update.py`
 
 ---
 
-### Feature F4.2: Dataset Handlers ⬜ READY
+### Feature F4.2: FATHOM Flood Data Pipeline ⬜ READY
 
-**Deliverable**: Additional external source handlers
+**Deliverable**: End-to-end pipeline for FATHOM flood risk data
+**Partner**: FATHOM
+**Data Patterns**: Zarr (preferred), COG (fallback)
 
 | Story | Status | Description |
 |-------|--------|-------------|
-| S4.2.1 | ⬜ | Manual update trigger endpoint |
-| S4.2.2 | ⬜ | FATHOM handler (flood data) |
-| S4.2.3 | 📋 | Admin0 handler (Natural Earth) |
-| S4.2.4 | 📋 | Style integration (depends on E5) |
+| S4.2.1 | ⬜ | FATHOM data inventory and schema analysis |
+| S4.2.2 | ⬜ | FATHOM handler implementation |
+| S4.2.3 | ⬜ | Zarr output configuration (chunking, compression) |
+| S4.2.4 | ⬜ | STAC collection with datacube extension |
+| S4.2.5 | ⬜ | TiTiler-xarray integration for tile serving |
+| S4.2.6 | ⬜ | Manual update trigger endpoint |
+
+**FATHOM Data Characteristics**:
+- Global flood hazard maps (fluvial, pluvial, coastal)
+- Multiple return periods (1-in-5 to 1-in-1000 year)
+- High resolution (3 arcsec / ~90m)
+- Time-series projections (climate scenarios)
+
+**Target Architecture**:
+```
+FATHOM Source       Platform ETL           Consumer Access
+┌─────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│ GeoTIFF or  │───▶│ Zarr conversion │───▶│ TiTiler-xarray  │
+│ NetCDF      │    │ + STAC catalog  │    │ (tiles + point) │
+└─────────────┘    └─────────────────┘    └─────────────────┘
+                          │
+                          ▼
+                   Zarr in Silver Storage
+                   (cloud-optimized, chunked)
+```
+
+---
+
+### Feature F4.3: Reference Data Pipelines 📋 PLANNED
+
+**Deliverable**: Common reference datasets for spatial joins
+
+| Story | Status | Description |
+|-------|--------|-------------|
+| S4.3.1 | 📋 | Admin0 handler (Natural Earth boundaries) |
+| S4.3.2 | 📋 | WDPA updates (protected areas) |
+| S4.3.3 | 📋 | Style integration (depends on E5) |
 
 ---
 
@@ -1200,4 +1242,4 @@ if __name__ == "__main__":
 
 ---
 
-**Last Updated**: 19 DEC 2025 (Merged E6 into E9; added ITSDA dependency summary)
+**Last Updated**: 19 DEC 2025 (Reimagined E4 as Partner Data Pipelines with FATHOM emphasis)

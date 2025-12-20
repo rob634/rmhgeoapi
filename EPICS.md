@@ -110,7 +110,7 @@ Abstract component names for ADO work items. Actual Azure resource names assigne
 
 ---
 
-# COMPLETED EPICS
+# EPICS
 
 ## Epic E1: Vector Data as API ✅
 
@@ -177,6 +177,8 @@ Abstract component names for ADO work items. Actual Azure resource names assigne
 **Key Files**: `jobs/unpublish_vector.py`, `services/unpublish_handlers.py`, `core/models/unpublish.py`
 
 **Note**: Code complete, needs deploy + test with `dry_run=true`
+
+---
 
 ---
 
@@ -312,424 +314,6 @@ Abstract component names for ADO work items. Actual Azure resource names assigne
 **Key Files**: `jobs/process_raster_collection.py` (planned)
 
 ---
-
-# ACTIVE EPICS
-
-## Epic E9: Zarr/Climate Data as API 🚧
-
-**Business Requirement**: Zarr/NetCDF data access with time-series query support
-**Status**: 🚧 PARTIAL
-
-### Feature F9.1: xarray Service Layer ✅
-
-**Deliverable**: Time-series and statistics endpoints
-
-| Story | Description |
-|-------|-------------|
-| S9.1.1 | Create xarray reader service |
-| S9.1.2 | Implement /api/xarray/point time-series |
-| S9.1.3 | Implement /api/xarray/statistics |
-| S9.1.4 | Implement /api/xarray/aggregate |
-
-**Key Files**: `xarray_api/`, `services/xarray_reader.py`
-
----
-
-### Feature F9.2: Virtual Zarr Pipeline 📋 PLANNED
-
-**Deliverable**: Kerchunk reference files enabling cloud-native access to legacy NetCDF
-
-**Strategic Context**:
-Eliminates need for traditional THREDDS/OPeNDAP infrastructure. NetCDF files
-remain in blob storage unchanged; lightweight JSON references (~KB) enable
-**TiTiler Zarr Service** to serve data via modern cloud-optimized patterns.
-
-**Compute Profile**: Azure Function App (reference generation is I/O-bound, not compute-bound)
-
-| Story | Status | Description |
-|-------|--------|-------------|
-| S9.2.1 | ⬜ | CMIP6 filename parser (extract variable, model, scenario) |
-| S9.2.2 | ⬜ | Chunking validator (pre-flight NetCDF compatibility check) |
-| S9.2.3 | ⬜ | Reference generator (single NetCDF → Kerchunk JSON ~KB) |
-| S9.2.4 | ⬜ | Virtual combiner (merge time-series references) |
-| S9.2.5 | ⬜ | STAC datacube registration (xarray-compatible items) |
-| S9.2.6 | ⬜ | Inventory job (scan and group NetCDF files) |
-| S9.2.7 | ⬜ | Generate job (full reference pipeline) |
-| S9.2.8 | ⬜ | **TiTiler Zarr Service** configuration for virtual Zarr serving |
-
-**Dependencies**: `virtualizarr`, `kerchunk`, `h5netcdf`, `h5py`
-
-**Architecture**:
-```
-NetCDF Files (unchanged)     Reference Generation      TiTiler Zarr Service
-┌─────────────────────┐     ┌──────────────────┐     ┌────────────────┐
-│ tasmax_2015.nc      │     │                  │     │                │
-│ tasmax_2016.nc      │────▶│ Kerchunk JSON    │────▶│ /tiles/{z}/{x} │
-│ tasmax_2017.nc      │     │ (~5KB per file)  │     │ /point/{x},{y} │
-│ ...                 │     │                  │     │                │
-└─────────────────────┘     └──────────────────┘     └────────────────┘
-  Bronze Storage Account     Silver Storage Account   Cloud-Native API
-     (no conversion)           (lightweight refs)     (no THREDDS)
-```
-
----
-
-### Feature F9.3: Reader App Migration ⬜ READY
-
-**Deliverable**: Move read APIs to **Reader Function App** (clean separation)
-
-| Story | Status | Description |
-|-------|--------|-------------|
-| S9.3.1 | ⬜ | Copy raster_api module |
-| S9.3.2 | ⬜ | Copy xarray_api module |
-| S9.3.3 | ⬜ | Copy service clients |
-| S9.3.4 | ⬜ | Update requirements.txt |
-| S9.3.5 | ⬜ | Register routes |
-| S9.3.6 | ⬜ | Deploy and validate |
-
----
-
-## Epic E7: Custom Data Pipelines 🚧
-
-**Business Requirement**: Custom ETL pipelines for strategic partners with modern, cloud-native data patterns
-**Status**: 🚧 PARTIAL (infrastructure complete, FATHOM pipeline in progress)
-**Key Partner**: FATHOM (flood risk analytics)
-
-**Strategic Context**:
-> Partners like FATHOM are embracing "future ready" data patterns — Zarr-first, cloud-optimized,
-> analysis-ready. E7 builds partner-specific pipelines that align with these modern standards
-> while leveraging our core ETL infrastructure.
-
-### Feature F7.1: Pipeline Infrastructure ✅
-
-**Deliverable**: Registry, scheduler, update job framework
-
-| Story | Description |
-|-------|-------------|
-| S7.1.1 | Create data models |
-| S7.1.2 | Design database schema |
-| S7.1.3 | Create repository layer |
-| S7.1.4 | Create registry service |
-| S7.1.5 | Implement HTTP CRUD endpoints |
-| S7.1.6 | Create timer scheduler (2 AM UTC) |
-| S7.1.7 | Create 4-stage update job |
-| S7.1.8 | Implement WDPA handler (reference implementation) |
-
-**Key Files**: `core/models/curated.py`, `infrastructure/curated_repository.py`, `services/curated/`, `jobs/curated_update.py`
-
----
-
-### Feature F7.2: FATHOM Flood Data Pipeline ⬜ READY
-
-**Deliverable**: End-to-end pipeline for FATHOM flood risk data
-**Partner**: FATHOM
-**Data Patterns**: Zarr (preferred), COG (fallback)
-
-| Story | Status | Description |
-|-------|--------|-------------|
-| S7.2.1 | ⬜ | FATHOM data inventory and schema analysis |
-| S7.2.2 | ⬜ | FATHOM handler implementation |
-| S7.2.3 | ⬜ | Zarr output configuration (chunking, compression) |
-| S7.2.4 | ⬜ | STAC collection with datacube extension |
-| S7.2.5 | ⬜ | **TiTiler Zarr Service** integration for tile serving |
-| S7.2.6 | ⬜ | Manual update trigger endpoint |
-
-**FATHOM Data Characteristics**:
-- Global flood hazard maps (fluvial, pluvial, coastal)
-- Multiple return periods (1-in-5 to 1-in-1000 year)
-- High resolution (3 arcsec / ~90m)
-- Time-series projections (climate scenarios)
-
-**Target Architecture**:
-```
-FATHOM Source       ETL Function App       Consumer Access
-┌─────────────┐    ┌─────────────────┐    ┌───────────────────┐
-│ GeoTIFF or  │───▶│ Zarr conversion │───▶│ TiTiler Zarr      │
-│ NetCDF      │    │ + STAC catalog  │    │ Service           │
-└─────────────┘    └─────────────────┘    └───────────────────┘
-                          │
-                          ▼
-                   Silver Storage Account
-                   (cloud-optimized Zarr)
-```
-
----
-
-### Feature F7.3: Reference Data Pipelines 📋 PLANNED
-
-**Deliverable**: Common reference datasets for spatial joins
-
-| Story | Status | Description |
-|-------|--------|-------------|
-| S7.3.1 | 📋 | Admin0 handler (Natural Earth boundaries) |
-| S7.3.2 | 📋 | WDPA updates (protected areas) |
-| S7.3.3 | 📋 | Style integration (depends on E5) |
-
----
-
-## Epic E5: OGC Styles 🚧
-
-**Business Requirement**: Support styling metadata for all data formats
-**Status**: 🚧 PARTIAL
-**Note**: Building capability first; population method (SLD ingest vs manual) TBD
-
-### Feature F5.1: OGC API Styles ✅
-
-**Deliverable**: CartoSym-JSON storage with multi-format output
-
-| Story | Description |
-|-------|-------------|
-| S5.1.1 | Create Pydantic models |
-| S5.1.2 | Build style translator (CartoSym → Leaflet/Mapbox) |
-| S5.1.3 | Create repository layer |
-| S5.1.4 | Implement service orchestration |
-| S5.1.5 | Create GET /features/collections/{id}/styles |
-| S5.1.6 | Create GET /features/collections/{id}/styles/{sid} |
-| S5.1.7 | Add geo.feature_collection_styles table |
-
-**Key Files**: `ogc_styles/`
-
-**Tested**: 18 DEC 2025 - All three output formats verified (Leaflet, Mapbox GL, CartoSym-JSON)
-
----
-
-### Feature F5.2: ETL Style Integration 📋 PLANNED
-
-**Deliverable**: Auto-create default styles on vector ingest
-
-| Story | Status | Description |
-|-------|--------|-------------|
-| S5.2.1 | 📋 | Design default style templates |
-| S5.2.2 | 📋 | Integrate into process_vector job |
-
----
-
-# PLANNED EPICS
-
-## Epic E4: Data Externalization 📋
-
-**Business Requirement**: Controlled data movement to external access zones
-**Status**: 📋 PLANNED
-
-```
-INTERNAL ZONE                    EXTERNAL ZONE
-(Bronze/Silver Storage)    →     (External Storage Account)
-              ↓
-     Approval + Data Factory Copy
-              ↓
-         CDN/WAF
-              ↓
-       Public Access
-```
-
-### Feature F4.1: Publishing Workflow 📋 PLANNED
-
-**Owner**: Claude (code)
-**Deliverable**: Approval queue, audit log, status APIs
-
-| Story | Status | Acceptance Criteria |
-|-------|--------|---------------------|
-| S4.1.1 | ⬜ | Design publish schema (`app.publish_queue`, `app.publish_audit_log`) |
-| S4.1.2 | ⬜ | Create publishing repository |
-| S4.1.3 | ⬜ | Submit for review endpoint |
-| S4.1.4 | ⬜ | Approve/Reject endpoints |
-| S4.1.5 | ⬜ | Status check endpoint |
-| S4.1.6 | ⬜ | Audit log queries |
-
----
-
-### Feature F4.2: ADF Data Movement 📋 PLANNED
-
-**Owner**: DevOps (ADF infrastructure) + Claude (trigger integration)
-**Deliverable**: Blob copy pipelines with approval triggers
-
-| Story | Status | Description | Owner | Acceptance Criteria |
-|-------|--------|-------------|-------|---------------------|
-| S4.2.1 | ⬜ | Create **Data Factory Instance** | DevOps | ADF exists in resource group, managed identity enabled |
-| S4.2.2 | ⬜ | Grant ADF access to **Silver Storage Account** | DevOps | ADF identity has `Storage Blob Data Reader` |
-| S4.2.3 | ⬜ | Grant ADF access to **External Storage Account** | DevOps | ADF identity has `Storage Blob Data Contributor` |
-| S4.2.4 | ⬜ | Create blob-to-blob copy pipeline | DevOps | Pipeline accepts source/dest params, copies blob |
-| S4.2.5 | ⬜ | Create REST API trigger for pipeline | DevOps | Pipeline can be invoked via HTTP POST |
-| S4.2.6 | ⬜ | Integrate approve endpoint with ADF trigger | Claude | `/api/publish/approve` triggers ADF pipeline |
-| S4.2.7 | ⬜ | Add ADF status polling to audit log | Claude | Audit log updated with copy status |
-| S4.2.8 | ⬜ | Add ADF config to **ETL Function App** | DevOps | Environment variables for ADF endpoint + credentials |
-
-### F4.2 Pipeline Parameters
-
-```json
-{
-  "source_container": "silver",
-  "source_blob_path": "rasters/dataset-123/file.tif",
-  "destination_container": "public",
-  "destination_blob_path": "rasters/dataset-123/file.tif",
-  "dataset_id": "dataset-123",
-  "approved_by": "user@example.com",
-  "approved_at": "2025-12-19T12:00:00Z"
-}
-```
-
-### F4.2 Data Flow
-
-```
-Silver Storage ──ADF Copy──▶ External Storage ──CDN──▶ Public URL
-       │                            │
-       └── ADF Identity (Reader) ───┴── ADF Identity (Contributor)
-```
-
----
-
-### Feature F4.3: External Delivery Infrastructure 📋 PLANNED
-
-**Owner**: DevOps (infrastructure)
-**Deliverable**: Cloudflare WAF/CDN, external storage
-
-| Story | Status | Description | Owner | Acceptance Criteria |
-|-------|--------|-------------|-------|---------------------|
-| S4.3.1 | ⬜ | Create **External Storage Account** | DevOps | Storage account exists, blob public access enabled |
-| S4.3.2 | ⬜ | Configure storage CORS | DevOps | CORS allows reads from approved domains |
-| S4.3.3 | ⬜ | Create Cloudflare zone | DevOps | Zone exists for external data domain |
-| S4.3.4 | ⬜ | Configure **CDN/WAF** caching rules | DevOps | COGs and vectors cached at edge |
-| S4.3.5 | ⬜ | Configure **CDN/WAF** security rules | DevOps | Rate limiting, bot protection enabled |
-| S4.3.6 | ⬜ | Configure custom domain DNS | DevOps | CNAME points to Cloudflare |
-| S4.3.7 | ⬜ | Validate end-to-end access | DevOps | Public URL serves data through CDN |
-
-### F4.3 Cloudflare Configuration
-
-**Caching Rules**:
-| Path Pattern | Cache TTL | Notes |
-|--------------|-----------|-------|
-| `*.tif`, `*.tiff` | 7 days | COG files rarely change |
-| `*.geojson` | 1 day | Vector exports |
-| `*.parquet` | 7 days | Analytics exports |
-| `*/metadata.json` | 1 hour | STAC-like metadata |
-
-**Security Rules**:
-| Rule | Setting | Rationale |
-|------|---------|-----------|
-| Rate Limiting | 1000 req/min per IP | Prevent abuse |
-| Bot Protection | Challenge suspicious | Block scrapers |
-| Hotlink Protection | Enabled | Prevent bandwidth theft |
-| Browser Integrity Check | Enabled | Block headless browsers |
-
-### F4.3 Dependencies
-
-- **Depends on**: S4.2.3 (ADF needs write access to External Storage)
-- **Blocked by**: None (can start immediately)
-
----
-
-## Epic E8: H3 Analytics Pipeline 🚧
-
-**Business Requirement**: Columnar aggregations of raster/vector data to H3 hexagonal grid
-**Status**: 🚧 PARTIAL (Infrastructure complete, aggregation handlers in progress)
-
-**Architecture**:
-```
-Source Data           H3 Aggregation          Output
-┌─────────────┐       ┌───────────────┐       ┌─────────────────┐
-│ Rasters     │──────▶│ Zonal Stats   │──────▶│ PostgreSQL OLTP │
-│ (COGs)      │       │ (mean,sum,etc)│       │ (h3.zonal_stats)│
-├─────────────┤       ├───────────────┤       ├─────────────────┤
-│ Vectors     │──────▶│ Point Counts  │──────▶│ GeoParquet OLAP │
-│ (PostGIS)   │       │ (category agg)│       │ (DuckDB export) │
-└─────────────┘       └───────────────┘       └─────────────────┘
-```
-
-### Feature F8.1: H3 Grid Infrastructure ✅
-
-**Deliverable**: Normalized H3 schema with cell-country mappings
-
-| Story | Status | Description |
-|-------|--------|-------------|
-| S8.1.1 | ✅ | Design normalized schema (cells, cell_admin0, cell_admin1) |
-| S8.1.2 | ✅ | Create stat_registry metadata catalog |
-| S8.1.3 | ✅ | Create zonal_stats table for raster aggregations |
-| S8.1.4 | ✅ | Create point_stats table for vector aggregations |
-| S8.1.5 | ✅ | Create batch_progress table for idempotency |
-| S8.1.6 | ✅ | Implement H3Repository with COPY-based bulk inserts |
-
-**Key Files**: `infrastructure/h3_schema.py`, `infrastructure/h3_repository.py`, `infrastructure/h3_batch_tracking.py`
-
----
-
-### Feature F8.2: Grid Bootstrap System ✅
-
-**Deliverable**: 3-stage cascade job generating res 2-7 pyramid
-
-| Story | Status | Description |
-|-------|--------|-------------|
-| S8.2.1 | ✅ | Create generate_h3_grid handler (base + cascade modes) |
-| S8.2.2 | ✅ | Create cascade_h3_descendants handler (multi-level) |
-| S8.2.3 | ✅ | Create finalize_h3_pyramid handler |
-| S8.2.4 | ✅ | Create bootstrap_h3_land_grid_pyramid job |
-| S8.2.5 | ✅ | Implement batch-level idempotency (resumable jobs) |
-| S8.2.6 | ✅ | Add country/bbox filtering for testing |
-
-**Key Files**: `jobs/bootstrap_h3_land_grid_pyramid.py`, `services/handler_generate_h3_grid.py`, `services/handler_cascade_h3_descendants.py`, `services/handler_finalize_h3_pyramid.py`
-
-**Expected Cell Counts** (land-filtered):
-- Res 2: ~2,000 | Res 3: ~14,000 | Res 4: ~98,000
-- Res 5: ~686,000 | Res 6: ~4.8M | Res 7: ~33.6M
-
----
-
-### Feature F8.3: Raster→H3 Aggregation 🚧 IN PROGRESS
-
-**Deliverable**: Zonal statistics from COGs to H3 cells
-
-| Story | Status | Description |
-|-------|--------|-------------|
-| S8.3.1 | ✅ | Create h3_raster_aggregation job definition |
-| S8.3.2 | ✅ | Design 3-stage workflow (inventory → compute → finalize) |
-| S8.3.3 | ⬜ | Implement h3_inventory_cells handler |
-| S8.3.4 | ⬜ | Implement h3_raster_zonal_stats handler |
-| S8.3.5 | ⬜ | Implement h3_aggregation_finalize handler |
-| S8.3.6 | ✅ | Create insert_zonal_stats_batch() repository method |
-
-**Key Files**: `jobs/h3_raster_aggregation.py`
-
-**Stats Supported**: mean, sum, min, max, count, std, median
-
----
-
-### Feature F8.4: Vector→H3 Aggregation ⬜ READY
-
-**Deliverable**: Point/polygon counts aggregated to H3 cells
-
-| Story | Status | Description |
-|-------|--------|-------------|
-| S8.4.1 | ⬜ | Create h3_vector_aggregation job |
-| S8.4.2 | ⬜ | Implement point-in-polygon handler |
-| S8.4.3 | ⬜ | Implement category grouping |
-| S8.4.4 | ✅ | Create insert_point_stats_batch() repository method |
-
-**Schema Ready**: `h3.point_stats` table exists
-
----
-
-### Feature F8.5: GeoParquet Export 📋 PLANNED
-
-**Deliverable**: Columnar export for OLAP analytics
-
-| Story | Status | Description |
-|-------|--------|-------------|
-| S8.5.1 | 📋 | Design export job parameters |
-| S8.5.2 | 📋 | Implement PostgreSQL → GeoParquet writer |
-| S8.5.3 | 📋 | Add DuckDB/Databricks compatibility |
-| S8.5.4 | 📋 | Create export_h3_stats job |
-
----
-
-### Feature F8.6: Analytics API 📋 PLANNED
-
-**Deliverable**: Query endpoints for H3 statistics
-
-| Story | Status | Description |
-|-------|--------|-------------|
-| S8.6.1 | 📋 | GET /api/h3/stats/{dataset_id} |
-| S8.6.2 | 📋 | GET /api/h3/stats/{dataset_id}/cells?iso3=&bbox= |
-| S8.6.3 | 📋 | GET /api/h3/registry (list all datasets) |
-| S8.6.4 | 📋 | Interactive H3 map interface |
 
 ---
 
@@ -961,6 +545,8 @@ QA (current) ──S3.3.2──▶ Document ──S3.3.3-4──▶ UAT ──S3
 
 ---
 
+---
+
 ## E3 ITSDA Dependency Summary
 
 Stories requiring ITSDA team action or coordination:
@@ -984,6 +570,432 @@ Stories requiring ITSDA team action or coordination:
 - **Co-owns**: Joint ownership
 - **Consumes**: ITSDA uses the output (no action needed)
 - **Implements**: ITSDA builds functionality on their side
+
+---
+
+---
+
+## Epic E4: Data Externalization 📋
+
+**Business Requirement**: Controlled data movement to external access zones
+**Status**: 📋 PLANNED
+
+```
+INTERNAL ZONE                    EXTERNAL ZONE
+(Bronze/Silver Storage)    →     (External Storage Account)
+              ↓
+     Approval + Data Factory Copy
+              ↓
+         CDN/WAF
+              ↓
+       Public Access
+```
+
+### Feature F4.1: Publishing Workflow 📋 PLANNED
+
+**Owner**: Claude (code)
+**Deliverable**: Approval queue, audit log, status APIs
+
+| Story | Status | Acceptance Criteria |
+|-------|--------|---------------------|
+| S4.1.1 | ⬜ | Design publish schema (`app.publish_queue`, `app.publish_audit_log`) |
+| S4.1.2 | ⬜ | Create publishing repository |
+| S4.1.3 | ⬜ | Submit for review endpoint |
+| S4.1.4 | ⬜ | Approve/Reject endpoints |
+| S4.1.5 | ⬜ | Status check endpoint |
+| S4.1.6 | ⬜ | Audit log queries |
+
+---
+
+### Feature F4.2: ADF Data Movement 📋 PLANNED
+
+**Owner**: DevOps (ADF infrastructure) + Claude (trigger integration)
+**Deliverable**: Blob copy pipelines with approval triggers
+
+| Story | Status | Description | Owner | Acceptance Criteria |
+|-------|--------|-------------|-------|---------------------|
+| S4.2.1 | ⬜ | Create **Data Factory Instance** | DevOps | ADF exists in resource group, managed identity enabled |
+| S4.2.2 | ⬜ | Grant ADF access to **Silver Storage Account** | DevOps | ADF identity has `Storage Blob Data Reader` |
+| S4.2.3 | ⬜ | Grant ADF access to **External Storage Account** | DevOps | ADF identity has `Storage Blob Data Contributor` |
+| S4.2.4 | ⬜ | Create blob-to-blob copy pipeline | DevOps | Pipeline accepts source/dest params, copies blob |
+| S4.2.5 | ⬜ | Create REST API trigger for pipeline | DevOps | Pipeline can be invoked via HTTP POST |
+| S4.2.6 | ⬜ | Integrate approve endpoint with ADF trigger | Claude | `/api/publish/approve` triggers ADF pipeline |
+| S4.2.7 | ⬜ | Add ADF status polling to audit log | Claude | Audit log updated with copy status |
+| S4.2.8 | ⬜ | Add ADF config to **ETL Function App** | DevOps | Environment variables for ADF endpoint + credentials |
+
+### F4.2 Pipeline Parameters
+
+```json
+{
+  "source_container": "silver",
+  "source_blob_path": "rasters/dataset-123/file.tif",
+  "destination_container": "public",
+  "destination_blob_path": "rasters/dataset-123/file.tif",
+  "dataset_id": "dataset-123",
+  "approved_by": "user@example.com",
+  "approved_at": "2025-12-19T12:00:00Z"
+}
+```
+
+### F4.2 Data Flow
+
+```
+Silver Storage ──ADF Copy──▶ External Storage ──CDN──▶ Public URL
+       │                            │
+       └── ADF Identity (Reader) ───┴── ADF Identity (Contributor)
+```
+
+---
+
+### Feature F4.3: External Delivery Infrastructure 📋 PLANNED
+
+**Owner**: DevOps (infrastructure)
+**Deliverable**: Cloudflare WAF/CDN, external storage
+
+| Story | Status | Description | Owner | Acceptance Criteria |
+|-------|--------|-------------|-------|---------------------|
+| S4.3.1 | ⬜ | Create **External Storage Account** | DevOps | Storage account exists, blob public access enabled |
+| S4.3.2 | ⬜ | Configure storage CORS | DevOps | CORS allows reads from approved domains |
+| S4.3.3 | ⬜ | Create Cloudflare zone | DevOps | Zone exists for external data domain |
+| S4.3.4 | ⬜ | Configure **CDN/WAF** caching rules | DevOps | COGs and vectors cached at edge |
+| S4.3.5 | ⬜ | Configure **CDN/WAF** security rules | DevOps | Rate limiting, bot protection enabled |
+| S4.3.6 | ⬜ | Configure custom domain DNS | DevOps | CNAME points to Cloudflare |
+| S4.3.7 | ⬜ | Validate end-to-end access | DevOps | Public URL serves data through CDN |
+
+### F4.3 Cloudflare Configuration
+
+**Caching Rules**:
+| Path Pattern | Cache TTL | Notes |
+|--------------|-----------|-------|
+| `*.tif`, `*.tiff` | 7 days | COG files rarely change |
+| `*.geojson` | 1 day | Vector exports |
+| `*.parquet` | 7 days | Analytics exports |
+| `*/metadata.json` | 1 hour | STAC-like metadata |
+
+**Security Rules**:
+| Rule | Setting | Rationale |
+|------|---------|-----------|
+| Rate Limiting | 1000 req/min per IP | Prevent abuse |
+| Bot Protection | Challenge suspicious | Block scrapers |
+| Hotlink Protection | Enabled | Prevent bandwidth theft |
+| Browser Integrity Check | Enabled | Block headless browsers |
+
+### F4.3 Dependencies
+
+- **Depends on**: S4.2.3 (ADF needs write access to External Storage)
+- **Blocked by**: None (can start immediately)
+
+---
+
+---
+
+## Epic E5: OGC Styles 🚧
+
+**Business Requirement**: Support styling metadata for all data formats
+**Status**: 🚧 PARTIAL
+**Note**: Building capability first; population method (SLD ingest vs manual) TBD
+
+### Feature F5.1: OGC API Styles ✅
+
+**Deliverable**: CartoSym-JSON storage with multi-format output
+
+| Story | Description |
+|-------|-------------|
+| S5.1.1 | Create Pydantic models |
+| S5.1.2 | Build style translator (CartoSym → Leaflet/Mapbox) |
+| S5.1.3 | Create repository layer |
+| S5.1.4 | Implement service orchestration |
+| S5.1.5 | Create GET /features/collections/{id}/styles |
+| S5.1.6 | Create GET /features/collections/{id}/styles/{sid} |
+| S5.1.7 | Add geo.feature_collection_styles table |
+
+**Key Files**: `ogc_styles/`
+
+**Tested**: 18 DEC 2025 - All three output formats verified (Leaflet, Mapbox GL, CartoSym-JSON)
+
+---
+
+### Feature F5.2: ETL Style Integration 📋 PLANNED
+
+**Deliverable**: Auto-create default styles on vector ingest
+
+| Story | Status | Description |
+|-------|--------|-------------|
+| S5.2.1 | 📋 | Design default style templates |
+| S5.2.2 | 📋 | Integrate into process_vector job |
+
+---
+
+---
+
+## Epic E7: Custom Data Pipelines 🚧
+
+**Business Requirement**: Custom ETL pipelines for strategic partners with modern, cloud-native data patterns
+**Status**: 🚧 PARTIAL (infrastructure complete, FATHOM pipeline in progress)
+**Key Partner**: FATHOM (flood risk analytics)
+
+**Strategic Context**:
+> Partners like FATHOM are embracing "future ready" data patterns — Zarr-first, cloud-optimized,
+> analysis-ready. E7 builds partner-specific pipelines that align with these modern standards
+> while leveraging our core ETL infrastructure.
+
+### Feature F7.1: Pipeline Infrastructure ✅
+
+**Deliverable**: Registry, scheduler, update job framework
+
+| Story | Description |
+|-------|-------------|
+| S7.1.1 | Create data models |
+| S7.1.2 | Design database schema |
+| S7.1.3 | Create repository layer |
+| S7.1.4 | Create registry service |
+| S7.1.5 | Implement HTTP CRUD endpoints |
+| S7.1.6 | Create timer scheduler (2 AM UTC) |
+| S7.1.7 | Create 4-stage update job |
+| S7.1.8 | Implement WDPA handler (reference implementation) |
+
+**Key Files**: `core/models/curated.py`, `infrastructure/curated_repository.py`, `services/curated/`, `jobs/curated_update.py`
+
+---
+
+### Feature F7.2: FATHOM Flood Data Pipeline ⬜ READY
+
+**Deliverable**: End-to-end pipeline for FATHOM flood risk data
+**Partner**: FATHOM
+**Data Patterns**: Zarr (preferred), COG (fallback)
+
+| Story | Status | Description |
+|-------|--------|-------------|
+| S7.2.1 | ⬜ | FATHOM data inventory and schema analysis |
+| S7.2.2 | ⬜ | FATHOM handler implementation |
+| S7.2.3 | ⬜ | Zarr output configuration (chunking, compression) |
+| S7.2.4 | ⬜ | STAC collection with datacube extension |
+| S7.2.5 | ⬜ | **TiTiler Zarr Service** integration for tile serving |
+| S7.2.6 | ⬜ | Manual update trigger endpoint |
+
+**FATHOM Data Characteristics**:
+- Global flood hazard maps (fluvial, pluvial, coastal)
+- Multiple return periods (1-in-5 to 1-in-1000 year)
+- High resolution (3 arcsec / ~90m)
+- Time-series projections (climate scenarios)
+
+**Target Architecture**:
+```
+FATHOM Source       ETL Function App       Consumer Access
+┌─────────────┐    ┌─────────────────┐    ┌───────────────────┐
+│ GeoTIFF or  │───▶│ Zarr conversion │───▶│ TiTiler Zarr      │
+│ NetCDF      │    │ + STAC catalog  │    │ Service           │
+└─────────────┘    └─────────────────┘    └───────────────────┘
+                          │
+                          ▼
+                   Silver Storage Account
+                   (cloud-optimized Zarr)
+```
+
+---
+
+### Feature F7.3: Reference Data Pipelines 📋 PLANNED
+
+**Deliverable**: Common reference datasets for spatial joins
+
+| Story | Status | Description |
+|-------|--------|-------------|
+| S7.3.1 | 📋 | Admin0 handler (Natural Earth boundaries) |
+| S7.3.2 | 📋 | WDPA updates (protected areas) |
+| S7.3.3 | 📋 | Style integration (depends on E5) |
+
+---
+
+---
+
+## Epic E8: H3 Analytics Pipeline 🚧
+
+**Business Requirement**: Columnar aggregations of raster/vector data to H3 hexagonal grid
+**Status**: 🚧 PARTIAL (Infrastructure complete, aggregation handlers in progress)
+
+**Architecture**:
+```
+Source Data           H3 Aggregation          Output
+┌─────────────┐       ┌───────────────┐       ┌─────────────────┐
+│ Rasters     │──────▶│ Zonal Stats   │──────▶│ PostgreSQL OLTP │
+│ (COGs)      │       │ (mean,sum,etc)│       │ (h3.zonal_stats)│
+├─────────────┤       ├───────────────┤       ├─────────────────┤
+│ Vectors     │──────▶│ Point Counts  │──────▶│ GeoParquet OLAP │
+│ (PostGIS)   │       │ (category agg)│       │ (DuckDB export) │
+└─────────────┘       └───────────────┘       └─────────────────┘
+```
+
+### Feature F8.1: H3 Grid Infrastructure ✅
+
+**Deliverable**: Normalized H3 schema with cell-country mappings
+
+| Story | Status | Description |
+|-------|--------|-------------|
+| S8.1.1 | ✅ | Design normalized schema (cells, cell_admin0, cell_admin1) |
+| S8.1.2 | ✅ | Create stat_registry metadata catalog |
+| S8.1.3 | ✅ | Create zonal_stats table for raster aggregations |
+| S8.1.4 | ✅ | Create point_stats table for vector aggregations |
+| S8.1.5 | ✅ | Create batch_progress table for idempotency |
+| S8.1.6 | ✅ | Implement H3Repository with COPY-based bulk inserts |
+
+**Key Files**: `infrastructure/h3_schema.py`, `infrastructure/h3_repository.py`, `infrastructure/h3_batch_tracking.py`
+
+---
+
+### Feature F8.2: Grid Bootstrap System ✅
+
+**Deliverable**: 3-stage cascade job generating res 2-7 pyramid
+
+| Story | Status | Description |
+|-------|--------|-------------|
+| S8.2.1 | ✅ | Create generate_h3_grid handler (base + cascade modes) |
+| S8.2.2 | ✅ | Create cascade_h3_descendants handler (multi-level) |
+| S8.2.3 | ✅ | Create finalize_h3_pyramid handler |
+| S8.2.4 | ✅ | Create bootstrap_h3_land_grid_pyramid job |
+| S8.2.5 | ✅ | Implement batch-level idempotency (resumable jobs) |
+| S8.2.6 | ✅ | Add country/bbox filtering for testing |
+
+**Key Files**: `jobs/bootstrap_h3_land_grid_pyramid.py`, `services/handler_generate_h3_grid.py`, `services/handler_cascade_h3_descendants.py`, `services/handler_finalize_h3_pyramid.py`
+
+**Expected Cell Counts** (land-filtered):
+- Res 2: ~2,000 | Res 3: ~14,000 | Res 4: ~98,000
+- Res 5: ~686,000 | Res 6: ~4.8M | Res 7: ~33.6M
+
+---
+
+### Feature F8.3: Raster→H3 Aggregation 🚧 IN PROGRESS
+
+**Deliverable**: Zonal statistics from COGs to H3 cells
+
+| Story | Status | Description |
+|-------|--------|-------------|
+| S8.3.1 | ✅ | Create h3_raster_aggregation job definition |
+| S8.3.2 | ✅ | Design 3-stage workflow (inventory → compute → finalize) |
+| S8.3.3 | ⬜ | Implement h3_inventory_cells handler |
+| S8.3.4 | ⬜ | Implement h3_raster_zonal_stats handler |
+| S8.3.5 | ⬜ | Implement h3_aggregation_finalize handler |
+| S8.3.6 | ✅ | Create insert_zonal_stats_batch() repository method |
+
+**Key Files**: `jobs/h3_raster_aggregation.py`
+
+**Stats Supported**: mean, sum, min, max, count, std, median
+
+---
+
+### Feature F8.4: Vector→H3 Aggregation ⬜ READY
+
+**Deliverable**: Point/polygon counts aggregated to H3 cells
+
+| Story | Status | Description |
+|-------|--------|-------------|
+| S8.4.1 | ⬜ | Create h3_vector_aggregation job |
+| S8.4.2 | ⬜ | Implement point-in-polygon handler |
+| S8.4.3 | ⬜ | Implement category grouping |
+| S8.4.4 | ✅ | Create insert_point_stats_batch() repository method |
+
+**Schema Ready**: `h3.point_stats` table exists
+
+---
+
+### Feature F8.5: GeoParquet Export 📋 PLANNED
+
+**Deliverable**: Columnar export for OLAP analytics
+
+| Story | Status | Description |
+|-------|--------|-------------|
+| S8.5.1 | 📋 | Design export job parameters |
+| S8.5.2 | 📋 | Implement PostgreSQL → GeoParquet writer |
+| S8.5.3 | 📋 | Add DuckDB/Databricks compatibility |
+| S8.5.4 | 📋 | Create export_h3_stats job |
+
+---
+
+### Feature F8.6: Analytics API 📋 PLANNED
+
+**Deliverable**: Query endpoints for H3 statistics
+
+| Story | Status | Description |
+|-------|--------|-------------|
+| S8.6.1 | 📋 | GET /api/h3/stats/{dataset_id} |
+| S8.6.2 | 📋 | GET /api/h3/stats/{dataset_id}/cells?iso3=&bbox= |
+| S8.6.3 | 📋 | GET /api/h3/registry (list all datasets) |
+| S8.6.4 | 📋 | Interactive H3 map interface |
+
+---
+
+---
+
+## Epic E9: Zarr/Climate Data as API 🚧
+
+**Business Requirement**: Zarr/NetCDF data access with time-series query support
+**Status**: 🚧 PARTIAL
+
+### Feature F9.1: xarray Service Layer ✅
+
+**Deliverable**: Time-series and statistics endpoints
+
+| Story | Description |
+|-------|-------------|
+| S9.1.1 | Create xarray reader service |
+| S9.1.2 | Implement /api/xarray/point time-series |
+| S9.1.3 | Implement /api/xarray/statistics |
+| S9.1.4 | Implement /api/xarray/aggregate |
+
+**Key Files**: `xarray_api/`, `services/xarray_reader.py`
+
+---
+
+### Feature F9.2: Virtual Zarr Pipeline 📋 PLANNED
+
+**Deliverable**: Kerchunk reference files enabling cloud-native access to legacy NetCDF
+
+**Strategic Context**:
+Eliminates need for traditional THREDDS/OPeNDAP infrastructure. NetCDF files
+remain in blob storage unchanged; lightweight JSON references (~KB) enable
+**TiTiler Zarr Service** to serve data via modern cloud-optimized patterns.
+
+**Compute Profile**: Azure Function App (reference generation is I/O-bound, not compute-bound)
+
+| Story | Status | Description |
+|-------|--------|-------------|
+| S9.2.1 | ⬜ | CMIP6 filename parser (extract variable, model, scenario) |
+| S9.2.2 | ⬜ | Chunking validator (pre-flight NetCDF compatibility check) |
+| S9.2.3 | ⬜ | Reference generator (single NetCDF → Kerchunk JSON ~KB) |
+| S9.2.4 | ⬜ | Virtual combiner (merge time-series references) |
+| S9.2.5 | ⬜ | STAC datacube registration (xarray-compatible items) |
+| S9.2.6 | ⬜ | Inventory job (scan and group NetCDF files) |
+| S9.2.7 | ⬜ | Generate job (full reference pipeline) |
+| S9.2.8 | ⬜ | **TiTiler Zarr Service** configuration for virtual Zarr serving |
+
+**Dependencies**: `virtualizarr`, `kerchunk`, `h5netcdf`, `h5py`
+
+**Architecture**:
+```
+NetCDF Files (unchanged)     Reference Generation      TiTiler Zarr Service
+┌─────────────────────┐     ┌──────────────────┐     ┌────────────────┐
+│ tasmax_2015.nc      │     │                  │     │                │
+│ tasmax_2016.nc      │────▶│ Kerchunk JSON    │────▶│ /tiles/{z}/{x} │
+│ tasmax_2017.nc      │     │ (~5KB per file)  │     │ /point/{x},{y} │
+│ ...                 │     │                  │     │                │
+└─────────────────────┘     └──────────────────┘     └────────────────┘
+  Bronze Storage Account     Silver Storage Account   Cloud-Native API
+     (no conversion)           (lightweight refs)     (no THREDDS)
+```
+
+---
+
+### Feature F9.3: Reader App Migration ⬜ READY
+
+**Deliverable**: Move read APIs to **Reader Function App** (clean separation)
+
+| Story | Status | Description |
+|-------|--------|-------------|
+| S9.3.1 | ⬜ | Copy raster_api module |
+| S9.3.2 | ⬜ | Copy xarray_api module |
+| S9.3.3 | ⬜ | Copy service clients |
+| S9.3.4 | ⬜ | Update requirements.txt |
+| S9.3.5 | ⬜ | Register routes |
+| S9.3.6 | ⬜ | Deploy and validate |
 
 ---
 

@@ -205,7 +205,7 @@ Abstract component names for ADO work items. Actual Azure resource names assigne
 
 ### Feature F2.2: TiTiler Integration ✅
 
-**Deliverable**: Tile serving, previews, viewer URLs via rmhtitiler
+**Deliverable**: Tile serving, previews, viewer URLs via **TiTiler Raster Service**
 
 | Story | Description |
 |-------|-------------|
@@ -342,7 +342,7 @@ Abstract component names for ADO work items. Actual Azure resource names assigne
 **Strategic Context**:
 Eliminates need for traditional THREDDS/OPeNDAP infrastructure. NetCDF files
 remain in blob storage unchanged; lightweight JSON references (~KB) enable
-TiTiler-xarray to serve data via modern cloud-optimized patterns.
+**TiTiler Zarr Service** to serve data via modern cloud-optimized patterns.
 
 **Compute Profile**: Azure Function App (reference generation is I/O-bound, not compute-bound)
 
@@ -355,20 +355,20 @@ TiTiler-xarray to serve data via modern cloud-optimized patterns.
 | S9.2.5 | ⬜ | STAC datacube registration (xarray-compatible items) |
 | S9.2.6 | ⬜ | Inventory job (scan and group NetCDF files) |
 | S9.2.7 | ⬜ | Generate job (full reference pipeline) |
-| S9.2.8 | ⬜ | TiTiler-xarray configuration for virtual Zarr serving |
+| S9.2.8 | ⬜ | **TiTiler Zarr Service** configuration for virtual Zarr serving |
 
 **Dependencies**: `virtualizarr`, `kerchunk`, `h5netcdf`, `h5py`
 
 **Architecture**:
 ```
-NetCDF Files (unchanged)     Reference Generation      TiTiler-xarray
+NetCDF Files (unchanged)     Reference Generation      TiTiler Zarr Service
 ┌─────────────────────┐     ┌──────────────────┐     ┌────────────────┐
 │ tasmax_2015.nc      │     │                  │     │                │
 │ tasmax_2016.nc      │────▶│ Kerchunk JSON    │────▶│ /tiles/{z}/{x} │
 │ tasmax_2017.nc      │     │ (~5KB per file)  │     │ /point/{x},{y} │
 │ ...                 │     │                  │     │                │
 └─────────────────────┘     └──────────────────┘     └────────────────┘
-     Blob Storage              Blob Storage           Cloud-Native API
+  Bronze Storage Account     Silver Storage Account   Cloud-Native API
      (no conversion)           (lightweight refs)     (no THREDDS)
 ```
 
@@ -376,7 +376,7 @@ NetCDF Files (unchanged)     Reference Generation      TiTiler-xarray
 
 ### Feature F9.3: Reader App Migration ⬜ READY
 
-**Deliverable**: Move read APIs to rmhogcstac (clean separation)
+**Deliverable**: Move read APIs to **Reader Function App** (clean separation)
 
 | Story | Status | Description |
 |-------|--------|-------------|
@@ -431,7 +431,7 @@ NetCDF Files (unchanged)     Reference Generation      TiTiler-xarray
 | S7.2.2 | ⬜ | FATHOM handler implementation |
 | S7.2.3 | ⬜ | Zarr output configuration (chunking, compression) |
 | S7.2.4 | ⬜ | STAC collection with datacube extension |
-| S7.2.5 | ⬜ | TiTiler-xarray integration for tile serving |
+| S7.2.5 | ⬜ | **TiTiler Zarr Service** integration for tile serving |
 | S7.2.6 | ⬜ | Manual update trigger endpoint |
 
 **FATHOM Data Characteristics**:
@@ -442,15 +442,15 @@ NetCDF Files (unchanged)     Reference Generation      TiTiler-xarray
 
 **Target Architecture**:
 ```
-FATHOM Source       Platform ETL           Consumer Access
-┌─────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│ GeoTIFF or  │───▶│ Zarr conversion │───▶│ TiTiler-xarray  │
-│ NetCDF      │    │ + STAC catalog  │    │ (tiles + point) │
-└─────────────┘    └─────────────────┘    └─────────────────┘
+FATHOM Source       ETL Function App       Consumer Access
+┌─────────────┐    ┌─────────────────┐    ┌───────────────────┐
+│ GeoTIFF or  │───▶│ Zarr conversion │───▶│ TiTiler Zarr      │
+│ NetCDF      │    │ + STAC catalog  │    │ Service           │
+└─────────────┘    └─────────────────┘    └───────────────────┘
                           │
                           ▼
-                   Zarr in Silver Storage
-                   (cloud-optimized, chunked)
+                   Silver Storage Account
+                   (cloud-optimized Zarr)
 ```
 
 ---
@@ -512,14 +512,14 @@ FATHOM Source       Platform ETL           Consumer Access
 **Status**: 📋 PLANNED
 
 ```
-INTERNAL ZONE              EXTERNAL ZONE
-(rmhazuregeo*)      →      (client-accessible)
-        ↓
-  Approval + ADF Copy
-        ↓
-  Cloudflare WAF/CDN
-        ↓
-   Public Access
+INTERNAL ZONE                    EXTERNAL ZONE
+(Bronze/Silver Storage)    →     (External Storage Account)
+              ↓
+     Approval + Data Factory Copy
+              ↓
+         CDN/WAF
+              ↓
+       Public Access
 ```
 
 ### Feature F4.1: Publishing Workflow 📋 PLANNED
@@ -1242,4 +1242,4 @@ if __name__ == "__main__":
 
 ---
 
-**Last Updated**: 19 DEC 2025 (Swapped E4↔E7: Data Externalization is now E4, Custom Pipelines is now E7)
+**Last Updated**: 19 DEC 2025 (Neutralized language; replaced specific names with Component Glossary terms)

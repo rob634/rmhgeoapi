@@ -18,7 +18,7 @@
 | 2 | E9 | DDH Platform Integration | 🚧 Partial | 8 | 4.8 |
 | 3 | E7 | Data Externalization | 📋 Planned | 3 | 4.3 |
 | 4 | E3 | Zarr/Climate Data as API | 🚧 Partial | 3 | 2.0 |
-| 5 | E4 | Partner Data Pipelines | 🚧 Partial | 3 | 2.6 |
+| 5 | E4 | Custom Data Pipelines | 🚧 Partial | 3 | 2.6 |
 | 6 | E5 | OGC Styles | 🚧 Partial | 2 | 3.7 |
 | 7 | E8 | H3 Analytics Pipeline | 🚧 Partial | 6 | 1.2 |
 
@@ -389,7 +389,7 @@ NetCDF Files (unchanged)     Reference Generation      TiTiler-xarray
 
 ---
 
-## Epic E4: Partner Data Pipelines 🚧
+## Epic E4: Custom Data Pipelines 🚧
 
 **Business Requirement**: Custom ETL pipelines for strategic partners with modern, cloud-native data patterns
 **Status**: 🚧 PARTIAL (infrastructure complete, FATHOM pipeline in progress)

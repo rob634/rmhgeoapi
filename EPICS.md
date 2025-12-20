@@ -9,23 +9,22 @@
 
 ## Quick Reference
 
-**FY26 Target (ends 30 JUN 2026)**: E1 ✅, E2, E9, E7, E6
+**FY26 Target (ends 30 JUN 2026)**: E1 ✅, E2, E9, E7
 
 | Priority | Epic | Name | Status | Features | WSJF |
 |:--------:|------|------|--------|:--------:|:----:|
 | — | E1 | Vector Data as API | ✅ Complete | 4 | — |
 | 1 | E2 | Raster Data as API | 🚧 Partial | 7 | 5.9 |
-| 2 | E9 | DDH Platform Integration | 📋 Planned | 5 | 3.2 |
+| 2 | E9 | DDH Platform Integration | 🚧 Partial | 8 | 4.8 |
 | 3 | E7 | Data Externalization | 📋 Planned | 3 | 4.3 |
-| 4 | E6 | Platform Observability | 🚧 Mostly Complete | 3 | 11.3 |
-| 5 | E3 | Zarr/Climate Data as API | 🚧 Partial | 3 | 2.0 |
-| 6 | E4 | Managed Datasets | 🚧 Partial | 2 | 2.6 |
-| 7 | E5 | OGC Styles | 🚧 Partial | 2 | 3.7 |
-| 8 | E8 | H3 Analytics Pipeline | 🚧 Partial | 6 | 1.2 |
+| 4 | E3 | Zarr/Climate Data as API | 🚧 Partial | 3 | 2.0 |
+| 5 | E4 | Managed Datasets | 🚧 Partial | 2 | 2.6 |
+| 6 | E5 | OGC Styles | 🚧 Partial | 2 | 3.7 |
+| 7 | E8 | H3 Analytics Pipeline | 🚧 Partial | 6 | 1.2 |
 
 **Priority Notes**:
-- **E9 + E6 tightly coupled**: Observability enables integration monitoring
-- **E9 requires elaboration**: ITSDA team (ITS Platform / DDH owner) holds original requirements; limited geospatial domain knowledge
+- **E9 includes Observability**: Merged E6 into E9 — observability is app-to-app monitoring for integration
+- **E9 requires ITSDA coordination**: See ITSDA dependency tags on stories below
 - **E3, E4, E5, E8**: Secondary priority for FY26; E3 (Zarr/Climate) highest among this tier
 
 ### WSJF Calculation
@@ -37,17 +36,16 @@
 | Epic | Business Value | Time Crit | Risk Red | **CoD** | Job Size | **WSJF** |
 |------|:--------------:|:---------:|:--------:|:-------:|:--------:|:--------:|
 | E2 | 21 (platform foundation) | 13 (FATHOM blocked) | 13 (enables downstream) | **47** | 8 | **5.9** |
-| E9 | 21 (analytics front-end) | 13 (high urgency) | 8 (stakeholder alignment) | **42** | 13 | **3.2** |
+| E9 | 21 (analytics front-end) | 13 (high urgency) | 13 (observability+diagnostics) | **48** | 10 | **4.8** |
 | E7 | 13 (external access) | 8 (post-platform) | 13 (security/audit) | **34** | 8 | **4.3** |
-| E6 | 8 (internal tooling) | 13 (E9 dependency) | 13 (diagnostics) | **34** | 3 | **11.3** |
 | E3 | 13 (CMIP client priority) | 5 (secondary tier) | 8 (technical complexity) | **26** | 13 | **2.0** |
 | E4 | 5 (operational efficiency) | 3 | 5 | **13** | 5 | **2.6** |
 | E5 | 5 (styling metadata) | 3 | 3 | **11** | 3 | **3.7** |
 | E8 | 8 (analytics capability) | 3 | 5 | **16** | 13 | **1.2** |
 
-**WSJF-Ordered Sequence**: E6 (11.3) → E2 (5.9) → E7 (4.3) → E5 (3.7) → E9 (3.2) → E4 (2.6) → E3 (2.0) → E8 (1.2)
+**WSJF-Ordered Sequence**: E2 (5.9) → E9 (4.8) → E7 (4.3) → E5 (3.7) → E4 (2.6) → E3 (2.0) → E8 (1.2)
 
-**Strategic Override**: E6 scores highest due to small scope and high dependency value. However, E2 remains the practical starting point as platform foundation.
+**Note**: E9 absorbs former E6 (Platform Observability) — observability is app-to-app monitoring that enables integration.
 
 | Enabler | Name | Status | Enables |
 |---------|------|--------|---------|
@@ -464,51 +462,6 @@ NetCDF Files (unchanged)     Reference Generation      TiTiler-xarray
 
 ---
 
-## Epic E6: Platform Observability 🚧
-
-**Business Requirement**: Remote diagnostics without DB access
-**Status**: 🚧 MOSTLY COMPLETE
-
-### Feature F6.1: Health & Diagnostics ✅
-
-**Deliverable**: Comprehensive health and status APIs
-
-| Story | Description |
-|-------|-------------|
-| S6.1.1 | Enhanced /api/health endpoint |
-| S6.1.2 | Platform status for DDH (/api/platform/*) |
-| S6.1.3 | 29 dbadmin endpoints |
-
-**Key Files**: `web_interfaces/health/`, `triggers/admin/db_*.py`
-
----
-
-### Feature F6.2: Error Telemetry ✅
-
-**Deliverable**: Structured logging and retry tracking
-
-| Story | Description |
-|-------|-------------|
-| S6.2.1 | Add error_source field to logs |
-| S6.2.2 | Create 6 retry telemetry checkpoints |
-| S6.2.3 | Implement log_nested_error() helper |
-| S6.2.4 | Add JSON deserialization error handling |
-
-**Key Files**: `core/error_handler.py`, `core/machine.py`
-
----
-
-### Feature F6.3: Verbose Validation 🔵 BACKLOG
-
-**Deliverable**: Enhanced error context
-
-| Story | Status | Description |
-|-------|--------|-------------|
-| S6.3.1 | 🔵 | Verbose pre-flight validation |
-| S6.3.2 | 🔵 | Unified DEBUG_MODE |
-
----
-
 # PLANNED EPICS
 
 ## Epic E7: Data Externalization 📋
@@ -738,10 +691,10 @@ Source Data           H3 Aggregation          Output
 
 ---
 
-## Epic E9: DDH Platform Integration 📋
+## Epic E9: DDH Platform Integration 🚧
 
 **Business Requirement**: Enable DDH application to consume geospatial platform data services
-**Status**: 📋 PLANNED
+**Status**: 🚧 PARTIAL (Observability complete, Identity/Access in progress, Documentation planned)
 **Owner**: ITSDA Team (DDH) + Geospatial Team (Platform)
 
 **Architectural Boundary**:
@@ -914,12 +867,81 @@ QA (current) ──S9.3.2──▶ Document ──S9.3.3-4──▶ UAT ──S9
 **Status**: Deferred — polling pattern is the supported integration contract
 **Trigger**: Revisit if polling creates unacceptable API load or latency issues
 
+| Story | Status | Description | ITSDA |
+|-------|--------|-------------|:-----:|
+| S9.5.1 | 🔵 | Design callback payload schema | Consumes |
+| S9.5.2 | 🔵 | Add callback_url parameter to job submission | — |
+| S9.5.3 | 🔵 | Implement webhook POST on job completion/failure | Receives |
+| S9.5.4 | 🔵 | Add retry logic for failed callbacks | — |
+
+---
+
+### Feature F9.6: Health & Diagnostics ✅ COMPLETE
+
+**Deliverable**: Comprehensive health and status APIs for integration monitoring
+**Owner**: Geospatial Team (complete)
+
+| Story | Status | Description | ITSDA |
+|-------|--------|-------------|:-----:|
+| S9.6.1 | ✅ | Enhanced /api/health endpoint | Consumes |
+| S9.6.2 | ✅ | Platform status for DDH (/api/platform/*) | Consumes |
+| S9.6.3 | ✅ | 29 dbadmin endpoints | — |
+
+**Key Files**: `web_interfaces/health/`, `triggers/admin/db_*.py`
+
+---
+
+### Feature F9.7: Error Telemetry ✅ COMPLETE
+
+**Deliverable**: Structured logging and retry tracking
+**Owner**: Geospatial Team (complete)
+
 | Story | Status | Description |
 |-------|--------|-------------|
-| S9.5.1 | 🔵 | Design callback payload schema |
-| S9.5.2 | 🔵 | Add callback_url parameter to job submission |
-| S9.5.3 | 🔵 | Implement webhook POST on job completion/failure |
-| S9.5.4 | 🔵 | Add retry logic for failed callbacks |
+| S9.7.1 | ✅ | Add error_source field to logs |
+| S9.7.2 | ✅ | Create 6 retry telemetry checkpoints |
+| S9.7.3 | ✅ | Implement log_nested_error() helper |
+| S9.7.4 | ✅ | Add JSON deserialization error handling |
+
+**Key Files**: `core/error_handler.py`, `core/machine.py`
+
+---
+
+### Feature F9.8: Verbose Validation 🔵 BACKLOG
+
+**Deliverable**: Enhanced error context for debugging
+**Owner**: Geospatial Team
+
+| Story | Status | Description |
+|-------|--------|-------------|
+| S9.8.1 | 🔵 | Verbose pre-flight validation |
+| S9.8.2 | 🔵 | Unified DEBUG_MODE |
+
+---
+
+## E9 ITSDA Dependency Summary
+
+Stories requiring ITSDA team action or coordination:
+
+| Feature | Story | ITSDA Role | Description |
+|---------|-------|------------|-------------|
+| F9.1 | S9.1.1-7 | **Reviews** | Must review/approve API documentation |
+| F9.2 | S9.2.3 | **Provides** | Must provide DDH managed identity client ID |
+| F9.2 | S9.2.4 | **Provides** | Must confirm DDH can reach Platform API endpoints |
+| F9.3 | S9.3.3-4 | **Provides** | Must create DDH identity in UAT/Prod Azure AD |
+| F9.3 | S9.3.5 | **Executes** | Must run integration tests from DDH side |
+| F9.4 | S9.4.1 | **Co-owns** | Must define test scenarios jointly |
+| F9.4 | S9.4.2-5 | **Executes** | Must write/run tests from DDH side |
+| F9.5 | S9.5.3 | **Implements** | Must implement callback receiver (if activated) |
+| F9.6 | S9.6.1-2 | **Consumes** | Uses health/status endpoints for monitoring |
+
+**Legend**:
+- **Reviews**: ITSDA reviews Platform team output
+- **Provides**: ITSDA provides information or resources
+- **Executes**: ITSDA performs the action
+- **Co-owns**: Joint ownership
+- **Consumes**: ITSDA uses the output (no action needed)
+- **Implements**: ITSDA builds functionality on their side
 
 ---
 
@@ -1178,4 +1200,4 @@ if __name__ == "__main__":
 
 ---
 
-**Last Updated**: 19 DEC 2025 (Refined DevOps stories: EN6, F7.2, F7.3, F9.2, F9.3 + Component Glossary)
+**Last Updated**: 19 DEC 2025 (Merged E6 into E9; added ITSDA dependency summary)

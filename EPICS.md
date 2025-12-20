@@ -9,24 +9,24 @@
 
 ## Quick Reference
 
-**FY26 Target (ends 30 JUN 2026)**: E1 ✅, E2, E3, E7
+**FY26 Target (ends 30 JUN 2026)**: E1 ✅, E2, E3, E4
 
 | Priority | Epic | Name | Status | Features | WSJF |
 |:--------:|------|------|--------|:--------:|:----:|
 | — | E1 | Vector Data as API | ✅ Complete | 4 | — |
 | 1 | E2 | Raster Data as API | 🚧 Partial | 7 | 5.9 |
 | 2 | E3 | DDH Platform Integration | 🚧 Partial | 8 | 4.8 |
-| 3 | E7 | Data Externalization | 📋 Planned | 3 | 4.3 |
+| 3 | E4 | Data Externalization | 📋 Planned | 3 | 4.3 |
 | 4 | E9 | Zarr/Climate Data as API | 🚧 Partial | 3 | 2.0 |
-| 5 | E4 | Custom Data Pipelines | 🚧 Partial | 3 | 2.6 |
+| 5 | E7 | Custom Data Pipelines | 🚧 Partial | 3 | 2.6 |
 | 6 | E5 | OGC Styles | 🚧 Partial | 2 | 3.7 |
 | 7 | E8 | H3 Analytics Pipeline | 🚧 Partial | 6 | 1.2 |
 
 **Priority Notes**:
 - **E3 includes Observability**: Merged E6 into E3 — observability is app-to-app monitoring for integration
 - **E3 requires ITSDA coordination**: See ITSDA dependency tags on stories below
-- **E4 + E9 synergy**: FATHOM pipeline (E4) drives Zarr/xarray capabilities (E9) — "future ready" patterns
-- **E9, E4, E5, E8**: Secondary priority for FY26; E4 (FATHOM) may elevate based on partner timeline
+- **E7 + E9 synergy**: FATHOM pipeline (E7) drives Zarr/xarray capabilities (E9) — "future ready" patterns
+- **E9, E7, E5, E8**: Secondary priority for FY26; E7 (FATHOM) may elevate based on partner timeline
 
 ### WSJF Calculation
 
@@ -38,13 +38,13 @@
 |------|:--------------:|:---------:|:--------:|:-------:|:--------:|:--------:|
 | E2 | 21 (platform foundation) | 13 (FATHOM blocked) | 13 (enables downstream) | **47** | 8 | **5.9** |
 | E3 | 21 (analytics front-end) | 13 (high urgency) | 13 (observability+diagnostics) | **48** | 10 | **4.8** |
-| E7 | 13 (external access) | 8 (post-platform) | 13 (security/audit) | **34** | 8 | **4.3** |
+| E4 | 13 (external access) | 8 (post-platform) | 13 (security/audit) | **34** | 8 | **4.3** |
 | E9 | 13 (CMIP client priority) | 5 (secondary tier) | 8 (technical complexity) | **26** | 13 | **2.0** |
-| E4 | 5 (operational efficiency) | 3 | 5 | **13** | 5 | **2.6** |
+| E7 | 5 (operational efficiency) | 3 | 5 | **13** | 5 | **2.6** |
 | E5 | 5 (styling metadata) | 3 | 3 | **11** | 3 | **3.7** |
 | E8 | 8 (analytics capability) | 3 | 5 | **16** | 13 | **1.2** |
 
-**WSJF-Ordered Sequence**: E2 (5.9) → E3 (4.8) → E7 (4.3) → E5 (3.7) → E4 (2.6) → E9 (2.0) → E8 (1.2)
+**WSJF-Ordered Sequence**: E2 (5.9) → E3 (4.8) → E4 (4.3) → E5 (3.7) → E7 (2.6) → E9 (2.0) → E8 (1.2)
 
 **Note**: E3 absorbs former E6 (Platform Observability) — observability is app-to-app monitoring that enables integration.
 
@@ -389,7 +389,7 @@ NetCDF Files (unchanged)     Reference Generation      TiTiler-xarray
 
 ---
 
-## Epic E4: Custom Data Pipelines 🚧
+## Epic E7: Custom Data Pipelines 🚧
 
 **Business Requirement**: Custom ETL pipelines for strategic partners with modern, cloud-native data patterns
 **Status**: 🚧 PARTIAL (infrastructure complete, FATHOM pipeline in progress)
@@ -397,29 +397,29 @@ NetCDF Files (unchanged)     Reference Generation      TiTiler-xarray
 
 **Strategic Context**:
 > Partners like FATHOM are embracing "future ready" data patterns — Zarr-first, cloud-optimized,
-> analysis-ready. E4 builds partner-specific pipelines that align with these modern standards
+> analysis-ready. E7 builds partner-specific pipelines that align with these modern standards
 > while leveraging our core ETL infrastructure.
 
-### Feature F4.1: Pipeline Infrastructure ✅
+### Feature F7.1: Pipeline Infrastructure ✅
 
 **Deliverable**: Registry, scheduler, update job framework
 
 | Story | Description |
 |-------|-------------|
-| S4.1.1 | Create data models |
-| S4.1.2 | Design database schema |
-| S4.1.3 | Create repository layer |
-| S4.1.4 | Create registry service |
-| S4.1.5 | Implement HTTP CRUD endpoints |
-| S4.1.6 | Create timer scheduler (2 AM UTC) |
-| S4.1.7 | Create 4-stage update job |
-| S4.1.8 | Implement WDPA handler (reference implementation) |
+| S7.1.1 | Create data models |
+| S7.1.2 | Design database schema |
+| S7.1.3 | Create repository layer |
+| S7.1.4 | Create registry service |
+| S7.1.5 | Implement HTTP CRUD endpoints |
+| S7.1.6 | Create timer scheduler (2 AM UTC) |
+| S7.1.7 | Create 4-stage update job |
+| S7.1.8 | Implement WDPA handler (reference implementation) |
 
 **Key Files**: `core/models/curated.py`, `infrastructure/curated_repository.py`, `services/curated/`, `jobs/curated_update.py`
 
 ---
 
-### Feature F4.2: FATHOM Flood Data Pipeline ⬜ READY
+### Feature F7.2: FATHOM Flood Data Pipeline ⬜ READY
 
 **Deliverable**: End-to-end pipeline for FATHOM flood risk data
 **Partner**: FATHOM
@@ -427,12 +427,12 @@ NetCDF Files (unchanged)     Reference Generation      TiTiler-xarray
 
 | Story | Status | Description |
 |-------|--------|-------------|
-| S4.2.1 | ⬜ | FATHOM data inventory and schema analysis |
-| S4.2.2 | ⬜ | FATHOM handler implementation |
-| S4.2.3 | ⬜ | Zarr output configuration (chunking, compression) |
-| S4.2.4 | ⬜ | STAC collection with datacube extension |
-| S4.2.5 | ⬜ | TiTiler-xarray integration for tile serving |
-| S4.2.6 | ⬜ | Manual update trigger endpoint |
+| S7.2.1 | ⬜ | FATHOM data inventory and schema analysis |
+| S7.2.2 | ⬜ | FATHOM handler implementation |
+| S7.2.3 | ⬜ | Zarr output configuration (chunking, compression) |
+| S7.2.4 | ⬜ | STAC collection with datacube extension |
+| S7.2.5 | ⬜ | TiTiler-xarray integration for tile serving |
+| S7.2.6 | ⬜ | Manual update trigger endpoint |
 
 **FATHOM Data Characteristics**:
 - Global flood hazard maps (fluvial, pluvial, coastal)
@@ -455,15 +455,15 @@ FATHOM Source       Platform ETL           Consumer Access
 
 ---
 
-### Feature F4.3: Reference Data Pipelines 📋 PLANNED
+### Feature F7.3: Reference Data Pipelines 📋 PLANNED
 
 **Deliverable**: Common reference datasets for spatial joins
 
 | Story | Status | Description |
 |-------|--------|-------------|
-| S4.3.1 | 📋 | Admin0 handler (Natural Earth boundaries) |
-| S4.3.2 | 📋 | WDPA updates (protected areas) |
-| S4.3.3 | 📋 | Style integration (depends on E5) |
+| S7.3.1 | 📋 | Admin0 handler (Natural Earth boundaries) |
+| S7.3.2 | 📋 | WDPA updates (protected areas) |
+| S7.3.3 | 📋 | Style integration (depends on E5) |
 
 ---
 
@@ -506,7 +506,7 @@ FATHOM Source       Platform ETL           Consumer Access
 
 # PLANNED EPICS
 
-## Epic E7: Data Externalization 📋
+## Epic E4: Data Externalization 📋
 
 **Business Requirement**: Controlled data movement to external access zones
 **Status**: 📋 PLANNED
@@ -522,39 +522,39 @@ INTERNAL ZONE              EXTERNAL ZONE
    Public Access
 ```
 
-### Feature F7.1: Publishing Workflow 📋 PLANNED
+### Feature F4.1: Publishing Workflow 📋 PLANNED
 
 **Owner**: Claude (code)
 **Deliverable**: Approval queue, audit log, status APIs
 
 | Story | Status | Acceptance Criteria |
 |-------|--------|---------------------|
-| S7.1.1 | ⬜ | Design publish schema (`app.publish_queue`, `app.publish_audit_log`) |
-| S7.1.2 | ⬜ | Create publishing repository |
-| S7.1.3 | ⬜ | Submit for review endpoint |
-| S7.1.4 | ⬜ | Approve/Reject endpoints |
-| S7.1.5 | ⬜ | Status check endpoint |
-| S7.1.6 | ⬜ | Audit log queries |
+| S4.1.1 | ⬜ | Design publish schema (`app.publish_queue`, `app.publish_audit_log`) |
+| S4.1.2 | ⬜ | Create publishing repository |
+| S4.1.3 | ⬜ | Submit for review endpoint |
+| S4.1.4 | ⬜ | Approve/Reject endpoints |
+| S4.1.5 | ⬜ | Status check endpoint |
+| S4.1.6 | ⬜ | Audit log queries |
 
 ---
 
-### Feature F7.2: ADF Data Movement 📋 PLANNED
+### Feature F4.2: ADF Data Movement 📋 PLANNED
 
 **Owner**: DevOps (ADF infrastructure) + Claude (trigger integration)
 **Deliverable**: Blob copy pipelines with approval triggers
 
 | Story | Status | Description | Owner | Acceptance Criteria |
 |-------|--------|-------------|-------|---------------------|
-| S7.2.1 | ⬜ | Create **Data Factory Instance** | DevOps | ADF exists in resource group, managed identity enabled |
-| S7.2.2 | ⬜ | Grant ADF access to **Silver Storage Account** | DevOps | ADF identity has `Storage Blob Data Reader` |
-| S7.2.3 | ⬜ | Grant ADF access to **External Storage Account** | DevOps | ADF identity has `Storage Blob Data Contributor` |
-| S7.2.4 | ⬜ | Create blob-to-blob copy pipeline | DevOps | Pipeline accepts source/dest params, copies blob |
-| S7.2.5 | ⬜ | Create REST API trigger for pipeline | DevOps | Pipeline can be invoked via HTTP POST |
-| S7.2.6 | ⬜ | Integrate approve endpoint with ADF trigger | Claude | `/api/publish/approve` triggers ADF pipeline |
-| S7.2.7 | ⬜ | Add ADF status polling to audit log | Claude | Audit log updated with copy status |
-| S7.2.8 | ⬜ | Add ADF config to **ETL Function App** | DevOps | Environment variables for ADF endpoint + credentials |
+| S4.2.1 | ⬜ | Create **Data Factory Instance** | DevOps | ADF exists in resource group, managed identity enabled |
+| S4.2.2 | ⬜ | Grant ADF access to **Silver Storage Account** | DevOps | ADF identity has `Storage Blob Data Reader` |
+| S4.2.3 | ⬜ | Grant ADF access to **External Storage Account** | DevOps | ADF identity has `Storage Blob Data Contributor` |
+| S4.2.4 | ⬜ | Create blob-to-blob copy pipeline | DevOps | Pipeline accepts source/dest params, copies blob |
+| S4.2.5 | ⬜ | Create REST API trigger for pipeline | DevOps | Pipeline can be invoked via HTTP POST |
+| S4.2.6 | ⬜ | Integrate approve endpoint with ADF trigger | Claude | `/api/publish/approve` triggers ADF pipeline |
+| S4.2.7 | ⬜ | Add ADF status polling to audit log | Claude | Audit log updated with copy status |
+| S4.2.8 | ⬜ | Add ADF config to **ETL Function App** | DevOps | Environment variables for ADF endpoint + credentials |
 
-### F7.2 Pipeline Parameters
+### F4.2 Pipeline Parameters
 
 ```json
 {
@@ -568,7 +568,7 @@ INTERNAL ZONE              EXTERNAL ZONE
 }
 ```
 
-### F7.2 Data Flow
+### F4.2 Data Flow
 
 ```
 Silver Storage ──ADF Copy──▶ External Storage ──CDN──▶ Public URL
@@ -578,22 +578,22 @@ Silver Storage ──ADF Copy──▶ External Storage ──CDN──▶ Publi
 
 ---
 
-### Feature F7.3: External Delivery Infrastructure 📋 PLANNED
+### Feature F4.3: External Delivery Infrastructure 📋 PLANNED
 
 **Owner**: DevOps (infrastructure)
 **Deliverable**: Cloudflare WAF/CDN, external storage
 
 | Story | Status | Description | Owner | Acceptance Criteria |
 |-------|--------|-------------|-------|---------------------|
-| S7.3.1 | ⬜ | Create **External Storage Account** | DevOps | Storage account exists, blob public access enabled |
-| S7.3.2 | ⬜ | Configure storage CORS | DevOps | CORS allows reads from approved domains |
-| S7.3.3 | ⬜ | Create Cloudflare zone | DevOps | Zone exists for external data domain |
-| S7.3.4 | ⬜ | Configure **CDN/WAF** caching rules | DevOps | COGs and vectors cached at edge |
-| S7.3.5 | ⬜ | Configure **CDN/WAF** security rules | DevOps | Rate limiting, bot protection enabled |
-| S7.3.6 | ⬜ | Configure custom domain DNS | DevOps | CNAME points to Cloudflare |
-| S7.3.7 | ⬜ | Validate end-to-end access | DevOps | Public URL serves data through CDN |
+| S4.3.1 | ⬜ | Create **External Storage Account** | DevOps | Storage account exists, blob public access enabled |
+| S4.3.2 | ⬜ | Configure storage CORS | DevOps | CORS allows reads from approved domains |
+| S4.3.3 | ⬜ | Create Cloudflare zone | DevOps | Zone exists for external data domain |
+| S4.3.4 | ⬜ | Configure **CDN/WAF** caching rules | DevOps | COGs and vectors cached at edge |
+| S4.3.5 | ⬜ | Configure **CDN/WAF** security rules | DevOps | Rate limiting, bot protection enabled |
+| S4.3.6 | ⬜ | Configure custom domain DNS | DevOps | CNAME points to Cloudflare |
+| S4.3.7 | ⬜ | Validate end-to-end access | DevOps | Public URL serves data through CDN |
 
-### F7.3 Cloudflare Configuration
+### F4.3 Cloudflare Configuration
 
 **Caching Rules**:
 | Path Pattern | Cache TTL | Notes |
@@ -611,9 +611,9 @@ Silver Storage ──ADF Copy──▶ External Storage ──CDN──▶ Publi
 | Hotlink Protection | Enabled | Prevent bandwidth theft |
 | Browser Integrity Check | Enabled | Block headless browsers |
 
-### F7.3 Dependencies
+### F4.3 Dependencies
 
-- **Depends on**: S7.2.3 (ADF needs write access to External Storage)
+- **Depends on**: S4.2.3 (ADF needs write access to External Storage)
 - **Blocked by**: None (can start immediately)
 
 ---
@@ -1242,4 +1242,4 @@ if __name__ == "__main__":
 
 ---
 
-**Last Updated**: 19 DEC 2025 (Swapped E3↔E9: Integration is now E3, Zarr is now E9)
+**Last Updated**: 19 DEC 2025 (Swapped E4↔E7: Data Externalization is now E4, Custom Pipelines is now E7)

@@ -70,6 +70,9 @@ def get_memory_stats() -> Optional[Dict[str, float]]:
             'system_percent': float       # System memory usage %
         }
     """
+    # Get a logger for visibility (20 DEC 2025: stderr not visible in App Insights)
+    _logger = logging.getLogger("util_logger.memory_stats")
+
     # Check if debug mode enabled
     try:
         from config import get_config
@@ -78,17 +81,14 @@ def get_memory_stats() -> Optional[Dict[str, float]]:
         if not config.debug_mode:
             return None
     except Exception as e:
-        # Fail silently - debug feature shouldn't break anything
-        # But print to stderr for debugging during development
-        import sys
-        print(f"DEBUG_MODE check failed: {e}", file=sys.stderr, flush=True)
+        # Log warning so failure is visible in App Insights
+        _logger.warning(f"⚠️ DEBUG_MODE check failed (memory stats disabled): {e}")
         return None
 
     # Lazy import psutil
     psutil_module, os_module = _lazy_import_psutil()
     if not psutil_module:
-        import sys
-        print("DEBUG_MODE: psutil import failed", file=sys.stderr, flush=True)
+        _logger.warning("⚠️ DEBUG_MODE: psutil import failed - memory tracking disabled")
         return None
 
     try:
@@ -103,9 +103,8 @@ def get_memory_stats() -> Optional[Dict[str, float]]:
             'system_percent': round(system_mem.percent, 1)
         }
     except Exception as e:
-        # Fail silently - debug feature shouldn't break production
-        import sys
-        print(f"DEBUG_MODE: memory stats collection failed: {e}", file=sys.stderr, flush=True)
+        # Log warning so failure is visible in App Insights
+        _logger.warning(f"⚠️ DEBUG_MODE: memory stats collection failed: {e}")
         return None
 
 

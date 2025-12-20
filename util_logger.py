@@ -16,8 +16,9 @@ Exports:
     LogEvent: Log event dataclass
     LoggerFactory: Factory for creating loggers
     log_exceptions: Exception logging decorator
-    get_memory_stats: Memory statistics helper
-    log_memory_checkpoint: Memory checkpoint logger
+    get_memory_stats: Memory/CPU statistics helper
+    log_memory_checkpoint: Resource checkpoint logger (memory, CPU, duration)
+    clear_checkpoint_context: Clear checkpoint timing for a context
 
 Dependencies:
     Standard library only (logging, enum, dataclasses, json)
@@ -55,19 +56,29 @@ def _lazy_import_psutil():
         return None, None
 
 
+# ============================================================================
+# CHECKPOINT TIMING - Track duration between checkpoints (20 DEC 2025)
+# ============================================================================
+# Module-level dict to track checkpoint times per context (task_id, job_id, etc.)
+# Key format: "{context_id}:{checkpoint_name}" or just checkpoint_name if no context
+_checkpoint_times: Dict[str, float] = {}
+
+
 def get_memory_stats() -> Optional[Dict[str, float]]:
     """
-    Get current process and system memory statistics.
+    Get current process memory, CPU, and system statistics.
 
     Only executes if DEBUG_MODE=true in config.
 
     Returns:
-        dict with memory stats or None if debug disabled or psutil unavailable
+        dict with resource stats or None if debug disabled or psutil unavailable
         {
             'process_rss_mb': float,      # Resident Set Size (actual RAM used)
             'process_vms_mb': float,      # Virtual Memory Size
+            'process_cpu_percent': float, # Process CPU usage % (20 DEC 2025)
             'system_available_mb': float, # Available system memory
-            'system_percent': float       # System memory usage %
+            'system_percent': float,      # System memory usage %
+            'system_cpu_percent': float   # System CPU usage % (20 DEC 2025)
         }
     """
     # Get a logger for visibility (20 DEC 2025: stderr not visible in App Insights)
@@ -96,11 +107,19 @@ def get_memory_stats() -> Optional[Dict[str, float]]:
         mem_info = process.memory_info()
         system_mem = psutil_module.virtual_memory()
 
+        # CPU stats (20 DEC 2025)
+        # Note: First call to cpu_percent() returns 0.0, subsequent calls return actual value
+        # interval=None means non-blocking (compares to last call)
+        process_cpu = process.cpu_percent(interval=None)
+        system_cpu = psutil_module.cpu_percent(interval=None)
+
         return {
             'process_rss_mb': round(mem_info.rss / (1024**2), 1),
             'process_vms_mb': round(mem_info.vms / (1024**2), 1),
+            'process_cpu_percent': round(process_cpu, 1),
             'system_available_mb': round(system_mem.available / (1024**2), 1),
-            'system_percent': round(system_mem.percent, 1)
+            'system_percent': round(system_mem.percent, 1),
+            'system_cpu_percent': round(system_cpu, 1)
         }
     except Exception as e:
         # Log warning so failure is visible in App Insights
@@ -108,27 +127,87 @@ def get_memory_stats() -> Optional[Dict[str, float]]:
         return None
 
 
-def log_memory_checkpoint(logger: logging.Logger, checkpoint_name: str, **extra_fields):
+def log_memory_checkpoint(
+    logger: logging.Logger,
+    checkpoint_name: str,
+    context_id: Optional[str] = None,
+    **extra_fields
+):
     """
-    Log a memory usage checkpoint.
+    Log a resource usage checkpoint with memory, CPU, and duration tracking.
 
     Only logs if DEBUG_MODE=true. Otherwise, this is a no-op.
-    Adds memory stats and custom fields to the log entry.
+    Adds memory/CPU stats, duration since last checkpoint, and custom fields.
 
     Args:
         logger: Python logger instance
         checkpoint_name: Descriptive name for this checkpoint
+        context_id: Optional task/job ID for tracking duration across checkpoints
+                   within the same operation. If None, uses global timing.
         **extra_fields: Additional context fields (e.g., file_size_mb=815)
+
+    Duration Tracking:
+        - First checkpoint in a context: duration_since_last_ms = None
+        - Subsequent checkpoints: duration_since_last_ms = time since previous checkpoint
+        - Use context_id to isolate timing between concurrent operations
 
     Example:
         logger = LoggerFactory.create_logger(ComponentType.SERVICE, "create_cog")
-        log_memory_checkpoint(logger, "After blob download", file_size_mb=815)
+        task_id = "abc123"
+        log_memory_checkpoint(logger, "Start", context_id=task_id)
+        # ... do work ...
+        log_memory_checkpoint(logger, "After download", context_id=task_id, file_size_mb=815)
+        # Output includes: duration_since_last_ms: 1234
     """
-    mem_stats = get_memory_stats()
-    if mem_stats:
-        # Merge memory stats with extra fields
-        all_fields = {**mem_stats, **extra_fields, 'checkpoint': checkpoint_name}
-        logger.info(f"📊 MEMORY CHECKPOINT: {checkpoint_name}", extra={'custom_dimensions': all_fields})
+    import time
+
+    resource_stats = get_memory_stats()
+    if resource_stats:
+        current_time = time.time()
+
+        # Build checkpoint key for duration tracking
+        checkpoint_key = f"{context_id}:last" if context_id else "_global:last"
+
+        # Calculate duration since last checkpoint
+        duration_ms = None
+        if checkpoint_key in _checkpoint_times:
+            last_time = _checkpoint_times[checkpoint_key]
+            duration_ms = round((current_time - last_time) * 1000, 1)
+
+        # Update last checkpoint time
+        _checkpoint_times[checkpoint_key] = current_time
+
+        # Merge all fields
+        all_fields = {
+            **resource_stats,
+            **extra_fields,
+            'checkpoint': checkpoint_name,
+        }
+
+        # Add duration if we have a previous checkpoint
+        if duration_ms is not None:
+            all_fields['duration_since_last_ms'] = duration_ms
+
+        # Add context_id if provided
+        if context_id:
+            all_fields['context_id'] = context_id[:16] if len(context_id) > 16 else context_id
+
+        logger.info(f"📊 CHECKPOINT: {checkpoint_name}", extra={'custom_dimensions': all_fields})
+
+
+def clear_checkpoint_context(context_id: str):
+    """
+    Clear checkpoint timing for a specific context.
+
+    Call this when a task/job completes to prevent memory leak from
+    accumulating checkpoint times.
+
+    Args:
+        context_id: The context ID used in log_memory_checkpoint calls
+    """
+    checkpoint_key = f"{context_id}:last"
+    if checkpoint_key in _checkpoint_times:
+        del _checkpoint_times[checkpoint_key]
 
 
 # ============================================================================

@@ -9,24 +9,24 @@
 
 ## Quick Reference
 
-**FY26 Target (ends 30 JUN 2026)**: E1 ✅, E2, E9, E7
+**FY26 Target (ends 30 JUN 2026)**: E1 ✅, E2, E3, E7
 
 | Priority | Epic | Name | Status | Features | WSJF |
 |:--------:|------|------|--------|:--------:|:----:|
 | — | E1 | Vector Data as API | ✅ Complete | 4 | — |
 | 1 | E2 | Raster Data as API | 🚧 Partial | 7 | 5.9 |
-| 2 | E9 | DDH Platform Integration | 🚧 Partial | 8 | 4.8 |
+| 2 | E3 | DDH Platform Integration | 🚧 Partial | 8 | 4.8 |
 | 3 | E7 | Data Externalization | 📋 Planned | 3 | 4.3 |
-| 4 | E3 | Zarr/Climate Data as API | 🚧 Partial | 3 | 2.0 |
+| 4 | E9 | Zarr/Climate Data as API | 🚧 Partial | 3 | 2.0 |
 | 5 | E4 | Custom Data Pipelines | 🚧 Partial | 3 | 2.6 |
 | 6 | E5 | OGC Styles | 🚧 Partial | 2 | 3.7 |
 | 7 | E8 | H3 Analytics Pipeline | 🚧 Partial | 6 | 1.2 |
 
 **Priority Notes**:
-- **E9 includes Observability**: Merged E6 into E9 — observability is app-to-app monitoring for integration
-- **E9 requires ITSDA coordination**: See ITSDA dependency tags on stories below
-- **E4 + E3 synergy**: FATHOM pipeline (E4) drives Zarr/xarray capabilities (E3) — "future ready" patterns
-- **E3, E4, E5, E8**: Secondary priority for FY26; E4 (FATHOM) may elevate based on partner timeline
+- **E3 includes Observability**: Merged E6 into E3 — observability is app-to-app monitoring for integration
+- **E3 requires ITSDA coordination**: See ITSDA dependency tags on stories below
+- **E4 + E9 synergy**: FATHOM pipeline (E4) drives Zarr/xarray capabilities (E9) — "future ready" patterns
+- **E9, E4, E5, E8**: Secondary priority for FY26; E4 (FATHOM) may elevate based on partner timeline
 
 ### WSJF Calculation
 
@@ -37,25 +37,25 @@
 | Epic | Business Value | Time Crit | Risk Red | **CoD** | Job Size | **WSJF** |
 |------|:--------------:|:---------:|:--------:|:-------:|:--------:|:--------:|
 | E2 | 21 (platform foundation) | 13 (FATHOM blocked) | 13 (enables downstream) | **47** | 8 | **5.9** |
-| E9 | 21 (analytics front-end) | 13 (high urgency) | 13 (observability+diagnostics) | **48** | 10 | **4.8** |
+| E3 | 21 (analytics front-end) | 13 (high urgency) | 13 (observability+diagnostics) | **48** | 10 | **4.8** |
 | E7 | 13 (external access) | 8 (post-platform) | 13 (security/audit) | **34** | 8 | **4.3** |
-| E3 | 13 (CMIP client priority) | 5 (secondary tier) | 8 (technical complexity) | **26** | 13 | **2.0** |
+| E9 | 13 (CMIP client priority) | 5 (secondary tier) | 8 (technical complexity) | **26** | 13 | **2.0** |
 | E4 | 5 (operational efficiency) | 3 | 5 | **13** | 5 | **2.6** |
 | E5 | 5 (styling metadata) | 3 | 3 | **11** | 3 | **3.7** |
 | E8 | 8 (analytics capability) | 3 | 5 | **16** | 13 | **1.2** |
 
-**WSJF-Ordered Sequence**: E2 (5.9) → E9 (4.8) → E7 (4.3) → E5 (3.7) → E4 (2.6) → E3 (2.0) → E8 (1.2)
+**WSJF-Ordered Sequence**: E2 (5.9) → E3 (4.8) → E7 (4.3) → E5 (3.7) → E4 (2.6) → E9 (2.0) → E8 (1.2)
 
-**Note**: E9 absorbs former E6 (Platform Observability) — observability is app-to-app monitoring that enables integration.
+**Note**: E3 absorbs former E6 (Platform Observability) — observability is app-to-app monitoring that enables integration.
 
 | Enabler | Name | Status | Enables |
 |---------|------|--------|---------|
-| EN1 | Job Orchestration Engine | ✅ Complete | E1, E2, E3 |
+| EN1 | Job Orchestration Engine | ✅ Complete | E1, E2, E9 |
 | EN2 | Database Architecture | ✅ Complete | All |
 | EN3 | Azure Platform Integration | ✅ Complete | All |
 | EN4 | Configuration System | ✅ Complete | All |
 | EN5 | Pre-flight Validation | ✅ Complete | E1, E2 |
-| EN6 | Long-Running Task Infrastructure | 📋 Planned | E2, E3 |
+| EN6 | Long-Running Task Infrastructure | 📋 Planned | E2, E9 |
 
 ---
 
@@ -315,27 +315,27 @@ Abstract component names for ADO work items. Actual Azure resource names assigne
 
 # ACTIVE EPICS
 
-## Epic E3: Zarr/Climate Data as API 🚧
+## Epic E9: Zarr/Climate Data as API 🚧
 
 **Business Requirement**: Zarr/NetCDF data access with time-series query support
 **Status**: 🚧 PARTIAL
 
-### Feature F3.1: xarray Service Layer ✅
+### Feature F9.1: xarray Service Layer ✅
 
 **Deliverable**: Time-series and statistics endpoints
 
 | Story | Description |
 |-------|-------------|
-| S3.1.1 | Create xarray reader service |
-| S3.1.2 | Implement /api/xarray/point time-series |
-| S3.1.3 | Implement /api/xarray/statistics |
-| S3.1.4 | Implement /api/xarray/aggregate |
+| S9.1.1 | Create xarray reader service |
+| S9.1.2 | Implement /api/xarray/point time-series |
+| S9.1.3 | Implement /api/xarray/statistics |
+| S9.1.4 | Implement /api/xarray/aggregate |
 
 **Key Files**: `xarray_api/`, `services/xarray_reader.py`
 
 ---
 
-### Feature F3.2: Virtual Zarr Pipeline 📋 PLANNED
+### Feature F9.2: Virtual Zarr Pipeline 📋 PLANNED
 
 **Deliverable**: Kerchunk reference files enabling cloud-native access to legacy NetCDF
 
@@ -348,14 +348,14 @@ TiTiler-xarray to serve data via modern cloud-optimized patterns.
 
 | Story | Status | Description |
 |-------|--------|-------------|
-| S3.2.1 | ⬜ | CMIP6 filename parser (extract variable, model, scenario) |
-| S3.2.2 | ⬜ | Chunking validator (pre-flight NetCDF compatibility check) |
-| S3.2.3 | ⬜ | Reference generator (single NetCDF → Kerchunk JSON ~KB) |
-| S3.2.4 | ⬜ | Virtual combiner (merge time-series references) |
-| S3.2.5 | ⬜ | STAC datacube registration (xarray-compatible items) |
-| S3.2.6 | ⬜ | Inventory job (scan and group NetCDF files) |
-| S3.2.7 | ⬜ | Generate job (full reference pipeline) |
-| S3.2.8 | ⬜ | TiTiler-xarray configuration for virtual Zarr serving |
+| S9.2.1 | ⬜ | CMIP6 filename parser (extract variable, model, scenario) |
+| S9.2.2 | ⬜ | Chunking validator (pre-flight NetCDF compatibility check) |
+| S9.2.3 | ⬜ | Reference generator (single NetCDF → Kerchunk JSON ~KB) |
+| S9.2.4 | ⬜ | Virtual combiner (merge time-series references) |
+| S9.2.5 | ⬜ | STAC datacube registration (xarray-compatible items) |
+| S9.2.6 | ⬜ | Inventory job (scan and group NetCDF files) |
+| S9.2.7 | ⬜ | Generate job (full reference pipeline) |
+| S9.2.8 | ⬜ | TiTiler-xarray configuration for virtual Zarr serving |
 
 **Dependencies**: `virtualizarr`, `kerchunk`, `h5netcdf`, `h5py`
 
@@ -374,18 +374,18 @@ NetCDF Files (unchanged)     Reference Generation      TiTiler-xarray
 
 ---
 
-### Feature F3.3: Reader App Migration ⬜ READY
+### Feature F9.3: Reader App Migration ⬜ READY
 
 **Deliverable**: Move read APIs to rmhogcstac (clean separation)
 
 | Story | Status | Description |
 |-------|--------|-------------|
-| S3.3.1 | ⬜ | Copy raster_api module |
-| S3.3.2 | ⬜ | Copy xarray_api module |
-| S3.3.3 | ⬜ | Copy service clients |
-| S3.3.4 | ⬜ | Update requirements.txt |
-| S3.3.5 | ⬜ | Register routes |
-| S3.3.6 | ⬜ | Deploy and validate |
+| S9.3.1 | ⬜ | Copy raster_api module |
+| S9.3.2 | ⬜ | Copy xarray_api module |
+| S9.3.3 | ⬜ | Copy service clients |
+| S9.3.4 | ⬜ | Update requirements.txt |
+| S9.3.5 | ⬜ | Register routes |
+| S9.3.6 | ⬜ | Deploy and validate |
 
 ---
 
@@ -733,7 +733,7 @@ Source Data           H3 Aggregation          Output
 
 ---
 
-## Epic E9: DDH Platform Integration 🚧
+## Epic E3: DDH Platform Integration 🚧
 
 **Business Requirement**: Enable DDH application to consume geospatial platform data services
 **Status**: 🚧 PARTIAL (Observability complete, Identity/Access in progress, Documentation planned)
@@ -761,38 +761,38 @@ DDH Application                    Geospatial Platform
 
 ---
 
-### Feature F9.1: API Contract Documentation 📋 PLANNED
+### Feature F3.1: API Contract Documentation 📋 PLANNED
 
 **Owner**: Geospatial Team
 **Deliverable**: Formal API specification for cross-team development
 
 | Story | Status | Description |
 |-------|--------|-------------|
-| S9.1.1 | 📋 | Document data access endpoints (OGC Features, Raster, STAC, H3) |
-| S9.1.2 | 📋 | Document job submission request/response formats |
-| S9.1.3 | 📋 | Document job status polling pattern and response schema |
-| S9.1.4 | 📋 | Document STAC item structure for vectors/rasters |
-| S9.1.5 | 📋 | Document error response contract |
-| S9.1.6 | 📋 | Generate OpenAPI 3.0 spec from existing endpoints |
-| S9.1.7 | 📋 | Publish API documentation (Swagger UI or static site) |
+| S3.1.1 | 📋 | Document data access endpoints (OGC Features, Raster, STAC, H3) |
+| S3.1.2 | 📋 | Document job submission request/response formats |
+| S3.1.3 | 📋 | Document job status polling pattern and response schema |
+| S3.1.4 | 📋 | Document STAC item structure for vectors/rasters |
+| S3.1.5 | 📋 | Document error response contract |
+| S3.1.6 | 📋 | Generate OpenAPI 3.0 spec from existing endpoints |
+| S3.1.7 | 📋 | Publish API documentation (Swagger UI or static site) |
 
 ---
 
-### Feature F9.2: Identity & Access Configuration 📋 PLANNED
+### Feature F3.2: Identity & Access Configuration 📋 PLANNED
 
 **Owner**: DevOps (Azure config) + Geospatial Team (requirements)
 **Deliverable**: Service principals and access grants per environment
 
 | Story | Status | Description | Owner | Acceptance Criteria |
 |-------|--------|-------------|-------|---------------------|
-| S9.2.1 | ✅ | Authentication strategy decided | — | **Managed Identity only** (see below) |
-| S9.2.2 | ✅ | DDH Managed Identity exists | — | DDH already has its own identity |
-| S9.2.3 | 📋 | Grant DDH write access to **Bronze Storage Account** | DevOps | DDH identity has `Storage Blob Data Contributor` on bronze container |
-| S9.2.4 | 📋 | Grant DDH access to **Platform API** | DevOps | DDH identity can call `/api/*` endpoints |
-| S9.2.5 | 📋 | Configure **ETL Function App** authentication | Claude | Function App validates DDH identity on protected endpoints |
-| S9.2.6 | 📋 | Document integration setup | DevOps | Runbook: role assignments, endpoint URLs |
+| S3.2.1 | ✅ | Authentication strategy decided | — | **Managed Identity only** (see below) |
+| S3.2.2 | ✅ | DDH Managed Identity exists | — | DDH already has its own identity |
+| S3.2.3 | 📋 | Grant DDH write access to **Bronze Storage Account** | DevOps | DDH identity has `Storage Blob Data Contributor` on bronze container |
+| S3.2.4 | 📋 | Grant DDH access to **Platform API** | DevOps | DDH identity can call `/api/*` endpoints |
+| S3.2.5 | 📋 | Configure **ETL Function App** authentication | Claude | Function App validates DDH identity on protected endpoints |
+| S3.2.6 | 📋 | Document integration setup | DevOps | Runbook: role assignments, endpoint URLs |
 
-### F9.2 Authentication Strategy (S9.2.1 Decision)
+### F3.2 Authentication Strategy (S3.2.1 Decision)
 
 **Principle**: No secrets. No tokens. Managed Identity only.
 
@@ -824,7 +824,7 @@ DDH Application                         Geospatial Platform
 | Platform → Bronze/Silver Storage | Platform's managed identity |
 | External APIs (if unavoidable) | Key Vault (exception only) |
 
-### F9.2 Access Matrix
+### F3.2 Access Matrix
 
 | Component | DDH Access | Notes |
 |-----------|:----------:|-------|
@@ -835,31 +835,31 @@ DDH Application                         Geospatial Platform
 | **Platform API** `/api/raster/*` | Read | Query raster extracts |
 | **Platform API** `/api/stac/*` | Read | Query STAC catalog |
 
-### F9.2 Prerequisites
+### F3.2 Prerequisites
 
-- [x] **Decision**: S9.2.1 ✅ Managed Identity only — no secrets, no tokens
-- [x] **DDH Identity**: S9.2.2 ✅ DDH already has its own managed identity
-- [ ] **Bronze Access**: S9.2.3 — Grant DDH write to bronze container
-- [ ] **API Access**: S9.2.4 — Configure Function App to accept DDH identity
+- [x] **Decision**: S3.2.1 ✅ Managed Identity only — no secrets, no tokens
+- [x] **DDH Identity**: S3.2.2 ✅ DDH already has its own managed identity
+- [ ] **Bronze Access**: S3.2.3 — Grant DDH write to bronze container
+- [ ] **API Access**: S3.2.4 — Configure Function App to accept DDH identity
 
 ---
 
-### Feature F9.3: Environment Provisioning 📋 PLANNED
+### Feature F3.3: Environment Provisioning 📋 PLANNED
 
 **Owner**: DevOps (provisioning) + Geospatial Team (validation)
 **Deliverable**: Replicate integration configuration across environments
 
 | Story | Status | Description | Owner | Acceptance Criteria |
 |-------|--------|-------------|-------|---------------------|
-| S9.3.1 | ✅ | QA environment baseline | — | Current state operational |
-| S9.3.2 | 📋 | Document QA configuration | DevOps | Checklist covers all items in table below |
-| S9.3.3 | 📋 | Provision UAT service principals | DevOps | DDH identity exists in UAT Azure AD |
-| S9.3.4 | 📋 | Provision UAT storage access | DevOps | Grants match F9.2 Access Matrix |
-| S9.3.5 | 📋 | Validate UAT integration | Joint | DDH can submit job, poll status, query results |
-| S9.3.6 | 📋 | Provision Production | DevOps | Same as UAT, production resource group |
-| S9.3.7 | 📋 | Document connection strings | DevOps | Environment config template published |
+| S3.3.1 | ✅ | QA environment baseline | — | Current state operational |
+| S3.3.2 | 📋 | Document QA configuration | DevOps | Checklist covers all items in table below |
+| S3.3.3 | 📋 | Provision UAT service principals | DevOps | DDH identity exists in UAT Azure AD |
+| S3.3.4 | 📋 | Provision UAT storage access | DevOps | Grants match F3.2 Access Matrix |
+| S3.3.5 | 📋 | Validate UAT integration | Joint | DDH can submit job, poll status, query results |
+| S3.3.6 | 📋 | Provision Production | DevOps | Same as UAT, production resource group |
+| S3.3.7 | 📋 | Document connection strings | DevOps | Environment config template published |
 
-### F9.3 Configuration Checklist (S9.3.2 Deliverable)
+### F3.3 Configuration Checklist (S3.3.2 Deliverable)
 
 Export the following from QA for replication to UAT/Prod:
 
@@ -878,104 +878,104 @@ Export the following from QA for replication to UAT/Prod:
 | **Identity** | App Admin Managed Identity Client ID | `{guid}` |
 | **Tile Service** | TiTiler Raster URL | `https://{titiler-raster}.azurecontainerapps.io` |
 
-### F9.3 Environment Progression
+### F3.3 Environment Progression
 
 ```
-QA (current) ──S9.3.2──▶ Document ──S9.3.3-4──▶ UAT ──S9.3.5──▶ Validate ──S9.3.6──▶ Prod
+QA (current) ──S3.3.2──▶ Document ──S3.3.3-4──▶ UAT ──S3.3.5──▶ Validate ──S3.3.6──▶ Prod
                               │                                      │
                               └──────── Iterate if issues ───────────┘
 ```
 
 ---
 
-### Feature F9.4: Integration Verification 📋 PLANNED
+### Feature F3.4: Integration Verification 📋 PLANNED
 
 **Owner**: ITSDA Team + Geospatial Team
 **Deliverable**: End-to-end test suite validating integration contract
 
 | Story | Status | Description |
 |-------|--------|-------------|
-| S9.4.1 | 📋 | Define integration test scenarios with ITSDA |
-| S9.4.2 | 📋 | Write vector dataset publish round-trip test |
-| S9.4.3 | 📋 | Write raster dataset publish round-trip test |
-| S9.4.4 | 📋 | Write OGC Features query verification test |
-| S9.4.5 | 📋 | Write job status polling verification test |
-| S9.4.6 | 📋 | Document expected response times and SLAs |
+| S3.4.1 | 📋 | Define integration test scenarios with ITSDA |
+| S3.4.2 | 📋 | Write vector dataset publish round-trip test |
+| S3.4.3 | 📋 | Write raster dataset publish round-trip test |
+| S3.4.4 | 📋 | Write OGC Features query verification test |
+| S3.4.5 | 📋 | Write job status polling verification test |
+| S3.4.6 | 📋 | Document expected response times and SLAs |
 
 ---
 
-### Feature F9.5: Job Completion Callbacks 🔵 BACKLOG
+### Feature F3.5: Job Completion Callbacks 🔵 BACKLOG
 
 **Status**: Deferred — polling pattern is the supported integration contract
 **Trigger**: Revisit if polling creates unacceptable API load or latency issues
 
 | Story | Status | Description | ITSDA |
 |-------|--------|-------------|:-----:|
-| S9.5.1 | 🔵 | Design callback payload schema | Consumes |
-| S9.5.2 | 🔵 | Add callback_url parameter to job submission | — |
-| S9.5.3 | 🔵 | Implement webhook POST on job completion/failure | Receives |
-| S9.5.4 | 🔵 | Add retry logic for failed callbacks | — |
+| S3.5.1 | 🔵 | Design callback payload schema | Consumes |
+| S3.5.2 | 🔵 | Add callback_url parameter to job submission | — |
+| S3.5.3 | 🔵 | Implement webhook POST on job completion/failure | Receives |
+| S3.5.4 | 🔵 | Add retry logic for failed callbacks | — |
 
 ---
 
-### Feature F9.6: Health & Diagnostics ✅ COMPLETE
+### Feature F3.6: Health & Diagnostics ✅ COMPLETE
 
 **Deliverable**: Comprehensive health and status APIs for integration monitoring
 **Owner**: Geospatial Team (complete)
 
 | Story | Status | Description | ITSDA |
 |-------|--------|-------------|:-----:|
-| S9.6.1 | ✅ | Enhanced /api/health endpoint | Consumes |
-| S9.6.2 | ✅ | Platform status for DDH (/api/platform/*) | Consumes |
-| S9.6.3 | ✅ | 29 dbadmin endpoints | — |
+| S3.6.1 | ✅ | Enhanced /api/health endpoint | Consumes |
+| S3.6.2 | ✅ | Platform status for DDH (/api/platform/*) | Consumes |
+| S3.6.3 | ✅ | 29 dbadmin endpoints | — |
 
 **Key Files**: `web_interfaces/health/`, `triggers/admin/db_*.py`
 
 ---
 
-### Feature F9.7: Error Telemetry ✅ COMPLETE
+### Feature F3.7: Error Telemetry ✅ COMPLETE
 
 **Deliverable**: Structured logging and retry tracking
 **Owner**: Geospatial Team (complete)
 
 | Story | Status | Description |
 |-------|--------|-------------|
-| S9.7.1 | ✅ | Add error_source field to logs |
-| S9.7.2 | ✅ | Create 6 retry telemetry checkpoints |
-| S9.7.3 | ✅ | Implement log_nested_error() helper |
-| S9.7.4 | ✅ | Add JSON deserialization error handling |
+| S3.7.1 | ✅ | Add error_source field to logs |
+| S3.7.2 | ✅ | Create 6 retry telemetry checkpoints |
+| S3.7.3 | ✅ | Implement log_nested_error() helper |
+| S3.7.4 | ✅ | Add JSON deserialization error handling |
 
 **Key Files**: `core/error_handler.py`, `core/machine.py`
 
 ---
 
-### Feature F9.8: Verbose Validation 🔵 BACKLOG
+### Feature F3.8: Verbose Validation 🔵 BACKLOG
 
 **Deliverable**: Enhanced error context for debugging
 **Owner**: Geospatial Team
 
 | Story | Status | Description |
 |-------|--------|-------------|
-| S9.8.1 | 🔵 | Verbose pre-flight validation |
-| S9.8.2 | 🔵 | Unified DEBUG_MODE |
+| S3.8.1 | 🔵 | Verbose pre-flight validation |
+| S3.8.2 | 🔵 | Unified DEBUG_MODE |
 
 ---
 
-## E9 ITSDA Dependency Summary
+## E3 ITSDA Dependency Summary
 
 Stories requiring ITSDA team action or coordination:
 
 | Feature | Story | ITSDA Role | Description |
 |---------|-------|------------|-------------|
-| F9.1 | S9.1.1-7 | **Reviews** | Must review/approve API documentation |
-| F9.2 | S9.2.3 | **Provides** | Must provide DDH managed identity client ID |
-| F9.2 | S9.2.4 | **Provides** | Must confirm DDH can reach Platform API endpoints |
-| F9.3 | S9.3.3-4 | **Provides** | Must create DDH identity in UAT/Prod Azure AD |
-| F9.3 | S9.3.5 | **Executes** | Must run integration tests from DDH side |
-| F9.4 | S9.4.1 | **Co-owns** | Must define test scenarios jointly |
-| F9.4 | S9.4.2-5 | **Executes** | Must write/run tests from DDH side |
-| F9.5 | S9.5.3 | **Implements** | Must implement callback receiver (if activated) |
-| F9.6 | S9.6.1-2 | **Consumes** | Uses health/status endpoints for monitoring |
+| F3.1 | S3.1.1-7 | **Reviews** | Must review/approve API documentation |
+| F3.2 | S3.2.3 | **Provides** | Must provide DDH managed identity client ID |
+| F3.2 | S3.2.4 | **Provides** | Must confirm DDH can reach Platform API endpoints |
+| F3.3 | S3.3.3-4 | **Provides** | Must create DDH identity in UAT/Prod Azure AD |
+| F3.3 | S3.3.5 | **Executes** | Must run integration tests from DDH side |
+| F3.4 | S3.4.1 | **Co-owns** | Must define test scenarios jointly |
+| F3.4 | S3.4.2-5 | **Executes** | Must write/run tests from DDH side |
+| F3.5 | S3.5.3 | **Implements** | Must implement callback receiver (if activated) |
+| F3.6 | S3.6.1-2 | **Consumes** | Uses health/status endpoints for monitoring |
 
 **Legend**:
 - **Reviews**: ITSDA reviews Platform team output
@@ -993,7 +993,7 @@ Technical foundation that enables all Epics above.
 
 ## Enabler EN1: Job Orchestration Engine ✅
 
-**What It Enables**: All ETL jobs (E1, E2, E3)
+**What It Enables**: All ETL jobs (E1, E2, E9)
 
 | Component | Description |
 |-----------|-------------|
@@ -1067,7 +1067,7 @@ Technical foundation that enables all Epics above.
 ## Enabler EN6: Long-Running Task Infrastructure 📋 PLANNED
 
 **Purpose**: Docker-based worker for tasks exceeding Azure Functions 30-min timeout
-**What It Enables**: E2 (oversized rasters), E3 (large climate datasets)
+**What It Enables**: E2 (oversized rasters), E9 (large climate datasets)
 **Reference**: See architecture diagram at `/api/interface/health`
 **Owner**: DevOps (infrastructure) + Claude (handler integration)
 
@@ -1237,9 +1237,9 @@ if __name__ == "__main__":
 | Task | Enabler tasks |
 
 **Cross-Team Assignment**:
-- E9 (DDH Platform Integration) → Assign to DDH Team in ADO
+- E3 (DDH Platform Integration) → Assign to DDH Team in ADO
 - All other Epics → Assign to Geospatial Team
 
 ---
 
-**Last Updated**: 19 DEC 2025 (Reimagined E4 as Partner Data Pipelines with FATHOM emphasis)
+**Last Updated**: 19 DEC 2025 (Swapped E3↔E9: Integration is now E3, Zarr is now E9)

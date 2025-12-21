@@ -3,7 +3,7 @@
   "info": {
     "title": "Geospatial Data Processing Platform API",
     "version": "1.0.0",
-    "description": "**Platform-as-a-Service for Geospatial Data Processing**\n\nThis API provides data processing services for DDH (Development Data Hub) and partners.\nSubmit raw geospatial data, receive processed REST API endpoints.\n\n**Key Features:**\n- Raster processing (COG creation, tiling, STAC cataloging)\n- Vector processing (PostGIS ingestion, validation)\n- Multi-stage orchestration with status tracking\n- STAC-compliant metadata catalog\n\n**Authentication:**\n- Azure API Management subscription key (via APIM)\n- Header: `Ocp-Apim-Subscription-Key`\n\n**Rate Limits:**\n- DDH Product: 1,000 requests/minute, 100,000/day\n- Partner Product: 100 requests/minute, 10,000/day\n\n**Base URLs:**\n- Production (via APIM): `https://api.platform.com/v1` (when APIM provisioned)\n- Development (direct): `https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net`\n",
+    "description": "**Platform-as-a-Service for Geospatial Data Processing**\n\nThis API provides data processing services for DDH (Development Data Hub) and partners.\nSubmit raw geospatial data, receive processed REST API endpoints.\n\n**Key Features:**\n- Raster processing (COG creation, tiling, STAC cataloging)\n- Vector processing (PostGIS ingestion, validation)\n- Multi-stage orchestration with status tracking\n- STAC-compliant metadata catalog\n\n**Base URLs:**\n- Production (via APIM): `https://api.platform.com/v1` (when APIM provisioned)\n- Development (direct): `https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net`\n",
     "contact": {
       "name": "Geospatial Platform Team",
       "email": "platform-support@example.com"
@@ -220,12 +220,7 @@
               }
             }
           }
-        },
-        "security": [
-          {
-            "ApiKeyAuth": []
-          }
-        ]
+        }
       }
     },
     "/api/platform/status/{request_id}": {
@@ -382,12 +377,7 @@
               }
             }
           }
-        },
-        "security": [
-          {
-            "ApiKeyAuth": []
-          }
-        ]
+        }
       }
     },
     "/api/platform/status": {
@@ -482,12 +472,7 @@
               }
             }
           }
-        },
-        "security": [
-          {
-            "ApiKeyAuth": []
-          }
-        ]
+        }
       }
     },
     "/api/features": {
@@ -2068,19 +2053,6 @@
           }
         }
       }
-    },
-    "securitySchemes": {
-      "ApiKeyAuth": {
-        "type": "apiKey",
-        "in": "header",
-        "name": "Ocp-Apim-Subscription-Key",
-        "description": "**Azure API Management Subscription Key**\n\nObtain from APIM developer portal after subscribing to:\n- DDH-Platform-API product (1000 req/min, 100K/day)\n- Partner-Platform-API product (100 req/min, 10K/day)\n\n**Header Format:**\n```\nOcp-Apim-Subscription-Key: your_subscription_key_here\n```\n\n**Development (Direct Function App):**\nWhen testing directly against Function App (bypassing APIM),\nthis header is optional but recommended for consistency.\n"
-      }
     }
-  },
-  "security": [
-    {
-      "ApiKeyAuth": []
-    }
-  ]
+  }
 }

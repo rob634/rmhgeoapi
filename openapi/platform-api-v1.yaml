@@ -14,14 +14,6 @@ info:
     - Multi-stage orchestration with status tracking
     - STAC-compliant metadata catalog
 
-    **Authentication:**
-    - Azure API Management subscription key (via APIM)
-    - Header: `Ocp-Apim-Subscription-Key`
-
-    **Rate Limits:**
-    - DDH Product: 1,000 requests/minute, 100,000/day
-    - Partner Product: 100 requests/minute, 10,000/day
-
     **Base URLs:**
     - Production (via APIM): `https://api.platform.com/v1` (when APIM provisioned)
     - Development (direct): `https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net`
@@ -231,8 +223,6 @@ paths:
                     error: "Failed to create CoreMachine jobs"
                     error_type: "PlatformError"
 
-      security:
-        - ApiKeyAuth: []
 
   /api/platform/status/{request_id}:
     get:
@@ -374,8 +364,6 @@ paths:
                     success: false
                     error: "Platform request a3f2c1b8e9d7f6a5c4b3a2e1d9c8b7a6 not found"
 
-      security:
-        - ApiKeyAuth: []
 
   /api/platform/status:
     get:
@@ -458,9 +446,6 @@ paths:
                         job_count: 1
                         created_at: "2025-10-29T15:40:00Z"
                         updated_at: "2025-10-29T15:40:00Z"
-
-      security:
-        - ApiKeyAuth: []
 
   # =========================================================================
   # OGC FEATURES API - Vector Data Access
@@ -1731,27 +1716,3 @@ components:
         units:
           type: string
           description: Data units if known
-
-  securitySchemes:
-    ApiKeyAuth:
-      type: apiKey
-      in: header
-      name: Ocp-Apim-Subscription-Key
-      description: |
-        **Azure API Management Subscription Key**
-
-        Obtain from APIM developer portal after subscribing to:
-        - DDH-Platform-API product (1000 req/min, 100K/day)
-        - Partner-Platform-API product (100 req/min, 10K/day)
-
-        **Header Format:**
-        ```
-        Ocp-Apim-Subscription-Key: your_subscription_key_here
-        ```
-
-        **Development (Direct Function App):**
-        When testing directly against Function App (bypassing APIM),
-        this header is optional but recommended for consistency.
-
-security:
-  - ApiKeyAuth: []

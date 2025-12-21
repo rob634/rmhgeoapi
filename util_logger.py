@@ -19,6 +19,7 @@ Exports:
     get_memory_stats: Memory/CPU statistics helper
     log_memory_checkpoint: Resource checkpoint logger (memory, CPU, duration)
     clear_checkpoint_context: Clear checkpoint timing for a context
+    monitored_gdal_operation: Context manager for GDAL ops with pulse monitoring
 
 Dependencies:
     Standard library only (logging, enum, dataclasses, json)
@@ -37,6 +38,8 @@ import json
 import time
 import traceback
 from functools import wraps
+from contextlib import contextmanager
+import threading
 
 
 # ============================================================================
@@ -241,6 +244,100 @@ def clear_checkpoint_context(context_id: str):
     checkpoint_key = f"{context_id}:last"
     if checkpoint_key in _checkpoint_times:
         del _checkpoint_times[checkpoint_key]
+
+
+# ============================================================================
+# GDAL OPERATION MONITOR - Background pulse for long-running operations (20 DEC 2025)
+# ============================================================================
+
+@contextmanager
+def monitored_gdal_operation(
+    logger: logging.Logger,
+    operation_name: str,
+    context_id: str = None,
+    pulse_interval: float = 30.0
+):
+    """
+    Context manager for monitoring long-running GDAL operations with background pulse.
+
+    During GDAL C library calls, Python's GIL is released, allowing background
+    threads to run. This enables heartbeat logging to detect silent OOM kills -
+    if the pulse stops, the last log entry shows memory state before death.
+
+    Args:
+        logger: Python logger instance
+        operation_name: Descriptive name for the operation (e.g., "cog_translate")
+        context_id: Optional task/job ID for checkpoint tracking
+        pulse_interval: Seconds between pulse logs (default 30s)
+
+    Usage:
+        from util_logger import monitored_gdal_operation
+
+        with monitored_gdal_operation(logger, "cog_translate", context_id=task_id):
+            cog_translate(input_path, output_path, profile)
+
+    Log Output:
+        START cog_translate - logs initial memory state
+        PULSE cog_translate (every 30s) - logs ongoing memory/CPU with beat count
+        END cog_translate - logs final memory state and total duration
+
+    OOM Detection:
+        If process is OOM-killed, the last PULSE log in Application Insights
+        shows the memory state just before death. No PULSE for >30s + degraded
+        instance = likely OOM.
+
+    Note:
+        Only logs if DEBUG_MODE=true (same as log_memory_checkpoint).
+    """
+    stop_event = threading.Event()
+    beat_count = [0]  # Use list for mutable reference in nested function
+    start_time = time.time()
+
+    def pulse_worker():
+        """Background thread that emits periodic pulse logs."""
+        while not stop_event.wait(timeout=pulse_interval):
+            beat_count[0] += 1
+            elapsed_sec = round(time.time() - start_time, 1)
+            log_memory_checkpoint(
+                logger,
+                f"PULSE {operation_name}",
+                context_id=context_id,
+                beat=beat_count[0],
+                elapsed_sec=elapsed_sec
+            )
+
+    # Start pulse thread (daemon=True so it dies with main process)
+    pulse_thread = threading.Thread(target=pulse_worker, daemon=True, name=f"pulse-{context_id or operation_name}")
+    pulse_thread.start()
+
+    try:
+        # Log start
+        log_memory_checkpoint(logger, f"START {operation_name}", context_id=context_id)
+        yield
+        # Log successful end
+        total_duration_sec = round(time.time() - start_time, 1)
+        log_memory_checkpoint(
+            logger,
+            f"END {operation_name}",
+            context_id=context_id,
+            total_duration_sec=total_duration_sec,
+            pulse_count=beat_count[0]
+        )
+    except Exception:
+        # Log end with error indicator
+        total_duration_sec = round(time.time() - start_time, 1)
+        log_memory_checkpoint(
+            logger,
+            f"END {operation_name} (ERROR)",
+            context_id=context_id,
+            total_duration_sec=total_duration_sec,
+            pulse_count=beat_count[0]
+        )
+        raise
+    finally:
+        # Stop pulse thread
+        stop_event.set()
+        pulse_thread.join(timeout=1.0)
 
 
 # ============================================================================

@@ -55,7 +55,7 @@
 | EN3 | Azure Platform Integration | ✅ Complete | All |
 | EN4 | Configuration System | ✅ Complete | All |
 | EN5 | Pre-flight Validation | ✅ Complete | E1, E2 |
-| EN6 | Long-Running Task Infrastructure | 📋 Planned | E2, E9 |
+| EN6 | Long-Running Task Infrastructure | ⏳ FY26 Decision | E2, E9 |
 
 ---
 
@@ -73,13 +73,21 @@ Abstract component names for ADO work items. Actual Azure resource names assigne
 
 ## Compute
 
-| Logical Name | Purpose | Runtime |
-|--------------|---------|---------|
-| **ETL Function App** | Job orchestration, HTTP APIs | Azure Functions (Python) |
-| **Reader Function App** | Read-only data access APIs | Azure Functions (Python) |
-| **Long-Running Worker** | Tasks exceeding 30-min timeout | Docker container (not yet deployed) |
-| **TiTiler Raster Service** | COG tile serving | Container App |
-| **TiTiler Zarr Service** | Zarr/NetCDF tile serving | Container App (not yet deployed) |
+| Logical Name | Purpose | Runtime | Status |
+|--------------|---------|---------|--------|
+| **ETL Function App** | Job orchestration, HTTP APIs | Azure Functions (Python) | ✅ Deployed |
+| **Reader Function App** | Read-only data access APIs | Azure Functions (Python) | 📋 Planned |
+| **Long-Running Worker** | Tasks exceeding 30-min timeout | Docker Container App | ⏳ FY26 Decision |
+| **TiTiler Raster Service** | COG tile serving | Docker Container App | ✅ Deployed |
+| **TiTiler Zarr Service** | Zarr/NetCDF tile serving | Docker Container App | 📋 Planned |
+
+### Docker Deployments Detail
+
+| Service | Image Source | Deployment Target | Notes |
+|---------|--------------|-------------------|-------|
+| **TiTiler Raster** | `ghcr.io/stac-utils/titiler-pgstac` | Azure Container Apps | Production, serving COGs |
+| **TiTiler Zarr** | Custom (xarray/zarr stack) | Azure Container Apps | Pending E9 progress |
+| **Long-Running Worker** | Custom (GDAL/rasterio stack) | Azure Container Apps | See EN6; FY26 decision pending |
 
 ## Queues (Service Bus)
 
@@ -377,7 +385,7 @@ DDH Application                    Geospatial Platform
 |-------|--------|-------------|-------|---------------------|
 | S3.2.1 | ✅ | Authentication strategy decided | — | **Managed Identity only** (see below) |
 | S3.2.2 | ✅ | DDH Managed Identity exists | — | DDH already has its own identity |
-| S3.2.3 | 📋 | Grant DDH write access to **Bronze Storage Account** | DevOps | DDH identity has `Storage Blob Data Contributor` on bronze container |
+| S3.2.3 | ✅ | Grant DDH write access to **Bronze Storage Account** | DevOps | DDH identity has `Storage Blob Data Contributor` on bronze container |
 | S3.2.4 | 📋 | Grant DDH access to **Platform API** | DevOps | DDH identity can call `/api/*` endpoints |
 | S3.2.5 | 📋 | Configure **ETL Function App** authentication | Claude | Function App validates DDH identity on protected endpoints |
 | S3.2.6 | 📋 | Document integration setup | DevOps | Runbook: role assignments, endpoint URLs |
@@ -429,7 +437,7 @@ DDH Application                         Geospatial Platform
 
 - [x] **Decision**: S3.2.1 ✅ Managed Identity only — no secrets, no tokens
 - [x] **DDH Identity**: S3.2.2 ✅ DDH already has its own managed identity
-- [ ] **Bronze Access**: S3.2.3 — Grant DDH write to bronze container
+- [x] **Bronze Access**: S3.2.3 ✅ DDH has write access to bronze container
 - [ ] **API Access**: S3.2.4 — Configure Function App to accept DDH identity
 
 ---
@@ -439,34 +447,57 @@ DDH Application                         Geospatial Platform
 **Owner**: DevOps (provisioning) + Geospatial Team (validation)
 **Deliverable**: Replicate integration configuration across environments
 
+**Key Simplification**: QA and UAT share the same PDMZ (Protected DMZ), so existing QA
+user-assigned managed identities can be reused for UAT. No new service principals needed.
+
 | Story | Status | Description | Owner | Acceptance Criteria |
 |-------|--------|-------------|-------|---------------------|
 | S3.3.1 | ✅ | QA environment baseline | — | Current state operational |
 | S3.3.2 | 📋 | Document QA configuration | DevOps | Checklist covers all items in table below |
-| S3.3.3 | 📋 | Provision UAT service principals | DevOps | DDH identity exists in UAT Azure AD |
-| S3.3.4 | 📋 | Provision UAT storage access | DevOps | Grants match F3.2 Access Matrix |
+| S3.3.3 | 📋 | Configure UAT resource access | DevOps | QA identities granted access to UAT resources |
+| S3.3.4 | 📋 | Deploy UAT Function App | DevOps | UAT Function App exists, uses same managed identity |
 | S3.3.5 | 📋 | Validate UAT integration | Joint | DDH can submit job, poll status, query results |
-| S3.3.6 | 📋 | Provision Production | DevOps | Same as UAT, production resource group |
+| S3.3.6 | 📋 | Provision Production | DevOps | Production may require separate identities (different PDMZ) |
 | S3.3.7 | 📋 | Document connection strings | DevOps | Environment config template published |
+
+### F3.3 Identity Reuse Strategy
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    PDMZ (Protected DMZ)                      │
+│  ┌──────────────────────┐    ┌──────────────────────────┐  │
+│  │   QA Environment      │    │   UAT Environment         │  │
+│  │   • QA Function App   │    │   • UAT Function App      │  │
+│  │   • QA Storage        │    │   • UAT Storage           │  │
+│  │   • QA Database       │    │   • UAT Database          │  │
+│  └──────────┬───────────┘    └────────────┬─────────────┘  │
+│             │                              │                 │
+│             └──────────┬───────────────────┘                 │
+│                        ▼                                     │
+│            ┌────────────────────────┐                        │
+│            │ Shared User-Assigned   │                        │
+│            │ Managed Identities     │                        │
+│            │ (reused across QA/UAT) │                        │
+│            └────────────────────────┘                        │
+└─────────────────────────────────────────────────────────────┘
+
+Production (separate PDMZ) → May require separate identities
+```
 
 ### F3.3 Configuration Checklist (S3.3.2 Deliverable)
 
 Export the following from QA for replication to UAT/Prod:
 
-| Category | Item | Example Value (Abstract) |
-|----------|------|--------------------------|
-| **Compute** | ETL Function App URL | `https://{etl-function-app}.azurewebsites.net` |
-| **Compute** | Reader Function App URL | `https://{reader-function-app}.azurewebsites.net` |
-| **Storage** | Bronze Storage Account | `{bronze-storage}.blob.core.windows.net` |
-| **Storage** | Silver Storage Account | `{silver-storage}.blob.core.windows.net` |
-| **Storage** | Bronze Container Name | `uploads` or similar |
-| **Storage** | Silver Container Name | `processed` or similar |
-| **Database** | PostgreSQL Host | `{pg-server}.postgres.database.azure.com` |
-| **Database** | Database Name | `{database-name}` |
-| **Queue** | Service Bus Namespace | `{servicebus-namespace}.servicebus.windows.net` |
-| **Identity** | DDH Service Principal Client ID | `{guid}` |
-| **Identity** | App Admin Managed Identity Client ID | `{guid}` |
-| **Tile Service** | TiTiler Raster URL | `https://{titiler-raster}.azurecontainerapps.io` |
+| Category | Item | QA/UAT Shared? | Example Value (Abstract) |
+|----------|------|:--------------:|--------------------------|
+| **Compute** | ETL Function App URL | No | `https://{etl-function-app}.azurewebsites.net` |
+| **Storage** | Bronze Storage Account | No | `{bronze-storage}.blob.core.windows.net` |
+| **Storage** | Silver Storage Account | No | `{silver-storage}.blob.core.windows.net` |
+| **Database** | PostgreSQL Host | No | `{pg-server}.postgres.database.azure.com` |
+| **Queue** | Service Bus Namespace | No | `{servicebus-namespace}.servicebus.windows.net` |
+| **Identity** | App Managed Identity | **Yes** | Same identity used for QA and UAT |
+| **Identity** | DDH Managed Identity | **Yes** | Same identity used for QA and UAT |
+| **Tile Service** | TiTiler Raster URL | TBD | `https://{titiler-raster}.azurecontainerapps.io` |
 
 ### F3.3 Environment Progression
 
@@ -474,6 +505,8 @@ Export the following from QA for replication to UAT/Prod:
 QA (current) ──S3.3.2──▶ Document ──S3.3.3-4──▶ UAT ──S3.3.5──▶ Validate ──S3.3.6──▶ Prod
                               │                                      │
                               └──────── Iterate if issues ───────────┘
+
+Note: S3.3.3 is simplified — no new identities needed for UAT (same PDMZ as QA)
 ```
 
 ---
@@ -1264,12 +1297,18 @@ Technical foundation that enables all Epics above.
 
 # BACKLOG ENABLERS
 
-## Enabler EN6: Long-Running Task Infrastructure 📋 PLANNED
+## Enabler EN6: Long-Running Task Infrastructure ⏳ FY26 DECISION PENDING
 
 **Purpose**: Docker-based worker for tasks exceeding Azure Functions 30-min timeout
 **What It Enables**: E2 (oversized rasters), E9 (large climate datasets)
 **Reference**: See architecture diagram at `/api/interface/health`
 **Owner**: DevOps (infrastructure) + Claude (handler integration)
+
+**Decision Context**: Deploy as part of FY26 work is pending. Current chunked processing
+in Azure Functions handles most use cases. EN6 activates if:
+- FATHOM data volumes exceed Function App timeout limits
+- Climate data (E9) requires multi-hour processing jobs
+- Production workloads demonstrate need for dedicated worker
 
 ### EN6 Stories
 

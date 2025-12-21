@@ -24,7 +24,7 @@ info:
 
     **Base URLs:**
     - Production (via APIM): `https://api.platform.com/v1` (when APIM provisioned)
-    - Development (direct): `https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net`
+    - Development (direct): `https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net`
   contact:
     name: Geospatial Platform Team
     email: platform-support@example.com
@@ -32,7 +32,7 @@ info:
     name: Proprietary
 
 servers:
-  - url: https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net
+  - url: https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net
     description: Azure Functions backend (direct access - development)
   - url: https://api.platform.com/v1
     description: Azure API Management gateway (production - when provisioned)

@@ -327,6 +327,18 @@ try:
 except ImportError as e:
     logger.warning(f"⚠️ Could not import Zarr interface: {e}")
 
+try:
+    from .gallery import interface as _gallery
+    logger.info("✅ Imported Gallery interface module")
+except ImportError as e:
+    logger.warning(f"⚠️ Could not import Gallery interface: {e}")
+
+try:
+    from .swagger import interface as _swagger
+    logger.info("✅ Imported Swagger interface module")
+except ImportError as e:
+    logger.warning(f"⚠️ Could not import Swagger interface: {e}")
+
 
 # Public API
 __all__ = [

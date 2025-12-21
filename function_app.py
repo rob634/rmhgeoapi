@@ -52,9 +52,8 @@ Endpoints:
     Platform Layer:
         POST /api/platform/submit - Submit Platform API request
         GET  /api/platform/status/{request_id} - Get Platform request status
-        GET  /api/platform/health - Simplified health for DDH (07 DEC 2025)
-        GET  /api/platform/stats - Job statistics for DDH (07 DEC 2025)
-        GET  /api/platform/failures - Recent failures for DDH (07 DEC 2025)
+        # REMOVED (19 DEC 2025): platform/health, platform/stats, platform/failures
+        # Use /api/health and /api/dbadmin/jobs?status=failed instead
 
     STAC API v1.0.0:
         GET  /api/stac_api - STAC landing page
@@ -236,12 +235,9 @@ from triggers.trigger_platform import (
     platform_unpublish_vector,
     platform_unpublish_raster
 )
-from triggers.trigger_platform_status import (
-    platform_request_status,
-    platform_health,
-    platform_stats,
-    platform_failures
-)
+from triggers.trigger_platform_status import platform_request_status
+# REMOVED (19 DEC 2025): platform_health, platform_stats, platform_failures
+# These were broken and redundant with /api/health
 
 # OGC Features API - Standalone module (29 OCT 2025)
 from ogc_features import get_ogc_triggers
@@ -864,91 +860,14 @@ async def platform_status_list(req: func.HttpRequest) -> func.HttpResponse:
     return await platform_request_status(req)
 
 
-# Platform Status Endpoints for DDH Visibility (07 DEC 2025)
-
-@app.route(route="platform/health", methods=["GET"])
-async def platform_health_endpoint(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    Simplified health endpoint for DDH consumption.
-
-    GET /api/platform/health
-
-    Returns high-level system health without internal details.
-    Designed for DDH team visibility into processing availability.
-
-    Response:
-        {
-            "status": "healthy",
-            "api_version": "v1.0",
-            "components": {
-                "job_processing": "healthy",
-                "stac_catalog": "healthy",
-                "storage": "healthy"
-            },
-            "recent_activity": {
-                "jobs_last_24h": 45,
-                "success_rate": "93.3%"
-            }
-        }
-    """
-    return await platform_health(req)
-
-
-@app.route(route="platform/stats", methods=["GET"])
-async def platform_stats_endpoint(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    Aggregated job statistics for DDH visibility.
-
-    GET /api/platform/stats?hours=24
-
-    Returns job processing statistics without exposing internal job IDs.
-
-    Response:
-        {
-            "period": "24h",
-            "jobs": {
-                "total": 45,
-                "completed": 42,
-                "failed": 3
-            },
-            "by_data_type": {
-                "raster": {"total": 30, "completed": 28, "failed": 2},
-                "vector": {"total": 15, "completed": 14, "failed": 1}
-            },
-            "avg_processing_time_minutes": {
-                "raster": 8.5,
-                "vector": 2.3
-            }
-        }
-    """
-    return await platform_stats(req)
-
-
-@app.route(route="platform/failures", methods=["GET"])
-async def platform_failures_endpoint(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    Recent failures for DDH troubleshooting.
-
-    GET /api/platform/failures?hours=24&limit=10
-
-    Returns sanitized failure information (no internal paths or stack traces).
-
-    Response:
-        {
-            "failures": [
-                {
-                    "request_id": "def456...",
-                    "dataset_id": "parcels-2024",
-                    "failed_at": "2025-12-07T09:15:00Z",
-                    "error_category": "validation_failed",
-                    "error_summary": "Source file not found",
-                    "can_retry": true
-                }
-            ],
-            "total_failures": 3
-        }
-    """
-    return await platform_failures(req)
+# ============================================================================
+# REMOVED (19 DEC 2025): platform/health, platform/stats, platform/failures
+# ============================================================================
+# These endpoints were broken and redundant:
+#   - platform/health: Use /api/health instead (comprehensive system health)
+#   - platform/stats: Use /api/health instead (includes job statistics)
+#   - platform/failures: Use /api/dbadmin/jobs?status=failed instead
+# ============================================================================
 
 
 # Dedicated Raster Endpoints (05 DEC 2025)
@@ -1881,6 +1800,51 @@ def web_interface_unified(req: func.HttpRequest) -> func.HttpResponse:
         - Auto-discovery of available interfaces
     """
     return unified_interface_handler(req)
+
+
+# ============================================================================
+# OPENAPI SPEC ENDPOINT
+# ============================================================================
+
+@app.route(route="openapi.json", methods=["GET"])
+def openapi_spec(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Serve OpenAPI 3.0 specification as JSON.
+
+    GET /api/openapi.json
+
+    Returns the Platform API OpenAPI spec with the server URL
+    dynamically set to the current deployment.
+    """
+    import json
+    from pathlib import Path
+    import yaml
+
+    try:
+        spec_path = Path(__file__).parent / "openapi" / "platform-api-v1.yaml"
+        with open(spec_path, "r", encoding="utf-8") as f:
+            spec = yaml.safe_load(f)
+
+        # Update server URL to current deployment
+        host = req.headers.get('Host', 'localhost')
+        scheme = 'https' if 'azurewebsites.net' in host else 'http'
+        base_url = f"{scheme}://{host}"
+
+        spec['servers'] = [
+            {'url': base_url, 'description': 'Current deployment'}
+        ]
+
+        return func.HttpResponse(
+            json.dumps(spec, indent=2),
+            mimetype="application/json",
+            status_code=200
+        )
+    except Exception as e:
+        return func.HttpResponse(
+            json.dumps({"error": f"Failed to load OpenAPI spec: {str(e)}"}),
+            mimetype="application/json",
+            status_code=500
+        )
 
 
 # ingest_vector HTTP endpoint REMOVED (27 NOV 2025)

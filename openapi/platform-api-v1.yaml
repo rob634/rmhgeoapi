@@ -42,8 +42,18 @@ tags:
     description: Processing request management and orchestration
   - name: Status
     description: Job status monitoring and tracking
+  - name: OGC Features
+    description: |
+      OGC API - Features (Part 1: Core) compliant endpoints.
+      Query vector data stored in PostGIS using standard GeoJSON responses.
   - name: STAC
-    description: STAC catalog queries (Phase 2)
+    description: |
+      STAC API v1.0.0 compliant endpoints.
+      Search and browse raster/vector catalog metadata.
+  - name: Raster
+    description: |
+      Raster query and extraction endpoints.
+      Extract values, clip regions, and generate previews from COGs.
 
 paths:
   /api/platform/submit:
@@ -452,6 +462,505 @@ paths:
       security:
         - ApiKeyAuth: []
 
+  # =========================================================================
+  # OGC FEATURES API - Vector Data Access
+  # =========================================================================
+
+  /api/features:
+    get:
+      summary: OGC Features landing page
+      description: |
+        Landing page for OGC API - Features (Part 1: Core).
+        Returns API metadata, links to collections, and conformance.
+      operationId: ogcFeaturesLanding
+      tags:
+        - OGC Features
+      responses:
+        '200':
+          description: Landing page with API links
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OGCLandingPage'
+
+  /api/features/conformance:
+    get:
+      summary: OGC Features conformance
+      description: Lists conformance classes supported by this API.
+      operationId: ogcFeaturesConformance
+      tags:
+        - OGC Features
+      responses:
+        '200':
+          description: Conformance classes
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OGCConformance'
+
+  /api/features/collections:
+    get:
+      summary: List vector collections
+      description: |
+        Returns list of all available vector collections (PostGIS tables).
+        Each collection corresponds to a table in the `geo` schema.
+      operationId: ogcFeaturesCollections
+      tags:
+        - OGC Features
+      responses:
+        '200':
+          description: List of collections
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OGCCollectionList'
+
+  /api/features/collections/{collection_id}:
+    get:
+      summary: Get collection metadata
+      description: Returns metadata for a specific vector collection including extent and schema.
+      operationId: ogcFeaturesCollection
+      tags:
+        - OGC Features
+      parameters:
+        - name: collection_id
+          in: path
+          required: true
+          description: Collection (table) name
+          schema:
+            type: string
+            example: "admin0"
+      responses:
+        '200':
+          description: Collection metadata
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OGCCollection'
+        '404':
+          description: Collection not found
+
+  /api/features/collections/{collection_id}/items:
+    get:
+      summary: Query features
+      description: |
+        Query features from a collection with optional spatial/attribute filters.
+
+        **Query Parameters:**
+        - `bbox`: Bounding box filter (minx,miny,maxx,maxy)
+        - `limit`: Max features to return (default: 100, max: 10000)
+        - `offset`: Pagination offset
+        - `{property}`: Filter by any property value
+
+        **Response Format:**
+        GeoJSON FeatureCollection with `numberReturned` and `numberMatched`.
+      operationId: ogcFeaturesItems
+      tags:
+        - OGC Features
+      parameters:
+        - name: collection_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: bbox
+          in: query
+          description: Bounding box (minx,miny,maxx,maxy in EPSG:4326)
+          schema:
+            type: string
+            example: "-77.5,38.5,-76.5,39.5"
+        - name: limit
+          in: query
+          description: Maximum number of features
+          schema:
+            type: integer
+            default: 100
+            maximum: 10000
+        - name: offset
+          in: query
+          description: Pagination offset
+          schema:
+            type: integer
+            default: 0
+      responses:
+        '200':
+          description: GeoJSON FeatureCollection
+          content:
+            application/geo+json:
+              schema:
+                $ref: '#/components/schemas/GeoJSONFeatureCollection'
+
+  /api/features/collections/{collection_id}/items/{feature_id}:
+    get:
+      summary: Get single feature
+      description: Returns a single feature by ID.
+      operationId: ogcFeaturesFeature
+      tags:
+        - OGC Features
+      parameters:
+        - name: collection_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: feature_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: GeoJSON Feature
+          content:
+            application/geo+json:
+              schema:
+                $ref: '#/components/schemas/GeoJSONFeature'
+        '404':
+          description: Feature not found
+
+  # =========================================================================
+  # STAC API - Catalog Access
+  # =========================================================================
+
+  /api/stac:
+    get:
+      summary: STAC API landing page
+      description: |
+        STAC API v1.0.0 landing page.
+        Returns catalog metadata and links to collections and search.
+      operationId: stacLanding
+      tags:
+        - STAC
+      responses:
+        '200':
+          description: STAC Catalog root
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/STACCatalog'
+
+  /api/stac/conformance:
+    get:
+      summary: STAC conformance
+      description: Lists STAC API conformance classes.
+      operationId: stacConformance
+      tags:
+        - STAC
+      responses:
+        '200':
+          description: Conformance classes
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/STACConformance'
+
+  /api/stac/collections:
+    get:
+      summary: List STAC collections
+      description: |
+        Returns all STAC collections in the catalog.
+        Collections group related items (e.g., all imagery for a dataset).
+      operationId: stacCollections
+      tags:
+        - STAC
+      responses:
+        '200':
+          description: List of STAC collections
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/STACCollectionList'
+
+  /api/stac/collections/{collection_id}:
+    get:
+      summary: Get STAC collection
+      description: Returns metadata for a specific STAC collection.
+      operationId: stacCollection
+      tags:
+        - STAC
+      parameters:
+        - name: collection_id
+          in: path
+          required: true
+          schema:
+            type: string
+            example: "aerial-imagery-2024"
+      responses:
+        '200':
+          description: STAC Collection
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/STACCollection'
+        '404':
+          description: Collection not found
+
+  /api/stac/collections/{collection_id}/items:
+    get:
+      summary: List STAC items
+      description: |
+        Returns items in a STAC collection with optional filtering.
+
+        **Query Parameters:**
+        - `bbox`: Spatial filter
+        - `datetime`: Temporal filter (ISO 8601)
+        - `limit`: Max items (default: 10)
+      operationId: stacItems
+      tags:
+        - STAC
+      parameters:
+        - name: collection_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: bbox
+          in: query
+          schema:
+            type: string
+        - name: datetime
+          in: query
+          description: ISO 8601 datetime or interval
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 10
+      responses:
+        '200':
+          description: STAC ItemCollection
+          content:
+            application/geo+json:
+              schema:
+                $ref: '#/components/schemas/STACItemCollection'
+
+  /api/stac/collections/{collection_id}/items/{item_id}:
+    get:
+      summary: Get STAC item
+      description: |
+        Returns a single STAC item with all assets and metadata.
+
+        **Asset Types:**
+        - `data`: Primary data asset (COG or Zarr URL)
+        - `thumbnail`: Preview image
+        - `metadata`: Additional metadata files
+      operationId: stacItem
+      tags:
+        - STAC
+      parameters:
+        - name: collection_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: item_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: STAC Item
+          content:
+            application/geo+json:
+              schema:
+                $ref: '#/components/schemas/STACItem'
+        '404':
+          description: Item not found
+
+  # =========================================================================
+  # RASTER API - COG Query and Extraction
+  # =========================================================================
+
+  /api/raster/point/{collection}/{item}:
+    get:
+      summary: Get raster value at point
+      description: |
+        Extract raster pixel value(s) at a specific location.
+
+        **Location Options:**
+        - Named location: `?location=washington_dc`
+        - Coordinates: `?location=-77.0369,38.9072`
+      operationId: rasterPoint
+      tags:
+        - Raster
+      parameters:
+        - name: collection
+          in: path
+          required: true
+          description: STAC collection ID
+          schema:
+            type: string
+        - name: item
+          in: path
+          required: true
+          description: STAC item ID
+          schema:
+            type: string
+        - name: location
+          in: query
+          required: true
+          description: Named location or lon,lat coordinates
+          schema:
+            type: string
+            example: "-77.0369,38.9072"
+      responses:
+        '200':
+          description: Point value(s)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RasterPointResponse'
+        '404':
+          description: Item not found
+
+  /api/raster/extract/{collection}/{item}:
+    get:
+      summary: Extract bbox as image
+      description: |
+        Extract a rectangular region from a raster as an image.
+
+        **Bbox Format:** minx,miny,maxx,maxy (EPSG:4326)
+      operationId: rasterExtract
+      tags:
+        - Raster
+      parameters:
+        - name: collection
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: item
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: bbox
+          in: query
+          required: true
+          description: Bounding box (minx,miny,maxx,maxy)
+          schema:
+            type: string
+            example: "-77.5,38.5,-76.5,39.5"
+        - name: format
+          in: query
+          description: Output format
+          schema:
+            type: string
+            enum: [png, jpeg, webp, tiff]
+            default: png
+        - name: width
+          in: query
+          description: Output width in pixels
+          schema:
+            type: integer
+            default: 512
+        - name: height
+          in: query
+          description: Output height in pixels
+          schema:
+            type: integer
+            default: 512
+      responses:
+        '200':
+          description: Image data
+          content:
+            image/png:
+              schema:
+                type: string
+                format: binary
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+
+  /api/raster/clip/{collection}/{item}:
+    get:
+      summary: Clip raster to boundary
+      description: |
+        Clip raster to a named boundary (state, country, etc.).
+
+        **Boundary Types:**
+        - `state`: US state boundaries
+        - `country`: Country boundaries (admin0)
+      operationId: rasterClip
+      tags:
+        - Raster
+      parameters:
+        - name: collection
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: item
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: boundary_type
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [state, country]
+        - name: boundary_id
+          in: query
+          required: true
+          description: Boundary identifier (e.g., "VA", "USA")
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Clipped image
+          content:
+            image/png:
+              schema:
+                type: string
+                format: binary
+
+  /api/raster/preview/{collection}/{item}:
+    get:
+      summary: Get raster preview
+      description: |
+        Generate a quick preview image of the entire raster.
+        Useful for thumbnails and data exploration.
+      operationId: rasterPreview
+      tags:
+        - Raster
+      parameters:
+        - name: collection
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: item
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: format
+          in: query
+          schema:
+            type: string
+            enum: [png, jpeg, webp]
+            default: png
+        - name: max_size
+          in: query
+          description: Maximum dimension in pixels
+          schema:
+            type: integer
+            default: 512
+      responses:
+        '200':
+          description: Preview image
+          content:
+            image/png:
+              schema:
+                type: string
+                format: binary
+
 components:
   schemas:
     PlatformRequest:
@@ -841,6 +1350,387 @@ components:
           type: string
           description: Error classification
           example: "ValidationError"
+
+    # =========================================================================
+    # OGC Features Schemas
+    # =========================================================================
+
+    OGCLandingPage:
+      type: object
+      properties:
+        title:
+          type: string
+          example: "OGC API - Features"
+        description:
+          type: string
+        links:
+          type: array
+          items:
+            $ref: '#/components/schemas/Link'
+
+    OGCConformance:
+      type: object
+      properties:
+        conformsTo:
+          type: array
+          items:
+            type: string
+          example:
+            - "http://www.opengis.net/spec/ogcapi-features-1/1.0/conf/core"
+            - "http://www.opengis.net/spec/ogcapi-features-1/1.0/conf/geojson"
+
+    OGCCollectionList:
+      type: object
+      properties:
+        collections:
+          type: array
+          items:
+            $ref: '#/components/schemas/OGCCollection'
+        links:
+          type: array
+          items:
+            $ref: '#/components/schemas/Link'
+
+    OGCCollection:
+      type: object
+      properties:
+        id:
+          type: string
+          description: Collection identifier (table name)
+        title:
+          type: string
+        description:
+          type: string
+        extent:
+          type: object
+          properties:
+            spatial:
+              type: object
+              properties:
+                bbox:
+                  type: array
+                  items:
+                    type: array
+                    items:
+                      type: number
+            temporal:
+              type: object
+              properties:
+                interval:
+                  type: array
+                  items:
+                    type: array
+                    items:
+                      type: string
+        links:
+          type: array
+          items:
+            $ref: '#/components/schemas/Link'
+
+    GeoJSONFeatureCollection:
+      type: object
+      properties:
+        type:
+          type: string
+          enum: [FeatureCollection]
+        features:
+          type: array
+          items:
+            $ref: '#/components/schemas/GeoJSONFeature'
+        numberReturned:
+          type: integer
+          description: Number of features in this response
+        numberMatched:
+          type: integer
+          description: Total features matching query
+        links:
+          type: array
+          items:
+            $ref: '#/components/schemas/Link'
+
+    GeoJSONFeature:
+      type: object
+      properties:
+        type:
+          type: string
+          enum: [Feature]
+        id:
+          oneOf:
+            - type: string
+            - type: integer
+        geometry:
+          type: object
+          description: GeoJSON geometry object
+        properties:
+          type: object
+          additionalProperties: true
+
+    Link:
+      type: object
+      properties:
+        href:
+          type: string
+          format: uri
+        rel:
+          type: string
+        type:
+          type: string
+        title:
+          type: string
+
+    # =========================================================================
+    # STAC Schemas
+    # =========================================================================
+
+    STACCatalog:
+      type: object
+      properties:
+        type:
+          type: string
+          enum: [Catalog]
+        stac_version:
+          type: string
+          example: "1.0.0"
+        id:
+          type: string
+        title:
+          type: string
+        description:
+          type: string
+        links:
+          type: array
+          items:
+            $ref: '#/components/schemas/Link'
+        conformsTo:
+          type: array
+          items:
+            type: string
+
+    STACConformance:
+      type: object
+      properties:
+        conformsTo:
+          type: array
+          items:
+            type: string
+          example:
+            - "https://api.stacspec.org/v1.0.0/core"
+            - "https://api.stacspec.org/v1.0.0/collections"
+            - "https://api.stacspec.org/v1.0.0/ogcapi-features"
+
+    STACCollectionList:
+      type: object
+      properties:
+        collections:
+          type: array
+          items:
+            $ref: '#/components/schemas/STACCollection'
+        links:
+          type: array
+          items:
+            $ref: '#/components/schemas/Link'
+
+    STACCollection:
+      type: object
+      description: |
+        STAC Collection representing a group of related items.
+        For rasters, typically groups COGs from same dataset.
+        For vectors, typically groups related PostGIS tables.
+      properties:
+        type:
+          type: string
+          enum: [Collection]
+        stac_version:
+          type: string
+        id:
+          type: string
+          description: Collection identifier (maps to dataset_id)
+        title:
+          type: string
+        description:
+          type: string
+        license:
+          type: string
+        extent:
+          type: object
+          properties:
+            spatial:
+              type: object
+              properties:
+                bbox:
+                  type: array
+                  items:
+                    type: array
+                    items:
+                      type: number
+            temporal:
+              type: object
+              properties:
+                interval:
+                  type: array
+                  items:
+                    type: array
+                    items:
+                      type: string
+                      nullable: true
+        links:
+          type: array
+          items:
+            $ref: '#/components/schemas/Link'
+
+    STACItemCollection:
+      type: object
+      properties:
+        type:
+          type: string
+          enum: [FeatureCollection]
+        features:
+          type: array
+          items:
+            $ref: '#/components/schemas/STACItem'
+        links:
+          type: array
+          items:
+            $ref: '#/components/schemas/Link'
+        numberReturned:
+          type: integer
+        numberMatched:
+          type: integer
+
+    STACItem:
+      type: object
+      description: |
+        STAC Item representing a single spatiotemporal asset.
+
+        **For Rasters:**
+        - `assets.data.href`: COG URL in silver-cogs container
+        - `assets.data.type`: "image/tiff; application=geotiff; profile=cloud-optimized"
+        - Properties include band info, CRS, resolution
+
+        **For Vectors:**
+        - `assets.data.href`: OGC Features API URL
+        - `assets.data.type`: "application/geo+json"
+        - Properties include feature count, geometry type
+      properties:
+        type:
+          type: string
+          enum: [Feature]
+        stac_version:
+          type: string
+        stac_extensions:
+          type: array
+          items:
+            type: string
+        id:
+          type: string
+          description: Item ID (format dataset_id-resource_id-version_id)
+        geometry:
+          type: object
+          description: GeoJSON geometry (bounding polygon)
+        bbox:
+          type: array
+          items:
+            type: number
+          minItems: 4
+          maxItems: 4
+          description: Bounding box [minx, miny, maxx, maxy]
+        properties:
+          type: object
+          description: Item properties including datetime, created, updated
+          properties:
+            datetime:
+              type: string
+              format: date-time
+              description: Acquisition or creation datetime
+            created:
+              type: string
+              format: date-time
+            updated:
+              type: string
+              format: date-time
+            platform:
+              type: string
+              description: Data source platform
+            gsd:
+              type: number
+              description: Ground sample distance (meters)
+          additionalProperties: true
+        links:
+          type: array
+          items:
+            $ref: '#/components/schemas/Link'
+        assets:
+          type: object
+          description: Asset dictionary keyed by asset role
+          additionalProperties:
+            $ref: '#/components/schemas/STACAsset'
+        collection:
+          type: string
+          description: Parent collection ID
+
+    STACAsset:
+      type: object
+      description: |
+        STAC Asset representing a downloadable file.
+
+        **Common Asset Keys:**
+        - `data`: Primary data file (COG, Zarr, or GeoJSON URL)
+        - `thumbnail`: Preview image
+        - `metadata`: Sidecar metadata file
+      properties:
+        href:
+          type: string
+          format: uri
+          description: Asset URL
+        type:
+          type: string
+          description: Media type
+          example: "image/tiff; application=geotiff; profile=cloud-optimized"
+        title:
+          type: string
+        description:
+          type: string
+        roles:
+          type: array
+          items:
+            type: string
+          example: ["data", "visual"]
+
+    # =========================================================================
+    # Raster API Schemas
+    # =========================================================================
+
+    RasterPointResponse:
+      type: object
+      description: Response from raster point query
+      properties:
+        collection:
+          type: string
+        item:
+          type: string
+        location:
+          type: object
+          properties:
+            lon:
+              type: number
+            lat:
+              type: number
+            name:
+              type: string
+              description: Named location if used
+        values:
+          type: array
+          items:
+            type: number
+          description: Pixel values for each band
+        band_names:
+          type: array
+          items:
+            type: string
+          description: Band names if available
+        units:
+          type: string
+          description: Data units if known
 
   securitySchemes:
     ApiKeyAuth:

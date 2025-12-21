@@ -387,7 +387,7 @@ DDH Application                    Geospatial Platform
 | S3.2.2 | ✅ | DDH Managed Identity exists | — | DDH already has its own identity |
 | S3.2.3 | ✅ | Grant DDH write access to **Bronze Storage Account** | DevOps | DDH identity has `Storage Blob Data Contributor` on bronze container |
 | S3.2.4 | 📋 | Grant DDH access to **Platform API** | DevOps | DDH identity can call `/api/*` endpoints |
-| S3.2.5 | 📋 | Configure **ETL Function App** authentication | Claude | Function App validates DDH identity on protected endpoints |
+| S3.2.5 | 📋 | Configure **ETL Function App** authentication | Geospatial | Function App validates DDH identity on protected endpoints |
 | S3.2.6 | 📋 | Document integration setup | DevOps | Runbook: role assignments, endpoint URLs |
 
 ### F3.2 Authentication Strategy (S3.2.1 Decision)
@@ -641,7 +641,7 @@ ETL Function App (Python)              Azure Data Factory              Target
 │ • get_activity_runs()    │        │ • Parameterized     │        │             │
 └─────────────────────────┘          └─────────────────────┘        └─────────────┘
         Python side                        ADF GUI side                 Infra side
-       (Claude owns)                    (DevOps owns)               (DevOps owns)
+     (Geospatial owns)                  (DevOps owns)               (DevOps owns)
 ```
 
 **Python Status**: ✅ `AzureDataFactoryRepository` built (`infrastructure/data_factory.py`)
@@ -650,7 +650,7 @@ ETL Function App (Python)              Azure Data Factory              Target
 
 ### Feature F4.1: Publishing Workflow 📋 PLANNED
 
-**Owner**: Claude (code)
+**Owner**: Geospatial Team
 **Deliverable**: Approval queue, audit log, status APIs
 
 | Story | Status | Acceptance Criteria |
@@ -666,7 +666,7 @@ ETL Function App (Python)              Azure Data Factory              Target
 
 ### Feature F4.2: ADF Python Integration 🚧 PARTIAL
 
-**Owner**: Claude
+**Owner**: Geospatial Team
 **Deliverable**: Python code to trigger and monitor ADF pipelines
 **Depends on**: F4.4 (ADF infrastructure must exist first)
 
@@ -875,7 +875,7 @@ az functionapp config appsettings set \
 
 ### Feature F4.5: Database-to-Database Pipelines 🔵 BACKLOG
 
-**Owner**: DevOps (ADF) + Claude (triggers)
+**Owner**: DevOps (ADF) + Geospatial Team (triggers)
 **Deliverable**: ADF pipelines for database copy operations
 **Status**: Deferred — implement when database promotion workflow is needed
 
@@ -894,11 +894,11 @@ az functionapp config appsettings set \
 
 ```
 F4.4: ADF Infrastructure ──────────────▶ F4.2: Python Integration
-        (DevOps)                                (Claude)
+        (DevOps)                              (Geospatial)
             │                                      │
             ▼                                      ▼
 F4.3: External Storage ─────────────────▶ F4.1: Publishing Workflow
-        (DevOps)                                (Claude)
+        (DevOps)                              (Geospatial)
                                                    │
                                                    ▼
                                           End-to-End Testing
@@ -1302,7 +1302,7 @@ Technical foundation that enables all Epics above.
 **Purpose**: Docker-based worker for tasks exceeding Azure Functions 30-min timeout
 **What It Enables**: E2 (oversized rasters), E9 (large climate datasets)
 **Reference**: See architecture diagram at `/api/interface/health`
-**Owner**: DevOps (infrastructure) + Claude (handler integration)
+**Owner**: DevOps (infrastructure) + Geospatial Team (handler integration)
 
 **Decision Context**: Deploy as part of FY26 work is pending. Current chunked processing
 in Azure Functions handles most use cases. EN6 activates if:
@@ -1318,9 +1318,9 @@ in Azure Functions handles most use cases. EN6 activates if:
 | EN6.2 | 📋 | Deploy **Long-Running Worker** to Azure | DevOps | Container runs, has managed identity, can access **Bronze/Silver Storage** |
 | EN6.3 | 📋 | Create **Long-Running Task Queue** | DevOps | Queue exists in Service Bus namespace, dead-letter enabled |
 | EN6.4 | 📋 | Implement queue listener | DevOps | Worker receives messages, logs receipt, acks on completion |
-| EN6.5 | 📋 | Integrate existing handlers | Claude | Worker calls `raster_cog.py` functions, writes to **Silver Storage** |
+| EN6.5 | 📋 | Integrate existing handlers | Geospatial | Worker calls `raster_cog.py` functions, writes to **Silver Storage** |
 | EN6.6 | 📋 | Add health endpoint | DevOps | `/health` returns 200, shows queue connection status |
-| EN6.7 | 📋 | Add routing logic in **ETL Function App** | Claude | Jobs exceeding size threshold route to **Long-Running Task Queue** |
+| EN6.7 | 📋 | Add routing logic in **ETL Function App** | Geospatial | Jobs exceeding size threshold route to **Long-Running Task Queue** |
 
 ### EN6.1 Docker Image Specification
 

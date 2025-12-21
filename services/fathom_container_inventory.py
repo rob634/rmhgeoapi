@@ -590,78 +590,88 @@ def fathom_inventory_summary(params: Dict[str, Any]) -> Dict[str, Any]:
 
     logger.info(f"📊 Generating inventory summary for {source_container}")
 
-    repo = PostgreSQLRepository()
+    try:
+        repo = PostgreSQLRepository()
 
-    with repo._get_connection() as conn:
-        with conn.cursor() as cur:
-            # Total files
-            cur.execute(sql.SQL("SELECT COUNT(*) FROM {schema}.etl_fathom").format(
-                schema=sql.Identifier("app")
-            ))
-            total_files = cur.fetchone()[0]
+        with repo._get_connection() as conn:
+            with conn.cursor() as cur:
+                # Total files
+                # NOTE: PostgreSQLRepository uses dict_row factory, so access by column name
+                cur.execute(sql.SQL("SELECT COUNT(*) as cnt FROM {schema}.etl_fathom").format(
+                    schema=sql.Identifier("app")
+                ))
+                total_files = cur.fetchone()["cnt"]
 
-            # Unique tiles
-            cur.execute(sql.SQL("SELECT COUNT(DISTINCT tile) FROM {schema}.etl_fathom").format(
-                schema=sql.Identifier("app")
-            ))
-            unique_tiles = cur.fetchone()[0]
+                # Unique tiles
+                cur.execute(sql.SQL("SELECT COUNT(DISTINCT tile) as cnt FROM {schema}.etl_fathom").format(
+                    schema=sql.Identifier("app")
+                ))
+                unique_tiles = cur.fetchone()["cnt"]
 
-            # Unique phase1 groups
-            cur.execute(sql.SQL("SELECT COUNT(DISTINCT phase1_group_key) FROM {schema}.etl_fathom").format(
-                schema=sql.Identifier("app")
-            ))
-            phase1_groups = cur.fetchone()[0]
+                # Unique phase1 groups
+                cur.execute(sql.SQL("SELECT COUNT(DISTINCT phase1_group_key) as cnt FROM {schema}.etl_fathom").format(
+                    schema=sql.Identifier("app")
+                ))
+                phase1_groups = cur.fetchone()["cnt"]
 
-            # Unique phase2 groups
-            cur.execute(sql.SQL("SELECT COUNT(DISTINCT phase2_group_key) FROM {schema}.etl_fathom WHERE phase2_group_key IS NOT NULL").format(
-                schema=sql.Identifier("app")
-            ))
-            phase2_groups = cur.fetchone()[0]
+                # Unique phase2 groups
+                cur.execute(sql.SQL("SELECT COUNT(DISTINCT phase2_group_key) as cnt FROM {schema}.etl_fathom WHERE phase2_group_key IS NOT NULL").format(
+                    schema=sql.Identifier("app")
+                ))
+                phase2_groups = cur.fetchone()["cnt"]
 
-            # By flood type
-            cur.execute(sql.SQL("""
-                SELECT flood_type, defense, COUNT(*)
-                FROM {schema}.etl_fathom
-                GROUP BY flood_type, defense
-                ORDER BY flood_type, defense
-            """).format(schema=sql.Identifier("app")))
-            by_flood_type = {f"{row[0]}_{row[1]}": row[2] for row in cur.fetchall()}
+                # By flood type
+                cur.execute(sql.SQL("""
+                    SELECT flood_type, defense, COUNT(*) as cnt
+                    FROM {schema}.etl_fathom
+                    GROUP BY flood_type, defense
+                    ORDER BY flood_type, defense
+                """).format(schema=sql.Identifier("app")))
+                by_flood_type = {f"{row['flood_type']}_{row['defense']}": row['cnt'] for row in cur.fetchall()}
 
-            # By year
-            cur.execute(sql.SQL("""
-                SELECT year, COUNT(*)
-                FROM {schema}.etl_fathom
-                GROUP BY year
-                ORDER BY year
-            """).format(schema=sql.Identifier("app")))
-            by_year = {str(row[0]): row[1] for row in cur.fetchall()}
+                # By year
+                cur.execute(sql.SQL("""
+                    SELECT year, COUNT(*) as cnt
+                    FROM {schema}.etl_fathom
+                    GROUP BY year
+                    ORDER BY year
+                """).format(schema=sql.Identifier("app")))
+                by_year = {str(row['year']): row['cnt'] for row in cur.fetchall()}
 
-            # Total file size
-            cur.execute(sql.SQL("""
-                SELECT COALESCE(SUM(file_size_bytes), 0)
-                FROM {schema}.etl_fathom
-            """).format(schema=sql.Identifier("app")))
-            total_size_bytes = cur.fetchone()[0]
+                # Total file size
+                cur.execute(sql.SQL("""
+                    SELECT COALESCE(SUM(file_size_bytes), 0) as total_bytes
+                    FROM {schema}.etl_fathom
+                """).format(schema=sql.Identifier("app")))
+                total_size_bytes = cur.fetchone()["total_bytes"]
 
-    summary = {
-        "total_files": total_files,
-        "unique_tiles": unique_tiles,
-        "phase1_groups": phase1_groups,
-        "phase2_groups": phase2_groups,
-        "by_flood_type": by_flood_type,
-        "by_year": by_year,
-        "total_size_bytes": total_size_bytes,
-        "total_size_gb": round(total_size_bytes / (1024**3), 2) if total_size_bytes else 0,
-        "source_container": source_container,
-        "dry_run": dry_run
-    }
+        # Handle potential Decimal type from SUM
+        if total_size_bytes is not None:
+            total_size_bytes = int(total_size_bytes)
 
-    logger.info(f"✅ Inventory summary: {total_files} files, {unique_tiles} tiles, {phase1_groups} phase1 groups")
+        summary = {
+            "total_files": total_files,
+            "unique_tiles": unique_tiles,
+            "phase1_groups": phase1_groups,
+            "phase2_groups": phase2_groups,
+            "by_flood_type": by_flood_type,
+            "by_year": by_year,
+            "total_size_bytes": total_size_bytes,
+            "total_size_gb": round(total_size_bytes / (1024**3), 2) if total_size_bytes else 0,
+            "source_container": source_container,
+            "dry_run": dry_run
+        }
 
-    return {
-        "success": True,
-        "result": summary
-    }
+        logger.info(f"✅ Inventory summary: {total_files} files, {unique_tiles} tiles, {phase1_groups} phase1 groups")
+
+        return {
+            "success": True,
+            "result": summary
+        }
+
+    except Exception as e:
+        logger.error(f"❌ SUMMARY ERROR: {type(e).__name__}: {e}")
+        raise  # Re-raise to let CoreMachine handle it
 
 
 # ============================================================================

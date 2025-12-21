@@ -1,5 +1,16 @@
+# ============================================================================
+# CLAUDE CONTEXT - XARRAY API HTTP TRIGGERS
+# ============================================================================
+# EPOCH: 4 - ACTIVE
+# STATUS: Trigger Layer - HTTP handlers for xarray direct access endpoints
+# PURPOSE: Azure Functions HTTP handlers for xarray API
+# LAST_REVIEWED: 19 DEC 2025
+# EXPORTS: get_xarray_triggers
+# DEPENDENCIES: azure-functions, .service
+# PORTABLE: Yes - works in rmhgeoapi and rmhogcapi
+# ============================================================================
 """
-xarray API HTTP Triggers.
+xarray API HTTP Triggers (SYNC VERSION).
 
 Azure Functions HTTP handlers for xarray direct access endpoints.
 
@@ -14,13 +25,14 @@ Integration (in function_app.py):
     _xarray_triggers = get_xarray_triggers()
     # Register with decorator pattern
 
-Created: 18 DEC 2025
+SYNC VERSION (19 DEC 2025):
+    Removed asyncio boilerplate - services are now synchronous.
+    All handlers are simple sync functions.
 """
 
 import azure.functions as func
 import json
 import logging
-import asyncio
 from typing import Dict, Any, List
 
 from .config import get_xarray_api_config
@@ -120,6 +132,7 @@ class XarrayPointTrigger(BaseXarrayTrigger):
 
     def handle(self, req: func.HttpRequest) -> func.HttpResponse:
         """Handle point time-series request."""
+        service = None
         try:
             # Get path parameters
             collection = req.route_params.get('collection')
@@ -144,26 +157,17 @@ class XarrayPointTrigger(BaseXarrayTrigger):
                     f"Invalid aggregation: {aggregation}. Use none, daily, monthly, or yearly."
                 )
 
-            # Create service and execute
+            # Create service and execute (SYNC - no asyncio needed)
             service = XarrayAPIService(self.config)
-
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-                response = loop.run_until_complete(
-                    service.point_timeseries(
-                        collection_id=collection,
-                        item_id=item,
-                        location=location,
-                        asset=asset,
-                        start_time=start_time,
-                        end_time=end_time,
-                        aggregation=aggregation
-                    )
-                )
-            finally:
-                loop.run_until_complete(service.close())
-                loop.close()
+            response = service.point_timeseries(
+                collection_id=collection,
+                item_id=item,
+                location=location,
+                asset=asset,
+                start_time=start_time,
+                end_time=end_time,
+                aggregation=aggregation
+            )
 
             if not response.success:
                 return self._error_response(response.error, response.status_code)
@@ -175,6 +179,9 @@ class XarrayPointTrigger(BaseXarrayTrigger):
         except Exception as e:
             logger.exception(f"Error in xarray point: {e}")
             return self._error_response(f"Internal error: {str(e)}", 500)
+        finally:
+            if service:
+                service.close()
 
 
 # ============================================================================
@@ -195,6 +202,7 @@ class XarrayStatisticsTrigger(BaseXarrayTrigger):
 
     def handle(self, req: func.HttpRequest) -> func.HttpResponse:
         """Handle regional statistics request."""
+        service = None
         try:
             # Get path parameters
             collection = req.route_params.get('collection')
@@ -219,26 +227,17 @@ class XarrayStatisticsTrigger(BaseXarrayTrigger):
                     f"Invalid temporal_resolution: {temporal_resolution}. Use daily, monthly, or yearly."
                 )
 
-            # Create service and execute
+            # Create service and execute (SYNC - no asyncio needed)
             service = XarrayAPIService(self.config)
-
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-                response = loop.run_until_complete(
-                    service.regional_statistics(
-                        collection_id=collection,
-                        item_id=item,
-                        bbox=bbox,
-                        asset=asset,
-                        start_time=start_time,
-                        end_time=end_time,
-                        temporal_resolution=temporal_resolution
-                    )
-                )
-            finally:
-                loop.run_until_complete(service.close())
-                loop.close()
+            response = service.regional_statistics(
+                collection_id=collection,
+                item_id=item,
+                bbox=bbox,
+                asset=asset,
+                start_time=start_time,
+                end_time=end_time,
+                temporal_resolution=temporal_resolution
+            )
 
             if not response.success:
                 return self._error_response(response.error, response.status_code)
@@ -250,6 +249,9 @@ class XarrayStatisticsTrigger(BaseXarrayTrigger):
         except Exception as e:
             logger.exception(f"Error in xarray statistics: {e}")
             return self._error_response(f"Internal error: {str(e)}", 500)
+        finally:
+            if service:
+                service.close()
 
 
 # ============================================================================
@@ -271,6 +273,7 @@ class XarrayAggregateTrigger(BaseXarrayTrigger):
 
     def handle(self, req: func.HttpRequest) -> func.HttpResponse:
         """Handle temporal aggregation request."""
+        service = None
         try:
             # Get path parameters
             collection = req.route_params.get('collection')
@@ -302,27 +305,18 @@ class XarrayAggregateTrigger(BaseXarrayTrigger):
                     f"Invalid format: {format_param}. Use json, tif, png, or npy."
                 )
 
-            # Create service and execute
+            # Create service and execute (SYNC - no asyncio needed)
             service = XarrayAPIService(self.config)
-
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-                response = loop.run_until_complete(
-                    service.temporal_aggregation(
-                        collection_id=collection,
-                        item_id=item,
-                        bbox=bbox,
-                        asset=asset,
-                        start_time=start_time,
-                        end_time=end_time,
-                        aggregation=aggregation,
-                        format=format_param
-                    )
-                )
-            finally:
-                loop.run_until_complete(service.close())
-                loop.close()
+            response = service.temporal_aggregation(
+                collection_id=collection,
+                item_id=item,
+                bbox=bbox,
+                asset=asset,
+                start_time=start_time,
+                end_time=end_time,
+                aggregation=aggregation,
+                format=format_param
+            )
 
             if not response.success:
                 return self._error_response(response.error, response.status_code)
@@ -340,3 +334,6 @@ class XarrayAggregateTrigger(BaseXarrayTrigger):
         except Exception as e:
             logger.exception(f"Error in xarray aggregate: {e}")
             return self._error_response(f"Internal error: {str(e)}", 500)
+        finally:
+            if service:
+                service.close()

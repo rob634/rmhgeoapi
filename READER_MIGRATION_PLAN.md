@@ -1,17 +1,58 @@
 # Reader App Migration Plan (F1.2)
 
 **Created**: 19 DEC 2025
-**Purpose**: Migrate raster_api and xarray_api modules from rmhazuregeoapi to rmhogcstac
-**Target**: rmhogcstac Function App (Reader API)
+**Updated**: 19 DEC 2025
+**Purpose**: Migrate raster_api and xarray_api modules from rmhazuregeoapi to rmhogcapi
+**Target**: rmhogcapi Function App (Reader API)
 
 ---
 
 ## Overview
 
-This migration moves read-only query endpoints from the ETL platform (rmhazuregeoapi) to the dedicated reader platform (rmhogcstac). The goal is clean separation:
+This migration moves read-only query endpoints from the ETL platform (rmhazuregeoapi) to the dedicated reader platform (rmhogcapi). The goal is clean separation:
 
 - **rmhazuregeoapi**: ETL operations (ingest, process, transform)
-- **rmhogcstac**: Read-only queries (OGC Features, STAC, raster ops, xarray ops)
+- **rmhogcapi**: Read-only queries (OGC Features, STAC, raster ops, xarray ops)
+
+### Key Design Decisions (19 DEC 2025)
+
+| Decision | Rationale |
+|----------|-----------|
+| **All sync, no async** | Queries are ≤30 seconds; async adds complexity without benefit |
+| **Config-independent** | Service clients use env vars, not config imports - enables zero-modification copy |
+| **Portable code** | Same files run in both rmhazuregeoapi and rmhogcapi |
+| **Explicit errors** | Missing env vars raise `ValueError` immediately |
+
+---
+
+## Architecture After Migration
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                          rmhogcapi                                       │
+├─────────────────────────────────────────────────────────────────────────┤
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐    │
+│  │ OGC Features│  │  STAC API   │  │ Raster API  │  │ xarray API  │    │
+│  │ (existing)  │  │ (existing)  │  │   (NEW)     │  │   (NEW)     │    │
+│  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘    │
+│         │                │                │                │            │
+│         v                v                v                v            │
+│  ┌─────────────────────────────────────────────────────────────────┐   │
+│  │                    services/                                      │   │
+│  │  ┌──────────────┐ ┌────────────────┐ ┌────────────────┐          │   │
+│  │  │ stac_client  │ │ titiler_client │ │ xarray_reader  │          │   │
+│  │  │   (SYNC)     │ │    (SYNC)      │ │    (SYNC)      │          │   │
+│  │  └──────────────┘ └────────────────┘ └────────────────┘          │   │
+│  └─────────────────────────────────────────────────────────────────┘   │
+│                                                                          │
+│  Environment Variables:                                                  │
+│  - STAC_API_BASE_URL    (self-referential to /api/stac)                 │
+│  - TITILER_BASE_URL     (external TiTiler instance)                     │
+│  - AZURE_STORAGE_ACCOUNT (for Zarr blob access)                         │
+│  - POSTGIS_HOST, etc.   (for OGC Features - existing)                   │
+│  - AZURE_CLIENT_ID      (managed identity - existing)                   │
+└─────────────────────────────────────────────────────────────────────────┘
+```
 
 ---
 
@@ -19,54 +60,45 @@ This migration moves read-only query endpoints from the ETL platform (rmhazurege
 
 All source files are located at: `/Users/robertharrison/python_builds/rmhgeoapi/`
 
-### 1. Raster API Module
+### 1. Service Clients (SYNC, config-independent)
+
+| Source Path | Description | Env Var Required |
+|-------------|-------------|------------------|
+| `services/stac_client.py` | Internal STAC API client with TTL cache | `STAC_API_BASE_URL` |
+| `services/titiler_client.py` | TiTiler HTTP client for raster ops | `TITILER_BASE_URL` |
+| `services/xarray_reader.py` | Direct Zarr reader using xarray | `AZURE_STORAGE_ACCOUNT` |
+
+**Key change from original**: These files **no longer import from config**. They accept constructor params or fall back to environment variables.
+
+### 2. Raster API Module
 
 | Source Path | Description |
 |-------------|-------------|
 | `raster_api/__init__.py` | Module init, exports `get_raster_triggers` |
-| `raster_api/config.py` | TiTiler configuration (TITILER_BASE_URL) |
-| `raster_api/service.py` | Business logic - STAC lookup + TiTiler proxy |
-| `raster_api/triggers.py` | HTTP handlers for raster endpoints |
+| `raster_api/config.py` | TiTiler configuration (named locations, defaults) |
+| `raster_api/service.py` | Business logic - STAC lookup + TiTiler proxy (SYNC) |
+| `raster_api/triggers.py` | HTTP handlers for raster endpoints (SYNC) |
 
 **Endpoints provided**:
 - `GET /api/raster/extract/{collection}/{item}` - Extract bbox as image
 - `GET /api/raster/point/{collection}/{item}` - Point value query
-- `GET /api/raster/clip/{collection}/{item}` - Clip to admin boundary
+- `POST /api/raster/clip/{collection}/{item}` - Clip to GeoJSON geometry
 - `GET /api/raster/preview/{collection}/{item}` - Quick preview image
 
-### 2. xarray API Module
+### 3. xarray API Module
 
 | Source Path | Description |
 |-------------|-------------|
 | `xarray_api/__init__.py` | Module init, exports `get_xarray_triggers` |
 | `xarray_api/config.py` | xarray configuration |
-| `xarray_api/output.py` | Response formatters |
-| `xarray_api/service.py` | Business logic - direct Zarr access |
-| `xarray_api/triggers.py` | HTTP handlers for xarray endpoints |
+| `xarray_api/output.py` | Response formatters (GeoTIFF, PNG) |
+| `xarray_api/service.py` | Business logic - direct Zarr access (SYNC) |
+| `xarray_api/triggers.py` | HTTP handlers for xarray endpoints (SYNC) |
 
 **Endpoints provided**:
 - `GET /api/xarray/point/{collection}/{item}` - Time-series at a point
 - `GET /api/xarray/statistics/{collection}/{item}` - Regional stats over time
 - `GET /api/xarray/aggregate/{collection}/{item}` - Temporal aggregation export
-
-### 3. Service Clients (copy to `services/` folder)
-
-| Source Path | Description | Dependencies |
-|-------------|-------------|--------------|
-| `services/stac_client.py` | Internal STAC API client with TTL cache | httpx |
-| `services/titiler_client.py` | TiTiler HTTP client for raster ops | httpx |
-| `services/xarray_reader.py` | Direct Zarr reader using xarray | xarray, zarr, fsspec, numpy |
-
-### 4. Config Module (may need to adapt)
-
-| Source Path | Description |
-|-------------|-------------|
-| `config/__init__.py` | Configuration loader |
-| `config/app_config.py` | AppConfig dataclass with service URLs |
-
-**Required config values**:
-- `STAC_API_BASE_URL` - Internal STAC API (e.g., https://rmhogcstac.../stac)
-- `TITILER_BASE_URL` - TiTiler server URL
 
 ---
 
@@ -75,183 +107,138 @@ All source files are located at: `/Users/robertharrison/python_builds/rmhgeoapi/
 ### Step 1: Copy Modules
 
 ```bash
-# In rmhogcstac project directory
-mkdir -p raster_api xarray_api services
+# In rmhogcapi project directory
+cd /Users/robertharrison/rmhogcapi
+
+# Create services directory if needed
+mkdir -p services
+
+# Copy service clients (SYNC versions)
+cp /Users/robertharrison/python_builds/rmhgeoapi/services/stac_client.py services/
+cp /Users/robertharrison/python_builds/rmhgeoapi/services/titiler_client.py services/
+cp /Users/robertharrison/python_builds/rmhgeoapi/services/xarray_reader.py services/
 
 # Copy raster_api module
-cp -r /path/to/rmhgeoapi/raster_api/* raster_api/
+cp -r /Users/robertharrison/python_builds/rmhgeoapi/raster_api .
 
 # Copy xarray_api module
-cp -r /path/to/rmhgeoapi/xarray_api/* xarray_api/
-
-# Copy service clients
-cp /path/to/rmhgeoapi/services/stac_client.py services/
-cp /path/to/rmhgeoapi/services/titiler_client.py services/
-cp /path/to/rmhgeoapi/services/xarray_reader.py services/
+cp -r /Users/robertharrison/python_builds/rmhgeoapi/xarray_api .
 ```
 
 ### Step 2: Update requirements.txt
 
-Add to rmhogcstac requirements.txt:
+Dependencies have been added to `/Users/robertharrison/rmhogcapi/requirements.txt`.
 
-```
-# HTTP client
-httpx>=0.25.0
+### Step 3: Configure Environment Variables
 
-# xarray/Zarr support
-xarray>=2024.1.0
-zarr>=2.16.0
-fsspec>=2024.2.0
-adlfs>=2024.2.0  # Azure Data Lake filesystem
-h5netcdf>=1.3.0
-numpy>=1.24.0
-```
-
-### Step 3: Adapt Config Imports
-
-The source files use `from config import get_config`. You have two options:
-
-**Option A: Copy config module**
-```bash
-mkdir -p config
-cp /path/to/rmhgeoapi/config/__init__.py config/
-cp /path/to/rmhgeoapi/config/app_config.py config/
-```
-
-**Option B: Adapt to existing config pattern**
-
-If rmhogcstac has its own config pattern, update imports in:
-- `services/stac_client.py` line 30: `from config import get_config`
-- `services/titiler_client.py` line 27: `from config import get_config`
-
-The config needs to provide:
-```python
-@dataclass
-class AppConfig:
-    stac_api_base_url: str  # e.g., "https://rmhogcstac.../stac"
-    titiler_base_url: str   # e.g., "https://titiler.../api"
-```
-
-### Step 4: Register Routes in function_app.py
-
-Add to rmhogcstac's `function_app.py`:
-
-```python
-import azure.functions as func
-from raster_api import get_raster_triggers
-from xarray_api import get_xarray_triggers
-
-# Register Raster API routes
-for trigger in get_raster_triggers():
-    @app.route(
-        route=trigger['route'],
-        methods=trigger['methods'],
-        auth_level=func.AuthLevel.ANONYMOUS
-    )
-    def _make_handler(handler=trigger['handler']):
-        def wrapped(req: func.HttpRequest) -> func.HttpResponse:
-            return handler(req)
-        return wrapped
-    _make_handler.__name__ = f"raster_{trigger['route'].replace('/', '_')}"
-
-# Register xarray API routes
-for trigger in get_xarray_triggers():
-    @app.route(
-        route=trigger['route'],
-        methods=trigger['methods'],
-        auth_level=func.AuthLevel.ANONYMOUS
-    )
-    def _make_handler(handler=trigger['handler']):
-        def wrapped(req: func.HttpRequest) -> func.HttpResponse:
-            return handler(req)
-        return wrapped
-    _make_handler.__name__ = f"xarray_{trigger['route'].replace('/', '_')}"
-```
-
-**Alternative (explicit registration):**
-
-```python
-from raster_api.triggers import (
-    RasterExtractTrigger,
-    RasterPointTrigger,
-    RasterClipTrigger,
-    RasterPreviewTrigger
-)
-from xarray_api.triggers import (
-    XarrayPointTrigger,
-    XarrayStatisticsTrigger,
-    XarrayAggregateTrigger
-)
-
-# Raster endpoints
-_raster_extract = RasterExtractTrigger()
-_raster_point = RasterPointTrigger()
-_raster_clip = RasterClipTrigger()
-_raster_preview = RasterPreviewTrigger()
-
-@app.route(route="raster/extract/{collection}/{item}", methods=["GET"])
-async def raster_extract(req: func.HttpRequest) -> func.HttpResponse:
-    return await _raster_extract.handle(req)
-
-@app.route(route="raster/point/{collection}/{item}", methods=["GET"])
-async def raster_point(req: func.HttpRequest) -> func.HttpResponse:
-    return await _raster_point.handle(req)
-
-@app.route(route="raster/clip/{collection}/{item}", methods=["GET"])
-async def raster_clip(req: func.HttpRequest) -> func.HttpResponse:
-    return await _raster_clip.handle(req)
-
-@app.route(route="raster/preview/{collection}/{item}", methods=["GET"])
-async def raster_preview(req: func.HttpRequest) -> func.HttpResponse:
-    return await _raster_preview.handle(req)
-
-# xarray endpoints
-_xarray_point = XarrayPointTrigger()
-_xarray_stats = XarrayStatisticsTrigger()
-_xarray_agg = XarrayAggregateTrigger()
-
-@app.route(route="xarray/point/{collection}/{item}", methods=["GET"])
-async def xarray_point(req: func.HttpRequest) -> func.HttpResponse:
-    return await _xarray_point.handle(req)
-
-@app.route(route="xarray/statistics/{collection}/{item}", methods=["GET"])
-async def xarray_statistics(req: func.HttpRequest) -> func.HttpResponse:
-    return await _xarray_stats.handle(req)
-
-@app.route(route="xarray/aggregate/{collection}/{item}", methods=["GET"])
-async def xarray_aggregate(req: func.HttpRequest) -> func.HttpResponse:
-    return await _xarray_agg.handle(req)
-```
-
-### Step 5: Configure Environment Variables
-
-Add to Azure Function App settings or local.settings.json:
+Add to Azure Function App settings or `local.settings.json`:
 
 ```json
 {
   "Values": {
-    "STAC_API_BASE_URL": "https://rmhogcstac-....azurewebsites.net/stac",
+    "STAC_API_BASE_URL": "https://rmhogcapi-....azurewebsites.net/api/stac",
     "TITILER_BASE_URL": "https://your-titiler-instance.com",
-    "AZURE_STORAGE_ACCOUNT": "rmhazuregeo"
+    "AZURE_STORAGE_ACCOUNT": "rmhazuregeo",
+
+    "POSTGIS_HOST": "rmhpgflex.postgres.database.azure.com",
+    "POSTGIS_PORT": "5432",
+    "POSTGIS_DATABASE": "geopgflex",
+    "POSTGIS_USER": "rmhpgflexadmin",
+    "USE_MANAGED_IDENTITY": "true",
+    "AZURE_CLIENT_ID": "<your-managed-identity-client-id>"
   }
 }
 ```
 
-### Step 6: Deploy and Validate
+### Step 4: Register Routes in function_app.py
+
+Add to rmhogcapi's `function_app.py`:
+
+```python
+# =============================================================================
+# RASTER API ENDPOINTS (NEW - 19 DEC 2025)
+# =============================================================================
+try:
+    from raster_api.triggers import (
+        RasterExtractTrigger,
+        RasterPointTrigger,
+        RasterClipTrigger,
+        RasterPreviewTrigger
+    )
+
+    _raster_extract = RasterExtractTrigger()
+    _raster_point = RasterPointTrigger()
+    _raster_clip = RasterClipTrigger()
+    _raster_preview = RasterPreviewTrigger()
+
+    @app.route(route="raster/extract/{collection}/{item}", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+    def raster_extract(req: func.HttpRequest) -> func.HttpResponse:
+        return _raster_extract.handle(req)
+
+    @app.route(route="raster/point/{collection}/{item}", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+    def raster_point(req: func.HttpRequest) -> func.HttpResponse:
+        return _raster_point.handle(req)
+
+    @app.route(route="raster/clip/{collection}/{item}", methods=["GET", "POST"], auth_level=func.AuthLevel.ANONYMOUS)
+    def raster_clip(req: func.HttpRequest) -> func.HttpResponse:
+        return _raster_clip.handle(req)
+
+    @app.route(route="raster/preview/{collection}/{item}", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+    def raster_preview(req: func.HttpRequest) -> func.HttpResponse:
+        return _raster_preview.handle(req)
+
+    logger.info("✅ Raster API registered (4 endpoints)")
+except ImportError as e:
+    logger.warning(f"⚠️ Raster API not available: {e}")
+
+# =============================================================================
+# XARRAY API ENDPOINTS (NEW - 19 DEC 2025)
+# =============================================================================
+try:
+    from xarray_api.triggers import (
+        XarrayPointTrigger,
+        XarrayStatisticsTrigger,
+        XarrayAggregateTrigger
+    )
+
+    _xarray_point = XarrayPointTrigger()
+    _xarray_stats = XarrayStatisticsTrigger()
+    _xarray_agg = XarrayAggregateTrigger()
+
+    @app.route(route="xarray/point/{collection}/{item}", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+    def xarray_point(req: func.HttpRequest) -> func.HttpResponse:
+        return _xarray_point.handle(req)
+
+    @app.route(route="xarray/statistics/{collection}/{item}", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+    def xarray_statistics(req: func.HttpRequest) -> func.HttpResponse:
+        return _xarray_stats.handle(req)
+
+    @app.route(route="xarray/aggregate/{collection}/{item}", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+    def xarray_aggregate(req: func.HttpRequest) -> func.HttpResponse:
+        return _xarray_agg.handle(req)
+
+    logger.info("✅ xarray API registered (3 endpoints)")
+except ImportError as e:
+    logger.warning(f"⚠️ xarray API not available: {e}")
+```
+
+**Note**: All handlers are **sync** - no `async def`, no `await`.
+
+### Step 5: Deploy and Validate
 
 ```bash
 # Deploy to Azure
-func azure functionapp publish rmhogcstac --python --build remote
+func azure functionapp publish rmhogcapi --python --build remote
 
 # Test endpoints
 # 1. Raster point query
-curl "https://rmhogcstac.../api/raster/point/{collection}/{item}?lon=-77.0&lat=38.9"
+curl "https://rmhogcapi.../api/raster/point/{collection}/{item}?location=-77.0,38.9"
 
 # 2. xarray time-series
-curl "https://rmhogcstac.../api/xarray/point/{collection}/{item}?lon=-77.0&lat=38.9&variable=tasmax"
+curl "https://rmhogcapi.../api/xarray/point/{collection}/{item}?location=-77.0,38.9"
 
 # 3. Raster preview
-curl "https://rmhogcstac.../api/raster/preview/{collection}/{item}"
+curl "https://rmhogcapi.../api/raster/preview/{collection}/{item}"
 ```
 
 ---
@@ -262,61 +249,97 @@ curl "https://rmhogcstac.../api/raster/preview/{collection}/{item}"
 raster_api/
 ├── __init__.py
 ├── config.py
-├── service.py ────────────┬──> services/stac_client.py
-│                          └──> services/titiler_client.py
+├── service.py ────────────┬──> services/stac_client.py (env: STAC_API_BASE_URL)
+│                          └──> services/titiler_client.py (env: TITILER_BASE_URL)
 └── triggers.py ──────────────> raster_api/service.py
 
 xarray_api/
 ├── __init__.py
 ├── config.py
 ├── output.py
-├── service.py ────────────┬──> services/stac_client.py
-│                          └──> services/xarray_reader.py
+├── service.py ────────────┬──> services/stac_client.py (env: STAC_API_BASE_URL)
+│                          └──> services/xarray_reader.py (env: AZURE_STORAGE_ACCOUNT)
 └── triggers.py ──────────────> xarray_api/service.py
 
 services/
-├── stac_client.py ───────────> config (get_config)
-├── titiler_client.py ────────> config (get_config)
-└── xarray_reader.py ─────────> xarray, zarr, fsspec
+├── stac_client.py ───────────> httpx (NO config import)
+├── titiler_client.py ────────> httpx (NO config import)
+└── xarray_reader.py ─────────> xarray, zarr, fsspec (NO config import)
 ```
 
 ---
 
-## STAC Client Details
+## Service Client Details
 
-The `stac_client.py` provides:
+### STACClient (SYNC)
 
-1. **TTL Cache**: 5-minute TTL for items, 1-hour TTL for collections
-2. **STACItem dataclass**: Parsed item with asset URL extraction
-3. **Async HTTP**: Uses httpx for non-blocking requests
+```python
+from services.stac_client import STACClient
 
-Key classes:
-- `TTLCache` - Thread-safe cache with auto-expiry
-- `STACItem` - Parsed item with `get_asset_url()`, `is_zarr()`, `is_cog()` methods
-- `STACClient` - Async client with `get_item()`, `get_collection()`, `list_items()`
+# Option 1: Explicit base_url
+client = STACClient(base_url="https://rmhogcapi.../api/stac")
 
----
+# Option 2: From STAC_API_BASE_URL env var
+client = STACClient()
 
-## TiTiler Client Details
+# Get item (SYNC - no await)
+response = client.get_item("collection", "item_id")
+if response.success:
+    zarr_url = response.item.get_asset_url("data")
 
-The `titiler_client.py` provides:
+client.close()
+```
 
-1. **COG endpoints**: `/cog/info`, `/cog/point`, `/cog/bbox`, `/cog/preview`, `/cog/feature`
-2. **xarray endpoints**: `/xarray/info`, `/xarray/point`, `/xarray/bbox`, `/xarray/preview`
-3. **Async HTTP**: Uses httpx with configurable timeout
+Features:
+- TTL Cache: 5-minute for items, 1-hour for collections
+- `httpx.Client` (sync, not async)
+- `STACItem` dataclass with `get_asset_url()`, `is_zarr()`, `is_cog()` methods
 
----
+### TiTilerClient (SYNC)
 
-## xarray Reader Details
+```python
+from services.titiler_client import TiTilerClient
 
-The `xarray_reader.py` provides:
+# Option 1: Explicit base_url
+client = TiTilerClient(base_url="https://titiler.../")
 
-1. **Point time-series**: Extract values at lon/lat over time range
-2. **Regional statistics**: Spatial stats per time period over bbox
-3. **Temporal aggregation**: Mean/max/min/sum over time range
+# Option 2: From TITILER_BASE_URL env var
+client = TiTilerClient()
 
-Key features:
-- Lazy imports (xarray/zarr only loaded when needed)
+# Get COG info (SYNC - no await)
+response = client.get_cog_info("https://storage.../file.tif")
+
+client.close()
+```
+
+Endpoints:
+- COG: `/cog/info`, `/cog/point`, `/cog/bbox`, `/cog/preview`, `/cog/feature`
+- xarray: `/xarray/info`, `/xarray/point`, `/xarray/bbox`, `/xarray/preview`
+
+### XarrayReader (SYNC)
+
+```python
+from services.xarray_reader import XarrayReader
+
+# Option 1: Explicit storage_account
+reader = XarrayReader(storage_account="rmhazuregeo")
+
+# Option 2: From AZURE_STORAGE_ACCOUNT env var
+reader = XarrayReader()
+
+# Get time-series (SYNC)
+result = reader.get_point_timeseries(
+    zarr_url="https://storage.../data.zarr",
+    variable="tasmax",
+    lon=-77.0,
+    lat=38.9
+)
+
+reader.close()
+```
+
+Features:
+- Lazy imports (xarray/zarr loaded on first use)
 - Dataset caching (reuse open datasets)
 - Azure Blob support via fsspec/adlfs
 
@@ -326,21 +349,36 @@ Key features:
 
 | Story | Acceptance Criteria |
 |-------|---------------------|
-| S1.2.1: Copy raster_api module | Module exists in rmhogcstac, imports succeed |
-| S1.2.2: Copy xarray_api module | Module exists in rmhogcstac, imports succeed |
-| S1.2.3: Copy service clients | stac_client, titiler_client, xarray_reader in services/ |
-| S1.2.4: Update requirements.txt | xarray, zarr, httpx, fsspec added |
-| S1.2.5: Register routes | Routes visible in Azure Functions list |
-| S1.2.6: Deploy and validate | All endpoints return correct responses |
+| S1.2.1: Copy service clients | `services/stac_client.py`, `titiler_client.py`, `xarray_reader.py` exist |
+| S1.2.2: Copy raster_api module | Module exists, imports succeed without config errors |
+| S1.2.3: Copy xarray_api module | Module exists, imports succeed without config errors |
+| S1.2.4: Update requirements.txt | httpx, xarray, zarr, fsspec, adlfs added |
+| S1.2.5: Configure env vars | STAC_API_BASE_URL, TITILER_BASE_URL, AZURE_STORAGE_ACCOUNT set |
+| S1.2.6: Register routes | 7 new routes visible in Azure Functions list |
+| S1.2.7: Deploy and validate | All endpoints return correct responses |
+
+---
+
+## What's NOT Needed from rmhazuregeoapi
+
+| Module | Reason |
+|--------|--------|
+| `config/` | Service clients use env vars directly |
+| `jobs/` | ETL only - not used by reader |
+| `repository/` | PostGIS access via existing rmhogcapi infrastructure |
+| `vector_api/` | Uses OGC Features (already in rmhogcapi) |
+| `platform_api/` | DDH integration - ETL only |
+| `analytics/` | DuckDB exports - ETL only |
 
 ---
 
 ## Notes
 
-- The modules use async/await - ensure rmhogcstac supports async handlers
-- STAC client caches are global (shared across requests in same process)
-- xarray reader caches open datasets (memory-efficient for repeated queries)
-- TiTiler client requires a running TiTiler instance (separate deployment)
+- **All code is synchronous** - no async/await, no asyncio event loops
+- **STAC client caches are global** - shared across requests in same process
+- **xarray reader caches datasets** - memory-efficient for repeated queries
+- **TiTiler requires separate deployment** - this plan doesn't include TiTiler setup
+- **Code runs in both apps** - same files work in rmhazuregeoapi (dev) and rmhogcapi (prod)
 
 ---
 

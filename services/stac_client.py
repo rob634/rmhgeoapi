@@ -4,12 +4,13 @@
 # EPOCH: 4 - ACTIVE
 # STATUS: Service Layer - Internal STAC API client for item resolution
 # PURPOSE: Query internal STAC API to resolve collection/item to asset URLs
-# LAST_REVIEWED: 18 DEC 2025
+# LAST_REVIEWED: 19 DEC 2025
 # EXPORTS: STACClient
-# DEPENDENCIES: httpx, config.app_config
+# DEPENDENCIES: httpx (sync)
+# PORTABLE: Yes - no config imports, works in rmhgeoapi and rmhogcapi
 # ============================================================================
 """
-Internal STAC Client Service.
+Internal STAC Client Service (SYNC VERSION).
 
 Queries our own STAC API (pgSTAC) to resolve:
 - Collection metadata
@@ -18,16 +19,25 @@ Queries our own STAC API (pgSTAC) to resolve:
 
 Used by raster_api and xarray_api modules to look up asset URLs
 from friendly collection/item identifiers.
+
+PORTABILITY:
+    This module is designed to work in both rmhgeoapi and rmhogcapi.
+    It does NOT import from config - instead accepts base_url as constructor
+    param or falls back to STAC_API_BASE_URL environment variable.
+
+SYNC VERSION (19 DEC 2025):
+    Converted from async to sync for Reader API migration.
+    Uses httpx.Client instead of httpx.AsyncClient.
+    All methods are synchronous - no async/await.
 """
 
+import os
 import httpx
 import logging
 import time
 from typing import Dict, Any, Optional, List, Tuple
 from dataclasses import dataclass, field
 from threading import Lock
-
-from config import get_config
 
 logger = logging.getLogger(__name__)
 
@@ -205,22 +215,33 @@ class STACClientResponse:
 
 class STACClient:
     """
-    Internal STAC API client.
+    Internal STAC API client (SYNC VERSION).
 
     Queries our own STAC API to resolve collection/item identifiers
     to actual asset URLs.
 
+    PORTABILITY:
+        Works in both rmhgeoapi and rmhogcapi without modification.
+        Does not import from config - uses constructor params or env vars.
+
     Usage:
+        # Option 1: Explicit base_url
+        client = STACClient(base_url="https://rmhogcapi.../api/stac")
+
+        # Option 2: From environment variable STAC_API_BASE_URL
         client = STACClient()
 
-        # Get single item
-        response = await client.get_item("cmip6", "tasmax-ssp585")
+        # Get single item (SYNC - no await)
+        response = client.get_item("cmip6", "tasmax-ssp585")
         if response.success:
             zarr_url = response.item.get_asset_url("data")
             variable = response.item.get_variable()
 
         # Get collection
-        response = await client.get_collection("cmip6")
+        response = client.get_collection("cmip6")
+
+        # Always close when done
+        client.close()
     """
 
     def __init__(self, base_url: Optional[str] = None, timeout: float = 10.0):
@@ -228,29 +249,36 @@ class STACClient:
         Initialize STAC client.
 
         Args:
-            base_url: STAC API base URL. If not provided, uses config.
+            base_url: STAC API base URL. If not provided, uses STAC_API_BASE_URL env var.
             timeout: Request timeout in seconds.
-        """
-        config = get_config()
-        self.base_url = (base_url or config.stac_api_base_url).rstrip('/')
-        self.timeout = timeout
-        self._client: Optional[httpx.AsyncClient] = None
 
-    async def _get_client(self) -> httpx.AsyncClient:
-        """Get or create async HTTP client."""
+        Raises:
+            ValueError: If no base_url provided and STAC_API_BASE_URL not set.
+        """
+        # Config-independent: accept param or use env var
+        self.base_url = (base_url or os.getenv("STAC_API_BASE_URL", "")).rstrip('/')
+        if not self.base_url:
+            raise ValueError(
+                "STACClient requires base_url parameter or STAC_API_BASE_URL environment variable"
+            )
+        self.timeout = timeout
+        self._client: Optional[httpx.Client] = None
+
+    def _get_client(self) -> httpx.Client:
+        """Get or create sync HTTP client."""
         if self._client is None or self._client.is_closed:
-            self._client = httpx.AsyncClient(
+            self._client = httpx.Client(
                 timeout=httpx.Timeout(self.timeout),
                 follow_redirects=True
             )
         return self._client
 
-    async def close(self):
+    def close(self):
         """Close the HTTP client."""
         if self._client and not self._client.is_closed:
-            await self._client.aclose()
+            self._client.close()
 
-    async def get_item(
+    def get_item(
         self,
         collection_id: str,
         item_id: str,
@@ -281,10 +309,10 @@ class STACClient:
                 )
 
         url = f"{self.base_url}/collections/{collection_id}/items/{item_id}"
-        client = await self._get_client()
+        client = self._get_client()
 
         try:
-            response = await client.get(url)
+            response = client.get(url)
 
             if response.status_code == 404:
                 return STACClientResponse(
@@ -342,7 +370,7 @@ class STACClient:
                 error=f"Unexpected error: {str(e)}"
             )
 
-    async def get_collection(self, collection_id: str, use_cache: bool = True) -> STACClientResponse:
+    def get_collection(self, collection_id: str, use_cache: bool = True) -> STACClientResponse:
         """
         Get STAC collection metadata.
 
@@ -365,10 +393,10 @@ class STACClient:
                 )
 
         url = f"{self.base_url}/collections/{collection_id}"
-        client = await self._get_client()
+        client = self._get_client()
 
         try:
-            response = await client.get(url)
+            response = client.get(url)
 
             if response.status_code == 404:
                 return STACClientResponse(
@@ -424,7 +452,7 @@ class STACClient:
                 error=f"Unexpected error: {str(e)}"
             )
 
-    async def list_items(
+    def list_items(
         self,
         collection_id: str,
         limit: int = 10,
@@ -446,10 +474,10 @@ class STACClient:
         if bbox:
             params["bbox"] = bbox
 
-        client = await self._get_client()
+        client = self._get_client()
 
         try:
-            response = await client.get(url, params=params)
+            response = client.get(url, params=params)
 
             if response.status_code >= 400:
                 return STACClientResponse(

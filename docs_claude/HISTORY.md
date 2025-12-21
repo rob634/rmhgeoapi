@@ -1,9 +1,54 @@
 # Project History
 
-**Last Updated**: 30 NOV 2025 - Dual Database Architecture Complete ✅
+**Last Updated**: 21 DEC 2025 - FATHOM ETL Pipeline Phase 1 Complete
 **Note**: For project history prior to September 11, 2025, see **OLDER_HISTORY.md**
 
 This document tracks completed architectural changes and improvements to the Azure Geospatial ETL Pipeline from September 11, 2025 onwards.
+
+---
+
+## 21 DEC 2025: FATHOM Flood Data ETL Pipeline 🌊
+
+**Status**: ⚠️ **Phase 1 Complete, Phase 2 In Progress**
+**Impact**: Global flood hazard data processing at scale
+**Author**: Robert and Claude
+**Docs**: [FATHOM_ETL.md](./FATHOM_ETL.md)
+
+### Achievement
+
+Built two-phase ETL pipeline for FATHOM global flood data:
+
+```
+Phase 1: Band Stacking (8 return periods → 1 multi-band COG per tile)
+Phase 2: Spatial Merge (N×N tiles → 1 larger merged COG)
+```
+
+### Test Region: Côte d'Ivoire
+
+| Phase | Status | Output |
+|-------|--------|--------|
+| Phase 1 | ✅ Complete | 32 stacked COGs in `silver-fathom/fathom-stacked/ci/` |
+| Phase 2 | ⚠️ 46/47 | Merged COGs in `silver-fathom/fathom/ci/` |
+
+### Bugs Fixed
+
+1. **dict_row access pattern**: psycopg3 returns dicts, code used tuple unpacking
+2. **source_container filter**: Phase 2 inventory filtered wrong container
+
+### Performance Metrics
+
+- Phase 2 avg task: 96.8 seconds
+- Peak memory: ~5 GB RSS (grid_size=3)
+- Safe grid_size limit: 3 (larger causes OOM)
+
+### Key Files
+
+| File | Purpose |
+|------|---------|
+| `jobs/process_fathom_stack.py` | Phase 1 job |
+| `jobs/process_fathom_merge.py` | Phase 2 job |
+| `services/fathom_etl.py` | All handlers |
+| `services/fathom_container_inventory.py` | Bronze scanner |
 
 ---
 

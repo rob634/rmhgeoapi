@@ -1,9 +1,9 @@
 {
   "openapi": "3.0.1",
   "info": {
-    "title": "Geospatial Data Processing Platform API",
+    "title": "Geospatial Service Layer API",
     "version": "1.0.0",
-    "description": "**Platform-as-a-Service for Geospatial Data Processing**\n\nThis API provides data processing services for DDH (Development Data Hub) and partners.\nSubmit raw geospatial data, receive processed REST API endpoints.\n\n**Key Features:**\n- Raster processing (COG creation, tiling, STAC cataloging)\n- Vector processing (PostGIS ingestion, validation)\n- Multi-stage orchestration with status tracking\n- STAC-compliant metadata catalog\n\n**Base URLs:**\n- Production (via APIM): `https://api.platform.com/v1` (when APIM provisioned)\n- Development (direct): `https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net`\n",
+    "description": "**Read-Only Query APIs for Geospatial Data Access**\n\nThis API provides standardized access to processed geospatial data:\n\n**Components:**\n- **OGC Features**: Vector data from PostGIS via OGC API - Features Core 1.0\n- **STAC**: Raster/vector metadata catalog via STAC API v1.0.0\n- **Raster**: Convenience wrappers for TiTiler tile serving\n- **xarray**: Direct Zarr access for time-series queries\n\n**Related Services (separate docs):**\n- TiTiler (Docker): `/cog/*`, `/xarray/*` - see TiTiler's own swagger\n- ETL Platform: `/api/platform/*` - internal processing APIs\n",
     "contact": {
       "name": "Geospatial Platform Team",
       "email": "platform-support@example.com"
@@ -15,22 +15,10 @@
   "servers": [
     {
       "url": "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net",
-      "description": "Azure Functions backend (direct access - development)"
-    },
-    {
-      "url": "https://api.platform.com/v1",
-      "description": "Azure API Management gateway (production - when provisioned)"
+      "description": "Azure Functions backend (development)"
     }
   ],
   "tags": [
-    {
-      "name": "Platform",
-      "description": "Processing request management and orchestration"
-    },
-    {
-      "name": "Status",
-      "description": "Job status monitoring and tracking"
-    },
     {
       "name": "OGC Features",
       "description": "OGC API - Features (Part 1: Core) compliant endpoints.\nQuery vector data stored in PostGIS using standard GeoJSON responses.\n"
@@ -41,440 +29,14 @@
     },
     {
       "name": "Raster",
-      "description": "Raster query and extraction endpoints.\nExtract values, clip regions, and generate previews from COGs.\n"
+      "description": "Raster query and extraction endpoints.\nConvenience wrappers that look up STAC items and proxy to TiTiler.\n"
+    },
+    {
+      "name": "xarray",
+      "description": "Direct Zarr access for time-series and temporal aggregation.\nMore efficient than TiTiler for multi-timestep queries.\n"
     }
   ],
   "paths": {
-    "/api/platform/submit": {
-      "post": {
-        "summary": "Submit data processing request",
-        "description": "Submit a geospatial data processing request. The Platform will:\n1. Validate request parameters\n2. Create CoreMachine jobs based on data type\n3. Return tracking ID and monitor URL\n4. Process data asynchronously\n\n**Processing Workflows by Data Type:**\n- `raster`: Validate \u2192 COG creation \u2192 STAC cataloging\n- `vector`: Validate \u2192 PostGIS ingestion \u2192 STAC cataloging\n- `collection`: Tile detection \u2192 Parallel COG creation \u2192 MosaicJSON\n\n**Request ID Generation:**\n- Deterministic SHA256 hash of (dataset_id + resource_id + version_id + timestamp)\n- Allows reprocessing same dataset multiple times\n- Returns existing request if duplicate submission detected\n\n**Response:**\n- `202 Accepted`: Request queued for processing\n- `400 Bad Request`: Invalid parameters\n- `500 Internal Server Error`: Platform error\n",
-        "operationId": "submitProcessingRequest",
-        "tags": [
-          "Platform"
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/PlatformRequest"
-              },
-              "examples": {
-                "helloWorld": {
-                  "summary": "Hello World test (with test_mode flag)",
-                  "description": "Simple test request that creates hello_world job",
-                  "value": {
-                    "dataset_id": "test-dataset",
-                    "resource_id": "test-resource",
-                    "version_id": "v1.0",
-                    "data_type": "raster",
-                    "source_location": "https://rmhazuregeo.blob.core.windows.net/rmhazuregeobronze/test.tif",
-                    "parameters": {
-                      "test_mode": true
-                    },
-                    "client_id": "ddh"
-                  }
-                },
-                "rasterProcessing": {
-                  "summary": "Raster processing (aerial imagery)",
-                  "description": "Process aerial photo to analysis-tier COG",
-                  "value": {
-                    "dataset_id": "aerial-imagery-2024",
-                    "resource_id": "site-alpha",
-                    "version_id": "v1.0",
-                    "data_type": "raster",
-                    "source_location": "https://rmhazuregeo.blob.core.windows.net/rmhazuregeobronze/aerial-alpha.tif",
-                    "parameters": {
-                      "output_tier": "analysis",
-                      "target_crs": "EPSG:4326"
-                    },
-                    "client_id": "ddh"
-                  }
-                },
-                "vectorProcessing": {
-                  "summary": "Vector processing (boundary data)",
-                  "description": "Ingest GeoJSON boundaries to PostGIS",
-                  "value": {
-                    "dataset_id": "boundary-data-2024",
-                    "resource_id": "district-boundaries",
-                    "version_id": "v1.0",
-                    "data_type": "vector",
-                    "source_location": "https://rmhazuregeo.blob.core.windows.net/rmhazuregeobronze/boundaries.geojson",
-                    "parameters": {
-                      "target_crs": "EPSG:4326",
-                      "table_name": "district_boundaries"
-                    },
-                    "client_id": "ddh"
-                  }
-                },
-                "rasterCollection": {
-                  "summary": "Raster collection (satellite tiles)",
-                  "description": "Process multiple rasters as unified collection with MosaicJSON",
-                  "value": {
-                    "dataset_id": "landsat-8-collection",
-                    "resource_id": "scene-123456",
-                    "version_id": "v1.0",
-                    "data_type": "raster",
-                    "source_location": "https://rmhazuregeo.blob.core.windows.net/rmhazuregeobronze/landsat/*.tif",
-                    "parameters": {
-                      "output_tier": "visualization",
-                      "create_mosaicjson": true
-                    },
-                    "client_id": "ddh"
-                  }
-                }
-              }
-            }
-          }
-        },
-        "responses": {
-          "202": {
-            "description": "**Request accepted for processing**\n\nThe Platform has validated and queued your request. CoreMachine jobs\nhave been created and will process asynchronously.\n\nUse the `monitor_url` to poll for status updates, or wait for webhook\ncallback if configured.\n",
-            "headers": {
-              "X-Correlation-Id": {
-                "description": "Request correlation ID for tracing",
-                "schema": {
-                  "type": "string",
-                  "example": "a3f2c1b8"
-                }
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProcessingResponse"
-                },
-                "examples": {
-                  "accepted": {
-                    "summary": "Typical acceptance response",
-                    "value": {
-                      "success": true,
-                      "request_id": "a3f2c1b8e9d7f6a5c4b3a2e1d9c8b7a6",
-                      "status": "pending",
-                      "jobs_created": [
-                        "validate_raster_job_abc123",
-                        "process_raster_job_def456"
-                      ],
-                      "message": "Platform request submitted. 2 jobs created.",
-                      "monitor_url": "/api/platform/status/a3f2c1b8e9d7f6a5c4b3a2e1d9c8b7a6"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "**Invalid request parameters**\n\nCommon issues:\n- Missing required fields (dataset_id, resource_id, version_id)\n- Invalid data_type enum value\n- Invalid source_location URL format\n- Invalid parameters for selected data_type\n",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                },
-                "examples": {
-                  "missingField": {
-                    "summary": "Missing required field",
-                    "value": {
-                      "success": false,
-                      "error": "Field 'dataset_id' is required",
-                      "error_type": "ValidationError"
-                    }
-                  },
-                  "invalidDataType": {
-                    "summary": "Invalid enum value",
-                    "value": {
-                      "success": false,
-                      "error": "data_type must be one of: raster, vector, pointcloud, mesh_3d, tabular",
-                      "error_type": "ValidationError"
-                    }
-                  },
-                  "invalidUrl": {
-                    "summary": "Invalid source location",
-                    "value": {
-                      "success": false,
-                      "error": "source_location must be Azure blob URL (https://) or absolute path (/)",
-                      "error_type": "ValidationError"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "**Internal server error**\n\nPlatform encountered an error during request processing.\nCheck Application Insights logs with correlation_id.\n",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                },
-                "examples": {
-                  "internalError": {
-                    "summary": "Platform error",
-                    "value": {
-                      "success": false,
-                      "error": "Failed to create CoreMachine jobs",
-                      "error_type": "PlatformError"
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/platform/status/{request_id}": {
-      "get": {
-        "summary": "Get processing request status",
-        "description": "Retrieve status of a Platform processing request including:\n- Overall request status (pending, processing, completed, failed)\n- Associated CoreMachine job statuses\n- Job statistics (total, completed, failed, processing)\n- API endpoints (when completed)\n- Data characteristics (when completed)\n\n**Status Values:**\n- `pending`: Request accepted, jobs not started yet\n- `processing`: One or more jobs actively processing\n- `completed`: All jobs completed successfully\n- `failed`: One or more jobs failed\n\n**Polling Recommendations:**\n- Poll every 5-10 seconds for small datasets\n- Poll every 30-60 seconds for large datasets\n- Use exponential backoff for long-running jobs\n- Consider webhook callbacks for better UX\n",
-        "operationId": "getPlatformStatus",
-        "tags": [
-          "Status"
-        ],
-        "parameters": [
-          {
-            "name": "request_id",
-            "in": "path",
-            "required": true,
-            "description": "Platform request ID (32-character hash from submit response)",
-            "schema": {
-              "type": "string",
-              "minLength": 32,
-              "maxLength": 32,
-              "example": "a3f2c1b8e9d7f6a5c4b3a2e1d9c8b7a6"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "**Request status retrieved successfully**\n\nReturns comprehensive status including all associated jobs.\n",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/StatusResponse"
-                },
-                "examples": {
-                  "processing": {
-                    "summary": "Request in progress",
-                    "value": {
-                      "request_id": "a3f2c1b8e9d7f6a5c4b3a2e1d9c8b7a6",
-                      "dataset_id": "aerial-imagery-2024",
-                      "resource_id": "site-alpha",
-                      "version_id": "v1.0",
-                      "data_type": "raster",
-                      "status": "processing",
-                      "job_ids": [
-                        "validate_raster_job_abc123",
-                        "process_raster_job_def456"
-                      ],
-                      "parameters": {
-                        "output_tier": "analysis"
-                      },
-                      "metadata": {
-                        "client_id": "ddh",
-                        "source_location": "https://storage.blob.core.windows.net/bronze/aerial-alpha.tif",
-                        "submission_time": "2025-10-29T15:30:00Z"
-                      },
-                      "created_at": "2025-10-29T15:30:00Z",
-                      "updated_at": "2025-10-29T15:32:15Z",
-                      "jobs": [
-                        {
-                          "job_id": "validate_raster_job_abc123",
-                          "job_type": "validate_raster_job",
-                          "status": "completed",
-                          "stage": 1,
-                          "created_at": "2025-10-29T15:30:00Z",
-                          "updated_at": "2025-10-29T15:30:45Z"
-                        },
-                        {
-                          "job_id": "process_raster_job_def456",
-                          "job_type": "process_raster",
-                          "status": "processing",
-                          "stage": 2,
-                          "created_at": "2025-10-29T15:30:45Z",
-                          "updated_at": "2025-10-29T15:32:15Z"
-                        }
-                      ],
-                      "job_statistics": {
-                        "total": 2,
-                        "completed": 1,
-                        "failed": 0,
-                        "processing": 1,
-                        "pending": 0
-                      },
-                      "urls": {
-                        "jobs": [
-                          "/api/jobs/status/validate_raster_job_abc123",
-                          "/api/jobs/status/process_raster_job_def456"
-                        ]
-                      }
-                    }
-                  },
-                  "completed": {
-                    "summary": "Request completed successfully",
-                    "value": {
-                      "request_id": "a3f2c1b8e9d7f6a5c4b3a2e1d9c8b7a6",
-                      "dataset_id": "aerial-imagery-2024",
-                      "resource_id": "site-alpha",
-                      "version_id": "v1.0",
-                      "data_type": "raster",
-                      "status": "completed",
-                      "job_ids": [
-                        "validate_raster_job_abc123",
-                        "process_raster_job_def456"
-                      ],
-                      "result_data": {
-                        "api_endpoints": {
-                          "tiles": "https://tiles.platform.com/{z}/{x}/{y}?dataset=aerial-imagery-2024&resource=site-alpha&version=v1.0",
-                          "stac_item": "https://stac.platform.com/collections/aerial-imagery-2024/items/site-alpha-v1.0",
-                          "download_cog": "https://rmhazuregeo.blob.core.windows.net/silver-cogs/aerial-alpha-analysis.tif"
-                        },
-                        "data_characteristics": {
-                          "bbox": [
-                            -120.5,
-                            38.0,
-                            -119.5,
-                            39.0
-                          ],
-                          "crs": "EPSG:4326",
-                          "file_size_mb": 45.2,
-                          "band_count": 3,
-                          "data_type": "uint8",
-                          "processing_time_seconds": 180
-                        }
-                      },
-                      "job_statistics": {
-                        "total": 2,
-                        "completed": 2,
-                        "failed": 0,
-                        "processing": 0,
-                        "pending": 0
-                      },
-                      "created_at": "2025-10-29T15:30:00Z",
-                      "updated_at": "2025-10-29T15:33:00Z"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "**Request not found**\n\nThe specified request_id does not exist in Platform database.\n",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                },
-                "examples": {
-                  "notFound": {
-                    "summary": "Request ID not found",
-                    "value": {
-                      "success": false,
-                      "error": "Platform request a3f2c1b8e9d7f6a5c4b3a2e1d9c8b7a6 not found"
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/platform/status": {
-      "get": {
-        "summary": "List all processing requests",
-        "description": "List Platform requests with optional filtering.\n\n**Use Cases:**\n- DDH dashboard showing all processing jobs\n- Failed request monitoring\n- Recent submissions audit\n\n**Filters:**\n- `status`: Filter by request status\n- `limit`: Limit number of results (default 100, max 1000)\n",
-        "operationId": "listPlatformRequests",
-        "tags": [
-          "Status"
-        ],
-        "parameters": [
-          {
-            "name": "status",
-            "in": "query",
-            "required": false,
-            "description": "Filter by request status",
-            "schema": {
-              "type": "string",
-              "enum": [
-                "pending",
-                "processing",
-                "completed",
-                "failed"
-              ]
-            }
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "required": false,
-            "description": "Maximum number of results",
-            "schema": {
-              "type": "integer",
-              "default": 100,
-              "minimum": 1,
-              "maximum": 1000
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "**Request list retrieved successfully**\n",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RequestListResponse"
-                },
-                "examples": {
-                  "recentRequests": {
-                    "summary": "Recent submissions",
-                    "value": {
-                      "success": true,
-                      "count": 3,
-                      "requests": [
-                        {
-                          "request_id": "a3f2c1b8e9d7f6a5c4b3a2e1d9c8b7a6",
-                          "dataset_id": "aerial-imagery-2024",
-                          "resource_id": "site-alpha",
-                          "version_id": "v1.0",
-                          "data_type": "raster",
-                          "status": "completed",
-                          "job_count": 2,
-                          "created_at": "2025-10-29T15:30:00Z",
-                          "updated_at": "2025-10-29T15:33:00Z"
-                        },
-                        {
-                          "request_id": "b4e3d2c1f0a9e8d7c6b5a4e3d2c1b0a9",
-                          "dataset_id": "boundary-data-2024",
-                          "resource_id": "district-boundaries",
-                          "version_id": "v1.0",
-                          "data_type": "vector",
-                          "status": "processing",
-                          "job_count": 1,
-                          "created_at": "2025-10-29T15:35:00Z",
-                          "updated_at": "2025-10-29T15:36:15Z"
-                        },
-                        {
-                          "request_id": "c5d4e3f2a1b0c9d8e7f6a5b4c3d2e1f0",
-                          "dataset_id": "test-dataset",
-                          "resource_id": "test-resource",
-                          "version_id": "v1.0",
-                          "data_type": "raster",
-                          "status": "pending",
-                          "job_count": 1,
-                          "created_at": "2025-10-29T15:40:00Z",
-                          "updated_at": "2025-10-29T15:40:00Z"
-                        }
-                      ]
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/features": {
       "get": {
         "summary": "OGC Features landing page",
@@ -581,7 +143,7 @@
     "/api/features/collections/{collection_id}/items": {
       "get": {
         "summary": "Query features",
-        "description": "Query features from a collection with optional spatial/attribute filters.\n\n**Query Parameters:**\n- `bbox`: Bounding box filter (minx,miny,maxx,maxy)\n- `limit`: Max features to return (default: 100, max: 10000)\n- `offset`: Pagination offset\n- `{property}`: Filter by any property value\n\n**Response Format:**\nGeoJSON FeatureCollection with `numberReturned` and `numberMatched`.\n",
+        "description": "Query features from a collection with optional spatial/attribute filters.\n\n**Query Parameters:**\n- `bbox`: Bounding box filter (minx,miny,maxx,maxy)\n- `datetime`: Temporal filter (ISO 8601 interval)\n- `limit`: Max features to return (default: 100, max: 10000)\n- `offset`: Pagination offset\n- `sortby`: Sort field (+/- prefix for asc/desc)\n- `simplify`: Geometry simplification tolerance in meters\n- `properties`: Attribute filter (key:value)\n\n**Response Format:**\nGeoJSON FeatureCollection with `numberReturned` and `numberMatched`.\n",
         "operationId": "ogcFeaturesItems",
         "tags": [
           "OGC Features"
@@ -605,6 +167,15 @@
             }
           },
           {
+            "name": "datetime",
+            "in": "query",
+            "description": "Temporal filter (ISO 8601 interval, e.g., 2024-01-01/2024-12-31)",
+            "schema": {
+              "type": "string",
+              "example": "2024-01-01/2024-12-31"
+            }
+          },
+          {
             "name": "limit",
             "in": "query",
             "description": "Maximum number of features",
@@ -621,6 +192,24 @@
             "schema": {
               "type": "integer",
               "default": 0
+            }
+          },
+          {
+            "name": "sortby",
+            "in": "query",
+            "description": "Sort field (+field for asc, -field for desc)",
+            "schema": {
+              "type": "string",
+              "example": "-created"
+            }
+          },
+          {
+            "name": "simplify",
+            "in": "query",
+            "description": "Geometry simplification tolerance in meters",
+            "schema": {
+              "type": "number",
+              "example": 100
             }
           }
         ],
@@ -881,10 +470,48 @@
         }
       }
     },
+    "/api/stac/search": {
+      "post": {
+        "summary": "Search STAC items",
+        "description": "Cross-collection search with advanced filtering.\n\n**Supported Filters:**\n- `collections`: Array of collection IDs\n- `bbox`: Bounding box [minx, miny, maxx, maxy]\n- `datetime`: ISO 8601 interval\n- `limit`: Max results\n",
+        "operationId": "stacSearch",
+        "tags": [
+          "STAC"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/STACSearchRequest"
+              },
+              "example": {
+                "collections": ["my-collection"],
+                "bbox": [-180, -90, 180, 90],
+                "datetime": "2024-01-01/2024-12-31",
+                "limit": 10
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "STAC ItemCollection",
+            "content": {
+              "application/geo+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/STACItemCollection"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/raster/point/{collection}/{item}": {
       "get": {
         "summary": "Get raster value at point",
-        "description": "Extract raster pixel value(s) at a specific location.\n\n**Location Options:**\n- Named location: `?location=washington_dc`\n- Coordinates: `?location=-77.0369,38.9072`\n",
+        "description": "Extract raster pixel value(s) at a specific location.\nLooks up STAC item and proxies to TiTiler.\n\n**Location Options:**\n- Coordinates: `?location=-77.0369,38.9072`\n- Named location: `?location=washington_dc` (if configured)\n",
         "operationId": "rasterPoint",
         "tags": [
           "Raster"
@@ -912,10 +539,19 @@
             "name": "location",
             "in": "query",
             "required": true,
-            "description": "Named location or lon,lat coordinates",
+            "description": "lon,lat coordinates or named location",
             "schema": {
               "type": "string",
               "example": "-77.0369,38.9072"
+            }
+          },
+          {
+            "name": "time_index",
+            "in": "query",
+            "description": "Time index for temporal data (1-based)",
+            "schema": {
+              "type": "integer",
+              "default": 1
             }
           }
         ],
@@ -939,7 +575,7 @@
     "/api/raster/extract/{collection}/{item}": {
       "get": {
         "summary": "Extract bbox as image",
-        "description": "Extract a rectangular region from a raster as an image.\n\n**Bbox Format:** minx,miny,maxx,maxy (EPSG:4326)\n",
+        "description": "Extract a rectangular region from a raster as an image.\nLooks up STAC item and proxies to TiTiler.\n\n**Bbox Format:** minx,miny,maxx,maxy (EPSG:4326)\n",
         "operationId": "rasterExtract",
         "tags": [
           "Raster"
@@ -981,27 +617,35 @@
                 "png",
                 "jpeg",
                 "webp",
-                "tiff"
+                "tif"
               ],
               "default": "png"
             }
           },
           {
-            "name": "width",
+            "name": "time_index",
             "in": "query",
-            "description": "Output width in pixels",
+            "description": "Time index for temporal data (1-based)",
             "schema": {
               "type": "integer",
-              "default": 512
+              "default": 1
             }
           },
           {
-            "name": "height",
+            "name": "colormap_name",
             "in": "query",
-            "description": "Output height in pixels",
+            "description": "Colormap name (viridis, turbo, etc.)",
             "schema": {
-              "type": "integer",
-              "default": 512
+              "type": "string"
+            }
+          },
+          {
+            "name": "rescale",
+            "in": "query",
+            "description": "Value rescaling (min,max)",
+            "schema": {
+              "type": "string",
+              "example": "0,255"
             }
           }
         ],
@@ -1015,7 +659,7 @@
                   "format": "binary"
                 }
               },
-              "image/jpeg": {
+              "image/tiff": {
                 "schema": {
                   "type": "string",
                   "format": "binary"
@@ -1029,7 +673,7 @@
     "/api/raster/clip/{collection}/{item}": {
       "get": {
         "summary": "Clip raster to boundary",
-        "description": "Clip raster to a named boundary (state, country, etc.).\n\n**Boundary Types:**\n- `state`: US state boundaries\n- `country`: Country boundaries (admin0)\n",
+        "description": "Clip raster to a named boundary (state, country, etc.).\nLooks up boundary geometry from OGC Features and proxies to TiTiler.\n",
         "operationId": "rasterClip",
         "tags": [
           "Raster"
@@ -1055,6 +699,7 @@
             "name": "boundary_type",
             "in": "query",
             "required": true,
+            "description": "Type of boundary (state, country)",
             "schema": {
               "type": "string",
               "enum": [
@@ -1070,6 +715,15 @@
             "description": "Boundary identifier (e.g., \"VA\", \"USA\")",
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": ["png", "tif"],
+              "default": "png"
             }
           }
         ],
@@ -1150,401 +804,257 @@
           }
         }
       }
+    },
+    "/api/xarray/point/{collection}/{item}": {
+      "get": {
+        "summary": "Get time-series at point",
+        "description": "Extract time-series values at a location from Zarr data.\nDirect xarray access - more efficient than multiple TiTiler calls.\n\n**Use Case:** Get all hourly temperatures for a month at a location.\n",
+        "operationId": "xarrayPoint",
+        "tags": [
+          "xarray"
+        ],
+        "parameters": [
+          {
+            "name": "collection",
+            "in": "path",
+            "required": true,
+            "description": "STAC collection ID",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "item",
+            "in": "path",
+            "required": true,
+            "description": "STAC item ID",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "location",
+            "in": "query",
+            "required": true,
+            "description": "lon,lat coordinates",
+            "schema": {
+              "type": "string",
+              "example": "-77.0,38.9"
+            }
+          },
+          {
+            "name": "start_time",
+            "in": "query",
+            "description": "Start of time range (ISO 8601)",
+            "schema": {
+              "type": "string",
+              "example": "2020-01-01"
+            }
+          },
+          {
+            "name": "end_time",
+            "in": "query",
+            "description": "End of time range (ISO 8601)",
+            "schema": {
+              "type": "string",
+              "example": "2020-01-31"
+            }
+          },
+          {
+            "name": "aggregation",
+            "in": "query",
+            "description": "Temporal aggregation",
+            "schema": {
+              "type": "string",
+              "enum": ["none", "daily", "monthly", "yearly"],
+              "default": "none"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Time-series data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/XArrayTimeSeriesResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/xarray/statistics/{collection}/{item}": {
+      "get": {
+        "summary": "Get regional statistics over time",
+        "description": "Calculate spatial statistics over a bbox for each time step.\n\n**Use Case:** Get monthly mean/max/min temperature over a region.\n",
+        "operationId": "xarrayStatistics",
+        "tags": [
+          "xarray"
+        ],
+        "parameters": [
+          {
+            "name": "collection",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "item",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "bbox",
+            "in": "query",
+            "required": true,
+            "description": "Bounding box (minx,miny,maxx,maxy)",
+            "schema": {
+              "type": "string",
+              "example": "-125,25,-65,50"
+            }
+          },
+          {
+            "name": "start_time",
+            "in": "query",
+            "description": "Start of time range",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "end_time",
+            "in": "query",
+            "description": "End of time range",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "stat",
+            "in": "query",
+            "description": "Statistic to compute",
+            "schema": {
+              "type": "string",
+              "enum": ["mean", "max", "min", "sum"],
+              "default": "mean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Statistics time-series",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/XArrayStatisticsResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/xarray/aggregate/{collection}/{item}": {
+      "get": {
+        "summary": "Temporal aggregation export",
+        "description": "Aggregate over time dimension and export as image.\n\n**Use Case:** Export annual mean temperature as GeoTIFF.\n",
+        "operationId": "xarrayAggregate",
+        "tags": [
+          "xarray"
+        ],
+        "parameters": [
+          {
+            "name": "collection",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "item",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "bbox",
+            "in": "query",
+            "required": true,
+            "description": "Bounding box (minx,miny,maxx,maxy)",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "start_time",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "end_time",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "temporal_agg",
+            "in": "query",
+            "required": true,
+            "description": "Aggregation method",
+            "schema": {
+              "type": "string",
+              "enum": ["mean", "max", "min", "sum"]
+            }
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": ["tif", "png"],
+              "default": "tif"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Aggregated raster",
+            "content": {
+              "image/tiff": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "image/png": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
     "schemas": {
-      "PlatformRequest": {
-        "type": "object",
-        "required": [
-          "dataset_id",
-          "resource_id",
-          "version_id",
-          "data_type",
-          "source_location",
-          "client_id"
-        ],
-        "properties": {
-          "dataset_id": {
-            "type": "string",
-            "description": "**DDH Dataset Identifier** (Mandatory)\n\nTop-level organizational unit in DDH hierarchy.\nExample: \"aerial-imagery-2024\", \"landsat-8-collection\"\n",
-            "minLength": 1,
-            "maxLength": 255,
-            "example": "aerial-imagery-2024"
-          },
-          "resource_id": {
-            "type": "string",
-            "description": "**DDH Resource Identifier** (Mandatory)\n\nSecond-level identifier within dataset.\nExample: \"site-alpha\", \"LC08_L1TP_044034\"\n",
-            "minLength": 1,
-            "maxLength": 255,
-            "example": "site-alpha"
-          },
-          "version_id": {
-            "type": "string",
-            "description": "**DDH Version Identifier** (Mandatory)\n\nSpecific version of resource (allows reprocessing).\nExample: \"v1.0\", \"v2.0\", \"2024-10-29\"\n",
-            "minLength": 1,
-            "maxLength": 50,
-            "example": "v1.0"
-          },
-          "data_type": {
-            "type": "string",
-            "enum": [
-              "raster",
-              "vector",
-              "pointcloud",
-              "mesh_3d",
-              "tabular"
-            ],
-            "description": "**Data Type for Processing** (Mandatory)\n\nDetermines which CoreMachine workflow to execute:\n- `raster`: Validate \u2192 COG \u2192 STAC (jobs: validate_raster_job, process_raster)\n- `vector`: Validate \u2192 PostGIS \u2192 STAC (jobs: ingest_vector)\n- `pointcloud`: Reserved for future (no job exists yet)\n- `mesh_3d`: Reserved for future (no job exists yet)\n- `tabular`: Reserved for future (no job exists yet)\n",
-            "example": "raster"
-          },
-          "source_location": {
-            "type": "string",
-            "format": "uri",
-            "description": "**Azure Blob Storage Location** (Mandatory)\n\nMust be Azure blob URL or absolute path:\n- HTTPS URL: `https://storage.blob.core.windows.net/container/file.tif`\n- WASBS URL: `wasbs://container@storage.blob.core.windows.net/file.tif`\n- Absolute path: `/mnt/data/file.tif` (if mounted)\n\nPlatform must have read access via:\n- Managed Identity (preferred)\n- SAS token in URL\n- Storage account key (via environment)\n",
-            "example": "https://rmhazuregeo.blob.core.windows.net/rmhazuregeobronze/aerial-alpha.tif"
-          },
-          "parameters": {
-            "type": "object",
-            "additionalProperties": true,
-            "description": "**Processing Parameters** (Optional)\n\nJob-specific configuration options:\n\n**Raster Processing:**\n- `output_tier`: \"visualization\" | \"analysis\" | \"archive\" (COG compression tier)\n- `target_crs`: \"EPSG:4326\" (reproject to CRS)\n- `create_mosaicjson`: true (for collections)\n\n**Vector Processing:**\n- `target_crs`: \"EPSG:4326\" (reproject to CRS)\n- `table_name`: \"my_table\" (PostGIS table name)\n- `schema`: \"geo\" (PostGIS schema, default: geo)\n\n**Testing:**\n- `test_mode`: true (creates hello_world job instead of real processing)\n",
-            "example": {
-              "output_tier": "analysis",
-              "target_crs": "EPSG:4326"
-            }
-          },
-          "client_id": {
-            "type": "string",
-            "description": "**Client Application Identifier** (Mandatory)\n\nIdentifies which application submitted the request.\nUsed for tracking, quotas, and client-specific behavior.\n\n**Known Clients:**\n- \"ddh\" - Development Data Hub (primary client)\n- \"analytics\" - Analytics application (future)\n- \"mobile\" - Mobile app (future)\n",
-            "example": "ddh"
-          }
-        }
-      },
-      "ProcessingResponse": {
-        "type": "object",
-        "required": [
-          "success",
-          "request_id",
-          "status",
-          "jobs_created",
-          "message",
-          "monitor_url"
-        ],
-        "properties": {
-          "success": {
-            "type": "boolean",
-            "description": "Whether request was accepted successfully",
-            "example": true
-          },
-          "request_id": {
-            "type": "string",
-            "description": "Platform tracking ID (32-character SHA256 hash prefix).\n\nGenerated deterministically from:\n`SHA256(dataset_id + resource_id + version_id + timestamp)[:32]`\n\nUse this ID to poll status via `/api/platform/status/{request_id}`\n",
-            "minLength": 32,
-            "maxLength": 32,
-            "example": "a3f2c1b8e9d7f6a5c4b3a2e1d9c8b7a6"
-          },
-          "status": {
-            "type": "string",
-            "enum": [
-              "pending",
-              "processing",
-              "completed",
-              "failed"
-            ],
-            "description": "Current request status:\n- `pending`: Accepted, jobs queued but not started\n- `processing`: One or more jobs actively running\n- `completed`: All jobs completed successfully\n- `failed`: One or more jobs failed\n",
-            "example": "pending"
-          },
-          "jobs_created": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "description": "List of CoreMachine job IDs created for this request.\n\nEach job can be monitored individually via:\n`/api/jobs/status/{job_id}`\n",
-            "example": [
-              "validate_raster_job_abc123",
-              "process_raster_job_def456"
-            ]
-          },
-          "message": {
-            "type": "string",
-            "description": "Human-readable status message",
-            "example": "Platform request submitted. 2 jobs created."
-          },
-          "monitor_url": {
-            "type": "string",
-            "format": "uri-reference",
-            "description": "Relative URL to poll for status updates.\n\nAppend to base URL:\n- Direct: `https://rmhgeoapibeta-...{monitor_url}`\n- APIM: `https://api.platform.com/v1{monitor_url}`\n",
-            "example": "/api/platform/status/a3f2c1b8e9d7f6a5c4b3a2e1d9c8b7a6"
-          }
-        }
-      },
-      "StatusResponse": {
-        "type": "object",
-        "required": [
-          "request_id",
-          "dataset_id",
-          "resource_id",
-          "version_id",
-          "data_type",
-          "status",
-          "job_ids",
-          "created_at",
-          "updated_at"
-        ],
-        "properties": {
-          "request_id": {
-            "type": "string",
-            "minLength": 32,
-            "maxLength": 32
-          },
-          "dataset_id": {
-            "type": "string"
-          },
-          "resource_id": {
-            "type": "string"
-          },
-          "version_id": {
-            "type": "string"
-          },
-          "data_type": {
-            "type": "string"
-          },
-          "status": {
-            "type": "string",
-            "enum": [
-              "pending",
-              "processing",
-              "completed",
-              "failed"
-            ]
-          },
-          "job_ids": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "description": "List of CoreMachine job IDs"
-          },
-          "parameters": {
-            "type": "object",
-            "additionalProperties": true,
-            "description": "Original request parameters"
-          },
-          "metadata": {
-            "type": "object",
-            "additionalProperties": true,
-            "description": "Request metadata (client_id, submission_time, etc.)"
-          },
-          "result_data": {
-            "type": "object",
-            "nullable": true,
-            "description": "Processing results (only present when status=completed).\nContains API endpoints and data characteristics.\n",
-            "properties": {
-              "api_endpoints": {
-                "type": "object",
-                "description": "REST API endpoints for accessing processed data",
-                "properties": {
-                  "tiles": {
-                    "type": "string",
-                    "format": "uri",
-                    "description": "Tile server URL (for rasters)"
-                  },
-                  "stac_item": {
-                    "type": "string",
-                    "format": "uri",
-                    "description": "STAC item URL"
-                  },
-                  "download_cog": {
-                    "type": "string",
-                    "format": "uri",
-                    "description": "Direct download URL for COG"
-                  }
-                }
-              },
-              "data_characteristics": {
-                "type": "object",
-                "description": "Metadata about processed data",
-                "properties": {
-                  "bbox": {
-                    "type": "array",
-                    "items": {
-                      "type": "number"
-                    },
-                    "minItems": 4,
-                    "maxItems": 4,
-                    "description": "Bounding box [minx, miny, maxx, maxy]"
-                  },
-                  "crs": {
-                    "type": "string",
-                    "description": "Coordinate reference system"
-                  },
-                  "file_size_mb": {
-                    "type": "number",
-                    "description": "Output file size in megabytes"
-                  },
-                  "processing_time_seconds": {
-                    "type": "integer",
-                    "description": "Total processing time"
-                  }
-                }
-              }
-            }
-          },
-          "jobs": {
-            "type": "array",
-            "description": "Detailed status of each CoreMachine job",
-            "items": {
-              "type": "object",
-              "properties": {
-                "job_id": {
-                  "type": "string"
-                },
-                "job_type": {
-                  "type": "string"
-                },
-                "status": {
-                  "type": "string"
-                },
-                "stage": {
-                  "type": "integer"
-                },
-                "created_at": {
-                  "type": "string",
-                  "format": "date-time"
-                },
-                "updated_at": {
-                  "type": "string",
-                  "format": "date-time"
-                }
-              }
-            }
-          },
-          "job_statistics": {
-            "type": "object",
-            "description": "Summary statistics of jobs",
-            "properties": {
-              "total": {
-                "type": "integer"
-              },
-              "completed": {
-                "type": "integer"
-              },
-              "failed": {
-                "type": "integer"
-              },
-              "processing": {
-                "type": "integer"
-              },
-              "pending": {
-                "type": "integer"
-              }
-            }
-          },
-          "urls": {
-            "type": "object",
-            "description": "Helpful URLs for job monitoring",
-            "properties": {
-              "jobs": {
-                "type": "array",
-                "items": {
-                  "type": "string",
-                  "format": "uri-reference"
-                }
-              }
-            }
-          },
-          "created_at": {
-            "type": "string",
-            "format": "date-time",
-            "description": "Request creation timestamp (UTC)"
-          },
-          "updated_at": {
-            "type": "string",
-            "format": "date-time",
-            "description": "Last update timestamp (UTC)"
-          }
-        }
-      },
-      "RequestListResponse": {
-        "type": "object",
-        "required": [
-          "success",
-          "count",
-          "requests"
-        ],
-        "properties": {
-          "success": {
-            "type": "boolean",
-            "example": true
-          },
-          "count": {
-            "type": "integer",
-            "description": "Number of requests returned",
-            "example": 3
-          },
-          "requests": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "properties": {
-                "request_id": {
-                  "type": "string"
-                },
-                "dataset_id": {
-                  "type": "string"
-                },
-                "resource_id": {
-                  "type": "string"
-                },
-                "version_id": {
-                  "type": "string"
-                },
-                "data_type": {
-                  "type": "string"
-                },
-                "status": {
-                  "type": "string"
-                },
-                "job_count": {
-                  "type": "integer",
-                  "description": "Number of CoreMachine jobs for this request"
-                },
-                "created_at": {
-                  "type": "string",
-                  "format": "date-time"
-                },
-                "updated_at": {
-                  "type": "string",
-                  "format": "date-time"
-                }
-              }
-            }
-          }
-        }
-      },
-      "ErrorResponse": {
-        "type": "object",
-        "required": [
-          "success",
-          "error"
-        ],
-        "properties": {
-          "success": {
-            "type": "boolean",
-            "example": false
-          },
-          "error": {
-            "type": "string",
-            "description": "Human-readable error message",
-            "example": "Field 'dataset_id' is required"
-          },
-          "error_type": {
-            "type": "string",
-            "description": "Error classification",
-            "example": "ValidationError"
-          }
-        }
-      },
       "OGCLandingPage": {
         "type": "object",
         "properties": {
@@ -1620,20 +1130,6 @@
                       "type": "array",
                       "items": {
                         "type": "number"
-                      }
-                    }
-                  }
-                }
-              },
-              "temporal": {
-                "type": "object",
-                "properties": {
-                  "interval": {
-                    "type": "array",
-                    "items": {
-                      "type": "array",
-                      "items": {
-                        "type": "string"
                       }
                     }
                   }
@@ -1798,7 +1294,6 @@
       },
       "STACCollection": {
         "type": "object",
-        "description": "STAC Collection representing a group of related items.\nFor rasters, typically groups COGs from same dataset.\nFor vectors, typically groups related PostGIS tables.\n",
         "properties": {
           "type": {
             "type": "string",
@@ -1810,8 +1305,7 @@
             "type": "string"
           },
           "id": {
-            "type": "string",
-            "description": "Collection identifier (maps to dataset_id)"
+            "type": "string"
           },
           "title": {
             "type": "string"
@@ -1826,33 +1320,10 @@
             "type": "object",
             "properties": {
               "spatial": {
-                "type": "object",
-                "properties": {
-                  "bbox": {
-                    "type": "array",
-                    "items": {
-                      "type": "array",
-                      "items": {
-                        "type": "number"
-                      }
-                    }
-                  }
-                }
+                "type": "object"
               },
               "temporal": {
-                "type": "object",
-                "properties": {
-                  "interval": {
-                    "type": "array",
-                    "items": {
-                      "type": "array",
-                      "items": {
-                        "type": "string",
-                        "nullable": true
-                      }
-                    }
-                  }
-                }
+                "type": "object"
               }
             }
           },
@@ -1895,7 +1366,6 @@
       },
       "STACItem": {
         "type": "object",
-        "description": "STAC Item representing a single spatiotemporal asset.\n\n**For Rasters:**\n- `assets.data.href`: COG URL in silver-cogs container\n- `assets.data.type`: \"image/tiff; application=geotiff; profile=cloud-optimized\"\n- Properties include band info, CRS, resolution\n\n**For Vectors:**\n- `assets.data.href`: OGC Features API URL\n- `assets.data.type`: \"application/geo+json\"\n- Properties include feature count, geometry type\n",
         "properties": {
           "type": {
             "type": "string",
@@ -1906,53 +1376,24 @@
           "stac_version": {
             "type": "string"
           },
-          "stac_extensions": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
           "id": {
-            "type": "string",
-            "description": "Item ID (format dataset_id-resource_id-version_id)"
+            "type": "string"
           },
           "geometry": {
-            "type": "object",
-            "description": "GeoJSON geometry (bounding polygon)"
+            "type": "object"
           },
           "bbox": {
             "type": "array",
             "items": {
               "type": "number"
-            },
-            "minItems": 4,
-            "maxItems": 4,
-            "description": "Bounding box [minx, miny, maxx, maxy]"
+            }
           },
           "properties": {
             "type": "object",
-            "description": "Item properties including datetime, created, updated",
             "properties": {
               "datetime": {
                 "type": "string",
-                "format": "date-time",
-                "description": "Acquisition or creation datetime"
-              },
-              "created": {
-                "type": "string",
                 "format": "date-time"
-              },
-              "updated": {
-                "type": "string",
-                "format": "date-time"
-              },
-              "platform": {
-                "type": "string",
-                "description": "Data source platform"
-              },
-              "gsd": {
-                "type": "number",
-                "description": "Ground sample distance (meters)"
               }
             },
             "additionalProperties": true
@@ -1965,52 +1406,67 @@
           },
           "assets": {
             "type": "object",
-            "description": "Asset dictionary keyed by asset role",
             "additionalProperties": {
               "$ref": "#/components/schemas/STACAsset"
             }
           },
           "collection": {
-            "type": "string",
-            "description": "Parent collection ID"
+            "type": "string"
           }
         }
       },
       "STACAsset": {
         "type": "object",
-        "description": "STAC Asset representing a downloadable file.\n\n**Common Asset Keys:**\n- `data`: Primary data file (COG, Zarr, or GeoJSON URL)\n- `thumbnail`: Preview image\n- `metadata`: Sidecar metadata file\n",
         "properties": {
           "href": {
             "type": "string",
-            "format": "uri",
-            "description": "Asset URL"
+            "format": "uri"
           },
           "type": {
-            "type": "string",
-            "description": "Media type",
-            "example": "image/tiff; application=geotiff; profile=cloud-optimized"
-          },
-          "title": {
             "type": "string"
           },
-          "description": {
+          "title": {
             "type": "string"
           },
           "roles": {
             "type": "array",
             "items": {
               "type": "string"
+            }
+          }
+        }
+      },
+      "STACSearchRequest": {
+        "type": "object",
+        "properties": {
+          "collections": {
+            "type": "array",
+            "items": {
+              "type": "string"
             },
-            "example": [
-              "data",
-              "visual"
-            ]
+            "description": "Collection IDs to search"
+          },
+          "bbox": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "minItems": 4,
+            "maxItems": 4,
+            "description": "Bounding box [minx, miny, maxx, maxy]"
+          },
+          "datetime": {
+            "type": "string",
+            "description": "ISO 8601 datetime interval"
+          },
+          "limit": {
+            "type": "integer",
+            "default": 10
           }
         }
       },
       "RasterPointResponse": {
         "type": "object",
-        "description": "Response from raster point query",
         "properties": {
           "collection": {
             "type": "string"
@@ -2026,10 +1482,6 @@
               },
               "lat": {
                 "type": "number"
-              },
-              "name": {
-                "type": "string",
-                "description": "Named location if used"
               }
             }
           },
@@ -2044,12 +1496,105 @@
             "type": "array",
             "items": {
               "type": "string"
-            },
-            "description": "Band names if available"
+            }
           },
           "units": {
-            "type": "string",
-            "description": "Data units if known"
+            "type": "string"
+          }
+        }
+      },
+      "XArrayTimeSeriesResponse": {
+        "type": "object",
+        "properties": {
+          "location": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "description": "[lon, lat]"
+          },
+          "item_id": {
+            "type": "string"
+          },
+          "variable": {
+            "type": "string"
+          },
+          "unit": {
+            "type": "string"
+          },
+          "time_series": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "time": {
+                  "type": "string"
+                },
+                "value": {
+                  "type": "number"
+                }
+              }
+            }
+          },
+          "statistics": {
+            "type": "object",
+            "properties": {
+              "min": {
+                "type": "number"
+              },
+              "max": {
+                "type": "number"
+              },
+              "mean": {
+                "type": "number"
+              },
+              "std": {
+                "type": "number"
+              }
+            }
+          }
+        }
+      },
+      "XArrayStatisticsResponse": {
+        "type": "object",
+        "properties": {
+          "bbox": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            }
+          },
+          "item_id": {
+            "type": "string"
+          },
+          "variable": {
+            "type": "string"
+          },
+          "aggregation": {
+            "type": "string"
+          },
+          "time_series": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "period": {
+                  "type": "string"
+                },
+                "spatial_mean": {
+                  "type": "number"
+                },
+                "spatial_min": {
+                  "type": "number"
+                },
+                "spatial_max": {
+                  "type": "number"
+                },
+                "valid_pixels": {
+                  "type": "integer"
+                }
+              }
+            }
           }
         }
       }

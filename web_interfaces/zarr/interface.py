@@ -52,24 +52,23 @@ class ZarrInterface(BaseInterface):
         """
         config = get_config()
 
-        # Build Zarr URL from config
+        # Storage config for dataset URLs
         storage_account = config.storage.silver.account_name
         container = config.storage.silver.cogs
-        zarr_url = f"https://{storage_account}.blob.core.windows.net/{container}/{self.ZARR_PATH}"
 
         # TiTiler base URL from config
         titiler_url = config.titiler_base_url.rstrip('/')
 
-        return self._generate_full_page(zarr_url, titiler_url)
+        return self._generate_full_page(storage_account, container, titiler_url)
 
-    def _generate_full_page(self, zarr_url: str, titiler_url: str) -> str:
+    def _generate_full_page(self, storage_account: str, container: str, titiler_url: str) -> str:
         """Generate complete HTML page with Leaflet and TiTiler-xarray integration."""
         return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Zarr Query - CMIP6 Climate Data</title>
+    <title>Zarr Explorer - Climate Data Viewer</title>
 
     <!-- Leaflet CSS -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
@@ -91,8 +90,29 @@ class ZarrInterface(BaseInterface):
 
     <script>
         // Configuration from server
-        const ZARR_URL = "{zarr_url}";
         const TITILER_URL = "{titiler_url}";
+        const STORAGE_ACCOUNT = "{storage_account}";
+        const CONTAINER = "{container}";
+
+        // Dataset configurations
+        const DATASETS = {{
+            'cmip6-sample': {{
+                name: 'CMIP6 Temperature Sample',
+                path: 'test-zarr/cmip6-tasmax-sample.zarr',
+                rescale: '250,320',
+                description: '12 monthly time steps, global coverage'
+            }},
+            'era5-global': {{
+                name: 'ERA5 Global Climate (Jan 2020)',
+                path: 'test-zarr/era5-global-sample.zarr',
+                rescale: '250,320',
+                description: '744 hourly steps, global 0.25deg, 9 variables'
+            }}
+        }};
+
+        // Current dataset URL
+        let currentDataset = 'cmip6-sample';
+        let ZARR_URL = `https://${{STORAGE_ACCOUNT}}.blob.core.windows.net/${{CONTAINER}}/${{DATASETS[currentDataset].path}}`;
 
         {self._generate_js()}
     </script>
@@ -122,7 +142,15 @@ class ZarrInterface(BaseInterface):
 
         <!-- Control Panel -->
         <div class="control-panel">
-            <h3>CMIP6 Zarr Query</h3>
+            <h3>Zarr Data Explorer</h3>
+
+            <div class="control-group">
+                <label for="dataset-select">Dataset:</label>
+                <select id="dataset-select">
+                    <option value="cmip6-sample">CMIP6 Temperature (Sample)</option>
+                    <option value="era5-global">ERA5 Global Climate (~27GB, 9 vars)</option>
+                </select>
+            </div>
 
             <div class="dataset-info" id="dataset-info">
                 <div class="info-loading">Loading dataset info...</div>
@@ -136,10 +164,23 @@ class ZarrInterface(BaseInterface):
             </div>
 
             <div class="control-group" id="time-control" style="display: none;">
-                <label for="time-select">Time:</label>
-                <select id="time-select">
-                    <option value="0">First timestep</option>
-                </select>
+                <label>Time Step (bidx):</label>
+                <div class="time-slider-container">
+                    <input type="range" id="time-slider" min="0" max="100" value="0" class="time-slider">
+                    <div class="time-display">
+                        <span id="time-current">1</span> / <span id="time-total">?</span>
+                    </div>
+                </div>
+                <div class="time-controls">
+                    <button id="time-prev" class="time-btn" title="Previous">⏮</button>
+                    <button id="time-play" class="time-btn" title="Play/Pause">▶️</button>
+                    <button id="time-next" class="time-btn" title="Next">⏭</button>
+                    <select id="time-speed" class="time-speed">
+                        <option value="1000">1s</option>
+                        <option value="500" selected>0.5s</option>
+                        <option value="250">0.25s</option>
+                    </select>
+                </div>
             </div>
 
             <div class="control-group">
@@ -357,6 +398,85 @@ class ZarrInterface(BaseInterface):
         .control-group select:disabled {
             background: #f0f0f0;
             color: #999;
+        }
+
+        /* Time Slider */
+        .time-slider-container {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 8px;
+        }
+
+        .time-slider {
+            flex: 1;
+            -webkit-appearance: none;
+            height: 6px;
+            border-radius: 3px;
+            background: #e9ecef;
+            outline: none;
+        }
+
+        .time-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            background: #00A3DA;
+            cursor: pointer;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+
+        .time-slider::-moz-range-thumb {
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            background: #00A3DA;
+            cursor: pointer;
+            border: none;
+        }
+
+        .time-display {
+            font-family: monospace;
+            font-size: 13px;
+            color: #053657;
+            min-width: 70px;
+            text-align: right;
+        }
+
+        .time-controls {
+            display: flex;
+            gap: 6px;
+            align-items: center;
+        }
+
+        .time-btn {
+            width: 36px;
+            height: 32px;
+            border: 1px solid #e9ecef;
+            border-radius: 4px;
+            background: white;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.2s;
+        }
+
+        .time-btn:hover {
+            background: #f0f7ff;
+            border-color: #0071BC;
+        }
+
+        .time-btn.playing {
+            background: #00A3DA;
+            border-color: #00A3DA;
+        }
+
+        .time-speed {
+            padding: 6px 8px;
+            border: 1px solid #e9ecef;
+            border-radius: 4px;
+            font-size: 12px;
+            background: white;
         }
 
         .button-group {
@@ -605,23 +725,48 @@ class ZarrInterface(BaseInterface):
         }
 
         // Load dataset info from TiTiler-xarray
+        // Per WIKI.md: Must call /xarray/variables first, then /xarray/info with variable
         async function loadDatasetInfo() {
             try {
                 setStatus('Loading dataset info...');
                 showSpinner('Fetching Zarr metadata...');
 
-                const infoUrl = `${TITILER_URL}/xarray/info?url=${encodeURIComponent(ZARR_URL)}`;
-                console.log('Fetching info:', infoUrl);
+                // STEP 1: Get available variables first (required before /info)
+                const varsUrl = `${TITILER_URL}/xarray/variables?url=${encodeURIComponent(ZARR_URL)}&decode_times=false`;
+                console.log('Fetching variables:', varsUrl);
 
-                const response = await fetch(infoUrl);
-
-                if (!response.ok) {
-                    const errorText = await response.text();
-                    throw new Error(`HTTP ${response.status}: ${errorText}`);
+                const varsResponse = await fetch(varsUrl);
+                if (!varsResponse.ok) {
+                    const errorText = await varsResponse.text();
+                    throw new Error(`Variables endpoint failed: HTTP ${varsResponse.status}: ${errorText}`);
                 }
 
-                datasetInfo = await response.json();
-                console.log('Dataset info:', datasetInfo);
+                const variables = await varsResponse.json();
+                console.log('Available variables:', variables);
+
+                if (!variables || variables.length === 0) {
+                    throw new Error('No variables found in Zarr dataset');
+                }
+
+                // Store variables for dropdown
+                datasetInfo = { variables: variables };
+
+                // STEP 2: Get info for first variable (required: variable param)
+                const firstVar = variables[0];
+                const infoUrl = `${TITILER_URL}/xarray/info?url=${encodeURIComponent(ZARR_URL)}&variable=${encodeURIComponent(firstVar)}&decode_times=false`;
+                console.log('Fetching info for variable:', firstVar, infoUrl);
+
+                const infoResponse = await fetch(infoUrl);
+                if (!infoResponse.ok) {
+                    const errorText = await infoResponse.text();
+                    throw new Error(`Info endpoint failed: HTTP ${infoResponse.status}: ${errorText}`);
+                }
+
+                const info = await infoResponse.json();
+                console.log('Dataset info:', info);
+
+                // Merge info into datasetInfo
+                datasetInfo = { ...datasetInfo, ...info };
 
                 // Update UI with dataset info
                 updateDatasetInfoPanel();
@@ -651,7 +796,7 @@ class ZarrInterface(BaseInterface):
                 console.error('Error loading dataset info:', error);
                 setStatus(`Error: ${error.message}`, 'error');
                 document.getElementById('dataset-info').innerHTML =
-                    `<div class="info-loading" style="color: #DC2626;">Failed to load dataset</div>`;
+                    `<div class="info-loading" style="color: #DC2626;">Failed to load: ${error.message}</div>`;
             } finally {
                 hideSpinner();
             }
@@ -659,20 +804,27 @@ class ZarrInterface(BaseInterface):
 
         function updateDatasetInfoPanel() {
             const panel = document.getElementById('dataset-info');
-
-            // Extract useful info
-            const dims = datasetInfo.dims || {};
             const attrs = datasetInfo.attrs || {};
 
             let html = '';
 
             // Dataset name from attrs or URL
-            const name = attrs.title || ZARR_URL.split('/').pop();
+            const name = attrs.long_name || attrs.title || ZARR_URL.split('/').pop();
             html += `<div class="info-row"><span class="info-label">Dataset:</span><span class="info-value">${name}</span></div>`;
 
-            // Dimensions
-            for (const [dim, size] of Object.entries(dims)) {
-                html += `<div class="info-row"><span class="info-label">${dim}:</span><span class="info-value">${size}</span></div>`;
+            // Dimensions from TiTiler response
+            if (datasetInfo.dimensions) {
+                html += `<div class="info-row"><span class="info-label">Dimensions:</span><span class="info-value">${datasetInfo.dimensions.join(', ')}</span></div>`;
+            }
+
+            // Size info
+            if (datasetInfo.width && datasetInfo.height) {
+                html += `<div class="info-row"><span class="info-label">Size:</span><span class="info-value">${datasetInfo.width} x ${datasetInfo.height}</span></div>`;
+            }
+
+            // Band count (time steps)
+            if (datasetInfo.count) {
+                html += `<div class="info-row"><span class="info-label">Time Steps:</span><span class="info-value">${datasetInfo.count}</span></div>`;
             }
 
             // Bounds if available
@@ -688,21 +840,15 @@ class ZarrInterface(BaseInterface):
             const select = document.getElementById('variable-select');
             select.innerHTML = '';
 
-            // Get data variables (exclude coordinate variables)
-            const variables = datasetInfo.data_vars || datasetInfo.variables || [];
-            const coords = datasetInfo.coords || [];
+            // Variables are now directly stored from /xarray/variables response
+            const variables = datasetInfo.variables || [];
 
-            // Filter out coordinates
-            const dataVars = Array.isArray(variables)
-                ? variables.filter(v => !coords.includes(v))
-                : Object.keys(variables).filter(v => !coords.includes(v));
-
-            if (dataVars.length === 0) {
+            if (variables.length === 0) {
                 select.innerHTML = '<option value="">No variables found</option>';
                 return;
             }
 
-            dataVars.forEach((varName, idx) => {
+            variables.forEach((varName, idx) => {
                 const option = document.createElement('option');
                 option.value = varName;
                 option.textContent = varName;
@@ -714,39 +860,97 @@ class ZarrInterface(BaseInterface):
             select.addEventListener('change', loadTiles);
         }
 
-        function populateTimeDropdown() {
-            const dims = datasetInfo.dims || {};
-            const timeControl = document.getElementById('time-control');
-            const timeSelect = document.getElementById('time-select');
+        // Animation state
+        let animationInterval = null;
+        let isPlaying = false;
+        let totalTimeSteps = 1;
 
-            // Check for time dimension
-            const timeDim = dims.time || dims.Time || dims.t;
-            if (!timeDim || timeDim <= 1) {
+        function populateTimeDropdown() {
+            const timeControl = document.getElementById('time-control');
+            const timeSlider = document.getElementById('time-slider');
+
+            // TiTiler returns 'count' for number of bands (time steps)
+            // and 'dimensions' array like ["time", "y", "x"]
+            const bandCount = datasetInfo.count || 1;
+            const dimensions = datasetInfo.dimensions || [];
+            const hasTimeDim = dimensions.includes('time') || dimensions.includes('Time');
+
+            if (!hasTimeDim || bandCount <= 1) {
                 timeControl.style.display = 'none';
                 return;
             }
 
+            totalTimeSteps = bandCount;
             timeControl.style.display = 'block';
-            timeSelect.innerHTML = '';
 
-            // Add time step options (limit to avoid huge dropdown)
-            const maxOptions = Math.min(timeDim, 50);
-            const step = Math.max(1, Math.floor(timeDim / maxOptions));
+            // Configure slider
+            timeSlider.min = 0;
+            timeSlider.max = bandCount - 1;
+            timeSlider.value = 0;
 
-            for (let i = 0; i < timeDim; i += step) {
-                const option = document.createElement('option');
-                option.value = i;
-                option.textContent = `Step ${i}`;
-                timeSelect.appendChild(option);
+            // Update display
+            document.getElementById('time-total').textContent = bandCount;
+            updateTimeDisplay(0);
+
+            // Slider change event
+            timeSlider.addEventListener('input', function() {
+                updateTimeDisplay(parseInt(this.value));
+                loadTiles();
+            });
+
+            // Control buttons
+            document.getElementById('time-prev').addEventListener('click', () => stepTime(-1));
+            document.getElementById('time-next').addEventListener('click', () => stepTime(1));
+            document.getElementById('time-play').addEventListener('click', toggleAnimation);
+        }
+
+        function updateTimeDisplay(idx) {
+            document.getElementById('time-current').textContent = idx + 1;  // 1-based display
+        }
+
+        function stepTime(delta) {
+            const slider = document.getElementById('time-slider');
+            let newVal = parseInt(slider.value) + delta;
+            newVal = Math.max(0, Math.min(totalTimeSteps - 1, newVal));
+            slider.value = newVal;
+            updateTimeDisplay(newVal);
+            loadTiles();
+        }
+
+        function toggleAnimation() {
+            const playBtn = document.getElementById('time-play');
+
+            if (isPlaying) {
+                // Stop animation
+                clearInterval(animationInterval);
+                animationInterval = null;
+                isPlaying = false;
+                playBtn.textContent = '▶️';
+                playBtn.classList.remove('playing');
+            } else {
+                // Start animation
+                isPlaying = true;
+                playBtn.textContent = '⏸️';
+                playBtn.classList.add('playing');
+
+                const speed = parseInt(document.getElementById('time-speed').value);
+                animationInterval = setInterval(() => {
+                    const slider = document.getElementById('time-slider');
+                    let newVal = parseInt(slider.value) + 1;
+                    if (newVal >= totalTimeSteps) {
+                        newVal = 0;  // Loop back to start
+                    }
+                    slider.value = newVal;
+                    updateTimeDisplay(newVal);
+                    loadTiles();
+                }, speed);
             }
-
-            timeSelect.addEventListener('change', loadTiles);
         }
 
         function loadTiles() {
             const variable = document.getElementById('variable-select').value;
             const colormap = document.getElementById('colormap-select').value;
-            const timeIdx = document.getElementById('time-select').value || 0;
+            const timeIdx = document.getElementById('time-slider').value || 0;
 
             if (!variable) {
                 setStatus('Select a variable first', 'error');
@@ -758,18 +962,21 @@ class ZarrInterface(BaseInterface):
                 map.removeLayer(tileLayer);
             }
 
-            // Build tile URL
-            // TiTiler-xarray tile endpoint: /xarray/tiles/{z}/{x}/{y}
-            let tileUrl = `${TITILER_URL}/xarray/tiles/{z}/{x}/{y}`;
+            // Build tile URL per WIKI.md pattern:
+            // /xarray/tiles/WebMercatorQuad/{z}/{x}/{y}@1x.png?url=...&variable=...&decode_times=false&bidx=1
+            let tileUrl = `${TITILER_URL}/xarray/tiles/WebMercatorQuad/{z}/{x}/{y}@1x.png`;
             tileUrl += `?url=${encodeURIComponent(ZARR_URL)}`;
             tileUrl += `&variable=${encodeURIComponent(variable)}`;
             tileUrl += `&colormap_name=${colormap}`;
+            tileUrl += `&decode_times=false`;  // CRITICAL: non-standard calendars
 
-            // Add time dimension if needed
-            const dims = datasetInfo.dims || {};
-            if (dims.time || dims.Time || dims.t) {
-                tileUrl += `&time=${timeIdx}`;
-            }
+            // CRITICAL: bidx required for temporal Zarr data (1-based index)
+            // Without bidx, get "Maximum array limit reached" error
+            const bidx = parseInt(timeIdx) + 1;  // Convert 0-based UI to 1-based bidx
+            tileUrl += `&bidx=${bidx}`;
+
+            // Add rescale for temperature data (Kelvin: ~250-320K range)
+            tileUrl += `&rescale=250,320`;
 
             console.log('Tile URL:', tileUrl);
 
@@ -796,7 +1003,7 @@ class ZarrInterface(BaseInterface):
         map.on('click', async function(e) {
             const { lat, lng } = e.latlng;
             const variable = document.getElementById('variable-select').value;
-            const timeIdx = document.getElementById('time-select').value || 0;
+            const timeIdx = document.getElementById('time-slider').value || 0;
 
             if (!variable) {
                 setStatus('Select a variable to query', 'error');
@@ -806,16 +1013,16 @@ class ZarrInterface(BaseInterface):
             try {
                 setStatus('Querying point...');
 
-                // Build point query URL
+                // Build point query URL per WIKI.md pattern:
+                // /xarray/point/{lon},{lat}?url=...&variable=...&decode_times=false&bidx=1
                 let pointUrl = `${TITILER_URL}/xarray/point/${lng},${lat}`;
                 pointUrl += `?url=${encodeURIComponent(ZARR_URL)}`;
                 pointUrl += `&variable=${encodeURIComponent(variable)}`;
+                pointUrl += `&decode_times=false`;  // CRITICAL: non-standard calendars
 
-                // Add time if needed
-                const dims = datasetInfo.dims || {};
-                if (dims.time || dims.Time || dims.t) {
-                    pointUrl += `&time=${timeIdx}`;
-                }
+                // CRITICAL: bidx required for temporal Zarr data (1-based index)
+                const bidx = parseInt(timeIdx) + 1;
+                pointUrl += `&bidx=${bidx}`;
 
                 console.log('Point query URL:', pointUrl);
 
@@ -893,6 +1100,31 @@ class ZarrInterface(BaseInterface):
 
         // Colormap change handler
         document.getElementById('colormap-select').addEventListener('change', loadTiles);
+
+        // Dataset switch handler
+        document.getElementById('dataset-select').addEventListener('change', function() {
+            currentDataset = this.value;
+            ZARR_URL = `https://${STORAGE_ACCOUNT}.blob.core.windows.net/${CONTAINER}/${DATASETS[currentDataset].path}`;
+
+            // Stop any animation
+            if (isPlaying) {
+                toggleAnimation();
+            }
+
+            // Remove existing tile layer
+            if (tileLayer) {
+                map.removeLayer(tileLayer);
+            }
+
+            // Reset UI
+            document.getElementById('variable-select').disabled = true;
+            document.getElementById('variable-select').innerHTML = '<option value="">Loading...</option>';
+            document.getElementById('time-control').style.display = 'none';
+            document.getElementById('query-result').style.display = 'none';
+
+            // Reload dataset
+            loadDatasetInfo();
+        });
 
         // Initialize on page load
         window.addEventListener('load', loadDatasetInfo);

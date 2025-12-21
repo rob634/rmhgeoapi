@@ -1,5 +1,16 @@
+# ============================================================================
+# CLAUDE CONTEXT - RASTER API HTTP TRIGGERS
+# ============================================================================
+# EPOCH: 4 - ACTIVE
+# STATUS: Trigger Layer - HTTP handlers for raster convenience endpoints
+# PURPOSE: Azure Functions HTTP handlers for raster API
+# LAST_REVIEWED: 19 DEC 2025
+# EXPORTS: get_raster_triggers
+# DEPENDENCIES: azure-functions, .service
+# PORTABLE: Yes - works in rmhgeoapi and rmhogcapi
+# ============================================================================
 """
-Raster API HTTP Triggers.
+Raster API HTTP Triggers (SYNC VERSION).
 
 Azure Functions HTTP handlers for raster convenience endpoints.
 
@@ -15,13 +26,14 @@ Integration (in function_app.py):
     _raster_triggers = get_raster_triggers()
     # Register with decorator pattern (see function_app.py for STAC API example)
 
-Created: 18 DEC 2025
+SYNC VERSION (19 DEC 2025):
+    Removed asyncio boilerplate - services are now synchronous.
+    All handlers are simple sync functions.
 """
 
 import azure.functions as func
 import json
 import logging
-import asyncio
 from typing import Dict, Any, List
 
 from .config import get_raster_api_config
@@ -129,6 +141,7 @@ class RasterExtractTrigger(BaseRasterTrigger):
 
     def handle(self, req: func.HttpRequest) -> func.HttpResponse:
         """Handle extract request."""
+        service = None
         try:
             # Get path parameters
             collection = req.route_params.get('collection')
@@ -154,30 +167,20 @@ class RasterExtractTrigger(BaseRasterTrigger):
             if format_param not in ['tif', 'png', 'npy', 'jpeg', 'webp']:
                 return self._error_response(f"Invalid format: {format_param}")
 
-            # Create service and execute
+            # Create service and execute (SYNC - no asyncio needed)
             service = RasterAPIService(self.config)
-
-            # Run async operation
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-                response = loop.run_until_complete(
-                    service.extract_bbox(
-                        collection_id=collection,
-                        item_id=item,
-                        bbox=bbox,
-                        format=format_param,
-                        asset=asset,
-                        time_index=time_index,
-                        colormap=colormap,
-                        rescale=rescale,
-                        width=int(width) if width else None,
-                        height=int(height) if height else None
-                    )
-                )
-            finally:
-                loop.run_until_complete(service.close())
-                loop.close()
+            response = service.extract_bbox(
+                collection_id=collection,
+                item_id=item,
+                bbox=bbox,
+                format=format_param,
+                asset=asset,
+                time_index=time_index,
+                colormap=colormap,
+                rescale=rescale,
+                width=int(width) if width else None,
+                height=int(height) if height else None
+            )
 
             if not response.success:
                 return self._error_response(response.error, response.status_code)
@@ -201,6 +204,9 @@ class RasterExtractTrigger(BaseRasterTrigger):
         except Exception as e:
             logger.exception(f"Error in raster extract: {e}")
             return self._error_response(f"Internal error: {str(e)}", 500)
+        finally:
+            if service:
+                service.close()
 
 
 # ============================================================================
@@ -219,6 +225,7 @@ class RasterPointTrigger(BaseRasterTrigger):
 
     def handle(self, req: func.HttpRequest) -> func.HttpResponse:
         """Handle point query request."""
+        service = None
         try:
             # Get path parameters
             collection = req.route_params.get('collection')
@@ -235,24 +242,15 @@ class RasterPointTrigger(BaseRasterTrigger):
             asset = req.params.get('asset', 'data')
             time_index = int(req.params.get('time_index', '1'))
 
-            # Create service and execute
+            # Create service and execute (SYNC - no asyncio needed)
             service = RasterAPIService(self.config)
-
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-                response = loop.run_until_complete(
-                    service.point_query(
-                        collection_id=collection,
-                        item_id=item,
-                        location=location,
-                        asset=asset,
-                        time_index=time_index
-                    )
-                )
-            finally:
-                loop.run_until_complete(service.close())
-                loop.close()
+            response = service.point_query(
+                collection_id=collection,
+                item_id=item,
+                location=location,
+                asset=asset,
+                time_index=time_index
+            )
 
             if not response.success:
                 return self._error_response(response.error, response.status_code)
@@ -264,6 +262,9 @@ class RasterPointTrigger(BaseRasterTrigger):
         except Exception as e:
             logger.exception(f"Error in raster point: {e}")
             return self._error_response(f"Internal error: {str(e)}", 500)
+        finally:
+            if service:
+                service.close()
 
 
 # ============================================================================
@@ -288,6 +289,7 @@ class RasterClipTrigger(BaseRasterTrigger):
 
     def handle(self, req: func.HttpRequest) -> func.HttpResponse:
         """Handle clip request."""
+        service = None
         try:
             # Get path parameters
             collection = req.route_params.get('collection')
@@ -337,27 +339,18 @@ class RasterClipTrigger(BaseRasterTrigger):
             if not geometry:
                 return self._error_response("No geometry provided")
 
-            # Create service and execute
+            # Create service and execute (SYNC - no asyncio needed)
             service = RasterAPIService(self.config)
-
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-                response = loop.run_until_complete(
-                    service.clip_by_geometry(
-                        collection_id=collection,
-                        item_id=item,
-                        geometry=geometry,
-                        format=format_param,
-                        asset=asset,
-                        time_index=time_index,
-                        colormap=colormap,
-                        rescale=rescale
-                    )
-                )
-            finally:
-                loop.run_until_complete(service.close())
-                loop.close()
+            response = service.clip_by_geometry(
+                collection_id=collection,
+                item_id=item,
+                geometry=geometry,
+                format=format_param,
+                asset=asset,
+                time_index=time_index,
+                colormap=colormap,
+                rescale=rescale
+            )
 
             if not response.success:
                 return self._error_response(response.error, response.status_code)
@@ -377,6 +370,9 @@ class RasterClipTrigger(BaseRasterTrigger):
         except Exception as e:
             logger.exception(f"Error in raster clip: {e}")
             return self._error_response(f"Internal error: {str(e)}", 500)
+        finally:
+            if service:
+                service.close()
 
 
 # ============================================================================
@@ -398,6 +394,7 @@ class RasterPreviewTrigger(BaseRasterTrigger):
 
     def handle(self, req: func.HttpRequest) -> func.HttpResponse:
         """Handle preview request."""
+        service = None
         try:
             # Get path parameters
             collection = req.route_params.get('collection')
@@ -418,27 +415,18 @@ class RasterPreviewTrigger(BaseRasterTrigger):
             if format_param not in ['png', 'jpeg', 'webp']:
                 return self._error_response(f"Invalid format: {format_param}")
 
-            # Create service and execute
+            # Create service and execute (SYNC - no asyncio needed)
             service = RasterAPIService(self.config)
-
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-                response = loop.run_until_complete(
-                    service.preview(
-                        collection_id=collection,
-                        item_id=item,
-                        format=format_param,
-                        asset=asset,
-                        time_index=time_index,
-                        max_size=max_size,
-                        colormap=colormap,
-                        rescale=rescale
-                    )
-                )
-            finally:
-                loop.run_until_complete(service.close())
-                loop.close()
+            response = service.preview(
+                collection_id=collection,
+                item_id=item,
+                format=format_param,
+                asset=asset,
+                time_index=time_index,
+                max_size=max_size,
+                colormap=colormap,
+                rescale=rescale
+            )
 
             if not response.success:
                 return self._error_response(response.error, response.status_code)
@@ -459,3 +447,6 @@ class RasterPreviewTrigger(BaseRasterTrigger):
         except Exception as e:
             logger.exception(f"Error in raster preview: {e}")
             return self._error_response(f"Internal error: {str(e)}", 500)
+        finally:
+            if service:
+                service.close()

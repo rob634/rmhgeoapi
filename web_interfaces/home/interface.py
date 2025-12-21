@@ -41,6 +41,16 @@ class HomeInterface(BaseInterface):
             </div>
 
             <div class="cards-grid">
+                <!-- Data Gallery Card (Featured) -->
+                <a href="/api/interface/gallery" class="card featured">
+                    <div class="card-icon">🖼️</div>
+                    <h3 class="card-title">Data Gallery</h3>
+                    <p class="card-description">
+                        Showcase of featured datasets with interactive visualizations
+                    </p>
+                    <div class="card-footer">Explore Gallery →</div>
+                </a>
+
                 <!-- STAC Collections Card -->
                 <a href="/api/interface/stac" class="card">
                     <div class="card-icon">📦</div>
@@ -213,6 +223,16 @@ class HomeInterface(BaseInterface):
 
         .card:hover .card-footer {
             color: var(--ds-cyan);
+        }
+
+        /* Featured card styling */
+        .card.featured {
+            border-left-color: var(--ds-gold);
+            background: linear-gradient(135deg, white 0%, #fffbf0 100%);
+        }
+
+        .card.featured:hover {
+            border-left-color: var(--ds-cyan);
         }
 
         /* Footer Info */

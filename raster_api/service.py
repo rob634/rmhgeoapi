@@ -1,8 +1,32 @@
+# ============================================================================
+# CLAUDE CONTEXT - RASTER API SERVICE
+# ============================================================================
+# EPOCH: 4 - ACTIVE
+# STATUS: Service Layer - Raster extraction and transformation
+# PURPOSE: Business logic for raster endpoints - bbox extraction, point queries
+# LAST_REVIEWED: 19 DEC 2025
+# EXPORTS: RasterAPIService
+# DEPENDENCIES: services.stac_client, services.titiler_client
+# PORTABLE: Yes - uses config-independent service clients
+# ============================================================================
 """
-Raster API Service Layer.
+Raster API Service Layer (SYNC VERSION).
 
-Business logic for raster convenience endpoints.
+Business logic for raster convenience endpoints:
+- /api/raster/extract/{collection}/{item} - Extract bbox as GeoTIFF/PNG
+- /api/raster/point/{collection}/{item} - Point value extraction
+- /api/raster/clip/{collection}/{item} - Clip to GeoJSON geometry
+- /api/raster/preview/{collection}/{item} - Quick preview image
+
 Coordinates between STAC client (item lookup) and TiTiler client (raster ops).
+
+PORTABILITY:
+    This module is designed to work in both rmhgeoapi and rmhogcapi.
+    Uses config-independent service clients (STACClient, TiTilerClient).
+
+SYNC VERSION (19 DEC 2025):
+    Converted from async to sync for Reader API migration.
+    All methods are synchronous - no async/await.
 """
 
 import logging
@@ -29,9 +53,25 @@ class RasterServiceResponse:
 
 class RasterAPIService:
     """
-    Raster API business logic.
+    Raster API business logic (SYNC VERSION).
 
     Orchestrates STAC item lookup and TiTiler requests.
+
+    PORTABILITY:
+        Works in both rmhgeoapi and rmhogcapi without modification.
+        Uses config-independent service clients.
+
+    Usage:
+        service = RasterAPIService()
+
+        # Extract bbox (SYNC - no await)
+        response = service.extract_bbox("collection", "item", "-77,-39,-76,-38")
+
+        # Point query
+        response = service.point_query("collection", "item", "-77.0,38.9")
+
+        # Always close when done
+        service.close()
     """
 
     def __init__(self, config: Optional[RasterAPIConfig] = None):
@@ -40,10 +80,10 @@ class RasterAPIService:
         self.stac_client = STACClient()
         self.titiler_client = TiTilerClient()
 
-    async def close(self):
+    def close(self):
         """Close client connections."""
-        await self.stac_client.close()
-        await self.titiler_client.close()
+        self.stac_client.close()
+        self.titiler_client.close()
 
     def _resolve_location(self, location: str) -> Optional[Tuple[float, float]]:
         """
@@ -97,7 +137,7 @@ class RasterAPIService:
         except ValueError:
             return None, f"Invalid bbox format: '{bbox}'. Use 'minx,miny,maxx,maxy' with numeric values"
 
-    async def _get_stac_item(
+    def _get_stac_item(
         self,
         collection_id: str,
         item_id: str
@@ -108,12 +148,12 @@ class RasterAPIService:
         Returns:
             Tuple of (STACItem, None) on success or (None, error_message) on failure
         """
-        response = await self.stac_client.get_item(collection_id, item_id)
+        response = self.stac_client.get_item(collection_id, item_id)
         if not response.success:
             return None, response.error
         return response.item, None
 
-    async def extract_bbox(
+    def extract_bbox(
         self,
         collection_id: str,
         item_id: str,
@@ -150,7 +190,7 @@ class RasterAPIService:
             return RasterServiceResponse(success=False, status_code=400, error=bbox_error)
 
         # Get STAC item
-        item, error = await self._get_stac_item(collection_id, item_id)
+        item, error = self._get_stac_item(collection_id, item_id)
         if error:
             return RasterServiceResponse(
                 success=False,
@@ -188,7 +228,7 @@ class RasterAPIService:
                     error="Cannot determine variable name for Zarr dataset"
                 )
 
-            response = await self.titiler_client.get_xarray_bbox(
+            response = self.titiler_client.get_xarray_bbox(
                 url=asset_url,
                 bbox=bbox,
                 variable=variable,
@@ -197,7 +237,7 @@ class RasterAPIService:
                 **kwargs
             )
         else:
-            response = await self.titiler_client.get_cog_bbox(
+            response = self.titiler_client.get_cog_bbox(
                 url=asset_url,
                 bbox=bbox,
                 format=format,
@@ -218,7 +258,7 @@ class RasterAPIService:
             content_type=response.content_type
         )
 
-    async def point_query(
+    def point_query(
         self,
         collection_id: str,
         item_id: str,
@@ -251,7 +291,7 @@ class RasterAPIService:
         lon, lat = coords
 
         # Get STAC item
-        item, error = await self._get_stac_item(collection_id, item_id)
+        item, error = self._get_stac_item(collection_id, item_id)
         if error:
             return RasterServiceResponse(
                 success=False,
@@ -278,7 +318,7 @@ class RasterAPIService:
                     error="Cannot determine variable name for Zarr dataset"
                 )
 
-            response = await self.titiler_client.get_xarray_point(
+            response = self.titiler_client.get_xarray_point(
                 url=asset_url,
                 lon=lon,
                 lat=lat,
@@ -286,7 +326,7 @@ class RasterAPIService:
                 bidx=time_index
             )
         else:
-            response = await self.titiler_client.get_cog_point(
+            response = self.titiler_client.get_cog_point(
                 url=asset_url,
                 lon=lon,
                 lat=lat
@@ -316,7 +356,7 @@ class RasterAPIService:
             json_data=result
         )
 
-    async def clip_by_geometry(
+    def clip_by_geometry(
         self,
         collection_id: str,
         item_id: str,
@@ -344,7 +384,7 @@ class RasterAPIService:
             RasterServiceResponse with clipped image
         """
         # Get STAC item
-        item, error = await self._get_stac_item(collection_id, item_id)
+        item, error = self._get_stac_item(collection_id, item_id)
         if error:
             return RasterServiceResponse(
                 success=False,
@@ -378,7 +418,7 @@ class RasterAPIService:
                     error="Cannot determine variable name for Zarr dataset"
                 )
 
-            response = await self.titiler_client.get_xarray_feature(
+            response = self.titiler_client.get_xarray_feature(
                 url=asset_url,
                 geometry=geometry,
                 variable=variable,
@@ -387,7 +427,7 @@ class RasterAPIService:
                 **kwargs
             )
         else:
-            response = await self.titiler_client.get_cog_feature(
+            response = self.titiler_client.get_cog_feature(
                 url=asset_url,
                 geometry=geometry,
                 format=format,
@@ -408,7 +448,7 @@ class RasterAPIService:
             content_type=response.content_type
         )
 
-    async def preview(
+    def preview(
         self,
         collection_id: str,
         item_id: str,
@@ -436,7 +476,7 @@ class RasterAPIService:
             RasterServiceResponse with preview image
         """
         # Get STAC item
-        item, error = await self._get_stac_item(collection_id, item_id)
+        item, error = self._get_stac_item(collection_id, item_id)
         if error:
             return RasterServiceResponse(
                 success=False,
@@ -470,7 +510,7 @@ class RasterAPIService:
                     error="Cannot determine variable name for Zarr dataset"
                 )
 
-            response = await self.titiler_client.get_xarray_preview(
+            response = self.titiler_client.get_xarray_preview(
                 url=asset_url,
                 variable=variable,
                 bidx=time_index,
@@ -479,7 +519,7 @@ class RasterAPIService:
                 **kwargs
             )
         else:
-            response = await self.titiler_client.get_cog_preview(
+            response = self.titiler_client.get_cog_preview(
                 url=asset_url,
                 format=format,
                 max_size=max_size,

@@ -2,7 +2,7 @@
 
 > **Navigation**: [Quick Start](WIKI_QUICK_START.md) | [Platform API](WIKI_PLATFORM_API.md) | [All Jobs](WIKI_API_JOB_SUBMISSION.md) | [Errors](WIKI_API_ERRORS.md) | [Glossary](WIKI_API_GLOSSARY.md)
 
-**Date**: 14 DEC 2025
+**Date**: 19 DEC 2025
 **Purpose**: External application integration via Anti-Corruption Layer (ACL)
 **Audience**: DDH developers, external application integrators
 
@@ -49,9 +49,10 @@ https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net
 | Endpoint | Method | Purpose |
 |----------|--------|---------|
 | `/api/platform/status/{request_id}` | GET | Check request/job status |
-| `/api/platform/health` | GET | Platform health check |
-| `/api/platform/stats` | GET | Aggregated job statistics |
-| `/api/platform/failures` | GET | Recent failures for troubleshooting |
+| `/api/health` | GET | System health check (comprehensive) |
+| `/api/dbadmin/jobs?status=failed` | GET | Query failed jobs |
+
+> **Note (19 DEC 2025)**: `/api/platform/health`, `/api/platform/stats`, and `/api/platform/failures` were removed as redundant with `/api/health`.
 
 ### Unpublish/Delete (Delete)
 
@@ -826,108 +827,35 @@ curl -X POST \
 
 ---
 
-## 7. Platform Operations
+## 7. System Health and Monitoring
+
+> **Note (19 DEC 2025)**: Platform-specific health endpoints (`/api/platform/health`, `/api/platform/stats`, `/api/platform/failures`) were removed as they were redundant with the comprehensive `/api/health` endpoint.
 
 ### Health Check
 
-```
-GET /api/platform/health
-```
-
-Simplified health status for DDH consumption.
+Use the main health endpoint for comprehensive system status:
 
 ```bash
-curl "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/platform/health"
+curl "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/health"
 ```
 
-**Response:**
-```json
-{
-    "status": "healthy",
-    "components": {
-        "job_processing": "ok",
-        "stac_catalog": "ok",
-        "storage": "ok"
-    },
-    "recent_activity": {
-        "jobs_24h": 15,
-        "completed": 14,
-        "failed": 1,
-        "success_rate": "93.3%"
-    }
-}
-```
+This provides status for all components: database, Service Bus, storage, STAC, TiTiler, and more.
 
-### Statistics
+### Failed Jobs
 
-```
-GET /api/platform/stats?hours=24
-```
-
-Aggregated job statistics over a time window.
+Use the dbadmin endpoint to query failed jobs:
 
 ```bash
-curl "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/platform/stats?hours=24"
+curl "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/dbadmin/jobs?status=failed&hours=24&limit=10"
 ```
 
 **Parameters:**
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `hours` | integer | 24 | Time window for statistics |
-
-**Response:**
-```json
-{
-    "time_window_hours": 24,
-    "total_jobs": 15,
-    "by_status": {
-        "completed": 14,
-        "failed": 1,
-        "processing": 0
-    },
-    "by_data_type": {
-        "raster": 10,
-        "vector": 5
-    },
-    "avg_processing_time_seconds": 45.2
-}
-```
-
-### Recent Failures
-
-```
-GET /api/platform/failures?hours=24&limit=10
-```
-
-Recent failures for troubleshooting with sanitized error messages.
-
-```bash
-curl "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/platform/failures?hours=24&limit=10"
-```
-
-**Parameters:**
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
+| `status` | string | - | Filter by status (failed, completed, processing) |
 | `hours` | integer | 24 | Time window to search |
-| `limit` | integer | 10 | Maximum failures to return |
-
-**Response:**
-```json
-{
-    "failures": [
-        {
-            "request_id": "abc123...",
-            "job_type": "process_raster_v2",
-            "failed_at": "2025-12-17T10:30:00Z",
-            "error_category": "validation",
-            "error_summary": "Invalid CRS: EPSG:0 not recognized"
-        }
-    ],
-    "total_failures": 1
-}
-```
+| `limit` | integer | 50 | Maximum jobs to return |
 
 ---
 
@@ -1014,6 +942,6 @@ When a raster job completes, the result includes:
 
 ---
 
-**Last Updated**: 17 DEC 2025
+**Last Updated**: 19 DEC 2025
 **Function App**: rmhazuregeoapi
 **Region**: East US

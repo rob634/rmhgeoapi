@@ -1167,7 +1167,7 @@ curl -X POST \
 
 **Stage 3**: Create MosaicJSON (single task)
 - Generate MosaicJSON index from all COGs
-- Upload to silver-mosaicjson container
+- Upload to silver-cogs container (alongside COGs)
 - Duration: 2-5 seconds
 
 **Stage 4**: Create STAC Collection (single task)
@@ -1199,7 +1199,7 @@ curl -X POST \
       "ready_for_titiler": true
     },
     "mosaicjson": {
-      "url": "https://rmhazuregeo.blob.core.windows.net/silver-mosaicjson/cogs/namangan_full/namangan-full-collection.json",
+      "url": "https://rmhazuregeo.blob.core.windows.net/silver-cogs/namangan_full/namangan-full-collection.json",
       "bounds": [71.6063, 40.9806, 71.7219, 41.0318],
       "tile_count": 4
     },

@@ -96,6 +96,10 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
         app_mode_health = self._check_app_mode()
         health_data["components"]["app_mode"] = app_mode_health
 
+        # Check hardware/runtime environment (21 DEC 2025)
+        hardware_health = self._check_hardware_environment()
+        health_data["components"]["hardware"] = hardware_health
+
         # Task routing coverage REMOVED (12 DEC 2025)
         # Moved to services/__init__.py (startup validation) and scripts/validate_config.py (pre-deployment)
         # This is configuration validation, not runtime health - doesn't belong in health endpoint
@@ -1885,6 +1889,84 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
             "ogc_features",
             check_ogc_features,
             description="OGC API - Features for PostGIS vector queries"
+        )
+
+    def _check_hardware_environment(self) -> Dict[str, Any]:
+        """
+        Check hardware/runtime environment (21 DEC 2025).
+
+        Reports CPU, RAM, and platform info for capacity planning and debugging.
+        Uses cached runtime environment from util_logger (computed once per process).
+
+        Returns:
+            Dict with hardware specs including:
+            - cpu_count: Logical CPU count
+            - total_ram_gb: Total system RAM
+            - available_ram_mb: Current available RAM
+            - ram_utilization_percent: Current RAM usage %
+            - cpu_utilization_percent: Current CPU usage %
+            - platform: OS and kernel version
+            - azure_site_name: Function app name
+            - azure_sku: App Service Plan SKU
+        """
+        def check_hardware():
+            import psutil
+            from util_logger import get_runtime_environment, get_memory_stats
+
+            # Get cached runtime environment (computed once per process)
+            runtime = get_runtime_environment()
+
+            # Get current memory/CPU stats
+            stats = get_memory_stats() or {}
+
+            # Fallback to direct psutil if util_logger debug mode is off
+            if not runtime:
+                mem = psutil.virtual_memory()
+                runtime = {
+                    'cpu_count': psutil.cpu_count() or 0,
+                    'total_ram_gb': round(mem.total / (1024**3), 1),
+                    'platform': f"{os.sys.platform}",
+                    'azure_site_name': os.environ.get('WEBSITE_SITE_NAME', 'local'),
+                    'azure_sku': os.environ.get('WEBSITE_SKU', 'unknown'),
+                    'azure_instance_id': os.environ.get('WEBSITE_INSTANCE_ID', '')[:16],
+                }
+
+            if not stats:
+                mem = psutil.virtual_memory()
+                stats = {
+                    'system_available_mb': round(mem.available / (1024**2), 1),
+                    'system_percent': round(mem.percent, 1),
+                    'system_cpu_percent': round(psutil.cpu_percent(interval=None), 1),
+                    'process_rss_mb': round(psutil.Process().memory_info().rss / (1024**2), 1),
+                }
+
+            return {
+                # Static hardware specs (from cached runtime)
+                "cpu_count": runtime.get('cpu_count'),
+                "total_ram_gb": runtime.get('total_ram_gb'),
+                "platform": runtime.get('platform'),
+                "python_version": runtime.get('python_version'),
+                # Azure environment
+                "azure_site_name": runtime.get('azure_site_name'),
+                "azure_sku": runtime.get('azure_sku'),
+                "azure_instance_id": runtime.get('azure_instance_id'),
+                # Current utilization
+                "available_ram_mb": stats.get('system_available_mb'),
+                "ram_utilization_percent": stats.get('system_percent'),
+                "cpu_utilization_percent": stats.get('system_cpu_percent'),
+                "process_rss_mb": stats.get('process_rss_mb'),
+                # Capacity thresholds
+                "capacity_notes": {
+                    "safe_file_limit_mb": round((runtime.get('total_ram_gb', 7) * 1024) / 4, 0),
+                    "warning_threshold_percent": 80,
+                    "critical_threshold_percent": 90,
+                }
+            }
+
+        return self.check_component_health(
+            "hardware",
+            check_hardware,
+            description="Runtime hardware environment (CPU, RAM, platform)"
         )
 
     def _get_config_sources(self) -> Dict[str, Any]:

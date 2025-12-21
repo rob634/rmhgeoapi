@@ -1,6 +1,6 @@
 # Working Backlog
 
-**Last Updated**: 20 DEC 2025
+**Last Updated**: 21 DEC 2025
 **Source of Truth**: [EPICS.md](/EPICS.md) — Epic/Feature/Story definitions live there
 **Purpose**: Sprint-level task tracking and delegation
 
@@ -10,14 +10,28 @@
 
 | Priority | Epic | Name | Status | Next Action |
 |:--------:|------|------|--------|-------------|
-| 1 | E2 | Raster Data as API | 🚧 | F2.7: Collection Processing |
-| 2 | E3 | DDH Platform Integration | 🚧 | F3.1: Validate Swagger UI |
-| 3 | E4 | Data Externalization | 📋 | F4.1: Publishing Workflow |
-| 4 | E9 | Zarr/Climate Data as API | 🚧 | F9.2: Virtual Zarr Pipeline |
+| 1 | E10 | FATHOM Flood Data Pipeline | 🚧 | Phase 2 retry, scale testing |
+| 2 | E2 | Raster Data as API | 🚧 | F2.7: Collection Processing |
+| 3 | E3 | DDH Platform Integration | 🚧 | F3.1: Validate Swagger UI |
+| 4 | E4 | Data Externalization | 📋 | F4.1: Publishing Workflow |
+| 5 | E9 | Zarr/Climate Data as API | 🚧 | F9.2: Virtual Zarr Pipeline |
 
 ---
 
 ## Current Sprint Focus
+
+### E10: FATHOM Flood Data Pipeline
+
+**Docs**: [FATHOM_ETL.md](./FATHOM_ETL.md)
+
+| Story | Description | Owner | Status |
+|-------|-------------|-------|--------|
+| F10.1: Phase 1 | Band stacking (8 return periods → 1 COG) | Claude | ✅ CI Complete |
+| F10.2: Phase 2 | Spatial merge (N×N tiles → 1 COG) | Claude | ⚠️ 46/47 tasks |
+| F10.3: STAC | Register merged COGs to catalog | Claude | 📋 Blocked |
+| F10.4: Scale | West Africa / Africa processing | Claude | 📋 |
+
+**Current Issue**: Phase 2 task `n10-n15_w005-w010` failed. Need retry with `force_reprocess=true`.
 
 ### E2: Raster Data as API
 
@@ -77,6 +91,8 @@ Tasks suitable for a colleague with Azure/Python/pipeline expertise but without 
 
 | Date | Item | Epic |
 |------|------|------|
+| 21 DEC 2025 | FATHOM Phase 1 complete (CI), Phase 2 46/47 tasks | E10.F10.1-2 |
+| 21 DEC 2025 | Fixed dict_row + source_container bugs in fathom_etl.py | E10 |
 | 20 DEC 2025 | Swagger UI + OpenAPI spec (19 endpoints, 20 schemas) | E3.F3.1 |
 | 18 DEC 2025 | OGC API Styles module | E5.F5.1 |
 | 18 DEC 2025 | Service Layer API Phase 4 | E2.F2.5 |

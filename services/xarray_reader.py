@@ -4,9 +4,10 @@
 # EPOCH: 4 - ACTIVE
 # STATUS: Service Layer - Direct Zarr access for time-series operations
 # PURPOSE: Read Zarr files directly with xarray for efficient time-series queries
-# LAST_REVIEWED: 18 DEC 2025
+# LAST_REVIEWED: 19 DEC 2025
 # EXPORTS: XarrayReader
 # DEPENDENCIES: xarray, zarr, fsspec, adlfs
+# PORTABLE: Yes - no config imports, works in rmhgeoapi and rmhogcapi
 # ============================================================================
 """
 xarray Zarr Reader Service.
@@ -20,8 +21,18 @@ Operations:
 - Point time-series extraction
 - Regional statistics over time
 - Temporal aggregation (mean, max, min over time)
+
+PORTABILITY:
+    This module is designed to work in both rmhgeoapi and rmhogcapi.
+    It does NOT import from config - instead accepts storage_account as
+    constructor param or falls back to AZURE_STORAGE_ACCOUNT environment variable.
+
+ALREADY SYNC:
+    This module was already synchronous - no async/await changes needed.
+    Only change is making storage_account config-independent.
 """
 
+import os
 import logging
 import statistics
 from typing import Dict, Any, Optional, List, Tuple, Union
@@ -109,7 +120,15 @@ class XarrayReader:
     Optimized for time-series operations that would require
     many HTTP requests via TiTiler.
 
+    PORTABILITY:
+        Works in both rmhgeoapi and rmhogcapi without modification.
+        Does not import from config - uses constructor params or env vars.
+
     Usage:
+        # Option 1: Explicit storage_account
+        reader = XarrayReader(storage_account="rmhazuregeo")
+
+        # Option 2: From environment variable AZURE_STORAGE_ACCOUNT
         reader = XarrayReader()
 
         # Point time-series
@@ -131,16 +150,28 @@ class XarrayReader:
             end_time="2015-12-31",
             aggregation="mean"
         )
+
+        # Always close when done
+        reader.close()
     """
 
-    def __init__(self, storage_account: str = "rmhazuregeo"):
+    def __init__(self, storage_account: Optional[str] = None):
         """
         Initialize xarray reader.
 
         Args:
-            storage_account: Azure storage account name for fsspec
+            storage_account: Azure storage account name for fsspec.
+                             If not provided, uses AZURE_STORAGE_ACCOUNT env var.
+
+        Raises:
+            ValueError: If no storage_account provided and AZURE_STORAGE_ACCOUNT not set.
         """
-        self.storage_account = storage_account
+        # Config-independent: accept param or use env var
+        self.storage_account = storage_account or os.getenv("AZURE_STORAGE_ACCOUNT", "")
+        if not self.storage_account:
+            raise ValueError(
+                "XarrayReader requires storage_account parameter or AZURE_STORAGE_ACCOUNT environment variable"
+            )
         self._datasets: Dict[str, Any] = {}  # Cache open datasets
 
     def _get_store(self, zarr_url: str) -> Any:

@@ -1,6 +1,6 @@
 # CLAUDE.md - Project Context
 
-**Last Updated**: 15 DEC 2025
+**Last Updated**: 21 DEC 2025
 
 ---
 
@@ -13,6 +13,7 @@ All Claude-optimized documentation is in **`/docs_claude/`**.
 |----------|---------|
 | `docs_claude/CLAUDE_CONTEXT.md` | Primary context - start here |
 | `docs_claude/TODO.md` | **ONLY** active task list |
+| `docs_claude/FATHOM_ETL.md` | FATHOM flood data pipeline (Phase 1 & 2) |
 | `docs_claude/ARCHITECTURE_REFERENCE.md` | Deep technical specs, error handling patterns |
 | `docs_claude/JOB_CREATION_QUICKSTART.md` | 5-step guide for new jobs |
 | `docs_claude/APIM_ARCHITECTURE.md` | Future microservices architecture |

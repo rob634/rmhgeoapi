@@ -377,8 +377,9 @@ curl "https://rmhazuregeoapi-.../api/storage/containers?prefix=silver-"
     },
     "silver": {
       "account": "rmhazuregeo",
-      "containers": ["silver-cogs", "silver-mosaicjson"],
-      "container_count": 2
+      "containers": ["silver-cogs"],
+      "container_count": 1,
+      "note": "MosaicJSON files stored in silver-cogs alongside COGs (19 DEC 2025)"
     },
     "silverext": {
       "account": "rmhazuregeo",

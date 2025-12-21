@@ -410,6 +410,284 @@ def monitored_gdal_operation(
         pulse_thread.join(timeout=1.0)
 
 
+def snapshot_memory_to_task(
+    task_id: str,
+    checkpoint_name: str,
+    logger: Optional[logging.Logger] = None,
+    task_repo = None,
+    **extra_fields
+) -> Dict[str, Any]:
+    """
+    Snapshot memory state and persist to task metadata (OOM evidence).
+
+    Writes memory stats to task.metadata JSONB field so that if the process
+    is OOM killed, we have evidence of last known memory state.
+
+    Call this BEFORE heavy operations to establish baseline.
+
+    Args:
+        task_id: Task ID to update
+        checkpoint_name: Name of checkpoint (e.g., "pre_cog_translate", "mid_processing")
+        logger: Optional logger for checkpoint logging
+        task_repo: TaskRepository instance (from infrastructure.jobs_tasks)
+                   If None, only logs without persisting to DB.
+        **extra_fields: Additional fields to include (e.g., file_size_mb, blob_name)
+
+    Returns:
+        Dict with memory snapshot data (also persisted to task metadata)
+
+    Example:
+        # In a handler
+        from infrastructure import RepositoryFactory
+        task_repo = RepositoryFactory.create_task_repository()
+
+        snapshot = snapshot_memory_to_task(
+            task_id=params['_task_id'],
+            checkpoint_name="pre_cog_translate",
+            logger=logger,
+            task_repo=task_repo,
+            input_file_mb=500
+        )
+
+        # Heavy operation - if OOM here, last snapshot is in DB
+        result = cog_translate(...)
+
+        snapshot_memory_to_task(
+            task_id=params['_task_id'],
+            checkpoint_name="post_cog_translate",
+            logger=logger,
+            task_repo=task_repo,
+            output_file_mb=result['size_mb']
+        )
+    """
+    from datetime import datetime, timezone
+
+    # Get memory stats
+    stats = get_memory_stats() or {}
+
+    snapshot = {
+        "checkpoint": checkpoint_name,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "process_rss_mb": stats.get('process_rss_mb'),
+        "process_peak_mb": stats.get('process_peak_mb'),
+        "system_available_mb": stats.get('system_available_mb'),
+        "system_percent": stats.get('system_percent'),
+        "cpu_percent": stats.get('system_cpu_percent'),
+        **extra_fields
+    }
+
+    # Log the checkpoint
+    if logger:
+        log_memory_checkpoint(
+            logger,
+            checkpoint_name,
+            context_id=task_id,
+            **extra_fields
+        )
+
+    # Persist to task metadata (OOM evidence)
+    if task_repo and task_id:
+        try:
+            # Store under memory_snapshots list in metadata
+            task_repo.update_task_metadata(
+                task_id,
+                {
+                    "memory_snapshots": [snapshot],  # Gets merged with existing
+                    "last_memory_checkpoint": {
+                        "name": checkpoint_name,
+                        "timestamp": snapshot["timestamp"],
+                        "rss_mb": snapshot["process_rss_mb"],
+                        "available_mb": snapshot["system_available_mb"]
+                    }
+                },
+                merge=True
+            )
+        except Exception as e:
+            # Non-fatal - logging still works even if DB update fails
+            if logger:
+                logger.warning(f"⚠️ Failed to persist memory snapshot to task metadata: {e}")
+
+    return snapshot
+
+
+def get_peak_memory_mb() -> Optional[float]:
+    """
+    Get peak memory usage for current process (if available).
+
+    Uses resource.getrusage on Unix, falls back to current RSS on Windows.
+
+    Returns:
+        Peak RSS in MB, or None if unavailable
+    """
+    try:
+        import resource
+        # maxrss is in KB on Linux, bytes on macOS
+        import platform
+        usage = resource.getrusage(resource.RUSAGE_SELF)
+        if platform.system() == 'Darwin':
+            # macOS: bytes
+            return round(usage.ru_maxrss / (1024 * 1024), 1)
+        else:
+            # Linux: KB
+            return round(usage.ru_maxrss / 1024, 1)
+    except ImportError:
+        # Windows - use current RSS as fallback
+        try:
+            import psutil
+            return round(psutil.Process().memory_info().rss / (1024 * 1024), 1)
+        except Exception:
+            return None
+    except Exception:
+        return None
+
+
+@contextmanager
+def track_peak_memory_to_task(
+    task_id: str,
+    task_repo,
+    logger: Optional[logging.Logger] = None,
+    poll_interval: float = 30.0,
+    operation_name: str = "operation"
+):
+    """
+    Track peak memory usage during long operations and persist to task metadata.
+
+    NOT YET WIRED UP - Built for future use after testing snapshot approach.
+
+    Uses background daemon thread to poll memory every poll_interval seconds.
+    Only updates task record when a NEW maximum is observed, minimizing DB writes.
+    Each DB write uses a fresh connection with fresh token (no expiration issues).
+
+    Works during GDAL/rasterio C library calls because GIL is released.
+
+    Args:
+        task_id: Task ID to update in database
+        task_repo: TaskRepository instance (from infrastructure.jobs_tasks)
+        logger: Optional logger for debug output
+        poll_interval: Seconds between memory polls (default 30s)
+        operation_name: Name for logging (e.g., "cog_translate")
+
+    Yields:
+        Dict with live stats that can be read after the operation:
+            - peak_memory_mb: Maximum RSS observed
+            - poll_count: Number of polls performed
+            - update_count: Number of DB updates (new max events)
+
+    Example (NOT YET IMPLEMENTED):
+        from util_logger import track_peak_memory_to_task
+
+        with track_peak_memory_to_task(
+            task_id=task_id,
+            task_repo=task_repo,
+            logger=logger,
+            operation_name="cog_translate"
+        ) as stats:
+            cog_translate(...)  # GIL released, background thread tracks max
+
+        logger.info(f"Peak memory: {stats['peak_memory_mb']} MB")
+
+    OOM Behavior:
+        If process is OOM killed, the last observed max is already persisted
+        in task.metadata.peak_memory_mb - this is the OOM evidence.
+
+    Added: 21 DEC 2025 - Built but not wired up pending testing
+    """
+    import psutil
+    from datetime import datetime, timezone
+
+    stop_event = threading.Event()
+    max_memory_mb = [0.0]  # Mutable for closure
+    poll_count = [0]
+    update_count = [0]
+    start_time = time.time()
+
+    def get_current_rss_mb() -> float:
+        """Get current process RSS in MB."""
+        try:
+            return round(psutil.Process().memory_info().rss / (1024 * 1024), 1)
+        except Exception:
+            return 0.0
+
+    def pulse_worker():
+        """Background thread that polls memory and updates task on new max."""
+        while not stop_event.wait(timeout=poll_interval):
+            poll_count[0] += 1
+            current_mb = get_current_rss_mb()
+
+            # Only update if we have a new maximum
+            if current_mb > max_memory_mb[0]:
+                max_memory_mb[0] = current_mb
+                update_count[0] += 1
+                elapsed = round(time.time() - start_time, 1)
+
+                # Log the new max
+                if logger:
+                    logger.debug(
+                        f"📊 [PEAK_MEMORY] New max: {current_mb} MB "
+                        f"(poll #{poll_count[0]}, +{elapsed}s into {operation_name})"
+                    )
+
+                # Persist to task metadata - each call gets fresh connection/token
+                try:
+                    task_repo.update_task_metadata(
+                        task_id,
+                        {
+                            "peak_memory_mb": current_mb,
+                            "peak_memory_at": datetime.now(timezone.utc).isoformat(),
+                            "peak_memory_elapsed_sec": elapsed,
+                            "peak_memory_operation": operation_name
+                        },
+                        merge=True
+                    )
+                except Exception as e:
+                    # Non-fatal - log and continue polling
+                    if logger:
+                        logger.warning(
+                            f"⚠️ Failed to persist peak memory to task (non-fatal): {e}"
+                        )
+
+    # Stats dict that caller can read after operation
+    stats = {
+        "peak_memory_mb": 0.0,
+        "poll_count": 0,
+        "update_count": 0
+    }
+
+    # Start background pulse thread
+    pulse_thread = threading.Thread(
+        target=pulse_worker,
+        daemon=True,
+        name=f"peak-mem-{task_id[:8] if task_id else 'unknown'}"
+    )
+    pulse_thread.start()
+
+    if logger:
+        logger.info(
+            f"📊 [PEAK_MEMORY] Started tracking for {operation_name} "
+            f"(poll every {poll_interval}s, task {task_id[:16]}...)"
+        )
+
+    try:
+        yield stats
+    finally:
+        # Stop the pulse thread
+        stop_event.set()
+        pulse_thread.join(timeout=2.0)
+
+        # Update stats for caller
+        stats["peak_memory_mb"] = max_memory_mb[0]
+        stats["poll_count"] = poll_count[0]
+        stats["update_count"] = update_count[0]
+
+        if logger:
+            elapsed = round(time.time() - start_time, 1)
+            logger.info(
+                f"📊 [PEAK_MEMORY] Tracking complete for {operation_name}: "
+                f"peak={max_memory_mb[0]} MB, polls={poll_count[0]}, "
+                f"updates={update_count[0]}, duration={elapsed}s"
+            )
+
+
 # ============================================================================
 # COMPONENT TYPES - Aligned with pyramid architecture
 # ============================================================================

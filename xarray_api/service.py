@@ -1,8 +1,31 @@
+# ============================================================================
+# CLAUDE CONTEXT - XARRAY API SERVICE
+# ============================================================================
+# EPOCH: 4 - ACTIVE
+# STATUS: Service Layer - xarray direct access for time-series operations
+# PURPOSE: Business logic for xarray endpoints - point timeseries, regional stats
+# LAST_REVIEWED: 19 DEC 2025
+# EXPORTS: XarrayAPIService
+# DEPENDENCIES: services.stac_client, services.xarray_reader
+# PORTABLE: Yes - uses config-independent service clients
+# ============================================================================
 """
-xarray API Service Layer.
+xarray API Service Layer (SYNC VERSION).
 
-Business logic for xarray direct access endpoints.
+Business logic for xarray direct access endpoints:
+- /api/xarray/timeseries/{collection}/{item} - Point time-series extraction
+- /api/xarray/stats/{collection}/{item} - Regional statistics over time
+- /api/xarray/aggregate/{collection}/{item} - Temporal aggregation
+
 Coordinates between STAC client (item lookup) and xarray reader (Zarr ops).
+
+PORTABILITY:
+    This module is designed to work in both rmhgeoapi and rmhogcapi.
+    Uses config-independent service clients (STACClient, XarrayReader).
+
+SYNC VERSION (19 DEC 2025):
+    Converted from async to sync for Reader API migration.
+    All methods are synchronous - no async/await.
 """
 
 import logging
@@ -31,9 +54,25 @@ class XarrayServiceResponse:
 
 class XarrayAPIService:
     """
-    xarray API business logic.
+    xarray API business logic (SYNC VERSION).
 
     Orchestrates STAC item lookup and xarray Zarr reads.
+
+    PORTABILITY:
+        Works in both rmhgeoapi and rmhogcapi without modification.
+        Uses config-independent service clients.
+
+    Usage:
+        service = XarrayAPIService()
+
+        # Point timeseries (SYNC - no await)
+        response = service.point_timeseries("collection", "item", "-77.0,38.9")
+
+        # Regional statistics
+        response = service.regional_statistics("collection", "item", "-77,-39,-76,-38")
+
+        # Always close when done
+        service.close()
     """
 
     def __init__(self, config: Optional[XarrayAPIConfig] = None):
@@ -42,9 +81,9 @@ class XarrayAPIService:
         self.stac_client = STACClient()
         self.xarray_reader = XarrayReader(storage_account=self.config.storage_account)
 
-    async def close(self):
+    def close(self):
         """Close client connections."""
-        await self.stac_client.close()
+        self.stac_client.close()
         self.xarray_reader.close()
 
     def _resolve_location(self, location: str) -> Optional[Tuple[float, float]]:
@@ -128,18 +167,18 @@ class XarrayAPIService:
         except ValueError:
             return None, f"Invalid bbox format: '{bbox}'. Use 'minx,miny,maxx,maxy' with numeric values"
 
-    async def _get_stac_item(
+    def _get_stac_item(
         self,
         collection_id: str,
         item_id: str
     ) -> Tuple[Optional[STACItem], Optional[str]]:
         """Get STAC item, return (item, error)."""
-        response = await self.stac_client.get_item(collection_id, item_id)
+        response = self.stac_client.get_item(collection_id, item_id)
         if not response.success:
             return None, response.error
         return response.item, None
 
-    async def point_timeseries(
+    def point_timeseries(
         self,
         collection_id: str,
         item_id: str,
@@ -184,7 +223,7 @@ class XarrayAPIService:
         lon, lat = coords
 
         # Get STAC item
-        item, error = await self._get_stac_item(collection_id, item_id)
+        item, error = self._get_stac_item(collection_id, item_id)
         if error:
             return XarrayServiceResponse(
                 success=False,
@@ -261,7 +300,7 @@ class XarrayAPIService:
             json_data=response_data
         )
 
-    async def regional_statistics(
+    def regional_statistics(
         self,
         collection_id: str,
         item_id: str,
@@ -300,7 +339,7 @@ class XarrayAPIService:
             return XarrayServiceResponse(success=False, status_code=400, error=bbox_error)
 
         # Get STAC item
-        item, error = await self._get_stac_item(collection_id, item_id)
+        item, error = self._get_stac_item(collection_id, item_id)
         if error:
             return XarrayServiceResponse(
                 success=False,
@@ -370,7 +409,7 @@ class XarrayAPIService:
             json_data=response_data
         )
 
-    async def temporal_aggregation(
+    def temporal_aggregation(
         self,
         collection_id: str,
         item_id: str,
@@ -411,7 +450,7 @@ class XarrayAPIService:
             return XarrayServiceResponse(success=False, status_code=400, error=bbox_error)
 
         # Get STAC item
-        item, error = await self._get_stac_item(collection_id, item_id)
+        item, error = self._get_stac_item(collection_id, item_id)
         if error:
             return XarrayServiceResponse(
                 success=False,

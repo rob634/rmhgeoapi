@@ -127,9 +127,9 @@ class StorageDefaults:
     SILVEREXT_RASTERS = "silverext-rasters"
     SILVEREXT_COGS = "silverext-cogs"
     SILVEREXT_TILES = "silverext-tiles"
-    SILVEREXT_MOSAICJSON = "silverext-mosaicjson"
-    SILVEREXT_STAC_ASSETS = "silverext-stac-assets"
-    SILVEREXT_MISC = "silverext-misc"
+    SILVEREXT_MOSAICJSON = "silverext-cogs"  # MosaicJSON stored alongside COGs (19 DEC 2025)
+    SILVEREXT_STAC_ASSETS = "silverext-cogs"  # Consolidated into silverext-cogs (19 DEC 2025)
+    SILVEREXT_MISC = "silverext-cogs"  # Consolidated into silverext-cogs (19 DEC 2025)
     SILVEREXT_TEMP = "silverext-temp"
 
     # Gold tier containers (analytics exports)

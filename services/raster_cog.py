@@ -341,6 +341,28 @@ def create_cog(params: dict) -> dict:
             "traceback": traceback.format_exc()
         }
 
+    # STEP 2c: Setup OOM evidence - persist memory snapshots to task metadata
+    # If OOM occurs during heavy operations, last snapshot will be in DB
+    task_repo = None
+    try:
+        from infrastructure import RepositoryFactory
+        from util_logger import snapshot_memory_to_task
+        task_repo = RepositoryFactory.create_task_repository()
+        logger.info("✅ STEP 2c: Task repository initialized for OOM evidence")
+
+        # Baseline snapshot - captures memory before any heavy operations
+        snapshot_memory_to_task(
+            task_id=task_id,
+            checkpoint_name="baseline",
+            logger=logger,
+            task_repo=task_repo,
+            blob_name=blob_name,
+            container_name=container_name
+        )
+    except Exception as e:
+        logger.warning(f"⚠️ STEP 2c: OOM evidence setup failed (non-fatal): {e}")
+        # Continue without OOM evidence - core functionality still works
+
     # STEP 3: Setup COG profile and configuration
     temp_dir = None
     local_output = None
@@ -472,6 +494,23 @@ def create_cog(params: dict) -> dict:
                                       in_memory=in_memory,
                                       compression=compression)
 
+                # CRITICAL: Persist memory state to task metadata BEFORE cog_translate
+                # This is the most likely OOM point - if we crash here, this evidence survives
+                if task_repo and task_id:
+                    try:
+                        from util_logger import snapshot_memory_to_task
+                        snapshot_memory_to_task(
+                            task_id=task_id,
+                            checkpoint_name="pre_cog_translate",
+                            logger=logger,
+                            task_repo=task_repo,
+                            in_memory=in_memory,
+                            compression=compression,
+                            input_size_mb=len(input_blob_bytes) / (1024 * 1024)
+                        )
+                    except Exception as snap_error:
+                        logger.warning(f"⚠️ Pre-cog_translate snapshot failed (non-fatal): {snap_error}")
+
                 # ================================================================
                 # HEARTBEAT DISABLED (2 DEC 2025) - Token expiration issues
                 # ================================================================
@@ -519,6 +558,21 @@ def create_cog(params: dict) -> dict:
                     log_memory_checkpoint(logger, "After cog_translate",
                                           context_id=task_id,
                                           processing_time_seconds=elapsed_time)
+
+                    # Final snapshot - captures peak memory after cog_translate success
+                    if task_repo and task_id:
+                        try:
+                            from util_logger import snapshot_memory_to_task, get_peak_memory_mb
+                            snapshot_memory_to_task(
+                                task_id=task_id,
+                                checkpoint_name="post_cog_translate",
+                                logger=logger,
+                                task_repo=task_repo,
+                                processing_time_seconds=elapsed_time,
+                                peak_memory_mb=get_peak_memory_mb()
+                            )
+                        except Exception as snap_error:
+                            logger.warning(f"⚠️ Post-cog_translate snapshot failed (non-fatal): {snap_error}")
 
                     # Read metadata from COG
                     with output_memfile.open() as dst:

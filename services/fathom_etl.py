@@ -28,7 +28,7 @@ import tempfile
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 
-from util_logger import LoggerFactory, ComponentType
+from util_logger import LoggerFactory, ComponentType, log_memory_checkpoint
 from config import FathomDefaults
 
 
@@ -228,8 +228,7 @@ def fathom_tile_inventory(params: dict, context: dict = None) -> dict:
     with repo._get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(sql, query_params)
-            rows = cur.fetchall()
-            columns = [desc[0] for desc in cur.description]
+            rows = cur.fetchall()  # Returns list of dicts due to dict_row factory
 
     logger.info(f"   Query returned {len(rows)} tile groups")
 
@@ -243,12 +242,13 @@ def fathom_tile_inventory(params: dict, context: dict = None) -> dict:
         raise ValueError(error_msg)
 
     # Convert to tile_groups format
+    # NOTE: rows are dicts due to PostgreSQLRepository's dict_row factory
     tile_groups = []
     for idx, row in enumerate(rows):
         if idx < 3:  # Log first 3 rows for debugging
-            logger.debug(f"   🔍 Row {idx}: columns={columns}")
-            logger.debug(f"   🔍 Row {idx}: values={[repr(v)[:100] for v in row]}")
-        row_dict = dict(zip(columns, row))
+            logger.debug(f"   🔍 Row {idx}: keys={list(row.keys())}")
+            logger.debug(f"   🔍 Row {idx}: values={[repr(v)[:100] for v in row.values()]}")
+        row_dict = row  # Already a dict from dict_row factory
 
         # Apply bbox filter if provided
         if bbox:
@@ -386,7 +386,11 @@ def fathom_band_stack(params: dict, context: dict = None) -> dict:
 
     tile = tile_group["tile"]
     output_name = tile_group["output_name"]
+    context_id = job_id or output_name  # Use job_id for correlation, fallback to output_name
     logger.info(f"🔧 Band stacking tile: {output_name}")
+
+    # Memory checkpoint: start of band stacking
+    log_memory_checkpoint(logger, "band_stack START", context_id=context_id)
 
     config = get_config()
     # Bronze zone for reading source tiles, Silver zone for writing output
@@ -455,6 +459,10 @@ def fathom_band_stack(params: dict, context: dict = None) -> dict:
             # Clean up
             local_path.unlink()
 
+        # Memory checkpoint: after downloading all return periods
+        log_memory_checkpoint(logger, "band_stack after_download", context_id=context_id,
+                              file_count=len(bands))
+
         if not bands:
             return {
                 "success": False,
@@ -490,6 +498,9 @@ def fathom_band_stack(params: dict, context: dict = None) -> dict:
             dst.build_overviews([2, 4], Resampling.nearest)
             dst.update_tags(ns='rio_overview', resampling='nearest')
 
+        # Memory checkpoint: after COG creation
+        log_memory_checkpoint(logger, "band_stack after_cog_write", context_id=context_id)
+
         # Get output size
         output_size = output_path.stat().st_size
         output_size_kb = output_size / 1024
@@ -500,6 +511,10 @@ def fathom_band_stack(params: dict, context: dict = None) -> dict:
             silver_repo.write_blob(output_container, output_blob_path, f.read())
 
         logger.info(f"   ☁️ Uploaded: {output_container}/{output_blob_path}")
+
+    # Memory checkpoint: after upload complete
+    log_memory_checkpoint(logger, "band_stack END", context_id=context_id,
+                          output_size_kb=output_size_kb)
 
     # =========================================================================
     # INLINE STATE UPDATE (17 DEC 2025)
@@ -615,6 +630,10 @@ def fathom_grid_inventory(params: dict, context: dict = None) -> dict:
         logger.info(f"   Spatial filter (bbox): {bbox}")
 
     # Query Phase 1 completed, Phase 2 pending records grouped by phase2_group_key
+    # NOTE: We don't filter by source_container here because:
+    # - etl_fathom.source_container stores the ORIGINAL source (bronze-fathom)
+    # - The job's source_container param refers to Phase 1 OUTPUT location (silver-fathom)
+    # - Filtering by phase1_processed_at IS NOT NULL is sufficient
     sql = """
         SELECT
             phase2_group_key,
@@ -633,7 +652,6 @@ def fathom_grid_inventory(params: dict, context: dict = None) -> dict:
           AND phase2_processed_at IS NULL
           AND grid_cell IS NOT NULL
           AND phase1_output_blob IS NOT NULL
-          AND source_container = %(source_container)s
         GROUP BY phase2_group_key, grid_cell, flood_type, defense, year, ssp
         ORDER BY phase2_group_key
     """
@@ -641,9 +659,8 @@ def fathom_grid_inventory(params: dict, context: dict = None) -> dict:
     repo = PostgreSQLRepository()
     with repo._get_connection() as conn:
         with conn.cursor() as cur:
-            cur.execute(sql, {"source_container": source_container})
-            rows = cur.fetchall()
-            columns = [desc[0] for desc in cur.description]
+            cur.execute(sql)
+            rows = cur.fetchall()  # Returns list of dicts due to dict_row factory
 
     logger.info(f"   Query returned {len(rows)} grid groups")
 
@@ -657,9 +674,10 @@ def fathom_grid_inventory(params: dict, context: dict = None) -> dict:
         raise ValueError(error_msg)
 
     # Convert to grid_groups format
+    # NOTE: rows are dicts due to PostgreSQLRepository's dict_row factory
     grid_groups = []
     for row in rows:
-        row_dict = dict(zip(columns, row))
+        row_dict = row  # Already a dict from dict_row factory
         grid_cell = row_dict["grid_cell"]
 
         # Apply bbox filter if provided
@@ -801,9 +819,14 @@ def fathom_spatial_merge(params: dict, context: dict = None) -> dict:
     grid_cell = grid_group["grid_cell"]
     output_name = grid_group["output_name"]
     tiles = grid_group["tiles"]
+    context_id = job_id or output_name  # Use job_id for correlation, fallback to output_name
 
     logger.info(f"🔧 Spatial merge for grid cell: {grid_cell}")
     logger.info(f"   Tiles to merge: {len(tiles)}")
+
+    # Memory checkpoint: start of spatial merge
+    log_memory_checkpoint(logger, "spatial_merge START", context_id=context_id,
+                          tile_count=len(tiles))
 
     config = get_config()
     # Silver zone for both reading (stacked COGs) and writing (merged COGs)
@@ -845,6 +868,10 @@ def fathom_spatial_merge(params: dict, context: dict = None) -> dict:
             with open(local_path, "wb") as f:
                 f.write(blob_bytes)
             local_tiles.append(str(local_path))
+
+        # Memory checkpoint: after downloading all tiles
+        log_memory_checkpoint(logger, "spatial_merge after_download", context_id=context_id,
+                              tiles_downloaded=len(local_tiles))
 
         # Process band-by-band to limit memory
         merged_bands = []
@@ -890,9 +917,18 @@ def fathom_spatial_merge(params: dict, context: dict = None) -> dict:
             for ds in datasets:
                 ds.close()
 
+            # Memory checkpoint: after each band merge (track peak memory per band)
+            if band_num == 1 or band_num == len(RETURN_PERIODS):  # First and last band only
+                log_memory_checkpoint(logger, f"spatial_merge band_{band_num}_complete",
+                                      context_id=context_id, return_period=RETURN_PERIODS[band_idx])
+
         # Stack all merged bands
         stacked = np.stack(merged_bands, axis=0)
         logger.info(f"   📦 Merged shape: {stacked.shape}")
+
+        # Memory checkpoint: after stacking all bands (peak memory expected here)
+        log_memory_checkpoint(logger, "spatial_merge after_stack", context_id=context_id,
+                              shape=f"{stacked.shape}")
 
         # Write output COG
         output_path = tmpdir / f"{output_name}.tif"
@@ -924,6 +960,9 @@ def fathom_spatial_merge(params: dict, context: dict = None) -> dict:
             dst.build_overviews([2, 4, 8, 16], Resampling.nearest)
             dst.update_tags(ns='rio_overview', resampling='nearest')
 
+        # Memory checkpoint: after COG write
+        log_memory_checkpoint(logger, "spatial_merge after_cog_write", context_id=context_id)
+
         # Get output size
         output_size = output_path.stat().st_size
         output_size_mb = output_size / (1024 * 1024)
@@ -938,6 +977,10 @@ def fathom_spatial_merge(params: dict, context: dict = None) -> dict:
             blob_repo.write_blob(output_container, output_blob_path, f.read())
 
         logger.info(f"   ☁️ Uploaded: {output_container}/{output_blob_path}")
+
+    # Memory checkpoint: after upload complete
+    log_memory_checkpoint(logger, "spatial_merge END", context_id=context_id,
+                          output_size_mb=output_size_mb, tile_count=len(tiles))
 
     # =========================================================================
     # INLINE STATE UPDATE (17 DEC 2025)
@@ -1040,11 +1083,31 @@ def fathom_stac_register(params: dict, context: dict = None) -> dict:
         "fathom_stac_register"
     )
 
-    cog_results = params.get("cog_results", [])
-    region_code = params["region_code"].lower()
-    collection_id = params.get("collection_id", FathomDefaults.PHASE2_COLLECTION_ID)
-    output_container = params.get("output_container", FathomDefaults.PHASE2_OUTPUT_CONTAINER)
-    dry_run = params.get("dry_run", False)
+    # Handle both direct params and CoreMachine fan-in structure
+    # CoreMachine's _create_fan_in_task passes:
+    #   - previous_results: results from previous stage
+    #   - job_parameters: original job parameters
+    if "job_parameters" in params:
+        # CoreMachine fan-in structure
+        job_params = params["job_parameters"]
+        # Extract successful results from previous_results
+        previous_results = params.get("previous_results", [])
+        cog_results = [
+            r.get("result", r) for r in previous_results
+            if r.get("success") and r.get("result")
+        ]
+        region_code = job_params["region_code"].lower()
+        collection_id = job_params.get("collection_id", FathomDefaults.PHASE1_COLLECTION_ID)
+        output_container = job_params.get("output_container", FathomDefaults.PHASE1_OUTPUT_CONTAINER)
+        dry_run = job_params.get("dry_run", False)
+        logger.info(f"📚 Fan-in mode: extracted {len(cog_results)} successful COGs from {len(previous_results)} previous results")
+    else:
+        # Direct params structure (from job's create_tasks_for_stage)
+        cog_results = params.get("cog_results", [])
+        region_code = params["region_code"].lower()
+        collection_id = params.get("collection_id", FathomDefaults.PHASE2_COLLECTION_ID)
+        output_container = params.get("output_container", FathomDefaults.PHASE2_OUTPUT_CONTAINER)
+        dry_run = params.get("dry_run", False)
 
     if dry_run:
         logger.info("🔍 DRY RUN - STAC registration skipped")
@@ -1066,11 +1129,10 @@ def fathom_stac_register(params: dict, context: dict = None) -> dict:
     full_collection_id = f"{collection_id}-{region_code}"
 
     # Check if collection exists, create if not
-    try:
-        existing = stac_repo.get_collection(full_collection_id)
+    if stac_repo.collection_exists(full_collection_id):
         logger.info(f"   Using existing collection: {full_collection_id}")
-    except Exception:
-        # Create collection
+    else:
+        # Create collection using new API
         logger.info(f"   Creating collection: {full_collection_id}")
 
         # Calculate collection bounds from all COGs
@@ -1085,37 +1147,40 @@ def fathom_stac_register(params: dict, context: dict = None) -> dict:
         else:
             collection_bounds = [-180, -90, 180, 90]
 
-        collection = {
-            "type": "Collection",
-            "stac_version": "1.0.0",
-            "id": full_collection_id,
-            "title": f"Fathom Global Flood Hazard Maps - {region_code.upper()}",
-            "description": (
+        # Use new create_collection API (requires container and tier)
+        result = stac_repo.create_collection(
+            container=output_container,
+            tier="silver",
+            collection_id=full_collection_id,
+            title=f"Fathom Global Flood Hazard Maps - {region_code.upper()}",
+            description=(
                 f"Consolidated flood hazard data for {region_code.upper()} from Fathom Global v3. "
                 "Multi-band COGs with return periods (1in5 to 1in1000) as bands. "
                 "Flood depth values in centimeters."
             ),
-            "license": "proprietary",
-            "extent": {
-                "spatial": {"bbox": [collection_bounds]},
-                "temporal": {"interval": [["2020-01-01T00:00:00Z", "2080-12-31T23:59:59Z"]]}
-            },
-            "summaries": {
+            summaries={
                 "fathom:flood_type": ["coastal", "fluvial", "pluvial"],
                 "fathom:defense_status": ["defended", "undefended"],
                 "fathom:year": [2020, 2030, 2050, 2080],
                 "fathom:ssp_scenario": ["ssp126", "ssp245", "ssp370", "ssp585"]
             },
-            "links": [],
-            "keywords": ["flood", "hazard", "fathom", "climate", region_code]
-        }
-
-        stac_repo.create_collection(collection)
-        logger.info(f"   ✅ Collection created: {full_collection_id}")
+            # Additional STAC properties via **kwargs
+            license="proprietary",
+            extent={
+                "spatial": {"bbox": [collection_bounds]},
+                "temporal": {"interval": [["2020-01-01T00:00:00Z", "2080-12-31T23:59:59Z"]]}
+            },
+            keywords=["flood", "hazard", "fathom", "climate", region_code]
+        )
+        if result.get("success"):
+            logger.info(f"   ✅ Collection created: {full_collection_id}")
+        else:
+            logger.warning(f"   ⚠️ Collection creation result: {result}")
 
     # Create STAC items for each COG
     items_created = 0
-    storage_base = f"https://{config.storage_account_name}.blob.core.windows.net/{output_container}"
+    # Silver zone storage account for STAC asset URLs
+    storage_base = f"https://{config.storage.silver.account_name}.blob.core.windows.net/{output_container}"
 
     for cog_result in cog_results:
         output_blob = cog_result["output_blob"]
@@ -1217,6 +1282,6 @@ def fathom_stac_register(params: dict, context: dict = None) -> dict:
         "result": {
             "collection_id": full_collection_id,
             "items_created": items_created,
-            "stac_catalog_url": f"{config.base_url}/api/stac/collections/{full_collection_id}"
+            "stac_catalog_url": f"{config.etl_app_base_url}/api/stac/collections/{full_collection_id}"
         }
     }

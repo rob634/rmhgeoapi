@@ -492,20 +492,20 @@ class AppConfig(BaseModel):
     @property
     def resolved_intermediate_tiles_container(self) -> str:
         """
-        Get intermediate tiles container, defaulting to silver-mosaicjson if not specified.
+        Get intermediate tiles container, defaulting to silver-cogs if not specified.
 
-        UPDATED (12 NOV 2025): Changed default from "silver-tiles" to "silver-mosaicjson"
-        to separate MosaicJSON files from other tile data.
+        UPDATED (19 DEC 2025): Changed default from "silver-mosaicjson" to "silver-cogs"
+        to store MosaicJSON files alongside COGs in the same container.
 
         Returns container name for MosaicJSON files (Stage 3 output).
-        If intermediate_tiles_container is None, falls back to silver-mosaicjson.
+        If intermediate_tiles_container is None, falls back to silver-cogs.
 
         Usage:
             config = get_config()
             container = config.resolved_intermediate_tiles_container
-            # Returns: "silver-mosaicjson" (or custom value if env var set)
+            # Returns: "silver-cogs" (or custom value if env var set)
         """
-        return self.raster.intermediate_tiles_container or "silver-mosaicjson"
+        return self.raster.intermediate_tiles_container or "silver-cogs"
 
     @property
     def titiler_pgstac_base_url(self) -> str:

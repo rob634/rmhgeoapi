@@ -106,11 +106,7 @@ NOTICE
 *.csv
 *.xlsx
 *.json.example
-*.yaml
-*.yml
-
-# OpenAPI documentation (not needed at runtime)
-openapi/
+# OpenAPI spec included for runtime Swagger UI
 
 # Claude-specific files
 .claude*

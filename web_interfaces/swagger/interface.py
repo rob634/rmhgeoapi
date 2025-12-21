@@ -13,7 +13,6 @@ import os
 from pathlib import Path
 
 import azure.functions as func
-import yaml
 
 from web_interfaces import InterfaceRegistry
 from web_interfaces.base import BaseInterface
@@ -47,8 +46,8 @@ except Exception as e:
     logger.error(f"Failed to load swagger-ui.css: {e}")
 
 try:
-    with open(_OPENAPI_DIR / "platform-api-v1.yaml", "r", encoding="utf-8") as f:
-        _OPENAPI_SPEC = yaml.safe_load(f)
+    with open(_OPENAPI_DIR / "platform-api-v1.json", "r", encoding="utf-8") as f:
+        _OPENAPI_SPEC = json.load(f)
     logger.info(f"Loaded OpenAPI spec: {_OPENAPI_SPEC.get('info', {}).get('title', 'Unknown')}")
 except Exception as e:
     logger.error(f"Failed to load OpenAPI spec: {e}")

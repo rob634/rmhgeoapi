@@ -1818,12 +1818,11 @@ def openapi_spec(req: func.HttpRequest) -> func.HttpResponse:
     """
     import json
     from pathlib import Path
-    import yaml
 
     try:
-        spec_path = Path(__file__).parent / "openapi" / "platform-api-v1.yaml"
+        spec_path = Path(__file__).parent / "openapi" / "platform-api-v1.json"
         with open(spec_path, "r", encoding="utf-8") as f:
-            spec = yaml.safe_load(f)
+            spec = json.load(f)
 
         # Update server URL to current deployment
         host = req.headers.get('Host', 'localhost')

@@ -86,6 +86,9 @@ def create_mosaicjson(
           See raster_cog.py for upstream contract documentation.
     """
     try:
+        # Extract task_id for checkpoint context tracking (20 DEC 2025)
+        task_id = params.get('_task_id')
+
         # Extract parameters from fan_in pattern
         # CoreMachine passes: {"previous_results": [...], "job_parameters": {...}}
         previous_results = params.get("previous_results", [])
@@ -201,7 +204,8 @@ def create_mosaicjson(
             mosaicjson_container=mosaicjson_container,
             cog_container=cog_container,
             output_folder=output_folder,
-            job_parameters=job_parameters
+            job_parameters=job_parameters,
+            task_id=task_id
         )
 
         # Add cog_blobs and cog_container to result for Stage 4 (11 NOV 2025)
@@ -284,7 +288,8 @@ def _create_mosaicjson_impl(
     mosaicjson_container: str,
     cog_container: str,
     output_folder: str,
-    job_parameters: Dict[str, Any] = None
+    job_parameters: Dict[str, Any] = None,
+    task_id: str = None
 ) -> dict:
     """
     Internal implementation: Create MosaicJSON from COG list.
@@ -355,7 +360,7 @@ def _create_mosaicjson_impl(
 
     # Memory checkpoint 1 (DEBUG_MODE only)
     from util_logger import log_memory_checkpoint
-    log_memory_checkpoint(logger, "Before processing COG list", cog_count=len(cog_urls))
+    log_memory_checkpoint(logger, "Before processing COG list", context_id=task_id, cog_count=len(cog_urls))
 
     # Get maxzoom setting (parameter overrides config default)
     from config import get_config
@@ -400,7 +405,7 @@ def _create_mosaicjson_impl(
 
         # Memory checkpoint 2 (DEBUG_MODE only)
         from util_logger import log_memory_checkpoint
-        log_memory_checkpoint(logger, "After mosaic creation",
+        log_memory_checkpoint(logger, "After mosaic creation", context_id=task_id,
                               quadkey_count=len(mosaic.tiles),
                               tile_count=len(cog_urls))
 
@@ -472,7 +477,7 @@ def _create_mosaicjson_impl(
 
         # Memory checkpoint 3 (DEBUG_MODE only)
         from util_logger import log_memory_checkpoint
-        log_memory_checkpoint(logger, "After mosaic upload",
+        log_memory_checkpoint(logger, "After mosaic upload", context_id=task_id,
                               blob_path=output_blob_name)
 
         # Generate public URL for the uploaded MosaicJSON (repository layer responsibility)

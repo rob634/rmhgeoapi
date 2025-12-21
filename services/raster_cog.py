@@ -211,6 +211,7 @@ def create_cog(params: dict) -> dict:
 
     # STEP 0: Initialize logger
     logger = None
+    task_id = params.get('_task_id')  # For checkpoint context tracking (20 DEC 2025)
     try:
         from util_logger import LoggerFactory, ComponentType
         logger = LoggerFactory.create_logger(ComponentType.SERVICE, "create_cog")
@@ -368,7 +369,7 @@ def create_cog(params: dict) -> dict:
 
             # Memory checkpoint 1 (DEBUG_MODE only)
             from util_logger import log_memory_checkpoint
-            log_memory_checkpoint(logger, "After blob download", input_size_mb=input_size_mb)
+            log_memory_checkpoint(logger, "After blob download", context_id=task_id, input_size_mb=input_size_mb)
         except Exception as e:
             logger.error(f"❌ STEP 3 FAILED: Cannot download input tile from {container_name}/{blob_name}")
             logger.error(f"   Error: {e}")
@@ -432,7 +433,7 @@ def create_cog(params: dict) -> dict:
         with MemoryFile(input_blob_bytes) as input_memfile:
             # Memory checkpoint 2 (DEBUG_MODE only)
             from util_logger import log_memory_checkpoint
-            log_memory_checkpoint(logger, "After opening MemoryFile")
+            log_memory_checkpoint(logger, "After opening MemoryFile", context_id=task_id)
 
             with input_memfile.open() as src:
                 # Get source CRS from raster
@@ -467,6 +468,7 @@ def create_cog(params: dict) -> dict:
                 # Memory checkpoint 3 (DEBUG_MODE only)
                 from util_logger import log_memory_checkpoint
                 log_memory_checkpoint(logger, "Before cog_translate",
+                                      context_id=task_id,
                                       in_memory=in_memory,
                                       compression=compression)
 
@@ -515,6 +517,7 @@ def create_cog(params: dict) -> dict:
                     # Memory checkpoint 4 (DEBUG_MODE only)
                     from util_logger import log_memory_checkpoint
                     log_memory_checkpoint(logger, "After cog_translate",
+                                          context_id=task_id,
                                           processing_time_seconds=elapsed_time)
 
                     # Read metadata from COG
@@ -538,6 +541,7 @@ def create_cog(params: dict) -> dict:
                         # Memory checkpoint 5 (DEBUG_MODE only)
                         from util_logger import log_memory_checkpoint
                         log_memory_checkpoint(logger, "After reading COG bytes",
+                                              context_id=task_id,
                                               output_size_mb=output_size_mb)
                     except Exception as e:
                         logger.error(f"❌ STEP 6 FAILED: Cannot read COG from MemoryFile")
@@ -565,7 +569,7 @@ def create_cog(params: dict) -> dict:
 
                     # Memory checkpoint 6 (DEBUG_MODE only)
                     from util_logger import log_memory_checkpoint
-                    log_memory_checkpoint(logger, "After upload (cleanup)")
+                    log_memory_checkpoint(logger, "After upload (cleanup)", context_id=task_id)
 
                     # No STEP 7 needed - MemoryFile context managers handle cleanup automatically.
 

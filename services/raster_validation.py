@@ -68,6 +68,7 @@ def validate_raster(params: dict) -> dict:
 
     # STEP 0: Initialize logger BEFORE any other operations
     logger = None
+    task_id = params.get('_task_id')  # For checkpoint context tracking (20 DEC 2025)
     try:
         from util_logger import LoggerFactory, ComponentType
         logger = LoggerFactory.create_logger(ComponentType.SERVICE, "validate_raster")
@@ -222,7 +223,7 @@ def validate_raster(params: dict) -> dict:
 
         # Memory checkpoint 1 (DEBUG_MODE only)
         from util_logger import log_memory_checkpoint
-        log_memory_checkpoint(logger, "After GDAL open")
+        log_memory_checkpoint(logger, "After GDAL open", context_id=task_id)
     except Exception as e:
         logger.error(f"❌ STEP 3 FAILED: Cannot open raster file: {e}\n{traceback.format_exc()}")
         return {
@@ -251,6 +252,7 @@ def validate_raster(params: dict) -> dict:
             # Memory checkpoint 2 (DEBUG_MODE only)
             from util_logger import log_memory_checkpoint
             log_memory_checkpoint(logger, "After metadata extraction",
+                                  context_id=task_id,
                                   band_count=band_count,
                                   shape_height=shape[0],
                                   shape_width=shape[1])
@@ -508,6 +510,7 @@ def validate_raster(params: dict) -> dict:
                 # Memory checkpoint 3 (DEBUG_MODE only)
                 from util_logger import log_memory_checkpoint
                 log_memory_checkpoint(logger, "Validation complete",
+                                      context_id=task_id,
                                       detected_type=detected_type,
                                       warnings_count=len(warnings))
 

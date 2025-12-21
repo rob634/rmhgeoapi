@@ -27,12 +27,14 @@ Dependencies:
 """
 
 from enum import Enum
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Tuple
 from datetime import datetime, timezone
 from dataclasses import dataclass, field
 import logging
 import sys
+import os
 import json
+import time
 import traceback
 from functools import wraps
 
@@ -50,18 +52,34 @@ def _lazy_import_psutil():
     """
     try:
         import psutil
-        import os
         return psutil, os
     except ImportError:
         return None, None
+
+
+# Prime CPU tracking at module load (20 DEC 2025)
+# First call to cpu_percent() always returns 0.0, so we prime it here
+def _prime_cpu_tracking():
+    """Prime psutil CPU tracking so subsequent calls return actual values."""
+    try:
+        import psutil
+        # These first calls return 0.0 but prime the internal counters
+        psutil.cpu_percent(interval=None)
+        psutil.Process(os.getpid()).cpu_percent(interval=None)
+    except Exception:
+        pass  # Silently ignore - CPU tracking is optional
+
+_prime_cpu_tracking()
 
 
 # ============================================================================
 # CHECKPOINT TIMING - Track duration between checkpoints (20 DEC 2025)
 # ============================================================================
 # Module-level dict to track checkpoint times per context (task_id, job_id, etc.)
-# Key format: "{context_id}:{checkpoint_name}" or just checkpoint_name if no context
-_checkpoint_times: Dict[str, float] = {}
+# Key format: "{context_id}:last"
+# Includes TTL-based cleanup to prevent memory leaks (20 DEC 2025)
+_checkpoint_times: Dict[str, Tuple[float, float]] = {}  # key -> (timestamp, last_access_time)
+_CHECKPOINT_TTL_SECONDS = 3600  # Clean up entries older than 1 hour
 
 
 def get_memory_stats() -> Optional[Dict[str, float]]:
@@ -127,6 +145,17 @@ def get_memory_stats() -> Optional[Dict[str, float]]:
         return None
 
 
+def _cleanup_stale_checkpoints():
+    """Remove checkpoint entries older than TTL to prevent memory leaks."""
+    current_time = time.time()
+    stale_keys = [
+        key for key, (_, access_time) in _checkpoint_times.items()
+        if current_time - access_time > _CHECKPOINT_TTL_SECONDS
+    ]
+    for key in stale_keys:
+        del _checkpoint_times[key]
+
+
 def log_memory_checkpoint(
     logger: logging.Logger,
     checkpoint_name: str,
@@ -150,6 +179,7 @@ def log_memory_checkpoint(
         - First checkpoint in a context: duration_since_last_ms = None
         - Subsequent checkpoints: duration_since_last_ms = time since previous checkpoint
         - Use context_id to isolate timing between concurrent operations
+        - Stale entries (>1 hour) are automatically cleaned up
 
     Example:
         logger = LoggerFactory.create_logger(ComponentType.SERVICE, "create_cog")
@@ -159,11 +189,13 @@ def log_memory_checkpoint(
         log_memory_checkpoint(logger, "After download", context_id=task_id, file_size_mb=815)
         # Output includes: duration_since_last_ms: 1234
     """
-    import time
-
     resource_stats = get_memory_stats()
     if resource_stats:
         current_time = time.time()
+
+        # Periodic cleanup of stale entries (every ~100 calls via simple modulo check)
+        if len(_checkpoint_times) > 100:
+            _cleanup_stale_checkpoints()
 
         # Build checkpoint key for duration tracking
         checkpoint_key = f"{context_id}:last" if context_id else "_global:last"
@@ -171,11 +203,11 @@ def log_memory_checkpoint(
         # Calculate duration since last checkpoint
         duration_ms = None
         if checkpoint_key in _checkpoint_times:
-            last_time = _checkpoint_times[checkpoint_key]
+            last_time, _ = _checkpoint_times[checkpoint_key]
             duration_ms = round((current_time - last_time) * 1000, 1)
 
-        # Update last checkpoint time
-        _checkpoint_times[checkpoint_key] = current_time
+        # Update checkpoint time with access time for TTL tracking
+        _checkpoint_times[checkpoint_key] = (current_time, current_time)
 
         # Merge all fields
         all_fields = {
@@ -192,15 +224,16 @@ def log_memory_checkpoint(
         if context_id:
             all_fields['context_id'] = context_id[:16] if len(context_id) > 16 else context_id
 
-        logger.info(f"📊 CHECKPOINT: {checkpoint_name}", extra={'custom_dimensions': all_fields})
+        logger.info(f"📊 MEMORY CHECKPOINT: {checkpoint_name}", extra={'custom_dimensions': all_fields})
 
 
 def clear_checkpoint_context(context_id: str):
     """
     Clear checkpoint timing for a specific context.
 
-    Call this when a task/job completes to prevent memory leak from
-    accumulating checkpoint times.
+    Call this when a task/job completes to clean up timing data.
+    Note: TTL-based cleanup also runs automatically, so this is optional
+    but recommended for immediate cleanup.
 
     Args:
         context_id: The context ID used in log_memory_checkpoint calls
@@ -472,10 +505,10 @@ class JSONFormatter(logging.Formatter):
 class LoggerFactory:
     """
     Factory for creating component-specific loggers.
-    
+
     This factory creates Python loggers configured for each
     component type with appropriate settings and context.
-    
+
     Example:
         logger = LoggerFactory.create_logger(
             ComponentType.CONTROLLER,
@@ -483,22 +516,21 @@ class LoggerFactory:
         )
         logger.info("Processing job")
     """
-    
+
     # Default configurations per component type
-    # Check environment variable for debug mode
-    import os
-    default_level = LogLevel.DEBUG if os.getenv('DEBUG_LOGGING', '').lower() == 'true' else LogLevel.INFO
-    
+    # Check environment variable for debug mode (os imported at module level)
+    _default_level = LogLevel.DEBUG if os.getenv('DEBUG_LOGGING', '').lower() == 'true' else LogLevel.INFO
+
     DEFAULT_CONFIGS = {
         ComponentType.CONTROLLER: ComponentConfig(
             component_type=ComponentType.CONTROLLER,
-            log_level=default_level,
+            log_level=_default_level,
             enable_performance_logging=True,
-            enable_debug_context=True if default_level == LogLevel.DEBUG else False
+            enable_debug_context=True if _default_level == LogLevel.DEBUG else False
         ),
         ComponentType.SERVICE: ComponentConfig(
             component_type=ComponentType.SERVICE,
-            log_level=default_level,
+            log_level=_default_level,
             enable_performance_logging=True
         ),
         ComponentType.REPOSITORY: ComponentConfig(
@@ -508,7 +540,7 @@ class LoggerFactory:
         ),
         ComponentType.FACTORY: ComponentConfig(
             component_type=ComponentType.FACTORY,
-            log_level=default_level
+            log_level=_default_level
         ),
         ComponentType.SCHEMA: ComponentConfig(
             component_type=ComponentType.SCHEMA,
@@ -516,17 +548,22 @@ class LoggerFactory:
         ),
         ComponentType.TRIGGER: ComponentConfig(
             component_type=ComponentType.TRIGGER,
-            log_level=default_level,
+            log_level=_default_level,
             enable_performance_logging=True
         ),
         ComponentType.ADAPTER: ComponentConfig(
             component_type=ComponentType.ADAPTER,
-            log_level=default_level,
+            log_level=_default_level,
             enable_performance_logging=True
         ),
         ComponentType.VALIDATOR: ComponentConfig(
             component_type=ComponentType.VALIDATOR,
-            log_level=default_level
+            log_level=_default_level
+        ),
+        ComponentType.JOB: ComponentConfig(
+            component_type=ComponentType.JOB,
+            log_level=_default_level,
+            enable_performance_logging=True  # Jobs benefit from timing info
         )
     }
     
@@ -560,63 +597,71 @@ class LoggerFactory:
         # Create hierarchical logger name
         logger_name = f"{component_type.value}.{name}"
         logger = logging.getLogger(logger_name)
-        
+
         # Set log level - handle both LogLevel enum and string
         if isinstance(config.log_level, str):
             log_level = LogLevel.from_string(config.log_level).to_python_level()
         else:
             log_level = config.log_level.to_python_level()
         logger.setLevel(log_level)
-        
-        # Remove existing handlers to avoid duplicates
-        logger.handlers.clear()
-        
-        # Create console handler with JSON formatting
-        handler = logging.StreamHandler(sys.stdout)
-        handler.setLevel(log_level)
-        
-        # Use JSON formatter for all output
-        formatter = JSONFormatter()
-        handler.setFormatter(formatter)
-        
-        # Add handler to logger
-        logger.addHandler(handler)
-        
+
+        # Only add handlers if this logger doesn't already have our JSON handler
+        # This prevents duplicate handlers when create_logger is called multiple times
+        # (20 DEC 2025: Fixed handler duplication issue)
+        has_json_handler = any(
+            isinstance(h.formatter, JSONFormatter) for h in logger.handlers
+        )
+        if not has_json_handler:
+            # Create console handler with JSON formatting
+            handler = logging.StreamHandler(sys.stdout)
+            handler.setLevel(log_level)
+
+            # Use JSON formatter for all output
+            formatter = JSONFormatter()
+            handler.setFormatter(formatter)
+
+            # Add handler to logger
+            logger.addHandler(handler)
+
         # Allow propagation to Azure's root logger for Application Insights
         logger.propagate = True
-        
+
         # Create a wrapper that adds context as custom dimensions
-        original_log = logger._log
-        
-        def log_with_context(level, msg, args, exc_info=None, extra=None, stack_info=False, stacklevel=1):
-            """Wrapper to inject context as custom dimensions."""
-            if extra is None:
-                extra = {}
+        # Only wrap if not already wrapped (check for our marker attribute)
+        if not hasattr(logger, '_context_wrapped'):
+            original_log = logger._log
 
-            # Build base custom dimensions from context
-            if context:
-                custom_dims = context.to_dict()
-                custom_dims['component_type'] = component_type.value
-                custom_dims['component_name'] = name
-            else:
-                custom_dims = {
-                    'component_type': component_type.value,
-                    'component_name': name
-                }
+            def log_with_context(level, msg, args, exc_info=None, extra=None, stack_info=False, stacklevel=1):
+                """Wrapper to inject context as custom dimensions."""
+                if extra is None:
+                    extra = {}
 
-            # Merge with any custom_dimensions passed in extra (for DEBUG_MODE, etc.)
-            if 'custom_dimensions' in extra:
-                custom_dims.update(extra['custom_dimensions'])
+                # Build base custom dimensions from context
+                if context:
+                    custom_dims = context.to_dict()
+                    custom_dims['component_type'] = component_type.value
+                    custom_dims['component_name'] = name
+                else:
+                    custom_dims = {
+                        'component_type': component_type.value,
+                        'component_name': name
+                    }
 
-            extra['custom_dimensions'] = custom_dims
+                # Merge with any custom_dimensions passed in extra (for DEBUG_MODE, etc.)
+                if 'custom_dimensions' in extra:
+                    custom_dims.update(extra['custom_dimensions'])
 
-            # Call original log method
-            original_log(level, msg, args, exc_info=exc_info, extra=extra,
-                        stack_info=stack_info, stacklevel=stacklevel)
-        
-        # Replace the _log method with our wrapper
-        logger._log = log_with_context
-        
+                extra['custom_dimensions'] = custom_dims
+
+                # Call original log method with incremented stacklevel
+                # +1 to account for this wrapper function (20 DEC 2025: Fixed stacklevel)
+                original_log(level, msg, args, exc_info=exc_info, extra=extra,
+                            stack_info=stack_info, stacklevel=stacklevel + 1)
+
+            # Replace the _log method with our wrapper
+            logger._log = log_with_context
+            logger._context_wrapped = True  # Mark as wrapped to prevent re-wrapping
+
         return logger
     
     @classmethod

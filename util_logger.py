@@ -17,6 +17,7 @@ Exports:
     LoggerFactory: Factory for creating loggers
     log_exceptions: Exception logging decorator
     get_memory_stats: Memory/CPU statistics helper
+    get_runtime_environment: Runtime environment info (CPU, RAM, platform)
     log_memory_checkpoint: Resource checkpoint logger (memory, CPU, duration)
     clear_checkpoint_context: Clear checkpoint timing for a context
     monitored_gdal_operation: Context manager for GDAL ops with pulse monitoring
@@ -148,6 +149,70 @@ def get_memory_stats() -> Optional[Dict[str, float]]:
         return None
 
 
+# Cached runtime environment (computed once per process)
+_runtime_environment: Optional[Dict[str, Any]] = None
+
+
+def get_runtime_environment() -> Optional[Dict[str, Any]]:
+    """
+    Get runtime environment info (CPU, RAM, platform, Azure instance).
+
+    Cached after first call since these don't change during process lifetime.
+    Only executes if DEBUG_MODE=true in config.
+
+    Returns:
+        dict with environment info or None if debug disabled:
+        {
+            'cpu_count': int,           # Logical CPU count
+            'total_ram_gb': float,      # Total system RAM in GB
+            'platform': str,            # e.g., "Linux 5.15.0"
+            'python_version': str,      # e.g., "3.11.4"
+            'azure_instance_id': str,   # Azure instance ID (if available)
+            'azure_site_name': str,     # Function app name
+            'azure_sku': str,           # App Service Plan SKU (if available)
+        }
+    """
+    global _runtime_environment
+
+    # Return cached result if available
+    if _runtime_environment is not None:
+        return _runtime_environment
+
+    # Check if debug mode enabled
+    try:
+        from config import get_config
+        config = get_config()
+        if not config.debug_mode:
+            return None
+    except Exception:
+        return None
+
+    # Lazy import psutil
+    psutil_module, _ = _lazy_import_psutil()
+    if not psutil_module:
+        return None
+
+    try:
+        import platform
+
+        mem = psutil_module.virtual_memory()
+
+        _runtime_environment = {
+            'cpu_count': psutil_module.cpu_count() or 0,
+            'total_ram_gb': round(mem.total / (1024**3), 1),
+            'platform': f"{platform.system()} {platform.release()}",
+            'python_version': platform.python_version(),
+            'azure_instance_id': os.environ.get('WEBSITE_INSTANCE_ID', '')[:16],  # Truncate for readability
+            'azure_site_name': os.environ.get('WEBSITE_SITE_NAME', ''),
+            'azure_sku': os.environ.get('WEBSITE_SKU', ''),
+        }
+
+        return _runtime_environment
+
+    except Exception:
+        return None
+
+
 def _cleanup_stale_checkpoints():
     """Remove checkpoint entries older than TTL to prevent memory leaks."""
     current_time = time.time()
@@ -222,6 +287,11 @@ def log_memory_checkpoint(
         # Add duration if we have a previous checkpoint
         if duration_ms is not None:
             all_fields['duration_since_last_ms'] = duration_ms
+        else:
+            # First checkpoint for this context - include runtime environment
+            runtime_env = get_runtime_environment()
+            if runtime_env:
+                all_fields.update(runtime_env)
 
         # Add context_id if provided
         if context_id:

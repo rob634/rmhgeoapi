@@ -1,6 +1,6 @@
 # Working Backlog
 
-**Last Updated**: 19 DEC 2025
+**Last Updated**: 20 DEC 2025
 **Source of Truth**: [EPICS.md](/EPICS.md) — Epic/Feature/Story definitions live there
 **Purpose**: Sprint-level task tracking and delegation
 
@@ -11,10 +11,9 @@
 | Priority | Epic | Name | Status | Next Action |
 |:--------:|------|------|--------|-------------|
 | 1 | E2 | Raster Data as API | 🚧 | F2.7: Collection Processing |
-| 2 | E9 | DDH Platform Integration | 📋 | F9.1: API Documentation |
-| 3 | E7 | Data Externalization | 📋 | F7.1: Publishing Workflow |
-| 4 | E6 | Platform Observability | 🚧 | F6.3: Verbose Validation |
-| 5 | E3 | Zarr/Climate Data as API | 🚧 | F3.2: Virtual Zarr Pipeline |
+| 2 | E3 | DDH Platform Integration | 🚧 | F3.1: Validate Swagger UI |
+| 3 | E4 | Data Externalization | 📋 | F4.1: Publishing Workflow |
+| 4 | E9 | Zarr/Climate Data as API | 🚧 | F9.2: Virtual Zarr Pipeline |
 
 ---
 
@@ -26,19 +25,20 @@
 |-------|-------------|-------|--------|
 | F2.7 | Raster Collection Processing (pgstac searches) | Claude | 📋 |
 
-### E9: DDH Platform Integration
+### E3: DDH Platform Integration
 
 | Story | Description | Owner | Status |
 |-------|-------------|-------|--------|
-| F9.1: API Docs | OpenAPI 3.0 spec generation | Claude | 📋 |
-| F9.2: Identity | DDH service principal setup | DevOps | 📋 |
-| F9.3: Envs | QA → UAT → Prod provisioning | DevOps | 📋 |
+| F3.1: API Docs | OpenAPI 3.0 spec + Swagger UI | Claude | ✅ Deployed |
+| **F3.1: Validate** | Review Swagger UI, test endpoints | User | 🔍 **Review** |
+| F3.2: Identity | DDH service principal setup | DevOps | 📋 |
+| F3.3: Envs | QA → UAT → Prod provisioning | DevOps | 📋 |
 
-### E3: Zarr/Climate Data as API
+### E9: Zarr/Climate Data as API
 
 | Story | Description | Owner | Status |
 |-------|-------------|-------|--------|
-| F3.3: Reader Migration | Copy raster_api/xarray_api to rmhogcstac | Claude | ⬜ Ready |
+| F9.3: Reader Migration | Copy raster_api/xarray_api to rmhogcstac | Claude | ⬜ Ready |
 
 ---
 
@@ -77,6 +77,7 @@ Tasks suitable for a colleague with Azure/Python/pipeline expertise but without 
 
 | Date | Item | Epic |
 |------|------|------|
+| 20 DEC 2025 | Swagger UI + OpenAPI spec (19 endpoints, 20 schemas) | E3.F3.1 |
 | 18 DEC 2025 | OGC API Styles module | E5.F5.1 |
 | 18 DEC 2025 | Service Layer API Phase 4 | E2.F2.5 |
 | 12 DEC 2025 | Unpublish workflows | E1.F1.4, E2.F2.4 |

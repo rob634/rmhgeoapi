@@ -65,11 +65,11 @@ Abstract component names for ADO work items. Actual Azure resource names assigne
 
 ## Storage
 
-| Logical Name | Purpose | Access Pattern |
-|--------------|---------|----------------|
-| **Bronze Storage Account** | Raw uploaded data | Write: ETL jobs, Read: processing |
-| **Silver Storage Account** | Processed COGs, Zarr | Write: ETL jobs, Read: TiTiler, APIs |
-| **External Storage Account** | Public-facing data | Write: ADF copy, Read: public CDN |
+| Logical Name | Purpose | Access Pattern | Zone |
+|--------------|---------|----------------|------|
+| **Bronze Storage Account** | Raw uploaded data | Write: ETL jobs, Read: processing | Internal |
+| **Silver Storage Account** | Processed COGs, Zarr | Write: ETL jobs, Read: TiTiler, APIs | Internal |
+| **External Storage Account** | Public-facing data | Write: ADF copy, Read: CDN/External Reader | External |
 
 ## Compute
 
@@ -100,12 +100,14 @@ Abstract component names for ADO work items. Actual Azure resource names assigne
 
 ## Database
 
-| Logical Name | Purpose |
-|--------------|---------|
-| **App Database** | Job/task state, curated datasets (nukeable) |
-| **Business Database** | PostGIS geo schema, pgSTAC catalog (protected) |
-| **App Admin Identity** | Managed identity with DDL privileges |
-| **App Reader Identity** | Managed identity with read-only privileges |
+| Logical Name | Purpose | Zone |
+|--------------|---------|------|
+| **App Database** | Job/task state, curated datasets (nukeable) | Internal |
+| **Business Database** | PostGIS geo schema, pgSTAC catalog (protected) | Internal |
+| **External Database** | External PostgreSQL with PostGIS for public data | External |
+| **App Admin Identity** | Managed identity with DDL privileges | Internal |
+| **App Reader Identity** | Managed identity with read-only privileges | Internal |
+| **External Reader Identity** | Managed identity for external zone read access | External |
 
 ## External Systems
 
@@ -709,20 +711,72 @@ final = adf_repo.wait_for_pipeline_completion(result['run_id'])
 
 ---
 
-### Feature F4.3: External Delivery Infrastructure 📋 PLANNED
+### Feature F4.3: External Delivery Infrastructure 🚧 PARTIAL
 
 **Owner**: DevOps (infrastructure)
-**Deliverable**: Cloudflare WAF/CDN, external storage
+**Deliverable**: External storage, database, CDN, and identity configuration
+
+**Current State**: Storage and database are **provisioned** but need validation and configuration.
+
+#### Phase 1: Storage Setup
 
 | Story | Status | Description | Owner | Acceptance Criteria |
 |-------|--------|-------------|-------|---------------------|
-| S4.3.1 | ⬜ | Create **External Storage Account** | DevOps | Storage account exists, blob public access enabled |
-| S4.3.2 | ⬜ | Configure storage CORS | DevOps | CORS allows reads from approved domains |
-| S4.3.3 | ⬜ | Create Cloudflare zone | DevOps | Zone exists for external data domain |
-| S4.3.4 | ⬜ | Configure **CDN/WAF** caching rules | DevOps | COGs and vectors cached at edge |
-| S4.3.5 | ⬜ | Configure **CDN/WAF** security rules | DevOps | Rate limiting, bot protection enabled |
-| S4.3.6 | ⬜ | Configure custom domain DNS | DevOps | CNAME points to Cloudflare |
-| S4.3.7 | ⬜ | Validate end-to-end access | DevOps | Public URL serves data through CDN |
+| S4.3.1 | ✅ | Create **External Storage Account** | DevOps | Storage account exists |
+| S4.3.2 | ⬜ | Validate storage access | DevOps | Confirm connectivity, list containers |
+| S4.3.3 | ⬜ | Configure storage RBAC | DevOps | Required identities have appropriate roles |
+| S4.3.4 | ⬜ | Configure storage CORS | DevOps | CORS allows reads from approved domains |
+
+#### Phase 2: Database Setup
+
+| Story | Status | Description | Owner | Acceptance Criteria |
+|-------|--------|-------------|-------|---------------------|
+| S4.3.5 | ✅ | Create **External PostgreSQL** | DevOps | Database server exists |
+| S4.3.6 | ⬜ | Validate database connectivity | DevOps | Can connect from approved networks |
+| S4.3.7 | ⬜ | Install PostGIS extension | DevOps | **Service Request Required** — PostGIS enabled on external DB |
+| S4.3.8 | ⬜ | Create external schemas | Geospatial | `geo`, `app`, `pgstac` schemas created |
+| S4.3.9 | ⬜ | Configure database RBAC | DevOps | Required identities have appropriate roles |
+
+#### Phase 3: Identity Setup
+
+| Story | Status | Description | Owner | Acceptance Criteria |
+|-------|--------|-------------|-------|---------------------|
+| S4.3.10 | ⬜ | Create **External Reader Identity** | DevOps | User-assigned managed identity for external read access |
+| S4.3.11 | ⬜ | Grant External Reader → External Storage | DevOps | `Storage Blob Data Reader` on external storage |
+| S4.3.12 | ⬜ | Grant External Reader → External Database | DevOps | Read-only access to external PostgreSQL |
+| S4.3.13 | ⬜ | Document identity separation | DevOps | Internal vs External reader identity matrix |
+
+### F4.3 Identity Separation
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                        INTERNAL ZONE                                     │
+│  ┌──────────────────────┐         ┌──────────────────────────────────┐ │
+│  │ Internal Reader ID   │────────▶│ Bronze/Silver Storage            │ │
+│  │ (existing)           │         │ Internal PostgreSQL              │ │
+│  └──────────────────────┘         └──────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│                        EXTERNAL ZONE                                     │
+│  ┌──────────────────────┐         ┌──────────────────────────────────┐ │
+│  │ External Reader ID   │────────▶│ External Storage                 │ │
+│  │ (NEW - S4.3.10)      │         │ External PostgreSQL              │ │
+│  └──────────────────────┘         └──────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────────────────────┘
+
+Principle: Separate identities for internal vs external access
+```
+
+#### Phase 4: CDN/WAF Setup
+
+| Story | Status | Description | Owner | Acceptance Criteria |
+|-------|--------|-------------|-------|---------------------|
+| S4.3.14 | ⬜ | Create Cloudflare zone | DevOps | Zone exists for external data domain |
+| S4.3.15 | ⬜ | Configure **CDN/WAF** caching rules | DevOps | COGs and vectors cached at edge |
+| S4.3.16 | ⬜ | Configure **CDN/WAF** security rules | DevOps | Rate limiting, bot protection enabled |
+| S4.3.17 | ⬜ | Configure custom domain DNS | DevOps | CNAME points to Cloudflare |
+| S4.3.18 | ⬜ | Validate end-to-end access | DevOps | Public URL serves data through CDN |
 
 ### F4.3 Cloudflare Configuration
 
@@ -741,6 +795,12 @@ final = adf_repo.wait_for_pipeline_completion(result['run_id'])
 | Bot Protection | Challenge suspicious | Block scrapers |
 | Hotlink Protection | Enabled | Prevent bandwidth theft |
 | Browser Integrity Check | Enabled | Block headless browsers |
+
+### F4.3 Service Requests Required
+
+| Item | Request Type | Notes |
+|------|--------------|-------|
+| **PostGIS on External DB** | Service Request | Azure Flexible Server requires support ticket for extensions |
 
 ---
 

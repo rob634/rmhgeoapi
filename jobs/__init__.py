@@ -57,6 +57,7 @@ from .curated_update import CuratedDatasetUpdateJob
 
 # H3 Aggregation (17 DEC 2025)
 from .h3_raster_aggregation import H3RasterAggregationJob
+from .h3_register_dataset import H3RegisterDatasetJob
 
 # ARCHIVED (07 DEC 2025) - replaced by inventory_container_contents
 # from .container_list import ListContainerContentsWorkflow
@@ -98,6 +99,7 @@ ALL_JOBS = {
 
     # H3 Aggregation (17 DEC 2025)
     "h3_raster_aggregation": H3RasterAggregationJob,
+    "h3_register_dataset": H3RegisterDatasetJob,
 
     # ARCHIVED (07 DEC 2025) - use inventory_container_contents instead
     # "list_container_contents": ListContainerContentsWorkflow,

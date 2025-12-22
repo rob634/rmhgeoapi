@@ -5,7 +5,7 @@
 # STATUS: Service Module - H3 Aggregation Handlers
 # PURPOSE: Zonal statistics and point aggregation for H3 hexagonal grids
 # LAST_REVIEWED: 17 DEC 2025
-# EXPORTS: h3_inventory_cells, h3_raster_zonal_stats, h3_aggregation_finalize
+# EXPORTS: h3_inventory_cells, h3_raster_zonal_stats, h3_aggregation_finalize, h3_register_dataset
 # DEPENDENCIES: rasterstats, h3, shapely
 # ============================================================================
 """
@@ -29,6 +29,7 @@ Handlers:
     h3_inventory_cells: Load H3 cells for scope, return batch ranges
     h3_raster_zonal_stats: Compute zonal stats for cell batch
     h3_aggregation_finalize: Verify and update registry provenance
+    h3_register_dataset: Register dataset in h3.dataset_registry
 """
 
 from typing import Dict, Callable
@@ -37,12 +38,14 @@ from typing import Dict, Callable
 from .handler_inventory import h3_inventory_cells
 from .handler_raster_zonal import h3_raster_zonal_stats
 from .handler_finalize import h3_aggregation_finalize
+from .handler_register import h3_register_dataset
 
 # Handler registry for this module
 ALL_HANDLERS: Dict[str, Callable] = {
     "h3_inventory_cells": h3_inventory_cells,
     "h3_raster_zonal_stats": h3_raster_zonal_stats,
     "h3_aggregation_finalize": h3_aggregation_finalize,
+    "h3_register_dataset": h3_register_dataset,
 }
 
 __all__ = [

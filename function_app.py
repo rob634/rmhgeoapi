@@ -222,6 +222,7 @@ from triggers.admin.db_data import admin_db_data_trigger
 from triggers.admin.db_diagnostics import admin_db_diagnostics_trigger
 from triggers.admin.servicebus import servicebus_admin_trigger
 from triggers.admin.h3_debug import admin_h3_debug_trigger
+from triggers.admin.h3_datasets import admin_h3_datasets_trigger
 
 # Curated Dataset Admin (15 DEC 2025) - System-managed geospatial data
 from triggers.curated.admin import curated_admin_trigger
@@ -482,6 +483,22 @@ def admin_h3_debug(req: func.HttpRequest) -> func.HttpResponse:
     - nuke_h3: Truncate all H3 tables (POST, requires confirm=yes)
     """
     return admin_h3_debug_trigger.handle_request(req)
+
+
+# H3 Dataset Registry API (22 DEC 2025)
+# Development endpoint for managing h3.dataset_registry. For production use,
+# prefer the h3_register_dataset job which provides async processing.
+@app.route(route="h3/datasets", methods=["GET", "POST", "DELETE"])
+def h3_datasets(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    H3 Dataset Registry CRUD: /api/h3/datasets
+
+    GET  /api/h3/datasets              - List all datasets
+    GET  /api/h3/datasets?id={id}      - Get single dataset
+    POST /api/h3/datasets              - Register new dataset (UPSERT)
+    DELETE /api/h3/datasets?id={id}    - Delete dataset (requires confirm=yes)
+    """
+    return admin_h3_datasets_trigger.handle_request(req)
 
 
 # H3 Stats API for web interface (16 DEC 2025)

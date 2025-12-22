@@ -3,16 +3,16 @@
 # ============================================================================
 # EPOCH: 4 - ACTIVE
 # STATUS: Job Definition - H3 Raster Zonal Statistics
-# PURPOSE: Aggregate local COG rasters to H3 hexagonal grid cells
-# LAST_REVIEWED: 17 DEC 2025
+# PURPOSE: Aggregate COG rasters to H3 hexagonal grid cells
+# LAST_REVIEWED: 22 DEC 2025
 # EXPORTS: H3RasterAggregationJob
 # DEPENDENCIES: jobs.base, jobs.mixins, infrastructure.h3_repository
 # ============================================================================
 """
 H3 Raster Aggregation Job - 3-Stage Workflow.
 
-Computes zonal statistics from local COG rasters (Azure Blob Storage)
-and stores results in h3.zonal_stats table.
+Computes zonal statistics from COG rasters and stores results in h3.zonal_stats.
+Supports multiple source types: Azure Blob Storage, Planetary Computer, or direct URLs.
 
 3-Stage Workflow:
     Stage 1: Inventory cells for scope (iso3/bbox/polygon_wkt)
@@ -20,21 +20,36 @@ and stores results in h3.zonal_stats table.
     Stage 3: Finalize (update registry provenance, verify counts)
 
 Features:
+    - Multiple source types: Azure Blob, Planetary Computer, direct URLs
     - Supports iso3, bbox, and polygon_wkt spatial scopes
     - Multiple stat types: mean, sum, min, max, count, std, median
     - Configurable batch size for memory management
     - Optional append_history mode (preserves existing values)
     - Dataset registry integration for metadata catalog
 
-Usage:
+Usage (Azure):
     POST /api/jobs/submit/h3_raster_aggregation
     {
+        "source_type": "azure",
         "container": "silver-cogs",
         "blob_path": "population/worldpop_2020.tif",
         "dataset_id": "worldpop_2020",
         "resolution": 6,
         "iso3": "GRC",
         "stats": ["sum", "mean", "count"]
+    }
+
+Usage (Planetary Computer):
+    POST /api/jobs/submit/h3_raster_aggregation
+    {
+        "source_type": "planetary_computer",
+        "collection": "cop-dem-glo-30",
+        "item_id": "Copernicus_DSM_COG_10_N35_00_E023_00",
+        "asset": "data",
+        "dataset_id": "copdem_glo30_greece",
+        "resolution": 6,
+        "iso3": "GRC",
+        "stats": ["mean", "min", "max"]
     }
 
 Exports:
@@ -93,16 +108,47 @@ class H3RasterAggregationJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct 
 
     # Declarative parameter validation
     parameters_schema: Dict[str, Any] = {
+        # Source type (determines which parameters are required)
+        'source_type': {
+            'type': 'str',
+            'default': 'azure',
+            'enum': ['azure', 'planetary_computer', 'url'],
+            'description': 'Source type: azure (Azure Blob), planetary_computer (PC STAC), url (direct URL)'
+        },
+        # Azure source parameters
         'container': {
             'type': 'str',
-            'required': True,
-            'description': 'Azure Blob Storage container name (e.g., "silver-cogs")'
+            'default': None,
+            'description': 'Azure Blob Storage container name (required for source_type=azure)'
         },
         'blob_path': {
             'type': 'str',
-            'required': True,
-            'description': 'Path to COG file within container (e.g., "population/worldpop_2020.tif")'
+            'default': None,
+            'description': 'Path to COG file within container (required for source_type=azure)'
         },
+        # Planetary Computer source parameters
+        'collection': {
+            'type': 'str',
+            'default': None,
+            'description': 'Planetary Computer collection ID (required for source_type=planetary_computer)'
+        },
+        'item_id': {
+            'type': 'str',
+            'default': None,
+            'description': 'STAC item ID (required for source_type=planetary_computer)'
+        },
+        'asset': {
+            'type': 'str',
+            'default': 'data',
+            'description': 'Asset key within STAC item (default: "data")'
+        },
+        # Direct URL source parameter
+        'cog_url': {
+            'type': 'str',
+            'default': None,
+            'description': 'Direct HTTPS URL to COG (required for source_type=url)'
+        },
+        # Common parameters
         'dataset_id': {
             'type': 'str',
             'required': True,
@@ -113,6 +159,11 @@ class H3RasterAggregationJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct 
             'default': 1,
             'min': 1,
             'description': 'Raster band to aggregate (1-indexed)'
+        },
+        'nodata': {
+            'type': 'float',
+            'default': None,
+            'description': 'Override nodata value (auto-detected from raster if not provided)'
         },
         'resolution': {
             'type': 'int',
@@ -181,6 +232,67 @@ class H3RasterAggregationJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct 
     }
 
     # ========================================================================
+    # CUSTOM VALIDATION: Source-specific parameter requirements
+    # ========================================================================
+
+    @classmethod
+    def validate_job_parameters(cls, params: dict) -> dict:
+        """
+        Validate job parameters with source-type-specific requirements.
+
+        Extends base validation to check:
+        - Dataset must be registered in h3.dataset_registry (pre-flight validation)
+        - Azure source: container + blob_path required
+        - Planetary Computer source: collection + item_id required
+        - URL source: cog_url required
+        """
+        # First, run base validation (applies schema defaults and type checks)
+        validated = super().validate_job_parameters(params)
+
+        # Get source_type (already has default from schema)
+        source_type = validated.get('source_type', 'azure')
+
+        # Validate source-specific requirements
+        if source_type == 'azure':
+            if not validated.get('container'):
+                raise ValueError("'container' is required when source_type='azure'")
+            if not validated.get('blob_path'):
+                raise ValueError("'blob_path' is required when source_type='azure'")
+
+        elif source_type == 'planetary_computer':
+            if not validated.get('collection'):
+                raise ValueError("'collection' is required when source_type='planetary_computer'")
+            if not validated.get('item_id'):
+                raise ValueError("'item_id' is required when source_type='planetary_computer'")
+
+        elif source_type == 'url':
+            if not validated.get('cog_url'):
+                raise ValueError("'cog_url' is required when source_type='url'")
+
+        # PRE-FLIGHT VALIDATION: Dataset must be registered
+        # This check happens at job submission time, not runtime
+        dataset_id = validated.get('dataset_id')
+        if dataset_id:
+            from infrastructure.h3_repository import H3Repository
+            h3_repo = H3Repository()
+            dataset = h3_repo.get_dataset(dataset_id)
+
+            if not dataset:
+                raise ValueError(
+                    f"Dataset '{dataset_id}' not found in h3.dataset_registry. "
+                    f"Register the dataset first using:\n"
+                    f"  - POST /api/jobs/submit/h3_register_dataset (recommended)\n"
+                    f"  - POST /api/h3/datasets (development/testing)\n"
+                    f"See job type 'h3_register_dataset' for required parameters."
+                )
+
+            # Inject theme from registry for partition routing
+            # This ensures Stage 2 handlers have the correct theme
+            validated['theme'] = dataset.get('theme')
+
+        return validated
+
+    # ========================================================================
     # JOB-SPECIFIC LOGIC: Task Creation
     # ========================================================================
 
@@ -212,10 +324,10 @@ class H3RasterAggregationJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct 
             ValueError: Invalid stage number or missing previous results
         """
         # Extract common parameters
-        container = job_params.get('container')
-        blob_path = job_params.get('blob_path')
+        source_type = job_params.get('source_type', 'azure')
         dataset_id = job_params.get('dataset_id')
         band = job_params.get('band', 1)
+        nodata = job_params.get('nodata')
         resolution = job_params.get('resolution')
         iso3 = job_params.get('iso3')
         bbox = job_params.get('bbox')
@@ -223,6 +335,14 @@ class H3RasterAggregationJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct 
         stats = job_params.get('stats', ['mean', 'sum', 'count'])
         append_history = job_params.get('append_history', False)
         batch_size = job_params.get('batch_size', 1000)
+
+        # Source-specific parameters
+        container = job_params.get('container')  # Azure
+        blob_path = job_params.get('blob_path')  # Azure
+        collection = job_params.get('collection')  # Planetary Computer
+        item_id = job_params.get('item_id')  # Planetary Computer
+        asset = job_params.get('asset', 'data')  # Planetary Computer
+        cog_url = job_params.get('cog_url')  # Direct URL
 
         # Registry metadata
         display_name = job_params.get('display_name') or dataset_id
@@ -287,25 +407,42 @@ class H3RasterAggregationJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct 
                 batch_start = batch_info.get('batch_start', 0)
                 actual_batch_size = batch_info.get('batch_size', batch_size)
 
+                # Build task parameters based on source type
+                task_params = {
+                    "source_type": source_type,
+                    "dataset_id": dataset_id,
+                    "band": band,
+                    "resolution": resolution,
+                    "iso3": iso3,
+                    "bbox": bbox,
+                    "polygon_wkt": polygon_wkt,
+                    "batch_start": batch_start,
+                    "batch_size": actual_batch_size,
+                    "batch_index": batch_idx,
+                    "stats": stats,
+                    "append_history": append_history,
+                    "source_job_id": job_id
+                }
+
+                # Add source-specific parameters
+                if source_type == 'azure':
+                    task_params["container"] = container
+                    task_params["blob_path"] = blob_path
+                elif source_type == 'planetary_computer':
+                    task_params["collection"] = collection
+                    task_params["item_id"] = item_id
+                    task_params["asset"] = asset
+                elif source_type == 'url':
+                    task_params["cog_url"] = cog_url
+
+                # Add nodata if provided
+                if nodata is not None:
+                    task_params["nodata"] = nodata
+
                 tasks.append({
                     "task_id": f"{job_id[:8]}-s2-batch{batch_idx}",
                     "task_type": "h3_raster_zonal_stats",
-                    "parameters": {
-                        "container": container,
-                        "blob_path": blob_path,
-                        "dataset_id": dataset_id,
-                        "band": band,
-                        "resolution": resolution,
-                        "iso3": iso3,
-                        "bbox": bbox,
-                        "polygon_wkt": polygon_wkt,
-                        "batch_start": batch_start,
-                        "batch_size": actual_batch_size,
-                        "batch_index": batch_idx,
-                        "stats": stats,
-                        "append_history": append_history,
-                        "source_job_id": job_id
-                    }
+                    "parameters": task_params
                 })
 
             return tasks
@@ -369,12 +506,31 @@ class H3RasterAggregationJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct 
 
         # Extract parameters
         params = context.parameters
+        source_type = params.get('source_type', 'azure')
         dataset_id = params.get('dataset_id', 'unknown')
         resolution = params.get('resolution', 0)
-        container = params.get('container', '')
-        blob_path = params.get('blob_path', '')
         iso3 = params.get('iso3')
         stats = params.get('stats', [])
+
+        # Build source info based on source_type
+        if source_type == 'azure':
+            source_info = {
+                "type": "azure",
+                "container": params.get('container', ''),
+                "blob_path": params.get('blob_path', '')
+            }
+        elif source_type == 'planetary_computer':
+            source_info = {
+                "type": "planetary_computer",
+                "collection": params.get('collection', ''),
+                "item_id": params.get('item_id', ''),
+                "asset": params.get('asset', 'data')
+            }
+        else:  # url
+            source_info = {
+                "type": "url",
+                "cog_url": params.get('cog_url', '')[:100] + "..."
+            }
 
         # Build scope description
         if iso3:
@@ -413,10 +569,7 @@ class H3RasterAggregationJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct 
             "dataset_id": dataset_id,
             "resolution": resolution,
             "scope": scope,
-            "source": {
-                "container": container,
-                "blob_path": blob_path
-            },
+            "source": source_info,
             "stats_computed": stats,
             "results": {
                 "total_cells": total_cells,

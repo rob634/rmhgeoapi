@@ -271,6 +271,8 @@ class TaskRoutingDefaults:
         # NOTE: Inventory handlers moved to VECTOR_TASKS (database queries)
         "fathom_band_stack",     # Actual raster: Stack 8 return periods
         "fathom_spatial_merge",  # Actual raster: Merge tiles band-by-band
+        # H3 Aggregation (memory-intensive rasterstats operations) - 22 DEC 2025
+        "h3_raster_zonal_stats",  # Stage 2: Compute zonal stats (GDAL + rasterstats)
     ]
 
     # Vector tasks → vector-tasks queue (high concurrency, DB-bound or lightweight)
@@ -293,6 +295,9 @@ class TaskRoutingDefaults:
         "generate_h3_grid",
         "cascade_h3_descendants",
         "finalize_h3_pyramid",
+        # H3 Aggregation handlers (DB-bound) - 22 DEC 2025
+        "h3_inventory_cells",       # Stage 1: Count cells, calculate batches
+        "h3_aggregation_finalize",  # Stage 3: Update registry, verify counts
         # Container inventory (lightweight blob listing)
         "container_summary_task",
         "list_blobs_with_metadata",

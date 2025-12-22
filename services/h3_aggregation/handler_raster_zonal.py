@@ -123,6 +123,7 @@ def h3_raster_zonal_stats(params: Dict[str, Any], context: Dict[str, Any] = None
     append_history = params.get('append_history', False)
     source_job_id = params.get('source_job_id')
     nodata = params.get('nodata')  # Optional - will read from raster if not provided
+    theme = params.get('theme')  # REQUIRED for partition routing - looked up from registry if not provided
 
     # Azure source parameters
     container = params.get('container')
@@ -183,6 +184,18 @@ def h3_raster_zonal_stats(params: Dict[str, Any], context: Dict[str, Any] = None
         from infrastructure.h3_repository import H3Repository
 
         h3_repo = H3Repository()
+
+        # STEP 1.5: Get theme from dataset_registry (required for partition routing)
+        if not theme:
+            theme = h3_repo.get_dataset_theme(dataset_id)
+            if not theme:
+                raise ValueError(
+                    f"Dataset '{dataset_id}' not found in h3.dataset_registry. "
+                    f"Register the dataset first with register_dataset() or provide 'theme' parameter."
+                )
+            logger.info(f"   Theme from registry: {theme}")
+        else:
+            logger.info(f"   Theme from params: {theme}")
 
         # STEP 2: Load H3 cells for batch
         cells = h3_repo.get_cells_for_aggregation(
@@ -271,9 +284,10 @@ def h3_raster_zonal_stats(params: Dict[str, Any], context: Dict[str, Any] = None
                         'nodata_count': result.get('nodata_count')
                     })
 
-        # STEP 6: Insert to h3.zonal_stats
+        # STEP 6: Insert to h3.zonal_stats (partitioned by theme)
         stats_inserted = h3_repo.insert_zonal_stats_batch(
             stats=stat_records,
+            theme=theme,  # Required partition key
             append_history=append_history,
             source_job_id=source_job_id
         )

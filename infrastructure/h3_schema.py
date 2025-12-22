@@ -4,7 +4,7 @@
 # EPOCH: 4 - ACTIVE
 # STATUS: Infrastructure - H3 OLTP Schema DDL
 # PURPOSE: Deploy normalized H3 schema (cells, admin mappings, stats tables)
-# LAST_REVIEWED: 17 DEC 2025
+# LAST_REVIEWED: 22 DEC 2025
 # EXPORTS: H3SchemaDeployer, deploy_h3_normalized_schema
 # DEPENDENCIES: psycopg, pydantic
 # ============================================================================
@@ -15,9 +15,9 @@ OLTP System of Record for H3 hexagonal grid data. Normalized design with:
 - h3.cells: Unique H3 geometry (stored once per h3_index)
 - h3.cell_admin0: Country overlap mapping (1:N)
 - h3.cell_admin1: Admin1/Province overlap mapping (1:N)
-- h3.stat_registry: Metadata catalog for aggregation datasets
-- h3.zonal_stats: Raster aggregation results (1:N, FK to stat_registry)
-- h3.point_stats: Point-in-polygon counts (1:N, FK to stat_registry)
+- h3.dataset_registry: Metadata catalog with source config (Planetary Computer, Azure, URL)
+- h3.zonal_stats: Raster aggregation results, PARTITIONED BY THEME for scalability
+- h3.point_stats: Point-in-polygon counts (1:N, FK to dataset_registry)
 
 Architecture:
     OLTP (PostgreSQL) -> ETL Export -> OLAP (GeoParquet/DuckDB/Databricks)
@@ -59,10 +59,15 @@ class H3SchemaDeployer:
         h3.cells - Core H3 grid (unique geometry per h3_index)
         h3.cell_admin0 - Country overlap mapping
         h3.cell_admin1 - Admin1/Province overlap mapping
-        h3.stat_registry - Metadata catalog for aggregation datasets
-        h3.zonal_stats - Raster aggregation results (FK to stat_registry)
-        h3.point_stats - Point-in-polygon counts (FK to stat_registry)
+        h3.dataset_registry - Metadata catalog with Planetary Computer/Azure source config
+        h3.zonal_stats - Raster aggregation results, PARTITIONED BY THEME
+        h3.point_stats - Point-in-polygon counts (FK to dataset_registry)
         h3.batch_progress - Resumable job tracking for cascade operations
+
+    Partitioning Strategy (22 DEC 2025):
+        zonal_stats is LIST partitioned by 'theme' column for scalability to 1B+ rows.
+        Themes: terrain, water, climate, demographics, infrastructure, landcover, vegetation
+        Each partition holds ~110-165M rows at 1B total, easily manageable by PostgreSQL.
 
     All DDL uses psycopg.sql composition for injection safety.
     """
@@ -113,13 +118,13 @@ class H3SchemaDeployer:
                 # Step 4: Create h3.cell_admin1 (admin1 mapping)
                 self._deploy_cell_admin1_table(conn, results)
 
-                # Step 5: Create h3.stat_registry (metadata catalog - BEFORE stats tables)
-                self._deploy_stat_registry_table(conn, results)
+                # Step 5: Create h3.dataset_registry (metadata catalog - BEFORE stats tables)
+                self._deploy_dataset_registry_table(conn, results)
 
-                # Step 6: Create h3.zonal_stats (raster aggregations - FK to stat_registry)
-                self._deploy_zonal_stats_table(conn, results)
+                # Step 6: Create h3.zonal_stats PARTITIONED BY THEME (raster aggregations)
+                self._deploy_zonal_stats_partitioned_table(conn, results)
 
-                # Step 7: Create h3.point_stats (point counts - FK to stat_registry)
+                # Step 7: Create h3.point_stats (point counts - FK to dataset_registry)
                 self._deploy_point_stats_table(conn, results)
 
                 # Step 8: Create h3.batch_progress (cascade job tracking)
@@ -464,33 +469,54 @@ class H3SchemaDeployer:
             results["steps"].append(step)
 
     # ========================================================================
-    # h3.stat_registry - METADATA CATALOG FOR AGGREGATION DATASETS
+    # h3.dataset_registry - COMPREHENSIVE METADATA CATALOG (22 DEC 2025)
     # ========================================================================
 
-    def _deploy_stat_registry_table(self, conn, results: Dict):
-        """
-        Create h3.stat_registry table - metadata catalog for aggregation datasets.
+    # Define valid themes for partitioning (used by zonal_stats)
+    VALID_THEMES = [
+        'terrain',        # DEM, slope, aspect
+        'water',          # Flood hazard, surface water, precipitation
+        'climate',        # Temperature, ERA5, CHIRPS
+        'demographics',   # Population, buildings, settlements
+        'infrastructure', # Roads, nighttime lights, OSM features
+        'landcover',      # ESA WorldCover, NLCD, Dynamic World
+        'vegetation',     # NDVI, LAI, forest cover
+    ]
 
-        Documents all statistics datasets with human-readable metadata, source
-        attribution, and provenance tracking. Referenced by zonal_stats and
-        point_stats via FK for data validation and discoverability.
+    def _deploy_dataset_registry_table(self, conn, results: Dict):
+        """
+        Create h3.dataset_registry table - comprehensive metadata catalog.
+
+        Stores complete source configuration for Planetary Computer, Azure Blob,
+        and direct URL sources. Theme column links to zonal_stats partitioning.
 
         Columns:
-            id VARCHAR(100) PRIMARY KEY - Dataset identifier (e.g., 'worldpop_2020')
-            stat_category VARCHAR(50) - Category: raster_zonal, vector_point, etc.
+            id VARCHAR(100) PRIMARY KEY - Dataset identifier (e.g., 'copdem_glo30')
             display_name VARCHAR(255) - Human-readable name
             description TEXT - Detailed explanation
-            source_name VARCHAR(255) - Data source organization
-            source_url VARCHAR(500) - Link to original data
-            source_license VARCHAR(100) - License (CC-BY-4.0, etc.)
-            resolution_range INT[] - Available H3 resolutions
-            stat_types VARCHAR[] - Available stat types
+            theme VARCHAR(50) - Partition key: terrain, water, climate, demographics, etc.
+            data_category VARCHAR(100) - Specific category: elevation, flood_depth, population
+            source_type VARCHAR(50) - planetary_computer, azure, url
+            source_config JSONB - Source-specific parameters (collection, container, etc.)
+            stat_types TEXT[] - Available stat types (mean, sum, min, max, std)
             unit VARCHAR(50) - Unit of measurement
+            native_resolution DOUBLE PRECISION - Native pixel size in degrees
+            recommended_h3_res INTEGER[] - Recommended H3 resolutions
+            nodata_value DOUBLE PRECISION - Nodata value for raster
+            value_range NUMRANGE - Expected value range for validation
+            is_temporal BOOLEAN - Time-series dataset flag
+            temporal_resolution VARCHAR(20) - daily, monthly, yearly
+            temporal_start TIMESTAMPTZ - Start of temporal extent
+            temporal_end TIMESTAMPTZ - End of temporal extent
+            source_name VARCHAR(255) - Data source organization
+            source_url VARCHAR(500) - Link to documentation
+            source_license VARCHAR(100) - SPDX license identifier
+            attribution TEXT - Required citation
             last_aggregation_at TIMESTAMPTZ - Last computation time
-            last_aggregation_job_id VARCHAR(64) - Last job ID
-            cell_count INTEGER - Number of cells with this stat
+            aggregation_job_id VARCHAR(64) - Last job ID
+            cells_aggregated BIGINT - Number of cells with this stat
         """
-        step = {"name": "create_h3_stat_registry", "status": "pending"}
+        step = {"name": "create_h3_dataset_registry", "status": "pending"}
 
         try:
             with conn.cursor() as cur:
@@ -500,32 +526,71 @@ class H3SchemaDeployer:
                         -- Primary key: dataset identifier
                         id VARCHAR(100) PRIMARY KEY,
 
-                        -- Classification
-                        stat_category VARCHAR(50) NOT NULL
-                            CONSTRAINT stat_registry_category_check
-                            CHECK (stat_category IN (
-                                'raster_zonal', 'vector_point', 'vector_line',
-                                'vector_polygon', 'planetary_computer', 'band_math'
-                            )),
-
                         -- Human-readable metadata
                         display_name VARCHAR(255) NOT NULL,
                         description TEXT,
+
+                        -- Classification (theme is partition key for zonal_stats)
+                        theme VARCHAR(50) NOT NULL
+                            CONSTRAINT dataset_registry_theme_check
+                            CHECK (theme IN (
+                                'terrain', 'water', 'climate', 'demographics',
+                                'infrastructure', 'landcover', 'vegetation'
+                            )),
+                        data_category VARCHAR(100) NOT NULL,
+
+                        -- Source configuration (flexible JSONB for different source types)
+                        source_type VARCHAR(50) NOT NULL
+                            CONSTRAINT dataset_registry_source_type_check
+                            CHECK (source_type IN ('planetary_computer', 'azure', 'url')),
+                        source_config JSONB NOT NULL,
+                        /*
+                        Example source_config values:
+
+                        planetary_computer:
+                        {
+                            "collection": "cop-dem-glo-30",
+                            "item_pattern": "Copernicus_DSM_COG_10_N{lat}_00_E{lon}_00_DEM",
+                            "asset": "data",
+                            "stac_api": "https://planetarycomputer.microsoft.com/api/stac/v1"
+                        }
+
+                        azure:
+                        {
+                            "container": "silver-cogs",
+                            "blob_path": "population/worldpop_2020.tif"
+                        }
+
+                        url:
+                        {
+                            "url": "https://example.com/data.tif"
+                        }
+                        */
+
+                        -- Data characteristics
+                        stat_types TEXT[] NOT NULL DEFAULT ARRAY['mean'],
+                        unit VARCHAR(50),
+                        native_resolution DOUBLE PRECISION,
+                        recommended_h3_res INTEGER[],
+                        nodata_value DOUBLE PRECISION,
+                        value_range NUMRANGE,
+
+                        -- Temporal (for time-series datasets)
+                        is_temporal BOOLEAN DEFAULT FALSE,
+                        temporal_resolution VARCHAR(20),
+                        temporal_start TIMESTAMPTZ,
+                        temporal_end TIMESTAMPTZ,
 
                         -- Source attribution
                         source_name VARCHAR(255),
                         source_url VARCHAR(500),
                         source_license VARCHAR(100),
+                        attribution TEXT,
 
-                        -- Technical metadata
-                        resolution_range INTEGER[],
-                        stat_types VARCHAR(50)[],
-                        unit VARCHAR(50),
-
-                        -- Provenance
+                        -- Aggregation state
                         last_aggregation_at TIMESTAMPTZ,
-                        last_aggregation_job_id VARCHAR(64),
-                        cell_count INTEGER,
+                        aggregation_job_id VARCHAR(64),
+                        cells_aggregated BIGINT DEFAULT 0,
 
                         -- Audit
                         created_at TIMESTAMPTZ DEFAULT NOW(),
@@ -533,41 +598,59 @@ class H3SchemaDeployer:
                     )
                 """).format(
                     schema=sql.Identifier(self.SCHEMA_NAME),
-                    table=sql.Identifier("stat_registry")
+                    table=sql.Identifier("dataset_registry")
                 ))
 
-                # Index on category for filtering
+                # Index on theme for partition alignment queries
                 cur.execute(sql.SQL("""
-                    CREATE INDEX IF NOT EXISTS idx_h3_stat_registry_category
-                    ON {schema}.{table}(stat_category)
+                    CREATE INDEX IF NOT EXISTS idx_h3_dataset_registry_theme
+                    ON {schema}.{table}(theme)
                 """).format(
                     schema=sql.Identifier(self.SCHEMA_NAME),
-                    table=sql.Identifier("stat_registry")
+                    table=sql.Identifier("dataset_registry")
                 ))
 
-                # Index on source for attribution queries
+                # Index on source_type for source queries
                 cur.execute(sql.SQL("""
-                    CREATE INDEX IF NOT EXISTS idx_h3_stat_registry_source
-                    ON {schema}.{table}(source_name)
-                    WHERE source_name IS NOT NULL
+                    CREATE INDEX IF NOT EXISTS idx_h3_dataset_registry_source_type
+                    ON {schema}.{table}(source_type)
                 """).format(
                     schema=sql.Identifier(self.SCHEMA_NAME),
-                    table=sql.Identifier("stat_registry")
+                    table=sql.Identifier("dataset_registry")
+                ))
+
+                # Index on data_category for category queries
+                cur.execute(sql.SQL("""
+                    CREATE INDEX IF NOT EXISTS idx_h3_dataset_registry_category
+                    ON {schema}.{table}(data_category)
+                """).format(
+                    schema=sql.Identifier(self.SCHEMA_NAME),
+                    table=sql.Identifier("dataset_registry")
+                ))
+
+                # GIN index on source_config for JSONB queries
+                cur.execute(sql.SQL("""
+                    CREATE INDEX IF NOT EXISTS idx_h3_dataset_registry_config
+                    ON {schema}.{table} USING GIN(source_config)
+                """).format(
+                    schema=sql.Identifier(self.SCHEMA_NAME),
+                    table=sql.Identifier("dataset_registry")
                 ))
 
                 # Table comment
                 cur.execute(sql.SQL("""
                     COMMENT ON TABLE {schema}.{table} IS
-                    'Metadata catalog for H3 aggregation datasets. Documents all statistics '
-                    'with human-readable names, source attribution, and provenance tracking. '
-                    'Referenced by zonal_stats.dataset_id and point_stats.source_id via FK.'
+                    'Comprehensive metadata catalog for H3 aggregation datasets. '
+                    'Stores source configuration (Planetary Computer, Azure, URL) and '
+                    'links to zonal_stats via dataset_id FK. Theme column aligns with '
+                    'zonal_stats partitioning for query optimization.'
                 """).format(
                     schema=sql.Identifier(self.SCHEMA_NAME),
-                    table=sql.Identifier("stat_registry")
+                    table=sql.Identifier("dataset_registry")
                 ))
 
             step["status"] = "success"
-            logger.info("Table h3.stat_registry created with indexes")
+            logger.info("Table h3.dataset_registry created with indexes")
 
         except Exception as e:
             step["status"] = "failed"
@@ -577,39 +660,52 @@ class H3SchemaDeployer:
             results["steps"].append(step)
 
     # ========================================================================
-    # h3.zonal_stats - RASTER AGGREGATION RESULTS
+    # h3.zonal_stats - PARTITIONED RASTER AGGREGATION RESULTS (22 DEC 2025)
     # ========================================================================
 
-    def _deploy_zonal_stats_table(self, conn, results: Dict):
+    def _deploy_zonal_stats_partitioned_table(self, conn, results: Dict):
         """
-        Create h3.zonal_stats table - raster aggregation results per cell.
+        Create h3.zonal_stats table - PARTITIONED BY THEME for billion-row scale.
 
-        Stores pre-computed zonal statistics from raster datasets (COGs).
-        One cell can have multiple stats (different datasets, bands, stat types).
+        List partitioning by theme enables:
+        - 6-9 partitions of ~110-165M rows each at 1B total
+        - Partition pruning when queries filter by theme
+        - Independent maintenance (VACUUM, REINDEX) per partition
+        - Future partition detachment for archival
 
         Columns:
+            theme VARCHAR(50) - PARTITION KEY: terrain, water, climate, etc.
             h3_index BIGINT FK - References h3.cells
-            dataset_id VARCHAR(100) - Dataset identifier (e.g., 'worldpop_2020')
-            band VARCHAR(50) - Raster band name (default: 'default')
+            dataset_id VARCHAR(100) FK - References h3.dataset_registry
+            band VARCHAR(50) - Raster band name (default: 'band_1')
             stat_type VARCHAR(20) - Statistic type (mean, sum, min, max, count, std)
             value DOUBLE PRECISION - Computed statistic value
             pixel_count INTEGER - Number of pixels in aggregation
+            nodata_count INTEGER - Pixels with nodata
             computed_at TIMESTAMPTZ - When stat was computed
+            source_job_id VARCHAR(64) - Job that computed this stat
 
-        Unique constraint on (h3_index, dataset_id, band, stat_type).
+        Unique constraint on (theme, h3_index, dataset_id, band, stat_type).
         """
-        step = {"name": "create_h3_zonal_stats", "status": "pending"}
+        step = {"name": "create_h3_zonal_stats_partitioned", "status": "pending"}
 
         try:
             with conn.cursor() as cur:
-                # Create table
+                # Create PARTITIONED parent table
                 cur.execute(sql.SQL("""
                     CREATE TABLE IF NOT EXISTS {schema}.{table} (
+                        -- Partition key (MUST be first for partitioning)
+                        theme VARCHAR(50) NOT NULL
+                            CONSTRAINT zonal_stats_theme_check
+                            CHECK (theme IN (
+                                'terrain', 'water', 'climate', 'demographics',
+                                'infrastructure', 'landcover', 'vegetation'
+                            )),
+
                         -- Composite natural key
-                        h3_index BIGINT NOT NULL
-                            REFERENCES {schema}.cells(h3_index) ON DELETE CASCADE,
+                        h3_index BIGINT NOT NULL,
                         dataset_id VARCHAR(100) NOT NULL,
-                        band VARCHAR(50) NOT NULL DEFAULT 'default',
+                        band VARCHAR(50) NOT NULL DEFAULT 'band_1',
                         stat_type VARCHAR(20) NOT NULL,
 
                         -- Computed values
@@ -621,10 +717,33 @@ class H3SchemaDeployer:
                         computed_at TIMESTAMPTZ DEFAULT NOW(),
                         source_job_id VARCHAR(64),
 
-                        -- Unique constraint on natural key
-                        CONSTRAINT zonal_stats_unique
-                            UNIQUE (h3_index, dataset_id, band, stat_type)
-                    )
+                        -- Primary key MUST include partition key
+                        PRIMARY KEY (theme, h3_index, dataset_id, band, stat_type)
+                    ) PARTITION BY LIST (theme)
+                """).format(
+                    schema=sql.Identifier(self.SCHEMA_NAME),
+                    table=sql.Identifier("zonal_stats")
+                ))
+
+                # Create partitions for each theme
+                for theme in self.VALID_THEMES:
+                    partition_name = f"zonal_stats_{theme}"
+                    cur.execute(sql.SQL("""
+                        CREATE TABLE IF NOT EXISTS {schema}.{partition}
+                        PARTITION OF {schema}.{parent}
+                        FOR VALUES IN (%s)
+                    """).format(
+                        schema=sql.Identifier(self.SCHEMA_NAME),
+                        partition=sql.Identifier(partition_name),
+                        parent=sql.Identifier("zonal_stats")
+                    ), (theme,))
+                    logger.info(f"  Created partition h3.{partition_name}")
+
+                # Create indexes on parent (automatically propagated to partitions)
+                # Index on h3_index for cell lookups
+                cur.execute(sql.SQL("""
+                    CREATE INDEX IF NOT EXISTS idx_h3_zonal_stats_h3_index
+                    ON {schema}.{table}(h3_index)
                 """).format(
                     schema=sql.Identifier(self.SCHEMA_NAME),
                     table=sql.Identifier("zonal_stats")
@@ -639,15 +758,6 @@ class H3SchemaDeployer:
                     table=sql.Identifier("zonal_stats")
                 ))
 
-                # Index on h3_index for cell lookups
-                cur.execute(sql.SQL("""
-                    CREATE INDEX IF NOT EXISTS idx_h3_zonal_stats_h3_index
-                    ON {schema}.{table}(h3_index)
-                """).format(
-                    schema=sql.Identifier(self.SCHEMA_NAME),
-                    table=sql.Identifier("zonal_stats")
-                ))
-
                 # Composite index for common query pattern
                 cur.execute(sql.SQL("""
                     CREATE INDEX IF NOT EXISTS idx_h3_zonal_stats_dataset_stat
@@ -657,11 +767,23 @@ class H3SchemaDeployer:
                     table=sql.Identifier("zonal_stats")
                 ))
 
+                # Index for job tracking
+                cur.execute(sql.SQL("""
+                    CREATE INDEX IF NOT EXISTS idx_h3_zonal_stats_job
+                    ON {schema}.{table}(source_job_id)
+                    WHERE source_job_id IS NOT NULL
+                """).format(
+                    schema=sql.Identifier(self.SCHEMA_NAME),
+                    table=sql.Identifier("zonal_stats")
+                ))
+
                 # Table comment
                 cur.execute(sql.SQL("""
                     COMMENT ON TABLE {schema}.{table} IS
                     'Pre-computed zonal statistics from raster datasets aggregated to H3 cells. '
-                    'Supports multiple datasets, bands, and stat types per cell. '
+                    'PARTITIONED BY THEME for billion-row scalability. '
+                    'Themes: terrain, water, climate, demographics, infrastructure, landcover, vegetation. '
+                    'Each partition: ~110-165M rows at 1B total. '
                     'stat_type: mean, sum, min, max, count, std, median.'
                 """).format(
                     schema=sql.Identifier(self.SCHEMA_NAME),
@@ -669,7 +791,8 @@ class H3SchemaDeployer:
                 ))
 
             step["status"] = "success"
-            logger.info("Table h3.zonal_stats created with indexes")
+            step["partitions"] = self.VALID_THEMES
+            logger.info(f"Table h3.zonal_stats created with {len(self.VALID_THEMES)} partitions")
 
         except Exception as e:
             step["status"] = "failed"
@@ -984,8 +1107,16 @@ class H3SchemaDeployer:
         tables_to_drop = [
             "batch_progress",  # No FK dependencies
             "point_stats",
-            "zonal_stats",
-            "stat_registry",  # After stats tables (they reference it)
+            # Drop all zonal_stats partitions first
+            "zonal_stats_terrain",
+            "zonal_stats_water",
+            "zonal_stats_climate",
+            "zonal_stats_demographics",
+            "zonal_stats_infrastructure",
+            "zonal_stats_landcover",
+            "zonal_stats_vegetation",
+            "zonal_stats",  # Parent partitioned table
+            "dataset_registry",  # After stats tables (they reference it)
             "cell_admin1",
             "cell_admin0",
             "cells"  # Must be last (FK dependencies)
@@ -1017,7 +1148,7 @@ class H3SchemaDeployer:
     def get_table_counts(self) -> Dict[str, int]:
         """Get row counts for all normalized H3 tables."""
         counts = {}
-        tables = ["cells", "cell_admin0", "cell_admin1", "stat_registry", "zonal_stats", "point_stats", "batch_progress"]
+        tables = ["cells", "cell_admin0", "cell_admin1", "dataset_registry", "zonal_stats", "point_stats", "batch_progress"]
 
         try:
             with self.repo._get_connection() as conn:

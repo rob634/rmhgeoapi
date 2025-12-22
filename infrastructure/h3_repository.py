@@ -1077,9 +1077,324 @@ class H3Repository(PostgreSQLRepository):
         return h3_indices
 
     # ========================================================================
-    # STAT REGISTRY METHODS (h3.stat_registry)
+    # DATASET REGISTRY METHODS (h3.dataset_registry) - 22 DEC 2025
     # ========================================================================
-    # Methods for managing the metadata catalog of aggregation datasets.
+    # Methods for managing the comprehensive dataset catalog.
+    # Supports Planetary Computer, Azure Blob, and direct URL sources.
+    # Theme column links to zonal_stats partitioning for scalability.
+    # ========================================================================
+
+    # Valid themes for partitioning (must match h3_schema.py)
+    VALID_THEMES = ['terrain', 'water', 'climate', 'demographics', 'infrastructure', 'landcover', 'vegetation']
+
+    def register_dataset(
+        self,
+        id: str,
+        display_name: str,
+        theme: str,
+        data_category: str,
+        source_type: str,
+        source_config: Dict[str, Any],
+        stat_types: Optional[List[str]] = None,
+        unit: Optional[str] = None,
+        description: Optional[str] = None,
+        source_name: Optional[str] = None,
+        source_url: Optional[str] = None,
+        source_license: Optional[str] = None,
+        recommended_h3_res: Optional[List[int]] = None,
+        nodata_value: Optional[float] = None
+    ) -> Dict[str, Any]:
+        """
+        Register a dataset in h3.dataset_registry (UPSERT).
+
+        Call this BEFORE running zonal stats aggregation to ensure the dataset
+        is registered and theme is available for partition routing.
+
+        Parameters:
+        ----------
+        id : str
+            Unique dataset identifier (e.g., 'copdem_glo30', 'worldpop_2020')
+        display_name : str
+            Human-readable name (e.g., 'Copernicus DEM GLO-30')
+        theme : str
+            Partition key. Must be one of:
+            terrain, water, climate, demographics, infrastructure, landcover, vegetation
+        data_category : str
+            Specific category (e.g., 'elevation', 'population', 'flood_depth')
+        source_type : str
+            One of: 'planetary_computer', 'azure', 'url'
+        source_config : Dict[str, Any]
+            Source-specific config. Examples:
+            - planetary_computer: {"collection": "cop-dem-glo-30", "item_pattern": "...", "asset": "data"}
+            - azure: {"container": "silver-cogs", "blob_path": "population/worldpop.tif"}
+            - url: {"url": "https://example.com/data.tif"}
+        stat_types : Optional[List[str]]
+            Available stats (default: ['mean'])
+        unit : Optional[str]
+            Unit of measurement (e.g., 'meters', 'people')
+        description : Optional[str]
+            Detailed description
+        source_name : Optional[str]
+            Data provider (e.g., 'Microsoft Planetary Computer')
+        source_url : Optional[str]
+            Link to documentation
+        source_license : Optional[str]
+            SPDX license (e.g., 'CC-BY-4.0')
+        recommended_h3_res : Optional[List[int]]
+            Recommended H3 resolutions (e.g., [5, 6, 7])
+        nodata_value : Optional[float]
+            Nodata value for raster
+
+        Returns:
+        -------
+        Dict with 'id', 'theme', 'created' (bool), 'updated_at'
+
+        Raises:
+        ------
+        ValueError: If theme or source_type is invalid
+
+        Example:
+        -------
+        >>> result = repo.register_dataset(
+        ...     id='copdem_glo30',
+        ...     display_name='Copernicus DEM GLO-30',
+        ...     theme='terrain',
+        ...     data_category='elevation',
+        ...     source_type='planetary_computer',
+        ...     source_config={
+        ...         'collection': 'cop-dem-glo-30',
+        ...         'item_pattern': 'Copernicus_DSM_COG_10_N{lat}_00_E{lon}_00_DEM',
+        ...         'asset': 'data'
+        ...     },
+        ...     stat_types=['mean', 'min', 'max', 'std'],
+        ...     unit='meters'
+        ... )
+        """
+        import json
+
+        # Validate theme
+        if theme not in self.VALID_THEMES:
+            raise ValueError(f"Invalid theme '{theme}'. Must be one of: {self.VALID_THEMES}")
+
+        # Validate source_type
+        valid_source_types = ['planetary_computer', 'azure', 'url']
+        if source_type not in valid_source_types:
+            raise ValueError(f"Invalid source_type '{source_type}'. Must be one of: {valid_source_types}")
+
+        # Default stat_types
+        if stat_types is None:
+            stat_types = ['mean']
+
+        query = sql.SQL("""
+            INSERT INTO {schema}.{table} (
+                id, display_name, description, theme, data_category,
+                source_type, source_config, stat_types, unit,
+                source_name, source_url, source_license,
+                recommended_h3_res, nodata_value,
+                created_at, updated_at
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
+            ON CONFLICT (id) DO UPDATE SET
+                display_name = EXCLUDED.display_name,
+                description = EXCLUDED.description,
+                theme = EXCLUDED.theme,
+                data_category = EXCLUDED.data_category,
+                source_type = EXCLUDED.source_type,
+                source_config = EXCLUDED.source_config,
+                stat_types = EXCLUDED.stat_types,
+                unit = EXCLUDED.unit,
+                source_name = EXCLUDED.source_name,
+                source_url = EXCLUDED.source_url,
+                source_license = EXCLUDED.source_license,
+                recommended_h3_res = EXCLUDED.recommended_h3_res,
+                nodata_value = EXCLUDED.nodata_value,
+                updated_at = NOW()
+            RETURNING id, theme, (xmax = 0) AS created, updated_at
+        """).format(
+            schema=sql.Identifier('h3'),
+            table=sql.Identifier('dataset_registry')
+        )
+
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(query, (
+                    id, display_name, description, theme, data_category,
+                    source_type, json.dumps(source_config), stat_types, unit,
+                    source_name, source_url, source_license,
+                    recommended_h3_res, nodata_value
+                ))
+                result = cur.fetchone()
+                conn.commit()
+
+        action = "Registered" if result['created'] else "Updated"
+        logger.info(f"✅ {action} dataset: {id} (theme={theme}, source={source_type})")
+
+        return dict(result)
+
+    def get_dataset(self, id: str) -> Optional[Dict[str, Any]]:
+        """
+        Get dataset metadata from h3.dataset_registry.
+
+        Parameters:
+        ----------
+        id : str
+            Dataset identifier
+
+        Returns:
+        -------
+        Optional[Dict[str, Any]]
+            Dataset entry or None if not found
+        """
+        query = sql.SQL("""
+            SELECT *
+            FROM {schema}.{table}
+            WHERE id = %s
+        """).format(
+            schema=sql.Identifier('h3'),
+            table=sql.Identifier('dataset_registry')
+        )
+
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(query, (id,))
+                result = cur.fetchone()
+
+        if result:
+            logger.debug(f"📊 Found dataset: {id} (theme={result['theme']})")
+            return dict(result)
+        else:
+            logger.debug(f"⚠️ Dataset not found: {id}")
+            return None
+
+    def get_dataset_theme(self, dataset_id: str) -> Optional[str]:
+        """
+        Get the theme for a dataset (needed for zonal_stats partition routing).
+
+        Parameters:
+        ----------
+        dataset_id : str
+            Dataset identifier
+
+        Returns:
+        -------
+        Optional[str]
+            Theme string or None if dataset not found
+        """
+        query = sql.SQL("""
+            SELECT theme FROM {schema}.{table} WHERE id = %s
+        """).format(
+            schema=sql.Identifier('h3'),
+            table=sql.Identifier('dataset_registry')
+        )
+
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(query, (dataset_id,))
+                result = cur.fetchone()
+
+        return result['theme'] if result else None
+
+    def update_dataset_aggregation_state(
+        self,
+        id: str,
+        job_id: str,
+        cells_aggregated: int
+    ) -> bool:
+        """
+        Update aggregation state after job completes.
+
+        Parameters:
+        ----------
+        id : str
+            Dataset identifier
+        job_id : str
+            Job ID that computed the stats
+        cells_aggregated : int
+            Number of cells with stats
+
+        Returns:
+        -------
+        bool
+            True if updated, False if not found
+        """
+        query = sql.SQL("""
+            UPDATE {schema}.{table}
+            SET
+                last_aggregation_at = NOW(),
+                aggregation_job_id = %s,
+                cells_aggregated = %s,
+                updated_at = NOW()
+            WHERE id = %s
+        """).format(
+            schema=sql.Identifier('h3'),
+            table=sql.Identifier('dataset_registry')
+        )
+
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(query, (job_id, cells_aggregated, id))
+                rowcount = cur.rowcount
+                conn.commit()
+
+        if rowcount > 0:
+            logger.info(f"✅ Updated aggregation state for {id}: job={job_id[:8]}..., cells={cells_aggregated:,}")
+        else:
+            logger.warning(f"⚠️ Dataset not found: {id}")
+
+        return rowcount > 0
+
+    def list_datasets(
+        self,
+        theme: Optional[str] = None,
+        source_type: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        List datasets, optionally filtered by theme or source_type.
+
+        Parameters:
+        ----------
+        theme : Optional[str]
+            Filter by theme (terrain, water, etc.)
+        source_type : Optional[str]
+            Filter by source (planetary_computer, azure, url)
+
+        Returns:
+        -------
+        List[Dict[str, Any]]
+            List of dataset entries
+        """
+        conditions = []
+        params = []
+
+        if theme:
+            conditions.append("theme = %s")
+            params.append(theme)
+        if source_type:
+            conditions.append("source_type = %s")
+            params.append(source_type)
+
+        where_clause = "WHERE " + " AND ".join(conditions) if conditions else ""
+
+        query = sql.SQL(f"""
+            SELECT id, display_name, theme, data_category, source_type,
+                   stat_types, unit, last_aggregation_at, cells_aggregated
+            FROM {{schema}}.{{table}}
+            {where_clause}
+            ORDER BY theme, id
+        """).format(
+            schema=sql.Identifier('h3'),
+            table=sql.Identifier('dataset_registry')
+        )
+
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(query, params)
+                results = cur.fetchall()
+
+        return [dict(r) for r in results]
+
+    # ========================================================================
+    # LEGACY STAT REGISTRY METHODS (deprecated - use dataset_registry)
     # ========================================================================
 
     def register_stat_dataset(
@@ -1552,15 +1867,18 @@ class H3Repository(PostgreSQLRepository):
     def insert_zonal_stats_batch(
         self,
         stats: List[Dict[str, Any]],
+        theme: str,
         append_history: bool = False,
         source_job_id: Optional[str] = None
     ) -> int:
         """
-        Bulk insert zonal statistics into h3.zonal_stats.
+        Bulk insert zonal statistics into h3.zonal_stats (PARTITIONED BY THEME).
 
         Uses COPY + staging for performance. Default behavior overwrites
         existing stats (ON CONFLICT DO UPDATE). Set append_history=True
         to skip conflicts (preserves historical data).
+
+        IMPORTANT: Theme is REQUIRED - it's the partition key for billion-row scale.
 
         Parameters:
         ----------
@@ -1568,11 +1886,15 @@ class H3Repository(PostgreSQLRepository):
             List of stat dictionaries with keys:
             - h3_index: int
             - dataset_id: str
-            - band: str (default: 'default')
+            - band: str (default: 'band_1')
             - stat_type: str ('mean', 'sum', 'min', 'max', 'count', 'std')
             - value: float
             - pixel_count: int (optional)
             - nodata_count: int (optional)
+
+        theme : str
+            REQUIRED partition key. Must be one of:
+            terrain, water, climate, demographics, infrastructure, landcover, vegetation
 
         append_history : bool
             If True, skip conflicts (don't overwrite existing).
@@ -1586,13 +1908,17 @@ class H3Repository(PostgreSQLRepository):
         int
             Number of rows inserted/updated
 
+        Raises:
+        ------
+        ValueError: If theme is invalid
+
         Example:
         -------
         >>> stats = [
-        ...     {"h3_index": 123, "dataset_id": "worldpop_2020", "stat_type": "sum", "value": 1500.0},
-        ...     {"h3_index": 123, "dataset_id": "worldpop_2020", "stat_type": "mean", "value": 75.0}
+        ...     {"h3_index": 123, "dataset_id": "copdem_glo30", "stat_type": "mean", "value": 450.5},
+        ...     {"h3_index": 123, "dataset_id": "copdem_glo30", "stat_type": "max", "value": 523.0}
         ... ]
-        >>> rows = repo.insert_zonal_stats_batch(stats)
+        >>> rows = repo.insert_zonal_stats_batch(stats, theme='terrain')
         """
         from io import StringIO
         import time
@@ -1601,15 +1927,20 @@ class H3Repository(PostgreSQLRepository):
             logger.warning("⚠️ insert_zonal_stats_batch called with empty list")
             return 0
 
+        # Validate theme (partition key)
+        if theme not in self.VALID_THEMES:
+            raise ValueError(f"Invalid theme '{theme}'. Must be one of: {self.VALID_THEMES}")
+
         start_time = time.time()
         stat_count = len(stats)
-        logger.info(f"📦 Inserting {stat_count:,} zonal stats (append_history={append_history})...")
+        logger.info(f"📦 Inserting {stat_count:,} zonal stats into '{theme}' partition (append_history={append_history})...")
 
         with self._get_connection() as conn:
             with conn.cursor() as cur:
-                # Create temp staging table
+                # Create temp staging table (now includes theme)
                 cur.execute("""
                     CREATE TEMP TABLE zonal_staging (
+                        theme VARCHAR(50),
                         h3_index BIGINT,
                         dataset_id VARCHAR(100),
                         band VARCHAR(50),
@@ -1620,12 +1951,12 @@ class H3Repository(PostgreSQLRepository):
                     ) ON COMMIT DROP
                 """)
 
-                # Build COPY data
+                # Build COPY data (theme is constant for all rows in batch)
                 buffer = StringIO()
                 for stat in stats:
                     h3_index = stat['h3_index']
                     dataset_id = stat['dataset_id']
-                    band = stat.get('band', 'default')
+                    band = stat.get('band', 'band_1')
                     stat_type = stat['stat_type']
                     value = stat.get('value')
                     value_str = str(value) if value is not None else '\\N'
@@ -1634,25 +1965,26 @@ class H3Repository(PostgreSQLRepository):
                     nodata_count = stat.get('nodata_count')
                     nodata_str = str(nodata_count) if nodata_count is not None else '\\N'
 
-                    buffer.write(f"{h3_index}\t{dataset_id}\t{band}\t{stat_type}\t{value_str}\t{pixel_str}\t{nodata_str}\n")
+                    buffer.write(f"{theme}\t{h3_index}\t{dataset_id}\t{band}\t{stat_type}\t{value_str}\t{pixel_str}\t{nodata_str}\n")
 
                 buffer.seek(0)
 
                 # COPY to staging
-                with cur.copy("COPY zonal_staging (h3_index, dataset_id, band, stat_type, value, pixel_count, nodata_count) FROM STDIN") as copy:
+                with cur.copy("COPY zonal_staging (theme, h3_index, dataset_id, band, stat_type, value, pixel_count, nodata_count) FROM STDIN") as copy:
                     copy.write(buffer.read())
 
                 # Insert with conflict handling
+                # Primary key is now (theme, h3_index, dataset_id, band, stat_type)
                 if append_history:
                     # Skip conflicts (preserve existing)
                     cur.execute(sql.SQL("""
                         WITH inserted AS (
                             INSERT INTO {schema}.{table}
-                                (h3_index, dataset_id, band, stat_type, value, pixel_count, nodata_count, source_job_id)
+                                (theme, h3_index, dataset_id, band, stat_type, value, pixel_count, nodata_count, source_job_id)
                             SELECT
-                                h3_index, dataset_id, band, stat_type, value, pixel_count, nodata_count, %s
+                                theme, h3_index, dataset_id, band, stat_type, value, pixel_count, nodata_count, %s
                             FROM zonal_staging
-                            ON CONFLICT (h3_index, dataset_id, band, stat_type) DO NOTHING
+                            ON CONFLICT (theme, h3_index, dataset_id, band, stat_type) DO NOTHING
                             RETURNING 1
                         )
                         SELECT COUNT(*) FROM inserted
@@ -1665,11 +1997,11 @@ class H3Repository(PostgreSQLRepository):
                     cur.execute(sql.SQL("""
                         WITH inserted AS (
                             INSERT INTO {schema}.{table}
-                                (h3_index, dataset_id, band, stat_type, value, pixel_count, nodata_count, source_job_id, computed_at)
+                                (theme, h3_index, dataset_id, band, stat_type, value, pixel_count, nodata_count, source_job_id, computed_at)
                             SELECT
-                                h3_index, dataset_id, band, stat_type, value, pixel_count, nodata_count, %s, NOW()
+                                theme, h3_index, dataset_id, band, stat_type, value, pixel_count, nodata_count, %s, NOW()
                             FROM zonal_staging
-                            ON CONFLICT (h3_index, dataset_id, band, stat_type) DO UPDATE SET
+                            ON CONFLICT (theme, h3_index, dataset_id, band, stat_type) DO UPDATE SET
                                 value = EXCLUDED.value,
                                 pixel_count = EXCLUDED.pixel_count,
                                 nodata_count = EXCLUDED.nodata_count,
@@ -1688,7 +2020,7 @@ class H3Repository(PostgreSQLRepository):
 
         total_time = time.time() - start_time
         rate = stat_count / total_time if total_time > 0 else 0
-        logger.info(f"✅ Inserted {rowcount:,} zonal stats in {total_time:.2f}s ({rate:,.0f} stats/sec)")
+        logger.info(f"✅ Inserted {rowcount:,} zonal stats into '{theme}' partition in {total_time:.2f}s ({rate:,.0f} stats/sec)")
 
         return rowcount
 

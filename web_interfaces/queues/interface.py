@@ -119,6 +119,9 @@ class QueuesInterface(BaseInterface):
                 <p id="error-message"></p>
                 <button onclick="loadData()" class="refresh-button" style="margin-top: 20px;">Retry</button>
             </div>
+
+            <!-- Confirmation Modal -->
+            <div id="confirmModal" class="modal-overlay" style="display: none;"></div>
         </div>
         """
 
@@ -475,6 +478,154 @@ class QueuesInterface(BaseInterface):
             border-color: #ef4444;
             color: #ef4444;
         }
+
+        .action-btn.danger-solid {
+            background: #ef4444;
+            color: white;
+            border-color: #ef4444;
+        }
+
+        .action-btn.danger-solid:hover {
+            background: #dc2626;
+            border-color: #dc2626;
+        }
+
+        .action-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        /* Confirmation Modal */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+
+        .modal-content {
+            background: white;
+            border-radius: 8px;
+            padding: 30px;
+            max-width: 450px;
+            width: 90%;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+        }
+
+        .modal-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+
+        .modal-header .icon {
+            font-size: 32px;
+        }
+
+        .modal-header h3 {
+            color: #053657;
+            margin: 0;
+            font-size: 20px;
+        }
+
+        .modal-body {
+            color: #626F86;
+            font-size: 14px;
+            line-height: 1.6;
+            margin-bottom: 20px;
+        }
+
+        .modal-body .queue-name {
+            font-family: monospace;
+            background: #f3f4f6;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-weight: 600;
+        }
+
+        .modal-body .warning {
+            background: #fef2f2;
+            border: 1px solid #fecaca;
+            border-radius: 6px;
+            padding: 12px;
+            margin-top: 15px;
+            color: #991b1b;
+            font-size: 13px;
+        }
+
+        .modal-footer {
+            display: flex;
+            gap: 12px;
+            justify-content: flex-end;
+        }
+
+        .modal-btn {
+            padding: 10px 20px;
+            border-radius: 6px;
+            font-weight: 600;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .modal-btn.cancel {
+            background: #f3f4f6;
+            border: 1px solid #e5e7eb;
+            color: #374151;
+        }
+
+        .modal-btn.cancel:hover {
+            background: #e5e7eb;
+        }
+
+        .modal-btn.confirm {
+            background: #ef4444;
+            border: 1px solid #ef4444;
+            color: white;
+        }
+
+        .modal-btn.confirm:hover {
+            background: #dc2626;
+        }
+
+        .modal-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        /* Toast notification */
+        .toast {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            padding: 15px 25px;
+            border-radius: 8px;
+            color: white;
+            font-weight: 600;
+            font-size: 14px;
+            z-index: 1001;
+            animation: slideIn 0.3s ease;
+        }
+
+        .toast.success {
+            background: #10b981;
+        }
+
+        .toast.error {
+            background: #ef4444;
+        }
+
+        @keyframes slideIn {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
         """
 
     def _generate_custom_js(self) -> str:
@@ -626,6 +777,7 @@ class QueuesInterface(BaseInterface):
                     <div class="queue-actions">
                         <a href="/api/servicebus/queue/${queue.queue_name}?type=peek" target="_blank" class="action-btn">Peek Messages</a>
                         <a href="/api/servicebus/queue/${queue.queue_name}?type=deadletter" target="_blank" class="action-btn">View DLQ</a>
+                        <button onclick="showClearQueueModal('${queue.queue_name}', ${total})" class="action-btn danger-solid">Clear Queue</button>
                     </div>
                 </div>
             `;
@@ -649,5 +801,95 @@ class QueuesInterface(BaseInterface):
             document.getElementById('queue-grid').innerHTML = '';
             document.getElementById('error-state').classList.remove('hidden');
             document.getElementById('error-message').textContent = message;
+        }
+
+        // Clear Queue Modal Functions
+        function showClearQueueModal(queueName, messageCount) {
+            const modal = document.getElementById('confirmModal');
+            modal.innerHTML = `
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <span class="icon">⚠️</span>
+                        <h3>Clear Queue Messages</h3>
+                    </div>
+                    <div class="modal-body">
+                        <p>You are about to clear all messages from queue:</p>
+                        <p><span class="queue-name">${queueName}</span></p>
+                        <p>This will delete <strong>${messageCount.toLocaleString()}</strong> message(s) including:</p>
+                        <ul style="margin: 10px 0; padding-left: 20px;">
+                            <li>Active messages</li>
+                            <li>Dead letter messages</li>
+                            <li>Scheduled messages</li>
+                        </ul>
+                        <div class="warning">
+                            <strong>⚠️ Warning:</strong> This action is IRREVERSIBLE. All messages will be permanently deleted.
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button class="modal-btn cancel" onclick="hideModal()">Cancel</button>
+                        <button class="modal-btn confirm" id="confirmClearBtn" onclick="clearQueue('${queueName}')">
+                            Clear All Messages
+                        </button>
+                    </div>
+                </div>
+            `;
+            modal.style.display = 'flex';
+
+            // Close modal on overlay click
+            modal.addEventListener('click', (e) => {
+                if (e.target === modal) hideModal();
+            });
+        }
+
+        function hideModal() {
+            const modal = document.getElementById('confirmModal');
+            modal.style.display = 'none';
+            modal.innerHTML = '';
+        }
+
+        async function clearQueue(queueName) {
+            const confirmBtn = document.getElementById('confirmClearBtn');
+            confirmBtn.disabled = true;
+            confirmBtn.textContent = 'Clearing...';
+
+            try {
+                const response = await fetch(
+                    `/api/servicebus/queue/${encodeURIComponent(queueName)}?type=nuke&confirm=yes&target=all`,
+                    { method: 'POST' }
+                );
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || `HTTP ${response.status}`);
+                }
+
+                // Success
+                hideModal();
+                showToast(`Cleared ${data.deleted.total} messages from ${queueName}`, 'success');
+
+                // Refresh the queue data
+                loadData();
+
+            } catch (error) {
+                console.error('Error clearing queue:', error);
+                hideModal();
+                showToast(`Failed to clear queue: ${error.message}`, 'error');
+            }
+        }
+
+        function showToast(message, type) {
+            // Remove existing toasts
+            document.querySelectorAll('.toast').forEach(t => t.remove());
+
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+            toast.textContent = message;
+            document.body.appendChild(toast);
+
+            // Auto-remove after 5 seconds
+            setTimeout(() => {
+                toast.remove();
+            }, 5000);
         }
         """

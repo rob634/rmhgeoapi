@@ -224,9 +224,9 @@ class AdminDbDataTrigger:
         GET /api/dbadmin/jobs?limit=100&status=processing&hours=24&job_type=process_raster
 
         Query Parameters:
-            limit: Number of results (default: 10, max: 1000)
+            limit: Number of results (default: 25, max: 1000)
             status: Filter by status (queued, processing, completed, failed)
-            hours: Only show jobs from last N hours (default: 24, max: 168)
+            hours: Only show jobs from last N hours (default: 168/7 days, max: 720/30 days, 0=all)
             job_type: Filter by job type
 
         Returns:
@@ -238,32 +238,58 @@ class AdminDbDataTrigger:
         logger.info("📊 Querying jobs with filters")
 
         try:
-            # Parse query parameters
-            limit = self._validate_limit(req.params.get('limit'))
-            hours = self._validate_hours(req.params.get('hours'))
+            # Parse query parameters - increased defaults for better usability
+            limit = self._validate_limit(req.params.get('limit'), default=25)
+            hours_param = req.params.get('hours')
+            # Support hours=0 or hours=all to disable time filter
+            if hours_param in ('0', 'all', 'none'):
+                hours = None  # No time filter
+            else:
+                hours = self._validate_hours(hours_param, default=168, max_hours=720)  # Default 7 days, max 30 days
             status_filter = req.params.get('status')
             job_type_filter = req.params.get('job_type')
 
-            # Build query
+            app_schema = self.config.app_schema
+            logger.info(f"📊 Querying schema: {app_schema}, hours={hours}, limit={limit}")
+
+            # Build query with task_counts subquery for each job
+            # This aggregates task status counts per job
             query_parts = [
-                f"SELECT job_id, job_type, status::text, stage, total_stages,",
-                f"       parameters, result_data, error_details, created_at, updated_at",
-                f"FROM {self.config.app_schema}.jobs",
-                f"WHERE created_at >= NOW() - INTERVAL '{hours} hours'"
+                f"""SELECT j.job_id, j.job_type, j.status::text, j.stage, j.total_stages,
+                       j.parameters, j.result_data, j.error_details, j.created_at, j.updated_at,
+                       COALESCE(tc.queued, 0) as task_queued,
+                       COALESCE(tc.processing, 0) as task_processing,
+                       COALESCE(tc.completed, 0) as task_completed,
+                       COALESCE(tc.failed, 0) as task_failed
+                FROM {app_schema}.jobs j
+                LEFT JOIN (
+                    SELECT parent_job_id,
+                           COUNT(*) FILTER (WHERE status::text = 'queued') as queued,
+                           COUNT(*) FILTER (WHERE status::text = 'processing') as processing,
+                           COUNT(*) FILTER (WHERE status::text = 'completed') as completed,
+                           COUNT(*) FILTER (WHERE status::text = 'failed') as failed
+                    FROM {app_schema}.tasks
+                    GROUP BY parent_job_id
+                ) tc ON j.job_id = tc.parent_job_id
+                WHERE 1=1"""
             ]
 
             params = []
 
+            # Only add time filter if hours is specified
+            if hours is not None:
+                query_parts.append(f"AND j.created_at >= NOW() - INTERVAL '{hours} hours'")
+
             if status_filter:
-                query_parts.append("AND status::text = %s")
+                query_parts.append("AND j.status::text = %s")
                 params.append(status_filter)
 
             if job_type_filter:
-                query_parts.append("AND job_type = %s")
+                query_parts.append("AND j.job_type = %s")
                 params.append(job_type_filter)
 
             query_parts.extend([
-                "ORDER BY created_at DESC",
+                "ORDER BY j.created_at DESC",
                 f"LIMIT %s"
             ])
             params.append(limit)
@@ -276,6 +302,29 @@ class AdminDbDataTrigger:
 
             with self.db_repo._get_connection() as conn:
                 with conn.cursor() as cursor:
+                    # First, check if the jobs table exists
+                    cursor.execute(f"""
+                        SELECT EXISTS (
+                            SELECT 1 FROM information_schema.tables
+                            WHERE table_schema = %s AND table_name = 'jobs'
+                        )
+                    """, (app_schema,))
+                    table_exists = cursor.fetchone()[0]
+
+                    if not table_exists:
+                        logger.warning(f"⚠️ Jobs table not found in schema: {app_schema}")
+                        return func.HttpResponse(
+                            body=json.dumps({
+                                'error': 'Schema not deployed',
+                                'message': f"Table '{app_schema}.jobs' does not exist",
+                                'hint': 'Run POST /api/dbadmin/maintenance/full-rebuild?confirm=yes to deploy schema',
+                                'schema': app_schema,
+                                'timestamp': datetime.now(timezone.utc).isoformat()
+                            }),
+                            status_code=503,
+                            mimetype='application/json'
+                        )
+
                     cursor.execute(query, tuple(params))
                     rows = cursor.fetchall()
 
@@ -291,14 +340,21 @@ class AdminDbDataTrigger:
                             'result_data': row['result_data'],
                             'error_details': row['error_details'],
                             'created_at': row['created_at'].isoformat() if row['created_at'] else None,
-                            'updated_at': row['updated_at'].isoformat() if row['updated_at'] else None
+                            'updated_at': row['updated_at'].isoformat() if row['updated_at'] else None,
+                            'task_counts': {
+                                'queued': row['task_queued'],
+                                'processing': row['task_processing'],
+                                'completed': row['task_completed'],
+                                'failed': row['task_failed']
+                            }
                         })
 
             result = {
                 'jobs': jobs,
                 'query_info': {
+                    'schema': app_schema,
                     'limit': limit,
-                    'hours_back': hours,
+                    'hours_back': hours if hours else 'all',
                     'status_filter': status_filter,
                     'job_type_filter': job_type_filter,
                     'total_found': len(jobs)
@@ -306,7 +362,7 @@ class AdminDbDataTrigger:
                 'timestamp': datetime.now(timezone.utc).isoformat()
             }
 
-            logger.info(f"✅ Found {len(jobs)} jobs")
+            logger.info(f"✅ Found {len(jobs)} jobs in {app_schema}")
 
             return func.HttpResponse(
                 body=json.dumps(result, indent=2),

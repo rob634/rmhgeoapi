@@ -527,6 +527,18 @@ class PipelineInterface(BaseInterface):
                     </div>
 
                     <div class="filter-group">
+                        <label for="hoursFilter">Time Range:</label>
+                        <select id="hoursFilter" class="filter-select">
+                            <option value="24">Last 24 hours</option>
+                            <option value="72">Last 3 days</option>
+                            <option value="168" selected>Last 7 days</option>
+                            <option value="336">Last 14 days</option>
+                            <option value="720">Last 30 days</option>
+                            <option value="0">All time</option>
+                        </select>
+                    </div>
+
+                    <div class="filter-group">
                         <label for="limitFilter">Limit:</label>
                         <select id="limitFilter" class="filter-select">
                             <option value="10">10</option>
@@ -614,6 +626,7 @@ class PipelineInterface(BaseInterface):
         // Job filters
         let currentFilters = {
             status: '',
+            hours: 168,  // Default 7 days
             limit: 25
         };
 
@@ -627,13 +640,18 @@ class PipelineInterface(BaseInterface):
                 currentFilters.status = e.target.value;
                 loadJobs();
             });
+            document.getElementById('hoursFilter').addEventListener('change', (e) => {
+                currentFilters.hours = parseInt(e.target.value);
+                loadJobs();
+            });
             document.getElementById('limitFilter').addEventListener('change', (e) => {
                 currentFilters.limit = parseInt(e.target.value);
                 loadJobs();
             });
             document.getElementById('clearFiltersBtn').addEventListener('click', () => {
-                currentFilters = { status: '', limit: 25 };
+                currentFilters = { status: '', hours: 168, limit: 25 };
                 document.getElementById('statusFilter').value = '';
+                document.getElementById('hoursFilter').value = '168';
                 document.getElementById('limitFilter').value = '25';
                 loadJobs();
             });
@@ -654,12 +672,27 @@ class PipelineInterface(BaseInterface):
                 // Build query string
                 const params = new URLSearchParams();
                 if (currentFilters.status) params.append('status', currentFilters.status);
+                params.append('hours', currentFilters.hours);  // Include hours filter
                 params.append('limit', currentFilters.limit);
 
                 const response = await fetch(`/api/dbadmin/jobs?${params.toString()}`);
-                if (!response.ok) throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-
                 const data = await response.json();
+
+                // Handle schema not deployed error (503)
+                if (response.status === 503 && data.error === 'Schema not deployed') {
+                    loadingState.style.display = 'none';
+                    errorState.style.display = 'block';
+                    errorState.querySelector('.error-message').innerHTML = `
+                        <strong>Schema not deployed:</strong> ${data.message}<br>
+                        <span style="font-size: 12px; color: #666;">
+                            Hint: ${data.hint || 'Deploy the database schema first'}
+                        </span>
+                    `;
+                    return;
+                }
+
+                if (!response.ok) throw new Error(data.error || `HTTP ${response.status}: ${response.statusText}`);
+
                 const jobs = data.jobs || [];
 
                 // Update stats
@@ -668,8 +701,8 @@ class PipelineInterface(BaseInterface):
                 // Update pipeline card stats
                 updatePipelineStats(jobs);
 
-                // Render table
-                renderJobsTable(jobs);
+                // Render table with query info
+                renderJobsTable(jobs, data.query_info);
 
                 // Show table
                 loadingState.style.display = 'none';
@@ -729,12 +762,17 @@ class PipelineInterface(BaseInterface):
                 collectionJobs.length > 0 ? Math.round(collectionSuccess / collectionJobs.length * 100) + '%' : '--';
         }
 
-        function renderJobsTable(jobs) {
+        function renderJobsTable(jobs, queryInfo) {
             const tbody = document.getElementById('jobsTableBody');
             tbody.innerHTML = '';
 
             if (jobs.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 2rem;">No jobs found</td></tr>';
+                const hoursText = queryInfo?.hours_back === 'all' ? 'any time' : `last ${queryInfo?.hours_back || 168} hours`;
+                const schemaText = queryInfo?.schema ? ` in schema '${queryInfo.schema}'` : '';
+                tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; padding: 2rem;">
+                    No jobs found${schemaText} (${hoursText}).<br>
+                    <span style="font-size: 12px; color: #666;">Try selecting "All time" or submit a test job.</span>
+                </td></tr>`;
                 return;
             }
 

@@ -166,9 +166,9 @@ class QueueDefaults:
     RASTER_TASKS_QUEUE = "raster-tasks"   # Raster-optimized queue
     VECTOR_TASKS_QUEUE = "vector-tasks"   # Vector-optimized queue
 
-    # Long-running tasks for Docker worker (13 DEC 2025 - placeholder)
-    # When Docker support is added, large raster collection tasks route here
-    LONG_RUNNING_RASTER_TASKS_QUEUE = "long-running-raster-tasks"
+    # Long-running tasks for Docker worker (13 DEC 2025, renamed 22 DEC 2025)
+    # When Docker support is added, large tasks route here (no timeout constraints)
+    LONG_RUNNING_TASKS_QUEUE = "long-running-tasks"
 
     MAX_BATCH_SIZE = 100
     BATCH_THRESHOLD = 50
@@ -225,24 +225,23 @@ class TaskRoutingDefaults:
 
     CRITICAL (11 DEC 2025 - No Legacy Fallbacks):
     ALL task types MUST be explicitly listed here. If a task type is not
-    in RASTER_TASKS, VECTOR_TASKS, or LONG_RUNNING_RASTER_TASKS,
+    in RASTER_TASKS, VECTOR_TASKS, or LONG_RUNNING_TASKS,
     CoreMachine will raise ContractViolationError.
     This prevents silent misrouting and enforces explicit queue assignment.
 
     Queue Selection Guidelines:
     - RASTER_TASKS: Memory-intensive GDAL operations (2-8GB RAM, low concurrency)
     - VECTOR_TASKS: DB-bound or lightweight operations (high concurrency)
-    - LONG_RUNNING_RASTER_TASKS: Docker worker for large files (no timeout constraints)
+    - LONG_RUNNING_TASKS: Docker worker for large files (no timeout constraints)
     """
 
-    # Long-running raster tasks → long-running-raster-tasks queue (13 DEC 2025)
-    # Placeholder for Docker worker. When Docker support is added, large raster
-    # collection tasks will route here instead of raising NotImplementedError.
+    # Long-running tasks → long-running-tasks queue (13 DEC 2025, renamed 22 DEC 2025)
+    # Placeholder for Docker worker. When Docker support is added, large
+    # tasks will route here instead of raising NotImplementedError.
     # Currently empty - no tasks route here yet.
-    LONG_RUNNING_RASTER_TASKS = [
+    LONG_RUNNING_TASKS = [
         # Future: "create_cog_large", "extract_tiles_large", etc.
-        # When a raster collection contains files > RASTER_SIZE_THRESHOLD_MB,
-        # ALL tasks for that job will route to this queue (all-or-none pattern)
+        # When a job contains files > size threshold, tasks route here
     ]
 
     # Raster tasks → raster-tasks queue (memory-intensive, low concurrency)

@@ -180,7 +180,6 @@ class SwaggerInterface(BaseInterface):
         <div class="nav-links">
             <a href="/api/interface/home">Home</a>
             <a href="/api/interface/docs">Static Docs</a>
-            <a href="/api/interface/platform">Platform</a>
             <a href="/api/health">Health Check</a>
         </div>
     </div>

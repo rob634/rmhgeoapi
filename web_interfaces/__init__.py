@@ -304,12 +304,6 @@ except ImportError as e:
     logger.warning(f"⚠️ Could not import Map interface: {e}")
 
 try:
-    from .platform import interface as _platform
-    logger.info("✅ Imported Platform interface module")
-except ImportError as e:
-    logger.warning(f"⚠️ Could not import Platform interface: {e}")
-
-try:
     from .h3 import interface as _h3
     logger.info("✅ Imported H3 interface module")
 except ImportError as e:

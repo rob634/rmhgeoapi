@@ -260,9 +260,8 @@ class GalleryInterface(BaseInterface):
 
             <div class="gallery-footer">
                 <p>
-                    <strong>Add Your Data:</strong> Process rasters via
-                    <a href="/api/interface/pipeline">Pipelines</a> or vectors via
-                    <a href="/api/interface/platform">Platform API</a>
+                    <strong>Add Your Data:</strong> Process data via
+                    <a href="/api/interface/pipeline">Pipelines</a>
                 </p>
             </div>
         </div>

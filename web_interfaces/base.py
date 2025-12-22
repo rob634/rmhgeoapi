@@ -285,13 +285,6 @@ class BaseInterface(ABC):
                    onmouseout="this.style.color='#0071BC'">
                     System Status
                 </a>
-                <a href="/api/interface/platform"
-                   style="color: #0071BC; text-decoration: none; font-weight: 600;
-                          transition: color 0.2s;"
-                   onmouseover="this.style.color='#00A3DA'"
-                   onmouseout="this.style.color='#0071BC'">
-                    Platform
-                </a>
                 <a href="/api/interface/storage"
                    style="color: #0071BC; text-decoration: none; font-weight: 600;
                           transition: color 0.2s;"

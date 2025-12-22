@@ -101,16 +101,6 @@ class HomeInterface(BaseInterface):
                     <div class="card-footer">Monitor Jobs →</div>
                 </a>
 
-                <!-- Platform Configuration Card -->
-                <a href="/api/interface/platform" class="card">
-                    <div class="card-icon">🔧</div>
-                    <h3 class="card-title">Platform Config</h3>
-                    <p class="card-description">
-                        DDH integration settings, naming patterns, and Platform API endpoints
-                    </p>
-                    <div class="card-footer">View Config →</div>
-                </a>
-
                 <!-- API Documentation Card -->
                 <a href="/api/interface/docs" class="card">
                     <div class="card-icon">📖</div>

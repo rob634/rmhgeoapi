@@ -4,9 +4,9 @@
 # EPOCH: 4 - ACTIVE
 # STATUS: Service Handler - Aggregation Finalization
 # PURPOSE: Update stat_registry provenance and verify counts
-# LAST_REVIEWED: 17 DEC 2025
+# LAST_REVIEWED: 22 DEC 2025
 # EXPORTS: h3_aggregation_finalize
-# DEPENDENCIES: infrastructure.h3_repository
+# DEPENDENCIES: infrastructure.h3_repository, util_logger (memory checkpoints)
 # ============================================================================
 """
 H3 Aggregation Finalize Handler.
@@ -25,7 +25,7 @@ Usage:
 """
 
 from typing import Dict, Any
-from util_logger import LoggerFactory, ComponentType
+from util_logger import LoggerFactory, ComponentType, log_memory_checkpoint
 
 from .base import validate_dataset_id
 
@@ -94,6 +94,13 @@ def h3_aggregation_finalize(params: Dict[str, Any], context: Dict[str, Any] = No
         actual_stat_count = _get_stat_count(h3_repo, dataset_id)
         logger.info(f"   Actual stats in DB: {actual_stat_count:,}")
 
+        # Memory checkpoint 1: After stat count verification query
+        task_id = f"{source_job_id[:8] if source_job_id else 'finalize'}"
+        log_memory_checkpoint(logger, "After stat count query",
+                              context_id=task_id,
+                              actual_stat_count=actual_stat_count,
+                              reported_stats=total_stats_computed)
+
         # STEP 3: Update stat_registry provenance
         registry_updated = h3_repo.update_stat_registry_provenance(
             id=dataset_id,
@@ -105,6 +112,12 @@ def h3_aggregation_finalize(params: Dict[str, Any], context: Dict[str, Any] = No
             logger.info(f"   ✅ Registry provenance updated")
         else:
             logger.warning(f"   ⚠️ Dataset not found in registry: {dataset_id}")
+
+        # Memory checkpoint 2: After registry update
+        log_memory_checkpoint(logger, "After registry update",
+                              context_id=task_id,
+                              registry_updated=registry_updated,
+                              dataset_id=dataset_id)
 
         # STEP 4: Verify counts match (warning only, don't fail)
         if actual_stat_count != total_stats_computed and total_stats_computed > 0:

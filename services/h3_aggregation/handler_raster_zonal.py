@@ -4,9 +4,9 @@
 # EPOCH: 4 - ACTIVE
 # STATUS: Service Handler - Raster Zonal Statistics
 # PURPOSE: Compute zonal statistics from COGs for H3 cell batches
-# LAST_REVIEWED: 17 DEC 2025
+# LAST_REVIEWED: 22 DEC 2025
 # EXPORTS: h3_raster_zonal_stats
-# DEPENDENCIES: rasterstats, rasterio, shapely
+# DEPENDENCIES: rasterstats, rasterio, shapely, util_logger (memory checkpoints)
 # ============================================================================
 """
 H3 Raster Zonal Stats Handler.
@@ -19,9 +19,17 @@ Features:
     - Windowed COG reads for memory efficiency
     - Batch processing with configurable size
     - Multiple stat types: mean, sum, min, max, count, std, median
+    - Supports Azure Blob Storage COGs (via SAS URL)
+    - Supports Planetary Computer COGs (via signed URL)
 
-Usage:
+Source Types:
+    - "azure": Local Azure Blob Storage COG (requires container + blob_path)
+    - "planetary_computer": Planetary Computer STAC item (requires stac_url or collection + item_id)
+    - "url": Direct HTTPS URL to COG (requires cog_url)
+
+Usage (Azure):
     result = h3_raster_zonal_stats({
+        "source_type": "azure",
         "container": "silver-cogs",
         "blob_path": "population/worldpop_2020.tif",
         "dataset_id": "worldpop_2020",
@@ -32,11 +40,26 @@ Usage:
         "batch_size": 1000,
         "stats": ["mean", "sum", "count"]
     })
+
+Usage (Planetary Computer):
+    result = h3_raster_zonal_stats({
+        "source_type": "planetary_computer",
+        "collection": "cop-dem-glo-30",
+        "item_id": "Copernicus_DSM_COG_10_N35_00_E023_00",
+        "asset": "data",
+        "dataset_id": "copdem_glo30",
+        "band": 1,
+        "resolution": 6,
+        "iso3": "GRC",
+        "batch_start": 0,
+        "batch_size": 1000,
+        "stats": ["mean", "min", "max"]
+    })
 """
 
 import time
 from typing import Dict, Any, List
-from util_logger import LoggerFactory, ComponentType
+from util_logger import LoggerFactory, ComponentType, log_memory_checkpoint
 
 from .base import validate_resolution, validate_stat_types, validate_dataset_id
 
@@ -89,8 +112,7 @@ def h3_raster_zonal_stats(params: Dict[str, Any], context: Dict[str, Any] = None
     start_time = time.time()
 
     # STEP 1: Validate parameters
-    container = params.get('container')
-    blob_path = params.get('blob_path')
+    source_type = params.get('source_type', 'azure')  # Default to Azure for backward compatibility
     dataset_id = params.get('dataset_id')
     band = params.get('band', 1)
     resolution = params.get('resolution')
@@ -100,27 +122,60 @@ def h3_raster_zonal_stats(params: Dict[str, Any], context: Dict[str, Any] = None
     stats = params.get('stats', ['mean', 'sum', 'count'])
     append_history = params.get('append_history', False)
     source_job_id = params.get('source_job_id')
+    nodata = params.get('nodata')  # Optional - will read from raster if not provided
+
+    # Azure source parameters
+    container = params.get('container')
+    blob_path = params.get('blob_path')
+
+    # Planetary Computer source parameters
+    collection = params.get('collection')
+    item_id = params.get('item_id')
+    asset = params.get('asset', 'data')
+
+    # Direct URL source parameter
+    cog_url = params.get('cog_url')
 
     # Scope parameters
     iso3 = params.get('iso3')
     bbox = params.get('bbox')
     polygon_wkt = params.get('polygon_wkt')
 
-    if not container:
-        raise ValueError("container is required")
-    if not blob_path:
-        raise ValueError("blob_path is required")
+    # Validate required parameters
     if not dataset_id:
         raise ValueError("dataset_id is required")
     if resolution is None:
         raise ValueError("resolution is required")
+
+    # Validate source-specific parameters
+    if source_type == 'azure':
+        if not container:
+            raise ValueError("container is required for source_type='azure'")
+        if not blob_path:
+            raise ValueError("blob_path is required for source_type='azure'")
+    elif source_type == 'planetary_computer':
+        if not collection:
+            raise ValueError("collection is required for source_type='planetary_computer'")
+        if not item_id:
+            raise ValueError("item_id is required for source_type='planetary_computer'")
+    elif source_type == 'url':
+        if not cog_url:
+            raise ValueError("cog_url is required for source_type='url'")
+    else:
+        raise ValueError(f"Invalid source_type: {source_type}. Must be 'azure', 'planetary_computer', or 'url'")
 
     validate_resolution(resolution)
     validate_dataset_id(dataset_id)
     validate_stat_types(stats)
 
     logger.info(f"📊 Zonal Stats - Batch {batch_index}: {dataset_id}")
-    logger.info(f"   Source: {container}/{blob_path} (band {band})")
+    logger.info(f"   Source type: {source_type}")
+    if source_type == 'azure':
+        logger.info(f"   Azure source: {container}/{blob_path} (band {band})")
+    elif source_type == 'planetary_computer':
+        logger.info(f"   PC source: {collection}/{item_id} asset={asset} (band {band})")
+    else:
+        logger.info(f"   URL source: {cog_url[:80]}... (band {band})")
     logger.info(f"   Range: offset={batch_start}, size={batch_size}")
     logger.info(f"   Stats: {stats}")
 
@@ -155,20 +210,49 @@ def h3_raster_zonal_stats(params: Dict[str, Any], context: Dict[str, Any] = None
 
         logger.info(f"   Loaded {cells_count:,} cells")
 
-        # STEP 3: Build COG URL
-        cog_url = _build_cog_url(container, blob_path)
-        logger.info(f"   COG URL: {cog_url}")
+        # Memory checkpoint 1: After loading cells from database
+        task_id = f"{source_job_id[:8] if source_job_id else 'unknown'}-b{batch_index}"
+        log_memory_checkpoint(logger, "After loading H3 cells",
+                              context_id=task_id,
+                              cells_count=cells_count,
+                              resolution=resolution)
+
+        # STEP 3: Build COG URL based on source type
+        if source_type == 'azure':
+            raster_url, detected_nodata = _build_azure_cog_url(container, blob_path, logger)
+        elif source_type == 'planetary_computer':
+            raster_url, detected_nodata = _build_planetary_computer_url(collection, item_id, asset, logger)
+        else:  # url
+            raster_url = cog_url
+            detected_nodata = None
+
+        # Use provided nodata or detected nodata
+        effective_nodata = nodata if nodata is not None else detected_nodata
+        logger.info(f"   COG URL: {raster_url[:100]}...")
+        logger.info(f"   Nodata value: {effective_nodata}")
+
+        # Memory checkpoint 2: After COG URL resolution (includes STAC fetch for Planetary Computer)
+        log_memory_checkpoint(logger, "After COG URL build",
+                              context_id=task_id,
+                              source_type=source_type)
 
         # STEP 4: Compute zonal stats using rasterstats
         zonal_results = _compute_zonal_stats(
             cells=cells,
-            cog_url=cog_url,
+            cog_url=raster_url,
             band=band,
             stats=stats,
+            nodata=effective_nodata,
             logger=logger
         )
 
         logger.info(f"   Computed {len(zonal_results):,} stat values")
+
+        # Memory checkpoint 3: After zonal stats computation (PEAK MEMORY - rasterstats loads raster data)
+        log_memory_checkpoint(logger, "After rasterstats computation",
+                              context_id=task_id,
+                              zonal_results_count=len(zonal_results),
+                              stats_requested=stats)
 
         # STEP 5: Build stat records for insertion
         stat_records = []
@@ -197,6 +281,12 @@ def h3_raster_zonal_stats(params: Dict[str, Any], context: Dict[str, Any] = None
         elapsed_time = time.time() - start_time
         logger.info(f"✅ Batch {batch_index} complete: {stats_inserted:,} stats in {elapsed_time:.2f}s")
 
+        # Memory checkpoint 4: After database insertion (cleanup phase)
+        log_memory_checkpoint(logger, "After DB insertion (cleanup)",
+                              context_id=task_id,
+                              stats_inserted=stats_inserted,
+                              elapsed_seconds=round(elapsed_time, 2))
+
         return {
             "success": True,
             "result": {
@@ -224,23 +314,118 @@ def h3_raster_zonal_stats(params: Dict[str, Any], context: Dict[str, Any] = None
         }
 
 
-def _build_cog_url(container: str, blob_path: str) -> str:
+def _build_azure_cog_url(container: str, blob_path: str, logger) -> tuple:
     """
-    Build Azure Blob Storage URL for COG access.
+    Build Azure Blob Storage URL for COG access using SAS token.
 
-    Uses GDAL's /vsiaz/ virtual filesystem for direct COG access
-    with range requests.
+    Uses /vsicurl/ with SAS URL for GDAL access. More reliable than
+    /vsiaz/ which requires GDAL-level Azure credentials.
 
     Args:
         container: Azure Blob Storage container name
         blob_path: Path to COG within container
+        logger: Logger instance
 
     Returns:
-        GDAL-compatible Azure Blob URL
+        Tuple of (GDAL-compatible URL, nodata value or None)
     """
-    # Use /vsiaz/ for Azure Blob Storage with GDAL
-    # Requires AZURE_STORAGE_CONNECTION_STRING or AZURE_STORAGE_ACCOUNT env vars
-    return f"/vsiaz/{container}/{blob_path}"
+    from infrastructure.blob import BlobRepository
+
+    # Determine zone from container name
+    is_silver_container = container.startswith('silver-')
+    source_zone = "silver" if is_silver_container else "bronze"
+
+    logger.debug(f"   Building Azure SAS URL for {source_zone} zone...")
+
+    blob_repo = BlobRepository.for_zone(source_zone)
+    sas_url = blob_repo.get_blob_url_with_sas(container, blob_path, hours=2)
+
+    # Use /vsicurl/ for HTTPS access
+    gdal_url = f"/vsicurl/{sas_url}"
+
+    # Try to detect nodata from raster metadata
+    nodata = None
+    try:
+        import rasterio
+        with rasterio.open(sas_url) as src:
+            nodata = src.nodata
+            logger.debug(f"   Detected nodata from raster: {nodata}")
+    except Exception as e:
+        logger.debug(f"   Could not detect nodata from raster: {e}")
+
+    return gdal_url, nodata
+
+
+def _build_planetary_computer_url(collection: str, item_id: str, asset: str, logger) -> tuple:
+    """
+    Build Planetary Computer COG URL with signed token.
+
+    Fetches STAC item and signs the asset URL for authenticated access.
+
+    Args:
+        collection: Planetary Computer collection ID (e.g., 'cop-dem-glo-30')
+        item_id: STAC item ID
+        asset: Asset key within the item (e.g., 'data')
+        logger: Logger instance
+
+    Returns:
+        Tuple of (GDAL-compatible URL, nodata value or None)
+    """
+    try:
+        import pystac_client
+        import planetary_computer
+    except ImportError as e:
+        raise ImportError(
+            f"pystac_client or planetary_computer not installed. "
+            f"Install with: pip install pystac-client planetary-computer. Error: {e}"
+        )
+
+    logger.debug(f"   Fetching STAC item: {collection}/{item_id}")
+
+    # Open Planetary Computer STAC API
+    catalog = pystac_client.Client.open(
+        "https://planetarycomputer.microsoft.com/api/stac/v1",
+        modifier=planetary_computer.sign_inplace,
+    )
+
+    # Fetch the specific item
+    item = catalog.get_collection(collection).get_item(item_id)
+    if item is None:
+        raise ValueError(f"STAC item not found: {collection}/{item_id}")
+
+    # Get asset URL
+    if asset not in item.assets:
+        available = list(item.assets.keys())
+        raise ValueError(f"Asset '{asset}' not found. Available: {available}")
+
+    asset_obj = item.assets[asset]
+    signed_url = asset_obj.href
+
+    logger.debug(f"   Got signed URL for asset '{asset}'")
+
+    # Use /vsicurl/ for HTTPS access
+    gdal_url = f"/vsicurl/{signed_url}"
+
+    # Try to get nodata from STAC metadata
+    nodata = None
+    if hasattr(asset_obj, 'extra_fields'):
+        # Check raster:bands extension
+        raster_bands = asset_obj.extra_fields.get('raster:bands', [])
+        if raster_bands and len(raster_bands) > 0:
+            nodata = raster_bands[0].get('nodata')
+            logger.debug(f"   Nodata from STAC metadata: {nodata}")
+
+    # Fall back to reading from raster if not in STAC
+    if nodata is None:
+        try:
+            import rasterio
+            with rasterio.open(signed_url) as src:
+                nodata = src.nodata
+                logger.debug(f"   Detected nodata from raster: {nodata}")
+        except Exception as e:
+            logger.debug(f"   Could not detect nodata from raster: {e}")
+
+    return gdal_url, nodata
 
 
 def _compute_zonal_stats(
@@ -248,6 +433,7 @@ def _compute_zonal_stats(
     cog_url: str,
     band: int,
     stats: List[str],
+    nodata: Any,
     logger
 ) -> List[Dict[str, Any]]:
     """
@@ -255,9 +441,10 @@ def _compute_zonal_stats(
 
     Args:
         cells: List of cell dicts with h3_index and geom_wkt
-        cog_url: GDAL-compatible raster URL
+        cog_url: GDAL-compatible raster URL (with /vsicurl/ prefix)
         band: Raster band (1-indexed)
         stats: Stat types to compute
+        nodata: Nodata value (None to use raster's internal nodata)
         logger: Logger instance
 
     Returns:
@@ -290,14 +477,18 @@ def _compute_zonal_stats(
     # Compute zonal stats
     # rasterstats returns list of dicts with stat values
     try:
-        results = zonal_stats(
-            vectors=geometries,
-            raster=cog_url,
-            band=band,
-            stats=stats,
-            nodata=-9999,  # Common nodata value
-            all_touched=True  # Include cells that touch polygon edge
-        )
+        # Build kwargs - only include nodata if we have a value
+        zs_kwargs = {
+            'vectors': geometries,
+            'raster': cog_url,
+            'band': band,
+            'stats': stats,
+            'all_touched': True  # Include cells that touch polygon edge
+        }
+        if nodata is not None:
+            zs_kwargs['nodata'] = nodata
+
+        results = zonal_stats(**zs_kwargs)
     except Exception as e:
         logger.error(f"rasterstats.zonal_stats failed: {e}")
         raise

@@ -4,9 +4,9 @@
 # EPOCH: 4 - ACTIVE
 # STATUS: Service Handler - H3 Cell Inventory
 # PURPOSE: Load H3 cells for aggregation scope and calculate batch ranges
-# LAST_REVIEWED: 17 DEC 2025
+# LAST_REVIEWED: 22 DEC 2025
 # EXPORTS: h3_inventory_cells
-# DEPENDENCIES: infrastructure.h3_repository
+# DEPENDENCIES: infrastructure.h3_repository, util_logger (memory checkpoints)
 # ============================================================================
 """
 H3 Inventory Cells Handler.
@@ -26,7 +26,7 @@ Usage:
 """
 
 from typing import Dict, Any
-from util_logger import LoggerFactory, ComponentType
+from util_logger import LoggerFactory, ComponentType, log_memory_checkpoint
 
 from .base import (
     resolve_spatial_scope,
@@ -125,11 +125,25 @@ def h3_inventory_cells(params: Dict[str, Any], context: Dict[str, Any] = None) -
 
         logger.info(f"   Found {total_cells:,} cells")
 
+        # Memory checkpoint 1: After cell count query
+        task_id = f"{source_job_id[:8] if source_job_id else 'inventory'}"
+        log_memory_checkpoint(logger, "After cell count query",
+                              context_id=task_id,
+                              total_cells=total_cells,
+                              resolution=resolution,
+                              scope_type=scope['scope_type'])
+
         # STEP 4: Calculate batch ranges
         batch_ranges = calculate_batch_ranges(total_cells, batch_size)
         num_batches = len(batch_ranges)
 
         logger.info(f"   Calculated {num_batches} batches (batch_size={batch_size})")
+
+        # Memory checkpoint 2: After batch calculation
+        log_memory_checkpoint(logger, "After batch calculation",
+                              context_id=task_id,
+                              num_batches=num_batches,
+                              batch_size=batch_size)
 
         # STEP 5: Register dataset in stat_registry (if dataset_id provided)
         dataset_registered = False

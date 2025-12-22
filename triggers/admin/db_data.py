@@ -307,9 +307,10 @@ class AdminDbDataTrigger:
                         SELECT EXISTS (
                             SELECT 1 FROM information_schema.tables
                             WHERE table_schema = %s AND table_name = 'jobs'
-                        )
+                        ) AS table_exists
                     """, (app_schema,))
-                    table_exists = cursor.fetchone()[0]
+                    result = cursor.fetchone()
+                    table_exists = result['table_exists'] if result else False
 
                     if not table_exists:
                         logger.warning(f"⚠️ Jobs table not found in schema: {app_schema}")

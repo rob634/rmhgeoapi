@@ -2,7 +2,7 @@
 
 > **Navigation**: [Quick Start](WIKI_QUICK_START.md) | [Platform API](WIKI_PLATFORM_API.md) | [All Jobs](WIKI_API_JOB_SUBMISSION.md) | [Errors](WIKI_API_ERRORS.md) | [Glossary](WIKI_API_GLOSSARY.md)
 
-**Last Updated**: 07 DEC 2025
+**Last Updated**: 21 DEC 2025
 **Audience**: Development team (all disciplines)
 **Purpose**: High-level understanding of platform architecture, patterns, and technology stack
 **Wiki**: Azure DevOps Wiki - Technical architecture documentation
@@ -752,6 +752,250 @@ const tileLayer = L.tileLayer(
 4. **FOSS Stack** = Industry-standard tools (NASA, USGS use same stack)
 5. **Standards-Based APIs** = OGC + STAC = works with existing GIS tools
 6. **Cloud-Optimized Formats** = COG enables streaming without downloading entire files
+
+---
+
+## Architecture Diagrams (Mermaid)
+
+Visual diagrams for CoreMachine orchestration and state lifecycle. These render in GitHub, Azure DevOps Wiki, and VS Code with Mermaid extension.
+
+### CoreMachine Composition
+
+The CoreMachine is a stateless orchestrator that coordinates job execution through composition (not inheritance).
+
+```mermaid
+flowchart TB
+    subgraph CoreMachine["CoreMachine (Stateless Orchestrator)"]
+        direction TB
+        PJM["process_job_message()"]
+        PTM["process_task_message()"]
+    end
+
+    subgraph Composed["Composed Components (Injected)"]
+        SM["StateManager<br/>━━━━━━━━━━━━━<br/>• update_job_status()<br/>• update_task_status()<br/>• get_stage_results()<br/>• check_stage_completion()"]
+
+        OM["OrchestrationManager<br/>━━━━━━━━━━━━━━━━<br/>• create_tasks_for_stage()<br/>• batch_tasks()<br/>• route_to_queue()"]
+
+        SCR["StageCompletionRepository<br/>━━━━━━━━━━━━━━━━━━━━<br/>• acquire_advisory_lock()<br/>• detect_last_task()<br/>• signal_stage_complete()"]
+    end
+
+    subgraph Registries["Explicit Registries"]
+        AJ["ALL_JOBS{}<br/>━━━━━━━━━━━━<br/>27 job definitions<br/>Validated at import"]
+
+        AH["ALL_HANDLERS{}<br/>━━━━━━━━━━━━━━<br/>56 task handlers<br/>Validated at import"]
+    end
+
+    PJM --> SM
+    PJM --> OM
+    PJM --> AJ
+
+    PTM --> SM
+    PTM --> SCR
+    PTM --> AH
+
+    OM --> SCR
+```
+
+### CoreMachine Internal Flow
+
+```mermaid
+flowchart TD
+    subgraph JobProcessing["process_job_message()"]
+        J1["Receive job message<br/>from geospatial-jobs queue"]
+        J2["Load JobRecord<br/>from database"]
+        J3["Get job definition<br/>from ALL_JOBS"]
+        J4["Determine current stage"]
+        J5["Call create_tasks_for_stage()"]
+        J6["Batch tasks (100 per batch)"]
+        J7["Route to appropriate queue<br/>(raster-tasks or vector-tasks)"]
+        J8["Update job status<br/>QUEUED → PROCESSING"]
+
+        J1 --> J2 --> J3 --> J4 --> J5 --> J6 --> J7 --> J8
+    end
+
+    subgraph TaskProcessing["process_task_message()"]
+        T1["Receive task message"]
+        T2["Load TaskRecord"]
+        T3["Get handler from<br/>ALL_HANDLERS"]
+        T4["Execute handler(params, context)"]
+        T5{"Success?"}
+        T6["Update task: COMPLETED"]
+        T7["Update task: FAILED"]
+        T8["Check stage completion<br/>(advisory lock)"]
+        T9{"Last task<br/>in stage?"}
+        T10["Signal stage complete"]
+        T11["Trigger next stage<br/>or finalize job"]
+        T12["Done (not last task)"]
+
+        T1 --> T2 --> T3 --> T4 --> T5
+        T5 -->|Yes| T6 --> T8
+        T5 -->|No| T7 --> T8
+        T8 --> T9
+        T9 -->|Yes| T10 --> T11
+        T9 -->|No| T12
+    end
+
+    JobProcessing -.->|"Creates tasks"| TaskProcessing
+    T11 -.->|"Next stage"| J4
+```
+
+### "Last Task Turns Out the Lights" Pattern
+
+This sequence diagram shows how PostgreSQL advisory locks prevent race conditions when parallel tasks complete.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant T1 as Task 1
+    participant T2 as Task 2
+    participant T3 as Task 3
+    participant DB as PostgreSQL
+    participant Lock as Advisory Lock
+    participant CM as CoreMachine
+
+    Note over T1,T3: Stage 1 has 3 parallel tasks
+
+    par Parallel Execution
+        T1->>T1: Execute handler
+        T2->>T2: Execute handler
+        T3->>T3: Execute handler
+    end
+
+    T2->>DB: UPDATE task SET status='COMPLETED'
+    T2->>Lock: TRY pg_try_advisory_lock(stage_id)
+    Lock-->>T2: Lock acquired ✓
+    T2->>DB: SELECT COUNT(*) FROM tasks WHERE stage=1 AND status='PENDING'
+    DB-->>T2: 2 remaining (T1, T3 not done)
+    T2->>Lock: pg_advisory_unlock()
+    Note over T2: Not last → exit
+
+    T1->>DB: UPDATE task SET status='COMPLETED'
+    T1->>Lock: TRY pg_try_advisory_lock(stage_id)
+    Lock-->>T1: Lock acquired ✓
+    T1->>DB: SELECT COUNT(*) FROM tasks WHERE stage=1 AND status='PENDING'
+    DB-->>T1: 1 remaining (T3 not done)
+    T1->>Lock: pg_advisory_unlock()
+    Note over T1: Not last → exit
+
+    T3->>DB: UPDATE task SET status='COMPLETED'
+    T3->>Lock: TRY pg_try_advisory_lock(stage_id)
+    Lock-->>T3: Lock acquired ✓
+    T3->>DB: SELECT COUNT(*) FROM tasks WHERE stage=1 AND status='PENDING'
+    DB-->>T3: 0 remaining ← LAST TASK!
+    T3->>CM: Signal stage_complete(stage=1)
+    T3->>Lock: pg_advisory_unlock()
+
+    CM->>CM: Advance to Stage 2 or Finalize
+```
+
+### Job State Machine
+
+```mermaid
+stateDiagram-v2
+    [*] --> QUEUED: Job submitted
+
+    QUEUED --> PROCESSING: CoreMachine picks up job
+
+    PROCESSING --> PROCESSING: Stage N complete,<br/>advance to Stage N+1
+
+    PROCESSING --> COMPLETED: All stages complete,<br/>all tasks successful
+
+    PROCESSING --> COMPLETED_WITH_ERRORS: All stages complete,<br/>some tasks failed
+
+    PROCESSING --> FAILED: Critical error or<br/>all tasks in stage failed
+
+    COMPLETED --> [*]
+    COMPLETED_WITH_ERRORS --> [*]
+    FAILED --> [*]
+
+    note right of PROCESSING
+        Job stays in PROCESSING
+        while stages execute.
+        Stage transitions happen
+        internally.
+    end note
+```
+
+### Task State Machine
+
+```mermaid
+stateDiagram-v2
+    [*] --> PENDING: Task created
+
+    PENDING --> QUEUED: Routed to Service Bus
+
+    QUEUED --> PROCESSING: Worker picks up message
+
+    PROCESSING --> COMPLETED: Handler returns success=true
+
+    PROCESSING --> FAILED: Handler returns success=false<br/>or raises exception
+
+    COMPLETED --> [*]
+    FAILED --> [*]
+
+    note right of PROCESSING
+        Task execution is atomic.
+        No partial completion.
+        Result stored in task record.
+    end note
+```
+
+### Stage State Machine
+
+```mermaid
+stateDiagram-v2
+    [*] --> PENDING: Stage defined in job
+
+    PENDING --> IN_PROGRESS: First task starts processing
+
+    IN_PROGRESS --> COMPLETED: Last task completes<br/>(advisory lock detects)
+
+    IN_PROGRESS --> FAILED: All tasks failed<br/>or critical error
+
+    COMPLETED --> [*]: Triggers next stage
+    FAILED --> [*]: Job fails
+
+    note right of IN_PROGRESS
+        Multiple tasks execute
+        in parallel within stage.
+        "Last task turns out lights"
+        pattern detects completion.
+    end note
+```
+
+### Combined State Flow
+
+```mermaid
+flowchart LR
+    subgraph Job["Job Lifecycle"]
+        JQ["QUEUED"] --> JP["PROCESSING"]
+        JP --> JC["COMPLETED"]
+        JP --> JE["COMPLETED_WITH_ERRORS"]
+        JP --> JF["FAILED"]
+    end
+
+    subgraph Stage["Stage Lifecycle (per stage)"]
+        SP["PENDING"] --> SI["IN_PROGRESS"]
+        SI --> SC["COMPLETED"]
+        SI --> SF["FAILED"]
+    end
+
+    subgraph Task["Task Lifecycle (per task)"]
+        TP["PENDING"] --> TQ["QUEUED"]
+        TQ --> TI["PROCESSING"]
+        TI --> TC["COMPLETED"]
+        TI --> TF["FAILED"]
+    end
+
+    JP -.->|"Creates stages"| SP
+    SI -.->|"Creates tasks"| TP
+    SC -.->|"Next stage or"| JC
+    TC -.->|"Last task signals"| SC
+```
+
+---
+
+**Full diagram set**: See [ARCHITECTURE_DIAGRAMS.md](docs_claude/ARCHITECTURE_DIAGRAMS.md) for additional C4 views (System Context, Container, Data Flow, Sequences)
 
 ---
 

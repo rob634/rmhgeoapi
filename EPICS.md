@@ -195,12 +195,26 @@ Abstract component names for ADO work items. Actual Azure resource names assigne
 ## Epic E2: Raster Data as API 🚧
 
 **Business Requirement**: "Make GeoTIFF available as API"
-**Status**: 🚧 PARTIAL (collection/mosaic workflow pending)
+**Status**: 🚧 PARTIAL (F2.7 Collection + F2.8 Classification pending)
 **Core Complete**: NOV 2025
+
+**Feature Overview**:
+| Feature | Status | Scope |
+|---------|--------|-------|
+| F2.1 | ✅ | Single Raster Pipeline |
+| F2.2 | ✅ | TiTiler Integration |
+| F2.3 | ✅ | STAC Cataloging |
+| F2.4 | ✅ | Raster Unpublish |
+| F2.5 | ✅ | Service Layer API |
+| F2.6 | ✅ | Large Raster Tiling |
+| F2.7 | 📋 | Raster Collection Pipeline |
+| F2.8 | 📋 | Classification & Detection |
 
 ### Feature F2.1: Raster ETL Pipeline ✅
 
 **Deliverable**: `process_raster_v2` with 3-tier compression
+
+**Enhancement**: Will integrate F2.8 (Classification) for automatic tier selection
 
 | Story | Description |
 |-------|-------------|
@@ -290,6 +304,8 @@ Abstract component names for ADO work items. Actual Azure resource names assigne
 
 **Deliverable**: `process_large_raster_v2` for oversized files
 
+**Enhancement**: Will integrate F2.8 (Classification) for automatic tier selection
+
 | Story | Description |
 |-------|-------------|
 | S2.6.1 | Create large raster processing job |
@@ -322,6 +338,65 @@ Abstract component names for ADO work items. Actual Azure resource names assigne
 | S2.7.5 | 📋 | Add collection-level STAC metadata |
 
 **Key Files**: `jobs/process_raster_collection.py` (planned)
+
+**Dependency**: Requires F2.8 (Classification & Detection) for input routing
+
+---
+
+### Feature F2.8: Raster Classification & Detection 📋 PLANNED
+
+**Deliverable**: Automated raster classification to inform processing mode and tier selection
+
+**Purpose**: Cross-cutting detection logic that serves F2.1 (single), F2.6 (large), and F2.7 (collection) pipelines.
+
+```
+Raster Input → F2.8 (Classify) → Route to F2.1/F2.6/F2.7 → Tier Selection → Output
+```
+
+| Story | Status | Description | Acceptance Criteria |
+|-------|--------|-------------|---------------------|
+| S2.8.1 | 📋 | Band Metadata Extraction | Extract band count, dtype, nodata, statistics from COG/TIF header |
+| S2.8.2 | 📋 | Image Type Classification | Detect: RGB, RGBA, Grayscale, Multispectral, Hyperspectral, DEM |
+| S2.8.3 | 📋 | DEM Detection & Processing | Identify elevation via dtype (float32/int16) + value range; apply terrain colormap |
+| S2.8.4 | 📋 | Sensor Profile Matching | Match known profiles (Landsat, Sentinel-2, WorldView-3) by band count/metadata |
+| S2.8.5 | 📋 | Tier Auto-Selection | Route to Analysis/Visualization/Archive tier based on classification result |
+
+**Classification Decision Tree**:
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                     Raster Classification                        │
+├─────────────────────────────────────────────────────────────────┤
+│  Band Count = 1                                                  │
+│  ├── dtype float32/float64 + range [-500, 9000] → DEM           │
+│  ├── dtype uint8 + range [0, 255] → Grayscale                   │
+│  └── else → Single-band Analysis                                │
+│                                                                  │
+│  Band Count = 3                                                  │
+│  ├── dtype uint8 → RGB (Visualization tier)                     │
+│  └── dtype uint16/float → Multispectral (Analysis tier)         │
+│                                                                  │
+│  Band Count = 4                                                  │
+│  ├── dtype uint8 → RGBA (Visualization tier)                    │
+│  └── dtype uint16/float → Multispectral (Analysis tier)         │
+│                                                                  │
+│  Band Count = 8 → WorldView-3 profile                           │
+│  Band Count = 10-13 → Sentinel-2 / Landsat profile              │
+│  Band Count > 100 → Hyperspectral (Analysis tier)               │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Tier Selection Logic**:
+| Classification | Default Tier | Compression | Notes |
+|----------------|--------------|-------------|-------|
+| DEM | Analysis | DEFLATE + predictor=3 | Lossless, float preservation |
+| RGB/RGBA | Visualization | JPEG 85% | Lossy OK for imagery |
+| Multispectral | Analysis | DEFLATE | Preserve band values |
+| Hyperspectral | Archive | LZW | Balance size vs quality |
+| Grayscale | Visualization | JPEG 90% | Higher quality for detail |
+
+**Key Files**: `services/raster_classifier.py` (planned), `models/band_mapping.py` (exists)
+
+**Existing Foundation**: `models/band_mapping.py` added 21 DEC 2025 contains WorldView-3 profile
 
 ---
 
@@ -1521,8 +1596,8 @@ if __name__ == "__main__":
 | **Total Epics** | **9** |
 | Completed Features | 18 |
 | Active Features | 6 |
-| Planned Features | 13 |
-| **Total Features** | **37** |
+| Planned Features | 14 |
+| **Total Features** | **38** |
 | Completed Enablers | 6 |
 | Backlog Enablers | 3 |
 
@@ -1541,4 +1616,4 @@ if __name__ == "__main__":
 
 ---
 
-**Last Updated**: 21 DEC 2025 (Neutralized language; replaced specific names with Component Glossary terms)
+**Last Updated**: 21 DEC 2025 (Added F2.8 Raster Classification & Detection)

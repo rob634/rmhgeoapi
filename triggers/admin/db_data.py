@@ -303,14 +303,23 @@ class AdminDbDataTrigger:
             with self.db_repo._get_connection() as conn:
                 with conn.cursor() as cursor:
                     # First, check if the jobs table exists
-                    cursor.execute(f"""
+                    # Note: Using try/except for robust dict/tuple access
+                    cursor.execute("""
                         SELECT EXISTS (
                             SELECT 1 FROM information_schema.tables
                             WHERE table_schema = %s AND table_name = 'jobs'
-                        ) AS table_exists
+                        )
                     """, (app_schema,))
                     result = cursor.fetchone()
-                    table_exists = result['table_exists'] if result else False
+                    # Handle both dict and tuple row types
+                    if result is None:
+                        table_exists = False
+                    elif hasattr(result, 'keys'):
+                        # Dict-like row
+                        table_exists = list(result.values())[0]
+                    else:
+                        # Tuple row
+                        table_exists = result[0]
 
                     if not table_exists:
                         logger.warning(f"⚠️ Jobs table not found in schema: {app_schema}")

@@ -62,39 +62,67 @@ PHASE 2: Spatial Merge (grid cells)
 | `jobs/process_fathom_stack.py` | Phase 1 job definition |
 | `jobs/process_fathom_merge.py` | Phase 2 job definition |
 | `services/fathom_etl.py` | Core handlers (tile_inventory, band_stack, grid_inventory, spatial_merge, stac_register) |
-| `services/fathom_container_inventory.py` | Bronze container scanner, etl_fathom table management |
+| `services/fathom_container_inventory.py` | Bronze container scanner, populates etl_source_files table |
+| `core/models/etl.py` | EtlSourceFile Pydantic model (defines table schema via IaC) |
 | `config/defaults.py` | FathomDefaults class (containers, prefixes, collection IDs) |
 
-### Database Table: `app.etl_fathom`
+### Database Table: `app.etl_source_files` (Generalized ETL Tracking)
 
-Tracks processing state for each source file:
+**Updated 21 DEC 2025**: FATHOM uses the generalized `app.etl_source_files` table with `etl_type='fathom'`.
+This table supports ANY ETL pipeline type via namespace (`etl_type`) and flexible JSONB metadata.
 
 ```sql
-CREATE TABLE app.etl_fathom (
+CREATE TABLE app.etl_source_files (
     id SERIAL PRIMARY KEY,
-    source_container VARCHAR(100),
-    source_blob VARCHAR(512),
-    tile VARCHAR(20),                    -- e.g., "n04w006"
-    flood_type VARCHAR(20),              -- fluvial/pluvial/coastal
-    defense VARCHAR(20),                 -- defended/undefended
-    return_period INTEGER,               -- 5, 10, 20, 50, 75, 100, 200, 500
-    year INTEGER,                        -- 2020, 2030, 2050, 2080
-    ssp VARCHAR(10),                     -- NULL for 2020, else ssp126/245/370/585
 
-    -- Phase 1 tracking
-    phase1_group_key VARCHAR(100),       -- tile + scenario (grouping key)
+    -- ETL Type Namespace (fathom, raster_v2, vector, etc.)
+    etl_type VARCHAR(64) NOT NULL,
+
+    -- Source file identification
+    source_blob_path VARCHAR(512) NOT NULL,
+    source_container VARCHAR(100) NOT NULL,
+    file_size_bytes BIGINT,
+
+    -- Domain-specific metadata as JSONB (flexible for each ETL type)
+    source_metadata JSONB DEFAULT '{}',
+
+    -- Phase 1 tracking (generic)
+    phase1_group_key VARCHAR(150),
     phase1_output_blob VARCHAR(512),
-    phase1_processed_at TIMESTAMP,
     phase1_job_id VARCHAR(64),
+    phase1_completed_at TIMESTAMP,
 
-    -- Phase 2 tracking
-    grid_cell VARCHAR(30),               -- e.g., "n00-n05_w005-w010"
-    phase2_group_key VARCHAR(100),       -- grid_cell + scenario
+    -- Phase 2 tracking (generic)
+    phase2_group_key VARCHAR(150),
     phase2_output_blob VARCHAR(512),
-    phase2_processed_at TIMESTAMP,
-    phase2_job_id VARCHAR(64)
+    phase2_job_id VARCHAR(64),
+    phase2_completed_at TIMESTAMP,
+
+    -- Timestamps
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW(),
+
+    -- Unique per ETL type + source path
+    UNIQUE (etl_type, source_blob_path)
 );
+
+-- FATHOM source_metadata example:
+-- {
+--   "flood_type": "fluvial",
+--   "defense": "defended",
+--   "year": 2020,
+--   "ssp": null,
+--   "return_period": "1in100",
+--   "tile": "n04w006",
+--   "grid_cell": "n00-n05_w005-w010"
+-- }
 ```
+
+**Key Design Principles**:
+- Single table for ALL ETL types, namespaced by `etl_type`
+- JSONB `source_metadata` stores domain-specific parsed fields
+- Generic phase1/phase2 columns support most multi-phase pipelines
+- Defined via Pydantic model (`core/models/etl.py`) → SQL generation (IaC)
 
 ---
 
@@ -104,15 +132,15 @@ CREATE TABLE app.etl_fathom (
 
 | Handler | Purpose |
 |---------|---------|
-| `fathom_tile_inventory` | Query etl_fathom for Phase 1 pending, group by tile+scenario |
-| `fathom_band_stack` | Download 8 TIFFs, stack bands, write COG, update etl_fathom |
+| `fathom_tile_inventory` | Query etl_source_files for Phase 1 pending, group by tile+scenario |
+| `fathom_band_stack` | Download 8 TIFFs, stack bands, write COG, update phase1_completed_at |
 
 ### Phase 2 Handlers
 
 | Handler | Purpose |
 |---------|---------|
-| `fathom_grid_inventory` | Query etl_fathom for Phase 1 complete, group by grid_cell+scenario |
-| `fathom_spatial_merge` | Download N² COGs, merge spatially, write COG, update etl_fathom |
+| `fathom_grid_inventory` | Query etl_source_files for Phase 1 complete, group by grid_cell+scenario |
+| `fathom_spatial_merge` | Download N² COGs, merge spatially, write COG, update phase2_completed_at |
 | `fathom_stac_register` | Create STAC items for merged COGs |
 
 ---
@@ -128,13 +156,17 @@ silver-fathom/fathom-stacked/ci/n04w006/n04w006_fluvial-defended_2020.tif
 silver-fathom/fathom-stacked/ci/n04w006/n04w006_coastal-undefended_2030_ssp245.tif
 ```
 
-### Phase 2 Output
+### Phase 2 Output (Flat Structure)
 ```
-silver-fathom/fathom/{region}/{grid_cell}/{grid_cell}_{flood_type}-{defense}_{year}[_{ssp}].tif
+silver-fathom/fathom/{region}/{flood_type}-{defense}-{year}[-{ssp}]-{grid_cell}.tif
 
 Example:
-silver-fathom/fathom/ci/n00-n05_w005-w010/n00-n05_w005-w010_fluvial-defended_2020.tif
+silver-fathom/fathom/ci/fluvial-defended-2020-n00-n05_w005-w010.tif
+silver-fathom/fathom/ci/coastal-undefended-2030-ssp245-n00-n05_w005-w010.tif
 ```
+
+**Note**: Phase 2 uses flat output (no grid_cell subfolder) with naming that matches
+the original FATHOM file order: `{flood_type}-{defense}-{year}-{ssp}-{grid_cell}`
 
 ### Grid Cell Format
 ```
@@ -197,39 +229,50 @@ for row in rows:
 **Files**: `services/fathom_etl.py` (tile_inventory, grid_inventory handlers)
 
 ### 2. Phase 2 source_container Filter
-**Problem**: grid_inventory filtered by `source_container = 'silver-fathom'` but etl_fathom stores original source `bronze-fathom`.
+**Problem**: grid_inventory filtered by `source_container = 'silver-fathom'` but table stores original source `bronze-fathom`.
 
 ```python
 # BEFORE (buggy):
-WHERE phase1_processed_at IS NOT NULL
+WHERE phase1_completed_at IS NOT NULL
   AND source_container = %(source_container)s  -- Always returns 0 rows!
 
 # AFTER (fixed):
-WHERE phase1_processed_at IS NOT NULL
-  -- Removed source_container filter; phase1_processed_at IS NOT NULL is sufficient
+WHERE phase1_completed_at IS NOT NULL
+  -- Removed source_container filter; phase1_completed_at IS NOT NULL is sufficient
 ```
 
-**File**: `services/fathom_etl.py:651`
+**File**: `services/fathom_etl.py`
 
 ---
 
 ## Processing Status
 
-### Côte d'Ivoire (CI) - Test Region
+### Table Migration (21 DEC 2025)
+
+**IMPORTANT**: Migrated from `app.etl_fathom` to generalized `app.etl_source_files` table.
+
+Before testing, you must:
+1. Deploy to Azure: `func azure functionapp publish rmhazuregeoapi --python --build remote`
+2. Full rebuild schema: `POST /api/dbadmin/maintenance?action=full-rebuild&confirm=yes`
+3. Re-run FATHOM inventory: `POST /api/jobs/submit/inventory_fathom_container`
+4. Process with Phase 1 + Phase 2 jobs
+
+### Côte d'Ivoire (CI) - Previous Test Region (Before Migration)
 
 | Phase | Status | Details |
 |-------|--------|---------|
-| Bronze inventory | ✅ Complete | ~256 source files scanned |
-| Phase 1 (stack) | ✅ Complete | 32 stacked COGs created |
-| Phase 2 (merge) | ⚠️ Partial | 46/47 tasks complete, 1 failed |
-| STAC registration | ❌ Blocked | Waiting for Phase 2 retry |
+| Bronze inventory | ⚠️ Needs Rerun | Old table structure |
+| Phase 1 (stack) | ⚠️ Needs Rerun | Old table structure |
+| Phase 2 (merge) | ⚠️ Needs Rerun | Old table structure |
+| STAC registration | ⚠️ Needs Rerun | Old table structure |
 
-**Phase 2 Failure**: Task `n10-n15_w005-w010_*` failed (likely OOM or timeout on larger grid).
+**Note**: Previous CI processing used the old `etl_fathom` table. After schema rebuild,
+the COG files still exist in Azure blob storage but the tracking table is reset.
 
 ### Next Steps
-1. Retry failed Phase 2 task with `force_reprocess=true`
-2. Investigate if that grid cell has more tiles (edge case)
-3. Consider grid_size=2 for memory-constrained areas
+1. Deploy and rebuild schema (creates new `etl_source_files` table)
+2. Run inventory job to populate new table
+3. Run Phase 1 + Phase 2 to validate new JSONB structure
 
 ---
 
@@ -286,8 +329,11 @@ curl -X POST "https://rmhazuregeoapi.../api/jobs/submit/process_fathom_merge" \
 # Memory checkpoints
 traces | where message contains 'MEMORY CHECKPOINT' and message contains 'spatial_merge'
 
+# Phase 1 completion
+traces | where message contains 'Updated' and message contains 'phase1_completed_at'
+
 # Phase 2 completion
-traces | where message contains 'Updated' and message contains 'phase2_processed_at'
+traces | where message contains 'Updated' and message contains 'phase2_completed_at'
 
 # Failures
 traces | where message contains 'Failed' or message contains 'Error'
@@ -302,3 +348,5 @@ traces | where message contains 'Failed' or message contains 'Error'
 3. **Retry Logic**: Auto-retry failed tasks with smaller grid_size
 4. **Monitoring Dashboard**: Real-time processing metrics
 5. **Global Processing**: Full FATHOM dataset (~100K tiles)
+6. ~~**Generalized ETL Tracking**~~: ✅ Done (21 DEC 2025) - Migrated to `app.etl_source_files`
+7. **Additional ETL Types**: Use `etl_source_files` for raster_v2, vector, and other pipelines

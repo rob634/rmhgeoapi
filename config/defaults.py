@@ -352,8 +352,8 @@ class RasterDefaults:
     Environment variables match constant names for clarity (no prefix stripping).
     """
 
-    # Size thresholds - names match env vars for clarity (13 DEC 2025)
-    RASTER_SIZE_THRESHOLD_MB = 800      # 800 MB - small vs large file cutoff
+    # Size thresholds - names match env vars for clarity (21 DEC 2025)
+    RASTER_SIZE_THRESHOLD_MB = 2048     # 2 GB - small vs large file cutoff (raised for OOM frontier testing)
     RASTER_MAX_FILE_SIZE_MB = 20000     # 20 GB - maximum allowed file size
     RASTER_IN_MEMORY_THRESHOLD_MB = 100 # 100 MB - in-memory vs disk processing
 

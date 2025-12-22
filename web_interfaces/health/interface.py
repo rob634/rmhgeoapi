@@ -1245,6 +1245,80 @@ class HealthInterface(BaseInterface):
             background: linear-gradient(135deg, #F0F7EE 0%, #E8F4FD 100%);
             border-color: #5BB381;
         }
+
+        /* Hardware/Function App Resources Section */
+        .hardware-section {
+            margin-top: 20px;
+            padding-top: 20px;
+            border-top: 1px solid #e9ecef;
+        }
+
+        .hardware-section h4 {
+            color: #053657;
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 15px;
+        }
+
+        .hardware-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 12px;
+        }
+
+        .hardware-card {
+            background: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 6px;
+            padding: 12px;
+            display: flex;
+            gap: 12px;
+            align-items: flex-start;
+        }
+
+        .hardware-icon {
+            font-size: 20px;
+            flex-shrink: 0;
+        }
+
+        .hardware-details {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .hardware-label {
+            font-size: 10px;
+            color: #626F86;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 2px;
+        }
+
+        .hardware-value {
+            font-size: 16px;
+            font-weight: 700;
+            color: #053657;
+            margin-bottom: 4px;
+        }
+
+        .hardware-sub {
+            font-size: 11px;
+            color: #626F86;
+        }
+
+        .hardware-bar-container {
+            height: 6px;
+            background: #e9ecef;
+            border-radius: 3px;
+            overflow: hidden;
+            margin: 6px 0;
+        }
+
+        .hardware-bar {
+            height: 100%;
+            border-radius: 3px;
+            transition: width 0.3s ease;
+        }
         """
 
     def _generate_custom_js(self, tooltips: dict) -> str:
@@ -1443,6 +1517,9 @@ class HealthInterface(BaseInterface):
                 return;
             }}
 
+            // Get hardware info from components
+            const hardware = data.components?.hardware?.details || {{}};
+
             envInfo.classList.remove('hidden');
             envInfo.innerHTML = `
                 <h3>Environment</h3>
@@ -1453,6 +1530,96 @@ class HealthInterface(BaseInterface):
                             <div class="env-value">${{value || 'N/A'}}</div>
                         </div>
                     `).join('')}}
+                </div>
+                ${{Object.keys(hardware).length > 0 ? renderHardwareInfo(hardware) : ''}}
+            `;
+        }}
+
+        // Render hardware/Function App info section
+        function renderHardwareInfo(hardware) {{
+            // Calculate memory bar color based on utilization
+            const ramPercent = hardware.ram_utilization_percent || 0;
+            let ramBarColor = '#10B981'; // green
+            if (ramPercent >= 90) ramBarColor = '#DC2626'; // red
+            else if (ramPercent >= 80) ramBarColor = '#F59E0B'; // yellow
+
+            const cpuPercent = hardware.cpu_utilization_percent || 0;
+            let cpuBarColor = '#10B981';
+            if (cpuPercent >= 90) cpuBarColor = '#DC2626';
+            else if (cpuPercent >= 70) cpuBarColor = '#F59E0B';
+
+            return `
+                <div class="hardware-section">
+                    <h4>Function App Resources</h4>
+                    <div class="hardware-grid">
+                        <!-- Azure Info -->
+                        <div class="hardware-card">
+                            <div class="hardware-icon">☁️</div>
+                            <div class="hardware-details">
+                                <div class="hardware-label">Azure Site</div>
+                                <div class="hardware-value">${{hardware.azure_site_name || 'local'}}</div>
+                                <div class="hardware-sub">${{hardware.azure_sku || 'N/A'}} ${{hardware.azure_instance_id ? '• ' + hardware.azure_instance_id : ''}}</div>
+                            </div>
+                        </div>
+
+                        <!-- CPU Info -->
+                        <div class="hardware-card">
+                            <div class="hardware-icon">⚡</div>
+                            <div class="hardware-details">
+                                <div class="hardware-label">CPU</div>
+                                <div class="hardware-value">${{hardware.cpu_count || 'N/A'}} cores</div>
+                                <div class="hardware-bar-container">
+                                    <div class="hardware-bar" style="width: ${{Math.min(cpuPercent, 100)}}%; background: ${{cpuBarColor}};"></div>
+                                </div>
+                                <div class="hardware-sub">${{cpuPercent.toFixed(1)}}% utilized</div>
+                            </div>
+                        </div>
+
+                        <!-- RAM Info -->
+                        <div class="hardware-card">
+                            <div class="hardware-icon">💾</div>
+                            <div class="hardware-details">
+                                <div class="hardware-label">Memory</div>
+                                <div class="hardware-value">${{hardware.total_ram_gb || 'N/A'}} GB total</div>
+                                <div class="hardware-bar-container">
+                                    <div class="hardware-bar" style="width: ${{Math.min(ramPercent, 100)}}%; background: ${{ramBarColor}};"></div>
+                                </div>
+                                <div class="hardware-sub">${{hardware.available_ram_mb ? (hardware.available_ram_mb / 1024).toFixed(1) + ' GB' : 'N/A'}} available (${{(100 - ramPercent).toFixed(1)}}% free)</div>
+                            </div>
+                        </div>
+
+                        <!-- Process Info -->
+                        <div class="hardware-card">
+                            <div class="hardware-icon">📊</div>
+                            <div class="hardware-details">
+                                <div class="hardware-label">Process RSS</div>
+                                <div class="hardware-value">${{hardware.process_rss_mb ? (hardware.process_rss_mb >= 1024 ? (hardware.process_rss_mb / 1024).toFixed(2) + ' GB' : hardware.process_rss_mb.toFixed(0) + ' MB') : 'N/A'}}</div>
+                                <div class="hardware-sub">Current process memory usage</div>
+                            </div>
+                        </div>
+
+                        <!-- Platform Info -->
+                        <div class="hardware-card">
+                            <div class="hardware-icon">🖥️</div>
+                            <div class="hardware-details">
+                                <div class="hardware-label">Platform</div>
+                                <div class="hardware-value">${{hardware.platform || 'N/A'}}</div>
+                                <div class="hardware-sub">Python ${{hardware.python_version || 'N/A'}}</div>
+                            </div>
+                        </div>
+
+                        <!-- Capacity Limits -->
+                        ${{hardware.capacity_notes ? `
+                        <div class="hardware-card">
+                            <div class="hardware-icon">📏</div>
+                            <div class="hardware-details">
+                                <div class="hardware-label">Safe File Limit</div>
+                                <div class="hardware-value">${{hardware.capacity_notes.safe_file_limit_mb ? (hardware.capacity_notes.safe_file_limit_mb / 1024).toFixed(1) + ' GB' : 'N/A'}}</div>
+                                <div class="hardware-sub">Warn at ${{hardware.capacity_notes.warning_threshold_percent}}% • Critical at ${{hardware.capacity_notes.critical_threshold_percent}}%</div>
+                            </div>
+                        </div>
+                        ` : ''}}
+                    </div>
                 </div>
             `;
         }}

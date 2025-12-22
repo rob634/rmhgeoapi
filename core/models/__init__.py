@@ -68,9 +68,9 @@ from .janitor import (
     JanitorRunStatus
 )
 
-# ETL tracking models (05 DEC 2025)
+# ETL tracking models (21 DEC 2025 - generalized)
 from .etl import (
-    EtlFathomRecord
+    EtlSourceFile
 )
 
 # Unpublish audit models (12 DEC 2025)
@@ -134,8 +134,8 @@ __all__ = [
     'JanitorRunType',
     'JanitorRunStatus',
 
-    # ETL tracking models (05 DEC 2025)
-    'EtlFathomRecord',
+    # ETL tracking models (21 DEC 2025 - generalized)
+    'EtlSourceFile',
 
     # Unpublish audit models (12 DEC 2025)
     'UnpublishJobRecord',

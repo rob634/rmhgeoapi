@@ -38,6 +38,21 @@
 | Story | Description | Owner | Status |
 |-------|-------------|-------|--------|
 | F2.7 | Raster Collection Processing (pgstac searches) | Claude | 📋 |
+| S2.2.5 | Dynamic TiTiler preview URLs based on band count | Claude | 📋 |
+
+**S2.2.5 Details**: TiTiler fails for >4 band imagery (e.g., WorldView-3 8-band) when default URLs don't specify `bidx` parameters. Need to:
+- Detect band count in STAC metadata extraction
+- Generate band-appropriate preview URLs (e.g., `&bidx=5&bidx=3&bidx=2` for WV RGB)
+- Add WorldView-3 profile to `models/band_mapping.py` ✅ Done 21 DEC 2025
+
+| Story | Description | Owner | Status |
+|-------|-------------|-------|--------|
+| S2.2.6 | Auto-rescale DEM TiTiler URLs using p2/p98 statistics | Claude | 📋 |
+
+**S2.2.6 Details**: DEMs render grey without proper stretch. Need to:
+- Query TiTiler `/cog/statistics` for p2/p98 percentiles during STAC extraction
+- Add `&rescale={p2},{p98}&colormap_name=terrain` to DEM preview/viewer URLs
+- Store rescale values in STAC item properties for client use
 
 ### E3: DDH Platform Integration
 

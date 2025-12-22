@@ -504,6 +504,13 @@ class TasksInterface(BaseInterface):
             margin-top: 4px;
         }
 
+        .task-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 10px;
+        }
+
         .error-details {
             margin-top: 10px;
             padding: 10px;
@@ -525,7 +532,7 @@ class TasksInterface(BaseInterface):
             word-break: break-word;
         }
 
-        .view-result-button {
+        .view-result-button, .view-memory-button {
             margin-top: 10px;
             padding: 6px 12px;
             background: white;
@@ -536,11 +543,22 @@ class TasksInterface(BaseInterface):
             font-size: 11px;
             font-weight: 600;
             transition: all 0.2s;
+            margin-right: 8px;
         }
 
-        .view-result-button:hover {
+        .view-result-button:hover, .view-memory-button:hover {
             background: #f8f9fa;
             border-color: #0071BC;
+        }
+
+        .view-memory-button {
+            color: #7c3aed;
+            border-color: #ddd6fe;
+        }
+
+        .view-memory-button:hover {
+            border-color: #7c3aed;
+            background: #f5f3ff;
         }
 
         .result-json {
@@ -554,6 +572,147 @@ class TasksInterface(BaseInterface):
             font-family: 'Courier New', monospace;
             max-height: 300px;
             overflow-y: auto;
+        }
+
+        /* Memory Metrics Styles */
+        .memory-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 3px 8px;
+            border-radius: 10px;
+            font-size: 10px;
+            font-weight: 600;
+            margin-left: 8px;
+        }
+
+        .memory-badge.memory-low {
+            background: #D1FAE5;
+            color: #059669;
+        }
+
+        .memory-badge.memory-medium {
+            background: #FEF3C7;
+            color: #D97706;
+        }
+
+        .memory-badge.memory-high {
+            background: #FEE2E2;
+            color: #DC2626;
+        }
+
+        .memory-timeline {
+            margin-top: 10px;
+            background: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 3px;
+            overflow: hidden;
+        }
+
+        .memory-timeline-header {
+            background: #7c3aed;
+            color: white;
+            padding: 10px 15px;
+            font-size: 12px;
+            font-weight: 600;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .memory-timeline-body {
+            padding: 0;
+        }
+
+        .memory-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 11px;
+        }
+
+        .memory-table th {
+            background: #f1f5f9;
+            padding: 8px 12px;
+            text-align: left;
+            font-weight: 600;
+            color: #475569;
+            border-bottom: 1px solid #e2e8f0;
+        }
+
+        .memory-table td {
+            padding: 8px 12px;
+            border-bottom: 1px solid #e9ecef;
+            font-family: 'Courier New', monospace;
+        }
+
+        .memory-table tr:last-child td {
+            border-bottom: none;
+        }
+
+        .memory-table tr.peak-row {
+            background: #fef3c7;
+        }
+
+        .memory-table tr.peak-row td {
+            font-weight: 600;
+        }
+
+        .memory-summary {
+            display: flex;
+            gap: 20px;
+            padding: 12px 15px;
+            background: white;
+            border-top: 1px solid #e9ecef;
+            font-size: 11px;
+        }
+
+        .memory-summary-item {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+
+        .memory-summary-label {
+            color: #64748b;
+            font-weight: 600;
+            text-transform: uppercase;
+            font-size: 9px;
+            letter-spacing: 0.5px;
+        }
+
+        .memory-summary-value {
+            color: #1e293b;
+            font-weight: 700;
+            font-family: 'Courier New', monospace;
+        }
+
+        .oom-warning {
+            margin-top: 10px;
+            padding: 12px 15px;
+            background: #fef2f2;
+            border: 1px solid #fecaca;
+            border-left: 4px solid #dc2626;
+            border-radius: 3px;
+        }
+
+        .oom-warning-title {
+            color: #dc2626;
+            font-weight: 700;
+            font-size: 12px;
+            margin-bottom: 6px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .oom-warning-detail {
+            color: #991b1b;
+            font-size: 11px;
+            line-height: 1.5;
+        }
+
+        .oom-warning-detail strong {
+            color: #7f1d1d;
         }
 
         /* Empty/Error States */
@@ -954,6 +1113,9 @@ class TasksInterface(BaseInterface):
                         </div>
                     ` : '';
 
+                    // Check for OOM warning (failed task with high memory at last checkpoint)
+                    const oomWarningHTML = renderOOMWarning(task);
+
                     const resultButton = task.result_data ? `
                         <button class="view-result-button" onclick="event.stopPropagation(); toggleResult('task-${{task.task_id}}')">
                             View Result
@@ -963,17 +1125,27 @@ class TasksInterface(BaseInterface):
                         </div>
                     ` : '';
 
+                    // Memory button and timeline
+                    const memoryHTML = renderMemorySection(task);
+
+                    // Memory badge for task header
+                    const memoryBadge = renderMemoryBadge(task);
+
                     html += `
                         <div class="task-card">
                             <div class="task-header">
                                 <div>
-                                    <div class="task-type">${{task.task_type}}</div>
+                                    <div class="task-type">${{task.task_type}}${{memoryBadge}}</div>
                                     <div class="task-id">${{task.task_id.substring(0, 8)}}...${{task.task_id.slice(-8)}}</div>
                                 </div>
                                 <span class="status-badge status-${{task.status}}">${{task.status}}</span>
                             </div>
                             ${{errorHTML}}
-                            ${{resultButton}}
+                            ${{oomWarningHTML}}
+                            <div class="task-actions">
+                                ${{resultButton}}
+                                ${{memoryHTML}}
+                            </div>
                         </div>
                     `;
                 }});
@@ -1015,6 +1187,218 @@ class TasksInterface(BaseInterface):
                 }}
             }}
         }}
+
+        // ============================================================
+        // MEMORY METRICS RENDERING FUNCTIONS
+        // ============================================================
+
+        // Get peak RSS from memory snapshots
+        function getPeakMemory(task) {{
+            if (!task.metadata) return null;
+
+            const snapshots = task.metadata.memory_snapshots || [];
+            if (snapshots.length === 0) return null;
+
+            let peak = {{ rss_mb: 0, checkpoint: '', index: -1 }};
+            snapshots.forEach((snap, idx) => {{
+                const rss = snap.process_rss_mb || snap.rss_mb || 0;
+                if (rss > peak.rss_mb) {{
+                    peak = {{ rss_mb: rss, checkpoint: snap.checkpoint || snap.name, index: idx }};
+                }}
+            }});
+
+            return peak.rss_mb > 0 ? peak : null;
+        }}
+
+        // Render memory badge for task header
+        function renderMemoryBadge(task) {{
+            const peak = getPeakMemory(task);
+            if (!peak) return '';
+
+            // Determine color based on peak RSS
+            let colorClass = 'memory-low';
+            if (peak.rss_mb >= 2048) {{
+                colorClass = 'memory-high';
+            }} else if (peak.rss_mb >= 1024) {{
+                colorClass = 'memory-medium';
+            }}
+
+            const displayMB = peak.rss_mb >= 1024
+                ? (peak.rss_mb / 1024).toFixed(1) + ' GB'
+                : Math.round(peak.rss_mb) + ' MB';
+
+            return `<span class="memory-badge ${{colorClass}}">📊 ${{displayMB}}</span>`;
+        }}
+
+        // Render OOM warning for failed tasks with high memory
+        function renderOOMWarning(task) {{
+            if (task.status !== 'failed') return '';
+            if (!task.metadata) return '';
+
+            const lastCheckpoint = task.metadata.last_memory_checkpoint;
+            const snapshots = task.metadata.memory_snapshots || [];
+
+            if (!lastCheckpoint && snapshots.length === 0) return '';
+
+            // Check if last checkpoint shows high memory pressure
+            const lastSnap = lastCheckpoint || snapshots[snapshots.length - 1];
+            if (!lastSnap) return '';
+
+            const rss = lastSnap.rss_mb || lastSnap.process_rss_mb || 0;
+            const systemPercent = lastSnap.system_percent || 0;
+            const availableMB = lastSnap.available_mb || lastSnap.system_available_mb || 0;
+
+            // Only show warning if memory was high when task failed
+            // (RSS > 2GB or system > 85% used or available < 500MB)
+            if (rss < 2048 && systemPercent < 85 && availableMB > 500) return '';
+
+            const checkpointName = lastSnap.name || lastSnap.checkpoint || 'unknown';
+
+            return `
+                <div class="oom-warning">
+                    <div class="oom-warning-title">⚠️ Possible Memory Issue</div>
+                    <div class="oom-warning-detail">
+                        <strong>Last checkpoint:</strong> ${{checkpointName}}<br>
+                        <strong>Process RSS:</strong> ${{rss.toFixed(0)}} MB<br>
+                        <strong>System available:</strong> ${{availableMB.toFixed(0)}} MB (${{(100 - systemPercent).toFixed(1)}}% free)<br>
+                        Task stopped responding after this checkpoint.
+                    </div>
+                </div>
+            `;
+        }}
+
+        // Render memory timeline section
+        function renderMemorySection(task) {{
+            if (!task.metadata) return '';
+
+            const snapshots = task.metadata.memory_snapshots || [];
+            if (snapshots.length === 0) return '';
+
+            const peak = getPeakMemory(task);
+            const taskIdShort = task.task_id.substring(0, 8);
+
+            // Calculate total duration if timestamps available
+            let totalDuration = '';
+            if (snapshots.length >= 2) {{
+                try {{
+                    const firstTime = new Date(snapshots[0].timestamp);
+                    const lastTime = new Date(snapshots[snapshots.length - 1].timestamp);
+                    const durationSec = (lastTime - firstTime) / 1000;
+                    if (durationSec > 0) {{
+                        totalDuration = durationSec >= 60
+                            ? (durationSec / 60).toFixed(1) + ' min'
+                            : durationSec.toFixed(1) + 's';
+                    }}
+                }} catch (e) {{
+                    // Ignore timestamp parsing errors
+                }}
+            }}
+
+            // Build table rows
+            let tableRows = '';
+            let prevTime = null;
+
+            snapshots.forEach((snap, idx) => {{
+                const checkpoint = snap.checkpoint || snap.name || `Step ${{idx + 1}}`;
+                const rss = snap.process_rss_mb || snap.rss_mb || 0;
+                const available = snap.system_available_mb || snap.available_mb || 0;
+                const systemPct = snap.system_percent || 0;
+                const cpu = snap.cpu_percent || snap.process_cpu_percent || 0;
+
+                // Calculate duration from previous checkpoint
+                let duration = '--';
+                if (snap.timestamp && prevTime) {{
+                    try {{
+                        const currTime = new Date(snap.timestamp);
+                        const durationSec = (currTime - prevTime) / 1000;
+                        duration = durationSec >= 60
+                            ? (durationSec / 60).toFixed(1) + 'm'
+                            : durationSec.toFixed(1) + 's';
+                    }} catch (e) {{}}
+                }}
+                if (snap.timestamp) {{
+                    try {{
+                        prevTime = new Date(snap.timestamp);
+                    }} catch (e) {{}}
+                }}
+
+                const isPeak = peak && idx === peak.index;
+                const rowClass = isPeak ? 'peak-row' : '';
+                const peakMarker = isPeak ? ' ⬅ Peak' : '';
+
+                tableRows += `
+                    <tr class="${{rowClass}}">
+                        <td>${{checkpoint}}${{peakMarker}}</td>
+                        <td>${{rss.toFixed(0)}}</td>
+                        <td>${{available.toFixed(0)}}</td>
+                        <td>${{systemPct.toFixed(0)}}%</td>
+                        <td>${{cpu.toFixed(0)}}%</td>
+                        <td>${{duration}}</td>
+                    </tr>
+                `;
+            }});
+
+            // Summary stats
+            const peakDisplay = peak
+                ? (peak.rss_mb >= 1024 ? (peak.rss_mb / 1024).toFixed(2) + ' GB' : peak.rss_mb.toFixed(0) + ' MB')
+                : 'N/A';
+            const peakCheckpoint = peak ? peak.checkpoint : 'N/A';
+
+            return `
+                <button class="view-memory-button" onclick="event.stopPropagation(); toggleMemory('memory-${{taskIdShort}}')">
+                    📊 Memory (${{snapshots.length}} checkpoints)
+                </button>
+                <div id="memory-${{taskIdShort}}" class="memory-timeline hidden">
+                    <div class="memory-timeline-header">
+                        <span>Memory Timeline</span>
+                        <span>${{snapshots.length}} checkpoints</span>
+                    </div>
+                    <div class="memory-timeline-body">
+                        <table class="memory-table">
+                            <thead>
+                                <tr>
+                                    <th>Checkpoint</th>
+                                    <th>RSS (MB)</th>
+                                    <th>Avail (MB)</th>
+                                    <th>Sys %</th>
+                                    <th>CPU %</th>
+                                    <th>Duration</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${{tableRows}}
+                            </tbody>
+                        </table>
+                        <div class="memory-summary">
+                            <div class="memory-summary-item">
+                                <span class="memory-summary-label">Peak RSS</span>
+                                <span class="memory-summary-value">${{peakDisplay}}</span>
+                            </div>
+                            <div class="memory-summary-item">
+                                <span class="memory-summary-label">Peak At</span>
+                                <span class="memory-summary-value">${{peakCheckpoint}}</span>
+                            </div>
+                            <div class="memory-summary-item">
+                                <span class="memory-summary-label">Total Duration</span>
+                                <span class="memory-summary-value">${{totalDuration || 'N/A'}}</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }}
+
+        // Toggle memory timeline visibility
+        function toggleMemory(memoryId) {{
+            const memoryEl = document.getElementById(memoryId);
+            if (memoryEl) {{
+                memoryEl.classList.toggle('hidden');
+            }}
+        }}
+
+        // ============================================================
+        // ERROR/UTILITY FUNCTIONS
+        // ============================================================
 
         // Show error state
         function showError(message) {{

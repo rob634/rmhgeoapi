@@ -1,44 +1,51 @@
 """
-ETL Tracking Models.
+ETL Source File Tracking Models.
 
-Pydantic models for ETL pipeline tracking tables. Tracks source files
-through multi-phase processing pipelines for idempotent processing.
+General-purpose ETL tracking table that supports any ETL pipeline type.
+Tracks source files through multi-phase processing pipelines.
 
-Features:
-    - Inventory of source files from blob storage
-    - Phase 1/2 output tracking
-    - Idempotent processing (skip already-processed files)
-    - Progress monitoring and resumption
+Design Principles:
+    - Single table for ALL ETL types (namespaced by etl_type)
+    - Flexible source_metadata JSONB for domain-specific fields
+    - Generic phase1/phase2 tracking (most ETLs are 1-2 phases)
+    - Proper IaC via Pydantic → SQL generation
+
+Supported ETL Types:
+    - fathom: Flood hazard data (2-phase: band stack → spatial merge)
+    - raster_v2: General raster processing (future)
+    - vector: Vector ETL (future)
 
 Exports:
-    EtlFathomRecord: Tracks Fathom flood hazard files through 2-phase ETL
+    EtlSourceFile: General ETL tracking record
 """
 
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Optional, Dict, Any
 from pydantic import BaseModel, Field, ConfigDict
 
 
-class EtlFathomRecord(BaseModel):
+class EtlSourceFile(BaseModel):
     """
-    Fathom ETL tracking record - maps source TIFs to processed outputs.
+    General ETL source file tracking record.
 
-    This model represents the app.etl_fathom table which tracks all Fathom
-    flood hazard source files through the two-phase processing pipeline.
+    Tracks source files from blob storage through multi-phase ETL processing.
+    Uses etl_type to namespace different ETL pipelines and source_metadata
+    JSONB for domain-specific parsed fields.
 
-    Path Structure:
-    - Present-day: FLOOD_TYPE/YEAR/RETURN_PERIOD/filename_TILE.tif
-    - Future projection: FLOOD_TYPE/YEAR/SSP/RETURN_PERIOD/filename_TILE.tif
+    Table: app.etl_source_files
 
-    Phase 1 (Band Stacking):
-    - Groups 8 return period files per tile+scenario
-    - Outputs 1 multi-band COG per group (~500MB each)
-    - Group key: tile_floodtype-defense_year[_ssp]
-
-    Phase 2 (Spatial Merge):
-    - Groups phase1 outputs by 5×5 degree grid cells
-    - Outputs 1 merged COG per grid cell+scenario (~2-3GB each)
-    - Group key: gridcell_floodtype-defense_year[_ssp]
+    Example FATHOM record:
+        etl_type: "fathom"
+        source_blob_path: "FATHOM-3-0-3/.../FLUVIAL_DEFENDED/2020/1in100/n04w006.tif"
+        source_metadata: {
+            "flood_type": "fluvial",
+            "defense": "defended",
+            "year": 2020,
+            "ssp": null,
+            "return_period": "1in100",
+            "tile": "n04w006",
+            "grid_cell": "n00-n05_w005-w010"
+        }
     """
 
     model_config = ConfigDict(
@@ -55,109 +62,85 @@ class EtlFathomRecord(BaseModel):
     )
 
     # =========================================================================
+    # ETL Type Namespace
+    # =========================================================================
+    etl_type: str = Field(
+        ...,
+        max_length=64,
+        description="ETL pipeline type: fathom, raster_v2, vector, etc."
+    )
+
+    # =========================================================================
     # Source File Identification
     # =========================================================================
     source_blob_path: str = Field(
         ...,
         max_length=512,
-        description="Full blob path in source container (e.g., COASTAL_DEFENDED/2020/1in10/...)"
+        description="Full blob path in source container"
     )
     source_container: str = Field(
-        default="bronze-fathom",
-        max_length=64,
+        ...,
+        max_length=100,
         description="Source blob container name"
     )
     file_size_bytes: Optional[int] = Field(
         default=None,
         ge=0,
-        description="File size in bytes (for estimation)"
+        description="File size in bytes"
     )
 
     # =========================================================================
-    # Parsed Metadata (extracted from blob path)
+    # Parsed Metadata (flexible JSONB for domain-specific fields)
     # =========================================================================
-    flood_type: str = Field(
-        ...,
-        max_length=20,
-        description="Flood type: coastal, fluvial, or pluvial"
-    )
-    defense: str = Field(
-        ...,
-        max_length=20,
-        description="Defense status: defended or undefended"
-    )
-    year: int = Field(
-        ...,
-        ge=2020,
-        le=2100,
-        description="Projection year: 2020 (present), 2030, 2050, 2080"
-    )
-    ssp: Optional[str] = Field(
-        default=None,
-        max_length=10,
-        description="SSP scenario: ssp126, ssp245, ssp370, ssp585 (NULL for present-day 2020)"
-    )
-    return_period: str = Field(
-        ...,
-        max_length=10,
-        description="Return period: 1in5, 1in10, 1in20, 1in50, 1in100, 1in200, 1in500, 1in1000"
-    )
-    tile: str = Field(
-        ...,
-        max_length=20,
-        description="Tile coordinate: n04w006, s10e020, etc."
+    source_metadata: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Domain-specific parsed metadata as JSONB"
     )
 
     # =========================================================================
-    # Phase 1: Band Stacking (8 RPs → 1 multi-band COG)
+    # Phase 1 Processing
     # =========================================================================
-    # Note: phase1_group_key is GENERATED ALWAYS in PostgreSQL, computed here for convenience
     phase1_group_key: Optional[str] = Field(
         default=None,
-        max_length=100,
-        description="Computed: tile_floodtype-defense_year[_ssp] (GENERATED in PostgreSQL)"
+        max_length=150,
+        description="Grouping key for phase 1 processing"
     )
     phase1_output_blob: Optional[str] = Field(
         default=None,
         max_length=512,
-        description="Output blob path in silver-fathom after phase 1 processing"
+        description="Output blob path after phase 1"
     )
     phase1_job_id: Optional[str] = Field(
         default=None,
         max_length=64,
-        description="Job ID that processed this file in phase 1"
+        description="Job ID that processed phase 1"
     )
-    phase1_processed_at: Optional[datetime] = Field(
+    phase1_completed_at: Optional[datetime] = Field(
         default=None,
-        description="Timestamp when phase 1 processing completed"
+        description="Timestamp when phase 1 completed"
     )
 
     # =========================================================================
-    # Phase 2: Spatial Merge (NxN tiles → 1 merged COG per grid cell)
+    # Phase 2 Processing (optional, for multi-phase ETLs)
     # =========================================================================
-    grid_cell: Optional[str] = Field(
-        default=None,
-        max_length=30,
-        description="Grid cell assignment: n00-n05_w010-w005 (5×5 degree)"
-    )
     phase2_group_key: Optional[str] = Field(
         default=None,
-        max_length=100,
-        description="Group key for phase 2: gridcell_floodtype-defense_year[_ssp]"
+        max_length=150,
+        description="Grouping key for phase 2 processing"
     )
     phase2_output_blob: Optional[str] = Field(
         default=None,
         max_length=512,
-        description="Output blob path after phase 2 processing"
+        description="Output blob path after phase 2"
     )
     phase2_job_id: Optional[str] = Field(
         default=None,
         max_length=64,
-        description="Job ID that processed this file in phase 2"
+        description="Job ID that processed phase 2"
     )
-    phase2_processed_at: Optional[datetime] = Field(
+    phase2_completed_at: Optional[datetime] = Field(
         default=None,
-        description="Timestamp when phase 2 processing completed"
+        description="Timestamp when phase 2 completed"
     )
 
     # =========================================================================
@@ -165,29 +148,86 @@ class EtlFathomRecord(BaseModel):
     # =========================================================================
     created_at: Optional[datetime] = Field(
         default=None,
-        description="Record creation timestamp (set by database)"
+        description="Record creation timestamp"
     )
     updated_at: Optional[datetime] = Field(
         default=None,
-        description="Record last update timestamp (set by database)"
+        description="Record last update timestamp"
     )
 
     # =========================================================================
-    # Convenience Methods
+    # Convenience Methods for FATHOM
     # =========================================================================
-    def compute_phase1_group_key(self) -> str:
-        """Compute the phase1_group_key value (matches PostgreSQL GENERATED column)."""
-        base = f"{self.tile}_{self.flood_type}-{self.defense}_{self.year}"
-        if self.ssp:
-            return f"{base}_{self.ssp}"
-        return base
+    def get_fathom_field(self, field: str) -> Any:
+        """Get a FATHOM-specific field from source_metadata."""
+        return self.source_metadata.get(field)
+
+    @property
+    def flood_type(self) -> Optional[str]:
+        """FATHOM: flood type (fluvial/pluvial/coastal)."""
+        return self.source_metadata.get("flood_type")
+
+    @property
+    def defense(self) -> Optional[str]:
+        """FATHOM: defense status (defended/undefended)."""
+        return self.source_metadata.get("defense")
+
+    @property
+    def year(self) -> Optional[int]:
+        """FATHOM: projection year."""
+        return self.source_metadata.get("year")
+
+    @property
+    def ssp(self) -> Optional[str]:
+        """FATHOM: SSP scenario."""
+        return self.source_metadata.get("ssp")
+
+    @property
+    def return_period(self) -> Optional[str]:
+        """FATHOM: return period."""
+        return self.source_metadata.get("return_period")
+
+    @property
+    def tile(self) -> Optional[str]:
+        """FATHOM: tile coordinate."""
+        return self.source_metadata.get("tile")
+
+    @property
+    def grid_cell(self) -> Optional[str]:
+        """FATHOM: grid cell assignment."""
+        return self.source_metadata.get("grid_cell")
 
     class Meta:
         """Table metadata for SQL generation."""
-        table_name = "etl_fathom"
+        table_name = "etl_source_files"
+        schema = "app"
+
+        # Unique constraint
+        unique_constraints = [
+            ("etl_type", "source_blob_path")
+        ]
+
+        # Indexes for efficient queries
+        indexes = [
+            ("etl_type",),
+            ("etl_type", "phase1_group_key"),
+            ("etl_type", "phase2_group_key"),
+        ]
+
+        # Partial indexes for finding unprocessed records
+        partial_indexes = [
+            {
+                "columns": ("etl_type", "phase1_group_key"),
+                "where": "phase1_completed_at IS NULL"
+            },
+            {
+                "columns": ("etl_type", "phase2_group_key"),
+                "where": "phase1_completed_at IS NOT NULL AND phase2_completed_at IS NULL"
+            }
+        ]
 
 
 # Module exports
 __all__ = [
-    'EtlFathomRecord'
+    'EtlSourceFile'
 ]

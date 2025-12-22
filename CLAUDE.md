@@ -93,7 +93,7 @@ func azure functionapp publish rmhazuregeoapi --python --build remote
 curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/health
 
 # 2. FULL REBUILD DATABASE SCHEMAS (Required after deployment!)
-curl -X POST "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/dbadmin/maintenance/full-rebuild?confirm=yes"
+curl -X POST "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/dbadmin/maintenance?action=full-rebuild&confirm=yes"
 
 # 3. Submit Test Job
 curl -X POST https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/jobs/submit/hello_world \
@@ -110,11 +110,11 @@ curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/job
 
 | Endpoint | Purpose |
 |----------|---------|
-| `POST /api/dbadmin/maintenance/full-rebuild?confirm=yes` | **RECOMMENDED**: Atomic rebuild of app+pgstac schemas |
-| `POST /api/dbadmin/maintenance/redeploy?confirm=yes` | Redeploy app schema only |
-| `POST /api/dbadmin/maintenance/pgstac/redeploy?confirm=yes` | Redeploy pgstac schema only |
-| `POST /api/dbadmin/maintenance/nuke?confirm=yes` | Drop app schema (caution!) |
-| `POST /api/dbadmin/maintenance/cleanup?confirm=yes&days=30` | Delete old jobs/tasks |
+| `POST /api/dbadmin/maintenance?action=full-rebuild&confirm=yes` | **RECOMMENDED**: Atomic rebuild of app+pgstac schemas |
+| `POST /api/dbadmin/maintenance?action=redeploy&confirm=yes` | Redeploy app schema only |
+| `POST /api/dbadmin/maintenance?action=redeploy&target=pgstac&confirm=yes` | Redeploy pgstac schema only |
+| `POST /api/dbadmin/maintenance?action=nuke&confirm=yes` | Drop app schema (caution!) |
+| `POST /api/dbadmin/maintenance?action=cleanup&confirm=yes&days=30` | Delete old jobs/tasks |
 
 ### STAC Nuclear Button (DEV/TEST ONLY)
 ```bash

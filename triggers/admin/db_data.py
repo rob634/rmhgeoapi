@@ -564,7 +564,7 @@ class AdminDbDataTrigger:
 
             query = f"""
                 SELECT task_id, parent_job_id, task_type, status::text, stage, task_index,
-                       parameters, result_data, error_details, heartbeat, retry_count,
+                       parameters, result_data, metadata, error_details, heartbeat, retry_count,
                        created_at, updated_at
                 FROM {self.config.app_schema}.tasks
                 WHERE parent_job_id = %s
@@ -590,6 +590,7 @@ class AdminDbDataTrigger:
                             'task_index': row['task_index'],
                             'parameters': row['parameters'],
                             'result_data': row['result_data'],
+                            'metadata': row['metadata'],
                             'error_details': row['error_details'],
                             'heartbeat': row['heartbeat'].isoformat() if row['heartbeat'] else None,
                             'retry_count': row['retry_count'],

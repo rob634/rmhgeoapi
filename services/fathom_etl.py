@@ -1,11 +1,11 @@
 """
 Fathom ETL Task Handlers.
 
-DATABASE-DRIVEN ARCHITECTURE (17 DEC 2025):
-All inventory operations query app.etl_fathom table populated by
-InventoryFathomContainerJob. Processing state is tracked inline:
-- phase1_processed_at: Set by fathom_band_stack after successful COG creation
-- phase2_processed_at: Set by fathom_spatial_merge after successful merge
+DATABASE-DRIVEN ARCHITECTURE (21 DEC 2025):
+All inventory operations query app.etl_source_files table (etl_type='fathom')
+populated by InventoryFathomContainerJob. Processing state is tracked inline:
+- phase1_completed_at: Set by fathom_band_stack after successful COG creation
+- phase2_completed_at: Set by fathom_spatial_merge after successful merge
 
 Phase 1 (Band Stacking):
     - fathom_tile_inventory: Query DB for unprocessed tiles
@@ -17,6 +17,9 @@ Phase 2 (Spatial Merge):
 
 Shared:
     - fathom_stac_register: STAC collection/item creation
+
+NOTE (21 DEC 2025): Migrated from FATHOM-specific etl_fathom table to
+general-purpose etl_source_files table with JSONB metadata.
 
 Exports:
     fathom_tile_inventory, fathom_band_stack, fathom_grid_inventory,
@@ -124,12 +127,12 @@ def _tile_to_grid_cell(tile: str, grid_size: int) -> str:
 
 def fathom_tile_inventory(params: dict, context: dict = None) -> dict:
     """
-    Query app.etl_fathom to create tile_groups for Phase 1 processing.
+    Query app.etl_source_files to create tile_groups for Phase 1 processing.
 
-    DATABASE-DRIVEN (17 DEC 2025):
-    - Queries app.etl_fathom table populated by InventoryFathomContainerJob
+    DATABASE-DRIVEN (21 DEC 2025):
+    - Queries app.etl_source_files table (etl_type='fathom')
     - Groups by phase1_group_key (tile + scenario)
-    - Filters by phase1_processed_at IS NULL for unprocessed records
+    - Filters by phase1_completed_at IS NULL for unprocessed records
     - FAILS FAST if no records exist for region
 
     Args:
@@ -169,8 +172,10 @@ def fathom_tile_inventory(params: dict, context: dict = None) -> dict:
         logger.info(f"   Spatial filter (bbox): {bbox}")
 
     # Build SQL query with filters
+    # NOTE: source_metadata contains FATHOM-specific fields as JSONB
     where_clauses = [
-        "phase1_processed_at IS NULL",
+        "etl_type = 'fathom'",
+        "phase1_completed_at IS NULL",
         "source_container = %(source_container)s"
     ]
     query_params = {"source_container": source_container}
@@ -182,21 +187,21 @@ def fathom_tile_inventory(params: dict, context: dict = None) -> dict:
             if ft_raw in FLOOD_TYPE_MAP:
                 ft_info = FLOOD_TYPE_MAP[ft_raw]
                 flood_type_conditions.append(
-                    f"(flood_type = '{ft_info['flood_type']}' AND defense = '{ft_info['defense']}')"
+                    f"(source_metadata->>'flood_type' = '{ft_info['flood_type']}' AND source_metadata->>'defense' = '{ft_info['defense']}')"
                 )
         if flood_type_conditions:
             where_clauses.append(f"({' OR '.join(flood_type_conditions)})")
         logger.info(f"   Filter: flood_types = {filter_flood_types}")
 
     if filter_years:
-        where_clauses.append("year = ANY(%(years)s)")
+        where_clauses.append("(source_metadata->>'year')::int = ANY(%(years)s)")
         query_params["years"] = filter_years
         logger.info(f"   Filter: years = {filter_years}")
 
     if filter_ssp:
         # Normalize SSP values for query
         normalized_ssp = [SSP_MAP.get(s, s) for s in filter_ssp]
-        where_clauses.append("(ssp = ANY(%(ssp)s) OR ssp IS NULL)")
+        where_clauses.append("(source_metadata->>'ssp' = ANY(%(ssp)s) OR source_metadata->>'ssp' IS NULL)")
         query_params["ssp"] = normalized_ssp
         logger.info(f"   Filter: ssp_scenarios = {filter_ssp}")
 
@@ -208,19 +213,21 @@ def fathom_tile_inventory(params: dict, context: dict = None) -> dict:
     where_clause = " AND ".join(where_clauses)
 
     # Query grouped by phase1_group_key with return_period_files aggregation
+    # Extract FATHOM-specific fields from source_metadata JSONB
     sql = f"""
         SELECT
             phase1_group_key,
-            tile,
-            flood_type,
-            defense,
-            year,
-            ssp,
-            json_object_agg(return_period, source_blob_path ORDER BY return_period) as return_period_files,
+            source_metadata->>'tile' as tile,
+            source_metadata->>'flood_type' as flood_type,
+            source_metadata->>'defense' as defense,
+            (source_metadata->>'year')::int as year,
+            source_metadata->>'ssp' as ssp,
+            json_object_agg(source_metadata->>'return_period', source_blob_path ORDER BY source_metadata->>'return_period') as return_period_files,
             COUNT(*) as file_count
-        FROM app.etl_fathom
+        FROM app.etl_source_files
         WHERE {where_clause}
-        GROUP BY phase1_group_key, tile, flood_type, defense, year, ssp
+        GROUP BY phase1_group_key, source_metadata->>'tile', source_metadata->>'flood_type',
+                 source_metadata->>'defense', source_metadata->>'year', source_metadata->>'ssp'
         ORDER BY phase1_group_key
     """
 
@@ -235,7 +242,7 @@ def fathom_tile_inventory(params: dict, context: dict = None) -> dict:
     # FAIL FAST if no records
     if not rows:
         error_msg = (
-            f"No unprocessed records found in app.etl_fathom for container '{source_container}'. "
+            f"No unprocessed records found in app.etl_source_files (etl_type='fathom') for container '{source_container}'. "
             f"Run inventory_fathom_container job first to populate the table."
         )
         logger.error(f"❌ {error_msg}")
@@ -382,7 +389,7 @@ def fathom_band_stack(params: dict, context: dict = None) -> dict:
     output_prefix = params.get("output_prefix", FathomDefaults.PHASE1_OUTPUT_PREFIX)
     region_code = params["region_code"].lower()
     force_reprocess = params.get("force_reprocess", False)
-    job_id = params.get("job_id")  # For tracking in app.etl_fathom
+    job_id = params.get("job_id")  # For tracking in app.etl_source_files
 
     tile = tile_group["tile"]
     output_name = tile_group["output_name"]
@@ -517,8 +524,8 @@ def fathom_band_stack(params: dict, context: dict = None) -> dict:
                           output_size_kb=output_size_kb)
 
     # =========================================================================
-    # INLINE STATE UPDATE (17 DEC 2025)
-    # Update app.etl_fathom records for this phase1_group_key
+    # INLINE STATE UPDATE (21 DEC 2025)
+    # Update app.etl_source_files records for this phase1_group_key
     # =========================================================================
     _update_phase1_processed(output_name, output_blob_path, job_id, logger)
 
@@ -548,7 +555,7 @@ def fathom_band_stack(params: dict, context: dict = None) -> dict:
 
 def _update_phase1_processed(phase1_group_key: str, output_blob: str, job_id: Optional[str], logger) -> None:
     """
-    Update app.etl_fathom records to mark Phase 1 as processed.
+    Update app.etl_source_files records to mark Phase 1 as processed.
 
     Args:
         phase1_group_key: The group key (same as output_name)
@@ -564,12 +571,13 @@ def _update_phase1_processed(phase1_group_key: str, output_blob: str, job_id: Op
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    UPDATE app.etl_fathom
-                    SET phase1_processed_at = NOW(),
+                    UPDATE app.etl_source_files
+                    SET phase1_completed_at = NOW(),
                         phase1_output_blob = %(output_blob)s,
                         phase1_job_id = %(job_id)s,
                         updated_at = NOW()
-                    WHERE phase1_group_key = %(group_key)s
+                    WHERE etl_type = 'fathom'
+                      AND phase1_group_key = %(group_key)s
                     """,
                     {
                         "output_blob": output_blob,
@@ -580,10 +588,10 @@ def _update_phase1_processed(phase1_group_key: str, output_blob: str, job_id: Op
                 updated_count = cur.rowcount
                 conn.commit()
 
-        logger.info(f"   📝 Updated {updated_count} records in app.etl_fathom (phase1_processed_at)")
+        logger.info(f"   📝 Updated {updated_count} records in app.etl_source_files (phase1_completed_at)")
     except Exception as e:
         # Log but don't fail - processing succeeded, tracking is secondary
-        logger.warning(f"   ⚠️ Failed to update app.etl_fathom: {e}")
+        logger.warning(f"   ⚠️ Failed to update app.etl_source_files: {e}")
 
 
 # =============================================================================
@@ -592,10 +600,10 @@ def _update_phase1_processed(phase1_group_key: str, output_blob: str, job_id: Op
 
 def fathom_grid_inventory(params: dict, context: dict = None) -> dict:
     """
-    Query app.etl_fathom to create grid_groups for Phase 2 processing.
+    Query app.etl_source_files to create grid_groups for Phase 2 processing.
 
-    DATABASE-DRIVEN (17 DEC 2025):
-    - Queries app.etl_fathom for Phase 1 completed, Phase 2 pending records
+    DATABASE-DRIVEN (21 DEC 2025):
+    - Queries app.etl_source_files (etl_type='fathom') for Phase 1 completed, Phase 2 pending
     - Groups by phase2_group_key (grid_cell + scenario)
     - Uses phase1_output_blob for tile blob paths
     - FAILS FAST if no Phase 1 completed records exist
@@ -630,29 +638,32 @@ def fathom_grid_inventory(params: dict, context: dict = None) -> dict:
         logger.info(f"   Spatial filter (bbox): {bbox}")
 
     # Query Phase 1 completed, Phase 2 pending records grouped by phase2_group_key
+    # NOTE: source_metadata contains FATHOM-specific fields as JSONB
     # NOTE: We don't filter by source_container here because:
-    # - etl_fathom.source_container stores the ORIGINAL source (bronze-fathom)
+    # - source_container stores the ORIGINAL source (bronze-fathom)
     # - The job's source_container param refers to Phase 1 OUTPUT location (silver-fathom)
-    # - Filtering by phase1_processed_at IS NOT NULL is sufficient
+    # - Filtering by phase1_completed_at IS NOT NULL is sufficient
     sql = """
         SELECT
             phase2_group_key,
-            grid_cell,
-            flood_type,
-            defense,
-            year,
-            ssp,
+            source_metadata->>'grid_cell' as grid_cell,
+            source_metadata->>'flood_type' as flood_type,
+            source_metadata->>'defense' as defense,
+            (source_metadata->>'year')::int as year,
+            source_metadata->>'ssp' as ssp,
             json_agg(
-                json_build_object('tile', tile, 'blob_path', phase1_output_blob)
-                ORDER BY tile
+                json_build_object('tile', source_metadata->>'tile', 'blob_path', phase1_output_blob)
+                ORDER BY source_metadata->>'tile'
             ) as tiles,
             COUNT(*) as tile_count
-        FROM app.etl_fathom
-        WHERE phase1_processed_at IS NOT NULL
-          AND phase2_processed_at IS NULL
-          AND grid_cell IS NOT NULL
+        FROM app.etl_source_files
+        WHERE etl_type = 'fathom'
+          AND phase1_completed_at IS NOT NULL
+          AND phase2_completed_at IS NULL
+          AND source_metadata->>'grid_cell' IS NOT NULL
           AND phase1_output_blob IS NOT NULL
-        GROUP BY phase2_group_key, grid_cell, flood_type, defense, year, ssp
+        GROUP BY phase2_group_key, source_metadata->>'grid_cell', source_metadata->>'flood_type',
+                 source_metadata->>'defense', source_metadata->>'year', source_metadata->>'ssp'
         ORDER BY phase2_group_key
     """
 
@@ -667,7 +678,7 @@ def fathom_grid_inventory(params: dict, context: dict = None) -> dict:
     # FAIL FAST if no records
     if not rows:
         error_msg = (
-            f"No Phase 1 completed records found in app.etl_fathom for Phase 2 processing. "
+            f"No Phase 1 completed records found in app.etl_source_files (etl_type='fathom') for Phase 2 processing. "
             f"Run process_fathom_stack job first to complete Phase 1."
         )
         logger.error(f"❌ {error_msg}")
@@ -814,7 +825,7 @@ def fathom_spatial_merge(params: dict, context: dict = None) -> dict:
     output_prefix = params.get("output_prefix", FathomDefaults.PHASE2_OUTPUT_PREFIX)
     region_code = params["region_code"].lower()
     force_reprocess = params.get("force_reprocess", False)
-    job_id = params.get("job_id")  # For tracking in app.etl_fathom
+    job_id = params.get("job_id")  # For tracking in app.etl_source_files
 
     grid_cell = grid_group["grid_cell"]
     output_name = grid_group["output_name"]
@@ -832,8 +843,9 @@ def fathom_spatial_merge(params: dict, context: dict = None) -> dict:
     # Silver zone for both reading (stacked COGs) and writing (merged COGs)
     blob_repo = BlobRepository.for_zone("silver")
 
-    # Output path
-    output_blob_path = f"{output_prefix}/{region_code}/{grid_cell}/{output_name}.tif"
+    # Output path - flat structure (no grid_cell subfolder)
+    # Format: {prefix}/{region}/{flood_type}-{defense}-{year}[-{ssp}]-{grid_cell}.tif
+    output_blob_path = f"{output_prefix}/{region_code}/{output_name}.tif"
 
     # Idempotency check
     if not force_reprocess and blob_repo.blob_exists(output_container, output_blob_path):
@@ -983,8 +995,8 @@ def fathom_spatial_merge(params: dict, context: dict = None) -> dict:
                           output_size_mb=output_size_mb, tile_count=len(tiles))
 
     # =========================================================================
-    # INLINE STATE UPDATE (17 DEC 2025)
-    # Update app.etl_fathom records for this phase2_group_key
+    # INLINE STATE UPDATE (21 DEC 2025)
+    # Update app.etl_source_files records for this phase2_group_key
     # =========================================================================
     _update_phase2_processed(output_name, output_blob_path, job_id, logger)
 
@@ -1014,7 +1026,7 @@ def fathom_spatial_merge(params: dict, context: dict = None) -> dict:
 
 def _update_phase2_processed(phase2_group_key: str, output_blob: str, job_id: Optional[str], logger) -> None:
     """
-    Update app.etl_fathom records to mark Phase 2 as processed.
+    Update app.etl_source_files records to mark Phase 2 as processed.
 
     Args:
         phase2_group_key: The group key (same as output_name)
@@ -1030,12 +1042,13 @@ def _update_phase2_processed(phase2_group_key: str, output_blob: str, job_id: Op
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    UPDATE app.etl_fathom
-                    SET phase2_processed_at = NOW(),
+                    UPDATE app.etl_source_files
+                    SET phase2_completed_at = NOW(),
                         phase2_output_blob = %(output_blob)s,
                         phase2_job_id = %(job_id)s,
                         updated_at = NOW()
-                    WHERE phase2_group_key = %(group_key)s
+                    WHERE etl_type = 'fathom'
+                      AND phase2_group_key = %(group_key)s
                     """,
                     {
                         "output_blob": output_blob,
@@ -1046,10 +1059,10 @@ def _update_phase2_processed(phase2_group_key: str, output_blob: str, job_id: Op
                 updated_count = cur.rowcount
                 conn.commit()
 
-        logger.info(f"   📝 Updated {updated_count} records in app.etl_fathom (phase2_processed_at)")
+        logger.info(f"   📝 Updated {updated_count} records in app.etl_source_files (phase2_completed_at)")
     except Exception as e:
         # Log but don't fail - processing succeeded, tracking is secondary
-        logger.warning(f"   ⚠️ Failed to update app.etl_fathom: {e}")
+        logger.warning(f"   ⚠️ Failed to update app.etl_source_files: {e}")
 
 
 # =============================================================================

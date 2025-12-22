@@ -38,7 +38,7 @@ from ..models import (
     JanitorRun,
     JanitorRunType,
     JanitorRunStatus,
-    EtlFathomRecord,  # ETL tracking (05 DEC 2025)
+    EtlSourceFile,  # ETL tracking (21 DEC 2025 - generalized)
     UnpublishJobRecord,  # Unpublish audit (12 DEC 2025)
     UnpublishType,
     UnpublishStatus,
@@ -1093,7 +1093,7 @@ $$""").format(
         composed.append(self.generate_table_composed(TaskRecord, "tasks"))
         composed.append(self.generate_table_composed(ApiRequest, "api_requests"))
         composed.append(self.generate_table_composed(JanitorRun, "janitor_runs"))
-        composed.append(self.generate_table_composed(EtlFathomRecord, "etl_fathom"))  # ETL tracking (05 DEC 2025)
+        composed.append(self.generate_table_composed(EtlSourceFile, "etl_source_files"))  # ETL tracking (21 DEC 2025 - generalized)
         composed.append(self.generate_table_composed(UnpublishJobRecord, "unpublish_jobs"))  # Unpublish audit (12 DEC 2025)
         composed.append(self.generate_table_composed(CuratedDataset, "curated_datasets"))  # Curated datasets (15 DEC 2025)
         composed.append(self.generate_table_composed(CuratedUpdateLog, "curated_update_log"))
@@ -1103,7 +1103,7 @@ $$""").format(
         composed.extend(self.generate_indexes_composed("tasks", TaskRecord))
         composed.extend(self.generate_indexes_composed("api_requests", ApiRequest))
         composed.extend(self.generate_indexes_composed("janitor_runs", JanitorRun))
-        composed.extend(self.generate_indexes_composed("etl_fathom", EtlFathomRecord))  # ETL tracking (05 DEC 2025)
+        composed.extend(self.generate_indexes_composed("etl_source_files", EtlSourceFile))  # ETL tracking (21 DEC 2025 - generalized)
         composed.extend(self.generate_indexes_composed("unpublish_jobs", UnpublishJobRecord))  # Unpublish audit (12 DEC 2025)
         composed.extend(self.generate_indexes_composed("curated_datasets", CuratedDataset))  # Curated datasets (15 DEC 2025)
         composed.extend(self.generate_indexes_composed("curated_update_log", CuratedUpdateLog))

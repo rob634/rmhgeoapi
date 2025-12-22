@@ -488,11 +488,17 @@ def snapshot_memory_to_task(
     # Persist to task metadata (OOM evidence)
     if task_repo and task_id:
         try:
-            # Store under memory_snapshots list in metadata
+            # Get existing metadata to append to memory_snapshots list
+            existing_metadata = task_repo.get_task_metadata(task_id) or {}
+            existing_snapshots = existing_metadata.get("memory_snapshots", [])
+
+            # Append new snapshot to list (not replace)
+            updated_snapshots = existing_snapshots + [snapshot]
+
             task_repo.update_task_metadata(
                 task_id,
                 {
-                    "memory_snapshots": [snapshot],  # Gets merged with existing
+                    "memory_snapshots": updated_snapshots,
                     "last_memory_checkpoint": {
                         "name": checkpoint_name,
                         "timestamp": snapshot["timestamp"],

@@ -109,5 +109,19 @@ WORLDVIEW2_ALL = BandNames(mapping={
     8: "NIR2"
 })
 
+# WorldView-3 has same 8 MS bands as WV2 (plus SWIR which we don't typically ingest)
+# 30cm pansharpened products have these 8 bands fused with panchromatic
+WORLDVIEW3_RGB = BandNames(mapping={5: "Red", 3: "Green", 2: "Blue"})
+WORLDVIEW3_ALL = BandNames(mapping={
+    1: "Coastal",      # 400-450nm
+    2: "Blue",         # 450-510nm
+    3: "Green",        # 510-580nm
+    4: "Yellow",       # 585-625nm
+    5: "Red",          # 630-690nm
+    6: "RedEdge",      # 705-745nm
+    7: "NIR1",         # 770-895nm
+    8: "NIR2"          # 860-1040nm
+})
+
 SENTINEL2_RGB = BandNames(mapping={4: "Red", 3: "Green", 2: "Blue"})
 LANDSAT_RGB = BandNames(mapping={4: "Red", 3: "Green", 2: "Blue"})

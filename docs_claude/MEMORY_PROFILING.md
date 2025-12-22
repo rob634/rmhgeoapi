@@ -1,12 +1,75 @@
 # Memory Profiling Data
 
-**Last Updated**: 20 DEC 2025
+**Last Updated**: 21 DEC 2025
 
 ---
 
 ## Overview
 
-This document captures empirical memory profiling data for COG (Cloud Optimized GeoTIFF) processing operations. Data is collected via the checkpoint system in `util_logger.py`.
+This document captures empirical memory profiling data for COG (Cloud Optimized GeoTIFF) processing operations. Data is collected via the checkpoint system in `util_logger.py` and stored in task metadata JSONB for OOM evidence.
+
+---
+
+## OOM Evidence System (21 DEC 2025)
+
+### Implementation
+
+Memory snapshots are now persisted to task metadata in the database before and after heavy operations. If a process OOMs, we have evidence of memory state before the crash.
+
+**Key Function**: `snapshot_memory_to_task()` in `util_logger.py`
+
+**Checkpoints in `raster_cog.py`**:
+1. `baseline` - After parameter validation, before any heavy ops
+2. `pre_cog_translate` - After file download, before COG creation (critical point)
+3. `post_cog_translate` - After COG creation, includes peak memory and processing time
+
+**API Access**: `GET /api/dbadmin/tasks/{job_id}` returns `metadata.memory_snapshots[]`
+
+---
+
+## OOM Frontier Testing (21 DEC 2025)
+
+### Empirical Results - B3 Basic (7.7 GB RAM)
+
+| File | Size | Type | Peak Memory | Multiplier | Mem % | Time | Result |
+|------|------|------|-------------|------------|-------|------|--------|
+| dctest.tif | 26 MB | RGB | ~1.1 GB | ~42x | 56% | 12s | ✅ Single pass |
+| granule R0C0 | 769 MB | uint16 8-band | 2.0 GB | 2.6x | 56% | 31s | ✅ Single pass |
+| Luang Prabang DTM | 986 MB | **float32** DEM | **4.6 GB** | **4.7x** | 71% | 74s | ✅ Single pass |
+| Maxar R1C2 | 1,126 MB | uint16 8-band | 3.3 GB | 2.9x | 74% | 139s | ✅ Single pass |
+| Maxar R2C3 | 1,437 MB | uint16 8-band | **5.6 GB** | 3.9x | **85%** | 180s | ⚠️ **6 retries** |
+
+### Key Finding: Data Type Matters More Than File Size
+
+The float32 DTM (986 MB) used **more memory** than the larger uint16 Maxar file (1,126 MB):
+- **float32**: 4.6 GB peak (4.7x multiplier)
+- **uint16**: 3.3 GB peak (2.9x multiplier)
+
+### OOM Frontier for B3 Basic
+
+```
+Safe Zone:        < 1.1 GB input files (single pass, < 75% mem)
+Caution Zone:     1.1 - 1.3 GB files (may require retries)
+Danger Zone:      > 1.3 GB files (high retry rate, risk of OOM)
+Recommended:      Use process_large_raster_v2 for files > 1.2 GB
+```
+
+### Memory Snapshot Examples
+
+**986 MB DTM (float32) - Single Pass Success**:
+```
+baseline:           201 MB RSS, 40% mem, 4743 MB available
+pre_cog_translate:  1,191 MB RSS, 53% mem, 3729 MB available
+post_cog_translate: 2,643 MB RSS, 71% mem, 2307 MB available, Peak=4,624 MB
+```
+
+**1.44 GB Maxar (uint16) - Required 6 Retries**:
+```
+Attempt 2 (highest peak):
+  baseline:           166 MB RSS, 40% mem
+  pre_cog_translate:  1,566 MB RSS, 58% mem
+  post_cog_translate: 4,122 MB RSS, 85% mem, Peak=5,612 MB  ← Near OOM!
+```
 
 ---
 
@@ -111,24 +174,33 @@ Where:
 
 ## Configuration
 
-### Current Settings
+### Current Settings (21 DEC 2025)
 
 ```bash
-RASTER_MAX_FILE_SIZE_MB=800     # Maximum file size for direct processing
-RASTER_SIZE_THRESHOLD_MB=800    # Small vs large raster cutoff (default)
+# Azure Portal → Function App → Configuration → Application Settings
+RASTER_MAX_FILE_SIZE_MB=2000    # Maximum file size for direct processing (2 GB)
+RASTER_SIZE_THRESHOLD_MB=2048   # Small vs large raster cutoff (in defaults.py)
+
+# Debug settings
 DEBUG_MODE=true                  # Enable memory checkpoints
 DEBUG_LOGGING=true               # Enable debug logs
 ```
 
-### Safe Limits by Plan
+**Note**: Limits can be changed via env vars without redeploying. See `config/raster_config.py` for env var names.
 
-| Plan | Usable RAM | Conservative (10x) | Moderate (5x) | Observed (4x) |
-|------|------------|-------------------|---------------|---------------|
-| B3 | 5.5 GB | 550 MB | 1.1 GB | 1.4 GB |
-| EP2/P2V2 | 5.5 GB | 550 MB | 1.1 GB | 1.4 GB |
-| EP3/P3V2 | 12 GB | 1.2 GB | 2.4 GB | 3.0 GB |
+### Safe Limits by Plan (Updated 21 DEC 2025)
 
-**Current limit of 800 MB is safe for B3 tier** (778 MB file used 3 GB peak, within 5.5 GB usable).
+| Plan | Total RAM | Usable* | Safe Limit (uint16) | Safe Limit (float32) |
+|------|-----------|---------|---------------------|----------------------|
+| B3 | 7.7 GB | ~6 GB | **1.2 GB** | **800 MB** |
+| EP2/P2V2 | 7 GB | ~5.5 GB | 1.1 GB | 700 MB |
+| EP3/P3V2 | 14 GB | ~12 GB | 2.5 GB | 1.5 GB |
+
+*Usable = Total - OS/runtime overhead (~1.5 GB)
+
+**Key Insight**: float32 DEMs require ~60% more memory than uint16 imagery of same file size.
+
+**Recommendation**: Route files > 1.2 GB to `process_large_raster_v2` (chunked processing).
 
 ---
 
@@ -214,18 +286,27 @@ curl -s -H "Authorization: Bearer $TOKEN" \
 
 ## Future Enhancements
 
+### Completed (21 DEC 2025)
+
+- [x] Add peak memory tracking via `resource.getrusage()` ✅
+- [x] Persist memory snapshots to task metadata JSONB ✅
+- [x] Add `/api/health` hardware report ✅
+- [x] Profile multi-band (8-band WorldView) vs single-band (DEM) ✅
+- [x] Establish OOM frontier empirically ✅
+
 ### Pending Integration
 
-- [ ] Wire `monitored_gdal_operation` into `raster_cog.py` for pulse monitoring during cog_translate
-- [ ] Add peak memory tracking (requires background sampling thread)
-- [ ] Implement chunk size calculator based on runtime environment
+- [ ] Wire `monitored_gdal_operation` pulse worker for continuous peak tracking
+- [ ] Add memory logging to `raster_validation.py`
+- [ ] Add memory logging to other high-memory handlers (vector, H3)
+- [ ] Implement chunk size calculator based on runtime environment + data type
 
 ### Additional Data Needed
 
 - [ ] Profile with reprojection (EPSG:4326 → EPSG:3857)
 - [ ] Profile polar/high-latitude data (expected higher multipliers)
-- [ ] Profile multi-band vs single-band rasters
 - [ ] Test concurrent task memory interaction
+- [ ] Profile float64 data (rare but exists)
 
 ---
 

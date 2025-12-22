@@ -352,9 +352,10 @@ class RasterDefaults:
     Environment variables match constant names for clarity (no prefix stripping).
     """
 
-    # Size thresholds - names match env vars for clarity (21 DEC 2025)
-    RASTER_SIZE_THRESHOLD_MB = 2048     # 2 GB - small vs large file cutoff (raised for OOM frontier testing)
-    RASTER_MAX_FILE_SIZE_MB = 20000     # 20 GB - maximum allowed file size
+    # Size thresholds - optimized for 7.7 GB RAM target environment (22 DEC 2025)
+    # See docs_claude/MEMORY_PROFILING.md for empirical OOM frontier data
+    RASTER_SIZE_THRESHOLD_MB = 1200     # 1.2 GB - route larger files to process_large_raster_v2
+    RASTER_MAX_FILE_SIZE_MB = 8000      # 8 GB - hard reject (tiled pipeline handles up to this)
     RASTER_IN_MEMORY_THRESHOLD_MB = 100 # 100 MB - in-memory vs disk processing
 
     # Collection validation limit (13 DEC 2025)

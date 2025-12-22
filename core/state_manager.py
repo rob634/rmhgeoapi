@@ -417,7 +417,7 @@ class StateManager:
         Returns:
             True if updated successfully
         """
-        return self.self.repos['task_repo'].increment_task_retry_count(task_id)
+        return self.repos['task_repo'].increment_task_retry_count(task_id)
 
     def update_task_result(
         self,

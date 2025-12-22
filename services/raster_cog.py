@@ -295,10 +295,13 @@ def create_cog(params: dict) -> dict:
             }
 
         # Generate blob URL with SAS token using managed identity
+        # Detect zone from container name (silver-* containers are in silver zone)
         logger.info("🔄 Generating SAS URL for input blob using managed identity...")
         from infrastructure.blob import BlobRepository
-        bronze_repo = BlobRepository.for_zone("bronze")  # Input files come from bronze zone
-        blob_url = bronze_repo.get_blob_url_with_sas(container_name, blob_name, hours=2)
+        is_silver_container = container_name.startswith('silver-')
+        source_zone = "silver" if is_silver_container else "bronze"
+        blob_repo = BlobRepository.for_zone(source_zone)
+        blob_url = blob_repo.get_blob_url_with_sas(container_name, blob_name, hours=2)
         logger.info(f"   ✅ SAS URL generated (valid for 2 hours)")
 
         logger.info(f"✅ STEP 1: Parameters validated - blob={blob_name}, container={container_name}")
@@ -377,12 +380,17 @@ def create_cog(params: dict) -> dict:
         config_obj = get_config()
         silver_container = config_obj.storage.silver.get_container('cogs')
 
-        # Download input tile bytes from bronze zone
+        # Download input tile bytes - detect zone from container name
+        # Silver containers (silver-cogs, silver-tiles) are in silver zone
+        # All other containers are in bronze zone
         from infrastructure.blob import BlobRepository
-        bronze_repo = BlobRepository.for_zone("bronze")  # Input files come from bronze zone
+        is_silver_container = container_name.startswith('silver-')
+        source_zone = "silver" if is_silver_container else "bronze"
+        blob_repo = BlobRepository.for_zone(source_zone)
+        logger.debug(f"   Using {source_zone} zone for container: {container_name}")
 
         try:
-            input_blob_bytes = bronze_repo.read_blob(
+            input_blob_bytes = blob_repo.read_blob(
                 container=container_name,
                 blob_path=blob_name
             )

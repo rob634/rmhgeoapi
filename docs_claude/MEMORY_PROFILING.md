@@ -1,12 +1,36 @@
 # Memory Profiling Data
 
-**Last Updated**: 21 DEC 2025
+**Last Updated**: 22 DEC 2025
 
 ---
 
 ## Overview
 
 This document captures empirical memory profiling data for COG (Cloud Optimized GeoTIFF) processing operations. Data is collected via the checkpoint system in `util_logger.py` and stored in task metadata JSONB for OOM evidence.
+
+**Target Environment**: 2 vCPU / 7.7 GB RAM (IsolatedV2, B3 Basic, or equivalent)
+
+---
+
+## Design Constraints (22 DEC 2025)
+
+The production environment will be **2 vCPU / 7.7 GB RAM** (corporate Azure IsolatedV2).
+
+### Recommended File Size Limits
+
+| Data Type | Safe Limit | Max (with retries) | Route to Tiled Pipeline |
+|-----------|------------|--------------------|-----------------------|
+| **uint16 (8-band imagery)** | 1.0 GB | 1.2 GB | > 1.2 GB |
+| **float32 (DEMs)** | 700 MB | 900 MB | > 900 MB |
+| **RGB (uint8)** | 1.2 GB | 1.5 GB | > 1.5 GB |
+
+### Environment Variable Settings for 7.7 GB RAM
+
+```bash
+# Recommended settings for 2 vCPU / 7.7 GB RAM environment
+RASTER_SIZE_THRESHOLD_MB=1200    # Route files > 1.2 GB to large raster pipeline
+RASTER_MAX_FILE_SIZE_MB=8000     # Hard limit (reject files > 8 GB entirely)
+```
 
 ---
 
@@ -45,14 +69,52 @@ The float32 DTM (986 MB) used **more memory** than the larger uint16 Maxar file 
 - **float32**: 4.6 GB peak (4.7x multiplier)
 - **uint16**: 3.3 GB peak (2.9x multiplier)
 
-### OOM Frontier for B3 Basic
+### OOM Frontier for 7.7 GB RAM (Target Environment)
 
 ```
-Safe Zone:        < 1.1 GB input files (single pass, < 75% mem)
-Caution Zone:     1.1 - 1.3 GB files (may require retries)
-Danger Zone:      > 1.3 GB files (high retry rate, risk of OOM)
+Safe Zone:        < 1.0 GB input files (single pass, < 70% mem)
+Caution Zone:     1.0 - 1.2 GB files (may require retries)
+Danger Zone:      > 1.2 GB files (high retry rate, risk of OOM)
 Recommended:      Use process_large_raster_v2 for files > 1.2 GB
 ```
+
+---
+
+## PremiumV3 Reference Testing (22 DEC 2025)
+
+Testing on PremiumV3 (4 vCPU / 15.6 GB RAM) to understand memory behavior with larger files.
+
+### Empirical Results - PremiumV3
+
+| File | Size | Type | Peak Memory | Multiplier | Mem % | Time | Result |
+|------|------|------|-------------|------------|-------|------|--------|
+| Maxar R2C2 | 2,083 MB | uint16 8-band | 6,259 MB | 3.0x | 58% | 196s | ✅ Single pass |
+| WBG KHM | 2,182 MB | uint16 | 5,235 MB | 2.4x | 59% | 138s | ✅ Single pass |
+
+### Memory Snapshots - 2 GB Files on PremiumV3
+
+**Maxar R2C2 (2.08 GB uint16 8-band)**:
+```
+baseline:           257 MB RSS, 27% mem
+pre_cog_translate:  2,363 MB RSS, 40% mem
+post_cog_translate: 5,247 MB RSS, 58% mem, Peak=6,259 MB
+```
+
+**WBG KHM (2.18 GB uint16)**:
+```
+baseline:           350 MB RSS, 28% mem
+pre_cog_translate:  2,537 MB RSS, 42% mem
+post_cog_translate: 5,236 MB RSS, 59% mem, Peak=5,235 MB
+```
+
+### Scaling Comparison
+
+| Environment | RAM | Safe Limit | 2 GB File |
+|-------------|-----|------------|-----------|
+| IsolatedV2/B3 (target) | 7.7 GB | 1.2 GB | ❌ Would OOM |
+| PremiumV3 | 15.6 GB | 4.0 GB | ✅ 58% mem |
+
+**Conclusion**: 2 GB files require ~6 GB peak memory. Not viable on 7.7 GB RAM without tiled processing
 
 ### Memory Snapshot Examples
 
@@ -174,33 +236,39 @@ Where:
 
 ## Configuration
 
-### Current Settings (21 DEC 2025)
+### Production Settings for 7.7 GB RAM (22 DEC 2025)
 
 ```bash
 # Azure Portal → Function App → Configuration → Application Settings
-RASTER_MAX_FILE_SIZE_MB=2000    # Maximum file size for direct processing (2 GB)
-RASTER_SIZE_THRESHOLD_MB=2048   # Small vs large raster cutoff (in defaults.py)
+# Optimized for IsolatedV2 / B3 Basic (2 vCPU, 7.7 GB RAM)
 
-# Debug settings
+RASTER_SIZE_THRESHOLD_MB=1200   # Route files > 1.2 GB to process_large_raster_v2
+RASTER_MAX_FILE_SIZE_MB=8000    # Hard reject files > 8 GB
+
+# Debug settings (optional - enable for troubleshooting)
 DEBUG_MODE=true                  # Enable memory checkpoints
 DEBUG_LOGGING=true               # Enable debug logs
 ```
 
 **Note**: Limits can be changed via env vars without redeploying. See `config/raster_config.py` for env var names.
 
-### Safe Limits by Plan (Updated 21 DEC 2025)
+### Safe Limits by Plan (Updated 22 DEC 2025)
 
-| Plan | Total RAM | Usable* | Safe Limit (uint16) | Safe Limit (float32) |
-|------|-----------|---------|---------------------|----------------------|
-| B3 | 7.7 GB | ~6 GB | **1.2 GB** | **800 MB** |
-| EP2/P2V2 | 7 GB | ~5.5 GB | 1.1 GB | 700 MB |
-| EP3/P3V2 | 14 GB | ~12 GB | 2.5 GB | 1.5 GB |
+| Plan | Total RAM | Usable* | Safe (uint16) | Safe (float32) | Max (single pass) |
+|------|-----------|---------|---------------|----------------|-------------------|
+| **IsolatedV2/B3** (target) | 7.7 GB | ~6 GB | **1.0 GB** | **700 MB** | 1.2 GB |
+| EP2/P2V2 | 7 GB | ~5.5 GB | 1.0 GB | 650 MB | 1.1 GB |
+| EP3/P3V2 | 14 GB | ~12 GB | 2.5 GB | 1.5 GB | 4.0 GB |
+| PremiumV3 | 15.6 GB | ~14 GB | 3.0 GB | 2.0 GB | 4.5 GB |
 
 *Usable = Total - OS/runtime overhead (~1.5 GB)
 
-**Key Insight**: float32 DEMs require ~60% more memory than uint16 imagery of same file size.
+### Key Design Decisions
 
-**Recommendation**: Route files > 1.2 GB to `process_large_raster_v2` (chunked processing).
+1. **float32 DEMs require ~60% more memory** than uint16 imagery of same file size
+2. **Files > 1.2 GB** should route to `process_large_raster_v2` (tiled processing)
+3. **Concurrent processing disabled** for large files (maxConcurrentCalls=1 for raster queue)
+4. **Memory snapshots** provide OOM forensics if crashes occur
 
 ---
 

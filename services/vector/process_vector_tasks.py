@@ -26,7 +26,7 @@ import traceback
 
 from infrastructure.blob import BlobRepository
 from config import get_config
-from util_logger import LoggerFactory, ComponentType
+from util_logger import LoggerFactory, ComponentType, log_memory_checkpoint
 
 # Component-specific logger
 logger = LoggerFactory.create_logger(
@@ -172,6 +172,12 @@ def process_vector_prepare(parameters: Dict[str, Any]) -> Dict[str, Any]:
     # Step 1: Download source file from Bronze zone (08 DEC 2025)
     file_data = blob_repo.read_blob_to_stream(container_name, blob_name)
 
+    # Memory checkpoint 1: After blob download
+    log_memory_checkpoint(logger, "After blob download",
+                          context_id=job_id,
+                          blob_size_mb=round(blob_size_mb, 1),
+                          file_extension=file_extension)
+
     # Step 2: Convert to GeoDataFrame
     converters = {
         'csv': _convert_csv,
@@ -192,7 +198,13 @@ def process_vector_prepare(parameters: Dict[str, Any]) -> Dict[str, Any]:
     logger.info(f"[{job_id[:8]}] Loaded {total_features} features")
 
     # GAP-009 FIX (16 DEC 2025): Log memory usage after load
-    _log_memory_usage(gdf, "after_load", job_id)
+    gdf_mem_mb = _log_memory_usage(gdf, "after_load", job_id)
+
+    # Memory checkpoint 2: After GeoDataFrame conversion (PEAK MEMORY - GDF expansion)
+    log_memory_checkpoint(logger, "After GDF conversion",
+                          context_id=job_id,
+                          feature_count=total_features,
+                          gdf_memory_mb=round(gdf_mem_mb, 1))
 
     # GAP-002 FIX (15 DEC 2025): Validate source file contains features
     # Empty source files would create empty tables and silently "succeed"
@@ -213,7 +225,13 @@ def process_vector_prepare(parameters: Dict[str, Any]) -> Dict[str, Any]:
     validated_gdf = handler.prepare_gdf(gdf, geometry_params=geometry_params)
 
     # GAP-009 FIX (16 DEC 2025): Log memory usage after validation
-    _log_memory_usage(validated_gdf, "after_validation", job_id)
+    validated_mem_mb = _log_memory_usage(validated_gdf, "after_validation", job_id)
+
+    # Memory checkpoint 3: After geometry validation and reprojection
+    log_memory_checkpoint(logger, "After GDF validation",
+                          context_id=job_id,
+                          validated_features=len(validated_gdf),
+                          gdf_memory_mb=round(validated_mem_mb, 1))
 
     # GAP-002 FIX (15 DEC 2025): Validate features remain after geometry validation
     # prepare_gdf can filter out features with invalid/null geometries
@@ -413,6 +431,13 @@ def process_vector_prepare(parameters: Dict[str, Any]) -> Dict[str, Any]:
         f"{total_features} total features, ready for Stage 2 fan-out"
     )
 
+    # Memory checkpoint 4: After chunking and pickle upload (cleanup phase)
+    total_pickle_bytes = sum(p['pickle_bytes'] for p in verified_pickles)
+    log_memory_checkpoint(logger, "After pickle upload (cleanup)",
+                          context_id=job_id,
+                          num_chunks=len(chunk_paths),
+                          total_pickle_mb=round(total_pickle_bytes / (1024 * 1024), 1))
+
     result = {
         'chunk_paths': chunk_paths,
         'total_features': total_features,
@@ -505,6 +530,12 @@ def process_vector_upload(parameters: Dict[str, Any]) -> Dict[str, Any]:
         pickled_data = blob_repo.read_blob(config.vector_pickle_container, chunk_path)
         chunk = pickle.loads(pickled_data)
 
+        # Memory checkpoint 1: After pickle load
+        log_memory_checkpoint(logger, "After pickle load",
+                              context_id=job_id,
+                              chunk_index=chunk_index,
+                              chunk_rows=len(chunk))
+
         # Step 2: DELETE + INSERT in single transaction (IDEMPOTENT)
         handler = VectorToPostGISHandler()
         result = handler.insert_chunk_idempotent(
@@ -523,6 +554,13 @@ def process_vector_upload(parameters: Dict[str, Any]) -> Dict[str, Any]:
             f"deleted={result['rows_deleted']}, inserted={result['rows_inserted']} rows "
             f"in {elapsed:.2f}s ({rows_per_second:.0f} rows/sec)"
         )
+
+        # Memory checkpoint 2: After DB insert (cleanup phase)
+        log_memory_checkpoint(logger, "After DB insert (cleanup)",
+                              context_id=job_id,
+                              chunk_index=chunk_index,
+                              rows_inserted=result['rows_inserted'],
+                              elapsed_seconds=round(elapsed, 2))
 
         return {
             "success": True,

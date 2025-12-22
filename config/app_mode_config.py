@@ -52,6 +52,12 @@ class AppMode(str, Enum):
     - Which Service Bus queues the app listens to
     - Whether HTTP endpoints are exposed
     - How tasks are routed
+
+    Docker Worker Mode (22 DEC 2025):
+    - WORKER_DOCKER: Runs in Docker container, listens to long-running-raster-tasks queue
+    - No Azure Functions timeout constraints (can run hours/days)
+    - Uses same CoreMachine.process_task_message() as Function App workers
+    - Signals stage_complete to jobs queue when last task completes
     """
 
     STANDALONE = "standalone"           # All queues, all endpoints (default)
@@ -60,6 +66,7 @@ class AppMode(str, Enum):
     PLATFORM_ONLY = "platform_only"     # HTTP + jobs only (pure router)
     WORKER_RASTER = "worker_raster"     # raster-tasks only
     WORKER_VECTOR = "worker_vector"     # vector-tasks only
+    WORKER_DOCKER = "worker_docker"     # long-running-raster-tasks only (Docker)
 
 
 # =============================================================================
@@ -107,8 +114,10 @@ class AppModeConfig(BaseModel):
     @property
     def has_http_endpoints(self) -> bool:
         """Whether this mode serves HTTP endpoints."""
-        # All modes have HTTP endpoints for now (per user feedback)
-        # Worker modes could disable HTTP in future if needed
+        # Docker worker has no HTTP - it's a background polling process
+        if self.mode == AppMode.WORKER_DOCKER:
+            return False
+        # All other modes have HTTP endpoints for now (per user feedback)
         return True
 
     @property
@@ -139,6 +148,14 @@ class AppModeConfig(BaseModel):
             AppMode.WORKER_VECTOR,
         ]
 
+    @property
+    def listens_to_long_running_tasks(self) -> bool:
+        """Whether this mode processes long-running raster tasks (Docker worker queue)."""
+        return self.mode in [
+            AppMode.STANDALONE,      # Standalone can process everything
+            AppMode.WORKER_DOCKER,   # Docker worker's primary queue
+        ]
+
     # =========================================================================
     # ROUTING PROPERTIES
     # =========================================================================
@@ -165,6 +182,7 @@ class AppModeConfig(BaseModel):
         return self.mode in [
             AppMode.WORKER_RASTER,
             AppMode.WORKER_VECTOR,
+            AppMode.WORKER_DOCKER,
         ]
 
     @property
@@ -191,6 +209,9 @@ class AppModeConfig(BaseModel):
             APP_NAME: Unique app identifier (default: rmhazuregeoapi)
             RASTER_APP_URL: External raster app URL (optional)
             VECTOR_APP_URL: External vector app URL (optional)
+
+        Raises:
+            ValueError: If WORKER_DOCKER mode is used in Azure Functions runtime
         """
         mode_str = os.environ.get("APP_MODE", AppModeDefaults.DEFAULT_MODE)
 
@@ -207,6 +228,27 @@ class AppModeConfig(BaseModel):
             )
             mode = AppMode.STANDALONE
 
+        # Runtime environment validation (22 DEC 2025)
+        # Detect Azure Functions runtime via FUNCTIONS_WORKER_RUNTIME env var
+        is_azure_functions = os.environ.get("FUNCTIONS_WORKER_RUNTIME") is not None
+
+        if mode == AppMode.WORKER_DOCKER and is_azure_functions:
+            raise ValueError(
+                f"INVALID CONFIGURATION: APP_MODE='{mode.value}' cannot be used in Azure Functions. "
+                f"WORKER_DOCKER mode is only valid in Docker containers. "
+                f"Detected FUNCTIONS_WORKER_RUNTIME='{os.environ.get('FUNCTIONS_WORKER_RUNTIME')}'. "
+                f"For Azure Functions, use: standalone, platform_*, or worker_raster/worker_vector."
+            )
+
+        if mode != AppMode.WORKER_DOCKER and not is_azure_functions:
+            # Not in Azure Functions and not Docker mode - log warning (might be local dev)
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.info(
+                f"APP_MODE='{mode.value}' running outside Azure Functions runtime. "
+                f"This is expected for local development or Docker with non-Docker mode."
+            )
+
         return cls(
             mode=mode,
             app_name=os.environ.get("APP_NAME", AppModeDefaults.DEFAULT_APP_NAME),
@@ -218,6 +260,11 @@ class AppModeConfig(BaseModel):
     # HELPER METHODS
     # =========================================================================
 
+    @property
+    def is_docker_mode(self) -> bool:
+        """Whether this is the Docker worker mode."""
+        return self.mode == AppMode.WORKER_DOCKER
+
     def describe(self) -> dict:
         """Return a dictionary describing the current configuration."""
         return {
@@ -227,6 +274,7 @@ class AppModeConfig(BaseModel):
                 "jobs": self.listens_to_jobs_queue,
                 "raster_tasks": self.listens_to_raster_tasks,
                 "vector_tasks": self.listens_to_vector_tasks,
+                "long_running_tasks": self.listens_to_long_running_tasks,
             },
             "routing": {
                 "routes_raster_externally": self.routes_raster_externally,
@@ -235,6 +283,7 @@ class AppModeConfig(BaseModel):
             "role": {
                 "is_platform": self.is_platform_mode,
                 "is_worker": self.is_worker_mode,
+                "is_docker": self.is_docker_mode,
                 "has_http": self.has_http_endpoints,
             },
             "external_apps": {

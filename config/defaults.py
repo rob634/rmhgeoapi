@@ -186,10 +186,11 @@ class AppModeDefaults:
     Controls which queues this app listens to and how tasks are routed.
     Enables single codebase to be deployed in different configurations.
 
-    Architecture (07 DEC 2025):
+    Architecture (07 DEC 2025, updated 22 DEC 2025):
     - Centralized orchestration: Platform app handles jobs queue
     - Distributed execution: Workers process task queues
     - Message-based signaling: Workers send stage_complete to jobs queue
+    - Docker workers: Long-running tasks without Azure Functions timeout constraints
     """
 
     # Valid modes
@@ -199,10 +200,11 @@ class AppModeDefaults:
     PLATFORM_ONLY = "platform_only"     # HTTP + jobs only (pure router)
     WORKER_RASTER = "worker_raster"     # raster-tasks only
     WORKER_VECTOR = "worker_vector"     # vector-tasks only
+    WORKER_DOCKER = "worker_docker"     # long-running-raster-tasks only (Docker container)
 
     VALID_MODES = [
         STANDALONE, PLATFORM_RASTER, PLATFORM_VECTOR,
-        PLATFORM_ONLY, WORKER_RASTER, WORKER_VECTOR
+        PLATFORM_ONLY, WORKER_RASTER, WORKER_VECTOR, WORKER_DOCKER
     ]
 
     DEFAULT_MODE = STANDALONE

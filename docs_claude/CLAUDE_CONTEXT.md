@@ -1,6 +1,6 @@
 # Claude Context - Azure Geospatial ETL Pipeline
 
-**Date**: 05 DEC 2025
+**Date**: 23 DEC 2025
 **Primary Documentation**: Start here for all Claude instances
 
 ---
@@ -30,7 +30,7 @@ Bronze Storage (raw files) → CoreMachine (orchestration) → Silver Storage (C
 ### Active Environment
 - **Function App**: `rmhazuregeoapi` (B3 Basic tier)
 - **URL**: https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net
-- **Database**: rmhpgflex.postgres.database.azure.com
+- **Database**: rmhpostgres.postgres.database.azure.com (PostgreSQL 17, B2s)
 - **Resource Group**: `rmhazure_rg`
 
 ### Essential Commands
@@ -230,16 +230,48 @@ chmod +x /tmp/query_ai.sh && /tmp/query_ai.sh | python3 -m json.tool
 
 ## 📚 Documentation Map
 
+### Primary Documents
 | Document | Purpose |
 |----------|---------|
 | **CLAUDE_CONTEXT.md** | 🎯 START HERE - System overview |
 | **TODO.md** | Active tasks only |
-| **HISTORY.md** | Completed work log |
-| **JOB_CREATION_QUICKSTART.md** | New job creation guide |
-| **ARCHITECTURE_REFERENCE.md** | Deep technical specs |
+
+### Architecture Layer
+| Document | Purpose |
+|----------|---------|
+| **ARCHITECTURE_REFERENCE.md** | Deep technical specs, job patterns, error handling |
+| **ARCHITECTURE_DIAGRAMS.md** | Visual C4/Mermaid diagrams |
+| **COREMACHINE_PLATFORM_ARCHITECTURE.md** | Two-layer design details |
 | **SCHEMA_ARCHITECTURE.md** | PostgreSQL 5-schema design |
 | **SERVICE_BUS_HARMONIZATION.md** | Queue configuration |
-| **COREMACHINE_PLATFORM_ARCHITECTURE.md** | Two-layer design details |
+
+### Operations Layer
+| Document | Purpose |
+|----------|---------|
+| **DEPLOYMENT_GUIDE.md** | Deployment procedures |
+| **APPLICATION_INSIGHTS.md** | Log queries and diagnostics |
+| **MEMORY_PROFILING.md** | Performance optimization |
+
+### Development Layer
+| Document | Purpose |
+|----------|---------|
+| **JOB_CREATION_QUICKSTART.md** | New job creation guide |
+| **OGC_FEATURES_METADATA_INTEGRATION.md** | OGC API integration |
+| **ZARR_TITILER_LESSONS.md** | Zarr/TiTiler lessons learned |
+| **APIM_ARCHITECTURE.md** | Future API Management plans |
+
+### Pipeline Projects
+| Document | Purpose |
+|----------|---------|
+| **FATHOM_ETL.md** | FATHOM flood data pipeline |
+| **BUILDING_EXPOSURE_PIPELINE.md** | Building exposure analytics |
+| **PIPELINE_BUILDER_VISION.md** | Future pipeline builder UI |
+
+### History & Archives
+| Document | Purpose |
+|----------|---------|
+| **HISTORY.md** | Main completed work log |
+| **HISTORY_ARCHIVE_DEC2025.md** | TODO cleanup archive |
 
 ### Human Documentation (WIKI_*.md in root)
 - `WIKI_ONBOARDING.md` - Comprehensive developer guide

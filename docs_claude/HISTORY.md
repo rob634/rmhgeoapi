@@ -1,9 +1,13 @@
 # Project History
 
-**Last Updated**: 21 DEC 2025 - FATHOM ETL Pipeline Phase 1 Complete
-**Note**: For project history prior to September 11, 2025, see **OLDER_HISTORY.md**
+**Last Updated**: 23 DEC 2025
+**Active Log**: This is the main project history log (Sep 2025 onwards)
 
-This document tracks completed architectural changes and improvements to the Azure Geospatial ETL Pipeline from September 11, 2025 onwards.
+**Archives**:
+- [HISTORY_ARCHIVE_DEC2025.md](./HISTORY_ARCHIVE_DEC2025.md) - TODO.md cleanup archive
+- For history prior to September 2025, see **OLDER_HISTORY.md**
+
+This document tracks completed architectural changes and improvements to the Azure Geospatial ETL Pipeline.
 
 ---
 

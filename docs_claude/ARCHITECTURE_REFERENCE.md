@@ -539,81 +539,9 @@ All follow Pattern B with plain dicts and static methods.
 
 ## Database Schema Architecture
 
-### Three-Schema Design Philosophy (14 SEP 2025)
+**See [SCHEMA_ARCHITECTURE.md](./SCHEMA_ARCHITECTURE.md) for comprehensive database schema documentation.**
 
-The database uses a **three-schema architecture** for clear separation of concerns and production stability:
-
-#### 1. `app` Schema - Workflow Orchestration (STABLE)
-**Purpose**: Core job orchestration engine
-**Stability**: Fixed in production - schema changes rare
-**Contents**:
-- `jobs` table - Job records and state management
-- `tasks` table - Task execution and results
-- PostgreSQL functions for atomic state transitions
-- Advisory locks for concurrency control
-
-**Design Principle**: This schema represents the stable orchestration engine. Once deployed to production, changes should be minimal to ensure workflow reliability.
-
-#### 2. `pgstac` Schema - STAC Catalog (STABLE)
-**Purpose**: SpatioTemporal Asset Catalog metadata
-**Stability**: Managed by pypgstac migrations - version controlled
-**Contents**:
-- `collections` - STAC collections (datasets)
-- `items` - STAC items (individual assets)
-- `search()` function - CQL2 spatial/temporal queries
-- Partitioned tables for scale
-- Extensive indexing for performance
-
-**Design Principle**: Schema evolution managed by PgSTAC project. Updates only through official pypgstac migrations to maintain STAC API compliance.
-
-#### 3. `geo` Schema - Spatial Data Library (FLEXIBLE)
-**Purpose**: Growing library of curated vector and raster data
-**Stability**: Designed for continuous growth
-**Contents**:
-- Vector layers (PostGIS geometries)
-- Raster catalogs (PostGIS raster)
-- Derived products and analysis results
-- Project-specific spatial tables
-- Custom spatial functions
-
-**Design Principle**: This is the **living schema** that grows with your geospatial data library. New tables can be added without affecting core orchestration (`app`) or catalog metadata (`pgstac`).
-
-### Schema Interaction Patterns
-
-```sql
--- Example: Job in app schema creates spatial data in geo schema
--- and registers metadata in pgstac schema
-
--- 1. Job orchestration (app schema)
-INSERT INTO app.jobs (job_id, job_type, parameters) VALUES (...);
-
--- 2. Spatial processing (geo schema)
-CREATE TABLE geo.project_boundaries AS
-SELECT ST_Transform(geom, 4326) FROM source_data;
-
--- 3. Catalog registration (pgstac schema)
-SELECT pgstac.create_item('{
-  "collection": "processed-vectors",
-  "id": "project-boundaries-v1",
-  "geometry": {...}
-}'::jsonb);
-```
-
-### Benefits of Three-Schema Architecture
-
-1. **Production Stability**: Core orchestration (`app`) remains stable
-2. **Standards Compliance**: STAC catalog (`pgstac`) follows specifications
-3. **Data Flexibility**: Spatial library (`geo`) grows organically
-4. **Clear Boundaries**: Each schema has distinct responsibilities
-5. **Migration Safety**: Schema changes isolated by purpose
-6. **Performance**: Optimized indexing strategies per schema
-7. **Security**: Role-based access control per schema
-
-### Future-Proofing Considerations
-
-- **app schema**: Versioned migrations for any orchestration changes
-- **pgstac schema**: Automatic migrations via pypgstac upgrades
-- **geo schema**: Project-based prefixes for table organization (e.g., `geo.project1_*`, `geo.project2_*`)
+Key schemas: `app` (orchestration), `pgstac` (STAC catalog), `geo` (spatial data), `h3` (hexagonal analytics)
 
 ---
 

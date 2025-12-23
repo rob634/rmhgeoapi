@@ -544,28 +544,7 @@ class H3SchemaDeployer:
                             CONSTRAINT dataset_registry_source_type_check
                             CHECK (source_type IN ('planetary_computer', 'azure', 'url')),
                         source_config JSONB NOT NULL,
-                        /*
-                        Example source_config values:
-
-                        planetary_computer:
-                        {
-                            "collection": "cop-dem-glo-30",
-                            "item_pattern": "Copernicus_DSM_COG_10_N{lat}_00_E{lon}_00_DEM",
-                            "asset": "data",
-                            "stac_api": "https://planetarycomputer.microsoft.com/api/stac/v1"
-                        }
-
-                        azure:
-                        {
-                            "container": "silver-cogs",
-                            "blob_path": "population/worldpop_2020.tif"
-                        }
-
-                        url:
-                        {
-                            "url": "https://example.com/data.tif"
-                        }
-                        */
+                        /* Source-specific parameters - see dataset_registry documentation */
 
                         -- Data characteristics
                         stat_types TEXT[] NOT NULL DEFAULT ARRAY['mean'],

@@ -457,6 +457,109 @@ def my_stac_handler(params: Dict[str, Any]) -> Dict[str, Any]:
 
 ---
 
+## Autoscaling: Queue-Depth Based Scaling
+
+### Overview
+
+The Function App automatically scales based on Service Bus queue depth, not CPU/memory metrics. This is **proactive scaling** - we add capacity when work is waiting, not after resources are exhausted.
+
+```
+Service Bus Queue (geospatial-tasks)
+         │
+         ▼ metrics
+Azure Monitor Autoscale
+         │
+         ▼ scale actions
+App Service Plan (ASP-rmhazure)
+         │
+         ▼ hosts
+Function App (rmhazuregeoapi)
+```
+
+### Current Configuration
+
+| Setting | Value |
+|---------|-------|
+| **Autoscale Name** | `rmhazure-autoscale` |
+| **Target Resource** | `ASP-rmhazure` (App Service Plan) |
+| **Min Instances** | 1 |
+| **Max Instances** | 4 |
+
+### Scaling Rules
+
+| Direction | Trigger | Time Window | Cooldown |
+|-----------|---------|-------------|----------|
+| **Scale OUT** | Queue > 2 messages | 1 minute avg | 3 minutes |
+| **Scale IN** | Queue < 2 messages | 10 minute avg | 10 minutes |
+
+**Why asymmetric?**
+- **Scale OUT is aggressive**: Add capacity quickly when work is waiting
+- **Scale IN is conservative**: Avoid thrashing (rapid up/down cycling wastes money and causes cold starts)
+
+### Why Queue Depth (Not CPU/Memory)?
+
+Traditional autoscaling uses CPU or memory metrics, but for queue-based workloads:
+
+- **Proactive**: Scale up BEFORE work piles up, not after CPU spikes
+- **Work-aware**: Directly measures pending work, not resource consumption
+- **Responsive**: Queue depth changes immediately when jobs are submitted
+
+### CLI Commands
+
+```bash
+# View current configuration
+az monitor autoscale show --name rmhazure-autoscale --resource-group rmhazure_rg
+
+# Check current instance count
+az appservice plan show --name ASP-rmhazure --resource-group rmhazure_rg \
+  --query "{workers:properties.numberOfWorkers, maxWorkers:sku.capacity}"
+
+# Emergency: Disable autoscale
+az monitor autoscale update --name rmhazure-autoscale --resource-group rmhazure_rg --enabled false
+
+# Manually scale to 1 instance
+az appservice plan update --name ASP-rmhazure --resource-group rmhazure_rg --number-of-workers 1
+```
+
+### Recreating Autoscale Configuration
+
+If you need to recreate from scratch:
+
+```bash
+# Step 1: Create base autoscale settings
+az monitor autoscale create \
+  --resource-group rmhazure_rg \
+  --resource /subscriptions/{sub-id}/resourceGroups/rmhazure_rg/providers/Microsoft.Web/serverfarms/ASP-rmhazure \
+  --name rmhazure-autoscale \
+  --min-count 1 --max-count 4 --count 1
+
+# Step 2: Add scale-out rule (Queue > 2 for 1 min → Add 1 instance)
+az monitor autoscale rule create \
+  --resource-group rmhazure_rg \
+  --autoscale-name rmhazure-autoscale \
+  --condition "ActiveMessages > 2 avg 1m where EntityName == geospatial-tasks" \
+  --scale out 1 --cooldown 3 \
+  --resource /subscriptions/{sub-id}/resourceGroups/rmhazure_rg/providers/Microsoft.ServiceBus/namespaces/rmhazure
+
+# Step 3: Add scale-in rule (Queue < 2 for 10 min → Remove 1 instance)
+az monitor autoscale rule create \
+  --resource-group rmhazure_rg \
+  --autoscale-name rmhazure-autoscale \
+  --condition "ActiveMessages < 2 avg 10m where EntityName == geospatial-tasks" \
+  --scale in 1 --cooldown 10 \
+  --resource /subscriptions/{sub-id}/resourceGroups/rmhazure_rg/providers/Microsoft.ServiceBus/namespaces/rmhazure
+```
+
+### Troubleshooting
+
+| Issue | Solution |
+|-------|----------|
+| **Autoscale not triggering** | Check if enabled: `az monitor autoscale show ... --query "enabled"` |
+| **Instances not decreasing** | Scale-in requires < 2 msgs for 10 min + 10 min cooldown |
+| **Cost running high** | Disable autoscale + manually scale to 1 instance |
+
+---
+
 ## Free & Open Source Software (FOSS) Stack
 
 ### Why FOSS for Geospatial?

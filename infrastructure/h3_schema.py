@@ -718,12 +718,13 @@ class H3SchemaDeployer:
                     cur.execute(sql.SQL("""
                         CREATE TABLE IF NOT EXISTS {schema}.{partition}
                         PARTITION OF {schema}.{parent}
-                        FOR VALUES IN (%s)
+                        FOR VALUES IN ({theme_value})
                     """).format(
                         schema=sql.Identifier(self.SCHEMA_NAME),
                         partition=sql.Identifier(partition_name),
-                        parent=sql.Identifier("zonal_stats")
-                    ), (theme,))
+                        parent=sql.Identifier("zonal_stats"),
+                        theme_value=sql.Literal(theme)
+                    ))
                     logger.info(f"  Created partition h3.{partition_name}")
 
                 # Create indexes on parent (automatically propagated to partitions)

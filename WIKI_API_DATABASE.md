@@ -450,10 +450,26 @@ postgresql://<username>:<password>@<server>.postgres.database.azure.com:5432/<da
 
 ### Connection Pooling
 
-The application uses psycopg3 connection pooling:
+**⚠️ CRITICAL: Serverless Connection Pattern**
+
+Traditional connection pooling does NOT work effectively in Azure Functions due to ephemeral instances. Instead, use the **memory-first, single-connection burst** pattern:
+
+1. Do all computation in memory first (RAM is cheap)
+2. Open ONE connection for fast bulk insert
+3. Release connection immediately
+
+**See [WIKI_TECHNICAL_OVERVIEW.md → Serverless Database Connection Pattern](WIKI_TECHNICAL_OVERVIEW.md#serverless-database-connection-pattern)** for the full explanation, code examples, and the 23 DEC 2025 incident that taught us this lesson.
+
+**Connection budget formula**:
+```
+Available = max_connections × 0.5 (safety margin)
+Per task = Available ÷ concurrent_tasks
+```
+
+The application configuration below is for local development only:
 
 ```python
-# config/database_config.py
+# config/database_config.py (local dev only)
 pool_min_size: int = 1
 pool_max_size: int = 10
 pool_timeout: int = 30  # seconds
@@ -774,4 +790,4 @@ EXPLAIN ANALYZE SELECT * FROM app.jobs WHERE status = 'processing';
 
 ---
 
-**Last Updated**: 11 DEC 2025
+**Last Updated**: 23 DEC 2025

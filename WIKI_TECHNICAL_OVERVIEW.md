@@ -2,7 +2,7 @@
 
 > **Navigation**: [Quick Start](WIKI_QUICK_START.md) | [Platform API](WIKI_PLATFORM_API.md) | [All Jobs](WIKI_API_JOB_SUBMISSION.md) | [Errors](WIKI_API_ERRORS.md) | [Glossary](WIKI_API_GLOSSARY.md)
 
-**Last Updated**: 21 DEC 2025
+**Last Updated**: 23 DEC 2025
 **Audience**: Development team (all disciplines)
 **Purpose**: High-level understanding of platform architecture, patterns, and technology stack
 **Wiki**: Azure DevOps Wiki - Technical architecture documentation
@@ -239,6 +239,133 @@ $$ LANGUAGE plpgsql;
 
 **Result**: Exactly one task gets TRUE back, triggers next stage. Zero race conditions.
 
+### Serverless Database Connection Pattern
+
+**Problem**: Traditional connection pooling doesn't work in serverless environments.
+
+**Why connection pooling fails in Azure Functions**:
+
+```
+Traditional Web Server (Connection Pool Works):
+┌─────────────────────────────────────────────────────────────┐
+│  Web Server (always running)                                 │
+│  ┌─────────────────────────────────────────────────────┐    │
+│  │ Connection Pool (10 connections, reused for hours)   │    │
+│  │  ├── conn1 ──────> PostgreSQL                       │    │
+│  │  ├── conn2 ──────> PostgreSQL                       │    │
+│  │  └── conn3 ──────> PostgreSQL                       │    │
+│  └─────────────────────────────────────────────────────┘    │
+│  Requests share pooled connections efficiently               │
+└─────────────────────────────────────────────────────────────┘
+
+Azure Functions (Connection Pool FAILS):
+┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐
+│ Instance 1      │ │ Instance 2      │ │ Instance 3      │
+│ (scales to 0)   │ │ (just spawned)  │ │ (about to die)  │
+│ ┌─────────────┐ │ │ ┌─────────────┐ │ │ ┌─────────────┐ │
+│ │ Pool: 10    │ │ │ │ Pool: 10    │ │ │ │ Pool: 10    │ │
+│ │ connections │ │ │ │ connections │ │ │ │ connections │ │
+│ └─────────────┘ │ └─────────────┘ │ │ └─────────────┘ │
+└─────────────────┘ └─────────────────┘ └─────────────────┘
+         │                   │                   │
+         └───────────────────┴───────────────────┘
+                              │
+              30+ connections churning constantly!
+              Pools never reach steady state.
+              Instances spawn/die unpredictably.
+```
+
+**The disaster scenario** (23 DEC 2025 - this actually happened):
+
+We scaled to 8 instances × 2 workers × 4 concurrent tasks = 64 parallel operations. Each task opened multiple connections for different stages of processing. Result: **1,000+ connection attempts churning against 200 max_connections**. The database became completely unresponsive.
+
+**The correct pattern: Memory-First, Single-Connection Burst**
+
+Instead of holding connections open while computing, do ALL computation in memory first, then open ONE connection for a fast bulk insert:
+
+```python
+# ❌ WRONG: Hold connection open during computation
+def process_task_bad(items):
+    with get_connection() as conn:  # Connection held for entire duration!
+        for item in items:
+            result = expensive_computation(item)  # Minutes of CPU work
+            conn.execute("INSERT INTO results VALUES (?)", result)
+        conn.commit()
+    # Connection held for 5+ minutes per task
+    # 64 parallel tasks = 64 connections held for minutes = disaster
+
+# ✅ CORRECT: Memory-first, single-connection burst
+def process_task_good(items):
+    # Phase 1: Compute everything in memory (use RAM freely)
+    all_results = []
+    for item in items:
+        result = expensive_computation(item)  # RAM is cheap!
+        all_results.append(result)
+
+    # Phase 2: Single connection, fast bulk insert
+    with get_connection() as conn:  # Connection held for seconds
+        bulk_insert(conn, all_results)  # COPY protocol: 100K rows/second
+        conn.commit()
+    # Connection released in seconds, not minutes
+```
+
+**Why this works**:
+
+| Resource | Serverless Characteristic | Strategy |
+|----------|---------------------------|----------|
+| **RAM** | Abundant (4GB+ per worker), cheap | Use freely for computation |
+| **CPU** | Abundant, cheap | Parallelize computation |
+| **DB Connections** | Scarce (max_connections ÷ instances), expensive | Minimize hold time |
+
+**Connection budget formula**:
+
+```
+Available connections = max_connections × 0.5 (safety margin)
+Connections per task = Available connections ÷ concurrent_tasks
+
+Example:
+- PostgreSQL max_connections: 429
+- Safety margin: 429 × 0.5 = 214 available
+- Concurrent tasks: 64
+- Budget per task: 214 ÷ 64 = ~3 connections per task
+
+If your task needs 15 connections, you WILL exhaust the pool.
+```
+
+**Implementation pattern for bulk inserts**:
+
+```python
+def bulk_insert_with_copy(conn, table_name, rows: list[dict]):
+    """
+    Use PostgreSQL COPY protocol for maximum throughput.
+    100,000+ rows/second vs 1,000 rows/second for individual INSERTs.
+    """
+    from io import StringIO
+
+    # Build CSV in memory
+    buffer = StringIO()
+    columns = list(rows[0].keys())
+    for row in rows:
+        line = '\t'.join(str(row[col]) for col in columns)
+        buffer.write(line + '\n')
+    buffer.seek(0)
+
+    # Single COPY command (one round-trip to database)
+    with conn.cursor() as cur:
+        cur.copy_from(buffer, table_name, columns=columns)
+    conn.commit()
+```
+
+**Key principles**:
+
+1. **Never hold connections during computation** - RAM is cheap, connections are precious
+2. **Batch everything** - One connection for 100K rows beats 100K connections for 1 row each
+3. **Use COPY protocol** - 100x faster than individual INSERTs
+4. **Budget connections explicitly** - Calculate max connections per task before scaling
+5. **Fail fast on connection errors** - Don't retry connection exhaustion (it makes it worse)
+
+**Further reading**: See `docs_claude/ARCHITECTURE_REFERENCE.md` for implementation details and the H3 cascade handler refactoring that applied this pattern.
+
 ### Distributed Systems Challenges We Solved
 
 | Challenge | Our Solution |
@@ -249,6 +376,7 @@ $$ LANGUAGE plpgsql;
 | **Task coordination** | PostgreSQL as single source of truth |
 | **Retry logic** | Service Bus automatic retries + dead-letter queue |
 | **Observability** | Application Insights structured logging |
+| **Connection exhaustion** | Memory-first pattern, single-connection burst |
 
 ### Graceful Degradation (pgSTAC Optional)
 

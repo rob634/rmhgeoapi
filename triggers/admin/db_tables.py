@@ -403,7 +403,8 @@ class AdminDbTablesTrigger:
                                 # Parse GeoJSON string
                                 try:
                                     row_dict[col] = json.loads(val)
-                                except:
+                                except (json.JSONDecodeError, TypeError) as e:
+                                    logger.debug(f"Could not parse GeoJSON for column {col}: {e}")
                                     row_dict[col] = val
                             else:
                                 row_dict[col] = val

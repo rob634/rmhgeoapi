@@ -110,7 +110,7 @@ class HealthInterface(BaseInterface):
         jobs_queue = config.queues.jobs_queue
         raster_queue = config.queues.raster_tasks_queue
         vector_queue = config.queues.vector_tasks_queue
-        long_queue = config.queues.long_running_raster_tasks_queue
+        long_queue = config.queues.long_running_tasks_queue
 
         # OGC Features URL - clean up for display
         ogc_url = config.ogc_features_base_url

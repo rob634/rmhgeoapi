@@ -92,23 +92,40 @@ class ISO3AttributionService:
         Initialize ISO3 attribution service.
 
         Args:
-            admin0_table: Override admin0 table path (default: from config)
+            admin0_table: Override admin0 table path (default: via Promote Service)
         """
         self._admin0_table = admin0_table
-        self._config = None
         self._repo = None
 
     @property
     def admin0_table(self) -> str:
-        """Get admin0 table path from config or override."""
+        """
+        Get admin0 table path via Promote Service.
+
+        REQUIRES a promoted dataset with system_role='admin0_boundaries'.
+        There is NO FALLBACK to config defaults (23 DEC 2025).
+
+        Raises:
+            ValueError: If no system-reserved admin0 dataset is registered
+        """
         if self._admin0_table:
             return self._admin0_table
 
-        if self._config is None:
-            from config import get_config
-            self._config = get_config()
+        from services.promote_service import PromoteService
+        from core.models.promoted import SystemRole
 
-        return self._config.h3.system_admin0_table
+        service = PromoteService()
+        table = service.get_system_table_name(SystemRole.ADMIN0_BOUNDARIES.value)
+
+        if not table:
+            raise ValueError(
+                "No system-reserved dataset found with role 'admin0_boundaries'. "
+                "ISO3 attribution requires admin0 boundaries. "
+                "Promote your admin0 table with: POST /api/promote "
+                "{is_system_reserved: true, system_role: 'admin0_boundaries'}"
+            )
+
+        return table
 
     @property
     def repo(self):

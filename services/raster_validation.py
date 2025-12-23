@@ -23,7 +23,10 @@ Exports:
 """
 
 import sys
+import logging
 from typing import Any, Dict, Optional
+
+logger = logging.getLogger(__name__)
 
 # Lazy imports for Azure environment compatibility
 def _lazy_imports():
@@ -868,8 +871,8 @@ def _detect_raster_type(src, user_type: str) -> dict:
             if src.colorinterp[0] == ColorInterp.red:
                 evidence.append("Color interpretation: Red/Green/Blue")
                 confidence = "VERY_HIGH"
-        except:
-            pass
+        except (IndexError, AttributeError) as e:
+            logger.debug(f"Could not check color interpretation: {e}")
 
     # RGBA Detection (HIGH confidence) - CRITICAL FOR DRONE IMAGERY
     elif band_count == 4 and dtype in ['uint8', 'uint16']:
@@ -887,7 +890,8 @@ def _detect_raster_type(src, user_type: str) -> dict:
                 detected_type = RasterType.NIR.value
                 confidence = "MEDIUM"
                 evidence.append(f"4 bands, {dtype} (likely RGB + NIR)")
-        except:
+        except Exception as e:
+            logger.debug(f"Could not analyze 4th band for alpha detection: {e}")
             detected_type = RasterType.NIR.value
             confidence = "LOW"
             evidence.append(f"4 bands, {dtype} (could be RGBA or NIR)")
@@ -911,7 +915,8 @@ def _detect_raster_type(src, user_type: str) -> dict:
                     detected_type = RasterType.DEM.value
                     confidence = "MEDIUM"
                     evidence.append(f"Single-band {dtype} (likely elevation, smoothness: {smoothness:.3f})")
-            except:
+            except Exception as e:
+                logger.debug(f"Could not compute smoothness for DEM detection: {e}")
                 detected_type = RasterType.DEM.value
                 confidence = "LOW"
                 evidence.append(f"Single-band {dtype} (likely elevation)")
@@ -927,8 +932,8 @@ def _detect_raster_type(src, user_type: str) -> dict:
                     detected_type = RasterType.CATEGORICAL.value
                     confidence = "HIGH"
                     evidence.append(f"Single-band, {len(unique_values)} discrete integer values")
-        except:
-            pass
+        except Exception as e:
+            logger.debug(f"Could not analyze unique values for categorical detection: {e}")
 
     # Multispectral Detection (MEDIUM confidence)
     elif band_count >= 5:

@@ -626,16 +626,18 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                     try:
                         cur.execute("SELECT schema_name FROM information_schema.schemata WHERE schema_name = %s", (config.app_schema,))
                         app_schema_exists = cur.fetchone() is not None
-                    except:
+                    except Exception as e:
+                        self.logger.debug(f"Could not check app schema: {e}")
                         app_schema_exists = False
-                    
+
                     # Check postgis schema exists (for STAC data)
                     try:
                         cur.execute("SELECT schema_name FROM information_schema.schemata WHERE schema_name = %s", (config.postgis_schema,))
                         postgis_schema_exists = cur.fetchone() is not None
-                    except:
+                    except Exception as e:
+                        self.logger.debug(f"Could not check postgis schema: {e}")
                         postgis_schema_exists = False
-                    
+
                     # Count STAC items (optional) - use pg_stat for performance (12 DEC 2025)
                     try:
                         cur.execute("""
@@ -644,7 +646,8 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                         """, (config.postgis_schema,))
                         result = cur.fetchone()
                         stac_count = result[0] if result else 0
-                    except:
+                    except Exception as e:
+                        self.logger.debug(f"Could not count STAC items: {e}")
                         stac_count = "unknown"
                     
                     # Ensure app tables exist and validate schema
@@ -1213,14 +1216,20 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
         Check system reference tables required for spatial operations.
 
         System reference tables include:
-        - geo.curated_admin0 - Country boundaries for ISO3 attribution (curated dataset)
+        - admin0 boundaries - Country boundaries for ISO3 attribution
+
+        Resolution order (23 DEC 2025):
+        1. Check PromoteService for system-reserved dataset with role 'admin0_boundaries'
+        2. Fall back to config default (geo.curated_admin0)
 
         These tables are used for enriching STAC items with country codes and
         for H3 grid generation with land/ocean filtering.
 
         Returns:
             Dict with system reference tables health status including:
-            - admin0_table: Configured table name from H3Config
+            - admin0_table: Resolved table name (from promote service or config)
+            - admin0_source: Where table name came from ('promote_service' or 'config_default')
+            - promoted_dataset: If from promote service, the promoted_id
             - exists: Whether table exists in database
             - row_count: Number of country records loaded
             - columns: Required column availability (iso3, geom, name)
@@ -1229,13 +1238,52 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
         """
         def check_system_tables():
             from infrastructure.postgresql import PostgreSQLRepository
-            from config import get_config
 
-            config = get_config()
             repo = PostgreSQLRepository()
 
-            # Get configured admin0 table from H3Config
-            admin0_table = config.h3.system_admin0_table  # "geo.curated_admin0"
+            # Resolution: ONLY via promote service - no fallback (23 DEC 2025)
+            admin0_table = None
+            admin0_source = None
+            promoted_dataset_info = None
+            promote_error_msg = None
+
+            try:
+                from services.promote_service import PromoteService
+                from core.models.promoted import SystemRole
+
+                promote_service = PromoteService()
+                promoted = promote_service.get_by_system_role(SystemRole.ADMIN0_BOUNDARIES.value)
+
+                if promoted:
+                    # Get table name from STAC reference
+                    # Convention: stac_collection_id or stac_item_id maps to table name
+                    stac_id = promoted.get('stac_collection_id') or promoted.get('stac_item_id')
+                    if stac_id:
+                        # Table name is typically geo.{stac_id} or just the stac_id
+                        admin0_table = f"geo.{stac_id}"
+                        admin0_source = "promote_service"
+                        promoted_dataset_info = {
+                            "promoted_id": promoted.get('promoted_id'),
+                            "stac_type": "collection" if promoted.get('stac_collection_id') else "item",
+                            "stac_id": stac_id,
+                            "system_role": promoted.get('system_role'),
+                            "is_system_reserved": promoted.get('is_system_reserved', False)
+                        }
+            except Exception as promote_error:
+                promote_error_msg = str(promote_error)[:200]
+                self.logger.debug(f"Promote service lookup failed: {promote_error}")
+
+            # NO FALLBACK - if not found in promote service, report as not configured
+            if not admin0_table:
+                return {
+                    "admin0_table": None,
+                    "admin0_source": "not_configured",
+                    "exists": False,
+                    "error": "No system-reserved dataset found with role 'admin0_boundaries'",
+                    "impact": "ISO3 country attribution and H3 land filtering unavailable",
+                    "fix": "1. Create admin0 table via process_vector job\n2. Promote with: POST /api/promote {is_system_reserved: true, system_role: 'admin0_boundaries'}",
+                    "promote_service_error": promote_error_msg
+                }
 
             # Parse schema.table
             if '.' in admin0_table:
@@ -1256,13 +1304,18 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                         table_exists = cur.fetchone()['table_exists']
 
                         if not table_exists:
-                            return {
+                            result = {
                                 "admin0_table": admin0_table,
+                                "admin0_source": admin0_source,
                                 "exists": False,
                                 "error": f"Table {admin0_table} not found",
                                 "impact": "ISO3 country attribution will be unavailable for STAC items",
-                                "fix": "Load country boundaries from Natural Earth or GADM into geo.curated_admin0"
+                                "fix": "Run process_vector job to create admin0 table, then promote with system_role='admin0_boundaries'"
                             }
+                            if promoted_dataset_info:
+                                result["promoted_dataset"] = promoted_dataset_info
+                                result["note"] = "Promoted dataset exists but referenced table is missing"
+                            return result
 
                         # Check required columns
                         cur.execute("""
@@ -1302,6 +1355,7 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
 
                         result = {
                             "admin0_table": admin0_table,
+                            "admin0_source": admin0_source,
                             "exists": True,
                             "row_count": row_count,
                             "columns": {
@@ -1313,6 +1367,10 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                             "ready_for_attribution": ready,
                             "criticality": "low"  # Optional - only affects ISO3 country attribution
                         }
+
+                        # Add promoted dataset info if resolved via promote service
+                        if promoted_dataset_info:
+                            result["promoted_dataset"] = promoted_dataset_info
 
                         # Add warnings if issues detected
                         warnings = []
@@ -1334,14 +1392,18 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
 
             except Exception as e:
                 import traceback
-                return {
+                result = {
                     "admin0_table": admin0_table,
+                    "admin0_source": admin0_source,
                     "exists": False,
                     "error": str(e)[:200],
                     "error_type": type(e).__name__,
                     "traceback": traceback.format_exc()[:500],
                     "impact": "System reference tables check failed"
                 }
+                if promoted_dataset_info:
+                    result["promoted_dataset"] = promoted_dataset_info
+                return result
 
         return self.check_component_health(
             "system_reference_tables",

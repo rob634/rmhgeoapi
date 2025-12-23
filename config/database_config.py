@@ -308,9 +308,41 @@ class DatabaseConfig(BaseModel):
             "h3_schema": self.h3_schema
         }
 
+    @staticmethod
+    def _require_env(var_name: str, description: str) -> str:
+        """
+        Require an environment variable to be set (23 DEC 2025).
+
+        No fallback defaults - explicit configuration required.
+
+        Args:
+            var_name: Environment variable name
+            description: Human-readable description for error message
+
+        Returns:
+            Environment variable value
+
+        Raises:
+            ValueError: If environment variable is not set
+        """
+        value = os.environ.get(var_name)
+        if not value:
+            raise ValueError(
+                f"Required environment variable {var_name} is not set. "
+                f"Please set {var_name} to specify the {description}."
+            )
+        return value
+
     @classmethod
     def from_environment(cls):
         """Load from environment variables.
+
+        IMPORTANT (23 DEC 2025): Schema names now REQUIRE explicit configuration.
+        No fallback defaults. Set these environment variables:
+        - POSTGIS_SCHEMA (e.g., 'geo')
+        - APP_SCHEMA (e.g., 'app')
+        - PGSTAC_SCHEMA (e.g., 'pgstac')
+        - H3_SCHEMA (e.g., 'h3')
 
         POSTGIS_USER is optional when using managed identity authentication.
         It's only required for password-based authentication (local dev/troubleshooting).
@@ -321,10 +353,10 @@ class DatabaseConfig(BaseModel):
             user=os.environ.get("POSTGIS_USER"),  # Optional - only for password auth
             password=os.environ.get("POSTGIS_PASSWORD"),
             database=os.environ["POSTGIS_DATABASE"],
-            postgis_schema=os.environ.get("POSTGIS_SCHEMA", DatabaseDefaults.POSTGIS_SCHEMA),
-            app_schema=os.environ.get("APP_SCHEMA", DatabaseDefaults.APP_SCHEMA),
-            pgstac_schema=os.environ.get("PGSTAC_SCHEMA", DatabaseDefaults.PGSTAC_SCHEMA),
-            h3_schema=os.environ.get("H3_SCHEMA", DatabaseDefaults.H3_SCHEMA),
+            postgis_schema=cls._require_env("POSTGIS_SCHEMA", "geo schema name (e.g., 'geo')"),
+            app_schema=cls._require_env("APP_SCHEMA", "app schema name (e.g., 'app')"),
+            pgstac_schema=cls._require_env("PGSTAC_SCHEMA", "pgstac schema name (e.g., 'pgstac')"),
+            h3_schema=cls._require_env("H3_SCHEMA", "h3 schema name (e.g., 'h3')"),
             use_managed_identity=os.environ.get("USE_MANAGED_IDENTITY", "true").lower() == "true",
             managed_identity_admin_name=os.environ.get("DB_ADMIN_MANAGED_IDENTITY_NAME", AzureDefaults.MANAGED_IDENTITY_NAME),
             managed_identity_client_id=os.environ.get("DB_ADMIN_MANAGED_IDENTITY_CLIENT_ID"),

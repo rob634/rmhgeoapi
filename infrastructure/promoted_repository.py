@@ -89,6 +89,7 @@ class PromotedDatasetRepository(PostgreSQLRepository):
                             thumbnail_url, thumbnail_generated_at,
                             tags, viewer_config, style_id,
                             in_gallery, gallery_order,
+                            is_system_reserved, system_role,
                             promoted_at, updated_at
                         ) VALUES (
                             %s,
@@ -96,6 +97,7 @@ class PromotedDatasetRepository(PostgreSQLRepository):
                             %s, %s,
                             %s, %s,
                             %s, %s, %s,
+                            %s, %s,
                             %s, %s,
                             %s, %s
                         )
@@ -111,6 +113,7 @@ class PromotedDatasetRepository(PostgreSQLRepository):
                         dataset.thumbnail_url, dataset.thumbnail_generated_at,
                         dataset.tags, dataset.viewer_config, dataset.style_id,
                         dataset.in_gallery, dataset.gallery_order,
+                        dataset.is_system_reserved, dataset.system_role,
                         now, now
                     )
                 )
@@ -230,6 +233,55 @@ class PromotedDatasetRepository(PostgreSQLRepository):
                 rows = cur.fetchall()
                 return [self._row_to_model(row) for row in rows]
 
+    def get_by_system_role(self, system_role: str) -> Optional[PromotedDataset]:
+        """
+        Get a promoted dataset by system role.
+
+        System roles are unique - only one dataset can have a given role.
+
+        Args:
+            system_role: System role identifier (e.g., 'admin0_boundaries')
+
+        Returns:
+            PromotedDataset if found, None otherwise
+        """
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    sql.SQL("""
+                        SELECT * FROM {}.{}
+                        WHERE system_role = %s AND is_system_reserved = TRUE
+                    """).format(
+                        sql.Identifier(self.schema),
+                        sql.Identifier(self.table)
+                    ),
+                    (system_role,)
+                )
+                row = cur.fetchone()
+                return self._row_to_model(row) if row else None
+
+    def list_system_reserved(self) -> List[PromotedDataset]:
+        """
+        List all system-reserved datasets.
+
+        Returns:
+            List of PromotedDataset models that are system-reserved
+        """
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    sql.SQL("""
+                        SELECT * FROM {}.{}
+                        WHERE is_system_reserved = TRUE
+                        ORDER BY system_role ASC NULLS LAST, promoted_at DESC
+                    """).format(
+                        sql.Identifier(self.schema),
+                        sql.Identifier(self.table)
+                    )
+                )
+                rows = cur.fetchall()
+                return [self._row_to_model(row) for row in rows]
+
     # =========================================================================
     # UPDATE
     # =========================================================================
@@ -335,16 +387,29 @@ class PromotedDatasetRepository(PostgreSQLRepository):
     # DELETE (DEMOTE)
     # =========================================================================
 
-    def delete(self, promoted_id: str) -> bool:
+    def delete(self, promoted_id: str, confirm_system: bool = False) -> bool:
         """
         Delete (demote) a promoted dataset entirely.
 
         Args:
             promoted_id: Dataset to demote
+            confirm_system: Must be True to delete system-reserved datasets
 
         Returns:
             True if deleted, False if not found
+
+        Raises:
+            ValueError: If trying to delete system-reserved dataset without confirm_system=True
         """
+        # Check if system-reserved
+        existing = self.get_by_id(promoted_id)
+        if existing and existing.is_system_reserved and not confirm_system:
+            raise ValueError(
+                f"Cannot demote system-reserved dataset '{promoted_id}' "
+                f"(role: {existing.system_role}). "
+                f"Use confirm_system=True to override protection."
+            )
+
         with self._get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -380,6 +445,8 @@ class PromotedDatasetRepository(PostgreSQLRepository):
             style_id=row.get('style_id'),
             in_gallery=row.get('in_gallery', False),
             gallery_order=row.get('gallery_order'),
+            is_system_reserved=row.get('is_system_reserved', False),
+            system_role=row.get('system_role'),
             promoted_at=row.get('promoted_at'),
             updated_at=row.get('updated_at')
         )

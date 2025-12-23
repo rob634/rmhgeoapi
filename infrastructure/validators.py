@@ -757,8 +757,11 @@ def validate_blob_exists_with_size(params: Dict[str, Any], config: Dict[str, Any
         if env_value:
             try:
                 max_size_mb = int(env_value)
-            except ValueError:
-                pass
+            except ValueError as e:
+                raise ValueError(
+                    f"Invalid value for environment variable {max_size_env}: '{env_value}' "
+                    f"is not a valid integer. Please set {max_size_env} to an integer value (MB)."
+                ) from e
 
     # Get zone from config (default: bronze for input validation)
     zone = config.get('zone', 'bronze')

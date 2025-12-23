@@ -615,8 +615,8 @@ class PostgreSQLRepository(BaseRepository):
                     host_port = after_at.split('/')[0]
                     host = host_port.split(':')[0] if ':' in host_port else host_port
                     logger.debug(f"  Connecting to host: {host}")
-                except:
-                    pass  # Don't fail on parsing errors
+                except (IndexError, ValueError) as parse_err:
+                    logger.debug(f"  Could not parse host from connection string: {parse_err}")
             
             conn = psycopg.connect(self.conn_string, row_factory=dict_row)
             logger.debug(f"✅ PostgreSQL connection established successfully")
@@ -637,8 +637,8 @@ class PostgreSQLRepository(BaseRepository):
                         host_port = after_at.split('/')[0]
                         host = host_port.split(':')[0] if ':' in host_port else host_port
                         logger.error(f"  Failed to resolve hostname: {host}")
-                    except:
-                        pass
+                    except (IndexError, ValueError) as parse_err:
+                        logger.error(f"  Could not extract hostname for error reporting: {parse_err}")
             
             # Rollback any pending transaction
             if conn:

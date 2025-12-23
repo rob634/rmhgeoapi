@@ -44,6 +44,20 @@ class PromotedDatasetType(str, Enum):
     ITEM = "item"              # Individual STAC Item
 
 
+class SystemRole(str, Enum):
+    """
+    System roles for reserved datasets.
+
+    System-reserved datasets are critical for platform operations.
+    They require confirmation to demote and can be discovered by role.
+    """
+    ADMIN0_BOUNDARIES = "admin0_boundaries"  # Country boundaries for spatial attribution
+    H3_LAND_GRID = "h3_land_grid"            # H3 land-only grid cells
+    # Future roles:
+    # ADMIN1_BOUNDARIES = "admin1_boundaries"  # State/province boundaries
+    # COASTLINES = "coastlines"                # Coastline reference data
+
+
 class PromotedDataset(BaseModel):
     """
     Registry record for a promoted dataset.
@@ -152,6 +166,17 @@ class PromotedDataset(BaseModel):
         description="Display order in gallery (1 = first). NULL if not in gallery."
     )
 
+    # System Reserved (23 DEC 2025)
+    is_system_reserved: bool = Field(
+        default=False,
+        description="If True, dataset is critical for system operations and protected from accidental demotion"
+    )
+    system_role: Optional[str] = Field(
+        default=None,
+        max_length=50,
+        description="System role identifier (e.g., 'admin0_boundaries'). Enables lookup by role."
+    )
+
     # Audit
     promoted_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc),
@@ -196,5 +221,6 @@ class PromotedDataset(BaseModel):
 # Module exports
 __all__ = [
     'PromotedDataset',
-    'PromotedDatasetType'
+    'PromotedDatasetType',
+    'SystemRole'
 ]

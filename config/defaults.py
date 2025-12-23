@@ -73,16 +73,24 @@ class AzureDefaults:
 
 class DatabaseDefaults:
     """
-    Database configuration defaults - safe for any deployment.
+    Database configuration reference values.
 
-    These are standard PostgreSQL/PostGIS settings that work universally.
+    IMPORTANT (23 DEC 2025): Schema names REQUIRE explicit environment variables.
+    These constants are for reference only - NOT used as fallback defaults.
+
+    Required environment variables:
+    - POSTGIS_SCHEMA (standard value: 'geo')
+    - APP_SCHEMA (standard value: 'app')
+    - PGSTAC_SCHEMA (standard value: 'pgstac')
+    - H3_SCHEMA (standard value: 'h3')
     """
 
     PORT = 5432
-    POSTGIS_SCHEMA = "geo"
-    APP_SCHEMA = "app"
-    PGSTAC_SCHEMA = "pgstac"
-    H3_SCHEMA = "h3"
+    # Schema names - reference values only, env vars REQUIRED
+    POSTGIS_SCHEMA = "geo"      # Set POSTGIS_SCHEMA env var
+    APP_SCHEMA = "app"          # Set APP_SCHEMA env var
+    PGSTAC_SCHEMA = "pgstac"    # Set PGSTAC_SCHEMA env var
+    H3_SCHEMA = "h3"            # Set H3_SCHEMA env var
     CONNECTION_TIMEOUT_SECONDS = 30
     MIN_CONNECTIONS = 1
     MAX_CONNECTIONS = 20
@@ -438,10 +446,18 @@ class H3Defaults:
     H3 hexagonal spatial indexing defaults.
 
     Controls H3 grid generation and spatial filtering.
+
+    IMPORTANT (23 DEC 2025): Admin0 table lookup REQUIRES a promoted dataset
+    with system_role='admin0_boundaries'. There is NO FALLBACK.
+
+    To configure admin0:
+        1. Create table via process_vector job
+        2. Promote with: POST /api/promote {is_system_reserved: true, system_role: 'admin0_boundaries'}
     """
 
-    SYSTEM_ADMIN0_TABLE = "geo.curated_admin0"  # Renamed from system_admin0 (15 DEC 2025)
-    SPATIAL_FILTER_TABLE = "curated_admin0"     # Curated datasets use curated_ prefix
+    # System role for admin0 lookup (REQUIRED - no fallback)
+    ADMIN0_SYSTEM_ROLE = "admin0_boundaries"
+
     DEFAULT_RESOLUTION = 4  # ~1,770 km² per cell
     ENABLE_LAND_FILTER = True
 

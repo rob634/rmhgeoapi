@@ -28,6 +28,27 @@ from pydantic import ValidationError
 logger = logging.getLogger(__name__)
 
 
+class InvalidParameterError(Exception):
+    """
+    OGC API Features parameter validation error.
+
+    Raised when query parameter has invalid value per OGC API Features Core spec.
+    See: https://docs.ogc.org/is/17-069r3/17-069r3.html#query_parameters
+
+    Requirement /req/core/query-param-invalid:
+    "Server SHALL respond with status code 400 if request URI includes
+    a query parameter with an INVALID value"
+    """
+
+    def __init__(self, param_name: str, param_value: str, expected_type: str):
+        self.param_name = param_name
+        self.param_value = param_value
+        self.expected_type = expected_type
+        super().__init__(
+            f"Invalid value '{param_value}' for parameter '{param_name}': {expected_type}"
+        )
+
+
 # ============================================================================
 # TRIGGER REGISTRY FUNCTION
 # ============================================================================
@@ -378,8 +399,16 @@ class OGCItemsTrigger(BaseOGCTrigger):
                     status_code=400
                 )
 
-            # Parse query parameters
-            query_params = self._parse_query_parameters(req)
+            # Parse query parameters (OGC compliant - raises on invalid values)
+            try:
+                query_params = self._parse_query_parameters(req)
+            except InvalidParameterError as e:
+                logger.warning(f"Invalid query parameter: {e}")
+                return self._error_response(
+                    message=str(e),
+                    status_code=400,
+                    error_type="InvalidParameterValue"
+                )
 
             # Separate OGC standard params from property filters
             ogc_param_names = {
@@ -444,59 +473,67 @@ class OGCItemsTrigger(BaseOGCTrigger):
         """
         Parse and normalize query parameters from request.
 
+        OGC API Features Core compliant - returns 400 on invalid values.
+        See: /req/core/query-param-invalid
+
         Args:
             req: Azure Functions HTTP request
 
         Returns:
             Dict of parsed parameters with proper types
+
+        Raises:
+            InvalidParameterError: If any parameter has an invalid value
         """
         params = {}
 
-        # Pagination
+        # Pagination - integers required
         if 'limit' in req.params:
             try:
                 params['limit'] = int(req.params['limit'])
             except ValueError:
-                pass  # Will be caught by Pydantic validation
+                raise InvalidParameterError('limit', req.params['limit'], 'must be a positive integer')
 
         if 'offset' in req.params:
             try:
                 params['offset'] = int(req.params['offset'])
             except ValueError:
-                pass
+                raise InvalidParameterError('offset', req.params['offset'], 'must be a non-negative integer')
 
-        # Spatial filter (bbox)
+        # Spatial filter (bbox) - 4 or 6 floats required
         if 'bbox' in req.params:
+            bbox_str = req.params['bbox']
             try:
-                bbox_str = req.params['bbox']
                 bbox_parts = bbox_str.split(',')
-                params['bbox'] = [float(x) for x in bbox_parts]
-            except (ValueError, AttributeError):
-                pass  # Will be caught by Pydantic validation
+                if len(bbox_parts) not in (4, 6):
+                    raise InvalidParameterError('bbox', bbox_str, 'must have 4 values (2D) or 6 values (3D)')
+                params['bbox'] = [float(x.strip()) for x in bbox_parts]
+            except ValueError:
+                raise InvalidParameterError('bbox', bbox_str, 'all values must be valid numbers')
 
-        # Temporal filter
+        # Temporal filter - string, validated elsewhere
         if 'datetime' in req.params:
             params['datetime'] = req.params['datetime']
 
         if 'datetime_property' in req.params:
             params['datetime_property'] = req.params['datetime_property']
 
-        # Sorting
+        # Sorting - string
         if 'sortby' in req.params:
             params['sortby'] = req.params['sortby']
 
-        # Geometry optimization
+        # Geometry optimization - integers/floats required
         if 'precision' in req.params:
             try:
                 params['precision'] = int(req.params['precision'])
             except ValueError:
-                pass
+                raise InvalidParameterError('precision', req.params['precision'], 'must be a non-negative integer')
 
         if 'simplify' in req.params:
             try:
                 params['simplify'] = float(req.params['simplify'])
             except ValueError:
-                pass
+                raise InvalidParameterError('simplify', req.params['simplify'], 'must be a valid number')
 
         # CRS
         if 'crs' in req.params:

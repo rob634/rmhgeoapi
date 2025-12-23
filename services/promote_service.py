@@ -32,8 +32,10 @@ import logging
 
 from util_logger import LoggerFactory, ComponentType
 from core.models import PromotedDataset
+from core.models.promoted import SystemRole
 from infrastructure import PromotedDatasetRepository
 from infrastructure.pgstac_repository import PgStacRepository
+from infrastructure.pgstac_bootstrap import get_item_by_id
 
 logger = LoggerFactory.create_logger(ComponentType.SERVICE, "PromoteService")
 
@@ -70,7 +72,9 @@ class PromoteService:
         gallery: bool = False,
         gallery_order: Optional[int] = None,
         viewer_config: Optional[Dict[str, Any]] = None,
-        style_id: Optional[str] = None
+        style_id: Optional[str] = None,
+        is_system_reserved: bool = False,
+        system_role: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Promote a STAC collection or item.
@@ -90,6 +94,8 @@ class PromoteService:
             gallery_order: Optional gallery order (auto-assigned if not provided)
             viewer_config: Optional viewer customization
             style_id: Optional OGC Style ID
+            is_system_reserved: If True, marks as critical system dataset (protected from demotion)
+            system_role: System role identifier (e.g., 'admin0_boundaries') for discovery
 
         Returns:
             {
@@ -97,6 +103,8 @@ class PromoteService:
                 "promoted_id": str,
                 "action": "created" | "updated" | "gallery_added",
                 "in_gallery": bool,
+                "is_system_reserved": bool,
+                "system_role": str (if set),
                 "data": PromotedDataset dict
             }
         """
@@ -179,6 +187,22 @@ class PromoteService:
                         "data": existing.model_dump()
                     }
 
+        # Validate system_role if provided
+        if system_role:
+            valid_roles = [r.value for r in SystemRole]
+            if system_role not in valid_roles:
+                return {
+                    "success": False,
+                    "error": f"Invalid system_role '{system_role}'. Valid roles: {valid_roles}"
+                }
+            # Check if role is already assigned to another dataset
+            existing_role = self._repo.get_by_system_role(system_role)
+            if existing_role and existing_role.promoted_id != promoted_id:
+                return {
+                    "success": False,
+                    "error": f"System role '{system_role}' is already assigned to '{existing_role.promoted_id}'"
+                }
+
         # Create new promoted entry
         dataset = PromotedDataset(
             promoted_id=promoted_id,
@@ -190,7 +214,9 @@ class PromoteService:
             in_gallery=gallery,
             gallery_order=gallery_order if gallery else None,
             viewer_config=viewer_config or {},
-            style_id=style_id
+            style_id=style_id,
+            is_system_reserved=is_system_reserved,
+            system_role=system_role
         )
 
         try:
@@ -208,6 +234,8 @@ class PromoteService:
                 "promoted_id": promoted_id,
                 "action": "created",
                 "in_gallery": created.in_gallery,
+                "is_system_reserved": created.is_system_reserved,
+                "system_role": created.system_role,
                 "data": created.model_dump()
             }
 
@@ -226,28 +254,40 @@ class PromoteService:
     # DEMOTE OPERATIONS
     # =========================================================================
 
-    def demote(self, promoted_id: str) -> Dict[str, Any]:
+    def demote(self, promoted_id: str, confirm_system: bool = False) -> Dict[str, Any]:
         """
         Demote a dataset (remove from promoted entirely).
 
         Args:
             promoted_id: Dataset to demote
+            confirm_system: Must be True to demote system-reserved datasets
 
         Returns:
             {"success": bool, "promoted_id": str}
+
+        Note:
+            System-reserved datasets require confirm_system=True to demote.
+            This protects critical system datasets from accidental removal.
         """
         logger.info(f"Demoting dataset: {promoted_id}")
 
-        if self._repo.delete(promoted_id):
-            return {
-                "success": True,
-                "promoted_id": promoted_id,
-                "action": "demoted"
-            }
-        else:
+        try:
+            if self._repo.delete(promoted_id, confirm_system=confirm_system):
+                return {
+                    "success": True,
+                    "promoted_id": promoted_id,
+                    "action": "demoted"
+                }
+            else:
+                return {
+                    "success": False,
+                    "error": f"Promoted dataset '{promoted_id}' not found"
+                }
+        except ValueError as e:
+            # Raised when trying to delete system-reserved without confirm
             return {
                 "success": False,
-                "error": f"Promoted dataset '{promoted_id}' not found"
+                "error": str(e)
             }
 
     # =========================================================================
@@ -378,6 +418,72 @@ class PromoteService:
         return [d.model_dump() for d in datasets]
 
     # =========================================================================
+    # SYSTEM DATASET OPERATIONS (23 DEC 2025)
+    # =========================================================================
+
+    def get_by_system_role(self, system_role: str) -> Optional[Dict[str, Any]]:
+        """
+        Get a promoted dataset by system role.
+
+        System roles are unique - only one dataset can have a given role.
+        Used by H3 and other workflows to discover system datasets dynamically.
+
+        Args:
+            system_role: System role identifier (e.g., 'admin0_boundaries')
+
+        Returns:
+            PromotedDataset dict or None
+        """
+        dataset = self._repo.get_by_system_role(system_role)
+        return dataset.model_dump() if dataset else None
+
+    def list_system_reserved(self) -> List[Dict[str, Any]]:
+        """
+        List all system-reserved datasets.
+
+        Returns:
+            List of PromotedDataset dicts that are system-reserved
+        """
+        datasets = self._repo.list_system_reserved()
+        return [d.model_dump() for d in datasets]
+
+    def get_system_table_name(self, system_role: str) -> Optional[str]:
+        """
+        Get the PostGIS table name for a system role.
+
+        Convenience method for workflows that need to look up system tables.
+        Extracts the table name from the STAC item properties.
+
+        Args:
+            system_role: System role identifier (e.g., 'admin0_boundaries')
+
+        Returns:
+            Table name (e.g., 'curated_admin0') or None if not found
+        """
+        dataset = self._repo.get_by_system_role(system_role)
+        if not dataset:
+            logger.warning(f"No system dataset found for role: {system_role}")
+            return None
+
+        # Get the STAC item to extract table name
+        if dataset.stac_item_id:
+            item = self._get_item_for_validation(dataset.stac_item_id)
+            if item and 'properties' in item:
+                # Look for postgis:table property
+                table = item['properties'].get('postgis:table')
+                if table:
+                    return table
+                # Fallback: extract from title or id
+                logger.warning(
+                    f"STAC item '{dataset.stac_item_id}' missing postgis:table property"
+                )
+
+        # Fallback: derive from promoted_id
+        # Convention: promoted_id should match table name for system datasets
+        logger.info(f"Using promoted_id as table name fallback: {dataset.promoted_id}")
+        return dataset.promoted_id.replace('-', '_')
+
+    # =========================================================================
     # STAC VERIFICATION
     # =========================================================================
 
@@ -393,10 +499,10 @@ class PromoteService:
     def _verify_stac_item_exists(self, item_id: str) -> bool:
         """Check if a STAC item exists in PgSTAC."""
         try:
-            # PgSTAC items are typically accessed via search
-            # For now, we'll do a simple query
-            item = self._pgstac.get_item_by_id(item_id)
-            return item is not None
+            # Use standalone function from pgstac_bootstrap (23 DEC 2025 - bug fix)
+            result = get_item_by_id(item_id)
+            # get_item_by_id returns item dict on success, or {"error": ...} on failure
+            return result is not None and "error" not in result
         except Exception as e:
             logger.warning(f"Failed to verify STAC item '{item_id}': {e}")
             # If we can't verify, allow it (may be external STAC)

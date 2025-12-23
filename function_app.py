@@ -564,6 +564,78 @@ def h3_stats(req: func.HttpRequest) -> func.HttpResponse:
         )
 
 
+# ============================================================================
+# PROMOTE API - Dataset Promotion System (22 DEC 2025)
+# ============================================================================
+# These endpoints manage the promoted datasets system:
+# - POST/GET /api/promote - Create promoted dataset or list all
+# - GET/PUT/DELETE /api/promote/{promoted_id} - CRUD for specific dataset
+# - POST/DELETE /api/promote/{promoted_id}/gallery - Gallery management
+# - GET /api/promote/gallery - List gallery items
+# - GET /api/promote/system - List system-reserved datasets (23 DEC 2025)
+
+from triggers.promote import (
+    handle_promote,
+    handle_promote_item,
+    handle_gallery,
+    handle_gallery_list,
+    handle_system_reserved
+)
+
+
+@app.route(route="promote", methods=["GET", "POST"])
+def promote_handler(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Promote a STAC collection/item or list all promoted datasets.
+
+    POST /api/promote - Create promoted dataset
+    GET /api/promote - List all promoted datasets
+    """
+    return handle_promote(req)
+
+
+@app.route(route="promote/gallery", methods=["GET"])
+def promote_gallery_list_handler(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    List gallery items in display order: GET /api/promote/gallery
+    """
+    return handle_gallery_list(req)
+
+
+@app.route(route="promote/system", methods=["GET"])
+def promote_system_reserved_handler(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    List system-reserved datasets: GET /api/promote/system
+
+    Query Parameters:
+        role: Filter by system_role (e.g., 'admin0_boundaries')
+    """
+    return handle_system_reserved(req)
+
+
+@app.route(route="promote/{promoted_id}", methods=["GET", "PUT", "DELETE"])
+def promote_item_handler(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Get, update, or demote a promoted dataset.
+
+    GET /api/promote/{promoted_id} - Get details
+    PUT /api/promote/{promoted_id} - Update
+    DELETE /api/promote/{promoted_id}?confirm_system=true - Demote
+    """
+    return handle_promote_item(req)
+
+
+@app.route(route="promote/{promoted_id}/gallery", methods=["POST", "DELETE"])
+def promote_gallery_handler(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Add or remove a promoted dataset from the gallery.
+
+    POST /api/promote/{promoted_id}/gallery - Add to gallery
+    DELETE /api/promote/{promoted_id}/gallery - Remove from gallery
+    """
+    return handle_gallery(req)
+
+
 # 🚨 NUCLEAR RED BUTTON - DEVELOPMENT ONLY (⚠️ DEPRECATED - COMMENTED OUT 16 NOV 2025)
 # Use /api/dbadmin/maintenance/nuke instead
 # @app.route(route="db/schema/nuke", methods=["POST"])

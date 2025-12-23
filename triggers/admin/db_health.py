@@ -85,6 +85,8 @@ class AdminDbHealthTrigger:
                 return self._get_health(req)
             elif path == 'performance':
                 return self._get_performance(req)
+            elif path == 'utilization':
+                return self._get_utilization(req)
             else:
                 return func.HttpResponse(
                     body=json.dumps({'error': f'Unknown operation: {path}'}),
@@ -395,6 +397,209 @@ class AdminDbHealthTrigger:
             return func.HttpResponse(
                 body=json.dumps({
                     'error': str(e),
+                    'timestamp': datetime.now(timezone.utc).isoformat()
+                }),
+                status_code=500,
+                mimetype='application/json'
+            )
+
+
+    def _get_utilization(self, req: func.HttpRequest) -> func.HttpResponse:
+        """
+        Get database utilization snapshot using util_logger functions (23 DEC 2025).
+
+        GET /api/dbadmin/health/utilization
+
+        Tests the new get_database_environment() and get_database_stats() functions
+        from util_logger.py. These use their own connection with timeout.
+
+        Note: Ignores DEBUG_MODE check for testing purposes.
+
+        Returns:
+            {
+                "environment": {
+                    "postgresql_version": "17.2",
+                    "postgis_version": "3.5...",
+                    "database_size_mb": 512.3,
+                    "max_connections": 50,
+                    "shared_buffers": "128MB",
+                    ...
+                },
+                "stats": {
+                    "connection_utilization_percent": 15.2,
+                    "active_connections": 5,
+                    "cache_hit_ratio": 0.994,
+                    ...
+                },
+                "timing": {
+                    "environment_ms": 45.2,
+                    "stats_ms": 32.1,
+                    "total_ms": 77.3
+                },
+                "timestamp": "2025-12-23T..."
+            }
+        """
+        import time
+        logger.info("📊 Getting database utilization snapshot")
+
+        try:
+            total_start = time.time()
+
+            # Import the new functions
+            from util_logger import (
+                get_database_environment,
+                get_database_stats,
+                _get_database_connection,
+                _DATABASE_STATS_TIMEOUT_SECONDS
+            )
+
+            # Test environment (force refresh to test actual query time)
+            env_start = time.time()
+            environment = get_database_environment(force_refresh=True)
+            env_ms = round((time.time() - env_start) * 1000, 1)
+
+            # Test stats - bypass DEBUG_MODE check by calling connection directly
+            stats_start = time.time()
+            stats = None
+            stats_error = None
+
+            conn = None
+            try:
+                conn = _get_database_connection(timeout_seconds=30)
+                if conn:
+                    with conn.cursor() as cur:
+                        # Connection pool stats
+                        cur.execute("""
+                            SELECT
+                                count(*) as total,
+                                count(*) FILTER (WHERE state = 'active') as active,
+                                count(*) FILTER (WHERE state = 'idle') as idle,
+                                count(*) FILTER (WHERE state = 'idle in transaction') as idle_in_transaction,
+                                count(*) FILTER (WHERE wait_event_type = 'Lock') as locks_waiting
+                            FROM pg_stat_activity
+                            WHERE backend_type = 'client backend'
+                        """)
+                        row = cur.fetchone()
+                        total_conn = row[0] or 0
+                        active_conn = row[1] or 0
+                        idle_conn = row[2] or 0
+                        idle_in_tx = row[3] or 0
+                        locks_waiting = row[4] or 0
+
+                        # Max connections
+                        cur.execute("SHOW max_connections")
+                        max_conn = int(cur.fetchone()[0])
+                        utilization = round((total_conn / max_conn * 100), 1) if max_conn > 0 else 0
+
+                        # Cache hit ratio
+                        cur.execute("""
+                            SELECT sum(heap_blks_hit) / NULLIF(sum(heap_blks_hit + heap_blks_read), 0)
+                            FROM pg_statio_user_tables
+                        """)
+                        cache_hit = cur.fetchone()[0]
+                        cache_hit_ratio = round(float(cache_hit), 4) if cache_hit else 0.0
+
+                        # Index hit ratio
+                        cur.execute("""
+                            SELECT sum(idx_blks_hit) / NULLIF(sum(idx_blks_hit + idx_blks_read), 0)
+                            FROM pg_statio_user_indexes
+                        """)
+                        index_hit = cur.fetchone()[0]
+                        index_hit_ratio = round(float(index_hit), 4) if index_hit else 0.0
+
+                        # Long-running queries
+                        cur.execute("""
+                            SELECT count(*)
+                            FROM pg_stat_activity
+                            WHERE state = 'active'
+                            AND now() - query_start > interval '5 minutes'
+                            AND pid != pg_backend_pid()
+                        """)
+                        long_queries = cur.fetchone()[0] or 0
+
+                        # Oldest transaction
+                        cur.execute("""
+                            SELECT EXTRACT(EPOCH FROM (now() - min(xact_start)))
+                            FROM pg_stat_activity
+                            WHERE xact_start IS NOT NULL
+                            AND pid != pg_backend_pid()
+                        """)
+                        oldest_tx = cur.fetchone()[0]
+                        oldest_tx_sec = round(float(oldest_tx), 1) if oldest_tx else 0.0
+
+                        # Transaction stats
+                        cur.execute("""
+                            SELECT xact_commit, xact_rollback
+                            FROM pg_stat_database
+                            WHERE datname = current_database()
+                        """)
+                        tx_row = cur.fetchone()
+                        xact_commit = tx_row[0] or 0
+                        xact_rollback = tx_row[1] or 0
+                        total_tx = xact_commit + xact_rollback
+                        rollback_ratio = round(xact_rollback / total_tx, 4) if total_tx > 0 else 0.0
+
+                        stats = {
+                            'connection_utilization_percent': utilization,
+                            'active_connections': active_conn,
+                            'idle_connections': idle_conn,
+                            'idle_in_transaction': idle_in_tx,
+                            'total_connections': total_conn,
+                            'max_connections': max_conn,
+                            'cache_hit_ratio': cache_hit_ratio,
+                            'index_hit_ratio': index_hit_ratio,
+                            'long_running_queries': long_queries,
+                            'locks_waiting': locks_waiting,
+                            'oldest_transaction_sec': oldest_tx_sec,
+                            'xact_commit_total': xact_commit,
+                            'xact_rollback_total': xact_rollback,
+                            'rollback_ratio': rollback_ratio,
+                        }
+                else:
+                    stats_error = "Connection failed"
+            except Exception as e:
+                stats_error = str(e)[:200]
+            finally:
+                if conn:
+                    try:
+                        conn.close()
+                    except Exception:
+                        pass
+
+            stats_ms = round((time.time() - stats_start) * 1000, 1)
+            total_ms = round((time.time() - total_start) * 1000, 1)
+
+            result = {
+                'environment': environment,
+                'stats': stats if stats else {'error': stats_error},
+                'timing': {
+                    'environment_ms': env_ms,
+                    'stats_ms': stats_ms,
+                    'total_ms': total_ms,
+                    'timeout_setting_seconds': _DATABASE_STATS_TIMEOUT_SECONDS
+                },
+                'health_endpoint_ready': total_ms < 500,  # Should be <500ms for health endpoint
+                'timestamp': datetime.now(timezone.utc).isoformat()
+            }
+
+            # Determine HTTP status
+            status_code = 200 if environment and stats else 500
+
+            logger.info(f"✅ Database utilization: env={env_ms}ms, stats={stats_ms}ms, total={total_ms}ms")
+
+            return func.HttpResponse(
+                body=json.dumps(result, indent=2),
+                status_code=status_code,
+                mimetype='application/json'
+            )
+
+        except Exception as e:
+            logger.error(f"❌ Error getting database utilization: {e}")
+            logger.error(traceback.format_exc())
+            return func.HttpResponse(
+                body=json.dumps({
+                    'error': str(e),
+                    'traceback': traceback.format_exc()[:500],
                     'timestamp': datetime.now(timezone.utc).isoformat()
                 }),
                 status_code=500,

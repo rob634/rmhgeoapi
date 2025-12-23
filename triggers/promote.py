@@ -57,11 +57,17 @@ def handle_promote(req: func.HttpRequest) -> func.HttpResponse:
         "gallery": true,                           // Optional - add to gallery
         "gallery_order": 1,                        // Optional - gallery display order
         "viewer_config": {...},                    // Optional - viewer settings
-        "style_id": "flood-style"                  // Optional - OGC Style ID
+        "style_id": "flood-style",                 // Optional - OGC Style ID
+        "is_system_reserved": true,                // Optional - mark as system-critical (23 DEC 2025)
+        "system_role": "admin0_boundaries"         // Optional - system role for discovery
     }
 
     Query Parameters:
         gallery=true: Also add to gallery when promoting
+
+    System Roles (23 DEC 2025):
+        admin0_boundaries: Country boundaries for ISO3 attribution
+        h3_land_grid: H3 land-only grid cells for spatial operations
     """
     try:
         method = req.method.upper()
@@ -123,6 +129,10 @@ def handle_promote(req: func.HttpRequest) -> func.HttpResponse:
                 gallery = True
             gallery_order = body.get('gallery_order')
 
+            # System reserved flags (23 DEC 2025)
+            is_system_reserved = body.get('is_system_reserved', False)
+            system_role = body.get('system_role')
+
             # Promote
             service = PromoteService()
             result = service.promote(
@@ -135,7 +145,9 @@ def handle_promote(req: func.HttpRequest) -> func.HttpResponse:
                 gallery=gallery,
                 gallery_order=gallery_order,
                 viewer_config=viewer_config,
-                style_id=style_id
+                style_id=style_id,
+                is_system_reserved=is_system_reserved,
+                system_role=system_role
             )
 
             status_code = 201 if result.get('action') == 'created' else 200
@@ -193,8 +205,13 @@ def handle_promote_item(req: func.HttpRequest) -> func.HttpResponse:
         "description": "New description",
         "tags": ["new", "tags"],
         "viewer_config": {...},
-        "style_id": "new-style"
+        "style_id": "new-style",
+        "is_system_reserved": true,            // Optional - mark as system-critical (23 DEC 2025)
+        "system_role": "admin0_boundaries"     // Optional - system role for discovery
     }
+
+    DELETE Query Parameters (23 DEC 2025):
+        confirm_system=true: Required to delete system-reserved datasets
     """
     try:
         promoted_id = req.route_params.get('promoted_id')
@@ -249,6 +266,11 @@ def handle_promote_item(req: func.HttpRequest) -> func.HttpResponse:
                     status_code=404
                 )
 
+            # Support updating system reserved flags (23 DEC 2025)
+            # If not provided, keep existing values
+            is_system_reserved = body.get('is_system_reserved', existing.get('is_system_reserved', False))
+            system_role = body.get('system_role', existing.get('system_role'))
+
             result = service.promote(
                 promoted_id=promoted_id,
                 stac_collection_id=existing.get('stac_collection_id'),
@@ -259,7 +281,9 @@ def handle_promote_item(req: func.HttpRequest) -> func.HttpResponse:
                 gallery=existing.get('in_gallery', False),
                 gallery_order=body.get('gallery_order'),
                 viewer_config=body.get('viewer_config'),
-                style_id=body.get('style_id')
+                style_id=body.get('style_id'),
+                is_system_reserved=is_system_reserved,
+                system_role=system_role
             )
 
             status_code = 200 if result.get('success') else 400
@@ -270,9 +294,19 @@ def handle_promote_item(req: func.HttpRequest) -> func.HttpResponse:
             )
 
         elif method == "DELETE":
-            # Demote
-            result = service.demote(promoted_id)
-            status_code = 200 if result.get('success') else 404
+            # Demote - require confirmation for system-reserved datasets (23 DEC 2025)
+            confirm_system = req.params.get('confirm_system', '').lower() == 'true'
+
+            result = service.demote(promoted_id, confirm_system=confirm_system)
+
+            # Determine status code based on result
+            if result.get('success'):
+                status_code = 200
+            elif 'system-reserved' in result.get('error', '').lower():
+                status_code = 403  # Forbidden - need confirmation
+            else:
+                status_code = 404  # Not found
+
             return func.HttpResponse(
                 json.dumps(result, indent=2, default=str),
                 mimetype="application/json",
@@ -343,8 +377,9 @@ def handle_gallery(req: func.HttpRequest) -> func.HttpResponse:
             try:
                 body = req.get_json()
                 order = body.get('order')
-            except:
-                pass  # No body is fine
+            except (ValueError, TypeError) as e:
+                # No body or invalid JSON is fine for this endpoint
+                logger.debug(f"No JSON body for gallery add (ok): {e}")
 
             result = service.add_to_gallery(promoted_id, order)
             status_code = 200 if result.get('success') else 404
@@ -418,10 +453,88 @@ def handle_gallery_list(req: func.HttpRequest) -> func.HttpResponse:
         )
 
 
+def handle_system_reserved(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Handle GET /api/promote/system.
+
+    Returns all system-reserved datasets (23 DEC 2025).
+
+    Query Parameters:
+        role: Filter by system_role (e.g., 'admin0_boundaries')
+
+    Response:
+    {
+        "success": true,
+        "count": 2,
+        "data": [
+            {
+                "promoted_id": "curated-admin0",
+                "system_role": "admin0_boundaries",
+                "is_system_reserved": true,
+                ...
+            }
+        ]
+    }
+    """
+    try:
+        service = PromoteService()
+
+        # Check for role filter
+        role = req.params.get('role')
+
+        if role:
+            # Get specific system role
+            dataset = service.get_by_system_role(role)
+            if dataset:
+                return func.HttpResponse(
+                    json.dumps({
+                        'success': True,
+                        'count': 1,
+                        'data': [dataset]
+                    }, indent=2, default=str),
+                    mimetype="application/json",
+                    status_code=200
+                )
+            else:
+                return func.HttpResponse(
+                    json.dumps({
+                        'success': False,
+                        'error': f"No system-reserved dataset with role '{role}' found",
+                        'available_roles': ['admin0_boundaries', 'h3_land_grid']
+                    }, indent=2),
+                    mimetype="application/json",
+                    status_code=404
+                )
+        else:
+            # List all system-reserved datasets
+            datasets = service.list_system_reserved()
+            return func.HttpResponse(
+                json.dumps({
+                    'success': True,
+                    'count': len(datasets),
+                    'data': datasets
+                }, indent=2, default=str),
+                mimetype="application/json",
+                status_code=200
+            )
+
+    except Exception as e:
+        logger.exception(f"Error in handle_system_reserved: {e}")
+        return func.HttpResponse(
+            json.dumps({
+                'success': False,
+                'error': str(e)
+            }, indent=2),
+            mimetype="application/json",
+            status_code=500
+        )
+
+
 # Module exports
 __all__ = [
     'handle_promote',
     'handle_promote_item',
     'handle_gallery',
-    'handle_gallery_list'
+    'handle_gallery_list',
+    'handle_system_reserved'
 ]

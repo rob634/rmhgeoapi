@@ -625,8 +625,9 @@ class DuckDBRepository(IDuckDBRepository):
                     ext_name = row[0]
                     ext_loaded = row[1]
                     extensions[ext_name] = "loaded" if ext_loaded else "available"
-            except:
-                extensions = {"error": "Could not query extensions"}
+            except Exception as e:
+                logger.debug(f"Could not query DuckDB extensions: {e}")
+                extensions = {"error": f"Could not query extensions: {type(e).__name__}"}
 
             # Test H3 functions (Community Extension - not in duckdb_extensions())
             h3_test = {}

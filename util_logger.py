@@ -21,6 +21,9 @@ Exports:
     log_memory_checkpoint: Resource checkpoint logger (memory, CPU, duration)
     clear_checkpoint_context: Clear checkpoint timing for a context
     monitored_gdal_operation: Context manager for GDAL ops with pulse monitoring
+    get_database_environment: Database server config (PostgreSQL version, settings) - cached
+    get_database_stats: Database utilization snapshot (connections, cache, locks)
+    log_database_checkpoint: Database checkpoint logger (utilization, cache ratios)
 
 Dependencies:
     Standard library only (logging, enum, dataclasses, json)
@@ -514,6 +517,375 @@ def snapshot_memory_to_task(
                 logger.warning(f"⚠️ Failed to persist memory snapshot to task metadata: {e}")
 
     return snapshot
+
+
+# ============================================================================
+# DATABASE UTILIZATION STATS - PostgreSQL performance monitoring (23 DEC 2025)
+# ============================================================================
+# Mirrors memory tracking pattern but for database:
+# - get_database_environment(): Static server config (cached)
+# - get_database_stats(): Current utilization snapshot
+# - log_database_checkpoint(): Log checkpoint with DB stats
+
+# Cached database environment (computed once, refreshed on demand)
+_database_environment: Optional[Dict[str, Any]] = None
+_database_environment_updated: Optional[float] = None
+_DATABASE_ENV_CACHE_TTL_SECONDS = 300  # Refresh every 5 minutes
+
+# Default connection timeout for database stats queries
+_DATABASE_STATS_TIMEOUT_SECONDS = 60
+
+
+def _get_database_connection(timeout_seconds: int = _DATABASE_STATS_TIMEOUT_SECONDS):
+    """
+    Get a fresh database connection for stats queries.
+
+    Creates its own connection with specified timeout to avoid
+    blocking other operations if database is under pressure.
+
+    Args:
+        timeout_seconds: Connection and query timeout
+
+    Returns:
+        psycopg connection or None if connection fails
+    """
+    try:
+        import psycopg
+        from config import get_config
+
+        config = get_config()
+
+        # Build connection string based on auth method
+        if config.database.use_managed_identity:
+            # Get token for managed identity auth
+            from azure.identity import DefaultAzureCredential
+            credential = DefaultAzureCredential()
+            token = credential.get_token("https://ossrdbms-aad.database.windows.net/.default")
+
+            conn_str = (
+                f"host={config.database.host} "
+                f"port={config.database.port} "
+                f"dbname={config.database.database} "
+                f"user={config.database.managed_identity_admin_name} "
+                f"password={token.token} "
+                f"sslmode=require "
+                f"connect_timeout={timeout_seconds}"
+            )
+        else:
+            # Password auth
+            conn_str = (
+                f"host={config.database.host} "
+                f"port={config.database.port} "
+                f"dbname={config.database.database} "
+                f"user={config.database.user} "
+                f"password={config.database.password} "
+                f"sslmode=require "
+                f"connect_timeout={timeout_seconds}"
+            )
+
+        # Create connection with statement timeout
+        conn = psycopg.connect(
+            conn_str,
+            autocommit=True,
+            options=f"-c statement_timeout={timeout_seconds * 1000}"  # Convert to ms
+        )
+
+        return conn
+
+    except Exception as e:
+        _logger = logging.getLogger("util_logger.database_stats")
+        _logger.warning(f"⚠️ Database stats connection failed: {e}")
+        return None
+
+
+def get_database_environment(force_refresh: bool = False) -> Optional[Dict[str, Any]]:
+    """
+    Get database environment info (PostgreSQL version, config, etc.).
+
+    Cached after first call with TTL-based refresh. Use force_refresh=True
+    to bypass cache.
+
+    Returns:
+        dict with database environment info or None if unavailable:
+        {
+            'postgresql_version': str,      # e.g., "17.2"
+            'postgis_version': str,         # e.g., "3.5 USE_GEOS=1..."
+            'database_name': str,           # Database name
+            'database_size_mb': float,      # Database size in MB
+            'max_connections': int,         # max_connections setting
+            'shared_buffers': str,          # e.g., "128MB"
+            'work_mem': str,                # e.g., "4MB"
+            'effective_cache_size': str,    # e.g., "4GB"
+            'last_updated': str,            # ISO timestamp of last refresh
+        }
+    """
+    global _database_environment, _database_environment_updated
+
+    current_time = time.time()
+
+    # Return cached result if valid and not forcing refresh
+    if (not force_refresh
+        and _database_environment is not None
+        and _database_environment_updated is not None
+        and current_time - _database_environment_updated < _DATABASE_ENV_CACHE_TTL_SECONDS):
+        return _database_environment
+
+    conn = None
+    try:
+        conn = _get_database_connection(timeout_seconds=30)  # Shorter timeout for env
+        if not conn:
+            return _database_environment  # Return stale cache if available
+
+        with conn.cursor() as cur:
+            # PostgreSQL version
+            cur.execute("SELECT version()")
+            pg_version_full = cur.fetchone()[0]
+            # Extract just version number (e.g., "PostgreSQL 17.2" -> "17.2")
+            pg_version = pg_version_full.split()[1] if pg_version_full else "unknown"
+
+            # PostGIS version
+            postgis_version = "not installed"
+            try:
+                cur.execute("SELECT PostGIS_Version()")
+                postgis_version = cur.fetchone()[0]
+            except Exception:
+                pass
+
+            # Database name and size
+            cur.execute("SELECT current_database()")
+            db_name = cur.fetchone()[0]
+
+            cur.execute("SELECT pg_database_size(current_database())")
+            db_size_bytes = cur.fetchone()[0]
+            db_size_mb = round(db_size_bytes / (1024 * 1024), 1) if db_size_bytes else 0
+
+            # Key configuration settings
+            cur.execute("SHOW max_connections")
+            max_conn = int(cur.fetchone()[0])
+
+            cur.execute("SHOW shared_buffers")
+            shared_buffers = cur.fetchone()[0]
+
+            cur.execute("SHOW work_mem")
+            work_mem = cur.fetchone()[0]
+
+            cur.execute("SHOW effective_cache_size")
+            effective_cache = cur.fetchone()[0]
+
+            _database_environment = {
+                'postgresql_version': pg_version,
+                'postgis_version': postgis_version,
+                'database_name': db_name,
+                'database_size_mb': db_size_mb,
+                'max_connections': max_conn,
+                'shared_buffers': shared_buffers,
+                'work_mem': work_mem,
+                'effective_cache_size': effective_cache,
+                'last_updated': datetime.now(timezone.utc).isoformat(),
+            }
+            _database_environment_updated = current_time
+
+            return _database_environment
+
+    except Exception as e:
+        _logger = logging.getLogger("util_logger.database_stats")
+        _logger.warning(f"⚠️ Database environment query failed: {e}")
+        return _database_environment  # Return stale cache if available
+
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
+def get_database_stats() -> Optional[Dict[str, Any]]:
+    """
+    Get current database utilization snapshot.
+
+    Queries PostgreSQL for real-time performance metrics.
+    Only executes if DEBUG_MODE=true in config.
+
+    Returns:
+        dict with database stats or None if debug disabled or query fails:
+        {
+            'connection_utilization_percent': float,  # (total / max_connections) * 100
+            'active_connections': int,                # Currently executing queries
+            'idle_connections': int,                  # Connected but waiting
+            'total_connections': int,                 # Total connections
+            'max_connections': int,                   # Server max_connections
+            'cache_hit_ratio': float,                 # Buffer cache effectiveness (0.0-1.0)
+            'index_hit_ratio': float,                 # Index usage effectiveness (0.0-1.0)
+            'long_running_queries': int,              # Queries running > 5 min
+            'locks_waiting': int,                     # Queries blocked on locks
+            'oldest_transaction_sec': float,          # Age of oldest open transaction
+            'xact_commit_rate': float,                # Commits since stats reset
+            'xact_rollback_rate': float,              # Rollback ratio
+        }
+    """
+    _logger = logging.getLogger("util_logger.database_stats")
+
+    # Check if debug mode enabled
+    try:
+        from config import get_config
+        config = get_config()
+
+        if not config.debug_mode:
+            return None
+    except Exception as e:
+        _logger.warning(f"⚠️ DEBUG_MODE check failed (database stats disabled): {e}")
+        return None
+
+    conn = None
+    try:
+        conn = _get_database_connection()
+        if not conn:
+            return None
+
+        with conn.cursor() as cur:
+            # Connection pool stats
+            cur.execute("""
+                SELECT
+                    count(*) as total,
+                    count(*) FILTER (WHERE state = 'active') as active,
+                    count(*) FILTER (WHERE state = 'idle') as idle,
+                    count(*) FILTER (WHERE state = 'idle in transaction') as idle_in_transaction,
+                    count(*) FILTER (WHERE wait_event_type = 'Lock') as locks_waiting
+                FROM pg_stat_activity
+                WHERE backend_type = 'client backend'
+            """)
+            row = cur.fetchone()
+            total_conn = row[0] or 0
+            active_conn = row[1] or 0
+            idle_conn = row[2] or 0
+            idle_in_tx = row[3] or 0
+            locks_waiting = row[4] or 0
+
+            # Max connections
+            cur.execute("SHOW max_connections")
+            max_conn = int(cur.fetchone()[0])
+
+            utilization = round((total_conn / max_conn * 100), 1) if max_conn > 0 else 0
+
+            # Cache hit ratio (buffer cache effectiveness)
+            cur.execute("""
+                SELECT
+                    sum(heap_blks_hit) / NULLIF(sum(heap_blks_hit + heap_blks_read), 0)
+                FROM pg_statio_user_tables
+            """)
+            cache_hit = cur.fetchone()[0]
+            cache_hit_ratio = round(float(cache_hit), 4) if cache_hit else 0.0
+
+            # Index hit ratio
+            cur.execute("""
+                SELECT
+                    sum(idx_blks_hit) / NULLIF(sum(idx_blks_hit + idx_blks_read), 0)
+                FROM pg_statio_user_indexes
+            """)
+            index_hit = cur.fetchone()[0]
+            index_hit_ratio = round(float(index_hit), 4) if index_hit else 0.0
+
+            # Long-running queries (> 5 minutes)
+            cur.execute("""
+                SELECT count(*)
+                FROM pg_stat_activity
+                WHERE state = 'active'
+                AND now() - query_start > interval '5 minutes'
+                AND pid != pg_backend_pid()
+            """)
+            long_queries = cur.fetchone()[0] or 0
+
+            # Oldest transaction age
+            cur.execute("""
+                SELECT EXTRACT(EPOCH FROM (now() - min(xact_start)))
+                FROM pg_stat_activity
+                WHERE xact_start IS NOT NULL
+                AND pid != pg_backend_pid()
+            """)
+            oldest_tx = cur.fetchone()[0]
+            oldest_tx_sec = round(float(oldest_tx), 1) if oldest_tx else 0.0
+
+            # Transaction stats (commits/rollbacks)
+            cur.execute("""
+                SELECT xact_commit, xact_rollback
+                FROM pg_stat_database
+                WHERE datname = current_database()
+            """)
+            tx_row = cur.fetchone()
+            xact_commit = tx_row[0] or 0
+            xact_rollback = tx_row[1] or 0
+            total_tx = xact_commit + xact_rollback
+            rollback_ratio = round(xact_rollback / total_tx, 4) if total_tx > 0 else 0.0
+
+            return {
+                'connection_utilization_percent': utilization,
+                'active_connections': active_conn,
+                'idle_connections': idle_conn,
+                'idle_in_transaction': idle_in_tx,
+                'total_connections': total_conn,
+                'max_connections': max_conn,
+                'cache_hit_ratio': cache_hit_ratio,
+                'index_hit_ratio': index_hit_ratio,
+                'long_running_queries': long_queries,
+                'locks_waiting': locks_waiting,
+                'oldest_transaction_sec': oldest_tx_sec,
+                'xact_commit_total': xact_commit,
+                'xact_rollback_total': xact_rollback,
+                'rollback_ratio': rollback_ratio,
+            }
+
+    except Exception as e:
+        _logger.warning(f"⚠️ Database stats query failed: {e}")
+        return None
+
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
+def log_database_checkpoint(
+    logger: logging.Logger,
+    checkpoint_name: str,
+    context_id: Optional[str] = None,
+    **extra_fields
+):
+    """
+    Log a database utilization checkpoint with stats.
+
+    Only logs if DEBUG_MODE=true. Otherwise, this is a no-op.
+    Mirrors log_memory_checkpoint() but for database metrics.
+
+    Args:
+        logger: Python logger instance
+        checkpoint_name: Descriptive name for this checkpoint
+        context_id: Optional task/job ID for tracking
+        **extra_fields: Additional context fields (e.g., query_type="bulk_insert")
+
+    Example:
+        logger = LoggerFactory.create_logger(ComponentType.SERVICE, "bulk_loader")
+        log_database_checkpoint(logger, "Before bulk insert", context_id=task_id)
+        # ... execute bulk insert ...
+        log_database_checkpoint(logger, "After bulk insert", context_id=task_id, rows=50000)
+    """
+    db_stats = get_database_stats()
+    if db_stats:
+        # Merge all fields
+        all_fields = {
+            **db_stats,
+            **extra_fields,
+            'checkpoint': checkpoint_name,
+            'checkpoint_type': 'database',
+        }
+
+        # Add context_id if provided
+        if context_id:
+            all_fields['context_id'] = context_id[:16] if len(context_id) > 16 else context_id
+
+        logger.info(f"📊 DATABASE CHECKPOINT: {checkpoint_name}", extra={'custom_dimensions': all_fields})
 
 
 def get_peak_memory_mb() -> Optional[float]:

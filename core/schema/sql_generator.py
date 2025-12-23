@@ -49,6 +49,7 @@ from ..models import (
     CuratedUpdateType,
     CuratedUpdateStatus
 )
+from ..models.promoted import PromotedDataset, SystemRole  # Promoted datasets (23 DEC 2025)
 
 
 class PydanticToSQL:
@@ -1082,6 +1083,7 @@ $$""").format(
         composed.extend(self.generate_enum("curated_update_strategy", CuratedUpdateStrategy))
         composed.extend(self.generate_enum("curated_update_type", CuratedUpdateType))
         composed.extend(self.generate_enum("curated_update_status", CuratedUpdateStatus))
+        composed.extend(self.generate_enum("system_role", SystemRole))  # Promoted datasets (23 DEC 2025)
 
         # For tables, indexes, functions, and triggers, we still need string format
         # because they are complex multi-line statements
@@ -1097,6 +1099,7 @@ $$""").format(
         composed.append(self.generate_table_composed(UnpublishJobRecord, "unpublish_jobs"))  # Unpublish audit (12 DEC 2025)
         composed.append(self.generate_table_composed(CuratedDataset, "curated_datasets"))  # Curated datasets (15 DEC 2025)
         composed.append(self.generate_table_composed(CuratedUpdateLog, "curated_update_log"))
+        composed.append(self.generate_table_composed(PromotedDataset, "promoted_datasets"))  # Promoted datasets (23 DEC 2025)
 
         # Indexes - now using composed SQL
         composed.extend(self.generate_indexes_composed("jobs", JobRecord))
@@ -1107,6 +1110,7 @@ $$""").format(
         composed.extend(self.generate_indexes_composed("unpublish_jobs", UnpublishJobRecord))  # Unpublish audit (12 DEC 2025)
         composed.extend(self.generate_indexes_composed("curated_datasets", CuratedDataset))  # Curated datasets (15 DEC 2025)
         composed.extend(self.generate_indexes_composed("curated_update_log", CuratedUpdateLog))
+        composed.extend(self.generate_indexes_composed("promoted_datasets", PromotedDataset))  # Promoted datasets (23 DEC 2025)
 
         # Functions - already sql.Composed objects
         composed.extend(self.generate_static_functions())
@@ -1250,13 +1254,19 @@ def main():
     import psycopg
     import os
     
-    # Get schema name from config or use default
+    # Get schema name from config - REQUIRED, no fallback (23 DEC 2025)
     try:
         from config import get_config
         config = get_config()
         schema_name = config.app_schema
-    except:
-        schema_name = "app"
+    except Exception as e:
+        print(f"ERROR: Could not load configuration: {e}")
+        print("\nRequired environment variables for schema names:")
+        print("  - APP_SCHEMA (e.g., 'app')")
+        print("  - POSTGIS_SCHEMA (e.g., 'geo')")
+        print("  - PGSTAC_SCHEMA (e.g., 'pgstac')")
+        print("  - H3_SCHEMA (e.g., 'h3')")
+        sys.exit(1)
     
     # Create generator instance
     generator = PydanticToSQL(schema_name=schema_name)
@@ -1277,7 +1287,8 @@ def main():
                 connection = psycopg.connect(conn_str, connect_timeout=2)
                 # Connection successful - will be logged by inspect() method
                 break
-            except:
+            except Exception as e:
+                print(f"  Note: Could not connect with {conn_str[:30]}...: {type(e).__name__}")
                 continue
     
     # Use the inspect method for formatted output

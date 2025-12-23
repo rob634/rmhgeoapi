@@ -78,12 +78,9 @@ class BootstrapH3LandGridPyramidJob(JobBaseMixin, JobBase):  # Mixin FIRST for c
     ]
 
     # Declarative parameter validation (JobBaseMixin handles validation!)
+    # NOTE: spatial_filter_table is auto-resolved via Promote Service (system_role='admin0_boundaries')
+    # No fallback - the system dataset MUST be registered before running this job
     parameters_schema: Dict[str, Any] = {
-        'spatial_filter_table': {
-            'type': 'str',
-            'default': 'system_admin0',
-            'description': 'PostGIS table name for land filtering (without schema prefix)'
-        },
         'grid_id_prefix': {
             'type': 'str',
             'default': 'land',
@@ -124,11 +121,55 @@ class BootstrapH3LandGridPyramidJob(JobBaseMixin, JobBase):  # Mixin FIRST for c
     }
 
     # ========================================================================
-    # JOB-SPECIFIC LOGIC: Task Creation
+    # HELPER: Dynamic Admin0 Table Lookup (23 DEC 2025)
     # ========================================================================
 
     @staticmethod
+    def _resolve_admin0_table() -> str:
+        """
+        Resolve admin0 table name via Promote Service.
+
+        Looks up the system dataset with role='admin0_boundaries'.
+        FAILS EXPLICITLY if not found - no fallback to config defaults.
+
+        This enforces the system-reserved dataset workflow:
+        1. Process vector data via ETL pipeline
+        2. Promote dataset with is_system_reserved=true, system_role='admin0_boundaries'
+        3. Then H3 bootstrap can discover the table
+
+        Returns:
+            Table name (without schema prefix, e.g., 'curated_admin0')
+
+        Raises:
+            ValueError: If no system dataset with role 'admin0_boundaries' is registered
+        """
+        from services.promote_service import PromoteService
+        from core.models.promoted import SystemRole
+
+        service = PromoteService()
+        table = service.get_system_table_name(SystemRole.ADMIN0_BOUNDARIES.value)
+
+        if not table:
+            raise ValueError(
+                "No system-reserved dataset found with role 'admin0_boundaries'. "
+                "You must first:\n"
+                "  1. Create admin0 table via process_vector job\n"
+                "  2. Promote it: POST /api/promote with is_system_reserved=true, system_role='admin0_boundaries'\n"
+                "Then retry this job."
+            )
+
+        # Remove schema prefix if present
+        if '.' in table:
+            table = table.split('.')[-1]
+        return table
+
+    # ========================================================================
+    # JOB-SPECIFIC LOGIC: Task Creation
+    # ========================================================================
+
+    @classmethod
     def create_tasks_for_stage(
+        cls,
         stage: int,
         job_params: dict,
         job_id: str,
@@ -154,7 +195,9 @@ class BootstrapH3LandGridPyramidJob(JobBaseMixin, JobBase):  # Mixin FIRST for c
         Raises:
             ValueError: Invalid stage number or missing previous results
         """
-        spatial_filter_table = job_params.get('spatial_filter_table', 'system_admin0')
+        # Dynamic admin0 table lookup via Promote Service (23 DEC 2025)
+        # REQUIRES system_role='admin0_boundaries' to be registered - no fallback
+        spatial_filter_table = cls._resolve_admin0_table()
         grid_id_prefix = job_params.get('grid_id_prefix', 'land')
         country_filter = job_params.get('country_filter')
         bbox_filter = job_params.get('bbox_filter')

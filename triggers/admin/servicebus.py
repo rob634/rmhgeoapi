@@ -527,7 +527,8 @@ class ServiceBusAdminTrigger:
                         # Truncate if too long
                         if len(body_str) > 500:
                             body_str = body_str[:500] + "..."
-                    except:
+                    except Exception as e:
+                        self.logger.debug(f"Could not parse message body: {e}")
                         body_str = "<unable to parse>"
 
                     messages.append({
@@ -630,7 +631,8 @@ class ServiceBusAdminTrigger:
                         # Truncate if too long
                         if len(body_str) > 500:
                             body_str = body_str[:500] + "..."
-                    except:
+                    except Exception as e:
+                        self.logger.debug(f"Could not parse message body: {e}")
                         body_str = "<unable to parse>"
 
                     messages.append({

@@ -371,11 +371,11 @@ class ServiceBusRepository(IQueueRepository):
                         'error_source': 'infrastructure'
                     }
                 )
-                # Close the failed sender
+                # Close the failed sender (cleanup - don't let this mask the warmup error)
                 try:
                     sender.close()
-                except:
-                    pass
+                except Exception as close_err:
+                    logger.debug(f"Failed to close sender during cleanup: {close_err}")
                 raise RuntimeError(f"Sender warmup failed for {queue_or_topic}: {warmup_error}")
 
             logger.debug(f"✅ Sender created and cached for queue: {queue_or_topic}")

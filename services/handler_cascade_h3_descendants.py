@@ -5,13 +5,14 @@ Generates ALL descendants from a parent grid across multiple resolution levels.
 
 Example:
     Input: 10 res 2 parent cells, target [3,4,5,6,7]
-    Output: ~168,070 cells (70 + 490 + 3,430 + 24,010 + 168,070)
+    Output: ~196,070 cells (70 + 490 + 3,430 + 24,010 + 168,070)
 
 Key Properties:
     - No spatial filtering (children inherit parent land membership)
     - Cell-level idempotency (ON CONFLICT DO NOTHING)
     - Batch-level idempotency via H3BatchTracker (resumable jobs)
-    - Batch processing support (N parent cells per task)
+    - Memory-optimized: generate ALL cells first, then ONE connection for insert
+    - Database I/O optimized: single connection per task (22 DEC 2025)
 
 Exports:
     cascade_h3_descendants: Task handler function
@@ -31,6 +32,13 @@ def cascade_h3_descendants(params: Dict[str, Any], context: Dict[str, Any] = Non
     Uses H3 parent-child relationships to generate descendants efficiently.
     No spatial operations needed - children inherit parent's land membership.
 
+    OPTIMIZATION (22 DEC 2025):
+        - Generate ALL cells in memory first (~114MB for 196K cells)
+        - Open ONE database connection
+        - Batch insert all cells + admin0 mappings
+        - Close connection
+        This reduces connections from ~15 per task to 1 per task.
+
     Args:
         params: Task parameters containing:
             - parent_grid_id (str): Parent grid to cascade from (e.g., "test_albania_res2")
@@ -44,43 +52,7 @@ def cascade_h3_descendants(params: Dict[str, Any], context: Dict[str, Any] = Non
         context: Optional execution context (not used in this handler)
 
     Returns:
-        Success dict with generation statistics:
-        {
-            "success": True,
-            "result": {
-                "parent_grid_id": str,
-                "parents_processed": int,
-                "target_resolutions": List[int],
-                "cells_per_resolution": {3: 70, 4: 490, ...},
-                "total_cells_generated": int,
-                "total_cells_inserted": int,
-                "elapsed_time": float
-            }
-        }
-
-        Or failure dict if errors occur:
-        {
-            "success": False,
-            "error": "description of error"
-        }
-
-    Raises:
-        ValueError: If required parameters missing or invalid
-
-    Example:
-        >>> params = {
-        ...     "parent_grid_id": "test_albania_res2",
-        ...     "target_resolutions": [3, 4, 5, 6, 7],
-        ...     "grid_id_prefix": "test_albania",
-        ...     "batch_start": 0,
-        ...     "batch_size": 10,
-        ...     "source_job_id": "abc123..."
-        ... }
-        >>> result = cascade_h3_descendants(params)
-        >>> result["success"]
-        True
-        >>> result["result"]["total_cells_generated"]
-        168070
+        Success dict with generation statistics
     """
     logger = LoggerFactory.create_logger(ComponentType.SERVICE, "cascade_h3_descendants")
     start_time = time.time()
@@ -90,10 +62,10 @@ def cascade_h3_descendants(params: Dict[str, Any], context: Dict[str, Any] = Non
     target_resolutions = params.get('target_resolutions')
     grid_id_prefix = params.get('grid_id_prefix')
     batch_start = params.get('batch_start', 0)
-    batch_size = params.get('batch_size')  # None = process all remaining
-    batch_index = params.get('batch_index', 0)  # For idempotency tracking
+    batch_size = params.get('batch_size')
+    batch_index = params.get('batch_index', 0)
     source_job_id = params.get('source_job_id')
-    country_code = params.get('country_code')  # ISO3 code for admin0 mappings
+    country_code = params.get('country_code')
 
     if not parent_grid_id:
         raise ValueError("parent_grid_id is required")
@@ -104,25 +76,21 @@ def cascade_h3_descendants(params: Dict[str, Any], context: Dict[str, Any] = Non
     if not grid_id_prefix:
         raise ValueError("grid_id_prefix is required")
 
-    # Generate batch_id for idempotency tracking
-    # Format: {job_id_prefix}-s2-batch{index}
     batch_id = f"{source_job_id[:8] if source_job_id else 'unknown'}-s2-batch{batch_index}"
 
-    logger.info(f"🌳 H3 Cascade - Multi-Level Descendants")
+    logger.info(f"🌳 H3 Cascade - Multi-Level Descendants (Memory-Optimized)")
     logger.info(f"   Parent Grid: {parent_grid_id}")
     logger.info(f"   Target Resolutions: {target_resolutions}")
-    logger.info(f"   Grid ID Prefix: {grid_id_prefix}")
     logger.info(f"   Batch: start={batch_start}, size={batch_size if batch_size else 'ALL'}, id={batch_id}")
 
     try:
         from infrastructure.h3_repository import H3Repository
         from infrastructure.h3_batch_tracking import H3BatchTracker
 
-        # Create repositories
         h3_repo = H3Repository()
         batch_tracker = H3BatchTracker()
 
-        # STEP 1.5: IDEMPOTENCY CHECK - Skip if batch already completed
+        # IDEMPOTENCY CHECK
         if source_job_id and batch_tracker.is_batch_completed(source_job_id, batch_id):
             logger.info(f"✅ Batch {batch_id} already completed - skipping (idempotent)")
             return {
@@ -144,18 +112,7 @@ def cascade_h3_descendants(params: Dict[str, Any], context: Dict[str, Any] = Non
                 operation_type="cascade_h3_descendants"
             )
 
-        # STEP 2: Verify parent cells exist at resolution 2 (normalized schema)
-        logger.info(f"🔍 Verifying parent cells exist at resolution 2...")
-        parent_count = h3_repo.get_cell_count_by_resolution(resolution=2)
-        if parent_count == 0:
-            logger.error(f"❌ No cells found at resolution 2!")
-            return {
-                "success": False,
-                "error": "No cells found at resolution 2. Cannot cascade."
-            }
-        logger.info(f"   Found {parent_count:,} cells at resolution 2")
-
-        # STEP 3: Load parent cells (with batching) from normalized h3.cells
+        # STEP 2: Load parent cells (uses one connection, closes it)
         logger.info(f"📥 Loading parent cells from h3.cells...")
         parent_cells = h3_repo.get_cells_by_resolution(
             resolution=2,
@@ -167,7 +124,7 @@ def cascade_h3_descendants(params: Dict[str, Any], context: Dict[str, Any] = Non
         logger.info(f"   Loaded {parents_processed:,} parent cells")
 
         if parents_processed == 0:
-            logger.warning(f"⚠️ No parent cells found in batch (start={batch_start}, size={batch_size})")
+            logger.warning(f"⚠️ No parent cells found in batch")
             return {
                 "success": True,
                 "result": {
@@ -178,53 +135,57 @@ def cascade_h3_descendants(params: Dict[str, Any], context: Dict[str, Any] = Non
                     "total_cells_generated": 0,
                     "total_cells_inserted": 0,
                     "elapsed_time": time.time() - start_time,
-                    "message": "No parents in batch range (end of grid reached)"
+                    "message": "No parents in batch range"
                 }
             }
 
-        # STEP 4: Cascade to all target resolutions
-        logger.info(f"🌳 Cascading to {len(target_resolutions)} resolutions...")
+        # ====================================================================
+        # STEP 3: GENERATE ALL CELLS IN MEMORY (no DB connections)
+        # ====================================================================
+        logger.info(f"🧠 Generating all cells in memory...")
+        gen_start = time.time()
 
+        all_cells = []
         cells_per_resolution = {}
-        total_cells_generated = 0
-        total_cells_inserted = 0
 
         for target_res in sorted(target_resolutions):
-            logger.info(f"   → Resolution {target_res}...")
+            res_cells = _generate_descendants(parent_cells, target_res)
+            cells_per_resolution[target_res] = len(res_cells)
+            all_cells.extend(res_cells)
+            logger.info(f"   Res {target_res}: {len(res_cells):,} cells")
 
-            # Generate descendants for this resolution
-            cells, rows_inserted, admin0_inserted = _cascade_batch(
-                h3_repo=h3_repo,
-                parent_cells=parent_cells,
-                target_resolution=target_res,
-                grid_id=f"{grid_id_prefix}_res{target_res}",
-                source_job_id=source_job_id,
-                logger=logger,
-                country_code=country_code
-            )
+        gen_elapsed = time.time() - gen_start
+        logger.info(f"   Generated {len(all_cells):,} total cells in {gen_elapsed:.2f}s")
 
-            cells_per_resolution[target_res] = len(cells)
-            total_cells_generated += len(cells)
-            total_cells_inserted += rows_inserted
+        # ====================================================================
+        # STEP 4: ONE CONNECTION - BATCH INSERT EVERYTHING
+        # ====================================================================
+        logger.info(f"💾 Inserting all cells with ONE connection...")
+        insert_start = time.time()
 
-            logger.info(f"      ✅ Generated {len(cells):,} cells, inserted {rows_inserted:,}")
+        rows_inserted, admin0_inserted = _insert_all_cells(
+            h3_repo=h3_repo,
+            cells=all_cells,
+            source_job_id=source_job_id,
+            country_code=country_code,
+            logger=logger
+        )
 
-        # STEP 5: Build success result
+        insert_elapsed = time.time() - insert_start
+        logger.info(f"   Inserted {rows_inserted:,} cells + {admin0_inserted:,} admin0 in {insert_elapsed:.2f}s")
+
+        # STEP 5: Mark batch complete
         elapsed_time = time.time() - start_time
 
-        logger.info(f"🎉 Cascade complete: {total_cells_inserted:,} cells inserted in {elapsed_time:.2f}s")
-        logger.info(f"   Parents processed: {parents_processed:,}")
-        logger.info(f"   Resolutions: {target_resolutions}")
-        logger.info(f"   Cells per resolution: {cells_per_resolution}")
-
-        # STEP 6: Mark batch as completed (idempotency tracking)
         if source_job_id:
             batch_tracker.complete_batch(
                 job_id=source_job_id,
                 batch_id=batch_id,
                 items_processed=parents_processed,
-                items_inserted=total_cells_inserted
+                items_inserted=rows_inserted
             )
+
+        logger.info(f"🎉 Cascade complete: {rows_inserted:,} cells in {elapsed_time:.2f}s")
 
         return {
             "success": True,
@@ -237,8 +198,11 @@ def cascade_h3_descendants(params: Dict[str, Any], context: Dict[str, Any] = Non
                 "batch_id": batch_id,
                 "target_resolutions": target_resolutions,
                 "cells_per_resolution": cells_per_resolution,
-                "total_cells_generated": total_cells_generated,
-                "total_cells_inserted": total_cells_inserted,
+                "total_cells_generated": len(all_cells),
+                "total_cells_inserted": rows_inserted,
+                "admin0_inserted": admin0_inserted,
+                "generation_time": gen_elapsed,
+                "insert_time": insert_elapsed,
                 "elapsed_time": elapsed_time,
                 "grid_id_prefix": grid_id_prefix,
                 "source_job_id": source_job_id
@@ -250,7 +214,6 @@ def cascade_h3_descendants(params: Dict[str, Any], context: Dict[str, Any] = Non
         import traceback
         logger.error(traceback.format_exc())
 
-        # Record batch failure (for debugging and retry tracking)
         try:
             from infrastructure.h3_batch_tracking import H3BatchTracker
             batch_tracker = H3BatchTracker()
@@ -267,146 +230,144 @@ def cascade_h3_descendants(params: Dict[str, Any], context: Dict[str, Any] = Non
         }
 
 
-def _cascade_batch(
-    h3_repo,
+def _generate_descendants(
     parent_cells: List[Tuple[int, int]],
-    target_resolution: int,
-    grid_id: str,
-    source_job_id: str,
-    logger,
-    country_code: str = None
-) -> Tuple[List[Dict[str, Any]], int, int]:
+    target_resolution: int
+) -> List[Dict[str, Any]]:
     """
-    Generate descendants at target resolution from batch of parent cells.
+    Generate H3 descendants at target resolution (pure CPU, no DB).
 
     Args:
-        h3_repo: H3Repository instance
         parent_cells: List of (h3_index, parent_res2) tuples
         target_resolution: Target resolution level
-        grid_id: Grid ID for logging (normalized schema doesn't use grid_id)
-        source_job_id: Job ID for tracking
-        logger: Logger instance
-        country_code: Optional ISO3 code for admin0 mappings
 
     Returns:
-        Tuple of (cells_list, rows_inserted, admin0_inserted)
-        - cells_list: List of cell dicts with h3_index, resolution, geom_wkt
-        - rows_inserted: Number of cells inserted into h3.cells
-        - admin0_inserted: Number of mappings inserted into h3.cell_admin0
+        List of cell dicts with h3_index, resolution, geom_wkt, is_land
     """
     cells = []
 
-    logger.debug(f"   Cascading {len(parent_cells):,} parents to res {target_resolution}...")
-
     for h3_index, parent_res2 in parent_cells:
-        # Convert integer h3_index to hex string for h3 library v4+
-        # Database stores BIGINT, but h3 v4 API expects hex strings
         h3_str = h3.int_to_str(h3_index)
-
-        # Generate children at target resolution using H3
-        # NOTE: h3.cell_to_children() can jump multiple levels (res 2 → res 7 directly!)
         child_indices = h3.cell_to_children(h3_str, target_resolution)
 
         for child_index in child_indices:
-            # h3 v4 returns hex strings - convert to int for database storage
-            # Use h3.str_to_int() for consistent conversion
             if isinstance(child_index, str):
                 child_index_int = h3.str_to_int(child_index)
             else:
                 child_index_int = int(child_index)
 
-            # Get geometry as WKT (cell_to_boundary returns [(lat, lng), ...])
             boundary = h3.cell_to_boundary(child_index)
-            coords = [(lng, lat) for lat, lng in boundary]  # Convert to (lng, lat) for WKT
-            coords.append(coords[0])  # Close polygon
+            coords = [(lng, lat) for lat, lng in boundary]
+            coords.append(coords[0])
             polygon = Polygon(coords)
-            geom_wkt = polygon.wkt
 
             cells.append({
                 'h3_index': child_index_int,
                 'resolution': target_resolution,
-                'geom_wkt': geom_wkt,
-                'parent_res2': parent_res2  # Preserve parent for cascade tracking
+                'geom_wkt': polygon.wkt,
+                'is_land': True
             })
 
-    logger.debug(f"   Generated {len(cells):,} cells from {len(parent_cells):,} parents")
-
-    # Insert cells to h3.cells (normalized schema)
-    rows_inserted, admin0_inserted = _insert_descendants(
-        h3_repo=h3_repo,
-        cells=cells,
-        grid_id=grid_id,
-        grid_type='land',  # Descendants inherit parent land membership
-        source_job_id=source_job_id,
-        logger=logger,
-        country_code=country_code
-    )
-
-    return cells, rows_inserted, admin0_inserted
+    return cells
 
 
-def _insert_descendants(
+def _insert_all_cells(
     h3_repo,
     cells: List[Dict[str, Any]],
-    grid_id: str,
-    grid_type: str,
     source_job_id: str,
-    logger,
-    country_code: str = None
+    country_code: str,
+    logger
 ) -> Tuple[int, int]:
     """
-    Insert descendant cells to NORMALIZED h3.cells with ON CONFLICT handling.
-
-    Also inserts admin0 mappings if country_code is provided.
+    Insert all cells and admin0 mappings using ONE database connection.
 
     Args:
         h3_repo: H3Repository instance
-        cells: List of cell dicts (h3_index, resolution, geom_wkt, parent_h3_index)
-        grid_id: Grid ID (for logging only in normalized schema)
-        grid_type: Grid type (e.g., "land")
+        cells: List of all cell dicts
         source_job_id: Job ID for tracking
+        country_code: ISO3 code for admin0 mappings
         logger: Logger instance
-        country_code: Optional ISO3 code for admin0 mappings
 
     Returns:
-        Tuple of (cells_inserted, admin0_mappings_inserted)
+        Tuple of (cells_inserted, admin0_inserted)
     """
+    from io import StringIO
+
     if not cells:
         return 0, 0
 
-    logger.debug(f"   Inserting {len(cells):,} cells to h3.cells...")
+    with h3_repo._get_connection() as conn:
+        with conn.cursor() as cur:
+            # ============================================================
+            # INSERT CELLS via COPY + staging
+            # ============================================================
+            cur.execute("""
+                CREATE TEMP TABLE h3_cells_staging (
+                    h3_index BIGINT,
+                    resolution SMALLINT,
+                    geom_wkt TEXT,
+                    is_land BOOLEAN
+                ) ON COMMIT DROP
+            """)
 
-    # Mark cells as land
-    for cell in cells:
-        cell['is_land'] = True
+            buffer = StringIO()
+            for cell in cells:
+                h3_index = cell['h3_index']
+                resolution = cell['resolution']
+                geom_wkt = cell['geom_wkt']
+                is_land = 't' if cell.get('is_land', True) else 'f'
+                buffer.write(f"{h3_index}\t{resolution}\t{geom_wkt}\t{is_land}\n")
 
-    # Insert into h3.cells (normalized schema)
-    rows_inserted = h3_repo.insert_cells(
-        cells=cells,
-        source_job_id=source_job_id
-    )
+            buffer.seek(0)
+            with cur.copy("COPY h3_cells_staging (h3_index, resolution, geom_wkt, is_land) FROM STDIN") as copy:
+                copy.write(buffer.read())
 
-    duplicates_skipped = len(cells) - rows_inserted
+            # Insert from staging with ON CONFLICT
+            cur.execute(f"""
+                INSERT INTO h3.cells (h3_index, resolution, geom, is_land, source_job_id)
+                SELECT
+                    h3_index,
+                    resolution,
+                    ST_GeomFromText(geom_wkt, 4326),
+                    is_land,
+                    %s
+                FROM h3_cells_staging
+                ON CONFLICT (h3_index) DO NOTHING
+            """, (source_job_id,))
 
-    if duplicates_skipped > 0:
-        logger.debug(f"   Skipped {duplicates_skipped:,} duplicate cells (ON CONFLICT)")
+            rows_inserted = cur.rowcount
+            logger.debug(f"   Cells inserted: {rows_inserted:,}")
 
-    # Insert admin0 mappings if country_code provided
-    admin0_inserted = 0
-    if country_code:
-        admin0_mappings = [
-            {'h3_index': cell['h3_index'], 'iso3': country_code}
-            for cell in cells
-        ]
-        admin0_inserted = h3_repo.insert_cell_admin0_mappings(admin0_mappings)
-        logger.debug(f"   Inserted {admin0_inserted:,} admin0 mappings for {country_code}")
+            # ============================================================
+            # INSERT ADMIN0 MAPPINGS (same connection)
+            # ============================================================
+            admin0_inserted = 0
+            if country_code:
+                cur.execute("""
+                    CREATE TEMP TABLE h3_admin0_staging (
+                        h3_index BIGINT,
+                        iso3 VARCHAR(3)
+                    ) ON COMMIT DROP
+                """)
+
+                buffer2 = StringIO()
+                for cell in cells:
+                    buffer2.write(f"{cell['h3_index']}\t{country_code}\n")
+
+                buffer2.seek(0)
+                with cur.copy("COPY h3_admin0_staging (h3_index, iso3) FROM STDIN") as copy:
+                    copy.write(buffer2.read())
+
+                cur.execute("""
+                    INSERT INTO h3.cell_admin0 (h3_index, iso3)
+                    SELECT h3_index, iso3
+                    FROM h3_admin0_staging
+                    ON CONFLICT (h3_index, iso3) DO NOTHING
+                """)
+
+                admin0_inserted = cur.rowcount
+                logger.debug(f"   Admin0 mappings inserted: {admin0_inserted:,}")
+
+        conn.commit()
 
     return rows_inserted, admin0_inserted
-
-
-# ============================================================================
-# MODULE EXPORT (Register in services/__init__.py)
-# ============================================================================
-# To register this handler:
-# from .handler_cascade_h3_descendants import cascade_h3_descendants
-# ALL_HANDLERS["cascade_h3_descendants"] = cascade_h3_descendants

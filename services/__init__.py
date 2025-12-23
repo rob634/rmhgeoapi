@@ -148,6 +148,12 @@ from .h3_aggregation import (
     h3_aggregation_finalize,
 )
 
+# STAC Repair handlers (22 DEC 2025)
+from .stac_repair_handlers import (
+    stac_repair_inventory,
+    stac_repair_item,
+)
+
 # ============================================================================
 # STAC METADATA HELPER (25 NOV 2025)
 # ============================================================================
@@ -244,6 +250,9 @@ ALL_HANDLERS = {
     "h3_inventory_cells": h3_inventory_cells,  # Stage 1: Count cells, calculate batches
     "h3_raster_zonal_stats": h3_raster_zonal_stats,  # Stage 2: Compute zonal stats from COG
     "h3_aggregation_finalize": h3_aggregation_finalize,  # Stage 3: Update registry, verify counts
+    # STAC Repair handlers (22 DEC 2025)
+    "stac_repair_inventory": stac_repair_inventory,  # Stage 1: Scan catalog for issues
+    "stac_repair_item": stac_repair_item,  # Stage 2: Repair individual items
 }
 
 # ============================================================================

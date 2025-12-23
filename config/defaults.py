@@ -336,6 +336,10 @@ class TaskRoutingDefaults:
         "h3_inventory_cells",
         "h3_raster_zonal_stats",
         "h3_aggregation_finalize",
+        # STAC Repair handlers (22 DEC 2025)
+        # Lightweight: pgSTAC queries, item updates
+        "stac_repair_inventory",
+        "stac_repair_item",
     ]
 
 

@@ -2920,3 +2920,66 @@ def xarray_api_aggregate(req: func.HttpRequest) -> func.HttpResponse:
         &format=json|tif|png|npy
     """
     return _xarray_aggregate(req)
+
+
+# ============================================================================
+# STAC REPAIR ENDPOINTS - Direct Testing (23 DEC 2025)
+# ============================================================================
+# Direct endpoints to test STAC repair functionality without job orchestration.
+# Useful for debugging and manual repairs.
+#
+# Endpoints:
+#   GET  /api/stac/repair/test       - Test handler configuration
+#   POST /api/stac/repair/inventory  - Run inventory scan directly
+#   POST /api/stac/repair/item       - Repair single item directly
+# ============================================================================
+
+from triggers.admin.stac_repair import (
+    stac_repair_test_handler,
+    stac_repair_inventory_handler,
+    stac_repair_item_handler
+)
+
+
+@app.route(route="stac/repair/test", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def stac_repair_test(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Test STAC repair handler configuration.
+
+    GET /api/stac/repair/test
+
+    Returns handler availability and configuration status.
+    """
+    return stac_repair_test_handler(req)
+
+
+@app.route(route="stac/repair/inventory", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
+def stac_repair_inventory_endpoint(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Run STAC repair inventory directly (bypass job orchestration).
+
+    POST /api/stac/repair/inventory?collection_id=xxx&limit=100
+
+    Query Parameters:
+        collection_id: Optional - limit to specific collection
+        limit: Maximum items to scan (default: 100)
+        prioritize_promoted: If true, return promoted items first (default: true)
+    """
+    return stac_repair_inventory_handler(req)
+
+
+@app.route(route="stac/repair/item", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
+def stac_repair_item_endpoint(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Repair a single STAC item directly (bypass job orchestration).
+
+    POST /api/stac/repair/item?item_id=xxx&collection_id=yyy
+
+    Query Parameters:
+        item_id: STAC item ID to repair (required)
+        collection_id: Collection the item belongs to (required)
+        fix_version: Repair STAC version (default: true)
+        fix_datetime: Add datetime if missing (default: true)
+        fix_geometry: Derive geometry from bbox (default: true)
+    """
+    return stac_repair_item_handler(req)

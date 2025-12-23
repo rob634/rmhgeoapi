@@ -20,7 +20,8 @@
 | 4 | E9 | Zarr/Climate Data as API | 🚧 Partial | 3 | 2.0 |
 | 5 | E7 | Custom Data Pipelines | 🚧 Partial | 3 | 2.6 |
 | 6 | E5 | OGC Styles | 🚧 Partial | 2 | 3.7 |
-| 7 | E8 | H3 Analytics Pipeline | 🚧 Partial | 6 | 1.2 |
+| 7 | E8 | H3 Analytics Pipeline | 🚧 Partial | 7 | 1.2 |
+| NEW | E11 | Pipeline Builder Demo | 📋 Proposed | 4 | — |
 
 **Priority Notes**:
 - **E3 includes Observability**: Merged E6 into E3 — observability is app-to-app monitoring for integration
@@ -1279,6 +1280,43 @@ Source Data           H3 Aggregation          Output
 
 ---
 
+### Feature F8.7: Building Exposure Analysis 📋 HIGH PRIORITY
+
+**Deliverable**: Buildings → Raster Extract → H3 Aggregation pipeline
+**Documentation**: [BUILDING_EXPOSURE_PIPELINE.md](docs_claude/BUILDING_EXPOSURE_PIPELINE.md)
+**Timeline**: ~1 week
+**Business Value**: Climate risk exposure analysis for high-profile projects
+
+**Workflow**:
+```
+Buildings (MS/Google) → Centroids → Raster Sample → H3 Aggregate → GeoParquet
+```
+
+| Story | Status | Description |
+|-------|--------|-------------|
+| S8.7.1 | 📋 | Create `h3.building_exposure` schema |
+| S8.7.2 | 📋 | Create `building_exposure_analysis` job definition |
+| S8.7.3 | 📋 | Stage 1: `building_centroid_extract` handler |
+| S8.7.4 | 📋 | Stage 2: `building_raster_sample` handler (rasterstats) |
+| S8.7.5 | 📋 | Stage 3: `building_h3_aggregate` handler (SQL aggregation) |
+| S8.7.6 | 📋 | Stage 4: `h3_export_geoparquet` handler |
+| S8.7.7 | 📋 | Query API endpoints |
+| S8.7.8 | 📋 | End-to-end test: Kenya + FATHOM + MS Buildings |
+
+**Output per H3 Cell**:
+- `building_count`: Total buildings
+- `mean_exposure`: Average raster value
+- `max_exposure`: Maximum raster value
+- `pct_exposed_{threshold}`: % buildings above threshold
+- `count_exposed_{threshold}`: Count above threshold
+
+**Dependencies**:
+- E10.F10.2 (FATHOM merge) for flood COGs
+- Planetary Computer for MS Building Footprints
+- rasterstats + geopandas for processing
+
+---
+
 ---
 
 ## Epic E9: Zarr/Climate Data as API 🚧
@@ -1592,12 +1630,12 @@ if __name__ == "__main__":
 |----------|-------|
 | Completed Epics | 1 |
 | Active Epics | 7 |
-| Planned Epics | 1 |
-| **Total Epics** | **9** |
+| Planned Epics | 2 |
+| **Total Epics** | **10** |
 | Completed Features | 18 |
 | Active Features | 6 |
-| Planned Features | 14 |
-| **Total Features** | **38** |
+| Planned Features | 19 |
+| **Total Features** | **43** |
 | Completed Enablers | 6 |
 | Backlog Enablers | 3 |
 
@@ -1616,4 +1654,114 @@ if __name__ == "__main__":
 
 ---
 
-**Last Updated**: 21 DEC 2025 (Added F2.8 Raster Classification & Detection)
+## Epic E11: Pipeline Builder Demo App 📋 NEW
+
+**Business Requirement**: Visual demonstration of platform capabilities for stakeholder engagement
+**Status**: 📋 PROPOSED
+**Owner**: Geospatial Team (demo) → UI Team (production)
+**Documentation**: [PIPELINE_BUILDER_VISION.md](docs_claude/PIPELINE_BUILDER_VISION.md)
+
+**Strategic Purpose**:
+> "Show leadership what the backend can do. Demonstrate why proper UI investment unlocks value."
+
+**Buzzword Summary** (What we already have):
+- ✅ H3 Hexagonal Hierarchical Spatial Index
+- ✅ Cloud-Optimized GeoTIFFs (COG)
+- ✅ SpatioTemporal Asset Catalog (STAC)
+- ✅ OGC API Features & Styles
+- ✅ Declarative Pipeline Orchestration
+- ✅ Zero-Secret Azure Architecture
+- 🚧 Zonal Statistics at Scale
+- 📋 Columnar OLAP Export (GeoParquet)
+
+### Feature F11.1: Data Source Browser 📋
+
+**Deliverable**: STAC + Promoted datasets gallery view
+
+| Story | Status | Description | Backend Dep |
+|-------|--------|-------------|-------------|
+| S11.1.1 | 📋 | STAC collection browser with search | `/api/stac/*` ✅ |
+| S11.1.2 | 📋 | Promoted datasets gallery view | `/api/promote/gallery` ✅ |
+| S11.1.3 | 📋 | Preview thumbnails from TiTiler | TiTiler ✅ |
+| S11.1.4 | 📋 | Click to view on map | TiTiler ✅ |
+
+---
+
+### Feature F11.2: Pipeline Composer 📋
+
+**Deliverable**: Visual job submission interface
+
+| Story | Status | Description | Backend Dep |
+|-------|--------|-------------|-------------|
+| S11.2.1 | 📋 | List available job types | `/api/jobs/types` (new) |
+| S11.2.2 | 📋 | Visual parameter form generator | Job.parameters_schema ✅ |
+| S11.2.3 | 📋 | Submit pipeline and show queue | `/api/jobs/submit/*` ✅ |
+| S11.2.4 | 📋 | Real-time job progress tracker | `/api/jobs/status/*` ✅ |
+
+---
+
+### Feature F11.3: H3 Analytics Viewer 📋 (KEY FEATURE)
+
+**Deliverable**: Hexagonal analytics visualization with drill-down
+
+| Story | Status | Description | Backend Dep |
+|-------|--------|-------------|-------------|
+| S11.3.1 | 📋 | H3 hexagon layer (Mapbox GL + deck.gl) | `/api/h3/stats/*/cells` (F8.6) |
+| S11.3.2 | 📋 | Resolution switcher (zoom mapping) | H3 pyramid ✅ |
+| S11.3.3 | 📋 | Click hexagon → drill to children | H3 schema ✅ |
+| S11.3.4 | 📋 | Choropleth styling by stat value | OGC Styles ✅ |
+| S11.3.5 | 📋 | Country/Admin filter | `/api/h3/stats?iso3=` (F8.6) |
+| S11.3.6 | 📋 | Time slider for temporal stats | xarray service ✅ |
+
+**Blockers**: Requires E8.F8.3 (H3 aggregation handlers) + E8.F8.6 (H3 API)
+
+---
+
+### Feature F11.4: Export & Interoperability 📋
+
+**Deliverable**: Export capabilities for external tools
+
+| Story | Status | Description | Backend Dep |
+|-------|--------|-------------|-------------|
+| S11.4.1 | 📋 | Export H3 stats as GeoParquet | `/api/h3/export` (F8.5) |
+| S11.4.2 | 📋 | DuckDB SQL preview (WASM) | Client-side |
+| S11.4.3 | 📋 | Copy tile URL for other tools | TiTiler URLs ✅ |
+| S11.4.4 | 📋 | STAC item JSON download | `/api/stac/items/*` ✅ |
+
+---
+
+### E11 Technology Stack (Demo Quality)
+
+| Component | Technology | Rationale |
+|-----------|------------|-----------|
+| Frontend | Vanilla JS + Mapbox GL | "Demo quality" - no framework |
+| H3 Rendering | h3-js + deck.gl | Purpose-built for hexagons |
+| Hosting | Azure Static Web App | Free tier |
+| Backend | Existing APIs | Already production-ready |
+
+---
+
+### E11 Dependencies
+
+```
+E8.F8.3: H3 Aggregation Handlers ──┬──▶ E11.F11.3: H3 Viewer
+E8.F8.6: H3 Analytics API ─────────┘
+E8.F8.5: GeoParquet Export ───────────▶ E11.F11.4: Export
+```
+
+**Critical Path**: F8.3 → F8.6 → F11.3 → Demo Ready
+
+---
+
+### E11 Success Criteria
+
+Demo successful if leadership says:
+1. "Get real UI developers on this."
+2. "Can we show this to [external stakeholder]?"
+3. "When can we have a production version?"
+
+---
+
+---
+
+**Last Updated**: 22 DEC 2025 (Added E11 Pipeline Builder Demo App)

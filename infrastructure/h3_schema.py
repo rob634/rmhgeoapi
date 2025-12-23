@@ -106,36 +106,46 @@ class H3SchemaDeployer:
 
         try:
             with self.repo._get_connection() as conn:
+                # Each step commits independently so failures don't rollback earlier successes
                 # Step 1: Create schema
                 self._deploy_schema(conn, results)
+                conn.commit()
 
                 # Step 2: Create h3.cells (core table)
                 self._deploy_cells_table(conn, results)
+                conn.commit()
 
                 # Step 3: Create h3.cell_admin0 (country mapping)
                 self._deploy_cell_admin0_table(conn, results)
+                conn.commit()
 
                 # Step 4: Create h3.cell_admin1 (admin1 mapping)
                 self._deploy_cell_admin1_table(conn, results)
+                conn.commit()
 
                 # Step 5: Create h3.dataset_registry (metadata catalog - BEFORE stats tables)
                 self._deploy_dataset_registry_table(conn, results)
+                conn.commit()
 
                 # Step 6: Create h3.zonal_stats PARTITIONED BY THEME (raster aggregations)
+                # Note: May fail if existing non-partitioned zonal_stats exists
                 self._deploy_zonal_stats_partitioned_table(conn, results)
+                conn.commit()
 
                 # Step 7: Create h3.point_stats (point counts - FK to dataset_registry)
                 self._deploy_point_stats_table(conn, results)
+                conn.commit()
 
                 # Step 8: Create h3.batch_progress (cascade job tracking)
                 self._deploy_batch_progress_table(conn, results)
+                conn.commit()
 
                 # Step 9: Grant permissions
                 self._grant_permissions(conn, results)
-
                 conn.commit()
-                results["success"] = True
-                logger.info(f"H3 normalized schema deployed successfully")
+
+                results["success"] = len(results["errors"]) == 0
+                logger.info(f"H3 normalized schema deployment complete (errors: {len(results['errors'])})")
 
         except Exception as e:
             logger.error(f"H3 schema deployment failed: {e}")

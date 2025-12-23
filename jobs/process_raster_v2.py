@@ -88,17 +88,17 @@ class ProcessRasterV2Job(JobBaseMixin, JobBase):
         '_skip_validation': {'type': 'bool', 'default': False},
     }
 
-    # Pre-flight resource validation (29 NOV 2025: Added size check)
+    # Pre-flight resource validation (29 NOV 2025: Added size check, 23 DEC 2025: Renamed env var)
     # Uses blob_exists_with_size for efficient single API call
-    # Size limits from RASTER_MAX_FILE_SIZE_MB env var (default: 20GB)
+    # Size limits from RASTER_ROUTE_REJECT_MB env var (default: 8GB)
     resource_validators = [
         {
             'type': 'blob_exists_with_size',
             'container_param': 'container_name',
             'blob_param': 'blob_name',
-            'max_size_env': 'RASTER_MAX_FILE_SIZE_MB',  # From config/raster_config.py
+            'max_size_env': 'RASTER_ROUTE_REJECT_MB',  # From config/raster_config.py
             'error_not_found': 'Source raster file does not exist. Verify blob_name and container_name.',
-            'error_too_large': 'Raster file too_large for direct processing. Use process_large_raster_v2 for files over size limit.'
+            'error_too_large': 'Raster file too large for direct processing. Use process_large_raster_v2 for files over size limit.'
         }
     ]
 
@@ -374,36 +374,20 @@ class ProcessRasterV2Job(JobBaseMixin, JobBase):
     @staticmethod
     def _resolve_in_memory(job_params: Dict[str, Any], config) -> bool:
         """
-        Resolve in_memory setting based on file size and config.
+        Resolve in_memory setting for COG creation.
 
         Priority:
         1. Explicit job parameter (user override)
-        2. Size-based automatic selection (if blob size available from pre-flight)
-        3. Config default (raster.cog_in_memory)
+        2. Config default (raster.cog_in_memory, default: False)
 
-        Size-based logic (29 NOV 2025):
-        - Files <= in_memory_threshold_mb: Use in-memory (faster for small files)
-        - Files > in_memory_threshold_mb: Use disk-based (safer for large files)
-
-        The blob size is captured during pre-flight validation and stored
-        in _blob_size_mb by the blob_exists_with_size validator.
+        Simplified (23 DEC 2025):
+        - Removed size-based auto-selection (was based on removed raster_in_memory_threshold_mb)
+        - in_memory=False (disk-based /tmp) is safer with concurrency
+        - User can override per-job if needed for testing
         """
         # Priority 1: Explicit job parameter
         if job_params.get('in_memory') is not None:
             return job_params['in_memory']
 
-        # Priority 2: Size-based automatic selection
-        blob_size_mb = job_params.get('_blob_size_mb')
-        if blob_size_mb is not None:
-            threshold = config.raster.raster_in_memory_threshold_mb
-            use_in_memory = blob_size_mb <= threshold
-            # Log the decision for debugging
-            from util_logger import LoggerFactory, ComponentType
-            logger = LoggerFactory.create_logger(ComponentType.SERVICE, "process_raster_v2")
-            logger.info(
-                f"📏 Auto in_memory={use_in_memory} (size={blob_size_mb:.1f}MB, threshold={threshold}MB)"
-            )
-            return use_in_memory
-
-        # Priority 3: Config default
+        # Priority 2: Config default (False = disk-based, safer)
         return config.raster.cog_in_memory

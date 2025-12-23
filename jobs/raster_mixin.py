@@ -357,38 +357,29 @@ class RasterMixin:
         return default
 
     @staticmethod
-    def _resolve_in_memory(job_params: Dict[str, Any], config, default_threshold_mb: int = 500) -> bool:
+    def _resolve_in_memory(job_params: Dict[str, Any], config) -> bool:
         """
-        Resolve in_memory setting based on file size and config.
+        Resolve in_memory setting for COG creation.
 
         Priority:
         1. Explicit job parameter (user override)
-        2. Size-based automatic selection (if blob size available from pre-flight)
-        3. Config default (raster.cog_in_memory)
+        2. Config default (raster.cog_in_memory, default: False)
+
+        Simplified (23 DEC 2025):
+        - Removed size-based auto-selection (was based on removed raster_in_memory_threshold_mb)
+        - in_memory=False (disk-based /tmp) is safer with concurrency
+        - User can override per-job if needed for testing
 
         Args:
-            job_params: Job parameters (may include _blob_size_mb from pre-flight)
+            job_params: Job parameters
             config: AppConfig instance
-            default_threshold_mb: Fallback threshold if not in config
 
         Returns:
             bool: Whether to use in-memory processing
         """
-        logger = LoggerFactory.create_logger(ComponentType.CONTROLLER, "raster_mixin")
-
         # Priority 1: Explicit job parameter
         if job_params.get('in_memory') is not None:
             return job_params['in_memory']
 
-        # Priority 2: Size-based automatic selection
-        blob_size_mb = job_params.get('_blob_size_mb')
-        if blob_size_mb is not None:
-            threshold = getattr(config.raster, 'in_memory_threshold_mb', default_threshold_mb)
-            use_in_memory = blob_size_mb <= threshold
-            logger.info(
-                f"Auto in_memory={use_in_memory} (size={blob_size_mb:.1f}MB, threshold={threshold}MB)"
-            )
-            return use_in_memory
-
-        # Priority 3: Config default
-        return getattr(config.raster, 'cog_in_memory', True)
+        # Priority 2: Config default (False = disk-based, safer)
+        return getattr(config.raster, 'cog_in_memory', False)

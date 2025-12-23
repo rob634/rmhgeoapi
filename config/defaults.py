@@ -361,30 +361,69 @@ class RasterDefaults:
 
     Controls COG creation, validation, and MosaicJSON generation.
 
-    Size Threshold Configuration (13 DEC 2025):
-        - RASTER_SIZE_THRESHOLD_MB: Small vs large raster cutoff (per-file)
-        - RASTER_MAX_FILE_SIZE_MB: Absolute maximum allowed file size
-        - RASTER_IN_MEMORY_THRESHOLD_MB: Memory vs disk processing threshold
-        - RASTER_COLLECTION_SIZE_LIMIT: Max files allowed in a raster collection
+    Environment Variable Naming Convention (23 DEC 2025):
+        RASTER_ROUTE_*  - Orchestration layer (routing decisions)
+        RASTER_*        - Handler layer (processing decisions)
 
-    Environment variables match constant names for clarity (no prefix stripping).
+    Routing Thresholds (orchestration - decides which pipeline/queue):
+        - RASTER_ROUTE_LARGE_MB: Route to process_large_raster_v2 (tiling pipeline)
+        - RASTER_ROUTE_DOCKER_MB: Route to Docker worker queue (long-running)
+        - RASTER_ROUTE_REJECT_MB: Hard reject - file too large for any pipeline
+
+    Handler Settings (processing - how to process the file):
+        - RASTER_COG_IN_MEMORY: rio-cogeo in_memory parameter (False = use /tmp)
+        - RASTER_TILE_TARGET_MB: Target uncompressed tile size for extract_tiles
+
+    Memory Estimation Multipliers (dtype-aware, 23 DEC 2025):
+        - uint8/int8:   2.5x uncompressed size
+        - uint16/int16: 3.0x (upcast during processing)
+        - float32:      4.0x (float math + intermediate arrays)
+        - float64:      5.0x (double precision overhead)
     """
 
-    # Size thresholds - optimized for 7.7 GB RAM target environment (22 DEC 2025)
-    # See docs_claude/MEMORY_PROFILING.md for empirical OOM frontier data
-    RASTER_SIZE_THRESHOLD_MB = 1200     # 1.2 GB - route larger files to process_large_raster_v2
-    RASTER_MAX_FILE_SIZE_MB = 8000      # 8 GB - hard reject (tiled pipeline handles up to this)
-    RASTER_IN_MEMORY_THRESHOLD_MB = 100 # 100 MB - in-memory vs disk processing
+    # ==========================================================================
+    # ORCHESTRATION LAYER - Routing decisions (which pipeline/queue)
+    # ==========================================================================
 
-    # Collection validation limit (13 DEC 2025)
-    # Collections larger than this are rejected (too many files to size-check efficiently)
-    RASTER_COLLECTION_SIZE_LIMIT = 20
+    # Route to large raster pipeline (process_large_raster_v2 with tiling)
+    RASTER_ROUTE_LARGE_MB = 1200  # 1.2 GB - files above this use tiling pipeline
 
-    # COG creation
+    # Route to Docker worker queue (long-running-tasks)
+    # Files above this threshold route to Docker regardless of pipeline
+    RASTER_ROUTE_DOCKER_MB = 2000  # 2 GB - Docker worker for memory-intensive ops
+
+    # Hard reject - file exceeds maximum supported size
+    RASTER_ROUTE_REJECT_MB = 8000  # 8 GB - reject at preflight validation
+
+    # Collection size limit (max files per collection submission)
+    RASTER_COLLECTION_MAX_FILES = 20
+
+    # ==========================================================================
+    # HANDLER LAYER - Processing decisions (how to process)
+    # ==========================================================================
+
+    # Target tile size for extract_tiles (uncompressed MB per tile)
+    # Tiles are sized so Function App workers can COG them without OOM
+    RASTER_TILE_TARGET_MB = 400  # ~400 MB uncompressed tiles
+
+    # COG creation settings
     COG_COMPRESSION = "deflate"
     COG_JPEG_QUALITY = 85
     COG_TILE_SIZE = 512
-    COG_IN_MEMORY = False  # Disk-based safer with concurrency
+    COG_IN_MEMORY = False  # Disk-based (/tmp) - safer with concurrency
+
+    # ==========================================================================
+    # MEMORY ESTIMATION - Dtype-aware peak multipliers (23 DEC 2025)
+    # ==========================================================================
+    # These multipliers estimate peak RAM usage during COG creation
+    # based on empirical OOM observations. float32 requires significantly
+    # more working memory than int types due to intermediate arrays.
+
+    MEMORY_MULTIPLIER_UINT8 = 2.5   # Simple byte operations
+    MEMORY_MULTIPLIER_INT16 = 3.0   # Upcast during processing
+    MEMORY_MULTIPLIER_INT32 = 3.5   # Larger intermediates
+    MEMORY_MULTIPLIER_FLOAT32 = 4.0 # Float math + intermediate arrays
+    MEMORY_MULTIPLIER_FLOAT64 = 5.0 # Double precision overhead
 
     # Reprojection and validation
     TARGET_CRS = "EPSG:4326"

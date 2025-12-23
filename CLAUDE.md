@@ -1,6 +1,6 @@
 # CLAUDE.md - Project Context
 
-**Last Updated**: 21 DEC 2025
+**Last Updated**: 23 DEC 2025
 
 ---
 
@@ -88,20 +88,53 @@ Co-Authored-By: Claude <noreply@anthropic.com>
 func azure functionapp publish rmhazuregeoapi --python --build remote
 ```
 
-### Post-Deployment Testing
-```bash
-# 1. Health Check
-curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/health
+### Post-Deployment Validation (REQUIRED)
 
-# 2. FULL REBUILD DATABASE SCHEMAS (Required after deployment!)
+**Claude MUST perform these steps after EVERY deployment:**
+
+```bash
+# Step 1: Wait for app restart (30-60 seconds)
+sleep 45
+
+# Step 2: Health check (CRITICAL - detects startup failures)
+curl -sf https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/health
+```
+
+**If health check fails (404 or connection error):**
+
+1. **Check Application Insights for `STARTUP_FAILED`** - the app logs missing env vars before crashing:
+```bash
+# Quick query for startup failures (use APPLICATION_INSIGHTS.md for full setup)
+TOKEN=$(az account get-access-token --resource https://api.applicationinsights.io --query accessToken -o tsv)
+curl -s -H "Authorization: Bearer $TOKEN" \
+  "https://api.applicationinsights.io/v1/apps/d3af3d37-cfe3-411f-adef-bc540181cbca/query" \
+  --data-urlencode "query=traces | where message contains 'STARTUP_FAILED' | order by timestamp desc | take 5" \
+  -G | python3 -m json.tool
+```
+
+2. **Common cause: Missing environment variables**
+   - Required: `POSTGIS_HOST`, `POSTGIS_DATABASE`, `POSTGIS_SCHEMA`, `APP_SCHEMA`, `PGSTAC_SCHEMA`, `H3_SCHEMA`
+   - Check current settings: `az functionapp config appsettings list --name rmhazuregeoapi --resource-group rmhazure_rg`
+   - Add missing: `az functionapp config appsettings set --name rmhazuregeoapi --resource-group rmhazure_rg --settings VAR_NAME=value`
+
+3. **After fixing, restart and re-validate:**
+```bash
+az functionapp restart --name rmhazuregeoapi --resource-group rmhazure_rg
+sleep 45
+curl -sf https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/health
+```
+
+### Post-Deployment Testing (after health check passes)
+```bash
+# 1. FULL REBUILD DATABASE SCHEMAS (Required after deployment!)
 curl -X POST "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/dbadmin/maintenance?action=full-rebuild&confirm=yes"
 
-# 3. Submit Test Job
+# 2. Submit Test Job
 curl -X POST https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/jobs/submit/hello_world \
   -H "Content-Type: application/json" \
   -d '{"message": "deployment test"}'
 
-# 4. Check Job Status
+# 3. Check Job Status
 curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/jobs/status/{JOB_ID}
 ```
 

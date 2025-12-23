@@ -131,12 +131,15 @@ def debug_config() -> dict:
             'business_database': config.business_database.debug_dict() if config.business_database else None,
             'business_database_configured': config.is_business_database_configured(),
 
-            # Raster (field names match env vars - 13 DEC 2025)
+            # Raster (field names match env vars - 23 DEC 2025)
             'raster': {
                 'cog_compression': config.raster.cog_compression,
                 'cog_tile_size': config.raster.cog_tile_size,
-                'raster_size_threshold_mb': config.raster.raster_size_threshold_mb,
-                'raster_collection_size_limit': config.raster.raster_collection_size_limit,
+                'raster_route_large_mb': config.raster.raster_route_large_mb,
+                'raster_route_docker_mb': config.raster.raster_route_docker_mb,
+                'raster_route_reject_mb': config.raster.raster_route_reject_mb,
+                'raster_collection_max_files': config.raster.raster_collection_max_files,
+                'raster_tile_target_mb': config.raster.raster_tile_target_mb,
             },
 
             # Vector

@@ -1035,12 +1035,55 @@ def _get_optimal_cog_settings(raster_type: str) -> dict:
 # MEMORY FOOTPRINT ESTIMATION (30 NOV 2025)
 # ============================================================================
 
+def _get_memory_multiplier(dtype: str) -> float:
+    """
+    Get dtype-aware memory multiplier for peak RAM estimation.
+
+    Different data types require different amounts of working memory
+    during COG creation due to intermediate arrays, float math, and
+    type upcasting during processing.
+
+    Args:
+        dtype: Data type string (e.g., 'uint8', 'float32')
+
+    Returns:
+        float: Multiplier to apply to uncompressed size for peak estimate
+
+    Empirical Observations (23 DEC 2025):
+        - uint8/int8:   2.5x - Simple byte operations
+        - uint16/int16: 3.0x - Upcast to int32 during processing
+        - uint32/int32: 3.5x - Larger intermediate buffers
+        - float32:      4.0x - Float math creates many intermediate arrays
+        - float64:      5.0x - Double precision overhead compounds
+    """
+    from config.defaults import RasterDefaults
+
+    dtype_lower = str(dtype).lower()
+
+    if 'float64' in dtype_lower or 'complex' in dtype_lower:
+        return RasterDefaults.MEMORY_MULTIPLIER_FLOAT64
+    elif 'float32' in dtype_lower or 'float16' in dtype_lower:
+        return RasterDefaults.MEMORY_MULTIPLIER_FLOAT32
+    elif 'int32' in dtype_lower or 'uint32' in dtype_lower:
+        return RasterDefaults.MEMORY_MULTIPLIER_INT32
+    elif 'int16' in dtype_lower or 'uint16' in dtype_lower:
+        return RasterDefaults.MEMORY_MULTIPLIER_INT16
+    else:
+        # uint8, int8, or unknown - use conservative base multiplier
+        return RasterDefaults.MEMORY_MULTIPLIER_UINT8
+
+
 def _estimate_memory_footprint(width: int, height: int, band_count: int, dtype: str) -> dict:
     """
     Estimate memory footprint for raster processing operations.
 
     Calculates uncompressed size and estimates peak memory usage during
     COG creation (which includes warp buffers, overview generation, etc.).
+
+    Uses dtype-aware multipliers (23 DEC 2025) to account for different
+    working memory requirements of different data types:
+        - float32 requires ~4x uncompressed size (vs 2.5x for uint8)
+        - This explains OOM on float32 files that seemed "safe"
 
     Args:
         width: Raster width in pixels
@@ -1067,19 +1110,18 @@ def _estimate_memory_footprint(width: int, height: int, band_count: int, dtype: 
     try:
         bytes_per_pixel = np.dtype(dtype).itemsize
     except TypeError:
-        # Fallback for unknown dtypes
-        bytes_per_pixel = 4  # Assume float32
+        # Unknown dtype - assume float32 (4 bytes)
+        bytes_per_pixel = 4
 
     # Calculate uncompressed size
     total_pixels = width * height * band_count
     uncompressed_bytes = total_pixels * bytes_per_pixel
     uncompressed_gb = uncompressed_bytes / (1024 ** 3)
 
-    # Estimate peak memory during processing
+    # Estimate peak memory during processing using dtype-aware multiplier
     # COG creation involves: source + dest + warp buffers + overview pyramid
-    # Rule of thumb: 2.5x uncompressed size for peak memory
-    # Add extra for reprojection buffers if CRS change needed
-    peak_multiplier = 2.5
+    # Multiplier varies by dtype due to intermediate array allocations
+    peak_multiplier = _get_memory_multiplier(dtype)
     estimated_peak_gb = uncompressed_gb * peak_multiplier
 
     # Detect system resources

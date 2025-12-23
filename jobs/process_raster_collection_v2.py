@@ -38,13 +38,13 @@ class ProcessRasterCollectionV2Job(RasterMixin, RasterWorkflowsBase, JobBaseMixi
     - Collection size limit enforced (max files allowed)
     - Individual raster size threshold enforced (reject large files)
 
-    Size-Based Routing (13 DEC 2025):
+    Size-Based Routing (23 DEC 2025 - env var names updated):
         Pre-flight validation checks the count and size of each raster in the collection.
 
         Rejection conditions:
-        1. Collection exceeds RASTER_COLLECTION_SIZE_LIMIT (default: 20 files)
+        1. Collection exceeds RASTER_COLLECTION_MAX_FILES (default: 20 files)
            → Submit smaller batches
-        2. ANY raster exceeds RASTER_SIZE_THRESHOLD_MB (default: 800 MB)
+        2. ANY raster exceeds RASTER_ROUTE_LARGE_MB (default: 1200 MB)
            → Large raster collection processing requires Docker worker (coming soon)
 
         Current behavior:
@@ -52,13 +52,13 @@ class ProcessRasterCollectionV2Job(RasterMixin, RasterWorkflowsBase, JobBaseMixi
             requires Docker worker which is not yet implemented.
 
         Future behavior (when Docker worker is ready):
-            Routes ALL tasks to 'long-running-raster-tasks' queue instead of
+            Routes ALL tasks to 'long-running-tasks' queue instead of
             'raster-tasks' queue. All-or-none routing prevents complexity of
             splitting tasks between queues for a single job.
 
         Thresholds configurable via environment variables:
-        - RASTER_COLLECTION_SIZE_LIMIT: Max files in collection (default: 20)
-        - RASTER_SIZE_THRESHOLD_MB: Max individual file size in MB (default: 800)
+        - RASTER_COLLECTION_MAX_FILES: Max files in collection (default: 20)
+        - RASTER_ROUTE_LARGE_MB: Max individual file size in MB (default: 1200)
     """
 
     job_type = "process_raster_collection_v2"
@@ -106,10 +106,10 @@ class ProcessRasterCollectionV2Job(RasterMixin, RasterWorkflowsBase, JobBaseMixi
             'max_parallel': 10,
             'report_all': True,
             'min_count': 2,
-            # Collection count limit (from env var)
-            'max_collection_count_env': 'RASTER_COLLECTION_SIZE_LIMIT',
-            # Individual raster size threshold (from env var)
-            'max_individual_size_mb_env': 'RASTER_SIZE_THRESHOLD_MB',
+            # Collection count limit (from env var - 23 DEC 2025)
+            'max_collection_count_env': 'RASTER_COLLECTION_MAX_FILES',
+            # Individual raster size threshold (from env var - 23 DEC 2025)
+            'max_individual_size_mb_env': 'RASTER_ROUTE_LARGE_MB',
             # Error messages
             'error_not_found': 'One or more tiles not found in collection. Verify blob paths.',
             'error_collection_too_large': (

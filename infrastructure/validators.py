@@ -842,9 +842,9 @@ def validate_blob_list_exists_with_max_size(
         report_all: bool - Report all missing vs first (default: True)
         min_count: int - Minimum blobs required (default: 2)
         max_collection_count: int - Max files allowed in collection (optional)
-        max_collection_count_env: str - Env var for collection limit (e.g., 'RASTER_COLLECTION_SIZE_LIMIT')
+        max_collection_count_env: str - Env var for collection limit (e.g., 'RASTER_COLLECTION_MAX_FILES')
         max_individual_size_mb: int - Reject if ANY blob exceeds this (optional)
-        max_individual_size_mb_env: str - Env var for size threshold (e.g., 'RASTER_SIZE_THRESHOLD_MB')
+        max_individual_size_mb_env: str - Env var for size threshold (e.g., 'RASTER_ROUTE_LARGE_MB')
         error_not_found: str - Error if blob missing
         error_collection_too_large: str - Error if collection exceeds file count limit
         error_raster_too_large: str - Error if any blob exceeds size threshold
@@ -865,8 +865,8 @@ def validate_blob_list_exists_with_max_size(
                 'type': 'blob_list_exists_with_max_size',
                 'container_param': 'container_name',
                 'blob_list_param': 'blob_list',
-                'max_collection_count_env': 'RASTER_COLLECTION_SIZE_LIMIT',
-                'max_individual_size_mb_env': 'RASTER_SIZE_THRESHOLD_MB',
+                'max_collection_count_env': 'RASTER_COLLECTION_MAX_FILES',
+                'max_individual_size_mb_env': 'RASTER_ROUTE_LARGE_MB',
                 'error_collection_too_large': 'Collection exceeds max file count.',
                 'error_raster_too_large': 'Collection contains raster(s) exceeding size threshold.'
             }
@@ -924,10 +924,10 @@ def validate_blob_list_exists_with_max_size(
                 max_collection_count = int(env_value)
             except ValueError:
                 logger.warning(f"Invalid {max_collection_count_env} value: {env_value}, using default")
-                max_collection_count = RasterDefaults.RASTER_COLLECTION_SIZE_LIMIT
+                max_collection_count = RasterDefaults.RASTER_COLLECTION_MAX_FILES
         else:
             # Env var not set, use default
-            max_collection_count = RasterDefaults.RASTER_COLLECTION_SIZE_LIMIT
+            max_collection_count = RasterDefaults.RASTER_COLLECTION_MAX_FILES
 
     # Check collection count limit FIRST (before any blob API calls)
     if max_collection_count and len(blob_list) > max_collection_count:
@@ -948,10 +948,10 @@ def validate_blob_list_exists_with_max_size(
                 max_individual_size_mb = int(env_value)
             except ValueError:
                 logger.warning(f"Invalid {max_individual_size_mb_env} value: {env_value}, using default")
-                max_individual_size_mb = RasterDefaults.RASTER_SIZE_THRESHOLD_MB
+                max_individual_size_mb = RasterDefaults.RASTER_ROUTE_LARGE_MB
         else:
             # Env var not set, use default
-            max_individual_size_mb = RasterDefaults.RASTER_SIZE_THRESHOLD_MB
+            max_individual_size_mb = RasterDefaults.RASTER_ROUTE_LARGE_MB
 
     # Get zone from config (default: bronze for input validation)
     zone = config.get('zone', 'bronze')

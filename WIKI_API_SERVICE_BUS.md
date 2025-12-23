@@ -2,11 +2,13 @@
 
 > **Navigation**: [Quick Start](WIKI_QUICK_START.md) | [Platform API](WIKI_PLATFORM_API.md) | [All Jobs](WIKI_API_JOB_SUBMISSION.md) | [Errors](WIKI_API_ERRORS.md) | [Glossary](WIKI_API_GLOSSARY.md)
 
-**Date**: 24 NOV 2025
+**Date**: 23 DEC 2025
 **Status**: Reference Documentation
 **Wiki**: Azure DevOps Wiki - Service Bus configuration documentation
 **Purpose**: Developer guide for configuring Azure Service Bus in an already-deployed Azure environment
 **Audience**: Developers setting up the geospatial ETL pipeline in a new environment
+
+> **Note**: For conceptual understanding of serverless architecture and distributed systems patterns, see [WIKI_TECHNICAL_OVERVIEW.md](WIKI_TECHNICAL_OVERVIEW.md).
 
 ---
 
@@ -87,7 +89,12 @@ USER REQUEST
 └─────────────────┬────────────────────────────────────┘
                   ↓
 ┌──────────────────────────────────────────────────────┐
-│ SERVICE BUS QUEUE: geospatial-tasks                  │
+│ SERVICE BUS QUEUES (routed by task type):            │
+│                                                      │
+│ • raster-tasks      - COG processing, tile extract  │
+│ • vector-tasks      - PostGIS operations            │
+│ • long-running-tasks - H3 grids, large batch ops    │
+│                                                      │
 │ Messages: N × TaskQueueMessage                      │
 │   {                                                  │
 │     "task_id": "abc123-s1-t0",                      │
@@ -245,38 +252,94 @@ az servicebus queue create \
   --enable-dead-lettering-on-message-expiration true
 ```
 
-#### Queue 2: geospatial-tasks
+#### Queue 2: raster-tasks
 
 ```yaml
 # POPULATE FROM YOUR ENVIRONMENT:
-Queue Name: geospatial-tasks
+Queue Name: raster-tasks
 Lock Duration: PT5M (5 minutes - CRITICAL, do not change)
 Max Delivery Count: 1 (CRITICAL - disables Service Bus retries)
 Default Message TTL: P7D (7 days)
 Max Size: 1024 MB (1 GB)
 Dead-Letter Queue: Enabled (automatic)
+Purpose: COG processing, tile extraction, raster validation
 ```
 
-**How to verify**:
-```bash
-az servicebus queue show \
-  --resource-group <YOUR_RG> \
-  --namespace-name <YOUR_NAMESPACE> \
-  --name geospatial-tasks \
-  --query "{lockDuration:lockDuration, maxDeliveryCount:maxDeliveryCount, ttl:defaultMessageTimeToLive}" -o json
-```
-
-**How to create** (if doesn't exist):
+**How to create**:
 ```bash
 az servicebus queue create \
   --resource-group <YOUR_RG> \
   --namespace-name <YOUR_NAMESPACE> \
-  --name geospatial-tasks \
+  --name raster-tasks \
   --lock-duration PT5M \
   --max-delivery-count 1 \
   --default-message-time-to-live P7D \
   --max-size 1024 \
   --enable-dead-lettering-on-message-expiration true
+```
+
+#### Queue 3: vector-tasks
+
+```yaml
+# POPULATE FROM YOUR ENVIRONMENT:
+Queue Name: vector-tasks
+Lock Duration: PT5M (5 minutes - CRITICAL, do not change)
+Max Delivery Count: 1 (CRITICAL - disables Service Bus retries)
+Default Message TTL: P7D (7 days)
+Max Size: 1024 MB (1 GB)
+Dead-Letter Queue: Enabled (automatic)
+Purpose: PostGIS operations, vector ingestion, feature processing
+```
+
+**How to create**:
+```bash
+az servicebus queue create \
+  --resource-group <YOUR_RG> \
+  --namespace-name <YOUR_NAMESPACE> \
+  --name vector-tasks \
+  --lock-duration PT5M \
+  --max-delivery-count 1 \
+  --default-message-time-to-live P7D \
+  --max-size 1024 \
+  --enable-dead-lettering-on-message-expiration true
+```
+
+#### Queue 4: long-running-tasks
+
+```yaml
+# POPULATE FROM YOUR ENVIRONMENT:
+Queue Name: long-running-tasks
+Lock Duration: PT5M (5 minutes - CRITICAL, do not change)
+Max Delivery Count: 1 (CRITICAL - disables Service Bus retries)
+Default Message TTL: P7D (7 days)
+Max Size: 1024 MB (1 GB)
+Dead-Letter Queue: Enabled (automatic)
+Purpose: H3 grid generation, large batch operations, cascade handlers
+```
+
+**How to create**:
+```bash
+az servicebus queue create \
+  --resource-group <YOUR_RG> \
+  --namespace-name <YOUR_NAMESPACE> \
+  --name long-running-tasks \
+  --lock-duration PT5M \
+  --max-delivery-count 1 \
+  --default-message-time-to-live P7D \
+  --max-size 1024 \
+  --enable-dead-lettering-on-message-expiration true
+```
+
+**How to verify all task queues**:
+```bash
+for queue in raster-tasks vector-tasks long-running-tasks; do
+  echo "=== $queue ==="
+  az servicebus queue show \
+    --resource-group <YOUR_RG> \
+    --namespace-name <YOUR_NAMESPACE> \
+    --name $queue \
+    --query "{lockDuration:lockDuration, maxDeliveryCount:maxDeliveryCount}" -o json
+done
 ```
 
 ### 3. Azure Functions App
@@ -759,7 +822,9 @@ host.json maxAutoLockRenewalDuration (00:30:00)
 | `ServiceBusConnection` | string | Yes* | None | Service Bus connection string (OR use managed identity) |
 | `ServiceBusConnection__fullyQualifiedNamespace` | string | Yes* | None | Managed identity auth (alternative to connection string) |
 | `SERVICE_BUS_JOBS_QUEUE` | string | No | geospatial-jobs | Job orchestration queue name |
-| `SERVICE_BUS_TASKS_QUEUE` | string | No | geospatial-tasks | Task execution queue name |
+| `SERVICE_BUS_RASTER_TASKS_QUEUE` | string | No | raster-tasks | Raster task execution queue |
+| `SERVICE_BUS_VECTOR_TASKS_QUEUE` | string | No | vector-tasks | Vector task execution queue |
+| `SERVICE_BUS_LONG_RUNNING_TASKS_QUEUE` | string | No | long-running-tasks | Long-running task queue |
 | `SERVICE_BUS_MAX_BATCH_SIZE` | int | No | 100 | Maximum messages per batch (max 100) |
 | `SERVICE_BUS_BATCH_THRESHOLD` | int | No | 50 | Minimum tasks to trigger batch send |
 | `SERVICE_BUS_RETRY_COUNT` | int | No | 3 | Service Bus operation retry count |
@@ -767,6 +832,17 @@ host.json maxAutoLockRenewalDuration (00:30:00)
 | `AzureWebJobsStorage` | string | Yes | None | Storage account for Functions runtime |
 
 \* **Either** `ServiceBusConnection` OR `ServiceBusConnection__fullyQualifiedNamespace` required (not both)
+
+### Queue Routing by Task Type
+
+Tasks are automatically routed to the appropriate queue based on their type:
+
+| Task Type Pattern | Queue | Rationale |
+|------------------|-------|-----------|
+| `*_raster_*`, `extract_tiles`, `create_cog` | raster-tasks | Memory-intensive raster ops |
+| `*_vector_*`, `postgis_*`, `ingest_features` | vector-tasks | PostGIS operations |
+| `*_h3_*`, `cascade_*`, `generate_grid` | long-running-tasks | Operations > 5 minutes |
+| All others | raster-tasks | Default queue |
 
 ### Queue Configuration Values
 
@@ -780,7 +856,9 @@ host.json maxAutoLockRenewalDuration (00:30:00)
 | `maxSizeInMegabytes` | 1024 (1 GB) | Sufficient for 100,000+ job messages |
 | `enableDeadLetteringOnMessageExpiration` | true | Preserve expired messages for debugging |
 
-#### geospatial-tasks Queue
+#### Task Queues (raster-tasks, vector-tasks, long-running-tasks)
+
+All task queues share the same configuration:
 
 | Setting | Value | Rationale |
 |---------|-------|-----------|
@@ -789,6 +867,14 @@ host.json maxAutoLockRenewalDuration (00:30:00)
 | `defaultMessageTimeToLive` | P7D (7 days) | Long-running tile processing workflows |
 | `maxSizeInMegabytes` | 1024 (1 GB) | Handle 10,000+ task messages for large raster jobs |
 | `enableDeadLetteringOnMessageExpiration` | true | Preserve failed tasks for analysis |
+
+**Queue-Specific Purposes:**
+
+| Queue | Purpose | Typical Tasks |
+|-------|---------|---------------|
+| `raster-tasks` | Memory-intensive raster operations | COG creation, tile extraction, STAC registration |
+| `vector-tasks` | PostGIS database operations | Feature ingestion, spatial queries, H3 lookups |
+| `long-running-tasks` | Operations exceeding 5 minutes | H3 grid generation, cascade handlers, batch aggregations |
 
 ### host.json Configuration
 
@@ -1448,8 +1534,12 @@ SELECT pg_try_advisory_lock(hashtext('job_' || $1 || '_stage_' || $2))
 For developers setting up a new environment, follow this checklist:
 
 - [ ] **Step 1**: Verify Service Bus namespace exists
-- [ ] **Step 2**: Verify both queues exist (geospatial-jobs, geospatial-tasks)
-- [ ] **Step 3**: Verify `maxDeliveryCount: 1` on BOTH queues
+- [ ] **Step 2**: Verify all queues exist:
+  - [ ] `geospatial-jobs` (job orchestration)
+  - [ ] `raster-tasks` (raster processing)
+  - [ ] `vector-tasks` (PostGIS operations)
+  - [ ] `long-running-tasks` (H3 grids, cascade handlers)
+- [ ] **Step 3**: Verify `maxDeliveryCount: 1` on ALL queues
 - [ ] **Step 4**: Get Service Bus connection string
 - [ ] **Step 5**: Set `ServiceBusConnection` environment variable in Function App
 - [ ] **Step 6**: Verify host.json has correct Service Bus configuration
@@ -1458,11 +1548,26 @@ For developers setting up a new environment, follow this checklist:
 - [ ] **Step 9**: Run health check
 - [ ] **Step 10**: Submit test hello_world job
 - [ ] **Step 11**: Verify job completes successfully
-- [ ] **Step 12**: Check dead-letter queues are empty
+- [ ] **Step 12**: Check dead-letter queues are empty (all 4 queues)
+
+**Create all queues at once**:
+```bash
+for queue in geospatial-jobs raster-tasks vector-tasks long-running-tasks; do
+  az servicebus queue create \
+    --resource-group <YOUR_RG> \
+    --namespace-name <YOUR_NAMESPACE> \
+    --name $queue \
+    --lock-duration PT5M \
+    --max-delivery-count 1 \
+    --default-message-time-to-live P7D \
+    --max-size 1024 \
+    --enable-dead-lettering-on-message-expiration true
+done
+```
 
 **Estimated setup time**: 30-45 minutes for experienced Azure developer
 
 ---
 
-**Last Updated**: 24 NOV 2025
+**Last Updated**: 23 DEC 2025
 **Next Review**: When adding new job types or changing Service Bus tier

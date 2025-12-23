@@ -29,41 +29,56 @@ class RasterConfig(BaseModel):
 
     Controls COG creation, validation, and processing settings.
 
-    Size Threshold Fields (13 DEC 2025):
+    Field Naming Convention (23 DEC 2025):
         Field names match environment variable names for clarity.
         No prefix stripping - what you see is what you set.
 
-        raster_size_threshold_mb: Small vs large raster cutoff (per-file)
-        raster_max_file_size_mb: Absolute max for any raster (hard reject)
-        raster_in_memory_threshold_mb: Memory vs disk processing threshold
-        raster_collection_size_limit: Max files allowed in a collection
+        Routing (orchestration layer - which pipeline/queue):
+            raster_route_large_mb: Route to tiling pipeline
+            raster_route_docker_mb: Route to Docker worker queue
+            raster_route_reject_mb: Hard reject threshold
+
+        Handler (processing layer - how to process):
+            raster_tile_target_mb: Target tile size for extract_tiles
+            cog_in_memory: rio-cogeo in_memory parameter
     """
 
-    # Pipeline selection and size limits (field names match env vars - 13 DEC 2025)
-    raster_size_threshold_mb: int = Field(
-        default=RasterDefaults.RASTER_SIZE_THRESHOLD_MB,
-        description="File size threshold (MB) for small vs large raster routing. "
-                    "Rasters exceeding this trigger large file handling or rejection."
+    # ==========================================================================
+    # ORCHESTRATION LAYER - Routing decisions
+    # ==========================================================================
+
+    raster_route_large_mb: int = Field(
+        default=RasterDefaults.RASTER_ROUTE_LARGE_MB,
+        description="File size threshold (MB) for routing to large raster pipeline. "
+                    "Files above this use process_large_raster_v2 (tiling)."
     )
 
-    raster_max_file_size_mb: int = Field(
-        default=RasterDefaults.RASTER_MAX_FILE_SIZE_MB,
+    raster_route_docker_mb: int = Field(
+        default=RasterDefaults.RASTER_ROUTE_DOCKER_MB,
+        description="File size threshold (MB) for routing to Docker worker queue. "
+                    "Files above this route to long-running-tasks queue."
+    )
+
+    raster_route_reject_mb: int = Field(
+        default=RasterDefaults.RASTER_ROUTE_REJECT_MB,
         description="Maximum allowed file size in MB for raster processing. "
-                    "Files larger than this are rejected at pre-flight validation. "
-                    "Set to 0 to disable size limit."
+                    "Files larger than this are rejected at pre-flight validation."
     )
 
-    raster_in_memory_threshold_mb: int = Field(
-        default=RasterDefaults.RASTER_IN_MEMORY_THRESHOLD_MB,
-        description="Files smaller than this threshold use in-memory processing by default. "
-                    "Files larger use disk-based temp storage. Can be overridden per-job."
-    )
-
-    # Collection validation limit (13 DEC 2025)
-    raster_collection_size_limit: int = Field(
-        default=RasterDefaults.RASTER_COLLECTION_SIZE_LIMIT,
+    raster_collection_max_files: int = Field(
+        default=RasterDefaults.RASTER_COLLECTION_MAX_FILES,
         description="Max files allowed in a raster collection. "
                     "Collections larger than this are rejected - submit smaller batches."
+    )
+
+    # ==========================================================================
+    # HANDLER LAYER - Processing decisions
+    # ==========================================================================
+
+    raster_tile_target_mb: int = Field(
+        default=RasterDefaults.RASTER_TILE_TARGET_MB,
+        description="Target uncompressed tile size (MB) for extract_tiles stage. "
+                    "Tiles are sized so Function App workers can COG them without OOM."
     )
 
     # Intermediate storage
@@ -180,22 +195,27 @@ class RasterConfig(BaseModel):
     def from_environment(cls):
         """Load from environment variables."""
         return cls(
-            # Size thresholds and limits (field names match env vars - 13 DEC 2025)
-            raster_size_threshold_mb=int(os.environ.get(
-                "RASTER_SIZE_THRESHOLD_MB",
-                str(RasterDefaults.RASTER_SIZE_THRESHOLD_MB)
+            # Routing thresholds (orchestration layer - 23 DEC 2025)
+            raster_route_large_mb=int(os.environ.get(
+                "RASTER_ROUTE_LARGE_MB",
+                str(RasterDefaults.RASTER_ROUTE_LARGE_MB)
             )),
-            raster_max_file_size_mb=int(os.environ.get(
-                "RASTER_MAX_FILE_SIZE_MB",
-                str(RasterDefaults.RASTER_MAX_FILE_SIZE_MB)
+            raster_route_docker_mb=int(os.environ.get(
+                "RASTER_ROUTE_DOCKER_MB",
+                str(RasterDefaults.RASTER_ROUTE_DOCKER_MB)
             )),
-            raster_in_memory_threshold_mb=int(os.environ.get(
-                "RASTER_IN_MEMORY_THRESHOLD_MB",
-                str(RasterDefaults.RASTER_IN_MEMORY_THRESHOLD_MB)
+            raster_route_reject_mb=int(os.environ.get(
+                "RASTER_ROUTE_REJECT_MB",
+                str(RasterDefaults.RASTER_ROUTE_REJECT_MB)
             )),
-            raster_collection_size_limit=int(os.environ.get(
-                "RASTER_COLLECTION_SIZE_LIMIT",
-                str(RasterDefaults.RASTER_COLLECTION_SIZE_LIMIT)
+            raster_collection_max_files=int(os.environ.get(
+                "RASTER_COLLECTION_MAX_FILES",
+                str(RasterDefaults.RASTER_COLLECTION_MAX_FILES)
+            )),
+            # Handler settings (processing layer - 23 DEC 2025)
+            raster_tile_target_mb=int(os.environ.get(
+                "RASTER_TILE_TARGET_MB",
+                str(RasterDefaults.RASTER_TILE_TARGET_MB)
             )),
             # Intermediate storage
             intermediate_tiles_container=os.environ.get("INTERMEDIATE_TILES_CONTAINER"),

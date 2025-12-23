@@ -676,6 +676,7 @@ class H3SchemaDeployer:
                             schema=sql.Identifier(self.SCHEMA_NAME),
                             table=sql.Identifier("zonal_stats")
                         ))
+                        conn.commit()  # Commit the drop before creating new table
                         logger.info("🗑️ Dropped legacy h3.zonal_stats table")
 
                 # Create PARTITIONED parent table

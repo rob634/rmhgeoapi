@@ -104,54 +104,32 @@ class H3SchemaDeployer:
             "errors": []
         }
 
-        try:
-            with self.repo._get_connection() as conn:
-                # Each step commits independently so failures don't rollback earlier successes
-                # Step 1: Create schema
-                self._deploy_schema(conn, results)
-                conn.commit()
+        # Each step runs in its own connection to ensure commits are durable
+        steps = [
+            ("create_schema", self._deploy_schema),
+            ("create_h3_cells", self._deploy_cells_table),
+            ("create_h3_cell_admin0", self._deploy_cell_admin0_table),
+            ("create_h3_cell_admin1", self._deploy_cell_admin1_table),
+            ("create_h3_dataset_registry", self._deploy_dataset_registry_table),
+            ("create_h3_zonal_stats_partitioned", self._deploy_zonal_stats_partitioned_table),
+            ("create_h3_point_stats", self._deploy_point_stats_table),
+            ("create_h3_batch_progress", self._deploy_batch_progress_table),
+            ("grant_permissions", self._grant_permissions),
+        ]
 
-                # Step 2: Create h3.cells (core table)
-                self._deploy_cells_table(conn, results)
-                conn.commit()
+        for step_name, step_func in steps:
+            try:
+                with self.repo._get_connection() as conn:
+                    step_func(conn, results)
+                    conn.commit()
+                    logger.info(f"✅ Step '{step_name}' committed successfully")
+            except Exception as e:
+                logger.error(f"❌ Step '{step_name}' failed: {e}")
+                # Error already recorded in results by the step function
+                # Continue to next step instead of aborting
 
-                # Step 3: Create h3.cell_admin0 (country mapping)
-                self._deploy_cell_admin0_table(conn, results)
-                conn.commit()
-
-                # Step 4: Create h3.cell_admin1 (admin1 mapping)
-                self._deploy_cell_admin1_table(conn, results)
-                conn.commit()
-
-                # Step 5: Create h3.dataset_registry (metadata catalog - BEFORE stats tables)
-                self._deploy_dataset_registry_table(conn, results)
-                conn.commit()
-
-                # Step 6: Create h3.zonal_stats PARTITIONED BY THEME (raster aggregations)
-                # Note: May fail if existing non-partitioned zonal_stats exists
-                self._deploy_zonal_stats_partitioned_table(conn, results)
-                conn.commit()
-
-                # Step 7: Create h3.point_stats (point counts - FK to dataset_registry)
-                self._deploy_point_stats_table(conn, results)
-                conn.commit()
-
-                # Step 8: Create h3.batch_progress (cascade job tracking)
-                self._deploy_batch_progress_table(conn, results)
-                conn.commit()
-
-                # Step 9: Grant permissions
-                self._grant_permissions(conn, results)
-                conn.commit()
-
-                results["success"] = len(results["errors"]) == 0
-                logger.info(f"H3 normalized schema deployment complete (errors: {len(results['errors'])})")
-
-        except Exception as e:
-            logger.error(f"H3 schema deployment failed: {e}")
-            logger.error(traceback.format_exc())
-            results["errors"].append(str(e))
-            results["success"] = False
+        results["success"] = len(results["errors"]) == 0
+        logger.info(f"H3 normalized schema deployment complete (errors: {len(results['errors'])})")
 
         return results
 

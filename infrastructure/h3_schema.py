@@ -658,6 +658,26 @@ class H3SchemaDeployer:
 
         try:
             with conn.cursor() as cur:
+                # Check if table exists and is NOT partitioned (legacy table)
+                cur.execute("""
+                    SELECT c.relkind, c.relispartition
+                    FROM pg_class c
+                    JOIN pg_namespace n ON n.oid = c.relnamespace
+                    WHERE n.nspname = 'h3' AND c.relname = 'zonal_stats'
+                """)
+                row = cur.fetchone()
+
+                if row:
+                    relkind = row.get('relkind')
+                    # 'p' = partitioned table, 'r' = regular table
+                    if relkind == 'r':
+                        logger.warning("⚠️ Found non-partitioned h3.zonal_stats - dropping for partitioned rebuild")
+                        cur.execute(sql.SQL("DROP TABLE IF EXISTS {schema}.{table} CASCADE").format(
+                            schema=sql.Identifier(self.SCHEMA_NAME),
+                            table=sql.Identifier("zonal_stats")
+                        ))
+                        logger.info("🗑️ Dropped legacy h3.zonal_stats table")
+
                 # Create PARTITIONED parent table
                 cur.execute(sql.SQL("""
                     CREATE TABLE IF NOT EXISTS {schema}.{table} (

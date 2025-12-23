@@ -112,6 +112,7 @@ Environment Variables:
 # Native Python modules
 import logging
 import json
+import os
 import traceback
 import uuid
 import time
@@ -142,6 +143,37 @@ validator.ensure_startup_ready()
 # ========================================================================
 # APPLICATION IMPORTS - Our modules (validated at startup)
 # ========================================================================
+
+# ========================================================================
+# PRE-FLIGHT ENV VAR CHECK (23 DEC 2025)
+# ========================================================================
+# Check critical env vars BEFORE heavy imports that require them.
+# This ensures errors are LOGGED to Application Insights before the app fails.
+# Goal: "If app 404s, check Application Insights for STARTUP_FAILED"
+# ========================================================================
+_startup_logger = logging.getLogger("startup")
+_startup_logger.info("🚀 STARTUP: Pre-flight environment variable check...")
+
+_REQUIRED_ENV_VARS = [
+    ("POSTGIS_HOST", "PostgreSQL host"),
+    ("POSTGIS_DATABASE", "PostgreSQL database"),
+    ("POSTGIS_SCHEMA", "PostGIS/geo schema name"),
+    ("APP_SCHEMA", "Application schema name"),
+    ("PGSTAC_SCHEMA", "PgSTAC schema name"),
+    ("H3_SCHEMA", "H3 schema name"),
+]
+
+_missing_vars = []
+for var_name, description in _REQUIRED_ENV_VARS:
+    if not os.environ.get(var_name):
+        _missing_vars.append(f"{var_name} ({description})")
+
+if _missing_vars:
+    _error_msg = f"❌ STARTUP_FAILED: Missing required environment variables: {', '.join(_missing_vars)}"
+    _startup_logger.critical(_error_msg)
+    # Let the natural import error occur - but now it's logged
+else:
+    _startup_logger.info("✅ STARTUP: All required environment variables present")
 
 # ========================================================================
 # EXPLICIT REGISTRIES - Epoch 4 (NO DECORATORS!)

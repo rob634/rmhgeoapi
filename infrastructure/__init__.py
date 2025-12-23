@@ -98,6 +98,8 @@ if TYPE_CHECKING:
     # Curated datasets (15 DEC 2025 - system-managed data)
     from .curated_repository import CuratedDatasetRepository as _CuratedDatasetRepository
     from .curated_repository import CuratedUpdateLogRepository as _CuratedUpdateLogRepository
+    # Promoted datasets (23 DEC 2025 - gallery/system-reserved datasets)
+    from .promoted_repository import PromotedDatasetRepository as _PromotedDatasetRepository
 
 
 def __getattr__(name: str):
@@ -193,6 +195,11 @@ def __getattr__(name: str):
         from .curated_repository import CuratedUpdateLogRepository
         return CuratedUpdateLogRepository
 
+    # Promoted datasets (23 DEC 2025 - gallery/system-reserved datasets)
+    elif name == "PromotedDatasetRepository":
+        from .promoted_repository import PromotedDatasetRepository
+        return PromotedDatasetRepository
+
     # Helper function for getting default repositories
     elif name == "get_default_repositories":
         from .factory import get_default_repositories
@@ -227,5 +234,6 @@ __all__ = [
     "AzureDataFactoryRepository",  # Added 29 NOV 2025 - ADF pipeline orchestration
     "CuratedDatasetRepository",  # Added 15 DEC 2025 - system-managed data
     "CuratedUpdateLogRepository",  # Added 15 DEC 2025 - system-managed data
+    "PromotedDatasetRepository",  # Added 23 DEC 2025 - gallery/system-reserved datasets
     "get_default_repositories",
 ]

@@ -90,6 +90,13 @@ from .curated import (
     CuratedUpdateStatus
 )
 
+# Promoted dataset models (23 DEC 2025)
+from .promoted import (
+    PromotedDataset,
+    PromotedDatasetType,
+    SystemRole
+)
+
 __all__ = [
     # Enums
     'JobStatus',
@@ -148,5 +155,10 @@ __all__ = [
     'CuratedSourceType',
     'CuratedUpdateStrategy',
     'CuratedUpdateType',
-    'CuratedUpdateStatus'
+    'CuratedUpdateStatus',
+
+    # Promoted dataset models (23 DEC 2025)
+    'PromotedDataset',
+    'PromotedDatasetType',
+    'SystemRole'
 ]

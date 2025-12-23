@@ -333,6 +333,12 @@ try:
 except ImportError as e:
     logger.warning(f"⚠️ Could not import Swagger interface: {e}")
 
+try:
+    from .stac_map import interface as _stac_map
+    logger.info("✅ Imported STAC Map interface module")
+except ImportError as e:
+    logger.warning(f"⚠️ Could not import STAC Map interface: {e}")
+
 
 # Public API
 __all__ = [

@@ -75,6 +75,20 @@ class TasksInterface(BaseInterface):
                         <p class="subtitle">Job: <span id="job-id-display" style="font-family: 'Courier New', monospace; color: #0071BC; font-size: 14px;">{job_id[:16] if job_id else 'Loading...'}...</span></p>
                     </div>
                     <div style="display: flex; gap: 10px; align-items: center;">
+                        <div class="auto-refresh-toggle">
+                            <label class="toggle-label">
+                                <input type="checkbox" id="autoRefreshToggle" checked>
+                                <span class="toggle-slider"></span>
+                            </label>
+                            <span class="toggle-text">Auto-refresh</span>
+                            <select id="refreshInterval" class="interval-select">
+                                <option value="10">10s</option>
+                                <option value="30" selected>30s</option>
+                                <option value="60">1m</option>
+                                <option value="120">2m</option>
+                            </select>
+                            <span id="refreshCountdown" class="countdown-text"></span>
+                        </div>
                         <button id="refreshBtn" class="refresh-button">Refresh</button>
                         <a href="/api/interface/pipeline" class="back-button-link">
                             Back to Pipeline
@@ -180,6 +194,94 @@ class TasksInterface(BaseInterface):
             background: #005a96;
         }
 
+        /* Auto-refresh toggle */
+        .auto-refresh-toggle {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 12px;
+            background: #f8f9fa;
+            border-radius: 4px;
+            border: 1px solid #e9ecef;
+        }
+
+        .toggle-label {
+            position: relative;
+            display: inline-block;
+            width: 40px;
+            height: 22px;
+            cursor: pointer;
+        }
+
+        .toggle-label input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .toggle-slider {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: #ccc;
+            border-radius: 22px;
+            transition: 0.3s;
+        }
+
+        .toggle-slider:before {
+            content: "";
+            position: absolute;
+            height: 16px;
+            width: 16px;
+            left: 3px;
+            bottom: 3px;
+            background: white;
+            border-radius: 50%;
+            transition: 0.3s;
+        }
+
+        .toggle-label input:checked + .toggle-slider {
+            background: #10B981;
+        }
+
+        .toggle-label input:checked + .toggle-slider:before {
+            transform: translateX(18px);
+        }
+
+        .toggle-text {
+            font-size: 12px;
+            font-weight: 600;
+            color: #053657;
+        }
+
+        .interval-select {
+            padding: 4px 8px;
+            border: 1px solid #e9ecef;
+            border-radius: 3px;
+            font-size: 12px;
+            background: white;
+            cursor: pointer;
+        }
+
+        .countdown-text {
+            font-size: 11px;
+            color: #626F86;
+            font-family: 'Courier New', monospace;
+            min-width: 30px;
+        }
+
+        .refresh-button.refreshing {
+            background: #10B981;
+            animation: pulse 0.5s ease-in-out;
+        }
+
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+        }
+
         /* Job Summary Card */
         .job-summary-card {
             background: white;
@@ -188,6 +290,37 @@ class TasksInterface(BaseInterface):
             border-radius: 3px;
             margin-bottom: 20px;
             box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+        }
+
+        .job-overall-progress {
+            margin-top: 20px;
+            padding-top: 20px;
+            border-top: 1px solid #e9ecef;
+        }
+
+        .overall-progress-label {
+            font-size: 12px;
+            font-weight: 600;
+            color: #626F86;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 10px;
+        }
+
+        .job-overall-progress .progress-bar-container {
+            height: 16px;
+        }
+
+        .job-overall-progress .progress-text {
+            margin-top: 8px;
+        }
+
+        .job-overall-progress .progress-percent {
+            font-size: 14px;
+        }
+
+        .job-overall-progress .progress-count {
+            font-size: 13px;
         }
 
         .job-summary-grid {
@@ -333,6 +466,88 @@ class TasksInterface(BaseInterface):
             justify-content: center;
             gap: 8px;
             flex-wrap: wrap;
+        }
+
+        /* Progress Bar */
+        .stage-progress {
+            margin-top: 12px;
+            padding-top: 12px;
+            border-top: 1px solid rgba(0,0,0,0.08);
+        }
+
+        .progress-bar-container {
+            background: #e9ecef;
+            border-radius: 8px;
+            height: 12px;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .progress-bar-fill {
+            height: 100%;
+            border-radius: 8px;
+            transition: width 0.6s ease-out;
+            display: flex;
+        }
+
+        .progress-segment {
+            height: 100%;
+            transition: width 0.6s ease-out;
+        }
+
+        .progress-segment.completed {
+            background: linear-gradient(90deg, #10B981 0%, #34D399 100%);
+        }
+
+        .progress-segment.failed {
+            background: linear-gradient(90deg, #DC2626 0%, #F87171 100%);
+        }
+
+        .progress-segment.processing {
+            background: linear-gradient(90deg, #F59E0B 0%, #FBBF24 100%);
+            animation: progress-pulse 1.5s ease-in-out infinite;
+        }
+
+        .progress-segment.queued {
+            background: linear-gradient(90deg, #6B7280 0%, #9CA3AF 100%);
+        }
+
+        .progress-segment.pending {
+            background: linear-gradient(90deg, #9333EA 0%, #A855F7 100%);
+        }
+
+        @keyframes progress-pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+        }
+
+        .progress-text {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 6px;
+            font-size: 11px;
+        }
+
+        .progress-percent {
+            font-weight: 700;
+            color: #053657;
+        }
+
+        .progress-count {
+            color: #626F86;
+        }
+
+        /* Active stage glow effect */
+        .stage-box.active {
+            border-color: #F59E0B;
+            background: #FFFBEB;
+            box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.2);
+            animation: active-glow 2s ease-in-out infinite;
+        }
+
+        @keyframes active-glow {
+            0%, 100% { box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.2); }
+            50% { box-shadow: 0 0 0 6px rgba(245, 158, 11, 0.15); }
         }
 
         .count-badge {
@@ -775,6 +990,11 @@ class TasksInterface(BaseInterface):
         return f"""
         const JOB_ID = '{job_id}';
 
+        // Auto-refresh state
+        let autoRefreshInterval = null;
+        let countdownInterval = null;
+        let countdownValue = 0;
+
         // Predefined workflow definitions
         const WORKFLOW_DEFINITIONS = {{
             'process_vector': {{
@@ -813,8 +1033,82 @@ class TasksInterface(BaseInterface):
         // Load data on page load
         document.addEventListener('DOMContentLoaded', () => {{
             loadData();
-            document.getElementById('refreshBtn').addEventListener('click', loadData);
+            document.getElementById('refreshBtn').addEventListener('click', manualRefresh);
+
+            // Set up auto-refresh controls
+            const toggleEl = document.getElementById('autoRefreshToggle');
+            const intervalEl = document.getElementById('refreshInterval');
+
+            toggleEl.addEventListener('change', () => {{
+                if (toggleEl.checked) {{
+                    startAutoRefresh();
+                }} else {{
+                    stopAutoRefresh();
+                }}
+            }});
+
+            intervalEl.addEventListener('change', () => {{
+                if (toggleEl.checked) {{
+                    stopAutoRefresh();
+                    startAutoRefresh();
+                }}
+            }});
+
+            // Start auto-refresh by default
+            startAutoRefresh();
         }});
+
+        // Manual refresh with visual feedback
+        function manualRefresh() {{
+            const btn = document.getElementById('refreshBtn');
+            btn.classList.add('refreshing');
+            loadData().finally(() => {{
+                setTimeout(() => btn.classList.remove('refreshing'), 500);
+            }});
+
+            // Reset countdown if auto-refresh is on
+            if (document.getElementById('autoRefreshToggle').checked) {{
+                stopAutoRefresh();
+                startAutoRefresh();
+            }}
+        }}
+
+        // Start auto-refresh
+        function startAutoRefresh() {{
+            const intervalSec = parseInt(document.getElementById('refreshInterval').value) || 30;
+            countdownValue = intervalSec;
+            updateCountdown();
+
+            // Countdown timer (updates every second)
+            countdownInterval = setInterval(() => {{
+                countdownValue--;
+                updateCountdown();
+
+                if (countdownValue <= 0) {{
+                    countdownValue = intervalSec;
+                    loadData();
+                }}
+            }}, 1000);
+        }}
+
+        // Stop auto-refresh
+        function stopAutoRefresh() {{
+            if (countdownInterval) {{
+                clearInterval(countdownInterval);
+                countdownInterval = null;
+            }}
+            document.getElementById('refreshCountdown').textContent = '';
+        }}
+
+        // Update countdown display
+        function updateCountdown() {{
+            const el = document.getElementById('refreshCountdown');
+            if (countdownValue > 0) {{
+                el.textContent = countdownValue + 's';
+            }} else {{
+                el.textContent = '...';
+            }}
+        }}
 
         // Load job + tasks data
         async function loadData() {{
@@ -889,6 +1183,10 @@ class TasksInterface(BaseInterface):
                 `;
             }}
 
+            // Calculate overall progress
+            const doneTasks = completed + failed;
+            const progressPct = total > 0 ? ((doneTasks / total) * 100).toFixed(0) : 0;
+
             html += `
                 <div class="job-summary-grid">
                     <div class="summary-item">
@@ -917,6 +1215,17 @@ class TasksInterface(BaseInterface):
                     </div>
                 </div>
             `;
+
+            // Add overall progress bar if there are tasks
+            if (total > 0) {{
+                const counts = {{ pending, queued, processing, completed, failed }};
+                html += `
+                    <div class="job-overall-progress">
+                        <div class="overall-progress-label">Overall Progress</div>
+                        ${{renderProgressBar(counts, total)}}
+                    </div>
+                `;
+            }}
 
             document.getElementById('job-summary-card').innerHTML = html;
         }}
@@ -998,10 +1307,14 @@ class TasksInterface(BaseInterface):
                     }}
                 }}
 
-                html += `
-                        </div>
-                    </div>
-                `;
+                html += `</div>`;
+
+                // Add progress bar if there are tasks
+                if (totalTasks > 0) {{
+                    html += renderProgressBar(stageCounts, totalTasks);
+                }}
+
+                html += `</div>`;
             }});
 
             html += `</div>`;
@@ -1056,14 +1369,51 @@ class TasksInterface(BaseInterface):
                 if (stageCounts.completed > 0) html += `<span class="count-badge count-completed">C:${{stageCounts.completed}}</span>`;
                 if (stageCounts.failed > 0) html += `<span class="count-badge count-failed">F:${{stageCounts.failed}}</span>`;
 
-                html += `
-                        </div>
-                    </div>
-                `;
+                html += `</div>`;
+
+                // Add progress bar
+                if (totalTasks > 0) {{
+                    html += renderProgressBar(stageCounts, totalTasks);
+                }}
+
+                html += `</div>`;
             }});
 
             html += `</div>`;
             document.getElementById('workflow-diagram').innerHTML = html;
+        }}
+
+        // Render progress bar HTML
+        function renderProgressBar(counts, total) {{
+            if (total === 0) return '';
+
+            const completedPct = (counts.completed / total) * 100;
+            const failedPct = (counts.failed / total) * 100;
+            const processingPct = (counts.processing / total) * 100;
+            const queuedPct = (counts.queued / total) * 100;
+            const pendingPct = (counts.pending / total) * 100;
+
+            // Calculate overall progress (completed + failed = done)
+            const donePct = completedPct + failedPct;
+            const doneCount = counts.completed + counts.failed;
+
+            return `
+                <div class="stage-progress">
+                    <div class="progress-bar-container">
+                        <div class="progress-bar-fill">
+                            <div class="progress-segment completed" style="width: ${{completedPct}}%"></div>
+                            <div class="progress-segment failed" style="width: ${{failedPct}}%"></div>
+                            <div class="progress-segment processing" style="width: ${{processingPct}}%"></div>
+                            <div class="progress-segment queued" style="width: ${{queuedPct}}%"></div>
+                            <div class="progress-segment pending" style="width: ${{pendingPct}}%"></div>
+                        </div>
+                    </div>
+                    <div class="progress-text">
+                        <span class="progress-percent">${{donePct.toFixed(0)}}% done</span>
+                        <span class="progress-count">${{doneCount}}/${{total}} tasks</span>
+                    </div>
+                </div>
+            `;
         }}
 
         // Render task details grouped by stage

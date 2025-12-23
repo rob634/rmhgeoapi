@@ -1364,15 +1364,103 @@ class ErrorHandler:
 Scale Level     | Parallel Tasks | Storage        | Database
 ----------------|----------------|----------------|------------------
 Current (Dev)   | 10-50          | Azure Storage  | PostgreSQL Direct
-Near-term       | 100-1000       | Azure Storage  | PgBouncer Pool
-Long-term       | 10,000+        | Blob + Cosmos  | PostgreSQL + Cosmos
+Near-term       | 100-500        | Azure Storage  | PostgreSQL (memory-first pattern)
+Long-term       | 1,000+         | Blob + Cosmos  | PostgreSQL + Cosmos hybrid
 ```
 
+**Note (23 DEC 2025):** PgBouncer was previously recommended but is NOT suitable for serverless.
+See "Serverless Database Connection Pattern" section below for correct approach.
+
 ### Performance Optimizations
-- **Connection Pooling**: PgBouncer for >100 parallel tasks
 - **Queue Batching**: Process multiple messages per function invocation
 - **Result Streaming**: Direct blob writes for large outputs
 - **Caching Layer**: Redis for frequently accessed metadata
+
+---
+
+## ⚠️ CRITICAL: Serverless Database Connection Pattern (23 DEC 2025)
+
+**THIS SECTION DOCUMENTS A HARD-LEARNED LESSON THAT KILLED A DATABASE.**
+
+### The Problem
+
+In serverless architectures with parallel workers, traditional database patterns fail catastrophically:
+
+| Pattern | What Happens | Result |
+|---------|--------------|--------|
+| Connection pooling | Each worker instance creates its own pool | N workers × M pool size = connection explosion |
+| Incremental writes | Keep connection open, write as you go | Long-held connections × parallel workers = exhaustion |
+| Per-operation connections | Open/close per DB call | Connection churn overwhelms database |
+
+**Real incident (23 DEC 2025):** 8 function instances × 2 workers × 8 concurrent calls = 128 parallel operations. Each H3 cascade task opened ~15 connections (one per resolution insert). Result: 1,920 connections churning against a 200-connection database. Database became unresponsive and had to be replaced.
+
+### The Correct Pattern: Memory-First, Single-Connection Burst
+
+```python
+# ✅ CORRECT: Batch in memory, single connection burst
+def process_task(params):
+    # PHASE 1: CPU/Memory work (no database connection)
+    all_results = []
+    for item in items:
+        result = expensive_computation(item)  # Use RAM freely
+        all_results.append(result)
+
+    # PHASE 2: Single connection, batch insert
+    with get_connection() as conn:
+        bulk_insert(conn, all_results)  # One connection, fast
+        conn.commit()
+    # Connection released immediately
+```
+
+```python
+# ❌ WRONG: Connection open during computation
+def process_task(params):
+    with get_connection() as conn:  # Connection held for entire task!
+        for item in items:
+            result = expensive_computation(item)  # Connection idle during CPU work
+            conn.execute(insert, result)          # Many small writes
+        conn.commit()
+```
+
+### Design Principles
+
+1. **RAM is cheap, connections are precious**
+   - B3 App Service: 7GB RAM, can hold millions of records
+   - PostgreSQL B2s: 429 max connections shared across ALL clients
+
+2. **Minimize connection duration**
+   - Generate all data in memory first
+   - Open connection only for the INSERT
+   - Close immediately after commit
+
+3. **Minimize connection frequency**
+   - Batch ALL inserts into ONE connection
+   - Use COPY protocol for bulk inserts (faster than individual INSERTs)
+   - One connection per task, not per operation
+
+4. **NO connection pooling in serverless**
+   - Pools don't persist across function invocations
+   - Each worker process creates its own pool
+   - Pools hold connections even when idle
+   - Use simple open-use-close pattern instead
+
+### Connection Budget Calculation
+
+```
+Max safe concurrent connections = max_connections × 0.5 (leave headroom)
+
+Example: PostgreSQL B2s with 429 max_connections
+- Safe limit: ~200 concurrent connections
+- With 4 workers × 4 concurrent calls = 16 parallel tasks
+- Each task can safely use: 200 / 16 = 12 connections max
+- Target: 1-3 connections per task for safety margin
+```
+
+### Implementation Reference
+
+See `services/handler_cascade_h3_descendants.py` for the canonical implementation:
+- `_generate_descendants()`: Pure CPU, no DB connections
+- `_insert_all_cells()`: Single connection for all inserts via COPY
 
 ---
 

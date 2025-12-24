@@ -32,7 +32,7 @@ import logging
 
 from util_logger import LoggerFactory, ComponentType
 from core.models import PromotedDataset
-from core.models.promoted import SystemRole
+from core.models.promoted import SystemRole, Classification
 from infrastructure import PromotedDatasetRepository
 from infrastructure.pgstac_repository import PgStacRepository
 from infrastructure.pgstac_bootstrap import get_item_by_id
@@ -74,7 +74,8 @@ class PromoteService:
         viewer_config: Optional[Dict[str, Any]] = None,
         style_id: Optional[str] = None,
         is_system_reserved: bool = False,
-        system_role: Optional[str] = None
+        system_role: Optional[str] = None,
+        classification: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Promote a STAC collection or item.
@@ -203,6 +204,17 @@ class PromoteService:
                     "error": f"System role '{system_role}' is already assigned to '{existing_role.promoted_id}'"
                 }
 
+        # Parse classification (24 DEC 2025)
+        classification_enum = Classification.PUBLIC  # Default
+        if classification:
+            try:
+                classification_enum = Classification(classification)
+            except ValueError:
+                return {
+                    "success": False,
+                    "error": f"Invalid classification '{classification}'. Valid: {[c.value for c in Classification]}"
+                }
+
         # Create new promoted entry
         dataset = PromotedDataset(
             promoted_id=promoted_id,
@@ -216,7 +228,8 @@ class PromoteService:
             viewer_config=viewer_config or {},
             style_id=style_id,
             is_system_reserved=is_system_reserved,
-            system_role=system_role
+            system_role=system_role,
+            classification=classification_enum
         )
 
         try:

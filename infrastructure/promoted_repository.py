@@ -23,11 +23,13 @@ Created: 22 DEC 2025
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timezone
 import logging
+import json
 
 from psycopg import sql
+from psycopg.types.json import Jsonb
 
 from util_logger import LoggerFactory, ComponentType
-from core.models import PromotedDataset
+from core.models import PromotedDataset, Classification
 from .postgresql import PostgreSQLRepository
 
 logger = LoggerFactory.create_logger(ComponentType.REPOSITORY, "PromotedRepository")
@@ -78,7 +80,7 @@ class PromotedDatasetRepository(PostgreSQLRepository):
                 if cur.fetchone():
                     raise ValueError(f"Promoted dataset '{dataset.promoted_id}' already exists")
 
-                # Insert
+                # Insert (24 DEC 2025 - added classification column, Jsonb for dict/list)
                 now = datetime.now(timezone.utc)
                 cur.execute(
                     sql.SQL("""
@@ -90,6 +92,7 @@ class PromotedDatasetRepository(PostgreSQLRepository):
                             tags, viewer_config, style_id,
                             in_gallery, gallery_order,
                             is_system_reserved, system_role,
+                            classification,
                             promoted_at, updated_at
                         ) VALUES (
                             %s,
@@ -99,6 +102,7 @@ class PromotedDatasetRepository(PostgreSQLRepository):
                             %s, %s, %s,
                             %s, %s,
                             %s, %s,
+                            %s,
                             %s, %s
                         )
                         RETURNING *
@@ -111,9 +115,10 @@ class PromotedDatasetRepository(PostgreSQLRepository):
                         dataset.stac_collection_id, dataset.stac_item_id,
                         dataset.title, dataset.description,
                         dataset.thumbnail_url, dataset.thumbnail_generated_at,
-                        dataset.tags, dataset.viewer_config, dataset.style_id,
+                        Jsonb(dataset.tags), Jsonb(dataset.viewer_config), dataset.style_id,
                         dataset.in_gallery, dataset.gallery_order,
                         dataset.is_system_reserved, dataset.system_role,
+                        dataset.classification.value if dataset.classification else Classification.PUBLIC.value,
                         now, now
                     )
                 )
@@ -432,6 +437,13 @@ class PromotedDatasetRepository(PostgreSQLRepository):
 
     def _row_to_model(self, row: Dict[str, Any]) -> PromotedDataset:
         """Convert database row to PromotedDataset model."""
+        # Parse classification (24 DEC 2025)
+        classification_value = row.get('classification', 'public')
+        try:
+            classification = Classification(classification_value) if classification_value else Classification.PUBLIC
+        except ValueError:
+            classification = Classification.PUBLIC
+
         return PromotedDataset(
             promoted_id=row['promoted_id'],
             stac_collection_id=row.get('stac_collection_id'),
@@ -447,6 +459,7 @@ class PromotedDatasetRepository(PostgreSQLRepository):
             gallery_order=row.get('gallery_order'),
             is_system_reserved=row.get('is_system_reserved', False),
             system_role=row.get('system_role'),
+            classification=classification,
             promoted_at=row.get('promoted_at'),
             updated_at=row.get('updated_at')
         )

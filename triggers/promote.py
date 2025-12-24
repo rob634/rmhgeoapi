@@ -133,6 +133,9 @@ def handle_promote(req: func.HttpRequest) -> func.HttpResponse:
             is_system_reserved = body.get('is_system_reserved', False)
             system_role = body.get('system_role')
 
+            # Classification (24 DEC 2025)
+            classification = body.get('classification')
+
             # Promote
             service = PromoteService()
             result = service.promote(
@@ -142,6 +145,7 @@ def handle_promote(req: func.HttpRequest) -> func.HttpResponse:
                 title=title,
                 description=description,
                 tags=tags,
+                classification=classification,
                 gallery=gallery,
                 gallery_order=gallery_order,
                 viewer_config=viewer_config,

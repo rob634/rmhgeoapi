@@ -58,6 +58,16 @@ class SystemRole(str, Enum):
     # COASTLINES = "coastlines"                # Coastline reference data
 
 
+class Classification(str, Enum):
+    """
+    Data access classification levels.
+
+    Used to indicate the sensitivity/access level of promoted datasets.
+    """
+    PUBLIC = "public"  # Public - openly accessible
+    OUO = "ouo"        # Official Use Only - restricted access
+
+
 class PromotedDataset(BaseModel):
     """
     Registry record for a promoted dataset.
@@ -177,6 +187,12 @@ class PromotedDataset(BaseModel):
         description="System role identifier (e.g., 'admin0_boundaries'). Enables lookup by role."
     )
 
+    # Classification (23 DEC 2025)
+    classification: Classification = Field(
+        default=Classification.PUBLIC,
+        description="Data access classification (public, ouo)"
+    )
+
     # Audit
     promoted_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc),
@@ -222,5 +238,6 @@ class PromotedDataset(BaseModel):
 __all__ = [
     'PromotedDataset',
     'PromotedDatasetType',
-    'SystemRole'
+    'SystemRole',
+    'Classification'
 ]

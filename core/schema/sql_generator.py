@@ -49,7 +49,7 @@ from ..models import (
     CuratedUpdateType,
     CuratedUpdateStatus
 )
-from ..models.promoted import PromotedDataset, SystemRole  # Promoted datasets (23 DEC 2025)
+from ..models.promoted import PromotedDataset, SystemRole, Classification  # Promoted datasets (23 DEC 2025)
 
 
 class PydanticToSQL:
@@ -1084,6 +1084,7 @@ $$""").format(
         composed.extend(self.generate_enum("curated_update_type", CuratedUpdateType))
         composed.extend(self.generate_enum("curated_update_status", CuratedUpdateStatus))
         composed.extend(self.generate_enum("system_role", SystemRole))  # Promoted datasets (23 DEC 2025)
+        composed.extend(self.generate_enum("classification", Classification))
 
         # For tables, indexes, functions, and triggers, we still need string format
         # because they are complex multi-line statements

@@ -94,7 +94,8 @@ from .curated import (
 from .promoted import (
     PromotedDataset,
     PromotedDatasetType,
-    SystemRole
+    SystemRole,
+    Classification
 )
 
 __all__ = [
@@ -160,5 +161,6 @@ __all__ = [
     # Promoted dataset models (23 DEC 2025)
     'PromotedDataset',
     'PromotedDatasetType',
-    'SystemRole'
+    'SystemRole',
+    'Classification'
 ]

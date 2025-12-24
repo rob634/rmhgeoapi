@@ -1363,35 +1363,22 @@ class H3Repository(PostgreSQLRepository):
         List[Dict[str, Any]]
             List of dataset entries
         """
-        conditions = []
-        params = []
-
+        # Build WHERE conditions using helper (24 DEC 2025 - injection-safe)
+        where_conditions = {}
         if theme:
-            conditions.append("theme = %s")
-            params.append(theme)
+            where_conditions["theme"] = theme
         if source_type:
-            conditions.append("source_type = %s")
-            params.append(source_type)
+            where_conditions["source_type"] = source_type
 
-        where_clause = "WHERE " + " AND ".join(conditions) if conditions else ""
-
-        query = sql.SQL(f"""
-            SELECT id, display_name, theme, data_category, source_type,
-                   stat_types, unit, last_aggregation_at, cells_aggregated
-            FROM {{schema}}.{{table}}
-            {where_clause}
-            ORDER BY theme, id
-        """).format(
-            schema=sql.Identifier('h3'),
-            table=sql.Identifier('dataset_registry')
+        # Use execute_select helper for safe SQL composition
+        return self.execute_select(
+            table="dataset_registry",
+            columns=["id", "display_name", "theme", "data_category", "source_type",
+                     "stat_types", "unit", "last_aggregation_at", "cells_aggregated"],
+            where=where_conditions if where_conditions else None,
+            order_by=["theme", "id"],
+            schema="h3"
         )
-
-        with self._get_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute(query, params)
-                results = cur.fetchall()
-
-        return [dict(r) for r in results]
 
     # ========================================================================
     # LEGACY STAT REGISTRY METHODS (deprecated - use dataset_registry)

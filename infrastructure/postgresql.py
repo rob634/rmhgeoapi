@@ -922,6 +922,471 @@ class PostgreSQLRepository(BaseRepository):
         result = self._execute_query(query, (self.schema_name, table_name), fetch='one')
         return result['exists'] if result else False
 
+    # =========================================================================
+    # SAFE SQL COMPOSITION HELPERS (24 DEC 2025)
+    # =========================================================================
+    # These methods enforce disciplined SQL composition to prevent injection.
+    # All dynamic identifiers use sql.Identifier(), all values use %s params.
+    # =========================================================================
+
+    def build_where_clause(
+        self,
+        conditions: Dict[str, Any],
+        operator: str = "AND"
+    ) -> Tuple[sql.Composed, List[Any]]:
+        """
+        Build a safe WHERE clause using SQL composition.
+
+        Constructs WHERE clause with proper sql.Identifier() for column names
+        and %s placeholders for values. Prevents SQL injection from both
+        column names and values.
+
+        Parameters:
+        ----------
+        conditions : Dict[str, Any]
+            Column-value pairs for WHERE conditions.
+            Example: {"theme": "climate", "source_type": "raster"}
+
+        operator : str, default="AND"
+            Logical operator between conditions ("AND" or "OR")
+
+        Returns:
+        -------
+        Tuple[sql.Composed, List[Any]]
+            (WHERE clause as sql.Composed, list of parameter values)
+            Returns (sql.SQL(""), []) if conditions is empty
+
+        Example:
+        -------
+        >>> where, params = repo.build_where_clause({"theme": "climate", "active": True})
+        >>> # where = SQL("WHERE theme = %s AND active = %s")
+        >>> # params = ["climate", True]
+        """
+        if not conditions:
+            return sql.SQL(""), []
+
+        parts = []
+        params = []
+
+        for column, value in conditions.items():
+            if value is None:
+                # Handle NULL comparisons
+                parts.append(sql.SQL("{} IS NULL").format(sql.Identifier(column)))
+            else:
+                parts.append(sql.SQL("{} = %s").format(sql.Identifier(column)))
+                params.append(value)
+
+        joiner = sql.SQL(f" {operator} ")
+        where_clause = sql.SQL("WHERE ") + joiner.join(parts)
+
+        return where_clause, params
+
+    def build_where_in_clause(
+        self,
+        column: str,
+        values: List[Any]
+    ) -> Tuple[sql.Composed, List[Any]]:
+        """
+        Build a safe WHERE ... IN (...) clause.
+
+        Parameters:
+        ----------
+        column : str
+            Column name to filter on
+        values : List[Any]
+            List of values for IN clause
+
+        Returns:
+        -------
+        Tuple[sql.Composed, List[Any]]
+            (WHERE clause as sql.Composed, list of parameter values)
+
+        Example:
+        -------
+        >>> where, params = repo.build_where_in_clause("status", ["pending", "processing"])
+        >>> # where = SQL("WHERE status = ANY(%s)")
+        >>> # params = [["pending", "processing"]]
+        """
+        if not values:
+            # Empty list - return FALSE condition
+            return sql.SQL("WHERE FALSE"), []
+
+        # Use ANY(%s) with array parameter (more efficient than IN with many placeholders)
+        where_clause = sql.SQL("WHERE {} = ANY(%s)").format(sql.Identifier(column))
+        return where_clause, [values]
+
+    def execute_select(
+        self,
+        table: str,
+        columns: Optional[List[str]] = None,
+        where: Optional[Dict[str, Any]] = None,
+        order_by: Optional[List[str]] = None,
+        limit: Optional[int] = None,
+        schema: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Execute a safe SELECT query with automatic SQL composition.
+
+        All identifiers (schema, table, columns) use sql.Identifier().
+        All filter values use parameterized queries.
+
+        Parameters:
+        ----------
+        table : str
+            Table name to query
+        columns : Optional[List[str]]
+            Columns to select. None or empty = SELECT *
+        where : Optional[Dict[str, Any]]
+            WHERE conditions as column-value pairs
+        order_by : Optional[List[str]]
+            Columns to ORDER BY (prefix with "-" for DESC)
+        limit : Optional[int]
+            Maximum rows to return
+        schema : Optional[str]
+            Schema name (defaults to self.schema_name)
+
+        Returns:
+        -------
+        List[Dict[str, Any]]
+            List of rows as dictionaries
+
+        Example:
+        -------
+        >>> results = repo.execute_select(
+        ...     table="dataset_registry",
+        ...     columns=["id", "display_name", "theme"],
+        ...     where={"theme": "climate"},
+        ...     order_by=["theme", "id"],
+        ...     limit=10,
+        ...     schema="h3"
+        ... )
+        """
+        schema = schema or self.schema_name
+        params = []
+
+        # Build SELECT columns
+        if columns:
+            col_sql = sql.SQL(", ").join(sql.Identifier(c) for c in columns)
+        else:
+            col_sql = sql.SQL("*")
+
+        # Build base query
+        query_parts = [
+            sql.SQL("SELECT "),
+            col_sql,
+            sql.SQL(" FROM "),
+            sql.Identifier(schema),
+            sql.SQL("."),
+            sql.Identifier(table)
+        ]
+
+        # Build WHERE clause
+        if where:
+            where_clause, where_params = self.build_where_clause(where)
+            query_parts.append(sql.SQL(" "))
+            query_parts.append(where_clause)
+            params.extend(where_params)
+
+        # Build ORDER BY clause
+        if order_by:
+            order_parts = []
+            for col in order_by:
+                if col.startswith("-"):
+                    # Descending order
+                    order_parts.append(sql.SQL("{} DESC").format(sql.Identifier(col[1:])))
+                else:
+                    order_parts.append(sql.Identifier(col))
+            query_parts.append(sql.SQL(" ORDER BY "))
+            query_parts.append(sql.SQL(", ").join(order_parts))
+
+        # Build LIMIT clause
+        if limit:
+            query_parts.append(sql.SQL(" LIMIT %s"))
+            params.append(limit)
+
+        query = sql.Composed(query_parts)
+
+        with self._get_connection() as conn:
+            with conn.cursor(row_factory=dict_row) as cur:
+                cur.execute(query, params if params else None)
+                results = cur.fetchall()
+
+        return [dict(r) for r in results]
+
+    def execute_exists(
+        self,
+        table: str,
+        where: Dict[str, Any],
+        schema: Optional[str] = None
+    ) -> bool:
+        """
+        Check if a row exists matching the given conditions.
+
+        Uses SELECT EXISTS for efficient existence check without
+        fetching row data.
+
+        Parameters:
+        ----------
+        table : str
+            Table name to check
+        where : Dict[str, Any]
+            WHERE conditions as column-value pairs
+        schema : Optional[str]
+            Schema name (defaults to self.schema_name)
+
+        Returns:
+        -------
+        bool
+            True if matching row exists, False otherwise
+
+        Example:
+        -------
+        >>> exists = repo.execute_exists(
+        ...     table="grids",
+        ...     where={"grid_id": "land_res2"},
+        ...     schema="h3"
+        ... )
+        """
+        schema = schema or self.schema_name
+
+        where_clause, params = self.build_where_clause(where)
+
+        query = sql.SQL("SELECT EXISTS(SELECT 1 FROM {}.{} {}) AS exists").format(
+            sql.Identifier(schema),
+            sql.Identifier(table),
+            where_clause
+        )
+
+        with self._get_connection() as conn:
+            with conn.cursor(row_factory=dict_row) as cur:
+                cur.execute(query, params if params else None)
+                result = cur.fetchone()
+
+        return result['exists'] if result else False
+
+    def execute_insert(
+        self,
+        table: str,
+        data: Dict[str, Any],
+        on_conflict: Optional[str] = None,
+        returning: Optional[List[str]] = None,
+        schema: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Execute a safe INSERT with automatic SQL composition.
+
+        Parameters:
+        ----------
+        table : str
+            Table name to insert into
+        data : Dict[str, Any]
+            Column-value pairs to insert
+        on_conflict : Optional[str]
+            Conflict resolution: "nothing" for DO NOTHING, or column name for DO UPDATE
+        returning : Optional[List[str]]
+            Columns to return after insert
+        schema : Optional[str]
+            Schema name (defaults to self.schema_name)
+
+        Returns:
+        -------
+        Optional[Dict[str, Any]]
+            Returned row if RETURNING specified, else None
+
+        Example:
+        -------
+        >>> result = repo.execute_insert(
+        ...     table="dataset_registry",
+        ...     data={"id": "test", "display_name": "Test Dataset", "theme": "test"},
+        ...     on_conflict="nothing",
+        ...     returning=["id", "created_at"],
+        ...     schema="h3"
+        ... )
+        """
+        schema = schema or self.schema_name
+
+        columns = list(data.keys())
+        values = list(data.values())
+        placeholders = [sql.SQL("%s") for _ in columns]
+
+        # Build INSERT query
+        query_parts = [
+            sql.SQL("INSERT INTO "),
+            sql.Identifier(schema),
+            sql.SQL("."),
+            sql.Identifier(table),
+            sql.SQL(" ("),
+            sql.SQL(", ").join(sql.Identifier(c) for c in columns),
+            sql.SQL(") VALUES ("),
+            sql.SQL(", ").join(placeholders),
+            sql.SQL(")")
+        ]
+
+        # Add ON CONFLICT clause
+        if on_conflict == "nothing":
+            query_parts.append(sql.SQL(" ON CONFLICT DO NOTHING"))
+        elif on_conflict:
+            # ON CONFLICT (column) DO UPDATE - not implemented yet
+            raise NotImplementedError("ON CONFLICT DO UPDATE not yet implemented")
+
+        # Add RETURNING clause
+        if returning:
+            query_parts.append(sql.SQL(" RETURNING "))
+            query_parts.append(sql.SQL(", ").join(sql.Identifier(c) for c in returning))
+
+        query = sql.Composed(query_parts)
+
+        with self._get_connection() as conn:
+            with conn.cursor(row_factory=dict_row) as cur:
+                cur.execute(query, values)
+                result = cur.fetchone() if returning else None
+                conn.commit()
+
+        return dict(result) if result else None
+
+    def execute_update(
+        self,
+        table: str,
+        data: Dict[str, Any],
+        where: Dict[str, Any],
+        returning: Optional[List[str]] = None,
+        schema: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Execute a safe UPDATE with automatic SQL composition.
+
+        Parameters:
+        ----------
+        table : str
+            Table name to update
+        data : Dict[str, Any]
+            Column-value pairs to update
+        where : Dict[str, Any]
+            WHERE conditions (required - no unconditioned updates!)
+        returning : Optional[List[str]]
+            Columns to return after update
+        schema : Optional[str]
+            Schema name (defaults to self.schema_name)
+
+        Returns:
+        -------
+        Optional[Dict[str, Any]]
+            Returned row if RETURNING specified, else None
+
+        Raises:
+        ------
+        ValueError
+            If where is empty (safety check against unconditioned updates)
+
+        Example:
+        -------
+        >>> result = repo.execute_update(
+        ...     table="dataset_registry",
+        ...     data={"last_aggregation_at": datetime.now()},
+        ...     where={"id": "worldpop_2020"},
+        ...     returning=["id", "last_aggregation_at"],
+        ...     schema="h3"
+        ... )
+        """
+        if not where:
+            raise ValueError("WHERE conditions required for UPDATE (safety check)")
+
+        schema = schema or self.schema_name
+        params = []
+
+        # Build SET clause
+        set_parts = []
+        for column, value in data.items():
+            set_parts.append(sql.SQL("{} = %s").format(sql.Identifier(column)))
+            params.append(value)
+
+        # Build WHERE clause
+        where_clause, where_params = self.build_where_clause(where)
+        params.extend(where_params)
+
+        # Build UPDATE query
+        query_parts = [
+            sql.SQL("UPDATE "),
+            sql.Identifier(schema),
+            sql.SQL("."),
+            sql.Identifier(table),
+            sql.SQL(" SET "),
+            sql.SQL(", ").join(set_parts),
+            sql.SQL(" "),
+            where_clause
+        ]
+
+        # Add RETURNING clause
+        if returning:
+            query_parts.append(sql.SQL(" RETURNING "))
+            query_parts.append(sql.SQL(", ").join(sql.Identifier(c) for c in returning))
+
+        query = sql.Composed(query_parts)
+
+        with self._get_connection() as conn:
+            with conn.cursor(row_factory=dict_row) as cur:
+                cur.execute(query, params)
+                result = cur.fetchone() if returning else None
+                conn.commit()
+
+        return dict(result) if result else None
+
+    def execute_count(
+        self,
+        table: str,
+        where: Optional[Dict[str, Any]] = None,
+        schema: Optional[str] = None
+    ) -> int:
+        """
+        Execute a safe COUNT query.
+
+        Parameters:
+        ----------
+        table : str
+            Table name to count
+        where : Optional[Dict[str, Any]]
+            WHERE conditions (None = count all rows)
+        schema : Optional[str]
+            Schema name (defaults to self.schema_name)
+
+        Returns:
+        -------
+        int
+            Row count
+
+        Example:
+        -------
+        >>> count = repo.execute_count(
+        ...     table="grids",
+        ...     where={"grid_id": "land_res2"},
+        ...     schema="h3"
+        ... )
+        """
+        schema = schema or self.schema_name
+        params = []
+
+        query_parts = [
+            sql.SQL("SELECT COUNT(*) AS count FROM "),
+            sql.Identifier(schema),
+            sql.SQL("."),
+            sql.Identifier(table)
+        ]
+
+        if where:
+            where_clause, where_params = self.build_where_clause(where)
+            query_parts.append(sql.SQL(" "))
+            query_parts.append(where_clause)
+            params.extend(where_params)
+
+        query = sql.Composed(query_parts)
+
+        with self._get_connection() as conn:
+            with conn.cursor(row_factory=dict_row) as cur:
+                cur.execute(query, params if params else None)
+                result = cur.fetchone()
+
+        return result['count'] if result else 0
+
 
 # ============================================================================
 # JOB REPOSITORY - PostgreSQL implementation

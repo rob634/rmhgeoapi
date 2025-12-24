@@ -499,10 +499,19 @@ class PromoteService:
     def _verify_stac_item_exists(self, item_id: str) -> bool:
         """Check if a STAC item exists in PgSTAC."""
         try:
-            # Use standalone function from pgstac_bootstrap (23 DEC 2025 - bug fix)
-            result = get_item_by_id(item_id)
-            # get_item_by_id returns item dict on success, or {"error": ...} on failure
-            return result is not None and "error" not in result
+            # Use pypgstac search (24 DEC 2025 - fix for partitioned tables)
+            # The old get_item_by_id used direct SQL which didn't work with pgstac partitions
+            from infrastructure.pgstac_repository import PgStacRepository
+            pgstac_repo = PgStacRepository()
+
+            # Search for item by ID using pypgstac (handles partitions correctly)
+            results = pgstac_repo.search_items(ids=[item_id], limit=1)
+            if results and 'features' in results and len(results['features']) > 0:
+                logger.info(f"✅ Verified STAC item exists: {item_id}")
+                return True
+
+            logger.warning(f"⚠️ STAC item not found via search: {item_id}")
+            return False
         except Exception as e:
             logger.warning(f"Failed to verify STAC item '{item_id}': {e}")
             # If we can't verify, allow it (may be external STAC)

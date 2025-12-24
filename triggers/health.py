@@ -1255,12 +1255,30 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                 promoted = promote_service.get_by_system_role(SystemRole.ADMIN0_BOUNDARIES.value)
 
                 if promoted:
-                    # Get table name from STAC reference
-                    # Convention: stac_collection_id or stac_item_id maps to table name
+                    # Get table name from STAC item properties (24 DEC 2025)
+                    # STAC items have postgis:schema and postgis:table properties
                     stac_id = promoted.get('stac_collection_id') or promoted.get('stac_item_id')
                     if stac_id:
-                        # Table name is typically geo.{stac_id} or just the stac_id
-                        admin0_table = f"geo.{stac_id}"
+                        # Try to get actual table from STAC item properties
+                        try:
+                            from infrastructure.pgstac_bootstrap import get_item_by_id
+                            stac_item = get_item_by_id(stac_id)
+                            if stac_item and 'error' not in stac_item:
+                                props = stac_item.get('properties', {})
+                                postgis_schema = props.get('postgis:schema', 'geo')
+                                postgis_table = props.get('postgis:table')
+                                if postgis_table:
+                                    admin0_table = f"{postgis_schema}.{postgis_table}"
+                                else:
+                                    # Fallback to stac_id if no postgis:table
+                                    admin0_table = f"geo.{stac_id}"
+                            else:
+                                # STAC item not found - use stac_id as fallback
+                                admin0_table = f"geo.{stac_id}"
+                        except Exception as stac_err:
+                            self.logger.debug(f"STAC item lookup failed: {stac_err}")
+                            admin0_table = f"geo.{stac_id}"
+
                         admin0_source = "promote_service"
                         promoted_dataset_info = {
                             "promoted_id": promoted.get('promoted_id'),

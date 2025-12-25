@@ -245,7 +245,13 @@ class PydanticToSQL:
             if field_name in ["created_at", "updated_at"]:
                 sql_type_str = "TIMESTAMP"
                 is_optional = False
-            
+
+            # Special handling for auto-increment id fields (SERIAL)
+            # etl_source_files uses id as SERIAL primary key
+            if field_name == "id" and table_name == "etl_source_files":
+                sql_type_str = "SERIAL"
+                is_optional = True  # SERIAL is auto-generated, doesn't need NOT NULL
+
             # Build column definition using composition
             column_parts = [
                 sql.Identifier(field_name),
@@ -298,7 +304,9 @@ class PydanticToSQL:
                 column_parts.extend([sql.SQL(" DEFAULT '{}'")])  # JSONB empty object
             elif field_name == "jobs" and " DEFAULT" not in str(sql.SQL("").join(column_parts)):
                 column_parts.extend([sql.SQL(" DEFAULT '{}'")])  # JSONB empty object
-            
+            elif field_name == "source_metadata" and " DEFAULT" not in str(sql.SQL("").join(column_parts)):
+                column_parts.extend([sql.SQL(" DEFAULT '{}'")])  # JSONB empty object for ETL metadata
+
             columns.append(sql.SQL("").join(column_parts))
         
         # Add primary key constraint
@@ -346,6 +354,17 @@ class PydanticToSQL:
             # Unpublish audit table (12 DEC 2025)
             constraints.append(
                 sql.SQL("PRIMARY KEY ({})").format(sql.Identifier("unpublish_id"))
+            )
+        elif table_name == "etl_source_files":
+            # ETL tracking table (21 DEC 2025) - PRIMARY KEY on id, UNIQUE on (etl_type, source_blob_path)
+            constraints.append(
+                sql.SQL("PRIMARY KEY ({})").format(sql.Identifier("id"))
+            )
+            constraints.append(
+                sql.SQL("UNIQUE ({}, {})").format(
+                    sql.Identifier("etl_type"),
+                    sql.Identifier("source_blob_path")
+                )
             )
 
         # Combine columns and constraints

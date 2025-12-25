@@ -57,6 +57,50 @@ def _log_memory_usage(gdf, label: str, job_id: str) -> float:
     return mem_mb
 
 
+# ============================================================================
+# Column Mapping Helper (24 DEC 2025)
+# ============================================================================
+
+def _apply_column_mapping(gdf, mapping: Dict[str, str], job_id: str):
+    """
+    Apply column renames to GeoDataFrame with validation.
+
+    Validates that all source columns exist before renaming. Provides detailed
+    error message listing missing columns and available columns for debugging.
+
+    Args:
+        gdf: Source GeoDataFrame
+        mapping: {source_column: target_column} rename mapping
+        job_id: Job ID for log correlation
+
+    Returns:
+        GeoDataFrame with renamed columns
+
+    Raises:
+        ValueError: If any source columns in mapping are not found in GeoDataFrame
+    """
+    # Get available columns (exclude geometry column from list)
+    available_cols = [c for c in gdf.columns if c != 'geometry']
+
+    # Check for missing source columns
+    missing = [col for col in mapping.keys() if col not in gdf.columns]
+
+    if missing:
+        raise ValueError(
+            f"Column mapping failed. Source columns not found: {missing}. "
+            f"Available columns in source file: {available_cols}"
+        )
+
+    # Apply renames
+    gdf = gdf.rename(columns=mapping)
+
+    # Log the mapping
+    renamed_pairs = [f"'{src}' → '{tgt}'" for src, tgt in mapping.items()]
+    logger.info(f"[{job_id[:8]}] 🔄 Applied column mapping: {', '.join(renamed_pairs)}")
+
+    return gdf
+
+
 def process_vector_prepare(parameters: Dict[str, Any]) -> Dict[str, Any]:
     """
     Stage 1: Prepare vector data for chunked upload with idempotent table creation.
@@ -205,6 +249,12 @@ def process_vector_prepare(parameters: Dict[str, Any]) -> Dict[str, Any]:
                           context_id=job_id,
                           feature_count=total_features,
                           gdf_memory_mb=round(gdf_mem_mb, 1))
+
+    # Step 2b: Apply column mapping if specified (24 DEC 2025)
+    # Used for standardizing column names (e.g., ISO_A3 → iso3 for system tables)
+    column_mapping = parameters.get('column_mapping')
+    if column_mapping:
+        gdf = _apply_column_mapping(gdf, column_mapping, job_id)
 
     # GAP-002 FIX (15 DEC 2025): Validate source file contains features
     # Empty source files would create empty tables and silently "succeed"

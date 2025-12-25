@@ -3,6 +3,10 @@ STAC dashboard interface module.
 
 Web dashboard for browsing STAC collections and items with search and filter capabilities.
 
+Features (24 DEC 2025 - S12.3.3):
+    - HTMX enabled for future partial updates
+    - Uses COMMON_CSS and COMMON_JS utilities
+
 Exports:
     StacInterface: STAC collections browser with grid view and collection detail views
 """
@@ -31,21 +35,16 @@ class StacInterface(BaseInterface):
         Returns:
             Complete HTML document string
         """
-
-        # HTML content
         content = self._generate_html_content()
-
-        # Custom CSS for STAC dashboard
         custom_css = self._generate_custom_css()
-
-        # Custom JavaScript for STAC dashboard
         custom_js = self._generate_custom_js()
 
         return self.wrap_html(
             title="STAC Collections Dashboard",
             content=content,
             custom_css=custom_css,
-            custom_js=custom_js
+            custom_js=custom_js,
+            include_htmx=True
         )
 
     def _generate_html_content(self) -> str:
@@ -154,134 +153,29 @@ class StacInterface(BaseInterface):
         """
 
     def _generate_custom_css(self) -> str:
-        """Generate custom CSS for STAC dashboard."""
+        """Generate custom CSS for STAC dashboard.
+
+        Note: Most styles now in COMMON_CSS (S12.1.1).
+        Only STAC-specific styles remain here.
+        """
         return """
-        .dashboard-header {
-            background: white;
-            padding: 30px;
-            border-radius: 3px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-            margin-bottom: 20px;
-            border-left: 4px solid #0071BC;
-        }
-
-        .dashboard-header h1 {
-            color: #053657;
-            font-size: 28px;
-            margin-bottom: 10px;
-            font-weight: 700;
-        }
-
-        .subtitle {
-            color: #626F86;
-            font-size: 14px;
-        }
-
-        /* Stats Banner */
-        .stats-banner {
-            background: white;
-            padding: 20px 30px;
-            border-radius: 8px;
-            margin-bottom: 20px;
-            display: flex;
-            gap: 40px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-        }
-
-        .stat-item {
-            display: flex;
-            flex-direction: column;
-        }
-
-        .stat-label {
-            font-size: 12px;
-            color: #7f8c8d;
-            margin-bottom: 4px;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
-
-        .stat-value {
-            font-size: 28px;
-            font-weight: 700;
-            color: #2c3e50;
-        }
-
-        /* Filters */
+        /* STAC-specific: Filters row */
         .filters {
             display: flex;
             gap: 15px;
             margin-bottom: 20px;
         }
 
-        .filter-input, .filter-select {
-            padding: 10px 15px;
-            border: 1px solid #dee2e6;
-            border-radius: 6px;
-            font-size: 14px;
-            background: white;
-        }
-
-        .filter-input {
+        .filters .filter-input {
             flex: 1;
             max-width: 400px;
         }
 
-        .filter-select {
-            cursor: pointer;
-        }
-
-        /* Collections Grid */
-        .collections-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
-            gap: 20px;
-        }
-
-        .collection-card {
-            background: white;
-            border: 1px solid #e9ecef;
-            border-left: 4px solid #0071BC;
-            border-radius: 3px;
-            padding: 24px;
-            cursor: pointer;
-            transition: all 0.2s;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
-        }
-
-        .collection-card:hover {
-            box-shadow: 0 4px 12px rgba(0,113,188,0.15);
-            border-left-color: #00A3DA;
-            transform: translateY(-2px);
-        }
-
-        .collection-card h3 {
-            font-size: 18px;
-            margin-bottom: 10px;
-            color: #053657;
-            font-weight: 700;
-        }
-
-        .collection-card .description {
-            font-size: 14px;
-            color: #626F86;
-            margin-bottom: 15px;
-            line-height: 1.6;
-        }
-
-        .collection-card .meta {
-            display: flex;
-            gap: 15px;
-            font-size: 13px;
-            color: #0071BC;
-            font-weight: 600;
-        }
-
-        /* Collection Detail */
+        /* STAC-specific: Detail view */
         .detail-header {
             background: white;
-            border: 1px solid #e9ecef;
-            border-left: 4px solid #0071BC;
+            border: 1px solid var(--ds-gray-light);
+            border-left: 4px solid var(--ds-blue-primary);
             padding: 30px;
             border-radius: 3px;
             margin-bottom: 20px;
@@ -291,42 +185,21 @@ class StacInterface(BaseInterface):
         .detail-header h2 {
             font-size: 28px;
             margin-bottom: 10px;
-            color: #053657;
+            color: var(--ds-navy);
             font-weight: 700;
         }
 
         .detail-header .description {
             font-size: 16px;
-            color: #626F86;
+            color: var(--ds-gray);
             margin-bottom: 15px;
         }
 
-        .metadata {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 15px;
-            margin-top: 20px;
-        }
-
-        .metadata-item {
-            background: #f8f9fa;
-            border: 1px solid #e9ecef;
-            padding: 12px;
-            border-radius: 3px;
-        }
-
-        .metadata-item .label {
-            font-size: 12px;
-            color: #626F86;
-            margin-bottom: 4px;
-            text-transform: uppercase;
-            font-weight: 600;
-        }
-
-        .metadata-item .value {
-            font-size: 16px;
-            font-weight: 600;
-            color: #053657;
+        .detail-nav {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
         }
 
         .back-button {
@@ -335,8 +208,8 @@ class StacInterface(BaseInterface):
             gap: 8px;
             padding: 10px 20px;
             background: white;
-            border: 1px solid #e9ecef;
-            color: #0071BC;
+            border: 1px solid var(--ds-gray-light);
+            color: var(--ds-blue-primary);
             border-radius: 3px;
             cursor: pointer;
             font-size: 14px;
@@ -346,20 +219,12 @@ class StacInterface(BaseInterface):
         }
 
         .back-button:hover {
-            background: #f8f9fa;
-            border-color: #0071BC;
-            color: #00A3DA;
+            background: var(--ds-bg);
+            border-color: var(--ds-blue-primary);
+            color: var(--ds-cyan);
         }
 
-        /* Detail Navigation */
-        .detail-nav {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 20px;
-        }
-
-        /* TiTiler Button */
+        /* STAC-specific: TiTiler button */
         .titiler-button {
             display: inline-flex;
             align-items: center;
@@ -383,7 +248,7 @@ class StacInterface(BaseInterface):
             transform: translateY(-1px);
         }
 
-        /* Preview button in table */
+        /* STAC-specific: Preview link in items table */
         .preview-link {
             display: inline-flex;
             align-items: center;
@@ -408,79 +273,11 @@ class StacInterface(BaseInterface):
             font-style: italic;
         }
 
-        /* Items Table */
-        .items-table {
-            width: 100%;
-            border-collapse: collapse;
-            background: white;
-            border-radius: 8px;
-            overflow: hidden;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-        }
-
-        .items-table thead {
-            background: #f8f9fa;
-        }
-
-        .items-table th {
-            text-align: left;
-            padding: 12px;
-            font-weight: 600;
-            color: #2c3e50;
-            border-bottom: 2px solid #dee2e6;
-        }
-
-        .items-table td {
-            padding: 12px;
-            border-bottom: 1px solid #dee2e6;
-        }
-
-        .items-table tbody tr:hover {
-            background: #f8f9fa;
-        }
-
+        /* STAC-specific: Item ID styling */
         .item-id {
             font-family: 'Courier New', monospace;
-            color: #0071BC;
+            color: var(--ds-blue-primary);
             font-weight: 500;
-        }
-
-        /* Empty State */
-        .empty-state {
-            text-align: center;
-            padding: 60px 20px;
-            color: #7f8c8d;
-            background: white;
-            border-radius: 8px;
-        }
-
-        .empty-state .icon {
-            font-size: 64px;
-            margin-bottom: 20px;
-            opacity: 0.3;
-        }
-
-        .empty-state h3 {
-            font-size: 20px;
-            margin-bottom: 10px;
-            color: #2c3e50;
-        }
-
-        /* Spinner Container */
-        .spinner-container {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            padding: 60px 20px;
-            background: white;
-            border-radius: 8px;
-        }
-
-        .spinner-text {
-            margin-top: 20px;
-            color: #7f8c8d;
-            font-size: 14px;
         }
         """
 

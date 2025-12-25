@@ -37,7 +37,8 @@ class DocsInterface(BaseInterface):
             title="Platform API Documentation - DDH Integration",
             content=self._generate_html_content(),
             custom_css=self._generate_css(),
-            custom_js=self._generate_js()
+            custom_js=self._generate_js(),
+            include_htmx=True
         )
 
     def _generate_css(self) -> str:

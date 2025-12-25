@@ -520,6 +520,9 @@ ORDER BY r.rolname;""")
                 if not migration_result['success']:
                     return migration_result
 
+                # Apply post-migration fixes for pypgstac bugs (24 DEC 2025)
+                self._apply_pgstac_function_fixes()
+
             # Verify installation
             verification = self.verify_installation()
 
@@ -557,6 +560,46 @@ ORDER BY r.rolname;""")
                 ))
                 conn.commit()
                 logger.info("✅ pgstac schema dropped")
+
+    def _apply_pgstac_function_fixes(self):
+        """
+        Apply post-migration fixes for pypgstac bugs (24 DEC 2025).
+
+        pypgstac 0.9.8 has a bug where partition_after_triggerfunc is created
+        without a search_path, causing errors when deleting STAC items:
+
+            ERROR: relation "partition_sys_meta" does not exist
+            CONTEXT: PL/pgSQL function pgstac.partition_after_triggerfunc() line 13
+
+        This method applies the missing search_path configuration to affected functions.
+        Safe to run multiple times (idempotent).
+        """
+        logger.info("🔧 Applying pgstac function fixes...")
+
+        # Functions that need search_path = pgstac, public
+        # These are trigger functions that reference pgstac tables without schema prefix
+        functions_to_fix = [
+            'partition_after_triggerfunc()',
+        ]
+
+        with self._pg_repo._get_connection() as conn:
+            with conn.cursor() as cur:
+                for func_sig in functions_to_fix:
+                    try:
+                        cur.execute(sql.SQL("""
+                            ALTER FUNCTION {}.{} SET search_path = pgstac, public
+                        """).format(
+                            sql.Identifier(self.PGSTAC_SCHEMA),
+                            sql.SQL(func_sig)
+                        ))
+                        logger.info(f"  ✅ Fixed search_path for pgstac.{func_sig}")
+                    except Exception as e:
+                        # Function might not exist in future pypgstac versions
+                        logger.warning(f"  ⚠️ Could not fix pgstac.{func_sig}: {e}")
+
+                conn.commit()
+
+        logger.info("✅ pgstac function fixes applied")
 
     def _run_pypgstac_migrate(self, skip_prereq_check: bool = False) -> Dict[str, Any]:
         """
@@ -2180,7 +2223,14 @@ def get_item_by_id(item_id: str, collection_id: Optional[str] = None, repo: Opti
     Returns:
         STAC Item JSON or error dict
     """
-    logger.info(f"🔍 Looking up item '{item_id}'" + (f" in collection '{collection_id}'" if collection_id else ""))
+    from config import get_config
+    config = get_config()
+    debug = config.debug_mode
+
+    if debug:
+        logger.info(f"🔍 [DEBUG] get_item_by_id called: item_id='{item_id}', collection_id='{collection_id}'")
+    else:
+        logger.info(f"🔍 Looking up item '{item_id}'" + (f" in collection '{collection_id}'" if collection_id else ""))
 
     try:
         # Use repository pattern (16 NOV 2025 - managed identity support)
@@ -2192,6 +2242,7 @@ def get_item_by_id(item_id: str, collection_id: Optional[str] = None, repo: Opti
             with conn.cursor() as cur:
                 # CRITICAL (13 NOV 2025): Reconstruct full STAC item from separate columns + content
                 # pgSTAC stores id, collection, geometry separately from content JSONB
+                # CRITICAL (24 DEC 2025): Use alias 'stac_item' for RealDictCursor compatibility
                 if collection_id:
                     # Search in specific collection
                     cur.execute(
@@ -2202,7 +2253,7 @@ def get_item_by_id(item_id: str, collection_id: Optional[str] = None, repo: Opti
                                'geometry', ST_AsGeoJSON(geometry)::jsonb,
                                'type', 'Feature',
                                'stac_version', COALESCE(content->>'stac_version', '1.0.0')
-                           )
+                           ) as stac_item
                            FROM pgstac.items WHERE id = %s AND collection = %s""",
                         [item_id, collection_id]
                     )
@@ -2216,18 +2267,27 @@ def get_item_by_id(item_id: str, collection_id: Optional[str] = None, repo: Opti
                                'geometry', ST_AsGeoJSON(geometry)::jsonb,
                                'type', 'Feature',
                                'stac_version', COALESCE(content->>'stac_version', '1.0.0')
-                           )
+                           ) as stac_item
                            FROM pgstac.items WHERE id = %s""",
                         [item_id]
                     )
 
                 result = cur.fetchone()
 
+                if debug:
+                    logger.info(f"🔍 [DEBUG] Query result type: {type(result)}, keys: {list(result.keys()) if result else 'None'}")
+
                 if result:
-                    logger.info(f"✅ Found item '{item_id}'")
-                    return result[0]  # Return STAC Item JSON (now with all required fields)
+                    # CRITICAL (24 DEC 2025): RealDictCursor returns dict, access by column alias
+                    stac_item = result.get('stac_item') if isinstance(result, dict) else result[0]
+                    if debug:
+                        props = stac_item.get('properties', {}) if stac_item else {}
+                        logger.info(f"🔍 [DEBUG] Found item '{item_id}', postgis:table='{props.get('postgis:table')}'")
+                    else:
+                        logger.info(f"✅ Found item '{item_id}'")
+                    return stac_item
                 else:
-                    logger.warning(f"⚠️ Item '{item_id}' not found")
+                    logger.warning(f"⚠️ Item '{item_id}' not found" + (f" in collection '{collection_id}'" if collection_id else ""))
                     return {
                         'error': f"Item '{item_id}' not found" + (f" in collection '{collection_id}'" if collection_id else ""),
                         'item_id': item_id,
@@ -2236,6 +2296,9 @@ def get_item_by_id(item_id: str, collection_id: Optional[str] = None, repo: Opti
 
     except Exception as e:
         logger.error(f"❌ Failed to get item '{item_id}': {e}")
+        if debug:
+            import traceback
+            logger.error(f"❌ [DEBUG] Traceback: {traceback.format_exc()}")
         return {
             'error': str(e),
             'error_type': type(e).__name__,

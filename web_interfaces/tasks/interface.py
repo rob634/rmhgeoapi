@@ -3,10 +3,10 @@ Task monitoring interface module.
 
 Web dashboard for viewing tasks of a specific job with workflow visualization.
 
-Features (16 DEC 2025):
+Features (24 DEC 2025 - S12.3.2):
+    - HTMX-powered auto-refresh
     - Visual workflow diagram showing predefined stages
     - Task counts per stage with status colors (P/Q/R/C/F)
-    - Auto-refresh capability
     - Expandable task detail sections
 
 Task Status Legend:
@@ -31,6 +31,7 @@ class TasksInterface(BaseInterface):
     Task Monitoring Dashboard interface with workflow visualization.
 
     Displays predefined workflow stages with task counts and status indicators.
+    Uses HTMX for auto-refresh.
     """
 
     def render(self, request: func.HttpRequest) -> str:
@@ -60,7 +61,8 @@ class TasksInterface(BaseInterface):
             title=f"Task Monitor - {job_id[:8] if job_id else 'No Job'}",
             content=content,
             custom_css=custom_css,
-            custom_js=custom_js
+            custom_js=custom_js,
+            include_htmx=True
         )
 
     def _generate_html_content(self, job_id: str) -> str:

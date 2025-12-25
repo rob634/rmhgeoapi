@@ -3,7 +3,8 @@ H3 Grid Status interface module.
 
 Web dashboard for monitoring H3 hexagonal grid coverage at different resolutions.
 
-Features (16 DEC 2025):
+Features (24 DEC 2025 - S12.3.4):
+    - HTMX enabled for future partial updates
     - Visual display of H3 resolution levels 2-7
     - Cell count per resolution with status indicators
     - Resolution info (average cell size)
@@ -44,7 +45,8 @@ class H3Interface(BaseInterface):
             title="H3 Grid Status",
             content=content,
             custom_css=custom_css,
-            custom_js=custom_js
+            custom_js=custom_js,
+            include_htmx=True
         )
 
     def _generate_html_content(self) -> str:
@@ -112,50 +114,16 @@ class H3Interface(BaseInterface):
         """
 
     def _generate_custom_css(self) -> str:
-        """Generate custom CSS for H3 dashboard."""
+        """Generate custom CSS for H3 dashboard.
+
+        Note: Most styles now in COMMON_CSS (S12.1.1).
+        Only H3-specific styles remain here.
+        """
         return """
-        .dashboard-header {
-            background: white;
-            padding: 25px 30px;
-            border-radius: 3px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-            margin-bottom: 20px;
-            border-left: 4px solid #0071BC;
-        }
-
-        .dashboard-header h1 {
-            color: #053657;
-            font-size: 24px;
-            margin-bottom: 8px;
-            font-weight: 700;
-        }
-
-        .subtitle {
-            color: #626F86;
-            font-size: 14px;
-            margin: 0;
-        }
-
-        .refresh-button {
-            background: #0071BC;
-            color: white;
-            border: none;
-            padding: 10px 20px;
-            border-radius: 3px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.2s;
-            font-size: 14px;
-        }
-
-        .refresh-button:hover {
-            background: #005a96;
-        }
-
-        /* Summary Card */
+        /* H3-specific: Summary card */
         .summary-card {
             background: white;
-            border: 1px solid #e9ecef;
+            border: 1px solid var(--ds-gray-light);
             padding: 25px;
             border-radius: 3px;
             margin-bottom: 20px;
@@ -171,13 +139,13 @@ class H3Interface(BaseInterface):
         .summary-item {
             text-align: center;
             padding: 15px;
-            background: #f8f9fa;
+            background: var(--ds-bg);
             border-radius: 6px;
         }
 
         .summary-label {
             font-size: 11px;
-            color: #626F86;
+            color: var(--ds-gray);
             font-weight: 600;
             text-transform: uppercase;
             letter-spacing: 0.5px;
@@ -187,25 +155,15 @@ class H3Interface(BaseInterface):
 
         .summary-value {
             font-size: 28px;
-            color: #053657;
+            color: var(--ds-navy);
             font-weight: 700;
         }
 
         .summary-value.highlight {
-            color: #0071BC;
+            color: var(--ds-blue-primary);
         }
 
-        /* Section Title */
-        .section-title {
-            font-size: 16px;
-            font-weight: 700;
-            color: #053657;
-            margin-bottom: 15px;
-            padding-bottom: 10px;
-            border-bottom: 1px solid #e9ecef;
-        }
-
-        /* Resolution Grid */
+        /* H3-specific: Resolution grid and cards */
         .resolution-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
@@ -215,7 +173,7 @@ class H3Interface(BaseInterface):
 
         .resolution-card {
             background: white;
-            border: 2px solid #e9ecef;
+            border: 2px solid var(--ds-gray-light);
             border-radius: 8px;
             padding: 25px;
             text-align: center;
@@ -229,7 +187,7 @@ class H3Interface(BaseInterface):
         }
 
         .resolution-card.has-data {
-            border-color: #0071BC;
+            border-color: var(--ds-blue-primary);
             background: linear-gradient(135deg, #EBF5FF 0%, #DBEAFE 100%);
         }
 
@@ -244,7 +202,7 @@ class H3Interface(BaseInterface):
             top: -12px;
             left: 50%;
             transform: translateX(-50%);
-            background: #0071BC;
+            background: var(--ds-blue-primary);
             color: white;
             padding: 4px 16px;
             border-radius: 12px;
@@ -259,7 +217,7 @@ class H3Interface(BaseInterface):
         .resolution-level {
             font-size: 48px;
             font-weight: 700;
-            color: #0071BC;
+            color: var(--ds-blue-primary);
             margin: 10px 0;
         }
 
@@ -270,25 +228,25 @@ class H3Interface(BaseInterface):
         .resolution-name {
             font-size: 14px;
             font-weight: 600;
-            color: #053657;
+            color: var(--ds-navy);
             margin-bottom: 8px;
         }
 
         .resolution-size {
             font-size: 12px;
-            color: #626F86;
+            color: var(--ds-gray);
             margin-bottom: 15px;
         }
 
         .cell-count {
             font-size: 24px;
             font-weight: 700;
-            color: #053657;
+            color: var(--ds-navy);
         }
 
         .cell-count-label {
             font-size: 11px;
-            color: #626F86;
+            color: var(--ds-gray);
             text-transform: uppercase;
             letter-spacing: 0.5px;
         }
@@ -297,10 +255,10 @@ class H3Interface(BaseInterface):
             color: #9ca3af;
         }
 
-        /* Info Section */
+        /* H3-specific: Info section */
         .info-section {
             background: white;
-            border: 1px solid #e9ecef;
+            border: 1px solid var(--ds-gray-light);
             padding: 25px;
             border-radius: 3px;
             margin-bottom: 20px;
@@ -308,7 +266,7 @@ class H3Interface(BaseInterface):
         }
 
         .info-content {
-            color: #626F86;
+            color: var(--ds-gray);
             font-size: 14px;
             line-height: 1.6;
         }
@@ -320,44 +278,23 @@ class H3Interface(BaseInterface):
         }
 
         .info-table th {
-            background: #f8f9fa;
+            background: var(--ds-bg);
             padding: 12px;
             text-align: left;
             font-size: 12px;
             font-weight: 600;
-            color: #053657;
-            border-bottom: 2px solid #e9ecef;
+            color: var(--ds-navy);
+            border-bottom: 2px solid var(--ds-gray-light);
         }
 
         .info-table td {
             padding: 10px 12px;
-            border-bottom: 1px solid #e9ecef;
+            border-bottom: 1px solid var(--ds-gray-light);
             font-size: 13px;
         }
 
         .info-table tr:hover {
-            background: #f8f9fa;
-        }
-
-        /* Error State */
-        .error-state {
-            text-align: center;
-            padding: 60px 20px;
-            color: #626F86;
-            background: white;
-            border-radius: 3px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-        }
-
-        .error-state .icon {
-            font-size: 48px;
-            margin-bottom: 15px;
-            opacity: 0.3;
-        }
-
-        .error-state h3 {
-            color: #053657;
-            margin-bottom: 10px;
+            background: var(--ds-bg);
         }
         """
 

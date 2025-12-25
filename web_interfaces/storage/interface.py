@@ -1,29 +1,52 @@
 """
 Storage browser interface module.
 
-Web dashboard for browsing Azure Blob Storage bronze container files with filtering and detail views.
+Web dashboard for browsing Azure Blob Storage containers with HTMX-powered
+cascading dropdowns and dynamic file loading.
+
+Features (23 DEC 2025 - S12.2.2):
+    - HTMX-powered zone→container dropdown cascade
+    - HTMX file listing with loading indicators
+    - HTMX file detail panel
+    - Reduced JavaScript, server-side rendering
 
 Exports:
-    StorageInterface: Storage file browser with metadata and selection capabilities
+    StorageInterface: Storage file browser with HTMX interactivity
 """
+
+import logging
+from datetime import datetime
+from typing import List, Dict, Any
 
 import azure.functions as func
 from web_interfaces.base import BaseInterface
 from web_interfaces import InterfaceRegistry
 
+logger = logging.getLogger(__name__)
+
+# Valid storage zones
+VALID_ZONES = ["bronze", "silver", "silverext", "gold"]
+
 
 @InterfaceRegistry.register('storage')
 class StorageInterface(BaseInterface):
     """
-    Storage Browser interface for browsing Bronze/Silver/Gold containers.
+    Storage Browser interface with HTMX interactivity.
 
-    Displays files from Azure Blob Storage containers with
-    filtering, sorting, and detail view capabilities.
+    Uses HTMX for:
+        - Zone→container dropdown cascade (server-side)
+        - File listing with loading indicators
+        - File detail panel population
+
+    Fragments supported:
+        - containers: Returns container <option> elements for zone
+        - files: Returns file table rows
+        - file-detail: Returns file detail panel content
     """
 
     def render(self, request: func.HttpRequest) -> str:
         """
-        Generate Pipeline Dashboard HTML.
+        Generate Storage Browser HTML with HTMX attributes.
 
         Args:
             request: Azure Functions HttpRequest object
@@ -31,24 +54,301 @@ class StorageInterface(BaseInterface):
         Returns:
             Complete HTML document string
         """
-        # HTML content
         content = self._generate_html_content()
-
-        # Custom CSS for Pipeline Dashboard
         custom_css = self._generate_custom_css()
-
-        # Custom JavaScript for Pipeline Dashboard
         custom_js = self._generate_custom_js()
 
         return self.wrap_html(
             title="Storage Browser",
             content=content,
             custom_css=custom_css,
-            custom_js=custom_js
+            custom_js=custom_js,
+            include_htmx=True
         )
 
+    def htmx_partial(self, request: func.HttpRequest, fragment: str) -> str:
+        """
+        Handle HTMX partial requests for storage fragments.
+
+        Fragments:
+            containers: Returns <option> elements for container dropdown
+            files: Returns table rows for file listing
+            file-detail: Returns file detail panel content
+
+        Args:
+            request: Azure Functions HttpRequest
+            fragment: Fragment name to render
+
+        Returns:
+            HTML fragment string
+        """
+        if fragment == 'containers':
+            return self._render_containers_fragment(request)
+        elif fragment == 'files':
+            return self._render_files_fragment(request)
+        elif fragment == 'file-detail':
+            return self._render_file_detail_fragment(request)
+        else:
+            raise ValueError(f"Unknown fragment: {fragment}")
+
+    def _render_containers_fragment(self, request: func.HttpRequest) -> str:
+        """Render container options for a given zone."""
+        zone = request.params.get('zone', '')
+
+        if not zone:
+            return '<option value="">Select zone first</option>'
+
+        if zone not in VALID_ZONES:
+            return f'<option value="">Invalid zone: {zone}</option>'
+
+        try:
+            # Import BlobRepository to get containers for zone
+            from infrastructure.blob import BlobRepository
+
+            repo = BlobRepository.for_zone(zone)
+            containers = repo.list_containers()
+
+            if not containers:
+                return '<option value="">No containers in zone</option>'
+
+            # Return container options - containers is list of dicts with 'name' key
+            options = [f'<option value="{c["name"]}">{c["name"]}</option>' for c in containers]
+            return '\n'.join(options)
+
+        except Exception as e:
+            logger.error(f"Error loading containers for zone {zone}: {e}")
+            return f'<option value="">Error loading containers</option>'
+
+    def _render_files_fragment(self, request: func.HttpRequest) -> str:
+        """Render file table rows."""
+        zone = request.params.get('zone', '')
+        container = request.params.get('container', '')
+        prefix = request.params.get('prefix', '')
+        suffix = request.params.get('suffix', '')
+        limit = int(request.params.get('limit', '250'))
+
+        if not zone or not container:
+            return self._render_files_error("Please select a zone and container first")
+
+        try:
+            # Import BlobRepository to list blobs
+            from infrastructure.blob import BlobRepository
+
+            repo = BlobRepository.for_zone(zone)
+            blobs = repo.list_blobs(
+                container=container,
+                prefix=prefix if prefix else "",
+                limit=limit
+            )
+
+            # Apply suffix filter if specified (BlobRepository doesn't support suffix directly)
+            if suffix:
+                blobs = [b for b in blobs if b.get('name', '').endswith(suffix)]
+
+            if not blobs:
+                return self._render_files_empty()
+
+            # Build table rows
+            rows = []
+            for i, blob in enumerate(blobs):
+                size_mb = blob.get('size', 0) / (1024 * 1024)
+                last_modified = blob.get('last_modified', '')
+                if last_modified:
+                    try:
+                        dt = datetime.fromisoformat(last_modified.replace('Z', '+00:00'))
+                        date_str = dt.strftime('%Y-%m-%d')
+                    except Exception:
+                        date_str = 'N/A'
+                else:
+                    date_str = 'N/A'
+
+                name = blob.get('name', '')
+                short_name = name.split('/')[-1] if '/' in name else name
+
+                # Determine file type
+                if blob.get('size', 0) == 0:
+                    ext = 'Folder'
+                elif '.' in short_name:
+                    ext = short_name.split('.')[-1].upper()
+                else:
+                    ext = 'File'
+
+                # Encode blob name for use in hx-get
+                encoded_name = name.replace("'", "\\'")
+
+                row = f'''
+                <tr class="file-row"
+                    hx-get="/api/interface/storage?fragment=file-detail&zone={zone}&container={container}&path={name}"
+                    hx-target="#detail-content"
+                    hx-trigger="click"
+                    hx-indicator="#detail-spinner"
+                    onclick="showDetailPanel(); this.closest('tbody').querySelectorAll('tr').forEach(r=>r.classList.remove('selected')); this.classList.add('selected');"
+                    data-index="{i}">
+                    <td>
+                        <div class="file-name" title="{name}">{short_name}</div>
+                    </td>
+                    <td>
+                        <span class="file-size">{size_mb:.2f} MB</span>
+                    </td>
+                    <td>
+                        <span class="file-date">{date_str}</span>
+                    </td>
+                    <td>
+                        <span class="file-type">{ext}</span>
+                    </td>
+                </tr>'''
+                rows.append(row)
+
+            # Also update stats via OOB swap
+            total_size = sum(b.get('size', 0) for b in blobs) / (1024 * 1024)
+            stats_html = f'''
+            <div id="stats-content" hx-swap-oob="innerHTML:#stats-content">
+                <div class="stat-item">
+                    <span class="stat-label">Files Loaded</span>
+                    <span class="stat-value">{len(blobs)}</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">Total Size</span>
+                    <span class="stat-value">{total_size:.2f} MB</span>
+                </div>
+            </div>
+            '''
+
+            return '\n'.join(rows) + stats_html
+
+        except Exception as e:
+            logger.error(f"Error loading files: {e}", exc_info=True)
+            return self._render_files_error(str(e))
+
+    def _render_files_empty(self) -> str:
+        """Render empty state for files table."""
+        return '''
+        <tr>
+            <td colspan="4">
+                <div class="empty-state" style="margin: 0; box-shadow: none;">
+                    <div class="icon" style="font-size: 48px;">📁</div>
+                    <h3>No Files Found</h3>
+                    <p>No files match the current filter or the container is empty</p>
+                </div>
+            </td>
+        </tr>
+        '''
+
+    def _render_files_error(self, message: str) -> str:
+        """Render error state for files table."""
+        return f'''
+        <tr>
+            <td colspan="4">
+                <div class="error-state" style="margin: 0; box-shadow: none;">
+                    <div class="icon" style="font-size: 48px;">⚠️</div>
+                    <h3>Error Loading Files</h3>
+                    <p>{message}</p>
+                </div>
+            </td>
+        </tr>
+        '''
+
+    def _render_file_detail_fragment(self, request: func.HttpRequest) -> str:
+        """Render file detail panel content."""
+        zone = request.params.get('zone', '')
+        container = request.params.get('container', '')
+        path = request.params.get('path', '')
+
+        if not zone or not container or not path:
+            return '<p class="error-text">Missing file information</p>'
+
+        try:
+            # Import BlobRepository to get blob properties
+            from infrastructure.blob import BlobRepository
+
+            repo = BlobRepository.for_zone(zone)
+            props = repo.get_blob_properties(container=container, blob_path=path)
+
+            if not props:
+                return '<p class="error-text">File not found</p>'
+
+            # Extract metadata from blob properties dict
+            filename = path.split('/')[-1] if '/' in path else path
+            size = props.get('size', 0)
+            size_mb = size / (1024 * 1024)
+            content_type = props.get('content_type', 'Unknown') or 'Unknown'
+            last_modified = props.get('last_modified', 'N/A') or 'N/A'
+
+            # Extract folder from path
+            folder = '/'.join(path.split('/')[:-1]) if '/' in path else ''
+            # Extract extension
+            extension = filename.split('.')[-1] if '.' in filename else ''
+            # Get etag
+            etag = props.get('etag', '')
+
+            # Format last modified
+            if last_modified and last_modified != 'N/A':
+                try:
+                    dt = datetime.fromisoformat(last_modified.replace('Z', '+00:00'))
+                    last_modified = dt.strftime('%Y-%m-%d %H:%M:%S')
+                except Exception:
+                    pass
+
+            html = f'''
+            <div class="detail-row">
+                <div class="detail-label">Filename</div>
+                <div class="detail-value">{filename}</div>
+            </div>
+            <div class="detail-row">
+                <div class="detail-label">Full Path</div>
+                <div class="detail-value mono">{path}</div>
+            </div>
+            <div class="detail-row">
+                <div class="detail-label">Size</div>
+                <div class="detail-value">{size_mb:.2f} MB ({size:,} bytes)</div>
+            </div>
+            <div class="detail-row">
+                <div class="detail-label">Content Type</div>
+                <div class="detail-value">{content_type}</div>
+            </div>
+            <div class="detail-row">
+                <div class="detail-label">Last Modified</div>
+                <div class="detail-value">{last_modified}</div>
+            </div>
+            '''
+
+            if folder:
+                html += f'''
+            <div class="detail-row">
+                <div class="detail-label">Folder</div>
+                <div class="detail-value mono">{folder}</div>
+            </div>
+            '''
+
+            if extension:
+                html += f'''
+            <div class="detail-row">
+                <div class="detail-label">Extension</div>
+                <div class="detail-value">.{extension}</div>
+            </div>
+            '''
+
+            if etag:
+                html += f'''
+            <div class="detail-row">
+                <div class="detail-label">ETag</div>
+                <div class="detail-value mono" style="font-size: 11px;">{etag}</div>
+            </div>
+            '''
+
+            return html
+
+        except Exception as e:
+            logger.error(f"Error loading file details: {e}", exc_info=True)
+            return f'''
+            <div class="error-state" style="padding: 20px; margin: 0; box-shadow: none;">
+                <p>Failed to load file details</p>
+                <p style="font-size: 12px; color: #999;">{str(e)}</p>
+            </div>
+            '''
+
     def _generate_html_content(self) -> str:
-        """Generate HTML content structure."""
+        """Generate HTML content structure with HTMX attributes."""
         return """
         <div class="container">
             <!-- Header -->
@@ -61,47 +361,66 @@ class StorageInterface(BaseInterface):
             <div class="controls">
                 <div class="control-group">
                     <label for="zone-select">Zone:</label>
-                    <select id="zone-select" class="filter-select" onchange="onZoneChange()">
+                    <select id="zone-select" name="zone" class="filter-select"
+                            hx-get="/api/interface/storage?fragment=containers"
+                            hx-target="#container-select"
+                            hx-trigger="change"
+                            hx-indicator="#container-spinner"
+                            hx-include="[name='zone']"
+                            onchange="updateLoadButton()">
                         <option value="">Loading zones...</option>
                     </select>
+                    <span id="container-spinner" class="htmx-indicator spinner-sm"></span>
                 </div>
 
                 <div class="control-group">
                     <label for="container-select">Container:</label>
-                    <select id="container-select" class="filter-select" disabled>
+                    <select id="container-select" name="container" class="filter-select"
+                            onchange="updateLoadButton()">
                         <option value="">Select zone first</option>
                     </select>
                 </div>
 
                 <div class="control-group">
                     <label for="prefix-input">Path Filter:</label>
-                    <input type="text" id="prefix-input" class="filter-input"
+                    <input type="text" id="prefix-input" name="prefix" class="filter-input"
                            placeholder="e.g., maxar/ or data/2025/">
                 </div>
 
                 <div class="control-group">
                     <label for="suffix-input">Extension:</label>
-                    <input type="text" id="suffix-input" class="filter-input suffix-input"
+                    <input type="text" id="suffix-input" name="suffix" class="filter-input suffix-input"
                            placeholder=".tif">
                 </div>
 
                 <div class="button-group">
-                    <button onclick="loadBlobs()" class="refresh-button" id="load-btn" disabled>🔄 Load Files</button>
-                    <button onclick="loadBlobs(50)" class="load-button">50</button>
-                    <button onclick="loadBlobs(250)" class="load-button active">250</button>
-                    <button onclick="loadBlobs(1000)" class="load-button">1000</button>
+                    <button id="load-btn" class="refresh-button" disabled
+                            hx-get="/api/interface/storage?fragment=files"
+                            hx-target="#files-tbody"
+                            hx-trigger="click"
+                            hx-indicator="#loading-spinner"
+                            hx-include="#zone-select, #container-select, #prefix-input, #suffix-input, #limit-input"
+                            onclick="showFilesTable()">
+                        🔄 Load Files
+                    </button>
+                    <input type="hidden" id="limit-input" name="limit" value="250">
+                    <button type="button" class="load-button" onclick="setLimit(50)">50</button>
+                    <button type="button" class="load-button active" onclick="setLimit(250)">250</button>
+                    <button type="button" class="load-button" onclick="setLimit(1000)">1000</button>
                 </div>
             </div>
 
             <!-- Stats Banner -->
             <div id="stats-banner" class="stats-banner hidden">
-                <div class="stat-item">
-                    <span class="stat-label">Files Loaded</span>
-                    <span class="stat-value" id="files-count">0</span>
-                </div>
-                <div class="stat-item">
-                    <span class="stat-label">Total Size</span>
-                    <span class="stat-value" id="total-size">0 MB</span>
+                <div id="stats-content">
+                    <div class="stat-item">
+                        <span class="stat-label">Files Loaded</span>
+                        <span class="stat-value" id="files-count">0</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">Total Size</span>
+                        <span class="stat-value" id="total-size">0 MB</span>
+                    </div>
                 </div>
             </div>
 
@@ -109,7 +428,7 @@ class StorageInterface(BaseInterface):
             <div class="main-content">
                 <!-- Files Table -->
                 <div class="files-section">
-                    <div id="loading-spinner" class="spinner hidden"></div>
+                    <div id="loading-spinner" class="htmx-indicator spinner"></div>
 
                     <table class="files-table hidden" id="files-table">
                         <thead>
@@ -121,25 +440,15 @@ class StorageInterface(BaseInterface):
                             </tr>
                         </thead>
                         <tbody id="files-tbody">
-                            <!-- Files will be inserted here -->
+                            <!-- Files will be inserted here via HTMX -->
                         </tbody>
                     </table>
 
-                    <!-- Empty State -->
-                    <div id="empty-state" class="empty-state hidden">
+                    <!-- Initial State -->
+                    <div id="initial-state" class="empty-state">
                         <div class="icon">📁</div>
-                        <h3>No Files Found</h3>
-                        <p>No files match the current filter or the container is empty</p>
-                    </div>
-
-                    <!-- Error State -->
-                    <div id="error-state" class="error-state hidden">
-                        <div class="icon">⚠️</div>
-                        <h3>Error Loading Files</h3>
-                        <p id="error-message"></p>
-                        <button onclick="loadBlobs()" class="refresh-button" style="margin-top: 15px;">
-                            🔄 Retry
-                        </button>
+                        <h3>Select a Zone and Container</h3>
+                        <p>Choose a storage zone and container, then click "Load Files"</p>
                     </div>
                 </div>
 
@@ -150,15 +459,16 @@ class StorageInterface(BaseInterface):
                         <button onclick="closeDetailPanel()" class="close-button">×</button>
                     </div>
                     <div id="detail-content" class="detail-content">
-                        <!-- File details will be inserted here -->
+                        <!-- File details will be inserted here via HTMX -->
+                        <div id="detail-spinner" class="htmx-indicator spinner"></div>
                     </div>
                     <div class="detail-actions">
                         <div class="job-placeholder">
                             <h4>Submit Processing Job</h4>
-                            <p class="placeholder-text">Job submission coming soon...</p>
-                            <button class="submit-button disabled" disabled>
-                                🚀 Submit Job (Coming Soon)
-                            </button>
+                            <p class="placeholder-text">Select a file to see job submission options</p>
+                            <a href="/api/interface/submit-vector" class="submit-button" style="display: block; text-align: center; text-decoration: none;">
+                                🚀 Go to Submit Vector
+                            </a>
                         </div>
                     </div>
                 </div>
@@ -167,31 +477,13 @@ class StorageInterface(BaseInterface):
         """
 
     def _generate_custom_css(self) -> str:
-        """Generate custom CSS for Pipeline Dashboard."""
+        """Generate custom CSS for Storage Browser.
+
+        Note: Most styles now in COMMON_CSS (S12.1.1).
+        Only storage-specific styles remain here.
+        """
         return """
-        .dashboard-header {
-            background: white;
-            padding: 30px;
-            border-radius: 3px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-            margin-bottom: 20px;
-            border-left: 4px solid #0071BC;
-        }
-
-        .dashboard-header h1 {
-            color: #053657;
-            font-size: 28px;
-            margin-bottom: 10px;
-            font-weight: 700;
-        }
-
-        .subtitle {
-            color: #626F86;
-            font-size: 16px;
-            margin: 0;
-        }
-
-        /* Controls */
+        /* Storage-specific: Controls layout */
         .controls {
             background: white;
             padding: 20px;
@@ -208,27 +500,24 @@ class StorageInterface(BaseInterface):
             display: flex;
             flex-direction: column;
             gap: 5px;
+            position: relative;
         }
 
         .control-group label {
             font-size: 12px;
             font-weight: 600;
-            color: #626F86;
+            color: var(--ds-gray);
             text-transform: uppercase;
             letter-spacing: 0.5px;
         }
 
-        .filter-select, .filter-input {
+        .filter-input {
             padding: 10px 15px;
-            border: 1px solid #e9ecef;
+            border: 1px solid var(--ds-gray-light);
             border-radius: 3px;
             font-size: 14px;
-            color: #053657;
+            color: var(--ds-navy);
             background: white;
-            min-width: 180px;
-        }
-
-        .filter-input {
             min-width: 200px;
         }
 
@@ -237,9 +526,9 @@ class StorageInterface(BaseInterface):
             width: 80px;
         }
 
-        .filter-select:focus, .filter-input:focus {
+        .filter-input:focus {
             outline: none;
-            border-color: #0071BC;
+            border-color: var(--ds-blue-primary);
         }
 
         .button-group {
@@ -248,28 +537,10 @@ class StorageInterface(BaseInterface):
             align-items: center;
         }
 
-        .refresh-button {
-            background: #0071BC;
-            color: white;
-            border: none;
-            padding: 10px 20px;
-            border-radius: 3px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.2s;
-            font-size: 14px;
-        }
-
-        .refresh-button:hover {
-            background: #00A3DA;
-            transform: translateY(-1px);
-            box-shadow: 0 2px 8px rgba(0,113,188,0.3);
-        }
-
         .load-button {
             background: white;
-            color: #0071BC;
-            border: 1px solid #e9ecef;
+            color: var(--ds-blue-primary);
+            border: 1px solid var(--ds-gray-light);
             padding: 10px 16px;
             border-radius: 3px;
             font-weight: 600;
@@ -279,16 +550,16 @@ class StorageInterface(BaseInterface):
         }
 
         .load-button:hover, .load-button.active {
-            background: #f8f9fa;
-            border-color: #0071BC;
+            background: var(--ds-bg);
+            border-color: var(--ds-blue-primary);
         }
 
         .load-button.active {
-            background: #0071BC;
+            background: var(--ds-blue-primary);
             color: white;
         }
 
-        /* Stats Banner */
+        /* Storage-specific: Stats banner */
         .stats-banner {
             background: white;
             padding: 15px 20px;
@@ -299,27 +570,7 @@ class StorageInterface(BaseInterface):
             gap: 40px;
         }
 
-        .stat-item {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-
-        .stat-label {
-            font-size: 12px;
-            color: #626F86;
-            font-weight: 600;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
-
-        .stat-value {
-            font-size: 18px;
-            color: #053657;
-            font-weight: 700;
-        }
-
-        /* Main Content */
+        /* Storage-specific: Main content layout */
         .main-content {
             display: flex;
             gap: 20px;
@@ -330,7 +581,7 @@ class StorageInterface(BaseInterface):
             min-width: 0;
         }
 
-        /* Files Table */
+        /* Storage-specific: Files table */
         .files-table {
             width: 100%;
             border-collapse: collapse;
@@ -341,15 +592,15 @@ class StorageInterface(BaseInterface):
         }
 
         .files-table thead {
-            background: #f8f9fa;
+            background: var(--ds-bg);
         }
 
         .files-table th {
             text-align: left;
             padding: 15px;
             font-weight: 700;
-            color: #053657;
-            border-bottom: 2px solid #e9ecef;
+            color: var(--ds-navy);
+            border-bottom: 2px solid var(--ds-gray-light);
             font-size: 12px;
             text-transform: uppercase;
             letter-spacing: 0.5px;
@@ -357,8 +608,8 @@ class StorageInterface(BaseInterface):
 
         .files-table td {
             padding: 12px 15px;
-            border-bottom: 1px solid #e9ecef;
-            color: #053657;
+            border-bottom: 1px solid var(--ds-gray-light);
+            color: var(--ds-navy);
             font-size: 14px;
         }
 
@@ -368,43 +619,43 @@ class StorageInterface(BaseInterface):
         }
 
         .files-table tbody tr:hover {
-            background: #f8f9fa;
+            background: var(--ds-bg);
         }
 
         .files-table tbody tr.selected {
             background: #E6F3FF;
-            border-left: 3px solid #0071BC;
+            border-left: 3px solid var(--ds-blue-primary);
         }
 
         .file-name {
             font-weight: 500;
-            color: #0071BC;
+            color: var(--ds-blue-primary);
             word-break: break-all;
         }
 
         .file-size {
             font-family: 'Courier New', monospace;
             font-size: 13px;
-            color: #626F86;
+            color: var(--ds-gray);
         }
 
         .file-date {
             font-size: 13px;
-            color: #626F86;
+            color: var(--ds-gray);
         }
 
         .file-type {
             display: inline-block;
             padding: 3px 8px;
-            background: #f8f9fa;
+            background: var(--ds-bg);
             border-radius: 3px;
             font-size: 11px;
             font-weight: 600;
-            color: #626F86;
+            color: var(--ds-gray);
             text-transform: uppercase;
         }
 
-        /* Detail Panel */
+        /* Storage-specific: Detail Panel */
         .detail-panel {
             width: 400px;
             background: white;
@@ -421,12 +672,12 @@ class StorageInterface(BaseInterface):
             justify-content: space-between;
             align-items: center;
             padding: 20px;
-            border-bottom: 1px solid #e9ecef;
+            border-bottom: 1px solid var(--ds-gray-light);
         }
 
         .detail-header h3 {
             font-size: 16px;
-            color: #053657;
+            color: var(--ds-navy);
             margin: 0;
         }
 
@@ -434,14 +685,14 @@ class StorageInterface(BaseInterface):
             background: none;
             border: none;
             font-size: 24px;
-            color: #626F86;
+            color: var(--ds-gray);
             cursor: pointer;
             padding: 0;
             line-height: 1;
         }
 
         .close-button:hover {
-            color: #053657;
+            color: var(--ds-navy);
         }
 
         .detail-content {
@@ -457,7 +708,7 @@ class StorageInterface(BaseInterface):
         .detail-label {
             font-size: 11px;
             font-weight: 600;
-            color: #626F86;
+            color: var(--ds-gray);
             text-transform: uppercase;
             letter-spacing: 0.5px;
             margin-bottom: 5px;
@@ -465,40 +716,40 @@ class StorageInterface(BaseInterface):
 
         .detail-value {
             font-size: 14px;
-            color: #053657;
+            color: var(--ds-navy);
             word-break: break-all;
         }
 
         .detail-value.mono {
             font-family: 'Courier New', monospace;
             font-size: 13px;
-            background: #f8f9fa;
+            background: var(--ds-bg);
             padding: 8px;
             border-radius: 3px;
         }
 
         .detail-actions {
             padding: 20px;
-            border-top: 1px solid #e9ecef;
-            background: #f8f9fa;
+            border-top: 1px solid var(--ds-gray-light);
+            background: var(--ds-bg);
         }
 
         .job-placeholder h4 {
             font-size: 14px;
-            color: #053657;
+            color: var(--ds-navy);
             margin: 0 0 10px 0;
         }
 
         .placeholder-text {
             font-size: 13px;
-            color: #626F86;
+            color: var(--ds-gray);
             margin: 0 0 15px 0;
         }
 
         .submit-button {
             width: 100%;
             padding: 12px;
-            background: #0071BC;
+            background: var(--ds-blue-primary);
             color: white;
             border: none;
             border-radius: 3px;
@@ -507,30 +758,21 @@ class StorageInterface(BaseInterface):
             font-size: 14px;
         }
 
-        .submit-button.disabled {
-            background: #ccc;
-            cursor: not-allowed;
+        .submit-button:hover {
+            background: var(--ds-cyan);
         }
 
-        /* Empty/Error States */
-        .empty-state, .error-state {
-            text-align: center;
-            padding: 60px 20px;
-            color: #626F86;
-            background: white;
-            border-radius: 3px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-        }
-
-        .empty-state .icon, .error-state .icon {
-            font-size: 64px;
-            margin-bottom: 20px;
-            opacity: 0.3;
-        }
-
-        .empty-state h3, .error-state h3 {
-            color: #053657;
-            margin-bottom: 10px;
+        /* Storage-specific: Inline spinner next to dropdown */
+        .spinner-sm {
+            width: 18px;
+            height: 18px;
+            border: 2px solid var(--ds-gray-light);
+            border-top-color: var(--ds-blue-primary);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            position: absolute;
+            right: -25px;
+            bottom: 12px;
         }
 
         /* Responsive */
@@ -547,23 +789,22 @@ class StorageInterface(BaseInterface):
         """
 
     def _generate_custom_js(self) -> str:
-        """Generate custom JavaScript for Pipeline Dashboard."""
-        return """
-        let currentLimit = 250;
-        let currentBlobs = [];
-        let selectedBlob = null;
-        let zonesData = {};  // Cache zones and containers
+        """Generate minimal JavaScript for Storage Browser.
 
+        Most functionality now handled by HTMX (S12.2.2).
+        Only UI helper functions remain.
+        """
+        return """
         // Load zones on page load
         document.addEventListener('DOMContentLoaded', loadZones);
 
-        // Load zones from API
+        // Load zones from API (still needed for initial population)
         async function loadZones() {
             const zoneSelect = document.getElementById('zone-select');
 
             try {
                 const data = await fetchJSON(`${API_BASE_URL}/api/storage/containers`);
-                zonesData = data.zones || {};
+                const zonesData = data.zones || {};
 
                 // Populate zone dropdown
                 const zoneOptions = Object.entries(zonesData)
@@ -587,235 +828,62 @@ class StorageInterface(BaseInterface):
             }
         }
 
-        // Handle zone selection change
-        function onZoneChange() {
-            const zone = document.getElementById('zone-select').value;
-            const containerSelect = document.getElementById('container-select');
-            const loadBtn = document.getElementById('load-btn');
-
-            if (!zone || !zonesData[zone]) {
-                containerSelect.innerHTML = '<option value="">Select zone first</option>';
-                containerSelect.disabled = true;
-                loadBtn.disabled = true;
-                return;
-            }
-
-            const containers = zonesData[zone].containers || [];
-            containerSelect.innerHTML = containers
-                .map(c => `<option value="${c}">${c}</option>`)
-                .join('');
-            containerSelect.disabled = false;
-            loadBtn.disabled = false;
-        }
-
-        // Load blobs from API
-        async function loadBlobs(limit = null) {
-            if (limit !== null) {
-                currentLimit = limit;
-                // Update active button
-                document.querySelectorAll('.load-button').forEach(btn => {
-                    btn.classList.remove('active');
-                    if ((limit === 50 && btn.textContent === '50') ||
-                        (limit === 250 && btn.textContent === '250') ||
-                        (limit === 1000 && btn.textContent === '1000')) {
-                        btn.classList.add('active');
-                    }
-                });
-            }
-
+        // Update load button state based on selections
+        function updateLoadButton() {
             const zone = document.getElementById('zone-select').value;
             const container = document.getElementById('container-select').value;
-            const prefix = document.getElementById('prefix-input').value.trim();
-            const suffix = document.getElementById('suffix-input').value.trim();
+            const loadBtn = document.getElementById('load-btn');
 
-            if (!zone || !container) {
-                setStatus('Please select a zone and container first', true);
-                return;
-            }
-
-            const spinner = document.getElementById('loading-spinner');
-            const table = document.getElementById('files-table');
-            const tbody = document.getElementById('files-tbody');
-            const emptyState = document.getElementById('empty-state');
-            const errorState = document.getElementById('error-state');
-            const statsBanner = document.getElementById('stats-banner');
-
-            // Show loading
-            spinner.classList.remove('hidden');
-            table.classList.add('hidden');
-            emptyState.classList.add('hidden');
-            errorState.classList.add('hidden');
-            statsBanner.classList.add('hidden');
-            closeDetailPanel();
-
-            try {
-                // Build URL with zone parameter
-                const params = new URLSearchParams({
-                    zone: zone,
-                    limit: currentLimit,
-                    metadata: 'true'
-                });
-                if (prefix) params.append('prefix', prefix);
-                if (suffix) params.append('suffix', suffix);
-
-                const url = `${API_BASE_URL}/api/containers/${container}/blobs?${params}`;
-                const data = await fetchJSON(url);
-
-                spinner.classList.add('hidden');
-                currentBlobs = data.blobs || [];
-
-                if (currentBlobs.length === 0) {
-                    emptyState.classList.remove('hidden');
-                    return;
-                }
-
-                // Render table
-                tbody.innerHTML = currentBlobs.map((blob, index) => {
-                    const sizeMB = (blob.size / (1024 * 1024)).toFixed(2);
-                    const date = blob.last_modified ? new Date(blob.last_modified).toLocaleDateString() : 'N/A';
-                    const shortName = blob.name.split('/').pop();
-
-                    // Determine type: folders (size=0) or file extension
-                    let ext;
-                    if (blob.size === 0) {
-                        ext = 'Folder';
-                    } else if (shortName.includes('.')) {
-                        ext = shortName.split('.').pop().toUpperCase();
-                    } else {
-                        ext = 'File';
-                    }
-
-                    return `
-                        <tr onclick="selectBlob(${index})" data-index="${index}">
-                            <td>
-                                <div class="file-name" title="${blob.name}">${shortName}</div>
-                            </td>
-                            <td>
-                                <span class="file-size">${sizeMB} MB</span>
-                            </td>
-                            <td>
-                                <span class="file-date">${date}</span>
-                            </td>
-                            <td>
-                                <span class="file-type">${ext}</span>
-                            </td>
-                        </tr>
-                    `;
-                }).join('');
-
-                table.classList.remove('hidden');
-
-                // Update stats
-                const totalSize = currentBlobs.reduce((sum, b) => sum + (b.size || 0), 0);
-                const totalSizeMB = (totalSize / (1024 * 1024)).toFixed(2);
-                document.getElementById('files-count').textContent = currentBlobs.length;
-                document.getElementById('total-size').textContent = `${totalSizeMB} MB`;
-                statsBanner.classList.remove('hidden');
-
-            } catch (error) {
-                console.error('Error loading blobs:', error);
-                spinner.classList.add('hidden');
-                errorState.classList.remove('hidden');
-                document.getElementById('error-message').textContent = error.message || 'Failed to load files';
-            }
+            loadBtn.disabled = !zone || !container;
         }
 
-        // Select blob and show details
-        async function selectBlob(index) {
-            const blob = currentBlobs[index];
-            if (!blob) return;
+        // Set limit and update button state
+        function setLimit(limit) {
+            document.getElementById('limit-input').value = limit;
 
-            selectedBlob = blob;
-
-            // Highlight selected row
-            document.querySelectorAll('.files-table tbody tr').forEach(row => {
-                row.classList.remove('selected');
+            // Update button active state
+            document.querySelectorAll('.load-button').forEach(btn => {
+                btn.classList.remove('active');
+                if (btn.textContent === String(limit)) {
+                    btn.classList.add('active');
+                }
             });
-            document.querySelector(`tr[data-index="${index}"]`)?.classList.add('selected');
+        }
 
-            // Show detail panel with loading state
-            const detailPanel = document.getElementById('detail-panel');
-            const detailContent = document.getElementById('detail-content');
+        // Show files table and hide initial state
+        function showFilesTable() {
+            document.getElementById('initial-state')?.classList.add('hidden');
+            document.getElementById('files-table')?.classList.remove('hidden');
+            document.getElementById('stats-banner')?.classList.remove('hidden');
+        }
 
-            detailPanel.classList.remove('hidden');
-            detailContent.innerHTML = '<div class="spinner"></div>';
-
-            try {
-                // Fetch detailed metadata
-                const zone = document.getElementById('zone-select').value;
-                const container = document.getElementById('container-select').value;
-                // Use query param for blob path (Azure Functions v4 doesn't support :path constraint)
-                const url = `${API_BASE_URL}/api/containers/${container}/blob?zone=${zone}&path=${encodeURIComponent(blob.name)}`;
-                const metadata = await fetchJSON(url);
-
-                // Render details
-                detailContent.innerHTML = `
-                    <div class="detail-row">
-                        <div class="detail-label">Filename</div>
-                        <div class="detail-value">${metadata.filename || blob.name.split('/').pop()}</div>
-                    </div>
-                    <div class="detail-row">
-                        <div class="detail-label">Full Path</div>
-                        <div class="detail-value mono">${metadata.name || blob.name}</div>
-                    </div>
-                    <div class="detail-row">
-                        <div class="detail-label">Size</div>
-                        <div class="detail-value">${metadata.size_mb || (blob.size / (1024 * 1024)).toFixed(2)} MB (${(metadata.size || blob.size).toLocaleString()} bytes)</div>
-                    </div>
-                    <div class="detail-row">
-                        <div class="detail-label">Content Type</div>
-                        <div class="detail-value">${metadata.content_type || 'Unknown'}</div>
-                    </div>
-                    <div class="detail-row">
-                        <div class="detail-label">Last Modified</div>
-                        <div class="detail-value">${metadata.last_modified ? new Date(metadata.last_modified).toLocaleString() : 'N/A'}</div>
-                    </div>
-                    ${metadata.folder ? `
-                    <div class="detail-row">
-                        <div class="detail-label">Folder</div>
-                        <div class="detail-value mono">${metadata.folder}</div>
-                    </div>
-                    ` : ''}
-                    ${metadata.extension ? `
-                    <div class="detail-row">
-                        <div class="detail-label">Extension</div>
-                        <div class="detail-value">.${metadata.extension}</div>
-                    </div>
-                    ` : ''}
-                    ${metadata.etag ? `
-                    <div class="detail-row">
-                        <div class="detail-label">ETag</div>
-                        <div class="detail-value mono" style="font-size: 11px;">${metadata.etag}</div>
-                    </div>
-                    ` : ''}
-                `;
-
-            } catch (error) {
-                console.error('Error loading blob details:', error);
-                detailContent.innerHTML = `
-                    <div class="error-state" style="padding: 20px;">
-                        <p>Failed to load file details</p>
-                        <p style="font-size: 12px; color: #999;">${error.message}</p>
-                    </div>
-                `;
-            }
+        // Show detail panel
+        function showDetailPanel() {
+            document.getElementById('detail-panel')?.classList.remove('hidden');
         }
 
         // Close detail panel
         function closeDetailPanel() {
-            document.getElementById('detail-panel').classList.add('hidden');
+            document.getElementById('detail-panel')?.classList.add('hidden');
             document.querySelectorAll('.files-table tbody tr').forEach(row => {
                 row.classList.remove('selected');
             });
-            selectedBlob = null;
         }
 
         // Handle Enter key in filter inputs
         ['prefix-input', 'suffix-input'].forEach(id => {
             document.getElementById(id)?.addEventListener('keypress', (e) => {
                 if (e.key === 'Enter') {
-                    loadBlobs();
+                    document.getElementById('load-btn').click();
                 }
             });
+        });
+
+        // Listen for HTMX events to update UI
+        document.body.addEventListener('htmx:afterSwap', function(evt) {
+            // After loading files, show the table
+            if (evt.detail.target.id === 'files-tbody') {
+                showFilesTable();
+            }
         });
         """

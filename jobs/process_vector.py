@@ -147,6 +147,13 @@ class ProcessVectorJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
             'type': 'str',
             'default': None,
             'description': 'Column name containing date data for temporal extent auto-detection'
+        },
+        # Column mapping for standardizing column names (24 DEC 2025)
+        # Used for system tables that require specific column names (e.g., iso3, name)
+        'column_mapping': {
+            'type': 'dict',
+            'default': None,
+            'description': 'Column rename mapping {source_name: target_name}. Validates source columns exist before rename.'
         }
     }
 

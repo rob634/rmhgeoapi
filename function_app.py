@@ -1892,12 +1892,13 @@ def list_storage_containers(req: func.HttpRequest) -> func.HttpResponse:
 
 from web_interfaces import unified_interface_handler
 
-@app.route(route="interface/{name}", methods=["GET"])
+@app.route(route="interface/{name}", methods=["GET", "POST"])
 def web_interface_unified(req: func.HttpRequest) -> func.HttpResponse:
     """
     Unified web interface handler - dynamic module loading.
 
     GET /api/interface/{name}
+    POST /api/interface/{name}?fragment=submit  (HTMX form submissions)
 
     Route Parameters:
         name: Interface name (stac, vector, jobs, docs)

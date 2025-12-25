@@ -46,7 +46,8 @@ class QueuesInterface(BaseInterface):
             title="Service Bus Queues",
             content=content,
             custom_css=custom_css,
-            custom_js=custom_js
+            custom_js=custom_js,
+            include_htmx=True
         )
 
     def _generate_html_content(self) -> str:

@@ -1,6 +1,6 @@
 # Working Backlog
 
-**Last Updated**: 21 DEC 2025
+**Last Updated**: 24 DEC 2025
 **Source of Truth**: [EPICS.md](/EPICS.md) — Epic/Feature/Story definitions live there
 **Purpose**: Sprint-level task tracking and delegation
 
@@ -15,6 +15,7 @@
 | 3 | E3 | DDH Platform Integration | 🚧 | F3.1: Validate Swagger UI |
 | 4 | E4 | Data Externalization | 📋 | F4.1: Publishing Workflow |
 | 5 | E9 | Zarr/Climate Data as API | 🚧 | F9.2: Virtual Zarr Pipeline |
+| **NEW** | **E12** | **Interface Modernization** | ✅ | **Phase 1 Complete** |
 
 ---
 
@@ -69,6 +70,44 @@
 |-------|-------------|-------|--------|
 | F9.3: Reader Migration | Copy raster_api/xarray_api to rmhogcstac | Claude | ⬜ Ready |
 
+### E12: Interface Modernization 🚧 ACTIVE
+
+**Docs**: [NICEGUI.md](./NICEGUI.md)
+**Goal**: Clean up interfaces, add HTMX, build Submit Vector UI
+
+**Audit Findings (23 DEC 2025)**:
+- 15 interfaces with ~3,500 LOC duplicated code
+- Dashboard headers copied 9x identically
+- 4 different status badge implementations
+- 5 different filter/search patterns
+
+#### Phase 1: Cleanup + HTMX (8-10 days total)
+
+| Story | Description | Effort | Owner | Status |
+|-------|-------------|--------|-------|--------|
+| **F12.1: Cleanup** | | | | ✅ COMPLETE |
+| S12.1.1 | CSS Consolidation → `COMMON_CSS` | 1 day | Claude | ✅ 23 DEC |
+| S12.1.2 | JS Utilities → `COMMON_JS` | 0.5 day | Claude | ✅ 23 DEC |
+| S12.1.3 | Python Component Helpers in `BaseInterface` | 1 day | Claude | ✅ 23 DEC |
+| **F12.2: HTMX** | | | | ✅ COMPLETE |
+| S12.2.1 | Add HTMX to BaseInterface | 0.5 day | Claude | ✅ 23 DEC |
+| S12.2.2 | Refactor Storage Interface (HTMX) | 1 day | Claude | ✅ 23 DEC |
+| S12.2.3 | Create Submit Vector Interface | 2 days | Claude | ✅ 23 DEC |
+| **F12.3: Migration** | | | | ✅ COMPLETE |
+| S12.3.1 | Migrate Jobs Interface (HTMX + component helpers) | 0.5 day | Claude | ✅ 24 DEC |
+| S12.3.2 | Migrate Tasks Interface (HTMX) | 0.5 day | Claude | ✅ 24 DEC |
+| S12.3.3 | Migrate P1 interfaces (STAC, Vector) | 1 day | Claude | ✅ 24 DEC |
+| S12.3.4 | Migrate P2 interfaces (H3, Health, Pipeline) | 1 day | Claude | ✅ 24 DEC |
+| S12.3.5 | Migrate P3 interfaces (platform, docs, queues, gallery, home) | 1 day | Claude | ✅ 24 DEC |
+
+**Progress**: 14/18 interfaces HTMX-enabled (4 specialized full-page interfaces use custom HTML: map, zarr, swagger, stac-map)
+
+#### Phase 2: NiceGUI Evaluation (Future)
+
+| Story | Description | Owner | Status |
+|-------|-------------|-------|--------|
+| S12.4.1-5 | NiceGUI PoC on Docker Web App | Claude | 📋 After Phase 1 |
+
 ---
 
 ## DevOps / Non-Geospatial Tasks
@@ -106,6 +145,12 @@ Tasks suitable for a colleague with Azure/Python/pipeline expertise but without 
 
 | Date | Item | Epic |
 |------|------|------|
+| 24 DEC 2025 | **F12.3 Migration COMPLETE** - All 14 standard interfaces HTMX-enabled | E12 |
+| 24 DEC 2025 | S12.3.3-5: STAC, Vector, H3, Health, Pipeline, Platform, Docs, Queues, Gallery, Home | E12 |
+| 24 DEC 2025 | Jobs/Tasks interfaces migrated to HTMX (S12.3.1-2) | E12 |
+| 23 DEC 2025 | F12.1 Cleanup complete (COMMON_CSS, COMMON_JS, component helpers) | E12 |
+| 23 DEC 2025 | F12.2 HTMX complete (Storage + Submit Vector interfaces) | E12 |
+| 23 DEC 2025 | Interface audit, E12 epic created, NICEGUI.md documentation | E12 |
 | 21 DEC 2025 | FATHOM Phase 1 complete (CI), Phase 2 46/47 tasks | E10.F10.1-2 |
 | 21 DEC 2025 | Fixed dict_row + source_container bugs in fathom_etl.py | E10 |
 | 20 DEC 2025 | Swagger UI + OpenAPI spec (19 endpoints, 20 schemas) | E3.F3.1 |
@@ -126,6 +171,7 @@ Tasks suitable for a colleague with Azure/Python/pipeline expertise but without 
 | [HISTORY.md](./HISTORY.md) | Full completion log |
 | [READER_MIGRATION_PLAN.md](/READER_MIGRATION_PLAN.md) | F3.3 implementation guide |
 | [ARCHITECTURE_REFERENCE.md](./ARCHITECTURE_REFERENCE.md) | Technical patterns |
+| [NICEGUI.md](./NICEGUI.md) | E12 Interface Modernization (HTMX + NiceGUI) |
 
 ---
 

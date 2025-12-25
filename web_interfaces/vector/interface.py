@@ -3,6 +3,10 @@ OGC Features interface module.
 
 Web dashboard for browsing OGC API - Features collections with metadata and API endpoints.
 
+Features (24 DEC 2025 - S12.3.3):
+    - HTMX enabled for future partial updates
+    - Uses COMMON_CSS and COMMON_JS utilities
+
 Exports:
     VectorInterface: OGC Features collections browser with clickable cards and spatial extents
 """
@@ -31,21 +35,16 @@ class VectorInterface(BaseInterface):
         Returns:
             Complete HTML document string
         """
-
-        # HTML content
         content = self._generate_html_content()
-
-        # Custom CSS for OGC Features dashboard
         custom_css = self._generate_custom_css()
-
-        # Custom JavaScript for OGC Features dashboard
         custom_js = self._generate_custom_js()
 
         return self.wrap_html(
             title="OGC Features Collections",
             content=content,
             custom_css=custom_css,
-            custom_js=custom_js
+            custom_js=custom_js,
+            include_htmx=True
         )
 
     def _generate_html_content(self) -> str:
@@ -99,139 +98,26 @@ class VectorInterface(BaseInterface):
         """
 
     def _generate_custom_css(self) -> str:
-        """Generate custom CSS for OGC Features dashboard."""
+        """Generate custom CSS for OGC Features dashboard.
+
+        Note: Most styles now in COMMON_CSS (S12.1.1).
+        Only vector-specific styles remain here.
+        """
         return """
-        .dashboard-header {
-            background: white;
-            padding: 30px;
-            border-radius: 3px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-            margin-bottom: 20px;
-            border-left: 4px solid #0071BC;
-        }
-
-        .dashboard-header h1 {
-            color: #053657;
-            font-size: 28px;
-            margin-bottom: 10px;
-            font-weight: 700;
-        }
-
-        .subtitle {
-            color: #626F86;
-            font-size: 16px;
-            margin: 0;
-        }
-
-        /* Stats Banner */
+        /* Vector-specific: Stats banner as grid layout */
         .stats-banner {
-            background: white;
-            padding: 20px;
-            border-radius: 3px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-            margin-bottom: 20px;
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
             gap: 20px;
-        }
-
-        .stat-item {
-            text-align: center;
-            padding: 15px;
-            border-radius: 3px;
-            background: #f8f9fa;
-        }
-
-        .stat-label {
-            display: block;
-            font-size: 12px;
-            color: #626F86;
-            font-weight: 600;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            margin-bottom: 8px;
-        }
-
-        .stat-value {
-            display: block;
-            font-size: 28px;
-            color: #053657;
-            font-weight: 700;
-        }
-
-        /* Controls */
-        .controls {
-            background: white;
             padding: 20px;
-            border-radius: 3px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-            margin-bottom: 20px;
         }
 
-        .search-input {
-            width: 100%;
-            padding: 12px 20px;
-            border: 1px solid #e9ecef;
-            border-radius: 3px;
-            font-size: 14px;
-            color: #053657;
-            font-weight: 600;
-        }
-
-        .search-input:focus {
-            outline: none;
-            border-color: #0071BC;
-            box-shadow: 0 0 0 3px rgba(0,113,188,0.1);
-        }
-
-        /* Collections Grid */
-        .collections-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
-            gap: 20px;
-            margin-bottom: 20px;
-        }
-
-        .collection-card {
-            background: white;
-            border: 1px solid #e9ecef;
-            border-left: 4px solid #0071BC;
-            border-radius: 3px;
-            padding: 24px;
-            cursor: pointer;
-            transition: all 0.2s;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
-        }
-
-        .collection-card:hover {
-            box-shadow: 0 4px 12px rgba(0,113,188,0.15);
-            border-left-color: #00A3DA;
-            transform: translateY(-2px);
-        }
-
-        .collection-card h3 {
-            font-size: 18px;
-            color: #053657;
-            margin-bottom: 10px;
-            font-weight: 700;
-        }
-
-        .collection-card .description {
-            color: #626F86;
-            font-size: 14px;
-            margin-bottom: 15px;
-            line-height: 1.6;
-        }
-
+        /* Vector-specific: Card meta section with border */
         .collection-card .meta {
-            display: flex;
-            gap: 15px;
-            flex-wrap: wrap;
-            font-size: 13px;
-            color: #626F86;
             margin-top: 15px;
             padding-top: 15px;
-            border-top: 1px solid #e9ecef;
+            border-top: 1px solid var(--ds-gray-light);
+            color: var(--ds-gray);
         }
 
         .collection-card .meta-item {
@@ -241,73 +127,20 @@ class VectorInterface(BaseInterface):
         }
 
         .collection-card .feature-count {
-            color: #0071BC;
+            color: var(--ds-blue-primary);
             font-weight: 600;
         }
 
         .collection-card .bbox {
             font-family: 'Courier New', monospace;
             font-size: 11px;
-            color: #626F86;
+            color: var(--ds-gray);
         }
 
         .collection-card .links {
             margin-top: 12px;
             display: flex;
             gap: 10px;
-        }
-
-        .link-badge {
-            display: inline-flex;
-            align-items: center;
-            gap: 5px;
-            padding: 4px 10px;
-            background: #f8f9fa;
-            border: 1px solid #e9ecef;
-            border-radius: 12px;
-            font-size: 11px;
-            font-weight: 600;
-            color: #0071BC;
-            text-decoration: none;
-            transition: all 0.2s;
-        }
-
-        .link-badge:hover {
-            background: #0071BC;
-            color: white;
-            transform: translateY(-1px);
-        }
-
-        .link-badge-primary {
-            background: #0071BC;
-            color: white;
-            border-color: #0071BC;
-        }
-
-        .link-badge-primary:hover {
-            background: #00A3DA;
-            border-color: #00A3DA;
-        }
-
-        /* Empty State */
-        .empty-state {
-            text-align: center;
-            padding: 60px 20px;
-            color: #626F86;
-            background: white;
-            border-radius: 3px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-        }
-
-        .empty-state .icon {
-            font-size: 64px;
-            margin-bottom: 20px;
-            opacity: 0.3;
-        }
-
-        .empty-state h3 {
-            color: #053657;
-            margin-bottom: 10px;
         }
         """
 

@@ -1262,7 +1262,10 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                         # Try to get actual table from STAC item properties
                         try:
                             from infrastructure.pgstac_bootstrap import get_item_by_id
-                            stac_item = get_item_by_id(stac_id)
+                            # Pass collection_id for pgstac partitioned lookup (24 DEC 2025)
+                            # Vector items go to 'system-vectors' collection
+                            collection_id = 'system-vectors' if stac_id.startswith('postgis-') else None
+                            stac_item = get_item_by_id(stac_id, collection_id=collection_id)
                             if stac_item and 'error' not in stac_item:
                                 props = stac_item.get('properties', {})
                                 postgis_schema = props.get('postgis:schema', 'geo')
@@ -1270,8 +1273,20 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                                 if postgis_table:
                                     admin0_table = f"{postgis_schema}.{postgis_table}"
                                 else:
-                                    # Fallback to stac_id if no postgis:table
-                                    admin0_table = f"geo.{stac_id}"
+                                    # Fallback: parse from asset href (24 DEC 2025)
+                                    # Asset href format: postgis://host/db/schema.table
+                                    assets = stac_item.get('assets', {})
+                                    data_asset = assets.get('data', {})
+                                    href = data_asset.get('href', '')
+                                    if href.startswith('postgis://') and '/' in href:
+                                        # Extract schema.table from last path segment
+                                        table_part = href.split('/')[-1]
+                                        if '.' in table_part:
+                                            admin0_table = table_part
+                                        else:
+                                            admin0_table = f"geo.{stac_id}"
+                                    else:
+                                        admin0_table = f"geo.{stac_id}"
                             else:
                                 # STAC item not found - use stac_id as fallback
                                 admin0_table = f"geo.{stac_id}"
@@ -1500,7 +1515,8 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
             env_vars_set['ETL_APP_URL'] = bool(os.getenv('ETL_APP_URL'))
 
             # Check Managed Identity name (if using managed identity)
-            use_managed_identity = os.getenv('USE_MANAGED_IDENTITY', 'false').lower() == 'true'
+            # NOTE: Default must match database_config.py (default is 'true' for database auth)
+            use_managed_identity = os.getenv('USE_MANAGED_IDENTITY', 'true').lower() == 'true'
             if use_managed_identity:
                 mi_name = config.database.managed_identity_admin_name
                 if mi_name == AzureDefaults.MANAGED_IDENTITY_NAME:

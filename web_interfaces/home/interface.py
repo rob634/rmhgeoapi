@@ -248,5 +248,6 @@ class HomeInterface(BaseInterface):
         return self.wrap_html(
             title="Geospatial ETL Pipeline - Home",
             content=content,
-            custom_css=custom_css
+            custom_css=custom_css,
+            include_htmx=True
         )

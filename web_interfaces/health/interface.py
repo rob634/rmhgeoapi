@@ -3,6 +3,11 @@ Health monitoring interface module.
 
 Web dashboard for viewing system health status with component cards and expandable details.
 
+Features (24 DEC 2025 - S12.3.4):
+    - HTMX enabled for future partial updates
+    - Dynamic architecture diagram with tooltips
+    - Component cards with expandable details
+
 Exports:
     HealthInterface: Health monitoring dashboard with status badges and component grid
 
@@ -51,7 +56,8 @@ class HealthInterface(BaseInterface):
             title="System Health Dashboard",
             content=content,
             custom_css=custom_css,
-            custom_js=custom_js
+            custom_js=custom_js,
+            include_htmx=True
         )
 
     def _get_component_tooltips(self) -> dict:

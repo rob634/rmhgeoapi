@@ -133,7 +133,8 @@ class GalleryInterface(BaseInterface):
         return self.wrap_html(
             title="Data Gallery - Geospatial API",
             content=content,
-            custom_css=custom_css
+            custom_css=custom_css,
+            include_htmx=True
         )
 
     def _build_zarr_thumbnail_url(self, config) -> str:

@@ -3,21 +3,35 @@ Job monitor interface module.
 
 Web dashboard for monitoring jobs and tasks with filtering and refresh capabilities.
 
+Features (24 DEC 2025 - S12.3.1):
+    - HTMX-powered filtering and auto-refresh
+    - Uses BaseInterface component helpers
+    - Reduced JavaScript, server-side rendering
+
 Exports:
     JobsInterface: Job monitoring dashboard with stage progress and task status counts
 """
+
+import logging
+from typing import Dict, Any, List
 
 import azure.functions as func
 from web_interfaces.base import BaseInterface
 from web_interfaces import InterfaceRegistry
 
+logger = logging.getLogger(__name__)
+
 
 @InterfaceRegistry.register('jobs')
 class JobsInterface(BaseInterface):
     """
-    Job Monitor Dashboard interface.
+    Job Monitor Dashboard interface with HTMX interactivity.
 
     Displays jobs from app.jobs table with task counts and status filtering.
+
+    Fragments supported:
+        - jobs-table: Returns table rows for job listing
+        - stats: Returns stats banner content
     """
 
     def render(self, request: func.HttpRequest) -> str:
@@ -30,38 +44,289 @@ class JobsInterface(BaseInterface):
         Returns:
             Complete HTML document string
         """
-
-        # HTML content
         content = self._generate_html_content()
-
-        # Custom CSS for Job Monitor
         custom_css = self._generate_custom_css()
-
-        # Custom JavaScript for Job Monitor
         custom_js = self._generate_custom_js()
 
-        # Wrap in base HTML template
         return self.wrap_html(
             title="Job Monitor",
             content=content,
             custom_css=custom_css,
-            custom_js=custom_js
+            custom_js=custom_js,
+            include_htmx=True
         )
 
+    def htmx_partial(self, request: func.HttpRequest, fragment: str) -> str:
+        """
+        Handle HTMX partial requests for jobs fragments.
+
+        Fragments:
+            jobs-table: Returns table rows for job listing
+            stats: Returns stats banner content
+
+        Args:
+            request: Azure Functions HttpRequest
+            fragment: Fragment name to render
+
+        Returns:
+            HTML fragment string
+        """
+        if fragment == 'jobs-table':
+            return self._render_jobs_table_fragment(request)
+        elif fragment == 'stats':
+            return self._render_stats_fragment(request)
+        else:
+            raise ValueError(f"Unknown fragment: {fragment}")
+
+    def _render_jobs_table_fragment(self, request: func.HttpRequest) -> str:
+        """Render jobs table rows via HTMX."""
+        status = request.params.get('status', '')
+        limit = int(request.params.get('limit', '25'))
+
+        try:
+            jobs = self._query_jobs_with_task_counts(status, limit)
+
+            if not jobs:
+                return self._render_empty_jobs()
+
+            # Build table rows
+            rows = []
+            stats = {'total': 0, 'queued': 0, 'processing': 0, 'completed': 0, 'failed': 0}
+
+            for job in jobs:
+                job_id = job.get('job_id', job.get('id', ''))
+                job_id_short = job_id[:8] if job_id else '--'
+                job_type = job.get('job_type', '--')
+                job_status = job.get('status', 'unknown')
+                stage = job.get('stage', 0)
+                total_stages = job.get('total_stages', '?')
+                created_at = job.get('created_at', '')
+                tc = job.get('task_counts', {})
+
+                # Update stats
+                stats['total'] += 1
+                if job_status in stats:
+                    stats[job_status] += 1
+
+                # Format created_at
+                if created_at:
+                    try:
+                        from datetime import datetime
+                        if hasattr(created_at, 'strftime'):
+                            created_str = created_at.strftime('%Y-%m-%d %H:%M')
+                        else:
+                            dt = datetime.fromisoformat(str(created_at).replace('Z', '+00:00'))
+                            created_str = dt.strftime('%Y-%m-%d %H:%M')
+                    except Exception:
+                        created_str = str(created_at)[:16]
+                else:
+                    created_str = '--'
+
+                # Task counts HTML
+                task_counts_html = self._render_task_counts(tc)
+
+                row = f'''
+                <tr>
+                    <td><span class="job-id-short" title="{job_id}">{job_id_short}</span></td>
+                    <td>{job_type}</td>
+                    <td>{self.render_status_badge(job_status)}</td>
+                    <td><span class="stage-badge">Stage {stage}/{total_stages}</span></td>
+                    <td>{task_counts_html}</td>
+                    <td>{created_str}</td>
+                    <td>
+                        <a href="/api/interface/tasks?job_id={job_id}" class="btn btn-sm btn-primary">View Tasks</a>
+                    </td>
+                </tr>'''
+                rows.append(row)
+
+            # Also update stats via OOB swap
+            stats_html = self._render_stats_oob(stats)
+
+            return '\n'.join(rows) + stats_html
+
+        except Exception as e:
+            logger.error(f"Error loading jobs: {e}", exc_info=True)
+            return f'''
+            <tr>
+                <td colspan="7">
+                    <div class="error-state" style="margin: 0; box-shadow: none;">
+                        <p>Error loading jobs: {str(e)}</p>
+                    </div>
+                </td>
+            </tr>
+            '''
+
+    def _render_task_counts(self, tc: Dict[str, int]) -> str:
+        """Render task count badges."""
+        parts = []
+        if tc.get('queued', 0) > 0:
+            parts.append(f'<span class="task-count task-count-queued">Q:{tc["queued"]}</span>')
+        if tc.get('processing', 0) > 0:
+            parts.append(f'<span class="task-count task-count-processing">P:{tc["processing"]}</span>')
+        if tc.get('completed', 0) > 0:
+            parts.append(f'<span class="task-count task-count-completed">C:{tc["completed"]}</span>')
+        if tc.get('failed', 0) > 0:
+            parts.append(f'<span class="task-count task-count-failed">F:{tc["failed"]}</span>')
+
+        if not parts:
+            return '<span class="task-count" style="color: var(--ds-gray);">--</span>'
+
+        return f'<div class="task-summary">{" ".join(parts)}</div>'
+
+    def _render_stats_oob(self, stats: Dict[str, int]) -> str:
+        """Render stats as OOB swap."""
+        return f'''
+        <div id="stats-content" hx-swap-oob="innerHTML:#stats-content">
+            <div class="stat-card">
+                <div class="stat-label">Total Jobs</div>
+                <div class="stat-value">{stats['total']}</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Queued</div>
+                <div class="stat-value stat-queued">{stats['queued']}</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Processing</div>
+                <div class="stat-value stat-processing">{stats['processing']}</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Completed</div>
+                <div class="stat-value stat-completed">{stats['completed']}</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Failed</div>
+                <div class="stat-value stat-failed">{stats['failed']}</div>
+            </div>
+        </div>
+        '''
+
+    def _render_stats_fragment(self, request: func.HttpRequest) -> str:
+        """Render stats banner content."""
+        # This is called separately if needed
+        return self._render_stats_oob({'total': 0, 'queued': 0, 'processing': 0, 'completed': 0, 'failed': 0})
+
+    def _render_empty_jobs(self) -> str:
+        """Render empty state for jobs table."""
+        return '''
+        <tr>
+            <td colspan="7">
+                <div class="empty-state" style="margin: 0; box-shadow: none;">
+                    <div class="icon" style="font-size: 48px;">📋</div>
+                    <h3>No Jobs Found</h3>
+                    <p>No jobs match the current filter criteria</p>
+                </div>
+            </td>
+        </tr>
+        '''
+
+    def _query_jobs_with_task_counts(self, status: str, limit: int) -> List[Dict[str, Any]]:
+        """
+        Query jobs with task counts from database.
+
+        Mirrors the dbadmin endpoint query but returns dicts for rendering.
+        """
+        from config import Config
+        from infrastructure.postgresql import PostgreSQLRepository
+
+        config = Config()
+        repo = PostgreSQLRepository()
+        app_schema = config.app_schema
+
+        # Build query with task_counts subquery
+        query_parts = [
+            f"""SELECT j.job_id, j.job_type, j.status::text as status, j.stage, j.total_stages,
+                   j.created_at, j.updated_at,
+                   COALESCE(tc.queued, 0) as task_queued,
+                   COALESCE(tc.processing, 0) as task_processing,
+                   COALESCE(tc.completed, 0) as task_completed,
+                   COALESCE(tc.failed, 0) as task_failed
+            FROM {app_schema}.jobs j
+            LEFT JOIN (
+                SELECT parent_job_id,
+                       COUNT(*) FILTER (WHERE status::text = 'queued') as queued,
+                       COUNT(*) FILTER (WHERE status::text = 'processing') as processing,
+                       COUNT(*) FILTER (WHERE status::text = 'completed') as completed,
+                       COUNT(*) FILTER (WHERE status::text = 'failed') as failed
+                FROM {app_schema}.tasks
+                GROUP BY parent_job_id
+            ) tc ON j.job_id = tc.parent_job_id
+            WHERE 1=1"""
+        ]
+
+        params = []
+
+        # Add 7-day time filter by default for performance
+        query_parts.append("AND j.created_at >= NOW() - INTERVAL '168 hours'")
+
+        if status:
+            query_parts.append("AND j.status::text = %s")
+            params.append(status)
+
+        query_parts.extend([
+            "ORDER BY j.created_at DESC",
+            "LIMIT %s"
+        ])
+        params.append(limit)
+
+        query = " ".join(query_parts)
+
+        # Execute query using repository connection
+        with repo._get_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(query, params if params else None)
+                rows = cursor.fetchall()
+
+                jobs = []
+                for row in rows:
+                    # Handle both dict-like and tuple rows
+                    if hasattr(row, 'keys'):
+                        job = dict(row)
+                    else:
+                        # Tuple row - map by position
+                        job = {
+                            'job_id': row[0],
+                            'job_type': row[1],
+                            'status': row[2],
+                            'stage': row[3],
+                            'total_stages': row[4],
+                            'created_at': row[5],
+                            'updated_at': row[6],
+                            'task_queued': row[7],
+                            'task_processing': row[8],
+                            'task_completed': row[9],
+                            'task_failed': row[10]
+                        }
+
+                    # Restructure task counts
+                    job['task_counts'] = {
+                        'queued': job.pop('task_queued', 0),
+                        'processing': job.pop('task_processing', 0),
+                        'completed': job.pop('task_completed', 0),
+                        'failed': job.pop('task_failed', 0)
+                    }
+                    jobs.append(job)
+
+                return jobs
+
     def _generate_html_content(self) -> str:
-        """Generate HTML content for Job Monitor dashboard."""
+        """Generate HTML content for Job Monitor dashboard with HTMX."""
         return """
         <div class="container">
             <header class="dashboard-header">
-                <h1>Job Monitor</h1>
+                <h1>⚙️ Job Monitor</h1>
                 <p class="subtitle">Monitor jobs and tasks from app.jobs table</p>
             </header>
 
-            <!-- Filter Bar -->
+            <!-- Filter Bar with HTMX -->
             <div class="filter-bar">
                 <div class="filter-group">
                     <label for="statusFilter">Status:</label>
-                    <select id="statusFilter" class="filter-select">
+                    <select id="statusFilter" name="status" class="filter-select"
+                            hx-get="/api/interface/jobs?fragment=jobs-table"
+                            hx-target="#jobsTableBody"
+                            hx-trigger="change"
+                            hx-include="#limitFilter"
+                            hx-indicator="#loading-spinner">
                         <option value="">All</option>
                         <option value="queued">Queued</option>
                         <option value="processing">Processing</option>
@@ -72,7 +337,12 @@ class JobsInterface(BaseInterface):
 
                 <div class="filter-group">
                     <label for="limitFilter">Limit:</label>
-                    <select id="limitFilter" class="filter-select">
+                    <select id="limitFilter" name="limit" class="filter-select"
+                            hx-get="/api/interface/jobs?fragment=jobs-table"
+                            hx-target="#jobsTableBody"
+                            hx-trigger="change"
+                            hx-include="#statusFilter"
+                            hx-indicator="#loading-spinner">
                         <option value="10">10</option>
                         <option value="25" selected>25</option>
                         <option value="50">50</option>
@@ -81,235 +351,101 @@ class JobsInterface(BaseInterface):
                 </div>
 
                 <div class="filter-actions">
-                    <button id="refreshBtn" class="btn btn-primary">🔄 Refresh</button>
-                    <button id="clearFiltersBtn" class="btn btn-secondary">Clear Filters</button>
+                    <button class="btn btn-primary"
+                            hx-get="/api/interface/jobs?fragment=jobs-table"
+                            hx-target="#jobsTableBody"
+                            hx-include="#statusFilter, #limitFilter"
+                            hx-indicator="#loading-spinner">
+                        🔄 Refresh
+                    </button>
+                    <button class="btn btn-secondary" onclick="clearFilters()">Clear Filters</button>
                 </div>
             </div>
 
-            <!-- Loading State -->
-            <div id="loadingState" class="loading-state">
-                <div class="spinner"></div>
-                <p>Loading jobs...</p>
+            <!-- Stats Banner -->
+            <div class="stats-banner" id="stats-content">
+                <div class="stat-card">
+                    <div class="stat-label">Total Jobs</div>
+                    <div class="stat-value">--</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Queued</div>
+                    <div class="stat-value stat-queued">--</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Processing</div>
+                    <div class="stat-value stat-processing">--</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Completed</div>
+                    <div class="stat-value stat-completed">--</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Failed</div>
+                    <div class="stat-value stat-failed">--</div>
+                </div>
             </div>
 
-            <!-- Error State -->
-            <div id="errorState" class="error-state" style="display: none;">
-                <p class="error-message"></p>
-                <button id="retryBtn" class="btn btn-primary">Retry</button>
+            <!-- Loading Spinner -->
+            <div id="loading-spinner" class="htmx-indicator spinner-container">
+                <div class="spinner"></div>
+                <div class="spinner-text">Loading jobs...</div>
             </div>
 
             <!-- Jobs Table -->
-            <div id="jobsTableContainer" style="display: none;">
-                <div class="stats-banner">
-                    <div class="stat-card">
-                        <div class="stat-label">Total Jobs</div>
-                        <div class="stat-value" id="totalJobs">0</div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-label">Queued</div>
-                        <div class="stat-value stat-queued" id="queuedJobs">0</div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-label">Processing</div>
-                        <div class="stat-value stat-processing" id="processingJobs">0</div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-label">Completed</div>
-                        <div class="stat-value stat-completed" id="completedJobs">0</div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-label">Failed</div>
-                        <div class="stat-value stat-failed" id="failedJobs">0</div>
-                    </div>
-                </div>
-
-                <table class="data-table">
-                    <thead>
-                        <tr>
-                            <th>Job ID</th>
-                            <th>Job Type</th>
-                            <th>Status</th>
-                            <th>Stage</th>
-                            <th>Tasks</th>
-                            <th>Created</th>
-                            <th>Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody id="jobsTableBody">
-                        <!-- Populated by JavaScript -->
-                    </tbody>
-                </table>
-            </div>
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Job ID</th>
+                        <th>Job Type</th>
+                        <th>Status</th>
+                        <th>Stage</th>
+                        <th>Tasks</th>
+                        <th>Created</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="jobsTableBody"
+                       hx-get="/api/interface/jobs?fragment=jobs-table"
+                       hx-trigger="load"
+                       hx-include="#statusFilter, #limitFilter"
+                       hx-indicator="#loading-spinner">
+                    <!-- Loaded via HTMX on page load -->
+                </tbody>
+            </table>
         </div>
         """
 
     def _generate_custom_css(self) -> str:
-        """Generate custom CSS for Job Monitor."""
+        """Generate custom CSS for Job Monitor.
+
+        Note: Most styles now in COMMON_CSS (S12.1.1).
+        Only job-specific styles remain here.
+        """
         return """
-        .dashboard-header {
-            background: white;
-            padding: 25px 30px;
-            border-radius: 3px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-            margin-bottom: 20px;
-            border-left: 4px solid #0071BC;
-        }
-
-        .dashboard-header h1 {
-            color: #053657;
-            font-size: 24px;
-            margin-bottom: 8px;
-            font-weight: 700;
-        }
-
-        .subtitle {
-            color: #626F86;
-            font-size: 14px;
-            margin: 0;
-        }
-
-        .filter-bar {
-            background: white;
-            border-radius: 8px;
-            padding: 1.5rem;
-            margin-bottom: 1.5rem;
-            display: flex;
-            gap: 1.5rem;
-            align-items: flex-end;
-            flex-wrap: wrap;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-        }
-
-        .filter-group {
-            display: flex;
-            flex-direction: column;
-            gap: 0.5rem;
-            min-width: 150px;
-        }
-
-        .filter-group label {
-            font-size: 0.875rem;
-            font-weight: 500;
-            color: #374151;
-        }
-
-        .filter-select {
-            padding: 0.5rem 0.75rem;
-            border: 1px solid #d1d5db;
-            border-radius: 6px;
-            font-size: 0.875rem;
-            background: white;
-            cursor: pointer;
-        }
-
-        .filter-select:focus {
-            outline: none;
-            border-color: var(--ds-blue-primary);
-            box-shadow: 0 0 0 3px rgba(0, 113, 188, 0.1);
-        }
-
-        .filter-actions {
-            display: flex;
-            gap: 0.75rem;
-            margin-left: auto;
-        }
-
+        /* Jobs-specific: Stats banner as grid */
         .stats-banner {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
             gap: 1rem;
-            margin-bottom: 1.5rem;
+            padding: 0;
+            background: transparent;
+            box-shadow: none;
         }
 
-        .stat-card {
-            background: white;
-            border-radius: 8px;
-            padding: 1.25rem;
-            text-align: center;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-        }
-
-        .stat-label {
-            font-size: 0.875rem;
-            color: #6b7280;
-            margin-bottom: 0.5rem;
-        }
-
-        .stat-value {
-            font-size: 2rem;
-            font-weight: 700;
-            color: #1f2937;
-        }
-
-        .stat-queued { color: #6b7280; }
+        /* Jobs-specific: Colored stat values */
+        .stat-queued { color: var(--ds-status-queued-fg); }
         .stat-processing { color: var(--ds-blue-primary); }
-        .stat-completed { color: #10b981; }
-        .stat-failed { color: #ef4444; }
+        .stat-completed { color: var(--ds-status-completed-fg); }
+        .stat-failed { color: var(--ds-status-failed-fg); }
 
-        .data-table {
-            width: 100%;
-            background: white;
-            border-radius: 8px;
-            overflow: hidden;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-        }
-
-        .data-table thead {
-            background: #f9fafb;
-        }
-
-        .data-table th {
-            padding: 1rem;
-            text-align: left;
-            font-size: 0.875rem;
-            font-weight: 600;
-            color: #374151;
-            border-bottom: 2px solid #e5e7eb;
-        }
-
-        .data-table td {
-            padding: 1rem;
-            border-bottom: 1px solid #e5e7eb;
-            font-size: 0.875rem;
-        }
-
-        .data-table tbody tr:hover {
-            background: #f9fafb;
-        }
-
-        .status-badge {
-            padding: 0.25rem 0.75rem;
-            border-radius: 12px;
-            font-size: 0.75rem;
-            font-weight: 600;
-            text-transform: uppercase;
-        }
-
-        .status-queued {
-            background: #f3f4f6;
-            color: #6b7280;
-        }
-
-        .status-processing {
-            background: #dbeafe;
-            color: var(--ds-blue-primary);
-        }
-
-        .status-completed {
-            background: #d1fae5;
-            color: #059669;
-        }
-
-        .status-failed {
-            background: #fee2e2;
-            color: #dc2626;
-        }
-
+        /* Jobs-specific: Stage badge */
         .stage-badge {
             font-size: 0.875rem;
-            color: #6b7280;
+            color: var(--ds-gray);
         }
 
+        /* Jobs-specific: Task count summary */
         .task-summary {
             display: flex;
             gap: 0.75rem;
@@ -323,191 +459,39 @@ class JobsInterface(BaseInterface):
         }
 
         .task-count-queued {
-            background: #f3f4f6;
-            color: #6b7280;
+            background: var(--ds-status-queued-bg);
+            color: var(--ds-status-queued-fg);
         }
 
         .task-count-processing {
-            background: #dbeafe;
-            color: var(--ds-blue-primary);
+            background: var(--ds-status-processing-bg);
+            color: var(--ds-status-processing-fg);
         }
 
         .task-count-completed {
-            background: #d1fae5;
-            color: #059669;
+            background: var(--ds-status-completed-bg);
+            color: var(--ds-status-completed-fg);
         }
 
         .task-count-failed {
-            background: #fee2e2;
-            color: #dc2626;
-        }
-
-        .job-id-short {
-            font-family: 'Monaco', 'Courier New', monospace;
-            font-size: 0.75rem;
-            color: #6b7280;
-        }
-
-        .loading-state {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            padding: 3rem;
-            background: white;
-            border-radius: 8px;
-        }
-
-        .spinner {
-            width: 40px;
-            height: 40px;
-            border: 4px solid #f3f4f6;
-            border-top-color: var(--ds-blue-primary);
-            border-radius: 50%;
-            animation: spin 0.8s linear infinite;
-        }
-
-        @keyframes spin {
-            to { transform: rotate(360deg); }
-        }
-
-        .error-state {
-            padding: 2rem;
-            background: #fee2e2;
-            border-radius: 8px;
-            text-align: center;
-        }
-
-        .error-message {
-            color: #dc2626;
-            margin-bottom: 1rem;
+            background: var(--ds-status-failed-bg);
+            color: var(--ds-status-failed-fg);
         }
         """
 
     def _generate_custom_js(self) -> str:
-        """Generate custom JavaScript for Job Monitor."""
+        """Generate minimal JavaScript for Job Monitor.
+
+        Most functionality now handled by HTMX (S12.3.1).
+        Only helper functions remain.
+        """
         return """
-        let currentFilters = {
-            status: '',
-            limit: 25
-        };
+        // Clear filters and reload
+        function clearFilters() {
+            document.getElementById('statusFilter').value = '';
+            document.getElementById('limitFilter').value = '25';
 
-        // Load jobs on page load
-        document.addEventListener('DOMContentLoaded', () => {
-            loadJobs();
-
-            // Event listeners
-            document.getElementById('refreshBtn').addEventListener('click', loadJobs);
-            document.getElementById('statusFilter').addEventListener('change', (e) => {
-                currentFilters.status = e.target.value;
-                loadJobs();
-            });
-            document.getElementById('limitFilter').addEventListener('change', (e) => {
-                currentFilters.limit = parseInt(e.target.value);
-                loadJobs();
-            });
-            document.getElementById('clearFiltersBtn').addEventListener('click', () => {
-                currentFilters = { status: '', limit: 25 };
-                document.getElementById('statusFilter').value = '';
-                document.getElementById('limitFilter').value = '25';
-                loadJobs();
-            });
-            document.getElementById('retryBtn').addEventListener('click', loadJobs);
-        });
-
-        async function loadJobs() {
-            const loadingState = document.getElementById('loadingState');
-            const errorState = document.getElementById('errorState');
-            const tableContainer = document.getElementById('jobsTableContainer');
-
-            // Show loading
-            loadingState.style.display = 'flex';
-            errorState.style.display = 'none';
-            tableContainer.style.display = 'none';
-
-            try {
-                // Build query string
-                const params = new URLSearchParams();
-                if (currentFilters.status) params.append('status', currentFilters.status);
-                params.append('limit', currentFilters.limit);
-
-                const response = await fetch(`/api/dbadmin/jobs?${params.toString()}`);
-                if (!response.ok) throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-
-                const data = await response.json();
-
-                // Update stats
-                updateStats(data.jobs);
-
-                // Render table
-                renderJobsTable(data.jobs);
-
-                // Show table
-                loadingState.style.display = 'none';
-                tableContainer.style.display = 'block';
-
-            } catch (error) {
-                console.error('Failed to load jobs:', error);
-                loadingState.style.display = 'none';
-                errorState.style.display = 'block';
-                errorState.querySelector('.error-message').textContent = 'Failed to load jobs: ' + error.message;
-            }
-        }
-
-        function updateStats(jobs) {
-            const stats = jobs.reduce((acc, job) => {
-                acc.total++;
-                acc[job.status] = (acc[job.status] || 0) + 1;
-                return acc;
-            }, { total: 0, queued: 0, processing: 0, completed: 0, failed: 0 });
-
-            document.getElementById('totalJobs').textContent = stats.total;
-            document.getElementById('queuedJobs').textContent = stats.queued;
-            document.getElementById('processingJobs').textContent = stats.processing;
-            document.getElementById('completedJobs').textContent = stats.completed;
-            document.getElementById('failedJobs').textContent = stats.failed;
-        }
-
-        function renderJobsTable(jobs) {
-            const tbody = document.getElementById('jobsTableBody');
-            tbody.innerHTML = '';
-
-            if (jobs.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 2rem;">No jobs found</td></tr>';
-                return;
-            }
-
-            jobs.forEach(job => {
-                const row = document.createElement('tr');
-
-                // Job ID (short version) - API returns job_id, not id
-                const jobId = job.job_id || job.id;
-                const jobIdShort = jobId ? jobId.substring(0, 8) : '--';
-                const createdAt = job.created_at ? new Date(job.created_at).toLocaleString() : '--';
-
-                // Task counts
-                const taskCounts = job.task_counts || { queued: 0, processing: 0, completed: 0, failed: 0 };
-
-                row.innerHTML = `
-                    <td><span class="job-id-short" title="${jobId}">${jobIdShort}</span></td>
-                    <td>${job.job_type || '--'}</td>
-                    <td><span class="status-badge status-${job.status || 'unknown'}">${job.status || 'unknown'}</span></td>
-                    <td><span class="stage-badge">Stage ${job.stage || 0}/${job.total_stages || '?'}</span></td>
-                    <td>
-                        <div class="task-summary">
-                            ${taskCounts.queued > 0 ? `<span class="task-count task-count-queued">Q:${taskCounts.queued}</span>` : ''}
-                            ${taskCounts.processing > 0 ? `<span class="task-count task-count-processing">P:${taskCounts.processing}</span>` : ''}
-                            ${taskCounts.completed > 0 ? `<span class="task-count task-count-completed">C:${taskCounts.completed}</span>` : ''}
-                            ${taskCounts.failed > 0 ? `<span class="task-count task-count-failed">F:${taskCounts.failed}</span>` : ''}
-                        </div>
-                    </td>
-                    <td>${createdAt}</td>
-                    <td>
-                        <a href="/api/interface/tasks?job_id=${jobId}" class="btn btn-sm btn-primary">View Tasks</a>
-                    </td>
-                `;
-
-                tbody.appendChild(row);
-            });
+            // Trigger HTMX reload
+            htmx.trigger('#jobsTableBody', 'load');
         }
         """

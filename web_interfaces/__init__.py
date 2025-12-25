@@ -125,6 +125,10 @@ def unified_interface_handler(req: func.HttpRequest) -> func.HttpResponse:
 
     Route: /api/interface/{name}
 
+    Supports both full page renders and HTMX partial updates.
+    HTMX requests (with HX-Request header) are routed to htmx_partial()
+    with the 'fragment' query parameter specifying which partial to render.
+
     Args:
         req: Azure Functions HttpRequest object
 
@@ -132,13 +136,13 @@ def unified_interface_handler(req: func.HttpRequest) -> func.HttpResponse:
         HttpResponse with HTML content or error message
 
     Examples:
-        GET /api/interface/stac
-        GET /api/interface/vector?collection=test_geojson_fresh
-        GET /api/interface/jobs
-        GET /api/interface/docs
+        GET /api/interface/stac                          # Full page
+        GET /api/interface/storage                       # Full page
+        GET /api/interface/storage?fragment=containers&zone=bronze  # HTMX partial
+        GET /api/interface/storage?fragment=files&container=foo     # HTMX partial
 
     Error Responses:
-        400: Missing interface name
+        400: Missing interface name or invalid fragment
         404: Interface not found
         500: Error rendering interface
     """
@@ -171,10 +175,26 @@ def unified_interface_handler(req: func.HttpRequest) -> func.HttpResponse:
         )
 
     try:
-        logger.info(f"🌐 Rendering interface: {interface_name}")
-
-        # Instantiate interface and render HTML
+        # Instantiate interface
         interface = interface_class()
+
+        # Check for HTMX partial request
+        is_htmx = req.headers.get('HX-Request') == 'true'
+        fragment = req.params.get('fragment')
+
+        if is_htmx and fragment:
+            # HTMX partial update - return HTML fragment
+            logger.info(f"🔄 HTMX partial: {interface_name}/{fragment}")
+            html = interface.htmx_partial(req, fragment)
+
+            return func.HttpResponse(
+                html,
+                mimetype="text/html",
+                status_code=200
+            )
+
+        # Full page render
+        logger.info(f"🌐 Rendering interface: {interface_name}")
         html = interface.render(req)
 
         logger.info(f"✅ Successfully rendered interface: {interface_name}")
@@ -338,6 +358,12 @@ try:
     logger.info("✅ Imported STAC Map interface module")
 except ImportError as e:
     logger.warning(f"⚠️ Could not import STAC Map interface: {e}")
+
+try:
+    from .submit_vector import interface as _submit_vector
+    logger.info("✅ Imported Submit Vector interface module")
+except ImportError as e:
+    logger.warning(f"⚠️ Could not import Submit Vector interface: {e}")
 
 
 # Public API

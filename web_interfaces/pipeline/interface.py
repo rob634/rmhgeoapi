@@ -4,6 +4,11 @@ Pipeline workflows interface module.
 Web dashboard showing ETL pipeline workflows, job status, and the ability to
 monitor and manage data processing pipelines.
 
+Features (24 DEC 2025 - S12.3.4):
+    - HTMX enabled for future partial updates
+    - Pipeline workflow diagrams
+    - Jobs table with filtering
+
 Exports:
     PipelineInterface: Pipeline workflow dashboard with job monitoring
 """
@@ -39,7 +44,8 @@ class PipelineInterface(BaseInterface):
             title="Pipeline Workflows",
             content=self._generate_html_content(),
             custom_css=self._generate_css(),
-            custom_js=self._generate_js()
+            custom_js=self._generate_js(),
+            include_htmx=True
         )
 
     def _generate_css(self) -> str:

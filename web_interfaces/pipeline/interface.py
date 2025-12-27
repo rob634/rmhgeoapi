@@ -174,6 +174,31 @@ class PipelineInterface(BaseInterface):
                 text-transform: uppercase;
             }
 
+            /* Pipeline action button */
+            .pipeline-action {
+                margin-top: 16px;
+                padding-top: 16px;
+                border-top: 1px solid var(--ds-gray-light);
+            }
+
+            .btn-submit {
+                display: inline-block;
+                width: 100%;
+                padding: 10px 16px;
+                background: var(--ds-blue-primary);
+                color: white;
+                text-align: center;
+                text-decoration: none;
+                border-radius: 6px;
+                font-weight: 600;
+                font-size: 14px;
+                transition: background 0.2s;
+            }
+
+            .btn-submit:hover {
+                background: var(--ds-cyan);
+            }
+
             /* Custom pipelines section */
             .coming-soon {
                 background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
@@ -445,6 +470,9 @@ class PipelineInterface(BaseInterface):
                                 <div class="stat-value" id="vector-success">--</div>
                                 <div class="stat-label">Success Rate</div>
                             </div>
+                        </div>
+                        <div class="pipeline-action">
+                            <a href="/api/interface/submit-vector" class="btn btn-submit">📤 Submit Vector Job</a>
                         </div>
                     </div>
 
@@ -788,7 +816,7 @@ class PipelineInterface(BaseInterface):
                 // Job ID (short version) - API returns job_id, not id
                 const jobId = job.job_id || job.id;
                 const jobIdShort = jobId ? jobId.substring(0, 8) : '--';
-                const createdAt = job.created_at ? new Date(job.created_at).toLocaleString() : '--';
+                const createdAt = formatDateTime(job.created_at);
 
                 // Task counts
                 const taskCounts = job.task_counts || { queued: 0, processing: 0, completed: 0, failed: 0 };

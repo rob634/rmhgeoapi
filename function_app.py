@@ -385,11 +385,13 @@ app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
 # ============================================================================
 # DEV/Admin endpoints moved to separate Blueprint modules for better organization
 from routes import admin_db_bp, admin_servicebus_bp
+from web_interfaces.h3_sources import bp as h3_sources_bp
 
 app.register_functions(admin_db_bp)
 app.register_functions(admin_servicebus_bp)
+app.register_functions(h3_sources_bp)
 
-logger.info("✅ Blueprints registered: admin_db, admin_servicebus")
+logger.info("✅ Blueprints registered: admin_db, admin_servicebus, h3_sources")
 
 
 

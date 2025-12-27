@@ -654,7 +654,7 @@ class QueuesInterface(BaseInterface):
 
                 // Update last updated time
                 const lastUpdated = document.getElementById('last-updated');
-                lastUpdated.textContent = 'Updated: ' + new Date().toLocaleTimeString();
+                lastUpdated.textContent = 'Updated: ' + formatTime(new Date());
 
                 // Render summary
                 renderSummary(response);

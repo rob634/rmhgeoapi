@@ -159,8 +159,11 @@ class SubmitVectorInterface(BaseInterface):
                 last_modified = blob.get('last_modified', '')
                 if last_modified:
                     try:
+                        from zoneinfo import ZoneInfo
+                        eastern = ZoneInfo('America/New_York')
                         dt = datetime.fromisoformat(last_modified.replace('Z', '+00:00'))
-                        date_str = dt.strftime('%Y-%m-%d')
+                        dt_eastern = dt.astimezone(eastern)
+                        date_str = dt_eastern.strftime('%m/%d/%Y')
                     except Exception:
                         date_str = 'N/A'
                 else:
@@ -371,8 +374,8 @@ class SubmitVectorInterface(BaseInterface):
                 </div>
             </div>
             <div class="result-actions">
-                <a href="/api/interface/jobs" class="btn btn-primary">View Jobs Dashboard</a>
-                <a href="/api/jobs/status/{job_id}" class="btn btn-secondary" target="_blank">View Job Status (JSON)</a>
+                <a href="/api/interface/tasks?job_id={job_id}" class="btn btn-primary">View Job Tasks</a>
+                <a href="/api/interface/pipeline" class="btn btn-secondary">View Pipeline Dashboard</a>
             </div>
         </div>
         '''

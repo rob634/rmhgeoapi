@@ -4,9 +4,9 @@
 # EPOCH: 4 - ACTIVE
 # STATUS: Service Handler - Raster Zonal Statistics
 # PURPOSE: Compute zonal statistics from COGs for H3 cell batches
-# LAST_REVIEWED: 22 DEC 2025
+# LAST_REVIEWED: 27 DEC 2025
 # EXPORTS: h3_raster_zonal_stats
-# DEPENDENCIES: rasterstats, rasterio, shapely, util_logger (memory checkpoints)
+# DEPENDENCIES: rasterstats, rasterio, shapely, pystac_client, util_logger
 # ============================================================================
 """
 H3 Raster Zonal Stats Handler.
@@ -21,10 +21,13 @@ Features:
     - Multiple stat types: mean, sum, min, max, count, std, median
     - Supports Azure Blob Storage COGs (via SAS URL)
     - Supports Planetary Computer COGs (via signed URL)
+    - **NEW**: Dynamic tile discovery for tiled datasets (27 DEC 2025)
 
 Source Types:
     - "azure": Local Azure Blob Storage COG (requires container + blob_path)
-    - "planetary_computer": Planetary Computer STAC item (requires stac_url or collection + item_id)
+    - "planetary_computer": Planetary Computer STAC item
+        - With item_id: Single tile mode (legacy)
+        - With source_id: Dynamic tile discovery mode (searches STAC for tiles)
     - "url": Direct HTTPS URL to COG (requires cog_url)
 
 Usage (Azure):
@@ -41,7 +44,7 @@ Usage (Azure):
         "stats": ["mean", "sum", "count"]
     })
 
-Usage (Planetary Computer):
+Usage (Planetary Computer - Single Tile):
     result = h3_raster_zonal_stats({
         "source_type": "planetary_computer",
         "collection": "cop-dem-glo-30",
@@ -55,6 +58,20 @@ Usage (Planetary Computer):
         "batch_size": 1000,
         "stats": ["mean", "min", "max"]
     })
+
+Usage (Planetary Computer - Dynamic Tile Discovery, 27 DEC 2025):
+    result = h3_raster_zonal_stats({
+        "source_type": "planetary_computer",
+        "source_id": "cop-dem-glo-30",  # References h3.source_catalog
+        "dataset_id": "copdem_glo30",
+        "band": 1,
+        "resolution": 6,
+        "iso3": "RWA",
+        "batch_start": 0,
+        "batch_size": 500,
+        "stats": ["mean", "min", "max"]
+    })
+    # Handler auto-discovers tiles covering Rwanda via STAC API search
 """
 
 import time
@@ -133,6 +150,7 @@ def h3_raster_zonal_stats(params: Dict[str, Any], context: Dict[str, Any] = None
     collection = params.get('collection')
     item_id = params.get('item_id')
     asset = params.get('asset', 'data')
+    source_id = params.get('source_id')  # NEW: Reference to h3.source_catalog (27 DEC 2025)
 
     # Direct URL source parameter
     cog_url = params.get('cog_url')
@@ -149,16 +167,28 @@ def h3_raster_zonal_stats(params: Dict[str, Any], context: Dict[str, Any] = None
         raise ValueError("resolution is required")
 
     # Validate source-specific parameters
+    # NEW (27 DEC 2025): Support source_id for dynamic tile discovery
+    use_dynamic_tile_discovery = False
+
     if source_type == 'azure':
         if not container:
             raise ValueError("container is required for source_type='azure'")
         if not blob_path:
             raise ValueError("blob_path is required for source_type='azure'")
     elif source_type == 'planetary_computer':
-        if not collection:
-            raise ValueError("collection is required for source_type='planetary_computer'")
-        if not item_id:
-            raise ValueError("item_id is required for source_type='planetary_computer'")
+        if item_id:
+            # Legacy mode: single tile specified
+            if not collection:
+                raise ValueError("collection is required when item_id is provided")
+        elif source_id:
+            # NEW: Dynamic tile discovery mode
+            use_dynamic_tile_discovery = True
+            logger.info(f"   Using dynamic tile discovery for source: {source_id}")
+        else:
+            raise ValueError(
+                "Either 'item_id' (single tile mode) or 'source_id' (dynamic discovery) "
+                "is required for source_type='planetary_computer'"
+            )
     elif source_type == 'url':
         if not cog_url:
             raise ValueError("cog_url is required for source_type='url'")
@@ -185,15 +215,28 @@ def h3_raster_zonal_stats(params: Dict[str, Any], context: Dict[str, Any] = None
 
         h3_repo = H3Repository()
 
-        # STEP 1.5: Get theme from dataset_registry (required for partition routing)
+        # STEP 1.5: Get theme from dataset_registry or source_catalog (required for partition routing)
         if not theme:
+            # Try dataset_registry first
             theme = h3_repo.get_dataset_theme(dataset_id)
+            if theme:
+                logger.info(f"   Theme from dataset_registry: {theme}")
+            elif source_id:
+                # NEW (27 DEC 2025): Fall back to source_catalog for dynamic discovery
+                from infrastructure.h3_source_repository import H3SourceRepository
+                source_repo = H3SourceRepository()
+                try:
+                    source_config = source_repo.get_source(source_id)
+                    theme = source_config.get('theme')
+                    logger.info(f"   Theme from source_catalog: {theme}")
+                except ValueError:
+                    pass  # Source not found, will raise below
             if not theme:
                 raise ValueError(
-                    f"Dataset '{dataset_id}' not found in h3.dataset_registry. "
-                    f"Register the dataset first with register_dataset() or provide 'theme' parameter."
+                    f"Could not determine theme for dataset '{dataset_id}'. "
+                    f"Either register in h3.dataset_registry, provide 'theme' parameter, "
+                    f"or ensure source_id references a valid h3.source_catalog entry."
                 )
-            logger.info(f"   Theme from registry: {theme}")
         else:
             logger.info(f"   Theme from params: {theme}")
 
@@ -231,6 +274,27 @@ def h3_raster_zonal_stats(params: Dict[str, Any], context: Dict[str, Any] = None
                               resolution=resolution)
 
         # STEP 3: Build COG URL based on source type
+        # NEW (27 DEC 2025): Handle dynamic tile discovery for Planetary Computer
+        if use_dynamic_tile_discovery:
+            # Dynamic tile discovery mode - process all tiles covering the batch
+            return _process_with_dynamic_tile_discovery(
+                cells=cells,
+                source_id=source_id,
+                dataset_id=dataset_id,
+                band=band,
+                stats=stats,
+                theme=theme,
+                append_history=append_history,
+                source_job_id=source_job_id,
+                batch_index=batch_index,
+                batch_start=batch_start,
+                batch_size=batch_size,
+                start_time=start_time,
+                h3_repo=h3_repo,
+                logger=logger
+            )
+
+        # Standard single-tile mode
         if source_type == 'azure':
             raster_url, detected_nodata = _build_azure_cog_url(container, blob_path, logger)
         elif source_type == 'planetary_computer':
@@ -526,6 +590,284 @@ def _compute_zonal_stats(
         output.append(result_dict)
 
     return output
+
+
+# ============================================================================
+# DYNAMIC TILE DISCOVERY (27 DEC 2025)
+# ============================================================================
+
+def _process_with_dynamic_tile_discovery(
+    cells: List[Dict[str, Any]],
+    source_id: str,
+    dataset_id: str,
+    band: int,
+    stats: List[str],
+    theme: str,
+    append_history: bool,
+    source_job_id: str,
+    batch_index: int,
+    batch_start: int,
+    batch_size: int,
+    start_time: float,
+    h3_repo,
+    logger
+) -> Dict[str, Any]:
+    """
+    Process H3 cells using dynamic tile discovery from source catalog.
+
+    Automatically discovers Planetary Computer tiles that cover the cell
+    batch's bounding box and processes each tile.
+
+    Args:
+        cells: List of H3 cells with geom_wkt
+        source_id: Reference to h3.source_catalog entry
+        dataset_id: Dataset identifier for storage
+        band: Raster band (1-indexed)
+        stats: Stat types to compute
+        theme: Theme for partition routing
+        append_history: Skip existing values if True
+        source_job_id: Job ID for tracking
+        batch_index: Batch index
+        batch_start: Batch start offset
+        batch_size: Batch size
+        start_time: Start time for elapsed calculation
+        h3_repo: H3Repository instance
+        logger: Logger instance
+
+    Returns:
+        Success dict with computation results
+    """
+    try:
+        import pystac_client
+        import planetary_computer
+    except ImportError as e:
+        raise ImportError(
+            f"pystac_client or planetary_computer not installed for dynamic tile discovery. "
+            f"Install with: pip install pystac-client planetary-computer. Error: {e}"
+        )
+
+    from infrastructure.h3_source_repository import H3SourceRepository
+
+    # STEP 1: Load source configuration from catalog
+    source_repo = H3SourceRepository()
+    try:
+        source_config = source_repo.get_source(source_id)
+    except ValueError as e:
+        raise ValueError(f"Source '{source_id}' not found in h3.source_catalog: {e}")
+
+    collection_id = source_config.get('collection_id')
+    asset_key = source_config.get('asset_key', 'data')
+    nodata_value = source_config.get('nodata_value')
+
+    logger.info(f"   Source config: collection={collection_id}, asset={asset_key}")
+
+    # STEP 2: Calculate bounding box from cells
+    bbox = _calculate_cells_bbox(cells, logger)
+    logger.info(f"   Cells bbox: {bbox}")
+
+    # STEP 3: Discover tiles covering the bbox
+    stac_api_url = source_config.get('stac_api_url', 'https://planetarycomputer.microsoft.com/api/stac/v1')
+
+    catalog = pystac_client.Client.open(
+        stac_api_url,
+        modifier=planetary_computer.sign_inplace,
+    )
+
+    logger.info(f"   Searching STAC for tiles in bbox...")
+    search = catalog.search(
+        collections=[collection_id],
+        bbox=bbox,
+        max_items=100  # Safety limit - most batches should have < 10 tiles
+    )
+
+    items = list(search.items())
+    logger.info(f"   Discovered {len(items)} tiles covering the batch")
+
+    if len(items) == 0:
+        logger.warning(f"⚠️ No tiles found for bbox {bbox}")
+        return {
+            "success": True,
+            "result": {
+                "cells_processed": len(cells),
+                "stats_inserted": 0,
+                "tiles_processed": 0,
+                "batch_index": batch_index,
+                "elapsed_time": time.time() - start_time,
+                "message": "No tiles found for batch area"
+            }
+        }
+
+    # STEP 4: Process each tile
+    all_stat_records = []
+    processed_h3_indices = set()  # Track which cells have been processed
+
+    for item in items:
+        tile_id = item.id
+        logger.debug(f"   Processing tile: {tile_id}")
+
+        # Get asset URL
+        if asset_key not in item.assets:
+            logger.warning(f"   Asset '{asset_key}' not found in tile {tile_id}, skipping")
+            continue
+
+        signed_url = item.assets[asset_key].href
+        gdal_url = f"/vsicurl/{signed_url}"
+
+        # Get tile bounding box
+        tile_bbox = item.bbox
+
+        # Filter cells to those within this tile
+        tile_cells = _filter_cells_to_tile_bbox(cells, tile_bbox, processed_h3_indices)
+
+        if not tile_cells:
+            logger.debug(f"   No unprocessed cells in tile {tile_id}")
+            continue
+
+        logger.debug(f"   Processing {len(tile_cells)} cells in tile {tile_id}")
+
+        # Compute zonal stats for cells in this tile
+        try:
+            zonal_results = _compute_zonal_stats(
+                cells=tile_cells,
+                cog_url=gdal_url,
+                band=band,
+                stats=stats,
+                nodata=nodata_value,
+                logger=logger
+            )
+
+            # Build stat records
+            for result in zonal_results:
+                h3_index = result['h3_index']
+                processed_h3_indices.add(h3_index)
+
+                for stat_type in stats:
+                    value = result.get(stat_type)
+                    if value is not None:
+                        all_stat_records.append({
+                            'h3_index': h3_index,
+                            'dataset_id': dataset_id,
+                            'band': f"band_{band}",
+                            'stat_type': stat_type,
+                            'value': value,
+                            'pixel_count': result.get('count'),
+                            'nodata_count': result.get('nodata_count')
+                        })
+
+        except Exception as e:
+            logger.warning(f"   Failed to process tile {tile_id}: {e}")
+            continue
+
+    # STEP 5: Insert all stats to database
+    if all_stat_records:
+        stats_inserted = h3_repo.insert_zonal_stats_batch(
+            stats=all_stat_records,
+            theme=theme,
+            append_history=append_history,
+            source_job_id=source_job_id
+        )
+    else:
+        stats_inserted = 0
+
+    elapsed_time = time.time() - start_time
+    logger.info(
+        f"✅ Batch {batch_index} complete (dynamic discovery): "
+        f"{len(processed_h3_indices)} cells, {stats_inserted} stats, "
+        f"{len(items)} tiles in {elapsed_time:.2f}s"
+    )
+
+    return {
+        "success": True,
+        "result": {
+            "cells_processed": len(processed_h3_indices),
+            "cells_total": len(cells),
+            "stats_inserted": stats_inserted,
+            "tiles_discovered": len(items),
+            "tiles_processed": len([i for i in items if i.id]),
+            "batch_index": batch_index,
+            "batch_start": batch_start,
+            "batch_size": batch_size,
+            "elapsed_time": elapsed_time,
+            "dataset_id": dataset_id,
+            "source_id": source_id,
+            "source_job_id": source_job_id
+        }
+    }
+
+
+def _calculate_cells_bbox(cells: List[Dict[str, Any]], logger) -> tuple:
+    """
+    Calculate bounding box from H3 cell geometries.
+
+    Args:
+        cells: List of cells with geom_wkt
+        logger: Logger instance
+
+    Returns:
+        Tuple of (min_lon, min_lat, max_lon, max_lat)
+    """
+    from shapely import wkt
+
+    min_lon = float('inf')
+    min_lat = float('inf')
+    max_lon = float('-inf')
+    max_lat = float('-inf')
+
+    for cell in cells:
+        try:
+            geom = wkt.loads(cell['geom_wkt'])
+            bounds = geom.bounds  # (minx, miny, maxx, maxy)
+            min_lon = min(min_lon, bounds[0])
+            min_lat = min(min_lat, bounds[1])
+            max_lon = max(max_lon, bounds[2])
+            max_lat = max(max_lat, bounds[3])
+        except Exception as e:
+            logger.warning(f"Failed to parse geometry: {e}")
+            continue
+
+    return (min_lon, min_lat, max_lon, max_lat)
+
+
+def _filter_cells_to_tile_bbox(
+    cells: List[Dict[str, Any]],
+    tile_bbox: tuple,
+    already_processed: set
+) -> List[Dict[str, Any]]:
+    """
+    Filter cells to those within a tile's bounding box.
+
+    Also excludes cells that have already been processed to avoid duplicates.
+
+    Args:
+        cells: List of cells with h3_index and geom_wkt
+        tile_bbox: Tile bounding box (min_lon, min_lat, max_lon, max_lat)
+        already_processed: Set of h3_indices already processed
+
+    Returns:
+        Filtered list of cells
+    """
+    from shapely import wkt
+    from shapely.geometry import box
+
+    tile_min_lon, tile_min_lat, tile_max_lon, tile_max_lat = tile_bbox
+    tile_box = box(tile_min_lon, tile_min_lat, tile_max_lon, tile_max_lat)
+
+    filtered = []
+    for cell in cells:
+        h3_index = cell['h3_index']
+
+        # Skip if already processed
+        if h3_index in already_processed:
+            continue
+
+        try:
+            geom = wkt.loads(cell['geom_wkt'])
+            if geom.intersects(tile_box):
+                filtered.append(cell)
+        except Exception:
+            continue
+
+    return filtered
 
 
 # Export for handler registration

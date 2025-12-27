@@ -750,49 +750,67 @@ class BaseInterface(ABC):
         }
 
         // ============================================================
-        // DATE/TIME FORMATTING
+        // DATE/TIME FORMATTING - All times displayed in Eastern Time
         // ============================================================
 
+        const TIMEZONE = 'America/New_York';
+        const LOCALE = 'en-US';
+
         /**
-         * Format a date string or Date object to locale date string
+         * Format a date string or Date object to Eastern Time date string
          * @param {string|Date} date - Date to format
          * @param {string} fallback - Fallback if date is null/invalid
-         * @returns {string} Formatted date string
+         * @returns {string} Formatted date string in ET
          */
         function formatDate(date, fallback = '--') {
             if (!date) return fallback;
             try {
-                return new Date(date).toLocaleDateString();
+                return new Date(date).toLocaleDateString(LOCALE, {timeZone: TIMEZONE});
             } catch (e) {
                 return fallback;
             }
         }
 
         /**
-         * Format a date string or Date object to locale date+time string
+         * Format a date string or Date object to Eastern Time date+time string
          * @param {string|Date} date - Date to format
          * @param {string} fallback - Fallback if date is null/invalid
-         * @returns {string} Formatted datetime string
+         * @returns {string} Formatted datetime string in ET with timezone indicator
          */
         function formatDateTime(date, fallback = '--') {
             if (!date) return fallback;
             try {
-                return new Date(date).toLocaleString();
+                const formatted = new Date(date).toLocaleString(LOCALE, {
+                    timeZone: TIMEZONE,
+                    year: 'numeric',
+                    month: 'numeric',
+                    day: 'numeric',
+                    hour: 'numeric',
+                    minute: '2-digit',
+                    hour12: true
+                });
+                return formatted + ' ET';
             } catch (e) {
                 return fallback;
             }
         }
 
         /**
-         * Format a date to time only
+         * Format a date to Eastern Time time only
          * @param {string|Date} date - Date to format
          * @param {string} fallback - Fallback if date is null/invalid
-         * @returns {string} Formatted time string
+         * @returns {string} Formatted time string in ET
          */
         function formatTime(date, fallback = '--') {
             if (!date) return fallback;
             try {
-                return new Date(date).toLocaleTimeString();
+                const formatted = new Date(date).toLocaleTimeString(LOCALE, {
+                    timeZone: TIMEZONE,
+                    hour: 'numeric',
+                    minute: '2-digit',
+                    hour12: true
+                });
+                return formatted + ' ET';
             } catch (e) {
                 return fallback;
             }

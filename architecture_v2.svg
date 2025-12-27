@@ -1,0 +1,252 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 720" width="1200" height="720">
+<style>
+    svg { background: white; }
+    .box { stroke-width: 2; rx: 8; }
+    .funcapp { fill: #FFF8E1; stroke: #F9A825; }
+    .servicebus { fill: #E3F2FD; stroke: #1565C0; }
+    .postgres { fill: #E8F5E9; stroke: #2E7D32; }
+    .storage { fill: #F3E5F5; stroke: #7B1FA2; }
+    .appservice { fill: #E1F5FE; stroke: #0277BD; }
+    .group-box { fill: none; stroke: #90A4AE; stroke-width: 2; stroke-dasharray: 8,4; rx: 12; }
+    .group-label { font-family: 'Segoe UI', sans-serif; font-size: 14px; font-weight: 600; fill: #546E7A; }
+    .comp-label { font-family: 'Segoe UI', sans-serif; font-size: 11px; text-anchor: middle; fill: #37474F; }
+    .icon { font-size: 24px; text-anchor: middle; }
+    .row-label { font-family: 'Segoe UI', sans-serif; font-size: 10px; fill: #78909C; text-anchor: end; }
+    .col-label { font-family: 'Segoe UI', sans-serif; font-size: 10px; fill: #78909C; text-anchor: middle; }
+    .connector { stroke: #1565C0; stroke-width: 2; fill: none; }
+    .legend-text { font-family: 'Segoe UI', sans-serif; font-size: 11px; fill: #455A64; }
+</style>
+
+<!-- Legend -->
+<g transform="translate(20, 20)">
+    <rect x="0" y="0" width="16" height="16" class="box funcapp"/>
+    <text x="24" y="13" class="legend-text">Function App</text>
+    <rect x="0" y="24" width="16" height="16" class="box storage"/>
+    <text x="24" y="37" class="legend-text">Object Storage</text>
+    <rect x="0" y="48" width="16" height="16" class="box postgres"/>
+    <text x="24" y="61" class="legend-text">PostgreSQL</text>
+    <rect x="0" y="72" width="16" height="16" class="box servicebus"/>
+    <text x="24" y="85" class="legend-text">Service Bus</text>
+    <rect x="0" y="96" width="16" height="16" class="box appservice"/>
+    <text x="24" y="109" class="legend-text">App Service (Docker)</text>
+</g>
+
+<!-- Column headers - FIXED SPACING -->
+<!-- C1=200, C2=300, C3=420, C4=560, C5=700, C6=900 -->
+<text x="200" y="145" class="col-label">C1</text>
+<text x="300" y="145" class="col-label">C2</text>
+<text x="420" y="145" class="col-label">C3</text>
+<text x="560" y="145" class="col-label">C4</text>
+<text x="700" y="145" class="col-label">C5</text>
+<text x="900" y="145" class="col-label">C6</text>
+
+<text x="200" y="158" class="col-label">Platform</text>
+<text x="300" y="158" class="col-label">Orchestration</text>
+<text x="420" y="158" class="col-label">State/Queues</text>
+<text x="560" y="158" class="col-label">ETL + Input</text>
+<text x="700" y="158" class="col-label">Output/Data</text>
+<text x="900" y="158" class="col-label">API Services</text>
+
+<!-- Row labels - EQUAL SPACING (100px gaps) -->
+<!-- R1=200, R2=300, R3=400, R4=500, R5=600 -->
+<text x="145" y="225" class="row-label">R1 Storage</text>
+<text x="145" y="325" class="row-label">R2 Databases</text>
+<text x="145" y="425" class="row-label">R3 Functions</text>
+<text x="145" y="525" class="row-label">R4 Functions</text>
+<text x="145" y="625" class="row-label">R5 Docker</text>
+
+<!-- ETL Apps Group Box -->
+<rect x="155" y="170" width="470" height="510" class="group-box"/>
+<text x="390" y="190" class="group-label">ETL Layer</text>
+
+<!-- Services Group Box -->
+<rect x="820" y="170" width="160" height="510" class="group-box"/>
+<text x="900" y="190" class="group-label">API Services</text>
+
+<!-- ==================== R1: STORAGE ==================== -->
+<!-- Input Data (C4) - bronze_storage -->
+<g data-component="bronze_storage" transform="translate(520, 200)">
+    <rect x="0" y="0" width="80" height="50" class="box storage"/>
+    <text x="40" y="25" class="icon">📦</text>
+    <text x="40" y="43" class="comp-label">Input Data</text>
+</g>
+
+<!-- Output Data (C5) - silver_storage -->
+<g data-component="silver_storage" transform="translate(660, 200)">
+    <rect x="0" y="0" width="80" height="50" class="box storage"/>
+    <text x="40" y="25" class="icon">📦</text>
+    <text x="40" y="43" class="comp-label">Output Data</text>
+</g>
+
+<!-- ==================== R2: DATABASES (y=300) ==================== -->
+<!-- Job Table (C2) - job_table -->
+<g data-component="job_table" transform="translate(260, 300)">
+    <rect x="0" y="0" width="80" height="50" class="box postgres"/>
+    <text x="40" y="25" class="icon">🐘</text>
+    <text x="40" y="43" class="comp-label">Job Table</text>
+</g>
+
+<!-- Task Table (C3) - task_table -->
+<g data-component="task_table" transform="translate(380, 300)">
+    <rect x="0" y="0" width="80" height="50" class="box postgres"/>
+    <text x="40" y="25" class="icon">🐘</text>
+    <text x="40" y="43" class="comp-label">Task Table</text>
+</g>
+
+<!-- PostGIS (C5) - geo_tables -->
+<g data-component="geo_tables" transform="translate(660, 300)">
+    <rect x="0" y="0" width="80" height="50" class="box postgres"/>
+    <text x="40" y="25" class="icon">🐘</text>
+    <text x="40" y="43" class="comp-label">PostGIS</text>
+</g>
+
+<!-- ==================== R3: FUNCTION APPS (y=400) ==================== -->
+<!-- Platform API (C1) - platform_api -->
+<g data-component="platform_api" transform="translate(160, 400)">
+    <rect x="0" y="0" width="80" height="50" class="box funcapp"/>
+    <text x="40" y="25" class="icon">⚡</text>
+    <text x="40" y="43" class="comp-label">Platform API</text>
+</g>
+
+<!-- Orchestrator (C2) - orchestrator -->
+<g data-component="orchestrator" transform="translate(260, 400)">
+    <rect x="0" y="0" width="80" height="50" class="box funcapp"/>
+    <text x="40" y="25" class="icon">⚡</text>
+    <text x="40" y="43" class="comp-label">Orchestrator</text>
+</g>
+
+<!-- Parallel Task Queue (C3) - parallel_task_queue -->
+<g data-component="parallel_task_queue" transform="translate(380, 400)">
+    <rect x="0" y="0" width="80" height="50" class="box servicebus"/>
+    <text x="40" y="25" class="icon">📨</text>
+    <text x="40" y="43" class="comp-label">Parallel Task</text>
+</g>
+
+<!-- I/O Worker (C4) - parallel_task_worker -->
+<g data-component="parallel_task_worker" transform="translate(520, 400)">
+    <rect x="0" y="0" width="80" height="50" class="box funcapp"/>
+    <text x="40" y="25" class="icon">⚡</text>
+    <text x="40" y="43" class="comp-label">I/O Worker</text>
+</g>
+
+<!-- OGC Features (C6) - ogc_api -->
+<g data-component="ogc_api" transform="translate(860, 400)">
+    <rect x="0" y="0" width="80" height="50" class="box funcapp"/>
+    <text x="40" y="25" class="icon">⚡</text>
+    <text x="40" y="43" class="comp-label">OGC Features</text>
+</g>
+
+<!-- ==================== R4: FUNCTION APPS (y=500) ==================== -->
+<!-- Job Queue (C2) - job_queue -->
+<g data-component="job_queue" transform="translate(260, 500)">
+    <rect x="0" y="0" width="80" height="50" class="box servicebus"/>
+    <text x="40" y="25" class="icon">📨</text>
+    <text x="40" y="43" class="comp-label">Job Queue</text>
+</g>
+
+<!-- Compute Task Queue (C3) - compute_task_queue -->
+<g data-component="compute_task_queue" transform="translate(380, 500)">
+    <rect x="0" y="0" width="80" height="50" class="box servicebus"/>
+    <text x="40" y="25" class="icon">📨</text>
+    <text x="40" y="43" class="comp-label">Compute Task</text>
+</g>
+
+<!-- RAM Worker (C4) - compute_task_worker -->
+<g data-component="compute_task_worker" transform="translate(520, 500)">
+    <rect x="0" y="0" width="80" height="50" class="box funcapp"/>
+    <text x="40" y="25" class="icon">⚡</text>
+    <text x="40" y="43" class="comp-label">RAM Worker</text>
+</g>
+
+<!-- STAC API (C6) - aux_api -->
+<g data-component="aux_api" transform="translate(860, 500)">
+    <rect x="0" y="0" width="80" height="50" class="box funcapp"/>
+    <text x="40" y="25" class="icon">⚡</text>
+    <text x="40" y="43" class="comp-label">STAC API</text>
+</g>
+
+<!-- ==================== R5: DOCKER / APP SERVICE (y=600) ==================== -->
+<!-- Long Task Queue (C3) - long_task_queue -->
+<g data-component="long_task_queue" transform="translate(380, 600)">
+    <rect x="0" y="0" width="80" height="50" class="box servicebus"/>
+    <text x="40" y="25" class="icon">📨</text>
+    <text x="40" y="43" class="comp-label">Long Task</text>
+</g>
+
+<!-- Long Worker (C4) - long_task_worker -->
+<g data-component="long_task_worker" transform="translate(520, 600)">
+    <rect x="0" y="0" width="80" height="50" class="box appservice"/>
+    <text x="40" y="25" class="icon">🐳</text>
+    <text x="40" y="43" class="comp-label">Long Worker</text>
+</g>
+
+<!-- TiTiler (C6) - titiler_app -->
+<g data-component="titiler_app" transform="translate(860, 600)">
+    <rect x="0" y="0" width="80" height="50" class="box appservice"/>
+    <text x="40" y="25" class="icon">🐳</text>
+    <text x="40" y="43" class="comp-label">TiTiler</text>
+</g>
+
+<!-- ==================== CONNECTORS ==================== -->
+<!-- Platform API → Job Queue (down then right) -->
+<line x1="200" y1="450" x2="200" y2="525" class="connector"/>
+<line x1="200" y1="525" x2="260" y2="525" class="connector"/>
+
+<!-- Job Queue → Orchestrator (up) -->
+<line x1="300" y1="500" x2="300" y2="450" class="connector"/>
+
+<!-- Orchestrator → Job Table (up) -->
+<line x1="300" y1="400" x2="300" y2="350" class="connector"/>
+
+<!-- Orchestrator → Parallel Task (right) -->
+<line x1="340" y1="425" x2="380" y2="425" class="connector"/>
+
+<!-- Orchestrator → Compute Task (right-down) -->
+<line x1="340" y1="425" x2="360" y2="425" class="connector"/>
+<line x1="360" y1="425" x2="360" y2="525" class="connector"/>
+<line x1="360" y1="525" x2="380" y2="525" class="connector"/>
+
+<!-- Orchestrator → Long Task (down-right) -->
+<line x1="360" y1="525" x2="360" y2="625" class="connector"/>
+<line x1="360" y1="625" x2="380" y2="625" class="connector"/>
+
+<!-- Parallel Task → I/O Worker -->
+<line x1="460" y1="425" x2="520" y2="425" class="connector"/>
+
+<!-- Compute Task → RAM Worker -->
+<line x1="460" y1="525" x2="520" y2="525" class="connector"/>
+
+<!-- Long Task → Long Worker -->
+<line x1="460" y1="625" x2="520" y2="625" class="connector"/>
+
+<!-- Task Table → Input Data (up) -->
+<line x1="420" y1="300" x2="420" y2="225" class="connector"/>
+<line x1="420" y1="225" x2="520" y2="225" class="connector"/>
+
+<!-- Workers → Output Data (vertical spine at x=630) -->
+<line x1="630" y1="225" x2="630" y2="625" class="connector"/>
+<line x1="630" y1="225" x2="660" y2="225" class="connector"/>
+<line x1="600" y1="425" x2="630" y2="425" class="connector"/>
+<line x1="600" y1="525" x2="630" y2="525" class="connector"/>
+<line x1="600" y1="625" x2="630" y2="625" class="connector"/>
+
+<!-- Output Data → PostGIS (down) -->
+<line x1="700" y1="250" x2="700" y2="300" class="connector"/>
+
+<!-- PostGIS → OGC Features -->
+<line x1="740" y1="325" x2="800" y2="325" class="connector"/>
+<line x1="800" y1="325" x2="800" y2="425" class="connector"/>
+<line x1="800" y1="425" x2="860" y2="425" class="connector"/>
+
+<!-- PostGIS → STAC API -->
+<line x1="800" y1="525" x2="860" y2="525" class="connector"/>
+
+<!-- Output Data → TiTiler -->
+<line x1="800" y1="325" x2="800" y2="625" class="connector"/>
+<line x1="800" y1="625" x2="860" y2="625" class="connector"/>
+
+<!-- TiTiler note -->
+<text x="900" y="665" style="font-family: 'Segoe UI', sans-serif; font-size: 9px; fill: #78909C; text-anchor: middle;">vanilla + pgstac + xarray</text>
+
+</svg>

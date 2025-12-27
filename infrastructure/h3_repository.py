@@ -1395,10 +1395,11 @@ class H3Repository(PostgreSQLRepository):
         source_license: Optional[str] = None,
         resolution_range: Optional[List[int]] = None,
         stat_types: Optional[List[str]] = None,
-        unit: Optional[str] = None
+        unit: Optional[str] = None,
+        theme: str = 'terrain'
     ) -> bool:
         """
-        Register a new dataset in the stat_registry metadata catalog.
+        Register a new dataset in the dataset_registry metadata catalog.
 
         Creates an entry for a new aggregation dataset BEFORE computing stats.
         This enables FK validation when inserting into zonal_stats/point_stats.
@@ -1408,8 +1409,8 @@ class H3Repository(PostgreSQLRepository):
         id : str
             Unique dataset identifier (e.g., 'worldpop_2020', 'acled_2024')
         stat_category : str
-            Category: 'raster_zonal', 'vector_point', 'vector_line',
-            'vector_polygon', 'planetary_computer', 'band_math'
+            Data category (e.g., 'elevation', 'population', 'precipitation')
+            Maps to data_category column in schema.
         display_name : str
             Human-readable name (e.g., 'WorldPop 2020 Population')
         description : Optional[str]
@@ -1426,6 +1427,9 @@ class H3Repository(PostgreSQLRepository):
             Available stat types (e.g., ['mean', 'sum', 'count'])
         unit : Optional[str]
             Unit of measurement (e.g., 'people/km²', 'count')
+        theme : str
+            Theme for partitioning (terrain, water, climate, demographics,
+            infrastructure, landcover, vegetation). Default: 'terrain'.
 
         Returns:
         -------
@@ -1436,9 +1440,10 @@ class H3Repository(PostgreSQLRepository):
         -------
         >>> repo.register_stat_dataset(
         ...     id='worldpop_2020',
-        ...     stat_category='raster_zonal',
+        ...     stat_category='population',
         ...     display_name='WorldPop 2020 Population Estimates',
         ...     description='Gridded population estimates at 100m resolution',
+        ...     theme='demographics',
         ...     source_name='WorldPop',
         ...     source_url='https://www.worldpop.org/',
         ...     source_license='CC-BY-4.0',
@@ -1447,34 +1452,42 @@ class H3Repository(PostgreSQLRepository):
         ...     unit='people'
         ... )
         """
+        # Build minimal source_config JSONB (required by schema)
+        source_config = {"registered_via": "register_stat_dataset"}
+
         query = sql.SQL("""
             INSERT INTO {schema}.{table} (
-                id, stat_category, display_name, description,
+                id, display_name, description, theme, data_category,
+                source_type, source_config,
                 source_name, source_url, source_license,
-                resolution_range, stat_types, unit,
+                recommended_h3_res, stat_types, unit,
                 created_at, updated_at
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
             ON CONFLICT (id) DO UPDATE SET
-                stat_category = EXCLUDED.stat_category,
                 display_name = EXCLUDED.display_name,
                 description = EXCLUDED.description,
+                theme = EXCLUDED.theme,
+                data_category = EXCLUDED.data_category,
                 source_name = EXCLUDED.source_name,
                 source_url = EXCLUDED.source_url,
                 source_license = EXCLUDED.source_license,
-                resolution_range = EXCLUDED.resolution_range,
+                recommended_h3_res = EXCLUDED.recommended_h3_res,
                 stat_types = EXCLUDED.stat_types,
                 unit = EXCLUDED.unit,
                 updated_at = NOW()
         """).format(
             schema=sql.Identifier('h3'),
-            table=sql.Identifier('stat_registry')
+            table=sql.Identifier('dataset_registry')
         )
+
+        import json
 
         with self._get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(query, (
-                    id, stat_category, display_name, description,
+                    id, display_name, description, theme, stat_category,
+                    'url', json.dumps(source_config),  # source_type defaults to 'url'
                     source_name, source_url, source_license,
                     resolution_range, stat_types, unit
                 ))
@@ -1482,13 +1495,13 @@ class H3Repository(PostgreSQLRepository):
                 conn.commit()
 
         if rowcount > 0:
-            logger.info(f"✅ Registered stat dataset: {id} ({stat_category})")
+            logger.info(f"✅ Registered stat dataset: {id} (theme={theme}, category={stat_category})")
         else:
             logger.info(f"📝 Updated stat dataset: {id}")
 
         return rowcount > 0
 
-    def update_stat_registry_provenance(
+    def update_dataset_registry_provenance(
         self,
         id: str,
         job_id: str,
@@ -1515,7 +1528,7 @@ class H3Repository(PostgreSQLRepository):
 
         Example:
         -------
-        >>> repo.update_stat_registry_provenance(
+        >>> repo.update_dataset_registry_provenance(
         ...     id='worldpop_2020',
         ...     job_id='abc123...',
         ...     cell_count=176472
@@ -1525,13 +1538,13 @@ class H3Repository(PostgreSQLRepository):
             UPDATE {schema}.{table}
             SET
                 last_aggregation_at = NOW(),
-                last_aggregation_job_id = %s,
-                cell_count = %s,
+                aggregation_job_id = %s,
+                cells_aggregated = %s,
                 updated_at = NOW()
             WHERE id = %s
         """).format(
             schema=sql.Identifier('h3'),
-            table=sql.Identifier('stat_registry')
+            table=sql.Identifier('dataset_registry')
         )
 
         with self._get_connection() as conn:
@@ -1543,11 +1556,11 @@ class H3Repository(PostgreSQLRepository):
         if rowcount > 0:
             logger.info(f"✅ Updated provenance for {id}: job={job_id[:8]}..., cells={cell_count:,}")
         else:
-            logger.warning(f"⚠️ Dataset not found in stat_registry: {id}")
+            logger.warning(f"⚠️ Dataset not found in dataset_registry: {id}")
 
         return rowcount > 0
 
-    def get_stat_registry_entry(self, id: str) -> Optional[Dict[str, Any]]:
+    def get_dataset_registry_entry(self, id: str) -> Optional[Dict[str, Any]]:
         """
         Get metadata for a registered dataset.
 
@@ -1572,7 +1585,7 @@ class H3Repository(PostgreSQLRepository):
             WHERE id = %s
         """).format(
             schema=sql.Identifier('h3'),
-            table=sql.Identifier('stat_registry')
+            table=sql.Identifier('dataset_registry')
         )
 
         with self._get_connection() as conn:
@@ -1621,7 +1634,7 @@ class H3Repository(PostgreSQLRepository):
                 ORDER BY id
             """).format(
                 schema=sql.Identifier('h3'),
-                table=sql.Identifier('stat_registry')
+                table=sql.Identifier('dataset_registry')
             )
             params = (category,)
         else:
@@ -1635,7 +1648,7 @@ class H3Repository(PostgreSQLRepository):
                 ORDER BY stat_category, id
             """).format(
                 schema=sql.Identifier('h3'),
-                table=sql.Identifier('stat_registry')
+                table=sql.Identifier('dataset_registry')
             )
             params = ()
 

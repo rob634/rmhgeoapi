@@ -389,6 +389,14 @@ def process_vector_prepare(parameters: Dict[str, Any]) -> Dict[str, Any]:
     verified_pickles = []
     pickle_errors = []
 
+    # Progress tracking setup (26 DEC 2025)
+    # - Memory logging every 10 chunks (log only)
+    # - Task progress update at 25%, 50%, 75% milestones (DB update)
+    task_id = parameters.get('task_id')  # May be None if called outside task context
+    total_chunks = len(chunks)
+    progress_milestones = {int(total_chunks * p) for p in [0.25, 0.50, 0.75]} if total_chunks > 4 else set()
+    last_memory_log = 0
+
     for i, chunk in enumerate(chunks):
         chunk_path = f"{config.vector_pickle_prefix}/{job_id}/chunk_{i}.pkl"
 
@@ -421,6 +429,39 @@ def process_vector_prepare(parameters: Dict[str, Any]) -> Dict[str, Any]:
                     'blob_bytes': write_result['size'],
                     'etag': write_result.get('etag')
                 })
+
+                # Progress tracking (26 DEC 2025)
+                chunks_done = i + 1
+                percent_complete = (chunks_done / total_chunks) * 100
+
+                # Memory logging every 10 chunks (log only, no DB overhead)
+                if chunks_done - last_memory_log >= 10 or chunks_done == total_chunks:
+                    log_memory_checkpoint(
+                        logger, f"Pickle progress {chunks_done}/{total_chunks}",
+                        context_id=job_id,
+                        chunks_written=chunks_done,
+                        percent_complete=round(percent_complete, 1)
+                    )
+                    last_memory_log = chunks_done
+
+                # Task progress update at milestones (25%, 50%, 75%) - minimal DB overhead
+                if task_id and chunks_done in progress_milestones:
+                    try:
+                        from infrastructure.jobs_tasks import JobsTasksRepository
+                        repo = JobsTasksRepository()
+                        repo.update_task_metadata(task_id, {
+                            'pickle_progress': {
+                                'chunks_written': chunks_done,
+                                'total_chunks': total_chunks,
+                                'percent_complete': round(percent_complete, 1),
+                                'total_rows_written': sum(p['rows'] for p in verified_pickles)
+                            }
+                        }, merge=True)
+                        logger.info(f"[{job_id[:8]}] 📊 Progress update: {percent_complete:.0f}% ({chunks_done}/{total_chunks} chunks)")
+                    except Exception as progress_err:
+                        # Non-fatal - don't fail task due to progress tracking error
+                        logger.warning(f"[{job_id[:8]}] ⚠️ Failed to update progress: {progress_err}")
+
             else:
                 # Write returned but with no size - suspicious!
                 error_msg = f"Chunk {i} write returned invalid result: {write_result}"

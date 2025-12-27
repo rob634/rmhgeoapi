@@ -365,6 +365,12 @@ try:
 except ImportError as e:
     logger.warning(f"⚠️ Could not import Submit Vector interface: {e}")
 
+try:
+    from .promote import interface as _promote
+    logger.info("✅ Imported Promote interface module")
+except ImportError as e:
+    logger.warning(f"⚠️ Could not import Promote interface: {e}")
+
 
 # Public API
 __all__ = [

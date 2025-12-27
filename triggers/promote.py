@@ -49,15 +49,17 @@ def handle_promote(req: func.HttpRequest) -> func.HttpResponse:
     POST Body:
     {
         "promoted_id": "fathom-flood-100yr",       // Required - unique identifier
-        "stac_collection_id": "fathom-pluvial",    // Required if not stac_item_id
-        "stac_item_id": "item-123",                // Required if not stac_collection_id
-        "title": "Custom Title",                   // Optional - override STAC title
-        "description": "Custom description",       // Optional - override STAC description
+        "stac_collection_id": "fathom-pluvial",    // Required if not ogc_features_collection_id or stac_item_id
+        "ogc_features_collection_id": "roads",     // Required if not stac_collection_id or stac_item_id (26 DEC 2025)
+        "stac_item_id": "item-123",                // Required if not stac/ogc collection
+        "title": "Custom Title",                   // Optional - override source title
+        "description": "Custom description",       // Optional - override source description
         "tags": ["flood", "hazard"],               // Optional - categorization tags
         "gallery": true,                           // Optional - add to gallery
         "gallery_order": 1,                        // Optional - gallery display order
         "viewer_config": {...},                    // Optional - viewer settings
         "style_id": "flood-style",                 // Optional - OGC Style ID
+        "style": {"title": "...", "spec": {...}},  // Optional - inline style creation (26 DEC 2025)
         "is_system_reserved": true,                // Optional - mark as system-critical (23 DEC 2025)
         "system_role": "admin0_boundaries"         // Optional - system role for discovery
     }
@@ -102,15 +104,16 @@ def handle_promote(req: func.HttpRequest) -> func.HttpResponse:
                     status_code=400
                 )
 
-            # STAC reference (one required)
-            stac_collection_id = body.get('stac_collection_id')
+            # Collection reference (one required)
+            # Accept either stac_collection_id or ogc_features_collection_id
+            stac_collection_id = body.get('stac_collection_id') or body.get('ogc_features_collection_id')
             stac_item_id = body.get('stac_item_id')
 
             if not stac_collection_id and not stac_item_id:
                 return func.HttpResponse(
                     json.dumps({
                         'success': False,
-                        'error': 'Must specify either stac_collection_id or stac_item_id'
+                        'error': 'Must specify either stac_collection_id, ogc_features_collection_id, or stac_item_id'
                     }, indent=2),
                     mimetype="application/json",
                     status_code=400
@@ -122,6 +125,42 @@ def handle_promote(req: func.HttpRequest) -> func.HttpResponse:
             tags = body.get('tags')
             viewer_config = body.get('viewer_config')
             style_id = body.get('style_id')
+
+            # NEW (26 DEC 2025): Inline style creation
+            # If 'style' object provided, create OGC style and use its ID
+            style_spec = body.get('style')
+            created_style_id = None
+            if style_spec and isinstance(style_spec, dict):
+                try:
+                    from ogc_styles.repository import OGCStylesRepository
+                    styles_repo = OGCStylesRepository()
+
+                    # Determine collection_id for style association
+                    collection_id = stac_collection_id or stac_item_id
+
+                    # Generate style_id if not provided
+                    inline_style_id = style_spec.get('id') or f"{promoted_id}-default"
+                    inline_title = style_spec.get('title') or f"{promoted_id} Style"
+                    inline_spec = style_spec.get('spec', style_spec)
+
+                    # Create style in database
+                    styles_repo.create_style(
+                        collection_id=collection_id,
+                        style_id=inline_style_id,
+                        title=inline_title,
+                        description=style_spec.get('description'),
+                        style_spec=inline_spec,
+                        is_default=True
+                    )
+
+                    # Use this style for promotion
+                    style_id = inline_style_id
+                    created_style_id = inline_style_id
+                    logger.info(f"Created style '{style_id}' for collection '{collection_id}'")
+
+                except Exception as style_err:
+                    logger.warning(f"Failed to create inline style: {style_err}")
+                    # Continue without style - don't fail the promotion
 
             # Gallery flag (from body or query param)
             gallery = body.get('gallery', False)
@@ -157,6 +196,12 @@ def handle_promote(req: func.HttpRequest) -> func.HttpResponse:
             status_code = 201 if result.get('action') == 'created' else 200
             if not result.get('success'):
                 status_code = 400
+
+            # Add style_id to response if style was created (26 DEC 2025)
+            if created_style_id:
+                result['style_id'] = created_style_id
+                collection_id = stac_collection_id or stac_item_id
+                result['style_url'] = f"/api/features/collections/{collection_id}/styles/{created_style_id}"
 
             return func.HttpResponse(
                 json.dumps(result, indent=2, default=str),

@@ -1702,7 +1702,7 @@ class HealthInterface(BaseInterface):
                                 ${{checkedAt ? `
                                     <div class="detail-section">
                                         <div class="detail-label">Last Checked</div>
-                                        <div class="detail-value">${{new Date(checkedAt).toLocaleString()}}</div>
+                                        <div class="detail-value">${{formatDateTime(checkedAt)}}</div>
                                     </div>
                                 ` : ''}}
                                 ${{Object.keys(details).length > 0 ? `
@@ -1927,9 +1927,9 @@ class HealthInterface(BaseInterface):
         function updateLastChecked(timestamp) {{
             const lastChecked = document.getElementById('last-checked');
             if (timestamp) {{
-                lastChecked.textContent = `Last checked: ${{new Date(timestamp).toLocaleString()}}`;
+                lastChecked.textContent = `Last checked: ${{formatDateTime(timestamp)}}`;
             }} else {{
-                lastChecked.textContent = `Last checked: ${{new Date().toLocaleString()}}`;
+                lastChecked.textContent = `Last checked: ${{formatDateTime(new Date())}}`;
             }}
         }}
 

@@ -1,6 +1,6 @@
 # Working Backlog
 
-**Last Updated**: 24 DEC 2025
+**Last Updated**: 27 DEC 2025
 **Source of Truth**: [EPICS.md](/EPICS.md) — Epic/Feature/Story definitions live there
 **Purpose**: Sprint-level task tracking and delegation
 
@@ -145,6 +145,9 @@ Tasks suitable for a colleague with Azure/Python/pipeline expertise but without 
 
 | Date | Item | Epic |
 |------|------|------|
+| 27 DEC 2025 | **Vector Workflow UI COMPLETE** - Submit Vector + Promote interfaces polished | E12 |
+| 27 DEC 2025 | Timestamps standardized to Eastern Time across all interfaces | E12 |
+| 27 DEC 2025 | Architecture diagram v2 created (grid layout, component mapping) | — |
 | 24 DEC 2025 | **F12.3 Migration COMPLETE** - All 14 standard interfaces HTMX-enabled | E12 |
 | 24 DEC 2025 | S12.3.3-5: STAC, Vector, H3, Health, Pipeline, Platform, Docs, Queues, Gallery, Home | E12 |
 | 24 DEC 2025 | Jobs/Tasks interfaces migrated to HTMX (S12.3.1-2) | E12 |

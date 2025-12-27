@@ -101,8 +101,8 @@ def h3_aggregation_finalize(params: Dict[str, Any], context: Dict[str, Any] = No
                               actual_stat_count=actual_stat_count,
                               reported_stats=total_stats_computed)
 
-        # STEP 3: Update stat_registry provenance
-        registry_updated = h3_repo.update_stat_registry_provenance(
+        # STEP 3: Update dataset_registry provenance
+        registry_updated = h3_repo.update_dataset_registry_provenance(
             id=dataset_id,
             job_id=source_job_id,
             cell_count=total_cells_processed

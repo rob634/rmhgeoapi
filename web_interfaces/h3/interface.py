@@ -3,11 +3,12 @@ H3 Grid Status interface module.
 
 Web dashboard for monitoring H3 hexagonal grid coverage at different resolutions.
 
-Features (24 DEC 2025 - S12.3.4):
+Features (27 DEC 2025 - Updated):
     - HTMX enabled for future partial updates
     - Visual display of H3 resolution levels 2-7
     - Cell count per resolution with status indicators
     - Resolution info (average cell size)
+    - **Data Source Catalog** - displays registered h3.source_catalog entries
     - Auto-refresh capability
 
 Exports:
@@ -74,6 +75,12 @@ class H3Interface(BaseInterface):
             <!-- Resolution Grid -->
             <div class="section-title">Resolution Levels</div>
             <div id="resolution-grid" class="resolution-grid">
+                <div class="spinner"></div>
+            </div>
+
+            <!-- Source Catalog Section -->
+            <div class="section-title">Data Sources <span id="source-count" class="badge">--</span></div>
+            <div id="source-catalog" class="source-catalog">
                 <div class="spinner"></div>
             </div>
 
@@ -296,6 +303,137 @@ class H3Interface(BaseInterface):
         .info-table tr:hover {
             background: var(--ds-bg);
         }
+
+        /* H3-specific: Source catalog */
+        .source-catalog {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .source-card {
+            background: white;
+            border: 1px solid var(--ds-gray-light);
+            border-radius: 8px;
+            padding: 20px;
+            transition: all 0.2s ease;
+        }
+
+        .source-card:hover {
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            border-color: var(--ds-blue-primary);
+        }
+
+        .source-card.inactive {
+            opacity: 0.6;
+            background: #f9fafb;
+        }
+
+        .source-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 12px;
+        }
+
+        .source-title {
+            font-size: 16px;
+            font-weight: 600;
+            color: var(--ds-navy);
+            margin: 0;
+        }
+
+        .source-id {
+            font-size: 11px;
+            color: var(--ds-gray);
+            font-family: monospace;
+            margin-top: 4px;
+        }
+
+        .source-badges {
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+        }
+
+        .source-badge {
+            font-size: 10px;
+            padding: 3px 8px;
+            border-radius: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .source-badge.theme {
+            background: #EBF5FF;
+            color: var(--ds-blue-primary);
+        }
+
+        .source-badge.type {
+            background: #F0FDF4;
+            color: #059669;
+        }
+
+        .source-badge.inactive {
+            background: #FEE2E2;
+            color: #DC2626;
+        }
+
+        .source-description {
+            font-size: 13px;
+            color: var(--ds-gray);
+            margin-bottom: 15px;
+            line-height: 1.5;
+        }
+
+        .source-meta {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            font-size: 12px;
+            padding-top: 12px;
+            border-top: 1px solid var(--ds-gray-light);
+        }
+
+        .source-meta-item {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .source-meta-label {
+            color: var(--ds-gray);
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .source-meta-value {
+            color: var(--ds-navy);
+            font-weight: 600;
+        }
+
+        .source-empty {
+            grid-column: 1 / -1;
+            text-align: center;
+            padding: 40px;
+            color: var(--ds-gray);
+        }
+
+        .source-empty-icon {
+            font-size: 48px;
+            margin-bottom: 12px;
+        }
+
+        .badge {
+            background: var(--ds-blue-primary);
+            color: white;
+            font-size: 12px;
+            padding: 2px 10px;
+            border-radius: 12px;
+            margin-left: 8px;
+            font-weight: 600;
+        }
         """
 
     def _generate_custom_js(self) -> str:
@@ -320,22 +458,33 @@ class H3Interface(BaseInterface):
         async function loadData() {
             const summaryCard = document.getElementById('summary-card');
             const resolutionGrid = document.getElementById('resolution-grid');
+            const sourceCatalog = document.getElementById('source-catalog');
             const errorState = document.getElementById('error-state');
 
             // Show loading
             summaryCard.innerHTML = '<div class="spinner"></div>';
             resolutionGrid.innerHTML = '<div class="spinner"></div>';
+            sourceCatalog.innerHTML = '<div class="spinner"></div>';
             errorState.classList.add('hidden');
 
             try {
-                // Fetch H3 stats from API
-                const response = await fetchJSON(`${API_BASE_URL}/api/h3/stats`);
+                // Fetch H3 stats and sources in parallel
+                const [statsResponse, sourcesResponse] = await Promise.all([
+                    fetchJSON(`${API_BASE_URL}/api/h3/stats`),
+                    fetchJSON(`${API_BASE_URL}/api/h3/sources`).catch(err => {
+                        console.warn('Could not load sources:', err);
+                        return { sources: [] };
+                    })
+                ]);
 
                 // Render summary
-                renderSummary(response);
+                renderSummary(statsResponse);
 
                 // Render resolution cards
-                renderResolutionGrid(response);
+                renderResolutionGrid(statsResponse);
+
+                // Render source catalog
+                renderSourceCatalog(sourcesResponse);
 
             } catch (error) {
                 console.error('Error loading H3 data:', error);
@@ -400,7 +549,82 @@ class H3Interface(BaseInterface):
         function showError(message) {
             document.getElementById('summary-card').innerHTML = '';
             document.getElementById('resolution-grid').innerHTML = '';
+            document.getElementById('source-catalog').innerHTML = '';
             document.getElementById('error-state').classList.remove('hidden');
             document.getElementById('error-message').textContent = message;
+        }
+
+        function renderSourceCatalog(data) {
+            const sources = data.sources || [];
+            const container = document.getElementById('source-catalog');
+            const countBadge = document.getElementById('source-count');
+
+            // Update count badge
+            countBadge.textContent = sources.length;
+
+            if (sources.length === 0) {
+                container.innerHTML = `
+                    <div class="source-empty">
+                        <div class="source-empty-icon">📦</div>
+                        <h3>No Data Sources Registered</h3>
+                        <p>Register data sources using POST /api/h3/sources</p>
+                    </div>
+                `;
+                return;
+            }
+
+            let html = '';
+            for (const source of sources) {
+                const isActive = source.is_active !== false;
+                const theme = source.theme || 'unknown';
+                const sourceType = source.source_type || 'unknown';
+                const resolution = source.native_resolution_m ? `${source.native_resolution_m}m` : '--';
+                const h3Range = source.recommended_h3_res_min && source.recommended_h3_res_max
+                    ? `${source.recommended_h3_res_min}-${source.recommended_h3_res_max}`
+                    : '--';
+
+                html += `
+                    <div class="source-card ${isActive ? '' : 'inactive'}">
+                        <div class="source-header">
+                            <div>
+                                <h4 class="source-title">${source.display_name || source.id}</h4>
+                                <div class="source-id">${source.id}</div>
+                            </div>
+                            <div class="source-badges">
+                                <span class="source-badge theme">${theme}</span>
+                                <span class="source-badge type">${sourceType.replace('_', ' ')}</span>
+                                ${!isActive ? '<span class="source-badge inactive">Inactive</span>' : ''}
+                            </div>
+                        </div>
+                        <div class="source-description">
+                            ${source.description || 'No description available'}
+                        </div>
+                        <div class="source-meta">
+                            <div class="source-meta-item">
+                                <span class="source-meta-label">Resolution</span>
+                                <span class="source-meta-value">${resolution}</span>
+                            </div>
+                            <div class="source-meta-item">
+                                <span class="source-meta-label">H3 Levels</span>
+                                <span class="source-meta-value">${h3Range}</span>
+                            </div>
+                            ${source.collection_id ? `
+                            <div class="source-meta-item">
+                                <span class="source-meta-label">Collection</span>
+                                <span class="source-meta-value">${source.collection_id}</span>
+                            </div>
+                            ` : ''}
+                            ${source.source_provider ? `
+                            <div class="source-meta-item">
+                                <span class="source-meta-label">Provider</span>
+                                <span class="source-meta-value">${source.source_provider}</span>
+                            </div>
+                            ` : ''}
+                        </div>
+                    </div>
+                `;
+            }
+
+            container.innerHTML = html;
         }
         """

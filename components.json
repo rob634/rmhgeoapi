@@ -1,0 +1,108 @@
+{
+    "system": {
+        "diagram_components": {
+            "platform_api": {
+                "name": "rmhazuregeoapi",
+                "label": "Platform API",
+                "desc": "REST API for job submission and platform management",
+                "azure_type": "Function App"
+            },
+            "job_queue": {
+                "name": "job-queue",
+                "label": "Job Queue",
+                "desc": "Azure Service Bus queue for job orchestration messages",
+                "azure_type": "Service Bus Queue"
+            },
+            "orchestrator": {
+                "name": "orchestrator",
+                "label": "Orchestrator",
+                "desc": "CoreMachine orchestration engine - manages job lifecycle",
+                "azure_type": "Function App"
+            },
+            "job_table": {
+                "name": "app.jobs",
+                "label": "Job Table",
+                "desc": "PostgreSQL table storing job state and metadata",
+                "azure_type": "Azure Database for PostgreSQL"
+            },
+            "task_table": {
+                "name": "app.tasks",
+                "label": "Task Table",
+                "desc": "PostgreSQL table storing task state and results",
+                "azure_type": "Azure Database for PostgreSQL"
+            },
+            "parallel_task_worker": {
+                "name": "parallel-task-worker",
+                "label": "I/O Worker",
+                "desc": "Function App processing I/O-bound tasks (file transfers)",
+                "azure_type": "Function App"
+            },
+            "compute_task_worker": {
+                "name": "compute-task-worker",
+                "label": "RAM Worker",
+                "desc": "Function App processing CPU/RAM-intensive tasks",
+                "azure_type": "Function App"
+            },
+            "long_task_worker": {
+                "name": "long-task-worker",
+                "label": "Long Worker",
+                "desc": "Container App for long-running ETL operations (>10 min)",
+                "azure_type": "Web App"
+            },
+            "parallel_task_queue": {
+                "name": "parallel-task-queue",
+                "label": "Parallel Task",
+                "desc": "Service Bus queue for I/O-bound parallel tasks",
+                "azure_type": "Service Bus Queue"
+            },
+            "compute_task_queue": {
+                "name": "compute-task-queue",
+                "label": "Compute Task",
+                "desc": "Service Bus queue for CPU/RAM-intensive tasks",
+                "azure_type": "Service Bus Queue"
+            },
+            "long_task_queue": {
+                "name": "long-task-queue",
+                "label": "Long Task",
+                "desc": "Service Bus queue for long-running tasks",
+                "azure_type": "Service Bus Queue"
+            },
+            "bronze_storage": {
+                "name": "rmhazuregeobronze",
+                "label": "Input Data",
+                "desc": "Bronze zone - raw input files (GeoTIFF, GeoJSON, etc.)",
+                "azure_type": "Storage Account"
+            },
+            "silver_storage": {
+                "name": "rmhazuregeosilver",
+                "label": "Output Data",
+                "desc": "Silver zone - processed COGs and optimized data",
+                "azure_type": "Storage Account"
+            },
+            "geo_tables": {
+                "name": "geo schema",
+                "label": "PostGIS",
+                "desc": "PostGIS schema for vector data and spatial queries",
+                "azure_type": "Azure Database for PostgreSQL"
+            },
+            "ogc_api": {
+                "name": "ogc-features",
+                "label": "OGC Features",
+                "desc": "OGC API - Features endpoint for vector data access",
+                "azure_type": "Function App"
+            },
+            "aux_api": {
+                "name": "stac-api",
+                "label": "STAC API",
+                "desc": "SpatioTemporal Asset Catalog API for metadata search",
+                "azure_type": "Function App"
+            },
+            "titiler_app": {
+                "name": "titiler-pgstac",
+                "label": "TiTiler",
+                "desc": "Dynamic tile server for COG visualization",
+                "azure_type": "Web App"
+            }
+        }
+    }
+}

@@ -460,7 +460,183 @@ class TasksInterface(BaseInterface):
             font-size: 11px;
             color: #626F86;
             font-family: 'Courier New', monospace;
-            margin-bottom: 12px;
+            margin-bottom: 8px;
+        }
+
+        /* Expected count display - shows Stage 1 chunk count for Stage 2 visibility */
+        .expected-count {
+            font-size: 10px;
+            font-weight: 600;
+            color: #0071BC;
+            background: #E3F2FD;
+            padding: 4px 10px;
+            border-radius: 12px;
+            margin-bottom: 10px;
+            display: inline-block;
+        }
+
+        /* Stage metrics display */
+        .stage-metrics {
+            font-size: 9px;
+            color: #626F86;
+            margin-top: 8px;
+            padding-top: 8px;
+            border-top: 1px solid #E5E8EB;
+        }
+
+        .stage-metrics .metric-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 2px;
+        }
+
+        .stage-metrics .metric-label {
+            color: #8993A4;
+        }
+
+        .stage-metrics .metric-value {
+            font-weight: 600;
+            color: #44546F;
+        }
+
+        .stage-metrics .metric-value.rate {
+            color: #10B981;
+        }
+
+        /* Processing metrics panel */
+        .metrics-panel {
+            background: linear-gradient(135deg, #F0F9FF 0%, #E0F2FE 100%);
+            border: 1px solid #BAE6FD;
+            border-radius: 12px;
+            padding: 16px 20px;
+            margin-bottom: 20px;
+        }
+
+        .metrics-panel h3 {
+            font-size: 14px;
+            font-weight: 600;
+            color: #0369A1;
+            margin: 0 0 12px 0;
+        }
+
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+            gap: 16px;
+        }
+
+        .metric-card {
+            background: white;
+            border-radius: 8px;
+            padding: 12px;
+            text-align: center;
+        }
+
+        .metric-card .metric-value {
+            font-size: 24px;
+            font-weight: 700;
+            color: #0284C7;
+        }
+
+        .metric-card .metric-label {
+            font-size: 11px;
+            color: #64748B;
+            margin-top: 4px;
+        }
+
+        .metric-card.rate .metric-value {
+            color: #10B981;
+        }
+
+        .metric-card.time .metric-value {
+            color: #8B5CF6;
+        }
+
+        /* Results panel for completed jobs */
+        .results-panel {
+            margin-top: 20px;
+            padding: 20px;
+            background: linear-gradient(135deg, #ECFDF5 0%, #D1FAE5 100%);
+            border: 1px solid #10B981;
+            border-radius: 12px;
+        }
+
+        .results-panel h4 {
+            font-size: 16px;
+            font-weight: 600;
+            color: #065F46;
+            margin: 0 0 16px 0;
+        }
+
+        .results-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 12px;
+            margin-bottom: 16px;
+        }
+
+        .result-item {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .result-label {
+            font-size: 11px;
+            font-weight: 600;
+            color: #047857;
+            text-transform: uppercase;
+        }
+
+        .result-value {
+            font-size: 14px;
+            color: #065F46;
+        }
+
+        .result-value code {
+            background: rgba(16, 185, 129, 0.15);
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-family: 'Monaco', 'Courier New', monospace;
+            font-size: 13px;
+        }
+
+        .results-links {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        .result-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 12px 20px;
+            background: white;
+            border: 2px solid #10B981;
+            border-radius: 8px;
+            color: #065F46;
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 14px;
+            transition: all 0.2s;
+        }
+
+        .result-link:hover {
+            background: #10B981;
+            color: white;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
+        }
+
+        .result-link-primary {
+            background: #10B981;
+            color: white;
+        }
+
+        .result-link-primary:hover {
+            background: #059669;
+            border-color: #059669;
         }
 
         .stage-counts {
@@ -1003,7 +1179,7 @@ class TasksInterface(BaseInterface):
                 name: 'Vector ETL Pipeline',
                 stages: [
                     {{ number: 1, name: 'Prepare', taskType: 'process_vector_prepare', description: 'Load, validate, chunk data' }},
-                    {{ number: 2, name: 'Upload', taskType: 'process_vector_upload', description: 'Fan-out chunk uploads' }},
+                    {{ number: 2, name: 'Upload', taskType: 'process_vector_upload', description: 'Fan-out chunk uploads', expectCountFromStage1: true }},
                     {{ number: 3, name: 'Catalog', taskType: 'create_vector_stac', description: 'Create STAC record' }}
                 ]
             }},
@@ -1142,13 +1318,17 @@ class TasksInterface(BaseInterface):
                 ]);
 
                 const tasks = tasksData.tasks || [];
+                const metrics = tasksData.metrics || {{}};
                 const job = jobResponse.job || jobResponse;
 
-                // Render job summary
-                renderJobSummary(job);
+                // Render job summary (pass tasks for Stage 1 metadata)
+                renderJobSummary(job, tasks);
 
-                // Render workflow diagram
-                renderWorkflowDiagram(job, tasks);
+                // Render metrics panel if we have metrics
+                renderMetricsPanel(metrics, job);
+
+                // Render workflow diagram (pass metrics for stage-level display)
+                renderWorkflowDiagram(job, tasks, metrics);
 
                 // Render task details
                 if (tasks.length > 0) {{
@@ -1162,8 +1342,34 @@ class TasksInterface(BaseInterface):
             }}
         }}
 
+        // Helper: Get Stage 1 metadata from completed task or job result
+        function getStage1Metadata(job, tasks) {{
+            // First check job result_data summary (for completed jobs)
+            const summary = job.result_data?.summary;
+            if (summary?.stage_1_metadata) {{
+                return summary.stage_1_metadata;
+            }}
+
+            // Otherwise check Stage 1 task result (for in-progress jobs)
+            const stage1Task = tasks?.find(t =>
+                t.stage === 1 &&
+                t.status === 'completed' &&
+                t.result_data
+            );
+
+            if (stage1Task?.result_data?.result) {{
+                const r = stage1Task.result_data.result;
+                return {{
+                    chunk_count: r.num_chunks || r.chunk_count,
+                    total_features: r.total_features,
+                    chunk_size_used: r.chunk_size_used
+                }};
+            }}
+            return null;
+        }}
+
         // Render job summary card
-        function renderJobSummary(job) {{
+        function renderJobSummary(job, tasks) {{
             const taskCounts = job.result_data?.tasks_by_status || {{}};
             const pending = taskCounts.pending || 0;
             const queued = taskCounts.queued || 0;
@@ -1171,6 +1377,9 @@ class TasksInterface(BaseInterface):
             const completed = taskCounts.completed || 0;
             const failed = taskCounts.failed || 0;
             const total = pending + queued + processing + completed + failed;
+
+            // Get Stage 1 metadata if available
+            const stage1Meta = getStage1Metadata(job, tasks);
 
             let statusClass = 'status-' + (job.status || 'queued');
             let html = '';
@@ -1189,6 +1398,27 @@ class TasksInterface(BaseInterface):
             const doneTasks = completed + failed;
             const progressPct = total > 0 ? ((doneTasks / total) * 100).toFixed(0) : 0;
 
+            // Build Stage 1 metadata items if available
+            let stage1MetaItems = '';
+            if (stage1Meta) {{
+                if (stage1Meta.total_features) {{
+                    stage1MetaItems += `
+                        <div class="summary-item">
+                            <span class="summary-label">Total Features</span>
+                            <span class="summary-value" style="font-size: 14px;">${{stage1Meta.total_features.toLocaleString()}}</span>
+                        </div>
+                    `;
+                }}
+                if (stage1Meta.chunk_count) {{
+                    stage1MetaItems += `
+                        <div class="summary-item">
+                            <span class="summary-label">Chunks</span>
+                            <span class="summary-value" style="color: #0071BC;">${{stage1Meta.chunk_count}}</span>
+                        </div>
+                    `;
+                }}
+            }}
+
             html += `
                 <div class="job-summary-grid">
                     <div class="summary-item">
@@ -1203,6 +1433,7 @@ class TasksInterface(BaseInterface):
                         <span class="summary-label">Stage</span>
                         <span class="summary-value">${{job.stage || 0}} / ${{job.total_stages || '?'}}</span>
                     </div>
+                    ${{stage1MetaItems}}
                     <div class="summary-item">
                         <span class="summary-label">Tasks</span>
                         <span class="summary-value">${{total}}</span>
@@ -1229,11 +1460,155 @@ class TasksInterface(BaseInterface):
                 `;
             }}
 
+            // Add results panel for completed jobs with URLs
+            if (job.status === 'completed' && job.result_data) {{
+                const resultData = job.result_data;
+                const viewerUrl = resultData.viewer_url;
+                const ogcFeaturesUrl = resultData.ogc_features_url;
+                const tableName = resultData.table_name;
+                const schema = resultData.schema;
+                const blobName = resultData.blob_name;
+
+                if (viewerUrl || ogcFeaturesUrl) {{
+                    html += `
+                        <div class="results-panel">
+                            <h4>🎉 Results</h4>
+                            <div class="results-grid">
+                    `;
+
+                    if (tableName) {{
+                        html += `
+                            <div class="result-item">
+                                <span class="result-label">Table</span>
+                                <span class="result-value"><code>${{schema || 'geo'}}.${{tableName}}</code></span>
+                            </div>
+                        `;
+                    }}
+
+                    if (blobName) {{
+                        html += `
+                            <div class="result-item">
+                                <span class="result-label">Source</span>
+                                <span class="result-value">${{blobName}}</span>
+                            </div>
+                        `;
+                    }}
+
+                    html += `</div><div class="results-links">`;
+
+                    if (viewerUrl) {{
+                        html += `
+                            <a href="${{viewerUrl}}" target="_blank" class="result-link result-link-primary">
+                                🗺️ Open Map Viewer
+                            </a>
+                        `;
+                    }}
+
+                    if (ogcFeaturesUrl) {{
+                        html += `
+                            <a href="${{ogcFeaturesUrl}}" target="_blank" class="result-link">
+                                📡 OGC Features API
+                            </a>
+                        `;
+                    }}
+
+                    html += `</div></div>`;
+                }}
+            }}
+
             document.getElementById('job-summary-card').innerHTML = html;
         }}
 
+        // Render metrics panel with processing rate and execution time stats
+        function renderMetricsPanel(metrics, job) {{
+            // Only show if we have meaningful metrics
+            const hasMetrics = Object.values(metrics).some(m => m.avg_execution_time_ms !== null);
+            if (!hasMetrics) {{
+                return; // No metrics to display yet
+            }}
+
+            // Find stage 2 metrics (the parallel upload stage with the most data)
+            const stage2Metrics = metrics[2] || null;
+            const currentStage = job.stage || 1;
+
+            let html = `
+                <div class="metrics-panel">
+                    <h3>📊 Processing Metrics</h3>
+                    <div class="metrics-grid">
+            `;
+
+            // Stage 2 metrics (most interesting for parallel processing)
+            if (stage2Metrics && stage2Metrics.avg_execution_time_ms) {{
+                html += `
+                    <div class="metric-card rate">
+                        <div class="metric-value">${{stage2Metrics.tasks_per_minute || '-'}}</div>
+                        <div class="metric-label">Tasks/Min (Stage 2)</div>
+                    </div>
+                    <div class="metric-card time">
+                        <div class="metric-value">${{stage2Metrics.avg_execution_time_formatted || '-'}}</div>
+                        <div class="metric-label">Avg Task Time</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-value">${{(stage2Metrics.min_execution_time_ms/1000).toFixed(1)}}s - ${{(stage2Metrics.max_execution_time_ms/1000).toFixed(1)}}s</div>
+                        <div class="metric-label">Min - Max Time</div>
+                    </div>
+                `;
+
+                // Estimate time remaining if still processing
+                if (currentStage === 2 && stage2Metrics.pending > 0 && stage2Metrics.avg_execution_time_ms) {{
+                    const remainingMs = stage2Metrics.pending * stage2Metrics.avg_execution_time_ms;
+                    const remainingMin = Math.ceil(remainingMs / 60000);
+                    html += `
+                        <div class="metric-card">
+                            <div class="metric-value">~${{remainingMin}} min</div>
+                            <div class="metric-label">Est. Remaining</div>
+                        </div>
+                    `;
+                }}
+            }}
+
+            // Show Stage 1 metrics if available
+            const stage1Metrics = metrics[1] || null;
+            if (stage1Metrics && stage1Metrics.avg_execution_time_ms) {{
+                html += `
+                    <div class="metric-card time">
+                        <div class="metric-value">${{stage1Metrics.avg_execution_time_formatted || '-'}}</div>
+                        <div class="metric-label">Stage 1 Time</div>
+                    </div>
+                `;
+            }}
+
+            html += `
+                    </div>
+                </div>
+            `;
+
+            // Insert after workflow diagram
+            const workflowDiagram = document.getElementById('workflow-diagram');
+            const metricsDiv = document.createElement('div');
+            metricsDiv.innerHTML = html;
+            workflowDiagram.parentNode.insertBefore(metricsDiv.firstElementChild, workflowDiagram.nextSibling);
+        }}
+
+        // Helper: Get expected Stage 2 task count from Stage 1 result
+        function getExpectedStage2Count(tasks) {{
+            // Find completed Stage 1 task with result data
+            const stage1Task = tasks.find(t =>
+                t.stage === 1 &&
+                t.status === 'completed' &&
+                t.task_type === 'process_vector_prepare' &&
+                t.result_data
+            );
+
+            if (stage1Task && stage1Task.result_data) {{
+                const result = stage1Task.result_data.result || {{}};
+                return result.num_chunks || result.chunk_count || null;
+            }}
+            return null;
+        }}
+
         // Render workflow diagram
-        function renderWorkflowDiagram(job, tasks) {{
+        function renderWorkflowDiagram(job, tasks, metrics = {{}}) {{
             const workflowDef = WORKFLOW_DEFINITIONS[job.job_type];
 
             if (!workflowDef) {{
@@ -1241,6 +1616,9 @@ class TasksInterface(BaseInterface):
                 renderGenericWorkflow(job, tasks);
                 return;
             }}
+
+            // Get expected Stage 2 count if available (for process_vector)
+            const expectedStage2Count = getExpectedStage2Count(tasks);
 
             // Group tasks by stage
             const tasksByStage = {{}};
@@ -1281,11 +1659,18 @@ class TasksInterface(BaseInterface):
                     html += `<div class="stage-arrow">&#8594;</div>`;
                 }}
 
+                // Show expected count badge for Stage 2 if available
+                let expectedBadge = '';
+                if (stage.expectCountFromStage1 && expectedStage2Count) {{
+                    expectedBadge = `<div class="expected-count">Expected: ${{expectedStage2Count}} tasks</div>`;
+                }}
+
                 html += `
                     <div class="stage-box ${{stageStatus}}" onclick="scrollToStage(${{stage.number}})">
                         <div class="stage-number">${{stage.number}}</div>
                         <div class="stage-name">${{stage.name}}</div>
                         <div class="stage-task-type">${{stage.taskType}}</div>
+                        ${{expectedBadge}}
                         <div class="stage-counts">
                 `;
 
@@ -1314,6 +1699,23 @@ class TasksInterface(BaseInterface):
                 // Add progress bar if there are tasks
                 if (totalTasks > 0) {{
                     html += renderProgressBar(stageCounts, totalTasks);
+                }}
+
+                // Add stage metrics if available
+                const stageMetrics = metrics[stage.number];
+                if (stageMetrics && stageMetrics.avg_execution_time_ms) {{
+                    html += `
+                        <div class="stage-metrics">
+                            <div class="metric-row">
+                                <span class="metric-label">Avg:</span>
+                                <span class="metric-value">${{stageMetrics.avg_execution_time_formatted}}</span>
+                            </div>
+                            <div class="metric-row">
+                                <span class="metric-label">Rate:</span>
+                                <span class="metric-value rate">${{stageMetrics.tasks_per_minute || '-'}} /min</span>
+                            </div>
+                        </div>
+                    `;
                 }}
 
                 html += `</div>`;

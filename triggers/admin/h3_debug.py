@@ -119,6 +119,8 @@ class AdminH3DebugTrigger:
                 return self._deploy_normalized_schema(req)
             elif operation == 'drop_normalized_schema':
                 return self._drop_normalized_schema(req)
+            elif operation == 'seed_country_cells':
+                return self._seed_country_cells(req)
             else:
                 return func.HttpResponse(
                     json.dumps({
@@ -134,7 +136,8 @@ class AdminH3DebugTrigger:
                             "delete_grids",
                             "nuke_h3",
                             "deploy_normalized_schema",
-                            "drop_normalized_schema"
+                            "drop_normalized_schema",
+                            "seed_country_cells"
                         ]
                     }),
                     status_code=404,
@@ -966,6 +969,159 @@ class AdminH3DebugTrigger:
 
         except Exception as e:
             logger.error(f"❌ Drop normalized schema error: {e}\n{traceback.format_exc()}")
+            return func.HttpResponse(
+                json.dumps({
+                    "error": str(e),
+                    "traceback": traceback.format_exc()
+                }),
+                status_code=500,
+                mimetype="application/json"
+            )
+
+    def _seed_country_cells(self, req: func.HttpRequest) -> func.HttpResponse:
+        """
+        Seed H3 cells for a country using bbox-based polyfill.
+
+        DEV/TEST ONLY - Generates H3 cells for a country without requiring admin0 table.
+        Uses predefined bboxes for common test countries.
+
+        Query params:
+            iso3: str - ISO3 country code (e.g., "GRC" for Greece)
+            resolution: int - H3 resolution (default: 6)
+            confirm: str - Must be "yes" to actually insert
+
+        Example:
+            /api/h3/debug?operation=seed_country_cells&iso3=GRC&resolution=6&confirm=yes
+        """
+        try:
+            iso3 = req.params.get('iso3', '').upper()
+            resolution = int(req.params.get('resolution', 6))
+            confirm = req.params.get('confirm', '').lower() == 'yes'
+
+            # Predefined bboxes for test countries (minx, miny, maxx, maxy)
+            COUNTRY_BBOXES = {
+                'GRC': (19.3, 34.8, 29.7, 41.8),   # Greece
+                'ALB': (19.3, 39.6, 21.1, 42.7),   # Albania
+                'MLT': (14.1, 35.8, 14.6, 36.1),   # Malta (small, fast test)
+                'CYP': (32.2, 34.6, 34.6, 35.7),   # Cyprus
+                'RWA': (28.8, -2.9, 30.9, -1.0),   # Rwanda
+            }
+
+            if not iso3:
+                return func.HttpResponse(
+                    json.dumps({
+                        "error": "iso3 parameter required",
+                        "available_countries": list(COUNTRY_BBOXES.keys()),
+                        "usage": "?operation=seed_country_cells&iso3=GRC&resolution=6&confirm=yes"
+                    }),
+                    status_code=400,
+                    mimetype="application/json"
+                )
+
+            if iso3 not in COUNTRY_BBOXES:
+                return func.HttpResponse(
+                    json.dumps({
+                        "error": f"Unknown country code: {iso3}",
+                        "available_countries": list(COUNTRY_BBOXES.keys()),
+                        "hint": "Add new countries to COUNTRY_BBOXES in h3_debug.py"
+                    }),
+                    status_code=400,
+                    mimetype="application/json"
+                )
+
+            if resolution < 0 or resolution > 10:
+                return func.HttpResponse(
+                    json.dumps({
+                        "error": f"Resolution must be 0-10, got {resolution}",
+                        "hint": "Resolution 6 is recommended for country-level analysis"
+                    }),
+                    status_code=400,
+                    mimetype="application/json"
+                )
+
+            bbox = COUNTRY_BBOXES[iso3]
+
+            # Generate cells using h3 polyfill
+            import h3
+            from shapely.geometry import Polygon
+
+            polygon = Polygon([
+                (bbox[0], bbox[1]),
+                (bbox[2], bbox[1]),
+                (bbox[2], bbox[3]),
+                (bbox[0], bbox[3]),
+                (bbox[0], bbox[1])
+            ])
+
+            # Get H3 cells
+            h3_cells = list(h3.geo_to_cells(polygon, res=resolution))
+            cell_count = len(h3_cells)
+
+            if not confirm:
+                return func.HttpResponse(
+                    json.dumps({
+                        "dry_run": True,
+                        "iso3": iso3,
+                        "resolution": resolution,
+                        "bbox": bbox,
+                        "cells_to_insert": cell_count,
+                        "message": f"Add &confirm=yes to insert {cell_count:,} cells",
+                        "timestamp": datetime.now(timezone.utc).isoformat()
+                    }),
+                    mimetype="application/json"
+                )
+
+            # Convert to cell dicts with geometry
+            cells_data = []
+            mappings_data = []
+
+            for h3_str in h3_cells:
+                h3_index = h3.str_to_int(h3_str)
+                # Get cell boundary
+                boundary = h3.cell_to_boundary(h3_str)
+                # Create WKT polygon (h3 returns lat,lon so we swap to lon,lat)
+                coords = [(lon, lat) for lat, lon in boundary]
+                coords.append(coords[0])  # Close polygon
+                wkt = "POLYGON((" + ",".join(f"{x} {y}" for x, y in coords) + "))"
+
+                # Skip parent_h3_index to avoid FK constraint issues during test seeding
+                # In production, use bootstrap_h3_land_grid_pyramid for proper hierarchy
+                cells_data.append({
+                    'h3_index': h3_index,
+                    'resolution': resolution,
+                    'geom_wkt': wkt,
+                    'parent_h3_index': None,  # Skip hierarchy for test seeding
+                    'is_land': True
+                })
+
+                mappings_data.append({
+                    'h3_index': h3_index,
+                    'iso3': iso3,
+                    'coverage_pct': 1.0
+                })
+
+            # Insert cells and mappings
+            cells_inserted = self.h3_repo.insert_cells(cells_data, source_job_id=f"seed_{iso3}_res{resolution}")
+            mappings_inserted = self.h3_repo.insert_cell_admin0_mappings(mappings_data)
+
+            logger.info(f"✅ Seeded {cells_inserted} cells and {mappings_inserted} mappings for {iso3} at res {resolution}")
+
+            return func.HttpResponse(
+                json.dumps({
+                    "success": True,
+                    "iso3": iso3,
+                    "resolution": resolution,
+                    "bbox": bbox,
+                    "cells_inserted": cells_inserted,
+                    "mappings_inserted": mappings_inserted,
+                    "duplicates_skipped": cell_count - cells_inserted,
+                    "timestamp": datetime.now(timezone.utc).isoformat()
+                }),
+                mimetype="application/json"
+            )
+
+        except Exception as e:
+            logger.error(f"❌ Seed country cells error: {e}\n{traceback.format_exc()}")
             return func.HttpResponse(
                 json.dumps({
                     "error": str(e),

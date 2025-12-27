@@ -448,8 +448,8 @@ class StacInterface(BaseInterface):
                 // Extent - Temporal
                 if (collection.extent?.temporal?.interval) {
                     const interval = collection.extent.temporal.interval[0];
-                    const start = interval[0] ? new Date(interval[0]).toLocaleDateString() : 'Open';
-                    const end = interval[1] ? new Date(interval[1]).toLocaleDateString() : 'Open';
+                    const start = interval[0] ? formatDate(interval[0]) : 'Open';
+                    const end = interval[1] ? formatDate(interval[1]) : 'Open';
                     metadataItems.push(`
                         <div class="metadata-item">
                             <div class="label">Temporal Extent</div>

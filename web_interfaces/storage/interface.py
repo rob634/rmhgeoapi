@@ -155,8 +155,11 @@ class StorageInterface(BaseInterface):
                 last_modified = blob.get('last_modified', '')
                 if last_modified:
                     try:
+                        from zoneinfo import ZoneInfo
+                        eastern = ZoneInfo('America/New_York')
                         dt = datetime.fromisoformat(last_modified.replace('Z', '+00:00'))
-                        date_str = dt.strftime('%Y-%m-%d')
+                        dt_eastern = dt.astimezone(eastern)
+                        date_str = dt_eastern.strftime('%m/%d/%Y')
                     except Exception:
                         date_str = 'N/A'
                 else:
@@ -199,19 +202,22 @@ class StorageInterface(BaseInterface):
                 </tr>'''
                 rows.append(row)
 
-            # Also update stats via OOB swap
+            # OOB swap to update stats - wrapped in <template> to avoid HTML parsing issues
+            # See: https://github.com/bigskysoftware/htmx/issues/1900
             total_size = sum(b.get('size', 0) for b in blobs) / (1024 * 1024)
             stats_html = f'''
-            <div id="stats-content" hx-swap-oob="innerHTML:#stats-content">
-                <div class="stat-item">
-                    <span class="stat-label">Files Loaded</span>
-                    <span class="stat-value">{len(blobs)}</span>
+            <template>
+                <div id="stats-content" hx-swap-oob="true">
+                    <div class="stat-item">
+                        <span class="stat-label">Files Loaded</span>
+                        <span class="stat-value">{len(blobs)}</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">Total Size</span>
+                        <span class="stat-value">{total_size:.2f} MB</span>
+                    </div>
                 </div>
-                <div class="stat-item">
-                    <span class="stat-label">Total Size</span>
-                    <span class="stat-value">{total_size:.2f} MB</span>
-                </div>
-            </div>
+            </template>
             '''
 
             return '\n'.join(rows) + stats_html
@@ -281,11 +287,14 @@ class StorageInterface(BaseInterface):
             # Get etag
             etag = props.get('etag', '')
 
-            # Format last modified
+            # Format last modified in Eastern Time
             if last_modified and last_modified != 'N/A':
                 try:
+                    from zoneinfo import ZoneInfo
+                    eastern = ZoneInfo('America/New_York')
                     dt = datetime.fromisoformat(last_modified.replace('Z', '+00:00'))
-                    last_modified = dt.strftime('%Y-%m-%d %H:%M:%S')
+                    dt_eastern = dt.astimezone(eastern)
+                    last_modified = dt_eastern.strftime('%m/%d/%Y %I:%M:%S %p') + ' ET'
                 except Exception:
                     pass
 

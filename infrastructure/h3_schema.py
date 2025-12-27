@@ -111,6 +111,7 @@ class H3SchemaDeployer:
             ("create_h3_cell_admin0", self._deploy_cell_admin0_table),
             ("create_h3_cell_admin1", self._deploy_cell_admin1_table),
             ("create_h3_dataset_registry", self._deploy_dataset_registry_table),
+            ("create_h3_source_catalog", self._deploy_source_catalog_table),
             ("create_h3_zonal_stats_partitioned", self._deploy_zonal_stats_partitioned_table),
             ("create_h3_point_stats", self._deploy_point_stats_table),
             ("create_h3_batch_progress", self._deploy_batch_progress_table),
@@ -618,6 +619,235 @@ class H3SchemaDeployer:
 
             step["status"] = "success"
             logger.info("Table h3.dataset_registry created with indexes")
+
+        except Exception as e:
+            step["status"] = "failed"
+            step["error"] = str(e)
+            raise
+        finally:
+            results["steps"].append(step)
+
+    # ========================================================================
+    # h3.source_catalog - COMPREHENSIVE SOURCE METADATA (27 DEC 2025)
+    # ========================================================================
+
+    # Valid themes for source_catalog (aligned with zonal_stats partitions)
+    VALID_SOURCE_THEMES = [
+        'terrain',        # DEM, slope, aspect
+        'water',          # Flood hazard, surface water, precipitation
+        'climate',        # Temperature, ERA5, CHIRPS
+        'demographics',   # Population, buildings, settlements
+        'infrastructure', # Roads, nighttime lights, OSM features
+        'landcover',      # ESA WorldCover, NLCD, Dynamic World
+        'vegetation',     # NDVI, LAI, forest cover
+        'risk',           # Hazard/risk aggregations
+    ]
+
+    def _deploy_source_catalog_table(self, conn, results: Dict):
+        """
+        Create h3.source_catalog table - comprehensive source metadata for pipelines.
+
+        This is the enhanced replacement for dataset_registry with full support for:
+        - Planetary Computer STAC API with dynamic tile discovery
+        - Azure Blob storage with SAS tokens
+        - Direct URL sources
+        - PostGIS vector tables
+
+        Columns:
+            id VARCHAR(100) PRIMARY KEY - Source identifier (e.g., 'cop-dem-glo-30')
+            display_name VARCHAR(255) - Human-readable name
+            description TEXT - Detailed explanation
+
+            -- Source Connection
+            source_type VARCHAR(50) - planetary_computer, azure_blob, url, postgis
+            stac_api_url VARCHAR(500) - For STAC sources
+            collection_id VARCHAR(100) - STAC collection
+            asset_key VARCHAR(50) - Asset to use (default: 'data')
+
+            -- Tile/Item Pattern (for tiled datasets)
+            item_id_pattern VARCHAR(255) - Regex for item IDs
+            tile_size_degrees REAL - Tile extent in degrees
+            tile_count INTEGER - Approximate total tiles
+            tile_naming_convention VARCHAR(100) - lat_lon_grid, utm_zone, etc.
+
+            -- Raster Properties
+            native_resolution_m REAL - Meters per pixel
+            crs VARCHAR(50) - Coordinate reference system
+            data_type VARCHAR(20) - float32, int16, etc.
+            nodata_value DOUBLE PRECISION - Nodata value
+            value_range JSONB - {"min": -500, "max": 9000}
+            band_count SMALLINT - Number of bands
+            band_info JSONB - Band metadata array
+
+            -- Aggregation Configuration
+            theme VARCHAR(50) - terrain, climate, demographics, etc.
+            recommended_stats VARCHAR[] - Recommended statistics
+            recommended_h3_res_min SMALLINT - Min recommended resolution
+            recommended_h3_res_max SMALLINT - Max recommended resolution
+            aggregation_method VARCHAR(50) - zonal_stats, point_in_poly, etc.
+            unit VARCHAR(50) - Unit of measurement
+
+            -- Coverage
+            spatial_extent GEOMETRY(Polygon, 4326) - Bounding polygon
+            coverage_type VARCHAR(20) - global, regional, national
+            land_only BOOLEAN - Land coverage only
+
+            -- Temporal
+            temporal_extent_start TIMESTAMPTZ - Start of temporal extent
+            temporal_extent_end TIMESTAMPTZ - End of temporal extent
+            is_temporal_series BOOLEAN - Time-series dataset flag
+            update_frequency VARCHAR(50) - static, daily, monthly, yearly
+
+            -- Performance Hints
+            avg_tile_size_mb REAL - Average tile size in MB
+            recommended_batch_size INTEGER - Cells per batch
+            requires_auth BOOLEAN - Requires authentication
+
+            -- Provenance
+            source_provider VARCHAR(255) - Data source organization
+            source_url VARCHAR(500) - Link to documentation
+            source_license VARCHAR(100) - SPDX license
+            citation TEXT - Required citation
+
+            -- Metadata
+            created_at TIMESTAMPTZ - Creation timestamp
+            updated_at TIMESTAMPTZ - Last update timestamp
+            is_active BOOLEAN - Soft delete flag
+        """
+        step = {"name": "create_h3_source_catalog", "status": "pending"}
+
+        try:
+            with conn.cursor() as cur:
+                # Create table
+                cur.execute(sql.SQL("""
+                    CREATE TABLE IF NOT EXISTS {schema}.{table} (
+                        -- Identity
+                        id VARCHAR(100) PRIMARY KEY,
+                        display_name VARCHAR(255) NOT NULL,
+                        description TEXT,
+
+                        -- Source Connection
+                        source_type VARCHAR(50) NOT NULL
+                            CONSTRAINT source_catalog_source_type_check
+                            CHECK (source_type IN ('planetary_computer', 'azure_blob', 'url', 'postgis')),
+                        stac_api_url VARCHAR(500),
+                        collection_id VARCHAR(100),
+                        asset_key VARCHAR(50) DEFAULT 'data',
+
+                        -- Tile/Item Pattern (for tiled datasets)
+                        item_id_pattern VARCHAR(255),
+                        tile_size_degrees REAL,
+                        tile_count INTEGER,
+                        tile_naming_convention VARCHAR(100),
+
+                        -- Raster Properties
+                        native_resolution_m REAL,
+                        crs VARCHAR(50) DEFAULT 'EPSG:4326',
+                        data_type VARCHAR(20),
+                        nodata_value DOUBLE PRECISION,
+                        value_range JSONB,
+                        band_count SMALLINT DEFAULT 1,
+                        band_info JSONB,
+
+                        -- Aggregation Configuration
+                        theme VARCHAR(50) NOT NULL
+                            CONSTRAINT source_catalog_theme_check
+                            CHECK (theme IN (
+                                'terrain', 'water', 'climate', 'demographics',
+                                'infrastructure', 'landcover', 'vegetation', 'risk'
+                            )),
+                        recommended_stats VARCHAR[] DEFAULT ARRAY['mean'],
+                        recommended_h3_res_min SMALLINT DEFAULT 4,
+                        recommended_h3_res_max SMALLINT DEFAULT 8,
+                        aggregation_method VARCHAR(50) DEFAULT 'zonal_stats',
+                        unit VARCHAR(50),
+
+                        -- Coverage
+                        spatial_extent GEOMETRY(Polygon, 4326),
+                        coverage_type VARCHAR(20) DEFAULT 'global'
+                            CONSTRAINT source_catalog_coverage_check
+                            CHECK (coverage_type IN ('global', 'regional', 'national')),
+                        land_only BOOLEAN DEFAULT true,
+
+                        -- Temporal
+                        temporal_extent_start TIMESTAMPTZ,
+                        temporal_extent_end TIMESTAMPTZ,
+                        is_temporal_series BOOLEAN DEFAULT false,
+                        update_frequency VARCHAR(50),
+
+                        -- Performance Hints
+                        avg_tile_size_mb REAL,
+                        recommended_batch_size INTEGER DEFAULT 500,
+                        requires_auth BOOLEAN DEFAULT true,
+
+                        -- Provenance
+                        source_provider VARCHAR(255),
+                        source_url VARCHAR(500),
+                        source_license VARCHAR(100),
+                        citation TEXT,
+
+                        -- Metadata
+                        created_at TIMESTAMPTZ DEFAULT NOW(),
+                        updated_at TIMESTAMPTZ DEFAULT NOW(),
+                        is_active BOOLEAN DEFAULT true
+                    )
+                """).format(
+                    schema=sql.Identifier(self.SCHEMA_NAME),
+                    table=sql.Identifier("source_catalog")
+                ))
+
+                # Index on theme for partition-aligned queries
+                cur.execute(sql.SQL("""
+                    CREATE INDEX IF NOT EXISTS idx_h3_source_catalog_theme
+                    ON {schema}.{table}(theme)
+                """).format(
+                    schema=sql.Identifier(self.SCHEMA_NAME),
+                    table=sql.Identifier("source_catalog")
+                ))
+
+                # Index on source_type for source queries
+                cur.execute(sql.SQL("""
+                    CREATE INDEX IF NOT EXISTS idx_h3_source_catalog_source_type
+                    ON {schema}.{table}(source_type)
+                """).format(
+                    schema=sql.Identifier(self.SCHEMA_NAME),
+                    table=sql.Identifier("source_catalog")
+                ))
+
+                # Index on active sources
+                cur.execute(sql.SQL("""
+                    CREATE INDEX IF NOT EXISTS idx_h3_source_catalog_active
+                    ON {schema}.{table}(is_active)
+                    WHERE is_active = true
+                """).format(
+                    schema=sql.Identifier(self.SCHEMA_NAME),
+                    table=sql.Identifier("source_catalog")
+                ))
+
+                # Spatial index on extent
+                cur.execute(sql.SQL("""
+                    CREATE INDEX IF NOT EXISTS idx_h3_source_catalog_extent
+                    ON {schema}.{table} USING GIST(spatial_extent)
+                    WHERE spatial_extent IS NOT NULL
+                """).format(
+                    schema=sql.Identifier(self.SCHEMA_NAME),
+                    table=sql.Identifier("source_catalog")
+                ))
+
+                # Table comment
+                cur.execute(sql.SQL("""
+                    COMMENT ON TABLE {schema}.{table} IS
+                    'Comprehensive metadata catalog for H3 aggregation data sources. '
+                    'Supports Planetary Computer STAC, Azure Blob, direct URLs, and PostGIS. '
+                    'Enables dynamic tile discovery and declarative pipeline definitions. '
+                    'Created: 27 DEC 2025.'
+                """).format(
+                    schema=sql.Identifier(self.SCHEMA_NAME),
+                    table=sql.Identifier("source_catalog")
+                ))
+
+            step["status"] = "success"
+            logger.info("Table h3.source_catalog created with indexes")
 
         except Exception as e:
             step["status"] = "failed"

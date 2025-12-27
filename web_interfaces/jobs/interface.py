@@ -108,15 +108,22 @@ class JobsInterface(BaseInterface):
                 if job_status in stats:
                     stats[job_status] += 1
 
-                # Format created_at
+                # Format created_at in Eastern Time
                 if created_at:
                     try:
                         from datetime import datetime
-                        if hasattr(created_at, 'strftime'):
-                            created_str = created_at.strftime('%Y-%m-%d %H:%M')
+                        from zoneinfo import ZoneInfo
+                        eastern = ZoneInfo('America/New_York')
+
+                        if hasattr(created_at, 'astimezone'):
+                            # Already a datetime object
+                            dt_eastern = created_at.astimezone(eastern)
                         else:
+                            # Parse from string (assume UTC if no timezone)
                             dt = datetime.fromisoformat(str(created_at).replace('Z', '+00:00'))
-                            created_str = dt.strftime('%Y-%m-%d %H:%M')
+                            dt_eastern = dt.astimezone(eastern)
+
+                        created_str = dt_eastern.strftime('%m/%d/%Y %I:%M %p') + ' ET'
                     except Exception:
                         created_str = str(created_at)[:16]
                 else:
@@ -139,9 +146,11 @@ class JobsInterface(BaseInterface):
                 </tr>'''
                 rows.append(row)
 
-            # Also update stats via OOB swap
+            # OOB swap RE-ENABLED (26 DEC 2025) - Fixed by wrapping in <template>
+            # Issue: Browser HTML parser can't handle <div> inside <tbody> context
+            # Fix: Wrap OOB element in <template> tag for proper HTMX extraction
+            # See: https://github.com/bigskysoftware/htmx/issues/1900
             stats_html = self._render_stats_oob(stats)
-
             return '\n'.join(rows) + stats_html
 
         except Exception as e:
@@ -174,30 +183,41 @@ class JobsInterface(BaseInterface):
         return f'<div class="task-summary">{" ".join(parts)}</div>'
 
     def _render_stats_oob(self, stats: Dict[str, int]) -> str:
-        """Render stats as OOB swap."""
+        """
+        Render stats as OOB swap wrapped in template tag.
+
+        HTMX OOB swaps have parsing issues when mixed with table elements (<tr>, <td>).
+        The browser's HTML parser can't handle a <div> inside a <tbody> context.
+        Wrapping in <template> allows HTMX to extract the OOB element correctly.
+
+        See: https://github.com/bigskysoftware/htmx/issues/1900
+        See: https://htmx.org/attributes/hx-swap-oob/
+        """
         return f'''
-        <div id="stats-content" hx-swap-oob="innerHTML:#stats-content">
-            <div class="stat-card">
-                <div class="stat-label">Total Jobs</div>
-                <div class="stat-value">{stats['total']}</div>
+        <template>
+            <div id="stats-content" class="stats-banner" hx-swap-oob="true">
+                <div class="stat-card">
+                    <div class="stat-label">Total Jobs</div>
+                    <div class="stat-value">{stats['total']}</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Queued</div>
+                    <div class="stat-value stat-queued">{stats['queued']}</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Processing</div>
+                    <div class="stat-value stat-processing">{stats['processing']}</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Completed</div>
+                    <div class="stat-value stat-completed">{stats['completed']}</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Failed</div>
+                    <div class="stat-value stat-failed">{stats['failed']}</div>
+                </div>
             </div>
-            <div class="stat-card">
-                <div class="stat-label">Queued</div>
-                <div class="stat-value stat-queued">{stats['queued']}</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-label">Processing</div>
-                <div class="stat-value stat-processing">{stats['processing']}</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-label">Completed</div>
-                <div class="stat-value stat-completed">{stats['completed']}</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-label">Failed</div>
-                <div class="stat-value stat-failed">{stats['failed']}</div>
-            </div>
-        </div>
+        </template>
         '''
 
     def _render_stats_fragment(self, request: func.HttpRequest) -> str:
@@ -225,12 +245,12 @@ class JobsInterface(BaseInterface):
 
         Mirrors the dbadmin endpoint query but returns dicts for rendering.
         """
-        from config import Config
+        from config import get_config
         from infrastructure.postgresql import PostgreSQLRepository
 
-        config = Config()
+        config = get_config()
         repo = PostgreSQLRepository()
-        app_schema = config.app_schema
+        app_schema = config.database.app_schema
 
         # Build query with task_counts subquery
         query_parts = [
@@ -423,6 +443,14 @@ class JobsInterface(BaseInterface):
         Only job-specific styles remain here.
         """
         return """
+        /* Fix: Ensure spinner-container respects htmx-indicator */
+        .spinner-container.htmx-indicator {
+            display: none !important;
+        }
+        .spinner-container.htmx-indicator.htmx-request {
+            display: flex !important;
+        }
+
         /* Jobs-specific: Stats banner as grid */
         .stats-banner {
             display: grid;

@@ -631,7 +631,7 @@ class AdminDbDataTrigger:
             query = f"""
                 SELECT task_id, parent_job_id, task_type, status::text, stage, task_index,
                        parameters, result_data, metadata, error_details, heartbeat, retry_count,
-                       created_at, updated_at
+                       execution_started_at, created_at, updated_at
                 FROM {self.config.app_schema}.tasks
                 WHERE parent_job_id = %s
                 ORDER BY stage ASC, task_index ASC
@@ -647,6 +647,12 @@ class AdminDbDataTrigger:
 
                     tasks = []
                     for row in rows:
+                        # Calculate execution time if task is completed and has start time
+                        execution_time_ms = None
+                        if row['execution_started_at'] and row['updated_at'] and row['status'] == 'completed':
+                            delta = row['updated_at'] - row['execution_started_at']
+                            execution_time_ms = int(delta.total_seconds() * 1000)
+
                         tasks.append({
                             'task_id': row['task_id'],
                             'parent_job_id': row['parent_job_id'],
@@ -660,13 +666,57 @@ class AdminDbDataTrigger:
                             'error_details': row['error_details'],
                             'heartbeat': row['heartbeat'].isoformat() if row['heartbeat'] else None,
                             'retry_count': row['retry_count'],
+                            'execution_started_at': row['execution_started_at'].isoformat() if row['execution_started_at'] else None,
+                            'execution_time_ms': execution_time_ms,
                             'created_at': row['created_at'].isoformat() if row['created_at'] else None,
                             'updated_at': row['updated_at'].isoformat() if row['updated_at'] else None
                         })
 
+            # Calculate aggregate metrics per stage
+            stage_metrics = {}
+            for task in tasks:
+                stage = task['stage']
+                if stage not in stage_metrics:
+                    stage_metrics[stage] = {
+                        'total': 0,
+                        'completed': 0,
+                        'failed': 0,
+                        'processing': 0,
+                        'pending': 0,
+                        'queued': 0,
+                        'execution_times_ms': []
+                    }
+                stage_metrics[stage]['total'] += 1
+                stage_metrics[stage][task['status']] = stage_metrics[stage].get(task['status'], 0) + 1
+                if task['execution_time_ms']:
+                    stage_metrics[stage]['execution_times_ms'].append(task['execution_time_ms'])
+
+            # Compute averages and rates
+            metrics_summary = {}
+            for stage, metrics in stage_metrics.items():
+                times = metrics['execution_times_ms']
+                completed = metrics['completed']
+                avg_time_ms = sum(times) / len(times) if times else None
+                min_time_ms = min(times) if times else None
+                max_time_ms = max(times) if times else None
+
+                metrics_summary[stage] = {
+                    'total_tasks': metrics['total'],
+                    'completed': completed,
+                    'failed': metrics['failed'],
+                    'processing': metrics['processing'],
+                    'pending': metrics['pending'] + metrics.get('queued', 0),
+                    'avg_execution_time_ms': round(avg_time_ms) if avg_time_ms else None,
+                    'min_execution_time_ms': min_time_ms,
+                    'max_execution_time_ms': max_time_ms,
+                    'avg_execution_time_formatted': f"{avg_time_ms/1000:.1f}s" if avg_time_ms else None,
+                    'tasks_per_minute': round(60000 / avg_time_ms, 1) if avg_time_ms and avg_time_ms > 0 else None
+                }
+
             result = {
                 'job_id': job_id,
                 'tasks': tasks,
+                'metrics': metrics_summary,
                 'query_info': {
                     'total_tasks': len(tasks)
                 },

@@ -173,11 +173,16 @@ class BaseOGCTrigger:
         if hasattr(data, 'model_dump'):
             data = data.model_dump(mode='json', exclude_none=True)
 
-        return func.HttpResponse(
+        response = func.HttpResponse(
             body=json.dumps(data, indent=2),
             status_code=status_code,
             mimetype=content_type
         )
+        # Add CORS headers for local development/testing
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        response.headers['Access-Control-Allow-Methods'] = 'GET, OPTIONS'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
+        return response
 
     def _error_response(
         self,
@@ -200,11 +205,13 @@ class BaseOGCTrigger:
             "code": error_type,
             "description": message
         }
-        return func.HttpResponse(
+        response = func.HttpResponse(
             body=json.dumps(error_body, indent=2),
             status_code=status_code,
             mimetype="application/json"
         )
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        return response
 
 
 # ============================================================================

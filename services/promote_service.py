@@ -123,13 +123,20 @@ class PromoteService:
                 "error": "Cannot specify both stac_collection_id and stac_item_id"
             }
 
-        # Verify STAC reference exists
+        # Verify STAC reference exists (or OGC Features collection for system tables)
         if stac_collection_id:
-            if not self._verify_stac_collection_exists(stac_collection_id):
+            stac_exists = self._verify_stac_collection_exists(stac_collection_id)
+            ogc_exists = self._verify_ogc_features_collection_exists(stac_collection_id) if not stac_exists else False
+
+            if not stac_exists and not ogc_exists:
                 return {
                     "success": False,
-                    "error": f"STAC collection '{stac_collection_id}' not found in PgSTAC"
+                    "error": f"Collection '{stac_collection_id}' not found in PgSTAC or OGC Features"
                 }
+
+            # Log if using OGC-only collection
+            if ogc_exists and not stac_exists:
+                logger.info(f"Using OGC Features collection (not in STAC): {stac_collection_id}")
         else:
             if not self._verify_stac_item_exists(stac_item_id):
                 return {
@@ -509,29 +516,41 @@ class PromoteService:
             logger.warning(f"Failed to verify STAC collection '{collection_id}': {e}")
             return False
 
+    def _verify_ogc_features_collection_exists(self, collection_id: str) -> bool:
+        """
+        Check if an OGC Features collection exists.
+
+        Uses OGCFeaturesRepository which properly handles geometry_columns lookup.
+        """
+        try:
+            from ogc_features.repository import OGCFeaturesRepository
+
+            ogc_repo = OGCFeaturesRepository()
+            # get_collection_metadata raises ValueError if not found
+            metadata = ogc_repo.get_collection_metadata(collection_id)
+            logger.info(f"✅ Verified OGC Features collection exists: {collection_id}")
+            return True
+        except ValueError:
+            # Collection not found
+            logger.warning(f"⚠️ OGC collection not found: {collection_id}")
+            return False
+        except Exception as e:
+            logger.warning(f"Failed to verify OGC collection '{collection_id}': {e}")
+            return False
+
     def _verify_stac_item_exists(self, item_id: str) -> bool:
         """Check if a STAC item exists in PgSTAC."""
         try:
-            # Query pgstac.items directly by ID (24 DEC 2025 - partition-aware)
-            from infrastructure.postgresql import PostgreSQLRepository
-            repo = PostgreSQLRepository()
+            from infrastructure.pgstac_bootstrap import get_item_by_id
 
-            with repo._get_connection() as conn:
-                with conn.cursor() as cur:
-                    # Simple existence check - partitioned table query works via parent
-                    cur.execute(
-                        "SELECT EXISTS(SELECT 1 FROM pgstac.items WHERE id = %s)",
-                        [item_id]
-                    )
-                    result = cur.fetchone()
-                    exists = result[0] if result else False
+            result = get_item_by_id(item_id)
+            # get_item_by_id returns error dict if not found
+            if 'error' in result:
+                logger.warning(f"⚠️ STAC item not found: {item_id}")
+                return False
 
-                    if exists:
-                        logger.info(f"✅ Verified STAC item exists: {item_id}")
-                        return True
-                    else:
-                        logger.warning(f"⚠️ STAC item not found: {item_id}")
-                        return False
+            logger.info(f"✅ Verified STAC item exists: {item_id}")
+            return True
         except Exception as e:
             logger.warning(f"Failed to verify STAC item '{item_id}': {e}")
             # If we can't verify, allow it (may be external STAC)

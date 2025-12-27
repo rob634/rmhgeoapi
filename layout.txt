@@ -1,0 +1,6 @@
+  |          C1|       C2|               C3|         C4|          C5|C6
+R1|            |            |              |Input Data |Output Data |
+R2|            |            | Task Table   |           |PostGIS     |
+R3|            |Job Table   | Parallel Task| I/O Worker|            | OGC Feature
+R4|Platform API|Orchestrator|  Compute Task| RAM Worker|            |STAC API
+R5|            |Job Queue   | Long Task    |Long Worker|            |TiTIler

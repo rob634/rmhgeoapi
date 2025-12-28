@@ -1358,9 +1358,10 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                         """, (schema, table))
                         columns = [row['column_name'] for row in cur.fetchall()]
 
-                        has_iso3 = 'iso3' in columns
+                        # Accept both iso3 and iso_a3 as valid ISO3 column names
+                        has_iso3 = 'iso3' in columns or 'iso_a3' in columns
                         has_geom = 'geom' in columns or 'geometry' in columns
-                        has_name = 'name' in columns
+                        has_name = 'name' in columns or 'nam_0' in columns
 
                         # Check row count - use pg_stat for performance (12 DEC 2025)
                         row_count = 0
@@ -1386,15 +1387,20 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                         # Build result
                         ready = has_iso3 and has_geom and isinstance(row_count, int) and row_count > 0
 
+                        # Determine which column names were found
+                        iso3_col = 'iso3' if 'iso3' in columns else ('iso_a3' if 'iso_a3' in columns else None)
+                        geom_col = 'geom' if 'geom' in columns else ('geometry' if 'geometry' in columns else None)
+                        name_col = 'name' if 'name' in columns else ('nam_0' if 'nam_0' in columns else None)
+
                         result = {
                             "admin0_table": admin0_table,
                             "admin0_source": admin0_source,
                             "exists": True,
                             "row_count": row_count,
                             "columns": {
-                                "iso3": has_iso3,
-                                "geom": has_geom,
-                                "name": has_name
+                                "iso3": iso3_col,
+                                "geom": geom_col,
+                                "name": name_col
                             },
                             "spatial_index": has_spatial_index,
                             "ready_for_attribution": ready,

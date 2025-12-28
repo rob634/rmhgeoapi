@@ -371,6 +371,12 @@ try:
 except ImportError as e:
     logger.warning(f"⚠️ Could not import Promote interface: {e}")
 
+try:
+    from .submit_raster import interface as _submit_raster
+    logger.info("✅ Imported Submit Raster interface module")
+except ImportError as e:
+    logger.warning(f"⚠️ Could not import Submit Raster interface: {e}")
+
 
 # Public API
 __all__ = [

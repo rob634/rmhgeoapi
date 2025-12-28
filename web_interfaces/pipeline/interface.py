@@ -502,6 +502,9 @@ class PipelineInterface(BaseInterface):
                                 <div class="stat-label">Success Rate</div>
                             </div>
                         </div>
+                        <div class="pipeline-action">
+                            <a href="/api/interface/submit-raster" class="btn btn-submit">🗺️ Submit Raster Job</a>
+                        </div>
                     </div>
 
                     <!-- Process Raster Collection -->

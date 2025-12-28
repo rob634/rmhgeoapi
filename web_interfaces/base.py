@@ -672,6 +672,253 @@ class BaseInterface(ABC):
             padding-bottom: 10px;
             border-bottom: 1px solid var(--ds-gray-light);
         }
+
+        /* ============================================================
+           SYSTEM STATUS BAR - Fixed bottom status bar (28 DEC 2025)
+           ============================================================ */
+        .system-status-bar {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: #1a1a2e;
+            color: #e0e0e0;
+            padding: 8px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 12px;
+            z-index: 1000;
+            border-top: 1px solid #333;
+        }
+
+        .status-bar-left,
+        .status-bar-right {
+            display: flex;
+            gap: 20px;
+            align-items: center;
+        }
+
+        .status-bar-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .status-bar-label {
+            color: #888;
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .status-bar-value {
+            font-weight: 600;
+            font-family: 'Monaco', 'Courier New', monospace;
+        }
+
+        .status-bar-value.good {
+            color: #4ade80;
+        }
+
+        .status-bar-value.warning {
+            color: #fbbf24;
+        }
+
+        .status-bar-value.critical {
+            color: #f87171;
+        }
+
+        .status-bar-meter {
+            width: 60px;
+            height: 6px;
+            background: #333;
+            border-radius: 3px;
+            overflow: hidden;
+        }
+
+        .status-bar-meter-fill {
+            height: 100%;
+            transition: width 0.3s, background 0.3s;
+        }
+
+        .status-bar-meter-fill.good {
+            background: #4ade80;
+        }
+
+        .status-bar-meter-fill.warning {
+            background: #fbbf24;
+        }
+
+        .status-bar-meter-fill.critical {
+            background: #f87171;
+        }
+
+        .status-bar-divider {
+            width: 1px;
+            height: 20px;
+            background: #333;
+        }
+
+        /* Activity log toggle button */
+        .activity-log-toggle {
+            background: transparent;
+            border: 1px solid #444;
+            color: #e0e0e0;
+            padding: 4px 10px;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 11px;
+            transition: all 0.2s;
+        }
+
+        .activity-log-toggle:hover {
+            background: #333;
+            border-color: #555;
+        }
+
+        /* Adjust body padding for fixed status bar */
+        body.has-status-bar {
+            padding-bottom: 50px;
+        }
+
+        /* ============================================================
+           ACTIVITY LOG PANEL - Slide-up panel (28 DEC 2025)
+           ============================================================ */
+        .activity-log-panel {
+            position: fixed;
+            bottom: 40px;
+            right: 20px;
+            width: 400px;
+            max-height: 300px;
+            background: #1a1a2e;
+            border: 1px solid #333;
+            border-radius: 8px 8px 0 0;
+            box-shadow: 0 -4px 20px rgba(0,0,0,0.3);
+            z-index: 999;
+            display: none;
+            flex-direction: column;
+        }
+
+        .activity-log-panel.open {
+            display: flex;
+        }
+
+        .activity-log-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 15px;
+            background: #252540;
+            border-bottom: 1px solid #333;
+            border-radius: 8px 8px 0 0;
+        }
+
+        .activity-log-title {
+            color: #e0e0e0;
+            font-weight: 600;
+            font-size: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .activity-log-close {
+            background: transparent;
+            border: none;
+            color: #888;
+            cursor: pointer;
+            font-size: 16px;
+            padding: 0;
+            line-height: 1;
+        }
+
+        .activity-log-close:hover {
+            color: #e0e0e0;
+        }
+
+        .activity-log-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 0;
+            font-family: 'Monaco', 'Courier New', monospace;
+            font-size: 11px;
+        }
+
+        .activity-log-entry {
+            padding: 8px 15px;
+            border-bottom: 1px solid #252540;
+            display: flex;
+            gap: 10px;
+        }
+
+        .activity-log-entry:hover {
+            background: #252540;
+        }
+
+        .activity-log-time {
+            color: #666;
+            flex-shrink: 0;
+            width: 70px;
+        }
+
+        .activity-log-type {
+            flex-shrink: 0;
+            width: 60px;
+            font-weight: 600;
+        }
+
+        .activity-log-type.api {
+            color: #60a5fa;
+        }
+
+        .activity-log-type.job {
+            color: #4ade80;
+        }
+
+        .activity-log-type.error {
+            color: #f87171;
+        }
+
+        .activity-log-type.system {
+            color: #a78bfa;
+        }
+
+        .activity-log-message {
+            color: #e0e0e0;
+            flex: 1;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .activity-log-empty {
+            color: #666;
+            text-align: center;
+            padding: 30px;
+            font-style: italic;
+        }
+
+        /* Job progress indicator in status bar */
+        .job-progress-mini {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .job-progress-mini .progress-bar {
+            width: 80px;
+            height: 4px;
+            background: #333;
+            border-radius: 2px;
+            overflow: hidden;
+        }
+
+        .job-progress-mini .progress-fill {
+            height: 100%;
+            background: var(--ds-blue-primary);
+            transition: width 0.3s;
+        }
     """
 
     # Common JavaScript utilities
@@ -1020,6 +1267,195 @@ class BaseInterface(ABC):
             const msgEl = document.getElementById(errorMessage);
             if (msgEl) msgEl.textContent = message;
         }
+
+        // ============================================================
+        // SYSTEM STATUS BAR - Polling and updates (28 DEC 2025)
+        // ============================================================
+
+        // Activity log entries (kept in memory)
+        const activityLog = [];
+        const MAX_LOG_ENTRIES = 50;
+
+        /**
+         * Add entry to activity log
+         * @param {string} type - Entry type (api, job, error, system)
+         * @param {string} message - Log message
+         */
+        function logActivity(type, message) {
+            const entry = {
+                time: new Date(),
+                type: type,
+                message: message
+            };
+            activityLog.unshift(entry);
+            if (activityLog.length > MAX_LOG_ENTRIES) {
+                activityLog.pop();
+            }
+            updateActivityLogPanel();
+        }
+
+        /**
+         * Update the activity log panel UI
+         */
+        function updateActivityLogPanel() {
+            const content = document.getElementById('activity-log-content');
+            if (!content) return;
+
+            if (activityLog.length === 0) {
+                content.innerHTML = '<div class="activity-log-empty">No activity yet</div>';
+                return;
+            }
+
+            const html = activityLog.map(entry => {
+                const time = entry.time.toLocaleTimeString(LOCALE, {
+                    timeZone: TIMEZONE,
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit'
+                });
+                return `
+                    <div class="activity-log-entry">
+                        <span class="activity-log-time">${time}</span>
+                        <span class="activity-log-type ${entry.type}">${entry.type.toUpperCase()}</span>
+                        <span class="activity-log-message" title="${escapeHtml(entry.message)}">${escapeHtml(entry.message)}</span>
+                    </div>
+                `;
+            }).join('');
+
+            content.innerHTML = html;
+        }
+
+        /**
+         * Toggle activity log panel visibility
+         */
+        function toggleActivityLog() {
+            const panel = document.getElementById('activity-log-panel');
+            if (panel) {
+                panel.classList.toggle('open');
+            }
+        }
+
+        /**
+         * Update system status bar with data from /api/system/stats
+         * @param {Object} data - Stats data from API
+         */
+        function updateSystemStatusBar(data) {
+            // Memory
+            const memPercent = data.memory?.used_percent || 0;
+            const memAvailable = data.memory?.available_mb || 0;
+            const memClass = memPercent > 90 ? 'critical' : memPercent > 75 ? 'warning' : 'good';
+
+            const memValue = document.getElementById('status-mem-value');
+            const memMeter = document.getElementById('status-mem-meter');
+            if (memValue) {
+                memValue.textContent = memPercent.toFixed(0) + '%';
+                memValue.className = 'status-bar-value ' + memClass;
+            }
+            if (memMeter) {
+                memMeter.style.width = memPercent + '%';
+                memMeter.className = 'status-bar-meter-fill ' + memClass;
+            }
+
+            // CPU
+            const cpuPercent = data.cpu?.percent || 0;
+            const cpuClass = cpuPercent > 90 ? 'critical' : cpuPercent > 75 ? 'warning' : 'good';
+
+            const cpuValue = document.getElementById('status-cpu-value');
+            const cpuMeter = document.getElementById('status-cpu-meter');
+            if (cpuValue) {
+                cpuValue.textContent = cpuPercent.toFixed(0) + '%';
+                cpuValue.className = 'status-bar-value ' + cpuClass;
+            }
+            if (cpuMeter) {
+                cpuMeter.style.width = cpuPercent + '%';
+                cpuMeter.className = 'status-bar-meter-fill ' + cpuClass;
+            }
+
+            // Jobs
+            const jobsActive = data.jobs?.active || 0;
+            const jobsPending = data.jobs?.pending || 0;
+            const jobsCompleted = data.jobs?.completed_24h || 0;
+            const jobsFailed = data.jobs?.failed_24h || 0;
+
+            const activeEl = document.getElementById('status-jobs-active');
+            const pendingEl = document.getElementById('status-jobs-pending');
+            const completedEl = document.getElementById('status-jobs-completed');
+            const failedEl = document.getElementById('status-jobs-failed');
+
+            if (activeEl) activeEl.textContent = jobsActive;
+            if (pendingEl) pendingEl.textContent = jobsPending;
+            if (completedEl) completedEl.textContent = jobsCompleted;
+            if (failedEl) {
+                failedEl.textContent = jobsFailed;
+                failedEl.className = 'status-bar-value ' + (jobsFailed > 0 ? 'warning' : 'good');
+            }
+
+            // Update timestamp
+            const tsEl = document.getElementById('status-timestamp');
+            if (tsEl) {
+                tsEl.textContent = formatTime(data.timestamp);
+            }
+        }
+
+        /**
+         * Fetch and update system stats
+         */
+        async function refreshSystemStats() {
+            try {
+                const response = await fetch('/api/system/stats');
+                if (response.ok) {
+                    const data = await response.json();
+                    updateSystemStatusBar(data);
+                }
+            } catch (error) {
+                console.warn('Failed to fetch system stats:', error);
+            }
+        }
+
+        // Initialize system status polling
+        document.addEventListener('DOMContentLoaded', function() {
+            // Check if status bar exists
+            if (document.getElementById('system-status-bar')) {
+                // Add body class for padding
+                document.body.classList.add('has-status-bar');
+
+                // Initial fetch
+                refreshSystemStats();
+
+                // Poll every 15 seconds
+                setInterval(refreshSystemStats, 15000);
+
+                // Log page load
+                logActivity('system', 'Page loaded: ' + document.title);
+            }
+        });
+
+        // Intercept fetch to log API activity
+        const originalFetch = window.fetch;
+        window.fetch = async function(...args) {
+            const url = typeof args[0] === 'string' ? args[0] : args[0]?.url || 'unknown';
+            const method = args[1]?.method || 'GET';
+
+            // Don't log system stats polling
+            if (!url.includes('/api/system/stats')) {
+                const shortUrl = url.replace(window.location.origin, '');
+                logActivity('api', `${method} ${shortUrl}`);
+            }
+
+            try {
+                const response = await originalFetch.apply(this, args);
+
+                // Log errors
+                if (!response.ok && !url.includes('/api/system/stats')) {
+                    logActivity('error', `HTTP ${response.status}: ${url}`);
+                }
+
+                return response;
+            } catch (error) {
+                logActivity('error', `Network error: ${url}`);
+                throw error;
+            }
+        };
     """
 
     # ========================================================================
@@ -1346,7 +1782,8 @@ class BaseInterface(ABC):
         custom_css: str = "",
         custom_js: str = "",
         include_navbar: bool = True,
-        include_htmx: bool = True
+        include_htmx: bool = True,
+        include_status_bar: bool = True
     ) -> str:
         """
         Wrap content in complete HTML document.
@@ -1357,6 +1794,7 @@ class BaseInterface(ABC):
             - Navigation bar (optional)
             - Content
             - Common JavaScript and custom JavaScript
+            - System status bar with memory/CPU/jobs (optional, default: True)
 
         Args:
             title: Page title (appears in browser tab)
@@ -1365,6 +1803,7 @@ class BaseInterface(ABC):
             custom_js: Additional JavaScript specific to this interface
             include_navbar: Whether to include navigation bar (default: True)
             include_htmx: Whether to include HTMX library (default: True)
+            include_status_bar: Whether to include system status bar (default: True)
 
         Returns:
             Complete HTML document string
@@ -1379,6 +1818,7 @@ class BaseInterface(ABC):
         """
         navbar_html = self._render_navbar() if include_navbar else ""
         htmx_script = f'<script src="https://unpkg.com/htmx.org@{self.HTMX_VERSION}"></script>' if include_htmx else ""
+        status_bar_html = self.render_system_status_bar() if include_status_bar else ""
 
         return f"""<!DOCTYPE html>
 <html lang="en">
@@ -1396,6 +1836,7 @@ class BaseInterface(ABC):
 <body hx-headers='{{"Accept": "application/json"}}'>
     {navbar_html}
     {content}
+    {status_bar_html}
     <script>
         {self.COMMON_JS}
         {self.HTMX_JS}
@@ -2261,5 +2702,99 @@ class BaseInterface(ABC):
              {target_attr}
              hx-swap="innerHTML">
             {initial_content}
+        </div>
+        """
+
+    # ========================================================================
+    # SYSTEM STATUS BAR - Added 28 DEC 2025
+    # ========================================================================
+
+    def render_system_status_bar(self) -> str:
+        """
+        Render the system status bar with memory, CPU, and job stats.
+
+        The status bar is a fixed bottom bar that displays:
+        - Memory usage (% and meter)
+        - CPU usage (% and meter)
+        - Active jobs count
+        - Pending jobs count
+        - 24h completed/failed counts
+        - Activity log toggle button
+
+        The bar auto-refreshes via JavaScript every 15 seconds.
+
+        Returns:
+            HTML string for system status bar
+
+        Example:
+            # In wrap_html or content:
+            status_bar = self.render_system_status_bar()
+        """
+        return """
+        <div id="system-status-bar" class="system-status-bar">
+            <div class="status-bar-left">
+                <!-- Memory -->
+                <div class="status-bar-item">
+                    <span class="status-bar-label">MEM</span>
+                    <span id="status-mem-value" class="status-bar-value good">--</span>
+                    <div class="status-bar-meter">
+                        <div id="status-mem-meter" class="status-bar-meter-fill good" style="width: 0%"></div>
+                    </div>
+                </div>
+
+                <div class="status-bar-divider"></div>
+
+                <!-- CPU -->
+                <div class="status-bar-item">
+                    <span class="status-bar-label">CPU</span>
+                    <span id="status-cpu-value" class="status-bar-value good">--</span>
+                    <div class="status-bar-meter">
+                        <div id="status-cpu-meter" class="status-bar-meter-fill good" style="width: 0%"></div>
+                    </div>
+                </div>
+
+                <div class="status-bar-divider"></div>
+
+                <!-- Jobs Summary -->
+                <div class="status-bar-item">
+                    <span class="status-bar-label">ACTIVE</span>
+                    <span id="status-jobs-active" class="status-bar-value">0</span>
+                </div>
+
+                <div class="status-bar-item">
+                    <span class="status-bar-label">PENDING</span>
+                    <span id="status-jobs-pending" class="status-bar-value">0</span>
+                </div>
+
+                <div class="status-bar-item">
+                    <span class="status-bar-label">24H OK</span>
+                    <span id="status-jobs-completed" class="status-bar-value good">0</span>
+                </div>
+
+                <div class="status-bar-item">
+                    <span class="status-bar-label">24H FAIL</span>
+                    <span id="status-jobs-failed" class="status-bar-value good">0</span>
+                </div>
+            </div>
+
+            <div class="status-bar-right">
+                <span id="status-timestamp" class="status-bar-value" style="color: #666;">--</span>
+                <button class="activity-log-toggle" onclick="toggleActivityLog()">
+                    📋 Activity Log
+                </button>
+            </div>
+        </div>
+
+        <!-- Activity Log Panel -->
+        <div id="activity-log-panel" class="activity-log-panel">
+            <div class="activity-log-header">
+                <span class="activity-log-title">
+                    📋 Activity Log
+                </span>
+                <button class="activity-log-close" onclick="toggleActivityLog()">✕</button>
+            </div>
+            <div id="activity-log-content" class="activity-log-content">
+                <div class="activity-log-empty">No activity yet</div>
+            </div>
         </div>
         """

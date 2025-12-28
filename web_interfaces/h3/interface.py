@@ -509,7 +509,7 @@ class H3Interface(BaseInterface):
                     </div>
                     <div class="summary-item">
                         <span class="summary-label">Schema</span>
-                        <span class="summary-value" style="font-size: 16px;">h3.grids</span>
+                        <span class="summary-value" style="font-size: 16px;">h3.cells</span>
                     </div>
                     <div class="summary-item">
                         <span class="summary-label">Index Type</span>

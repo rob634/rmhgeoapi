@@ -541,7 +541,7 @@ def h3_stats(req: func.HttpRequest) -> func.HttpResponse:
     """
     Get H3 grid cell counts by resolution: GET /api/h3/stats
 
-    Returns cell counts for each resolution level (2-7) in the h3.grids table.
+    Returns cell counts for each resolution level (2-7) in the h3.cells table.
 
     Response:
         {
@@ -561,10 +561,10 @@ def h3_stats(req: func.HttpRequest) -> func.HttpResponse:
 
         repo = PostgreSQLRepository(schema_name='h3')
 
-        # Query cell counts by resolution
+        # Query cell counts by resolution from normalized h3.cells table
         query = """
             SELECT resolution, COUNT(*) as count
-            FROM h3.grids
+            FROM h3.cells
             GROUP BY resolution
             ORDER BY resolution
         """

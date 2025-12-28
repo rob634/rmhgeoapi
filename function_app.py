@@ -574,8 +574,8 @@ def h3_stats(req: func.HttpRequest) -> func.HttpResponse:
                 cur.execute(query)
                 rows = cur.fetchall()
 
-        # Build stats dict
-        stats = {str(row[0]): row[1] for row in rows}
+        # Build stats dict (rows are dict_row objects from psycopg)
+        stats = {str(row['resolution']): row['count'] for row in rows}
 
         return func.HttpResponse(
             json.dumps({

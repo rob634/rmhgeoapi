@@ -496,9 +496,20 @@ class H3Interface(BaseInterface):
         }
 
         function renderSummary(data) {
+            // Handle both array format (from h3_sources) and object format
             const stats = data.stats || {};
-            const totalCells = Object.values(stats).reduce((sum, count) => sum + count, 0);
-            const populatedLevels = Object.keys(stats).filter(k => stats[k] > 0).length;
+            let totalCells = 0;
+            let populatedLevels = 0;
+
+            if (Array.isArray(stats)) {
+                // Array format: [{resolution: 2, cell_count: 1}, ...]
+                totalCells = stats.reduce((sum, item) => sum + (item.cell_count || 0), 0);
+                populatedLevels = stats.filter(item => (item.cell_count || 0) > 0).length;
+            } else {
+                // Object format: {"2": 1, "3": 4, ...}
+                totalCells = Object.values(stats).reduce((sum, count) => sum + count, 0);
+                populatedLevels = Object.keys(stats).filter(k => stats[k] > 0).length;
+            }
 
             const html = `
                 <div class="summary-grid">
@@ -525,8 +536,20 @@ class H3Interface(BaseInterface):
         }
 
         function renderResolutionGrid(data) {
-            const stats = data.stats || {};
+            const rawStats = data.stats || {};
             let html = '';
+
+            // Convert array format to object format for easier lookup
+            let stats = {};
+            if (Array.isArray(rawStats)) {
+                // Array format: [{resolution: 2, cell_count: 1}, ...]
+                rawStats.forEach(item => {
+                    stats[item.resolution] = item.cell_count || 0;
+                });
+            } else {
+                // Already object format
+                stats = rawStats;
+            }
 
             // Render cards for resolutions 2-8
             for (let res = 2; res <= 8; res++) {

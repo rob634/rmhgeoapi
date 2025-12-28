@@ -372,3 +372,186 @@ def deactivate_source(req: HttpRequest) -> HttpResponse:
             status_code=500,
             mimetype="application/json"
         )
+
+
+# ============================================================================
+# H3 CELL STATISTICS
+# ============================================================================
+
+@bp.route(route="h3/stats", methods=["GET"])
+def get_h3_stats(req: HttpRequest) -> HttpResponse:
+    """
+    Get H3 cell statistics with optional country filter.
+
+    Query Parameters:
+        iso3 (str, optional): Filter by ISO3 country code (e.g., 'RWA', 'GRC')
+        resolution (int, optional): Filter by specific resolution (0-15)
+
+    Returns:
+        200: Cell counts grouped by resolution and optionally by country
+        500: Error response
+
+    Examples:
+        GET /api/h3/stats                    - All cells by resolution
+        GET /api/h3/stats?iso3=RWA           - Rwanda cells by resolution
+        GET /api/h3/stats?iso3=RWA&resolution=6  - Rwanda cells at res 6 only
+    """
+    try:
+        from infrastructure.h3_repository import H3Repository
+        from psycopg import sql
+
+        repo = H3Repository()
+
+        # Get query parameters
+        iso3 = req.params.get('iso3')
+        resolution_str = req.params.get('resolution')
+        resolution = int(resolution_str) if resolution_str else None
+
+        # Validate resolution if provided
+        if resolution is not None and (resolution < 0 or resolution > 15):
+            return HttpResponse(
+                json.dumps({"error": "resolution must be between 0 and 15"}),
+                status_code=400,
+                mimetype="application/json"
+            )
+
+        # H3 schema name
+        h3_schema = 'h3'
+
+        # Build query based on filters
+        if iso3:
+            # Query with country filter via cell_admin0 join
+            if resolution is not None:
+                query = sql.SQL("""
+                    SELECT
+                        ca.iso3,
+                        c.resolution,
+                        COUNT(*) as cell_count
+                    FROM {schema}.cells c
+                    JOIN {schema}.cell_admin0 ca ON c.h3_index = ca.h3_index
+                    WHERE ca.iso3 = %s AND c.resolution = %s
+                    GROUP BY ca.iso3, c.resolution
+                    ORDER BY c.resolution
+                """).format(schema=sql.Identifier(h3_schema))
+                params = (iso3.upper(), resolution)
+            else:
+                query = sql.SQL("""
+                    SELECT
+                        ca.iso3,
+                        c.resolution,
+                        COUNT(*) as cell_count
+                    FROM {schema}.cells c
+                    JOIN {schema}.cell_admin0 ca ON c.h3_index = ca.h3_index
+                    WHERE ca.iso3 = %s
+                    GROUP BY ca.iso3, c.resolution
+                    ORDER BY c.resolution
+                """).format(schema=sql.Identifier(h3_schema))
+                params = (iso3.upper(),)
+        else:
+            # Query all cells (no country filter)
+            if resolution is not None:
+                query = sql.SQL("""
+                    SELECT
+                        c.resolution,
+                        COUNT(*) as cell_count
+                    FROM {schema}.cells c
+                    WHERE c.resolution = %s
+                    GROUP BY c.resolution
+                    ORDER BY c.resolution
+                """).format(schema=sql.Identifier(h3_schema))
+                params = (resolution,)
+            else:
+                query = sql.SQL("""
+                    SELECT
+                        c.resolution,
+                        COUNT(*) as cell_count
+                    FROM {schema}.cells c
+                    GROUP BY c.resolution
+                    ORDER BY c.resolution
+                """).format(schema=sql.Identifier(h3_schema))
+                params = ()
+
+        # Execute query
+        with repo._get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(query, params)
+                results = cur.fetchall()
+
+        # Format response
+        stats = [dict(row) for row in results]
+        total_cells = sum(s.get('cell_count', 0) for s in stats)
+
+        return HttpResponse(
+            json.dumps({
+                "stats": stats,
+                "total_cells": total_cells,
+                "filters": {
+                    "iso3": iso3.upper() if iso3 else None,
+                    "resolution": resolution
+                }
+            }),
+            status_code=200,
+            mimetype="application/json"
+        )
+
+    except Exception as e:
+        logger.error(f"Error getting H3 stats: {e}\n{traceback.format_exc()}")
+        return HttpResponse(
+            json.dumps({"error": f"Failed to get H3 stats: {str(e)}"}),
+            status_code=500,
+            mimetype="application/json"
+        )
+
+
+@bp.route(route="h3/stats/countries", methods=["GET"])
+def get_h3_countries(req: HttpRequest) -> HttpResponse:
+    """
+    List all countries with H3 cells and their total counts.
+
+    Returns:
+        200: List of countries with cell counts
+        500: Error response
+    """
+    try:
+        from infrastructure.h3_repository import H3Repository
+        from psycopg import sql
+
+        repo = H3Repository()
+
+        query = sql.SQL("""
+            SELECT
+                ca.iso3,
+                COUNT(DISTINCT ca.h3_index) as cell_count,
+                MIN(c.resolution) as min_resolution,
+                MAX(c.resolution) as max_resolution
+            FROM {schema}.cell_admin0 ca
+            JOIN {schema}.cells c ON ca.h3_index = c.h3_index
+            GROUP BY ca.iso3
+            ORDER BY ca.iso3
+        """).format(schema=sql.Identifier(repo.schema_name))
+
+        with repo._get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(query)
+                results = cur.fetchall()
+
+        countries = [dict(row) for row in results]
+        total_cells = sum(c.get('cell_count', 0) for c in countries)
+
+        return HttpResponse(
+            json.dumps({
+                "countries": countries,
+                "country_count": len(countries),
+                "total_cells": total_cells
+            }),
+            status_code=200,
+            mimetype="application/json"
+        )
+
+    except Exception as e:
+        logger.error(f"Error getting H3 countries: {e}\n{traceback.format_exc()}")
+        return HttpResponse(
+            json.dumps({"error": f"Failed to get H3 countries: {str(e)}"}),
+            status_code=500,
+            mimetype="application/json"
+        )

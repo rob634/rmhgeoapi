@@ -135,12 +135,22 @@ class H3RasterAggregationJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct 
         'item_id': {
             'type': 'str',
             'default': None,
-            'description': 'STAC item ID (required for source_type=planetary_computer)'
+            'description': 'STAC item ID (single tile mode for source_type=planetary_computer)'
+        },
+        'source_id': {
+            'type': 'str',
+            'default': None,
+            'description': 'Reference to h3.source_catalog for dynamic tile discovery (alternative to item_id)'
         },
         'asset': {
             'type': 'str',
             'default': 'data',
             'description': 'Asset key within STAC item (default: "data")'
+        },
+        'theme': {
+            'type': 'str',
+            'default': None,
+            'description': 'Theme for partition routing (auto-detected from source_catalog if source_id provided)'
         },
         # Direct URL source parameter
         'cog_url': {
@@ -262,8 +272,9 @@ class H3RasterAggregationJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct 
         elif source_type == 'planetary_computer':
             if not validated.get('collection'):
                 raise ValueError("'collection' is required when source_type='planetary_computer'")
-            if not validated.get('item_id'):
-                raise ValueError("'item_id' is required when source_type='planetary_computer'")
+            # item_id OR source_id required (source_id enables dynamic tile discovery)
+            if not validated.get('item_id') and not validated.get('source_id'):
+                raise ValueError("'item_id' or 'source_id' is required when source_type='planetary_computer'")
 
         elif source_type == 'url':
             if not validated.get('cog_url'):

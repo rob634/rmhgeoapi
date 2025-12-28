@@ -415,10 +415,7 @@ def get_h3_stats(req: HttpRequest) -> HttpResponse:
                 mimetype="application/json"
             )
 
-        # H3 schema name
-        h3_schema = 'h3'
-
-        # Build query based on filters
+        # Build query based on filters (uses repo.schema_name for consistency)
         if iso3:
             # Query with country filter via cell_admin0 join
             if resolution is not None:
@@ -432,7 +429,7 @@ def get_h3_stats(req: HttpRequest) -> HttpResponse:
                     WHERE ca.iso3 = %s AND c.resolution = %s
                     GROUP BY ca.iso3, c.resolution
                     ORDER BY c.resolution
-                """).format(schema=sql.Identifier(h3_schema))
+                """).format(schema=sql.Identifier(repo.schema_name))
                 params = (iso3.upper(), resolution)
             else:
                 query = sql.SQL("""
@@ -445,7 +442,7 @@ def get_h3_stats(req: HttpRequest) -> HttpResponse:
                     WHERE ca.iso3 = %s
                     GROUP BY ca.iso3, c.resolution
                     ORDER BY c.resolution
-                """).format(schema=sql.Identifier(h3_schema))
+                """).format(schema=sql.Identifier(repo.schema_name))
                 params = (iso3.upper(),)
         else:
             # Query all cells (no country filter)
@@ -458,7 +455,7 @@ def get_h3_stats(req: HttpRequest) -> HttpResponse:
                     WHERE c.resolution = %s
                     GROUP BY c.resolution
                     ORDER BY c.resolution
-                """).format(schema=sql.Identifier(h3_schema))
+                """).format(schema=sql.Identifier(repo.schema_name))
                 params = (resolution,)
             else:
                 query = sql.SQL("""
@@ -468,7 +465,7 @@ def get_h3_stats(req: HttpRequest) -> HttpResponse:
                     FROM {schema}.cells c
                     GROUP BY c.resolution
                     ORDER BY c.resolution
-                """).format(schema=sql.Identifier(h3_schema))
+                """).format(schema=sql.Identifier(repo.schema_name))
                 params = ()
 
         # Execute query

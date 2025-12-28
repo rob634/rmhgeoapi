@@ -62,7 +62,8 @@ class TasksInterface(BaseInterface):
             content=content,
             custom_css=custom_css,
             custom_js=custom_js,
-            include_htmx=True
+            include_htmx=True,
+            include_status_bar=True
         )
 
     def _generate_html_content(self, job_id: str) -> str:

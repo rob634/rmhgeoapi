@@ -1783,7 +1783,7 @@ class BaseInterface(ABC):
         custom_js: str = "",
         include_navbar: bool = True,
         include_htmx: bool = True,
-        include_status_bar: bool = True
+        include_status_bar: bool = False
     ) -> str:
         """
         Wrap content in complete HTML document.
@@ -1803,7 +1803,7 @@ class BaseInterface(ABC):
             custom_js: Additional JavaScript specific to this interface
             include_navbar: Whether to include navigation bar (default: True)
             include_htmx: Whether to include HTMX library (default: True)
-            include_status_bar: Whether to include system status bar (default: True)
+            include_status_bar: Whether to include system status bar (default: False)
 
         Returns:
             Complete HTML document string

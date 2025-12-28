@@ -5,7 +5,7 @@ Web dashboard for monitoring H3 hexagonal grid coverage at different resolutions
 
 Features (27 DEC 2025 - Updated):
     - HTMX enabled for future partial updates
-    - Visual display of H3 resolution levels 2-7
+    - Visual display of H3 resolution levels 2-8
     - Cell count per resolution with status indicators
     - Resolution info (average cell size)
     - **Data Source Catalog** - displays registered h3.source_catalog entries
@@ -25,7 +25,7 @@ class H3Interface(BaseInterface):
     """
     H3 Grid Status Dashboard.
 
-    Displays cell counts for H3 resolutions 2-7 with visual status indicators.
+    Displays cell counts for H3 resolutions 2-8 with visual status indicators.
     """
 
     def render(self, request: func.HttpRequest) -> str:
@@ -99,12 +99,13 @@ class H3Interface(BaseInterface):
                             </tr>
                         </thead>
                         <tbody>
-                            <tr><td>2</td><td>86,745 km2</td><td>158.2 km</td><td>Continental regions</td></tr>
-                            <tr><td>3</td><td>12,393 km2</td><td>59.8 km</td><td>Country/State level</td></tr>
-                            <tr><td>4</td><td>1,770 km2</td><td>22.6 km</td><td>Metro areas</td></tr>
-                            <tr><td>5</td><td>252.9 km2</td><td>8.5 km</td><td>City districts</td></tr>
-                            <tr><td>6</td><td>36.1 km2</td><td>3.2 km</td><td>Neighborhoods</td></tr>
-                            <tr><td>7</td><td>5.2 km2</td><td>1.2 km</td><td>Census blocks</td></tr>
+                            <tr><td>2</td><td>86,745 km²</td><td>158.2 km</td><td>Continental regions</td></tr>
+                            <tr><td>3</td><td>12,393 km²</td><td>59.8 km</td><td>Country/State level</td></tr>
+                            <tr><td>4</td><td>1,770 km²</td><td>22.6 km</td><td>Metro areas</td></tr>
+                            <tr><td>5</td><td>252.9 km²</td><td>8.5 km</td><td>City districts</td></tr>
+                            <tr><td>6</td><td>36.1 km²</td><td>3.2 km</td><td>Neighborhoods</td></tr>
+                            <tr><td>7</td><td>5.2 km²</td><td>1.2 km</td><td>Census blocks</td></tr>
+                            <tr><td>8</td><td>0.74 km²</td><td>0.46 km</td><td>City blocks</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -439,15 +440,17 @@ class H3Interface(BaseInterface):
     def _generate_custom_js(self) -> str:
         """Generate custom JavaScript for H3 dashboard."""
         return """
-        // H3 resolution metadata
+        // H3 resolution metadata (resolutions 2-8)
         const H3_RESOLUTIONS = {
             2: { name: 'Continental', avgArea: '86,745 km²', avgEdge: '158.2 km' },
             3: { name: 'Country/State', avgArea: '12,393 km²', avgEdge: '59.8 km' },
             4: { name: 'Metro Areas', avgArea: '1,770 km²', avgEdge: '22.6 km' },
             5: { name: 'City Districts', avgArea: '252.9 km²', avgEdge: '8.5 km' },
             6: { name: 'Neighborhoods', avgArea: '36.1 km²', avgEdge: '3.2 km' },
-            7: { name: 'Census Blocks', avgArea: '5.2 km²', avgEdge: '1.2 km' }
+            7: { name: 'Census Blocks', avgArea: '5.2 km²', avgEdge: '1.2 km' },
+            8: { name: 'City Blocks', avgArea: '0.74 km²', avgEdge: '0.46 km' }
         };
+        const TOTAL_RESOLUTIONS = Object.keys(H3_RESOLUTIONS).length;
 
         // Load data on page load
         document.addEventListener('DOMContentLoaded', () => {
@@ -505,7 +508,7 @@ class H3Interface(BaseInterface):
                     </div>
                     <div class="summary-item">
                         <span class="summary-label">Populated Levels</span>
-                        <span class="summary-value">${populatedLevels} / 6</span>
+                        <span class="summary-value">${populatedLevels} / ${TOTAL_RESOLUTIONS}</span>
                     </div>
                     <div class="summary-item">
                         <span class="summary-label">Schema</span>
@@ -525,8 +528,8 @@ class H3Interface(BaseInterface):
             const stats = data.stats || {};
             let html = '';
 
-            // Render cards for resolutions 2-7
-            for (let res = 2; res <= 7; res++) {
+            // Render cards for resolutions 2-8
+            for (let res = 2; res <= 8; res++) {
                 const count = stats[res] || 0;
                 const hasData = count > 0;
                 const meta = H3_RESOLUTIONS[res];

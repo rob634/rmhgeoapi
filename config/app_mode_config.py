@@ -215,24 +215,53 @@ class AppModeConfig(BaseModel):
         """
         mode_str = os.environ.get("APP_MODE", AppModeDefaults.DEFAULT_MODE)
 
-        # Validate mode
+        # Validate mode - NO FALLBACKS, fail explicitly on invalid config
         try:
             mode = AppMode(mode_str)
         except ValueError:
-            # Invalid mode - fall back to standalone with warning
+            valid_modes = [m.value for m in AppMode]
+
+            # Log to Application Insights BEFORE raising exception
+            # This ensures the error is queryable even after the app fails to start
+            # Query with: traces | where message contains 'STARTUP_FAILED'
             import logging
-            logger = logging.getLogger(__name__)
-            logger.warning(
-                f"Invalid APP_MODE '{mode_str}', valid modes: {[m.value for m in AppMode]}. "
-                f"Falling back to '{AppModeDefaults.DEFAULT_MODE}'"
+            startup_logger = logging.getLogger("startup")
+            startup_logger.critical(
+                f"❌ STARTUP_FAILED: Invalid APP_MODE='{mode_str}'. "
+                f"Valid modes: {valid_modes}"
             )
-            mode = AppMode.STANDALONE
+
+            # Now raise with detailed message for local debugging
+            raise ValueError(
+                f"\n{'='*80}\n"
+                f"FATAL: Invalid APP_MODE environment variable\n"
+                f"{'='*80}\n"
+                f"Provided: APP_MODE='{mode_str}'\n"
+                f"Valid modes: {valid_modes}\n"
+                f"\n"
+                f"Mode descriptions:\n"
+                f"  standalone      - All queues, all HTTP endpoints (single app)\n"
+                f"  platform_only   - HTTP + jobs queue only (orchestrator)\n"
+                f"  platform_raster - HTTP + jobs + raster-tasks queues\n"
+                f"  platform_vector - HTTP + jobs + vector-tasks queues\n"
+                f"  worker_raster   - raster-tasks queue only (no HTTP)\n"
+                f"  worker_vector   - vector-tasks queue only (no HTTP)\n"
+                f"  worker_docker   - long-running-tasks queue (Docker container)\n"
+                f"\n"
+                f"Fix: Set APP_MODE to one of the valid modes in your environment.\n"
+                f"{'='*80}\n"
+            )
 
         # Runtime environment validation (22 DEC 2025)
         # Detect Azure Functions runtime via FUNCTIONS_WORKER_RUNTIME env var
         is_azure_functions = os.environ.get("FUNCTIONS_WORKER_RUNTIME") is not None
 
         if mode == AppMode.WORKER_DOCKER and is_azure_functions:
+            # Log to Application Insights BEFORE raising exception
+            startup_logger.critical(
+                f"❌ STARTUP_FAILED: APP_MODE='worker_docker' cannot run in Azure Functions. "
+                f"FUNCTIONS_WORKER_RUNTIME='{os.environ.get('FUNCTIONS_WORKER_RUNTIME')}'"
+            )
             raise ValueError(
                 f"INVALID CONFIGURATION: APP_MODE='{mode.value}' cannot be used in Azure Functions. "
                 f"WORKER_DOCKER mode is only valid in Docker containers. "

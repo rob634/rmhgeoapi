@@ -53,15 +53,8 @@ class VectorInterface(BaseInterface):
         <div class="container">
             <!-- Header -->
             <header class="dashboard-header">
-                <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 15px;">
-                    <div>
-                        <h1>📐 OGC Features Collections</h1>
-                        <p class="subtitle">Browse vector feature collections via OGC API - Features standard</p>
-                    </div>
-                    <a href="/api/interface/promote-vector" class="promote-link">
-                        <span>⬆️</span> Promote Vector →
-                    </a>
-                </div>
+                <h1>📐 OGC Features Collections</h1>
+                <p class="subtitle">Browse vector feature collections via OGC API - Features standard</p>
             </header>
 
             <!-- Stats Banner -->
@@ -148,26 +141,17 @@ class VectorInterface(BaseInterface):
             margin-top: 12px;
             display: flex;
             gap: 10px;
+            flex-wrap: wrap;
         }
 
-        .promote-link {
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-            padding: 10px 18px;
-            background: linear-gradient(135deg, #0071BC 0%, #00A3DA 100%);
-            color: white;
-            text-decoration: none;
-            border-radius: 6px;
-            font-weight: 600;
-            font-size: 14px;
-            transition: all 0.2s;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        .link-badge-promote {
+            background: linear-gradient(135deg, #10B981 0%, #059669 100%) !important;
+            color: white !important;
+            border-color: #059669 !important;
         }
 
-        .promote-link:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+        .link-badge-promote:hover {
+            background: linear-gradient(135deg, #059669 0%, #047857 100%) !important;
         }
         """
 
@@ -246,6 +230,7 @@ class VectorInterface(BaseInterface):
                 const selfLink = c.links?.find(l => l.rel === 'self')?.href;
                 const itemsLink = c.links?.find(l => l.rel === 'items')?.href;
                 const viewerLink = `${API_BASE_URL}/api/vector/viewer?collection=${encodeURIComponent(c.id)}`;
+                const promoteLink = `/api/interface/promote-vector?collection=${encodeURIComponent(c.id)}`;
 
                 return `
                     <div class="collection-card" onclick="openCollection('${selfLink}', event)">
@@ -270,6 +255,12 @@ class VectorInterface(BaseInterface):
                                target="_blank"
                                title="Interactive map viewer">
                                 🗺️ View Map
+                            </a>
+                            <a href="${promoteLink}"
+                               class="link-badge link-badge-promote"
+                               onclick="event.stopPropagation()"
+                               title="Promote to gallery with styling">
+                                ⬆️ Promote
                             </a>
                             <a href="${selfLink}"
                                class="link-badge"

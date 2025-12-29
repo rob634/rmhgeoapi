@@ -852,6 +852,12 @@ class PromoteVectorInterface(BaseInterface):
         let selectedCollection = null;
         let collectionMetadata = {};
 
+        // Get collection from URL parameter if provided
+        function getUrlParam(name) {
+            const params = new URLSearchParams(window.location.search);
+            return params.get(name);
+        }
+
         // Initialize on page load
         document.addEventListener('DOMContentLoaded', () => {
             console.log('Promote UI initializing...');
@@ -935,6 +941,14 @@ class PromoteVectorInterface(BaseInterface):
 
                 select.disabled = false;
                 console.log('Collections loaded successfully:', collections.length);
+
+                // Check for collection URL parameter and pre-select
+                const urlCollection = getUrlParam('collection');
+                if (urlCollection && collectionMetadata[urlCollection]) {
+                    console.log('Pre-selecting collection from URL:', urlCollection);
+                    select.value = urlCollection;
+                    onCollectionChange();  // Trigger the selection
+                }
 
             } catch (err) {
                 console.error('Failed to load collections:', err);

@@ -348,6 +348,11 @@ class TaskRoutingDefaults:
         # Lightweight: pgSTAC queries, item updates
         "stac_repair_inventory",
         "stac_repair_item",
+        # H3 Export handlers (28 DEC 2025)
+        # DB-bound: table creation, pgSTAC queries
+        "h3_export_validate",
+        "h3_export_build",
+        "h3_export_register",
         # Ingest Collection handlers (29 DEC 2025)
         # Lightweight: blob copy, pgSTAC operations
         "ingest_inventory",

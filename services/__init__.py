@@ -146,6 +146,10 @@ from .h3_aggregation import (
     h3_inventory_cells,
     h3_raster_zonal_stats,
     h3_aggregation_finalize,
+    # H3 Export handlers (28 DEC 2025)
+    h3_export_validate,
+    h3_export_build,
+    h3_export_register,
 )
 
 # STAC Repair handlers (22 DEC 2025)
@@ -253,6 +257,10 @@ ALL_HANDLERS = {
     "h3_inventory_cells": h3_inventory_cells,  # Stage 1: Count cells, calculate batches
     "h3_raster_zonal_stats": h3_raster_zonal_stats,  # Stage 2: Compute zonal stats from COG
     "h3_aggregation_finalize": h3_aggregation_finalize,  # Stage 3: Update registry, verify counts
+    # H3 Export handlers (28 DEC 2025)
+    "h3_export_validate": h3_export_validate,  # Stage 1: Check table, verify datasets
+    "h3_export_build": h3_export_build,  # Stage 2: Join + pivot + export
+    "h3_export_register": h3_export_register,  # Stage 3: Update catalog
     # STAC Repair handlers (22 DEC 2025)
     "stac_repair_inventory": stac_repair_inventory,  # Stage 1: Scan catalog for issues
     "stac_repair_item": stac_repair_item,  # Stage 2: Repair individual items

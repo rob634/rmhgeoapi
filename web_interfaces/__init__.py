@@ -366,10 +366,10 @@ except ImportError as e:
     logger.warning(f"⚠️ Could not import Submit Vector interface: {e}")
 
 try:
-    from .promote import interface as _promote
-    logger.info("✅ Imported Promote interface module")
+    from .promote_vector import interface as _promote_vector
+    logger.info("✅ Imported Promote Vector interface module")
 except ImportError as e:
-    logger.warning(f"⚠️ Could not import Promote interface: {e}")
+    logger.warning(f"⚠️ Could not import Promote Vector interface: {e}")
 
 try:
     from .submit_raster import interface as _submit_raster

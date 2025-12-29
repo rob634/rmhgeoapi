@@ -351,7 +351,8 @@ class H3RasterAggregationJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct 
         container = job_params.get('container')  # Azure
         blob_path = job_params.get('blob_path')  # Azure
         collection = job_params.get('collection')  # Planetary Computer
-        item_id = job_params.get('item_id')  # Planetary Computer
+        item_id = job_params.get('item_id')  # Planetary Computer (single tile mode)
+        source_id = job_params.get('source_id')  # Planetary Computer (dynamic tile discovery)
         asset = job_params.get('asset', 'data')  # Planetary Computer
         cog_url = job_params.get('cog_url')  # Direct URL
 
@@ -442,6 +443,7 @@ class H3RasterAggregationJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct 
                 elif source_type == 'planetary_computer':
                     task_params["collection"] = collection
                     task_params["item_id"] = item_id
+                    task_params["source_id"] = source_id  # For dynamic tile discovery
                     task_params["asset"] = asset
                 elif source_type == 'url':
                     task_params["cog_url"] = cog_url

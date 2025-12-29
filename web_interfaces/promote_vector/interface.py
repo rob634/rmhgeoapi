@@ -1,15 +1,15 @@
 # ============================================================================
-# CLAUDE CONTEXT - PROMOTE INTERFACE
+# CLAUDE CONTEXT - PROMOTE VECTOR INTERFACE
 # ============================================================================
 # EPOCH: 4 - ACTIVE
-# STATUS: Web Interface - Full promote UI with style builder
+# STATUS: Web Interface - Vector dataset promotion with style builder
 # PURPOSE: Promote OGC Feature collections with integrated style creation
-# LAST_REVIEWED: 26 DEC 2025
-# EXPORTS: PromoteInterface
+# LAST_REVIEWED: 28 DEC 2025
+# EXPORTS: PromoteVectorInterface
 # DEPENDENCIES: web_interfaces.base, InterfaceRegistry
 # ============================================================================
 """
-Promote Interface - Dataset promotion with OGC Style builder.
+Promote Vector Interface - Vector dataset promotion with OGC Style builder.
 
 Features:
     - OGC Features collection selector
@@ -17,7 +17,7 @@ Features:
     - Live Leaflet map preview
     - Atomic promotion + style creation
 
-Route: /api/interface/promote
+Route: /api/interface/promote-vector
 """
 
 import logging
@@ -30,10 +30,10 @@ from web_interfaces import InterfaceRegistry
 logger = logging.getLogger(__name__)
 
 
-@InterfaceRegistry.register('promote')
-class PromoteInterface(BaseInterface):
+@InterfaceRegistry.register('promote-vector')
+class PromoteVectorInterface(BaseInterface):
     """
-    Promote Dashboard with integrated OGC Style builder.
+    Promote Vector Dashboard with integrated OGC Style builder.
 
     Allows users to:
     1. Select OGC Features collection
@@ -44,7 +44,7 @@ class PromoteInterface(BaseInterface):
     """
 
     def render(self, request: func.HttpRequest) -> str:
-        """Generate Promote Dashboard HTML."""
+        """Generate Promote Vector Dashboard HTML."""
         # Include Leaflet CSS and JS in head section
         # Note: Script in head loads before body scripts execute
         leaflet_head = """
@@ -53,7 +53,7 @@ class PromoteInterface(BaseInterface):
         """
 
         return self.wrap_html(
-            title="Promote Dataset",
+            title="Promote Vector Dataset",
             content=self._generate_html_content(),
             custom_css=leaflet_head + self._generate_custom_css(),
             custom_js=self._generate_custom_js(),
@@ -624,8 +624,8 @@ class PromoteInterface(BaseInterface):
         return """
         <div class="container">
             <header class="dashboard-header">
-                <h1>Promote Dataset</h1>
-                <p class="subtitle">Create a promoted dataset with custom styling for the gallery</p>
+                <h1>Promote Vector Dataset</h1>
+                <p class="subtitle">Promote an OGC Features collection with custom styling for the gallery</p>
             </header>
 
             <div id="success-container" style="display: none;"></div>

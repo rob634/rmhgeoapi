@@ -1181,7 +1181,7 @@ class TasksInterface(BaseInterface):
                 stages: [
                     {{ number: 1, name: 'Prepare', taskType: 'process_vector_prepare', description: 'Load, validate, chunk data' }},
                     {{ number: 2, name: 'Upload', taskType: 'process_vector_upload', description: 'Fan-out chunk uploads', expectCountFromStage1: true }},
-                    {{ number: 3, name: 'Catalog', taskType: 'create_vector_stac', description: 'Create STAC record' }}
+                    {{ number: 3, name: 'Catalog', taskType: 'vector_create_stac', description: 'Create STAC record' }}
                 ]
             }},
             'process_raster': {{

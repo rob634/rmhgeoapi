@@ -161,6 +161,17 @@ from .stac_repair_handlers import (
 # Ingest Collection handlers (29 DEC 2025)
 from .ingest import ALL_HANDLERS as INGEST_HANDLERS
 
+# Validate no handler name collisions before merge (29 DEC 2025)
+# Python dict unpacking silently overwrites duplicates - fail explicitly instead
+def _validate_no_handler_collisions(base_keys: set, merge_dict: dict, merge_name: str):
+    """Fail fast if handler registries have overlapping keys."""
+    collisions = base_keys & set(merge_dict.keys())
+    if collisions:
+        raise ValueError(
+            f"FATAL: Handler name collision when merging {merge_name}: {collisions}. "
+            f"Each handler must have a unique name across all registries."
+        )
+
 # ============================================================================
 # STAC METADATA HELPER (25 NOV 2025)
 # ============================================================================
@@ -191,7 +202,7 @@ ALL_HANDLERS = {
     # "analyze_single_blob": analyze_single_blob,
     "list_raster_files": list_raster_files,
     "extract_stac_metadata": extract_stac_metadata,
-    "extract_vector_stac_metadata": extract_vector_stac_metadata,
+    "vector_extract_stac_metadata": extract_vector_stac_metadata,
     # "test_minimal" removed (30 NOV 2025) - file doesn't exist
     "validate_raster": validate_raster,
     "create_cog": create_cog,
@@ -208,7 +219,7 @@ ALL_HANDLERS = {
     "finalize_h3_pyramid": finalize_h3_pyramid,  # H3 pyramid finalization and verification (14 NOV 2025)
     # Vector ETL handlers - OLD ingest_vector handlers REMOVED (27 NOV 2025)
     # "prepare_vector_chunks" and "upload_pickled_chunk" removed - use process_vector idempotent handlers
-    "create_vector_stac": create_vector_stac,        # Stage 3: Create STAC record (shared by process_vector)
+    "vector_create_stac": create_vector_stac,        # Stage 3: Create STAC record (shared by process_vector)
     # Raster collection handlers (20 OCT 2025)
     "create_mosaicjson": create_mosaicjson,          # Stage 3: Create MosaicJSON from COG collection
     "create_stac_collection": create_stac_collection,  # Stage 4: Create STAC collection item
@@ -228,7 +239,7 @@ ALL_HANDLERS = {
     # Idempotent Vector ETL handlers (26 NOV 2025)
     "process_vector_prepare": process_vector_prepare,  # Stage 1: Load, validate, chunk, create table
     "process_vector_upload": process_vector_upload,    # Stage 2: DELETE+INSERT idempotent upload
-    # Note: create_vector_stac already registered above - reused for Stage 3
+    # Note: vector_create_stac already registered above - reused for Stage 3
     # Container Inventory handlers - consolidated (07 DEC 2025)
     # Base handlers (analysis_mode="basic")
     "list_blobs_with_metadata": list_blobs_with_metadata,  # Stage 1: List blobs with full metadata
@@ -264,9 +275,13 @@ ALL_HANDLERS = {
     # STAC Repair handlers (22 DEC 2025)
     "stac_repair_inventory": stac_repair_inventory,  # Stage 1: Scan catalog for issues
     "stac_repair_item": stac_repair_item,  # Stage 2: Repair individual items
-    # Ingest Collection handlers (29 DEC 2025)
-    **INGEST_HANDLERS,  # ingest_inventory, ingest_copy_batch, ingest_register_*, ingest_finalize
 }
+
+# Validate no collisions before merging INGEST_HANDLERS (29 DEC 2025)
+_validate_no_handler_collisions(set(ALL_HANDLERS.keys()), INGEST_HANDLERS, "INGEST_HANDLERS")
+
+# Now safe to merge - Ingest Collection handlers
+ALL_HANDLERS.update(INGEST_HANDLERS)  # ingest_inventory, ingest_copy_batch, ingest_register_*, ingest_finalize
 
 # ============================================================================
 # VALIDATION

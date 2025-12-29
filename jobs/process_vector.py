@@ -216,7 +216,7 @@ class ProcessVectorJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
         {
             "number": 3,
             "name": "create_stac",
-            "task_type": "create_vector_stac",  # REUSE existing handler (already idempotent)
+            "task_type": "vector_create_stac",  # REUSE existing handler (already idempotent)
             "parallelism": "single",
             "description": "Create STAC catalog entry"
         }
@@ -342,7 +342,7 @@ class ProcessVectorJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
             return tasks
 
         elif stage == 3:
-            # Stage 3: Single STAC task - reuse existing create_vector_stac handler
+            # Stage 3: Single STAC task - reuse existing vector_create_stac handler
             if not previous_results:
                 raise ValueError("Stage 3 requires previous results")
 
@@ -370,7 +370,7 @@ class ProcessVectorJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
             task_id = generate_deterministic_task_id(job_id, 3, "stac")
             return [{
                 'task_id': task_id,
-                'task_type': 'create_vector_stac',  # Reuse existing idempotent handler
+                'task_type': 'vector_create_stac',  # Reuse existing idempotent handler
                 'parameters': {
                     'schema': stage_1_result.get('schema', 'geo'),
                     'table_name': stage_1_result.get('table_name'),
@@ -406,7 +406,7 @@ class ProcessVectorJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
         # Separate tasks by stage
         stage_1_tasks = [t for t in task_results if t.task_type == "process_vector_prepare"]
         stage_2_tasks = [t for t in task_results if t.task_type == "process_vector_upload"]
-        stage_3_tasks = [t for t in task_results if t.task_type == "create_vector_stac"]
+        stage_3_tasks = [t for t in task_results if t.task_type == "vector_create_stac"]
 
         # Extract metadata from Stage 1
         chunk_metadata = {}

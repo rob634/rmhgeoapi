@@ -199,7 +199,7 @@ from typing import Optional
 
 # App Mode Configuration (07 DEC 2025 - Multi-Function App Architecture)
 # Evaluated at module load time to control which Service Bus triggers are registered
-from config import get_app_mode_config
+from config import get_app_mode_config, get_config
 _app_mode = get_app_mode_config()
 
 # CoreMachine - Universal orchestrator (Epoch 4)
@@ -2112,6 +2112,104 @@ def openapi_spec(req: func.HttpRequest) -> func.HttpResponse:
 # See config/app_mode_config.py for mode definitions and queue mappings.
 # ============================================================================
 
+# ============================================================================
+# STARTUP QUEUE VALIDATION (29 DEC 2025)
+# ============================================================================
+# Validate that required Service Bus queues exist BEFORE registering triggers.
+# This catches missing queue errors at deployment time, not 30 seconds later
+# when the first message arrives and the trigger silently fails.
+#
+# Query failures with: traces | where message contains 'STARTUP_FAILED'
+# ============================================================================
+_startup_logger = logging.getLogger("startup")
+_startup_logger.info("🔍 STARTUP: Validating Service Bus queue existence...")
+
+# Build list of required queues based on APP_MODE
+_required_queues = []
+_config = get_config()
+
+if _app_mode.listens_to_jobs_queue:
+    _required_queues.append({
+        "name": _config.service_bus_jobs_queue,
+        "purpose": "Job orchestration + stage_complete signals",
+        "flag": "listens_to_jobs_queue"
+    })
+
+if _app_mode.listens_to_raster_tasks:
+    _required_queues.append({
+        "name": _config.queues.raster_tasks_queue,
+        "purpose": "Raster tasks (GDAL operations)",
+        "flag": "listens_to_raster_tasks"
+    })
+
+if _app_mode.listens_to_vector_tasks:
+    _required_queues.append({
+        "name": _config.queues.vector_tasks_queue,
+        "purpose": "Vector tasks (DB operations)",
+        "flag": "listens_to_vector_tasks"
+    })
+
+if _app_mode.listens_to_long_running_tasks:
+    _required_queues.append({
+        "name": _config.queues.long_running_tasks_queue,
+        "purpose": "Long-running tasks (Docker worker)",
+        "flag": "listens_to_long_running_tasks"
+    })
+
+# Validate each required queue exists
+if _required_queues:
+    try:
+        from infrastructure.service_bus import ServiceBusRepository
+        _sb_repo = ServiceBusRepository()
+        _missing_queues = []
+
+        for _queue_info in _required_queues:
+            _queue_name = _queue_info["name"]
+            try:
+                if not _sb_repo.queue_exists(_queue_name):
+                    _missing_queues.append(_queue_info)
+                    _startup_logger.warning(f"❌ Queue missing: {_queue_name} ({_queue_info['purpose']})")
+                else:
+                    _startup_logger.info(f"✅ Queue exists: {_queue_name}")
+            except Exception as _qe:
+                # If we can't check, treat as missing (fail safe)
+                _missing_queues.append(_queue_info)
+                _startup_logger.warning(f"❌ Queue check failed: {_queue_name} - {_qe}")
+
+        if _missing_queues:
+            _missing_names = [q["name"] for q in _missing_queues]
+            _startup_logger.critical(
+                f"❌ STARTUP_FAILED: Missing required Service Bus queues for APP_MODE='{_app_mode.mode.value}': "
+                f"{_missing_names}. Create queues or change APP_MODE."
+            )
+            raise RuntimeError(
+                f"\n{'='*80}\n"
+                f"FATAL: Required Service Bus queues do not exist\n"
+                f"{'='*80}\n"
+                f"APP_MODE: {_app_mode.mode.value}\n"
+                f"Missing queues:\n" +
+                "\n".join([f"  - {q['name']}: {q['purpose']} (required by {q['flag']})" for q in _missing_queues]) +
+                f"\n\nFix options:\n"
+                f"  1. Create missing queues in Azure Service Bus\n"
+                f"  2. Run POST /api/dbadmin/maintenance?action=full-rebuild&confirm=yes\n"
+                f"  3. Change APP_MODE to a mode that doesn't require these queues\n"
+                f"{'='*80}\n"
+            )
+        else:
+            _startup_logger.info(f"✅ STARTUP: All {len(_required_queues)} required queues validated")
+
+    except ImportError as _ie:
+        _startup_logger.warning(f"⚠️ STARTUP: Could not import ServiceBusRepository for queue validation: {_ie}")
+        # Don't fail startup - let the trigger registration fail naturally if needed
+    except RuntimeError:
+        # Re-raise our own RuntimeError (missing queues)
+        raise
+    except Exception as _e:
+        _startup_logger.warning(f"⚠️ STARTUP: Queue validation skipped due to error: {_e}")
+        # Don't fail startup for unexpected errors - let health check catch it later
+else:
+    _startup_logger.info("⏭️ STARTUP: No queue validation needed (APP_MODE doesn't listen to any queues)")
+
 # 16 DEC 2025: Verbose logging for trigger registration
 logger.info("=" * 70)
 logger.info("🔌 SERVICE BUS TRIGGER REGISTRATION STARTING")
@@ -2487,7 +2585,7 @@ if _app_mode.listens_to_vector_tasks:
         Task types routed here:
         - handler_vector_prepare, handler_vector_upload
         - handler_stac_vector_item, process_vector_prepare
-        - process_vector_upload, create_vector_stac
+        - process_vector_upload, vector_create_stac
         """
         correlation_id = str(uuid.uuid4())[:8]
         start_time = time.time()

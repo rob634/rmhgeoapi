@@ -253,21 +253,13 @@ class TaskRoutingDefaults:
     ]
 
     # Raster tasks → raster-tasks queue (memory-intensive, low concurrency)
+    # ORPHANED ENTRIES REMOVED 29 DEC 2025: handler_raster_*, handler_stac_* prefixed
+    # entries did not exist in ALL_HANDLERS - they were never implemented.
     RASTER_TASKS = [
-        # process_raster_v2 handlers
-        "handler_raster_validate",
-        "handler_raster_create_cog",
-        "handler_stac_raster_item",
-        # process_large_raster_v2 handlers
-        "handler_raster_create_tiles",
-        "handler_raster_create_mosaic",
         # Raster validation and COG creation
         "validate_raster",
         "create_cog",
         "extract_stac_metadata",
-        "create_tiling_scheme",
-        "extract_tile",
-        "create_mosaic_json",
         # STAC raster catalog
         "list_raster_files",
         # Tiling and extraction
@@ -285,16 +277,14 @@ class TaskRoutingDefaults:
     ]
 
     # Vector tasks → vector-tasks queue (high concurrency, DB-bound or lightweight)
+    # ORPHANED ENTRIES REMOVED 29 DEC 2025: handler_vector_*, handler_stac_* prefixed
+    # entries did not exist in ALL_HANDLERS - they were never implemented.
     VECTOR_TASKS = [
-        # process_vector handlers
-        "handler_vector_prepare",
-        "handler_vector_upload",
-        "handler_stac_vector_item",
         # Vector ETL (idempotent)
         "process_vector_prepare",
         "process_vector_upload",
-        "create_vector_stac",
-        "extract_vector_stac_metadata",
+        "vector_create_stac",
+        "vector_extract_stac_metadata",
         # H3 handlers (DB-bound PostGIS operations)
         "h3_level4_generate",
         "h3_base_generate",
@@ -339,11 +329,8 @@ class TaskRoutingDefaults:
         "curated_fetch_data",
         "curated_etl_process",
         "curated_finalize",
-        # H3 Aggregation handlers (17 DEC 2025)
-        # DB-bound operations: inventory, zonal stats, finalization
-        "h3_inventory_cells",
-        "h3_raster_zonal_stats",
-        "h3_aggregation_finalize",
+        # NOTE: h3_inventory_cells, h3_aggregation_finalize already listed above (lines 298-299)
+        # NOTE: h3_raster_zonal_stats is in RASTER_TASKS (memory-intensive rasterstats)
         # STAC Repair handlers (22 DEC 2025)
         # Lightweight: pgSTAC queries, item updates
         "stac_repair_inventory",

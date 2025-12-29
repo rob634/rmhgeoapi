@@ -1783,7 +1783,8 @@ class BaseInterface(ABC):
         custom_js: str = "",
         include_navbar: bool = True,
         include_htmx: bool = True,
-        include_status_bar: bool = False
+        include_status_bar: bool = False,
+        head_extras: str = ""
     ) -> str:
         """
         Wrap content in complete HTML document.
@@ -1804,6 +1805,7 @@ class BaseInterface(ABC):
             include_navbar: Whether to include navigation bar (default: True)
             include_htmx: Whether to include HTMX library (default: True)
             include_status_bar: Whether to include system status bar (default: False)
+            head_extras: Raw HTML to inject into head (for external CSS/JS links)
 
         Returns:
             Complete HTML document string
@@ -1827,6 +1829,7 @@ class BaseInterface(ABC):
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{title}</title>
     {htmx_script}
+    {head_extras}
     <style>
         {self.COMMON_CSS}
         {self.HTMX_CSS}

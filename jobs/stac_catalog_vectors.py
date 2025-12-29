@@ -34,7 +34,7 @@ class StacCatalogVectorsWorkflow(JobBase):
         {
             "number": 1,
             "name": "catalog_table",
-            "task_type": "extract_vector_stac_metadata",
+            "task_type": "vector_extract_stac_metadata",
             "description": "Extract STAC metadata from PostGIS table and insert into PgSTAC",
             "parallelism": "single"
         }
@@ -143,7 +143,7 @@ class StacCatalogVectorsWorkflow(JobBase):
             return [
                 {
                     "task_id": task_id,
-                    "task_type": "extract_vector_stac_metadata",
+                    "task_type": "vector_extract_stac_metadata",
                     "parameters": {
                         "schema": job_params["schema"],
                         "table_name": job_params["table_name"],

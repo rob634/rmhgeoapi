@@ -46,7 +46,6 @@ class PromoteVectorInterface(BaseInterface):
     def render(self, request: func.HttpRequest) -> str:
         """Generate Promote Vector Dashboard HTML."""
         # Include Leaflet CSS and JS in head section
-        # Note: Script in head loads before body scripts execute
         leaflet_head = """
         <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
         <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -55,9 +54,10 @@ class PromoteVectorInterface(BaseInterface):
         return self.wrap_html(
             title="Promote Vector Dataset",
             content=self._generate_html_content(),
-            custom_css=leaflet_head + self._generate_custom_css(),
+            custom_css=self._generate_custom_css(),
             custom_js=self._generate_custom_js(),
-            include_htmx=False  # Disabled - not needed for this interface
+            include_htmx=False,  # Disabled - not needed for this interface
+            head_extras=leaflet_head
         )
 
     def _generate_custom_css(self) -> str:
@@ -901,8 +901,8 @@ class PromoteVectorInterface(BaseInterface):
             select.disabled = true;
 
             try {
-                console.log('Fetching collections from /api/features/collections');
-                const response = await fetch('/api/features/collections');
+                console.log('Fetching collections from', API_BASE_URL + '/api/features/collections');
+                const response = await fetch(`${API_BASE_URL}/api/features/collections`);
                 console.log('Response status:', response.status);
 
                 if (!response.ok) {
@@ -980,7 +980,7 @@ class PromoteVectorInterface(BaseInterface):
         async function loadCollectionPreview(collectionId) {
             try {
                 // Get features from OGC Features API
-                const response = await fetch(`/api/features/collections/${collectionId}/items?limit=100`);
+                const response = await fetch(`${API_BASE_URL}/api/features/collections/${collectionId}/items?limit=100`);
                 if (!response.ok) throw new Error('Failed to load features');
 
                 const data = await response.json();
@@ -1281,7 +1281,7 @@ class PromoteVectorInterface(BaseInterface):
                     }
                 };
 
-                const response = await fetch('/api/promote', {
+                const response = await fetch(`${API_BASE_URL}/api/promote`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload)

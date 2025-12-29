@@ -56,7 +56,7 @@ class H3SourceRepository:
     # Valid themes (must match h3_schema.py)
     VALID_THEMES = [
         'terrain', 'water', 'climate', 'demographics',
-        'infrastructure', 'landcover', 'vegetation', 'risk'
+        'infrastructure', 'landcover', 'vegetation', 'risk', 'agriculture'
     ]
 
     # Valid source types

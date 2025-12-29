@@ -348,6 +348,13 @@ class TaskRoutingDefaults:
         # Lightweight: pgSTAC queries, item updates
         "stac_repair_inventory",
         "stac_repair_item",
+        # Ingest Collection handlers (29 DEC 2025)
+        # Lightweight: blob copy, pgSTAC operations
+        "ingest_inventory",
+        "ingest_copy_batch",
+        "ingest_register_collection",
+        "ingest_register_items",
+        "ingest_finalize",
     ]
 
 

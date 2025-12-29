@@ -154,6 +154,9 @@ from .stac_repair_handlers import (
     stac_repair_item,
 )
 
+# Ingest Collection handlers (29 DEC 2025)
+from .ingest import ALL_HANDLERS as INGEST_HANDLERS
+
 # ============================================================================
 # STAC METADATA HELPER (25 NOV 2025)
 # ============================================================================
@@ -253,6 +256,8 @@ ALL_HANDLERS = {
     # STAC Repair handlers (22 DEC 2025)
     "stac_repair_inventory": stac_repair_inventory,  # Stage 1: Scan catalog for issues
     "stac_repair_item": stac_repair_item,  # Stage 2: Repair individual items
+    # Ingest Collection handlers (29 DEC 2025)
+    **INGEST_HANDLERS,  # ingest_inventory, ingest_copy_batch, ingest_register_*, ingest_finalize
 }
 
 # ============================================================================

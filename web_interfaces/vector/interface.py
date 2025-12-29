@@ -53,8 +53,15 @@ class VectorInterface(BaseInterface):
         <div class="container">
             <!-- Header -->
             <header class="dashboard-header">
-                <h1>📐 OGC Features Collections</h1>
-                <p class="subtitle">Browse vector feature collections via OGC API - Features standard</p>
+                <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 15px;">
+                    <div>
+                        <h1>📐 OGC Features Collections</h1>
+                        <p class="subtitle">Browse vector feature collections via OGC API - Features standard</p>
+                    </div>
+                    <a href="/api/interface/promote-vector" class="promote-link">
+                        <span>⬆️</span> Promote Vector →
+                    </a>
+                </div>
             </header>
 
             <!-- Stats Banner -->
@@ -141,6 +148,26 @@ class VectorInterface(BaseInterface):
             margin-top: 12px;
             display: flex;
             gap: 10px;
+        }
+
+        .promote-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 10px 18px;
+            background: linear-gradient(135deg, #0071BC 0%, #00A3DA 100%);
+            color: white;
+            text-decoration: none;
+            border-radius: 6px;
+            font-weight: 600;
+            font-size: 14px;
+            transition: all 0.2s;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .promote-link:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.15);
         }
         """
 

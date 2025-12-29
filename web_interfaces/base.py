@@ -1855,6 +1855,15 @@ class BaseInterface(ABC):
         Note:
             This is called automatically by wrap_html() unless
             include_navbar=False is specified.
+
+        Navigation structure (29 DEC 2025):
+            - System Status (includes links to Storage, Queues, Database)
+            - Pipelines (includes Submit Vector, Submit Raster, Jobs, Tasks)
+            - H3
+            - STAC
+            - OGC Features (includes link to Promote Vector)
+            - Gallery
+            - API Docs (includes link to Swagger)
         """
         return f"""
         <nav style="background: white; padding: 15px 30px; border-radius: 3px;
@@ -1869,26 +1878,12 @@ class BaseInterface(ABC):
                 Geospatial API v{__version__}
             </a>
             <div style="display: flex; gap: 20px;">
-                <a href="/api/interface/gallery"
-                   style="color: #0071BC; text-decoration: none; font-weight: 600;
-                          transition: color 0.2s;"
-                   onmouseover="this.style.color='#00A3DA'"
-                   onmouseout="this.style.color='#0071BC'">
-                    Gallery
-                </a>
                 <a href="/api/interface/health"
                    style="color: #0071BC; text-decoration: none; font-weight: 600;
                           transition: color 0.2s;"
                    onmouseover="this.style.color='#00A3DA'"
                    onmouseout="this.style.color='#0071BC'">
                     System Status
-                </a>
-                <a href="/api/interface/storage"
-                   style="color: #0071BC; text-decoration: none; font-weight: 600;
-                          transition: color 0.2s;"
-                   onmouseover="this.style.color='#00A3DA'"
-                   onmouseout="this.style.color='#0071BC'">
-                    Storage
                 </a>
                 <a href="/api/interface/pipeline"
                    style="color: #0071BC; text-decoration: none; font-weight: 600;
@@ -1904,13 +1899,6 @@ class BaseInterface(ABC):
                    onmouseout="this.style.color='#0071BC'">
                     H3
                 </a>
-                <a href="/api/interface/queues"
-                   style="color: #0071BC; text-decoration: none; font-weight: 600;
-                          transition: color 0.2s;"
-                   onmouseover="this.style.color='#00A3DA'"
-                   onmouseout="this.style.color='#0071BC'">
-                    Queues
-                </a>
                 <a href="/api/interface/stac"
                    style="color: #0071BC; text-decoration: none; font-weight: 600;
                           transition: color 0.2s;"
@@ -1925,19 +1913,19 @@ class BaseInterface(ABC):
                    onmouseout="this.style.color='#0071BC'">
                     OGC Features
                 </a>
+                <a href="/api/interface/gallery"
+                   style="color: #0071BC; text-decoration: none; font-weight: 600;
+                          transition: color 0.2s;"
+                   onmouseover="this.style.color='#00A3DA'"
+                   onmouseout="this.style.color='#0071BC'">
+                    Gallery
+                </a>
                 <a href="/api/interface/docs"
                    style="color: #0071BC; text-decoration: none; font-weight: 600;
                           transition: color 0.2s;"
                    onmouseover="this.style.color='#00A3DA'"
                    onmouseout="this.style.color='#0071BC'">
                     API Docs
-                </a>
-                <a href="/api/interface/swagger"
-                   style="color: #0071BC; text-decoration: none; font-weight: 600;
-                          transition: color 0.2s;"
-                   onmouseover="this.style.color='#00A3DA'"
-                   onmouseout="this.style.color='#0071BC'">
-                    Swagger
                 </a>
             </div>
         </nav>

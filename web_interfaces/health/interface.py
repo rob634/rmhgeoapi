@@ -915,6 +915,35 @@ class HealthInterface(BaseInterface):
             margin-top: 3px;
         }
 
+        .component-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            margin-top: 8px;
+            padding: 4px 10px;
+            background: #E8F4FD;
+            border: 1px solid #0071BC;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 600;
+            color: #0071BC;
+            text-decoration: none;
+            transition: all 0.2s;
+        }
+
+        .component-link:hover {
+            background: #0071BC;
+            color: white;
+            transform: translateY(-1px);
+        }
+
+        .component-link.disabled {
+            background: #f3f4f6;
+            border-color: #9CA3AF;
+            color: #9CA3AF;
+            cursor: not-allowed;
+        }
+
         /* Status Badge */
         .status-badge {
             display: inline-flex;
@@ -1662,6 +1691,13 @@ class HealthInterface(BaseInterface):
             envInfo.insertAdjacentHTML('afterend', identityHtml);
         }}
 
+        // Component links mapping - links to related interface pages
+        const COMPONENT_LINKS = {{
+            'storage_containers': {{ url: '/api/interface/storage', label: 'Storage Browser', icon: '📁' }},
+            'service_bus': {{ url: '/api/interface/queues', label: 'Queue Monitor', icon: '📨' }},
+            'database': {{ url: '#', label: 'Database (coming soon)', icon: '🐘', disabled: true }}
+        }};
+
         // Render component cards
         function renderComponents(components) {{
             const grid = document.getElementById('components-grid');
@@ -1685,12 +1721,24 @@ class HealthInterface(BaseInterface):
                 const details = component.details || {{}};
                 const checkedAt = component.checked_at;
 
+                // Check if this component has a link
+                const linkInfo = COMPONENT_LINKS[name];
+                let linkHtml = '';
+                if (linkInfo) {{
+                    if (linkInfo.disabled) {{
+                        linkHtml = `<span class="component-link disabled" title="${{linkInfo.label}}">${{linkInfo.icon}} ${{linkInfo.label}}</span>`;
+                    }} else {{
+                        linkHtml = `<a href="${{linkInfo.url}}" class="component-link" onclick="event.stopPropagation();">${{linkInfo.icon}} ${{linkInfo.label}} &rarr;</a>`;
+                    }}
+                }}
+
                 return `
                     <div class="component-card ${{status}}" data-component-key="${{name}}">
                         <div class="component-header" onclick="toggleDetails('${{name}}')">
                             <div>
                                 <div class="component-name">${{formatLabel(name)}}</div>
                                 ${{description ? `<div class="component-description">${{description}}</div>` : ''}}
+                                ${{linkHtml}}
                             </div>
                             <div style="display: flex; align-items: center; gap: 10px;">
                                 <span class="status-badge ${{status}}">${{getStatusIcon(status)}} ${{status}}</span>

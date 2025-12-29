@@ -470,6 +470,7 @@ class H3SchemaDeployer:
         'infrastructure', # Roads, nighttime lights, OSM features
         'landcover',      # ESA WorldCover, NLCD, Dynamic World
         'vegetation',     # NDVI, LAI, forest cover
+        'agriculture',    # Crop production, yield, harvested area (MapSPAM)
     ]
 
     def _deploy_dataset_registry_table(self, conn, results: Dict):

@@ -337,6 +337,26 @@ class DocsInterface(BaseInterface):
             .access-level.public { background: #d4edda; color: #155724; }
             .access-level.ouo { background: #fff3cd; color: #856404; }
             .access-level.restricted { background: #f8d7da; color: #721c24; }
+
+            .swagger-link {
+                display: inline-flex;
+                align-items: center;
+                gap: 6px;
+                padding: 10px 18px;
+                background: linear-gradient(135deg, #85EA2D 0%, #49C21A 100%);
+                color: #1B3409;
+                text-decoration: none;
+                border-radius: 6px;
+                font-weight: 600;
+                font-size: 14px;
+                transition: all 0.2s;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            }
+
+            .swagger-link:hover {
+                transform: translateY(-2px);
+                box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+            }
         """
 
     def _generate_html_content(self) -> str:
@@ -344,8 +364,15 @@ class DocsInterface(BaseInterface):
         return """
         <div class="container">
             <header class="dashboard-header">
-                <h1>Platform API Documentation</h1>
-                <p class="subtitle">DDH Integration Endpoints for Geospatial Data Processing</p>
+                <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 15px;">
+                    <div>
+                        <h1>Platform API Documentation</h1>
+                        <p class="subtitle">DDH Integration Endpoints for Geospatial Data Processing</p>
+                    </div>
+                    <a href="/api/interface/swagger" class="swagger-link">
+                        <span>📋</span> Swagger UI →
+                    </a>
+                </div>
             </header>
 
             <div class="info-box">

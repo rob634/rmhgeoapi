@@ -92,6 +92,44 @@ GALLERY_ITEMS = [
         },
         "thumbnail_type": "static",
         "thumbnail_url": None
+    },
+    {
+        "id": "raster-viewer",
+        "title": "TiTiler Raster Viewer",
+        "subtitle": "COG Preview with RGB Band Selection",
+        "description": "Load any Cloud Optimized GeoTIFF (COG) URL and visualize with custom "
+                       "RGB band selection, rescale controls, and colormaps. Point query for values.",
+        "icon": "🛰️",
+        "source_type": "TiTiler",
+        "source_badge_color": "#7C3AED",  # Purple for TiTiler
+        "link": "/api/interface/raster-viewer",
+        "link_text": "Open Raster Viewer",
+        "metadata": {
+            "Input": "COG URL",
+            "Features": "RGB bands, rescale, colormap",
+            "Renderer": "TiTiler + Leaflet"
+        },
+        "thumbnail_type": "static",
+        "thumbnail_url": None
+    },
+    {
+        "id": "stac-map",
+        "title": "STAC Map Explorer",
+        "subtitle": "Spatial STAC Collection Viewer",
+        "description": "Explore STAC collections on an interactive map with footprints, "
+                       "bounding boxes, and click-to-preview functionality.",
+        "icon": "🗺️",
+        "source_type": "STAC Map",
+        "source_badge_color": "#10B981",  # Green for map
+        "link": "/api/interface/stac-map",
+        "link_text": "Open STAC Map",
+        "metadata": {
+            "API": "STAC API 1.0",
+            "View": "Collection footprints",
+            "Renderer": "Leaflet.js"
+        },
+        "thumbnail_type": "static",
+        "thumbnail_url": None
     }
 ]
 

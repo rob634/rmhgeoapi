@@ -59,8 +59,14 @@ from .curated_update import CuratedDatasetUpdateJob
 from .h3_raster_aggregation import H3RasterAggregationJob
 from .h3_register_dataset import H3RegisterDatasetJob
 
+# H3 Export (28 DEC 2025)
+from .h3_export_dataset import H3ExportDatasetJob
+
 # STAC Repair (22 DEC 2025)
 from .repair_stac_items import RepairStacItemsJob
+
+# Ingest Collection (29 DEC 2025)
+from .ingest_collection import IngestCollectionJob
 
 # ARCHIVED (07 DEC 2025) - replaced by inventory_container_contents
 # from .container_list import ListContainerContentsWorkflow
@@ -104,8 +110,14 @@ ALL_JOBS = {
     "h3_raster_aggregation": H3RasterAggregationJob,
     "h3_register_dataset": H3RegisterDatasetJob,
 
+    # H3 Export (28 DEC 2025)
+    "h3_export_dataset": H3ExportDatasetJob,
+
     # STAC Repair (22 DEC 2025)
     "repair_stac_items": RepairStacItemsJob,
+
+    # Ingest Collection (29 DEC 2025)
+    "ingest_collection": IngestCollectionJob,
 
     # ARCHIVED (07 DEC 2025) - use inventory_container_contents instead
     # "list_container_contents": ListContainerContentsWorkflow,

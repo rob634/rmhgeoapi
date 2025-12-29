@@ -1,6 +1,6 @@
 # Working Backlog
 
-**Last Updated**: 28 DEC 2025
+**Last Updated**: 29 DEC 2025
 **Source of Truth**: [EPICS.md](/EPICS.md) — Epic/Feature/Story definitions live there
 **Purpose**: Sprint-level task tracking and delegation
 
@@ -17,6 +17,8 @@
 | 5 | E9 | Zarr/Climate Data as API | 🚧 | F9.2: Virtual Zarr Pipeline |
 | **NEW** | **E12** | **Interface Modernization** | ✅ | **Phase 1 Complete** |
 | **NEW** | **E13** | **Pipeline Observability** | ✅ | **Complete (9/10 stories)** |
+| **NEW** | **E14** | **H3 Export Pipeline** | ✅ | **Complete** |
+| **NEW** | **E15** | **Ingest Collection Pipeline** | ✅ | **Complete** |
 
 ---
 
@@ -228,6 +230,122 @@
 
 **Total Effort**: ~7-9 days
 
+### E14: H3 Export Pipeline ✅ COMPLETE
+
+**Goal**: Create denormalized, wide-format exports from H3 zonal_stats for mapping and download applications.
+
+**Use Case**: "I want a specific map" or "I want a copy of a specific extract" (NOT for analytics)
+
+**Architecture**:
+```
+POST /api/jobs/submit/h3_export_dataset
+    │
+    ├── Stage 1: Validate
+    │   ├── Check table doesn't exist (or overwrite=true)
+    │   └── Verify datasets exist in registry
+    │
+    ├── Stage 2: Build
+    │   ├── Join h3.cells with h3.zonal_stats
+    │   ├── Pivot to wide format (one column per stat)
+    │   └── Create geo.{table_name}
+    │
+    └── Stage 3: Register
+        └── Update export catalog
+```
+
+**Features**:
+- Explicit overwrite control (`overwrite: true` or fail)
+- Multiple geometry options: polygon (full hex) or centroid (point)
+- Spatial scope filtering (iso3, bbox, polygon_wkt)
+- Variable selection from multiple datasets/stat_types
+- Auto-indexed (h3_index PK, spatial GIST, iso3)
+
+**Output Table**:
+```sql
+geo.{table_name}
+├── h3_index BIGINT PRIMARY KEY
+├── geom GEOMETRY(Polygon/Point, 4326)
+├── iso3 VARCHAR(3)          -- optional
+├── {dataset_id}_{stat_type} -- pivot columns
+└── ...
+```
+
+**Usage**:
+```bash
+POST /api/jobs/submit/h3_export_dataset
+{
+    "table_name": "rwanda_terrain_res6",
+    "resolution": 6,
+    "iso3": "RWA",
+    "variables": [
+        {"dataset_id": "cop_dem_rwanda_res6", "stat_types": ["mean", "min", "max"]}
+    ],
+    "geometry_type": "polygon",
+    "overwrite": false
+}
+```
+
+**Files Created** (28 DEC 2025):
+- `jobs/h3_export_dataset.py` - Job definition (3-stage workflow)
+- `services/h3_aggregation/handler_export.py` - Handlers (validate, build, register)
+
+### E15: Ingest Collection Pipeline ✅ COMPLETE
+
+**Goal**: Ingest pre-processed COG collections with existing STAC metadata from bronze to silver storage, registering in pgSTAC for discovery.
+
+**Use Case**: Data already converted to COG with STAC JSON sidecars (like MapSPAM agricultural data). No processing needed - just copy and register.
+
+**Architecture**:
+```
+POST /api/jobs/submit/ingest_collection
+    │
+    ├── Stage 1: Inventory
+    │   ├── Download collection.json
+    │   ├── Parse item links
+    │   └── Create batches for parallel stages
+    │
+    ├── Stage 2: Copy (parallel batches)
+    │   └── Copy COG files: bronze → silver
+    │
+    ├── Stage 3: Register Collection
+    │   └── Upsert collection to pgSTAC
+    │
+    ├── Stage 4: Register Items (parallel batches)
+    │   ├── Download item JSONs
+    │   ├── Update asset hrefs to silver
+    │   └── Upsert items to pgSTAC
+    │
+    └── Stage 5: Finalize
+        └── Create h3.source_catalog entry
+```
+
+**Features**:
+- Reads existing collection.json and item JSONs from source
+- Parallel blob copy with batching (server-side copy)
+- Updates asset hrefs to silver container
+- Creates h3.source_catalog entry for H3 pipeline integration
+- Preserves all dimension properties from source STAC
+
+**Usage**:
+```bash
+POST /api/jobs/submit/ingest_collection
+{
+    "source_container": "bronzemapspam",
+    "target_container": "silvermapspam",
+    "batch_size": 100
+}
+```
+
+**Files Created** (29 DEC 2025):
+- `jobs/ingest_collection.py` - Job definition (5-stage workflow)
+- `services/ingest/__init__.py` - Module initialization
+- `services/ingest/handler_inventory.py` - Inventory handler
+- `services/ingest/handler_copy.py` - Blob copy handler
+- `services/ingest/handler_register.py` - pgSTAC registration handlers
+
+**Also Added**:
+- `agriculture` theme to h3_schema.py, h3_repository.py, h3_source_repository.py
+
 ---
 
 ## DevOps / Non-Geospatial Tasks
@@ -265,7 +383,10 @@ Tasks suitable for a colleague with Azure/Python/pipeline expertise but without 
 
 | Date | Item | Epic |
 |------|------|------|
-| 28 DEC 2025 | **E13 Pipeline Observability DESIGNED** - Universal metrics + H3/FATHOM contexts | E13 |
+| 29 DEC 2025 | **E15 Ingest Collection Pipeline COMPLETE** - Pre-processed COG ingest (MapSPAM) | E15 |
+| 29 DEC 2025 | **Agriculture theme added** - New H3 theme for crop data | E15 |
+| 28 DEC 2025 | **E14 H3 Export Pipeline COMPLETE** - Denormalized map exports from zonal_stats | E14 |
+| 28 DEC 2025 | **E13 Pipeline Observability COMPLETE** - Universal metrics + H3/FATHOM contexts | E13 |
 | 28 DEC 2025 | **H3 Phase 1 COMPLETE** - source_catalog, repository, API, dynamic tile discovery | E8 |
 | 27 DEC 2025 | **Vector Workflow UI COMPLETE** - Submit Vector + Promote interfaces polished | E12 |
 | 27 DEC 2025 | Timestamps standardized to Eastern Time across all interfaces | E12 |

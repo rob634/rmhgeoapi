@@ -39,6 +39,7 @@ from .handler_inventory import h3_inventory_cells
 from .handler_raster_zonal import h3_raster_zonal_stats
 from .handler_finalize import h3_aggregation_finalize
 from .handler_register import h3_register_dataset
+from .handler_export import h3_export_validate, h3_export_build, h3_export_register
 
 # Handler registry for this module
 ALL_HANDLERS: Dict[str, Callable] = {
@@ -46,6 +47,10 @@ ALL_HANDLERS: Dict[str, Callable] = {
     "h3_raster_zonal_stats": h3_raster_zonal_stats,
     "h3_aggregation_finalize": h3_aggregation_finalize,
     "h3_register_dataset": h3_register_dataset,
+    # H3 Export handlers (28 DEC 2025)
+    "h3_export_validate": h3_export_validate,
+    "h3_export_build": h3_export_build,
+    "h3_export_register": h3_export_register,
 }
 
 __all__ = [

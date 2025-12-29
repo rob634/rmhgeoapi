@@ -88,7 +88,7 @@ class H3RegisterDatasetJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MR
     ]
 
     # Valid themes (must match h3_schema.py partitions)
-    VALID_THEMES = ['terrain', 'water', 'climate', 'demographics', 'infrastructure', 'landcover', 'vegetation']
+    VALID_THEMES = ['terrain', 'water', 'climate', 'demographics', 'infrastructure', 'landcover', 'vegetation', 'agriculture']
 
     # Declarative parameter validation
     parameters_schema: Dict[str, Any] = {

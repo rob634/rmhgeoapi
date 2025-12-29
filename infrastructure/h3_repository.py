@@ -1085,7 +1085,7 @@ class H3Repository(PostgreSQLRepository):
     # ========================================================================
 
     # Valid themes for partitioning (must match h3_schema.py)
-    VALID_THEMES = ['terrain', 'water', 'climate', 'demographics', 'infrastructure', 'landcover', 'vegetation']
+    VALID_THEMES = ['terrain', 'water', 'climate', 'demographics', 'infrastructure', 'landcover', 'vegetation', 'agriculture']
 
     def register_dataset(
         self,

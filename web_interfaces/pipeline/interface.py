@@ -430,6 +430,26 @@ class PipelineInterface(BaseInterface):
                 color: #dc2626;
                 margin-bottom: 1rem;
             }
+
+            .metrics-link {
+                display: inline-flex;
+                align-items: center;
+                gap: 6px;
+                padding: 10px 18px;
+                background: linear-gradient(135deg, #8B5CF6 0%, #7C3AED 100%);
+                color: white;
+                text-decoration: none;
+                border-radius: 6px;
+                font-weight: 600;
+                font-size: 14px;
+                transition: all 0.2s;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            }
+
+            .metrics-link:hover {
+                transform: translateY(-2px);
+                box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+            }
         """
 
     def _generate_html_content(self) -> str:
@@ -437,8 +457,15 @@ class PipelineInterface(BaseInterface):
         return """
         <div class="container">
             <header class="dashboard-header">
-                <h1>Pipeline Workflows</h1>
-                <p class="subtitle">Monitor and manage ETL data processing pipelines</p>
+                <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 15px;">
+                    <div>
+                        <h1>Pipeline Workflows</h1>
+                        <p class="subtitle">Monitor and manage ETL data processing pipelines</p>
+                    </div>
+                    <a href="/api/interface/metrics" class="metrics-link">
+                        <span>📊</span> Metrics Dashboard →
+                    </a>
+                </div>
             </header>
 
             <!-- Available Pipelines -->

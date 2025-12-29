@@ -78,6 +78,7 @@ from .queue_config import QueueConfig, QueueNames
 from .analytics_config import AnalyticsConfig, DuckDBConnectionType
 from .h3_config import H3Config
 from .platform_config import PlatformConfig, generate_platform_request_id
+from .metrics_config import MetricsConfig
 from .app_config import AppConfig
 from .app_mode_config import AppMode, AppModeConfig, get_app_mode_config
 
@@ -166,6 +167,9 @@ def debug_config() -> dict:
             # Platform
             'platform': config.platform.debug_dict(),
 
+            # Metrics (E13: Pipeline Observability)
+            'metrics': config.metrics.debug_dict(),
+
             # Application
             'debug_mode': config.debug_mode,
             'environment': config.environment,
@@ -246,4 +250,7 @@ __all__ = [
     # Platform
     'PlatformConfig',
     'generate_platform_request_id',
+
+    # Metrics (E13: Pipeline Observability)
+    'MetricsConfig',
 ]

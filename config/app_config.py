@@ -46,6 +46,7 @@ from .queue_config import QueueConfig
 from .analytics_config import AnalyticsConfig
 from .h3_config import H3Config
 from .platform_config import PlatformConfig
+from .metrics_config import MetricsConfig
 from .defaults import AzureDefaults, AppDefaults, KeyVaultDefaults
 
 
@@ -281,6 +282,11 @@ class AppConfig(BaseModel):
     platform: PlatformConfig = Field(
         default_factory=PlatformConfig.from_environment,
         description="Platform layer configuration (DDH integration, anti-corruption layer)"
+    )
+
+    metrics: MetricsConfig = Field(
+        default_factory=MetricsConfig.from_environment,
+        description="Pipeline observability metrics configuration (E13: 28 DEC 2025)"
     )
 
     # ========================================================================

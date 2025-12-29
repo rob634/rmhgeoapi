@@ -377,6 +377,18 @@ try:
 except ImportError as e:
     logger.warning(f"⚠️ Could not import Submit Raster interface: {e}")
 
+try:
+    from .raster_viewer import interface as _raster_viewer
+    logger.info("✅ Imported Raster Viewer interface module")
+except ImportError as e:
+    logger.warning(f"⚠️ Could not import Raster Viewer interface: {e}")
+
+try:
+    from .metrics import interface as _metrics
+    logger.info("✅ Imported Metrics interface module")
+except ImportError as e:
+    logger.warning(f"⚠️ Could not import Metrics interface: {e}")
+
 
 # Public API
 __all__ = [

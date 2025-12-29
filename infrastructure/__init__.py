@@ -200,6 +200,26 @@ def __getattr__(name: str):
         from .promoted_repository import PromotedDatasetRepository
         return PromotedDatasetRepository
 
+    # Pipeline Observability (28 DEC 2025 - E13)
+    elif name == "MetricsRepository":
+        from .metrics_repository import MetricsRepository
+        return MetricsRepository
+    elif name == "JobProgressTracker":
+        from .job_progress import JobProgressTracker
+        return JobProgressTracker
+    elif name == "JobProgressSnapshot":
+        from .job_progress import JobProgressSnapshot
+        return JobProgressSnapshot
+    elif name == "H3AggregationTracker":
+        from .job_progress_contexts import H3AggregationTracker
+        return H3AggregationTracker
+    elif name == "FathomETLTracker":
+        from .job_progress_contexts import FathomETLTracker
+        return FathomETLTracker
+    elif name == "RasterCollectionTracker":
+        from .job_progress_contexts import RasterCollectionTracker
+        return RasterCollectionTracker
+
     # Helper function for getting default repositories
     elif name == "get_default_repositories":
         from .factory import get_default_repositories
@@ -235,5 +255,12 @@ __all__ = [
     "CuratedDatasetRepository",  # Added 15 DEC 2025 - system-managed data
     "CuratedUpdateLogRepository",  # Added 15 DEC 2025 - system-managed data
     "PromotedDatasetRepository",  # Added 23 DEC 2025 - gallery/system-reserved datasets
+    # Pipeline Observability (28 DEC 2025 - E13)
+    "MetricsRepository",
+    "JobProgressTracker",
+    "JobProgressSnapshot",
+    "H3AggregationTracker",
+    "FathomETLTracker",
+    "RasterCollectionTracker",
     "get_default_repositories",
 ]

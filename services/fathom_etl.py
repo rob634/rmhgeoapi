@@ -34,6 +34,18 @@ from typing import Dict, Any, List, Optional
 from util_logger import LoggerFactory, ComponentType, log_memory_checkpoint
 from config import FathomDefaults
 
+# E13: Pipeline Observability (28 DEC 2025)
+# Lazy import to avoid circular dependencies
+_tracker_class = None
+
+def _get_tracker_class():
+    """Lazy load FathomETLTracker to avoid import-time issues."""
+    global _tracker_class
+    if _tracker_class is None:
+        from infrastructure.job_progress_contexts import FathomETLTracker
+        _tracker_class = FathomETLTracker
+    return _tracker_class
+
 
 # Return period band mapping (use FathomDefaults as source of truth)
 RETURN_PERIODS = FathomDefaults.RETURN_PERIODS
@@ -396,6 +408,21 @@ def fathom_band_stack(params: dict, context: dict = None) -> dict:
     context_id = job_id or output_name  # Use job_id for correlation, fallback to output_name
     logger.info(f"🔧 Band stacking tile: {output_name}")
 
+    # E13: Pipeline Observability - Create tracker for metrics (28 DEC 2025)
+    tracker = None
+    if job_id:
+        try:
+            TrackerClass = _get_tracker_class()
+            tracker = TrackerClass(
+                job_id=job_id,
+                job_type="process_fathom_stack",
+                auto_persist=True
+            )
+            tracker.set_tiles_total(1)  # One tile per band_stack task
+        except Exception as e:
+            logger.warning(f"Could not create metrics tracker: {e}")
+            tracker = None
+
     # Memory checkpoint: start of band stacking
     log_memory_checkpoint(logger, "band_stack START", context_id=context_id)
 
@@ -522,6 +549,14 @@ def fathom_band_stack(params: dict, context: dict = None) -> dict:
     # Memory checkpoint: after upload complete
     log_memory_checkpoint(logger, "band_stack END", context_id=context_id,
                           output_size_kb=output_size_kb)
+
+    # E13: Record tile completion in tracker
+    if tracker:
+        tracker.record_tile(
+            tile_id=output_name,
+            size_bytes=int(output_size_kb * 1024),
+            region=region_code
+        )
 
     # =========================================================================
     # INLINE STATE UPDATE (21 DEC 2025)
@@ -835,6 +870,22 @@ def fathom_spatial_merge(params: dict, context: dict = None) -> dict:
     logger.info(f"🔧 Spatial merge for grid cell: {grid_cell}")
     logger.info(f"   Tiles to merge: {len(tiles)}")
 
+    # E13: Pipeline Observability - Create tracker for metrics (28 DEC 2025)
+    tracker = None
+    if job_id:
+        try:
+            TrackerClass = _get_tracker_class()
+            tracker = TrackerClass(
+                job_id=job_id,
+                job_type="process_fathom_merge",
+                auto_persist=True
+            )
+            tracker.set_tiles_total(len(tiles))
+            tracker.start_region(grid_cell)
+        except Exception as e:
+            logger.warning(f"Could not create metrics tracker: {e}")
+            tracker = None
+
     # Memory checkpoint: start of spatial merge
     log_memory_checkpoint(logger, "spatial_merge START", context_id=context_id,
                           tile_count=len(tiles))
@@ -993,6 +1044,15 @@ def fathom_spatial_merge(params: dict, context: dict = None) -> dict:
     # Memory checkpoint: after upload complete
     log_memory_checkpoint(logger, "spatial_merge END", context_id=context_id,
                           output_size_mb=output_size_mb, tile_count=len(tiles))
+
+    # E13: Record merged tile completion in tracker
+    if tracker:
+        tracker.record_tile(
+            tile_id=output_name,
+            size_bytes=int(output_size_mb * 1024 * 1024),
+            region=grid_cell
+        )
+        tracker.complete_region(grid_cell)
 
     # =========================================================================
     # INLINE STATE UPDATE (21 DEC 2025)

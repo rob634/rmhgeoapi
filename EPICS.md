@@ -1,6 +1,6 @@
 # SAFe Epic & Feature Registry
 
-**Last Updated**: 27 DEC 2025
+**Last Updated**: 28 DEC 2025
 **Framework**: SAFe (Scaled Agile Framework)
 **Purpose**: Master reference for Azure DevOps Boards import
 **Source of Truth**: This file defines Epic/Feature numbers; TODO.md should align
@@ -20,9 +20,10 @@
 | 4 | E9 | Zarr/Climate Data as API | 🚧 Partial | 3 | 2.0 |
 | 5 | E7 | Custom Data Pipelines | 🚧 Partial | 3 | 2.6 |
 | 6 | E5 | OGC Styles | 🚧 Partial | 2 | 3.7 |
-| 7 | E8 | H3 Analytics Pipeline | 🚧 Partial | 7 | 1.2 |
+| 7 | E8 | H3 Analytics Pipeline | 🚧 Partial | 11 | 1.2 |
 | NEW | E11 | Pipeline Builder Demo | 📋 Proposed | 4 | — |
 | NEW | E12 | Interface Modernization | ✅ Phase 1 | 4 | — |
+| NEW | E13 | Pipeline Observability | 📋 Designed | 7 | — |
 
 **Priority Notes**:
 - **E3 includes Observability**: Merged E6 into E3 — observability is app-to-app monitoring for integration
@@ -1169,7 +1170,8 @@ FATHOM Source       ETL Function App       Consumer Access
 ## Epic E8: H3 Analytics Pipeline 🚧
 
 **Business Requirement**: Columnar aggregations of raster/vector data to H3 hexagonal grid
-**Status**: 🚧 PARTIAL (Infrastructure complete, aggregation handlers in progress)
+**Status**: 🚧 PARTIAL (F8.1-F8.3 complete, F8.8 Source Catalog complete, F8.4-F8.7 pending)
+**Last Review**: 28 DEC 2025
 
 **Architecture**:
 ```
@@ -1182,6 +1184,21 @@ Source Data           H3 Aggregation          Output
 │ (PostGIS)   │       │ (category agg)│       │ (DuckDB export) │
 └─────────────┘       └───────────────┘       └─────────────────┘
 ```
+
+**Feature Summary**:
+| Feature | Status | Description |
+|---------|--------|-------------|
+| F8.1 | ✅ | H3 Grid Infrastructure |
+| F8.2 | ✅ | Grid Bootstrap System |
+| F8.3 | ✅ | Raster→H3 Aggregation |
+| F8.4 | ⬜ | Vector→H3 Aggregation |
+| F8.5 | 📋 | GeoParquet Export |
+| F8.6 | 🚧 | Analytics API (partial) |
+| F8.7 | 📋 | Building Exposure Analysis |
+| F8.8 | ✅ | Source Catalog (NEW 27 DEC) |
+| F8.9 | 📋 | Pipeline Definition Framework (NEW) |
+| F8.10 | 📋 | Multi-Step Pipeline Operations (NEW) |
+| F8.11 | 📋 | Rwanda Coffee Climate Risk Demo (NEW) |
 
 ### Feature F8.1: H3 Grid Infrastructure ✅
 
@@ -1221,22 +1238,34 @@ Source Data           H3 Aggregation          Output
 
 ---
 
-### Feature F8.3: Raster→H3 Aggregation 🚧 IN PROGRESS
+### Feature F8.3: Raster→H3 Aggregation ✅ COMPLETE
 
 **Deliverable**: Zonal statistics from COGs to H3 cells
+**Completed**: 27 DEC 2025
 
 | Story | Status | Description |
 |-------|--------|-------------|
 | S8.3.1 | ✅ | Create h3_raster_aggregation job definition |
 | S8.3.2 | ✅ | Design 3-stage workflow (inventory → compute → finalize) |
-| S8.3.3 | ⬜ | Implement h3_inventory_cells handler |
-| S8.3.4 | ⬜ | Implement h3_raster_zonal_stats handler |
-| S8.3.5 | ⬜ | Implement h3_aggregation_finalize handler |
+| S8.3.3 | ✅ | Implement h3_inventory_cells handler |
+| S8.3.4 | ✅ | Implement h3_raster_zonal_stats handler |
+| S8.3.5 | ✅ | Implement h3_aggregation_finalize handler |
 | S8.3.6 | ✅ | Create insert_zonal_stats_batch() repository method |
+| S8.3.7 | ✅ | Add dynamic STAC tile discovery for Planetary Computer (27 DEC) |
+| S8.3.8 | ✅ | Add theme-based zonal_stats partitioning (7 partitions) |
 
-**Key Files**: `jobs/h3_raster_aggregation.py`
+**Key Files**:
+- `jobs/h3_raster_aggregation.py`
+- `services/h3_aggregation/handler_inventory.py`
+- `services/h3_aggregation/handler_raster_zonal.py`
+- `services/h3_aggregation/handler_finalize.py`
 
 **Stats Supported**: mean, sum, min, max, count, std, median
+
+**Source Types Supported**:
+- `azure`: Azure Blob Storage COGs (container + blob_path)
+- `planetary_computer`: Planetary Computer STAC (collection + item_id OR source_id for dynamic discovery)
+- `url`: Direct HTTPS URLs to COGs
 
 ---
 
@@ -1268,16 +1297,18 @@ Source Data           H3 Aggregation          Output
 
 ---
 
-### Feature F8.6: Analytics API 📋 PLANNED
+### Feature F8.6: Analytics API 🚧 PARTIAL
 
 **Deliverable**: Query endpoints for H3 statistics
 
 | Story | Status | Description |
 |-------|--------|-------------|
 | S8.6.1 | 📋 | GET /api/h3/stats/{dataset_id} |
-| S8.6.2 | 📋 | GET /api/h3/stats/{dataset_id}/cells?iso3=&bbox= |
-| S8.6.3 | 📋 | GET /api/h3/registry (list all datasets) |
+| S8.6.2 | ✅ | GET /api/h3/stats?iso3=&resolution= (cell counts) |
+| S8.6.3 | ✅ | GET /api/h3/stats/countries (country list with counts) |
 | S8.6.4 | 📋 | Interactive H3 map interface |
+
+**Key Files**: `web_interfaces/h3_sources/interface.py`
 
 ---
 
@@ -1315,6 +1346,195 @@ Buildings (MS/Google) → Centroids → Raster Sample → H3 Aggregate → GeoPa
 - E10.F10.2 (FATHOM merge) for flood COGs
 - Planetary Computer for MS Building Footprints
 - rasterstats + geopandas for processing
+
+---
+
+### Feature F8.8: Source Catalog ✅ COMPLETE
+
+**Deliverable**: Comprehensive metadata catalog for H3 aggregation data sources
+**Completed**: 27 DEC 2025
+
+| Story | Status | Description |
+|-------|--------|-------------|
+| S8.8.1 | ✅ | Create `h3.source_catalog` table schema |
+| S8.8.2 | ✅ | Implement H3SourceRepository with full CRUD |
+| S8.8.3 | ✅ | Create REST API endpoints (GET/POST/PATCH/DELETE /api/h3/sources) |
+| S8.8.4 | ✅ | Support Planetary Computer, Azure Blob, URL, PostGIS source types |
+| S8.8.5 | ✅ | Integrate with h3_raster_zonal_stats for dynamic tile discovery |
+
+**Key Files**:
+- `infrastructure/h3_schema.py` (source_catalog table)
+- `infrastructure/h3_source_repository.py`
+- `web_interfaces/h3_sources/interface.py`
+
+**Source Catalog Fields**:
+- Identity: id, display_name, description
+- Connection: source_type, stac_api_url, collection_id, asset_key
+- Tile pattern: item_id_pattern, tile_size_degrees, tile_naming_convention
+- Raster properties: native_resolution_m, crs, data_type, nodata_value, value_range
+- Aggregation: theme (partition key), recommended_stats, recommended_h3_res_min/max
+- Provenance: source_provider, source_url, source_license, citation
+
+---
+
+### Feature F8.9: Pipeline Definition Framework 📋 PLANNED
+
+**Deliverable**: Declarative JSONB pipeline definitions with step dependencies
+**Origin**: NEW_ADVENTURE.md (28 DEC 2025)
+**Estimated Effort**: ~34 story points
+
+**Concept**: Instead of submitting jobs with explicit parameters, define reusable pipeline templates in the database.
+
+| Story | Status | Description |
+|-------|--------|-------------|
+| S8.9.1 | 📋 | Create `h3.pipeline_definition` table schema |
+| S8.9.2 | 📋 | Implement pipeline JSONB validation |
+| S8.9.3 | 📋 | Build step dependency resolver (topological sort) |
+| S8.9.4 | 📋 | Implement `$prev_step` reference pattern |
+| S8.9.5 | 📋 | Create `/api/h3/pipelines` CRUD endpoints |
+| S8.9.6 | 📋 | Create pipeline validation service (dry run) |
+| S8.9.7 | 📋 | Implement `PipelineFactory.build_job()` - compiles pipeline → CoreMachine job |
+| S8.9.8 | 📋 | Register `h3_pipeline` job type |
+| S8.9.9 | 📋 | Create `/api/h3/pipelines/run` execution endpoint |
+| S8.9.10 | 📋 | Create `/api/h3/pipelines/runs/{id}` status endpoint |
+
+**Pipeline Definition Schema**:
+```json
+{
+  "id": "elevation-stats",
+  "display_name": "Elevation Statistics",
+  "description": "Compute elevation stats from Copernicus DEM",
+  "steps": [
+    {
+      "id": "dem",
+      "operation": "zonal_stats",
+      "source_id": "cop-dem-glo-30",
+      "stats": ["mean", "min", "max"]
+    }
+  ],
+  "default_scope": {
+    "resolution": 6
+  }
+}
+```
+
+**Usage**:
+```bash
+# Define once
+POST /api/h3/pipelines
+{"id": "elevation-stats", "steps": [...]}
+
+# Run many times with different scopes
+POST /api/h3/pipelines/run
+{"pipeline_id": "elevation-stats", "scope": {"iso3": "RWA"}}
+```
+
+**Key Files** (planned):
+- `infrastructure/h3_schema.py` (pipeline_definition table)
+- `infrastructure/h3_pipeline_repository.py`
+- `services/h3_aggregation/pipeline_factory.py`
+- `jobs/h3_pipeline.py`
+- `web_interfaces/h3_pipelines/interface.py`
+
+---
+
+### Feature F8.10: Multi-Step Pipeline Operations 📋 PLANNED
+
+**Deliverable**: Complex operations: spatial joins, weighted aggregates, intermediate storage
+**Origin**: NEW_ADVENTURE.md (28 DEC 2025)
+**Estimated Effort**: ~42 story points
+**Depends On**: F8.9 (Pipeline Definition Framework)
+
+| Story | Status | Description |
+|-------|--------|-------------|
+| S8.10.1 | 📋 | Design intermediate output storage strategy (temp tables vs blob) |
+| S8.10.2 | 📋 | Implement temp table intermediate storage |
+| S8.10.3 | 📋 | Implement `h3_spatial_join` handler |
+| S8.10.4 | 📋 | Implement `h3_weighted_aggregate` handler |
+| S8.10.5 | 📋 | Implement step output reference resolution (`$prev_step`) |
+| S8.10.6 | 📋 | Create intermediate cleanup service |
+| S8.10.7 | 📋 | End-to-end test: multi-step flood risk pipeline |
+
+**Multi-Step Pipeline Example**:
+```json
+{
+  "id": "flood-weighted-risk",
+  "steps": [
+    {"id": "flood", "operation": "zonal_stats", "source_id": "fathom-pluvial", "stats": ["max"]},
+    {"id": "pop", "operation": "zonal_stats", "source_id": "worldpop-2020", "stats": ["sum"]},
+    {"id": "risk", "operation": "weighted_aggregate",
+     "value_source": "$prev_step.flood",
+     "weight_source": "$prev_step.pop",
+     "output_dataset": "flood_pop_risk"}
+  ]
+}
+```
+
+**Operations Supported**:
+- `zonal_stats` - Raster to H3 aggregation (existing)
+- `point_stats` - Vector point counting (F8.4)
+- `spatial_join` - Join H3 stats with admin boundaries
+- `weighted_aggregate` - Combine datasets with weights
+- `normalize` - Scale values to 0-1 range
+- `classify` - Assign risk categories
+
+---
+
+### Feature F8.11: Rwanda Coffee Climate Risk Demo 📋 PLANNED
+
+**Deliverable**: End-to-end demonstration pipeline for coffee suitability/risk analysis
+**Origin**: NEW_ADVENTURE.md (28 DEC 2025)
+**Estimated Effort**: ~34 story points
+**Depends On**: F8.9, F8.10
+**Business Value**: Showcase platform capabilities for stakeholder engagement
+
+| Story | Status | Description |
+|-------|--------|-------------|
+| S8.11.1 | 📋 | Register iSDA soil sources (pH, carbon, texture) in source_catalog |
+| S8.11.2 | 📋 | Register CMIP6 temperature/precipitation sources |
+| S8.11.3 | 📋 | Register MapSPAM coffee production source |
+| S8.11.4 | 📋 | Seed Rwanda H3 res-7 cells (~5,000 cells) |
+| S8.11.5 | 📋 | Define coffee suitability calculation logic |
+| S8.11.6 | 📋 | Define coffee climate risk pipeline |
+| S8.11.7 | 📋 | Execute pipeline for Rwanda |
+| S8.11.8 | 📋 | Export results to GeoParquet |
+| S8.11.9 | 📋 | Create demo visualization (integrate with E11 Pipeline Builder) |
+
+**Data Sources**:
+| Source | Provider | Theme | Resolution |
+|--------|----------|-------|------------|
+| iSDA Soil pH | iSDA Africa | soil | 30m |
+| iSDA Soil Carbon | iSDA Africa | soil | 30m |
+| iSDA Soil Texture | iSDA Africa | soil | 30m |
+| CMIP6 Temperature | Planetary Computer | climate | ~100km |
+| CMIP6 Precipitation | Planetary Computer | climate | ~100km |
+| MapSPAM Coffee | IFPRI | agriculture | 10km |
+
+**Coffee Suitability Formula** (simplified):
+```
+suitability = f(
+  soil_ph: optimal 5.0-6.5,
+  soil_carbon: >2% preferred,
+  temp_mean: 15-24°C optimal,
+  precip_annual: 1200-2200mm optimal
+)
+```
+
+**Pipeline Definition**:
+```json
+{
+  "id": "coffee-climate-risk-rwa",
+  "steps": [
+    {"id": "soil_ph", "operation": "zonal_stats", "source_id": "isda-soil-ph"},
+    {"id": "soil_carbon", "operation": "zonal_stats", "source_id": "isda-soil-carbon"},
+    {"id": "temp", "operation": "zonal_stats", "source_id": "cmip6-tas-ssp245"},
+    {"id": "precip", "operation": "zonal_stats", "source_id": "cmip6-pr-ssp245"},
+    {"id": "suitability", "operation": "composite_score",
+     "inputs": ["$prev_step.soil_ph", "$prev_step.soil_carbon", "$prev_step.temp", "$prev_step.precip"],
+     "formula": "coffee_suitability_v1"}
+  ]
+}
+```
 
 ---
 
@@ -1931,4 +2151,198 @@ After Phase 1, evaluate:
 
 ---
 
-**Last Updated**: 27 DEC 2025 (E12 Phase 1 Complete - Vector Workflow UI built)
+## Epic E13: Pipeline Observability 📋 DESIGNED
+
+**Business Requirement**: Real-time metrics for long-running jobs with massive task counts
+**Status**: 📋 DESIGNED (28 DEC 2025)
+**Total Effort**: ~7-9 days
+
+**Problem Statement**: Jobs with 100s-1000s of tasks (H3 aggregation, FATHOM ETL, raster collections) lack visibility into:
+- Progress (which stage, how many tasks done)
+- Throughput (tasks/minute, cells/second)
+- ETA (when will it finish)
+- Health (error rates, stalled detection)
+
+**Architecture**:
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│  UNIVERSAL METRICS (all long-running jobs)                          │
+│  • stage progress, task counts, rates, ETA, error tracking         │
+└─────────────────────────────────────────────────────────────────────┘
+                              │ extends
+                              ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│  CONTEXT-SPECIFIC METRICS (domain knowledge)                        │
+│  • H3: cells processed, stats computed, current tile               │
+│  • FATHOM: tiles merged, bytes processed, current region           │
+│  • Raster: files processed, COGs created, output size              │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+**Feature Summary**:
+| Feature | Status | Description |
+|---------|--------|-------------|
+| F13.1 | 📋 | Config (env vars, debug mode) |
+| F13.2 | 📋 | Storage (job_metrics table, repository) |
+| F13.3 | 📋 | Tracker (base class, rate calculation, ETA) |
+| F13.4 | 📋 | HTTP API (metrics endpoints) |
+| F13.5 | 📋 | Dashboard (pipeline-monitor interface) |
+| F13.6 | 📋 | H3 Integration (handler instrumentation) |
+| F13.7 | 📋 | FATHOM Integration (handler instrumentation) |
+
+---
+
+### Feature F13.1: Metrics Config 📋
+
+**Deliverable**: Configuration system for metrics collection
+
+| Story | Status | Description |
+|-------|--------|-------------|
+| S13.1.1 | 📋 | Create `config/metrics_config.py` with env vars |
+
+**Environment Variables**:
+- `METRICS_DEBUG_MODE` - Chattery stdout logging
+- `METRICS_ENABLED` - Master switch
+- `METRICS_SAMPLE_INTERVAL` - Snapshot frequency (seconds)
+- `METRICS_RETENTION_MINUTES` - Auto-cleanup threshold
+
+---
+
+### Feature F13.2: Metrics Storage 📋
+
+**Deliverable**: Database storage for job metrics
+
+| Story | Status | Description |
+|-------|--------|-------------|
+| S13.2.1 | 📋 | Create `app.job_metrics` table in schema |
+| S13.2.2 | 📋 | Create `infrastructure/metrics_repository.py` |
+
+**Table Schema**:
+- Columns: job_id, timestamp, metric_type, payload (JSONB)
+- Indexes: job_id, timestamp, (job_id, timestamp)
+
+**Repository Methods**: write_snapshot(), get_latest(), get_history(), cleanup()
+
+---
+
+### Feature F13.3: Job Progress Tracker 📋
+
+**Deliverable**: Base tracker class with rate calculation and ETA
+
+| Story | Status | Description |
+|-------|--------|-------------|
+| S13.3.1 | 📋 | Create `infrastructure/job_progress.py` - base tracker |
+| S13.3.2 | 📋 | Create `infrastructure/job_progress_contexts.py` - mixins |
+
+**Base Class Methods**:
+- Universal: start_stage(), task_started/completed/failed()
+- Rates: calculate tasks/min, error rate, ETA
+- Debug: emit_debug() - chattery when METRICS_DEBUG_MODE=true
+
+**Context Mixins**:
+- `H3AggregationContext` - cells, stats, tiles
+- `FathomETLContext` - tiles, bytes, regions
+- `RasterCollectionContext` - files, COGs, sizes
+
+---
+
+### Feature F13.4: Metrics HTTP API 📋
+
+**Deliverable**: REST endpoints for metrics access
+
+| Story | Status | Description |
+|-------|--------|-------------|
+| S13.4.1 | 📋 | Create `web_interfaces/metrics/interface.py` |
+
+**Endpoints**:
+- `GET /api/metrics/jobs` - All active jobs with progress
+- `GET /api/metrics/jobs/{job_id}` - Single job details
+- `GET /api/metrics/jobs/{job_id}/events` - Event log (debug)
+
+**Response Schema**:
+```json
+{
+  "job_id": "abc123...",
+  "job_type": "h3_raster_aggregation",
+  "status": "processing",
+  "progress": {
+    "stage": 2, "total_stages": 3, "stage_name": "compute_stats",
+    "tasks_total": 5, "tasks_completed": 2, "tasks_failed": 0
+  },
+  "rates": {
+    "tasks_per_minute": 1.5,
+    "elapsed_seconds": 120,
+    "eta_seconds": 180
+  },
+  "context": {
+    "type": "h3_aggregation",
+    "cells_total": 68597,
+    "cells_processed": 25000,
+    "cells_rate_per_sec": 850,
+    "stats_computed": 100000
+  }
+}
+```
+
+---
+
+### Feature F13.5: Pipeline Dashboard 📋
+
+**Deliverable**: Web interface for job monitoring
+
+| Story | Status | Description |
+|-------|--------|-------------|
+| S13.5.1 | 📋 | Create pipeline dashboard at `/api/interface/pipeline-monitor` |
+
+**UI Components**:
+- HTML + vanilla JS (no frameworks)
+- Auto-refresh every 30 seconds via fetch()
+- Job selector dropdown
+- Progress bars (stage, tasks, context-specific)
+- Rate display + ETA calculation
+- Event log (last 20 events)
+
+---
+
+### Feature F13.6: H3 Integration 📋
+
+**Deliverable**: Instrument H3 aggregation handlers with metrics
+
+| Story | Status | Description |
+|-------|--------|-------------|
+| S13.6.1 | 📋 | Integrate `H3AggregationTracker` into `handler_raster_zonal.py` |
+| S13.6.2 | 📋 | Integrate into `handler_inventory_cells.py` |
+
+**Tracked Metrics**: cells_processed, stats_computed, current_tile
+
+---
+
+### Feature F13.7: FATHOM Integration 📋
+
+**Deliverable**: Instrument FATHOM ETL handlers with metrics
+
+| Story | Status | Description |
+|-------|--------|-------------|
+| S13.7.1 | 📋 | Integrate `FathomETLTracker` into FATHOM handlers |
+
+**Tracked Metrics**: tiles_merged, bytes_processed, current_region
+
+---
+
+**Debug Mode Output** (when `METRICS_DEBUG_MODE=true`):
+```
+[METRICS] Job abc123 started: h3_raster_aggregation
+[METRICS] Stage 2/3: compute_stats (5 tasks)
+[METRICS]   Task batch-0 started
+[METRICS]   Processing tile: Copernicus_DSM_COG_10_S02_00_E029_00
+[METRICS]     Batch 0: 1000 cells
+[METRICS]     ✓ 4000 stats @ 842 cells/sec
+[METRICS]   Task batch-0 completed (2.3s, 2000 cells, 8000 stats)
+[METRICS]   Progress: 2000/68597 cells (2.9%), ETA: 74s
+```
+
+---
+
+---
+
+**Last Updated**: 28 DEC 2025 (E8 updated, E13 added)

@@ -1,6 +1,6 @@
 # Working Backlog
 
-**Last Updated**: 27 DEC 2025
+**Last Updated**: 28 DEC 2025
 **Source of Truth**: [EPICS.md](/EPICS.md) — Epic/Feature/Story definitions live there
 **Purpose**: Sprint-level task tracking and delegation
 
@@ -16,6 +16,7 @@
 | 4 | E4 | Data Externalization | 📋 | F4.1: Publishing Workflow |
 | 5 | E9 | Zarr/Climate Data as API | 🚧 | F9.2: Virtual Zarr Pipeline |
 | **NEW** | **E12** | **Interface Modernization** | ✅ | **Phase 1 Complete** |
+| **NEW** | **E13** | **Pipeline Observability** | ✅ | **Complete (9/10 stories)** |
 
 ---
 
@@ -108,6 +109,125 @@
 |-------|-------------|-------|--------|
 | S12.4.1-5 | NiceGUI PoC on Docker Web App | Claude | 📋 After Phase 1 |
 
+### E13: Pipeline Observability ✅ COMPLETE
+
+**Goal**: Real-time metrics for long-running jobs with massive task counts (H3 aggregation, FATHOM ETL, raster collections)
+
+**Problem Statement**: Jobs with 100s-1000s of tasks lack visibility into:
+- Progress (which stage, how many tasks done)
+- Throughput (tasks/minute, cells/second)
+- ETA (when will it finish)
+- Health (error rates, stalled detection)
+
+**Architecture**:
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│  UNIVERSAL METRICS (all long-running jobs)                          │
+│  • stage progress, task counts, rates, ETA, error tracking         │
+└─────────────────────────────────────────────────────────────────────┘
+                              │ extends
+                              ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│  CONTEXT-SPECIFIC METRICS (domain knowledge)                        │
+│  • H3: cells processed, stats computed, current tile               │
+│  • FATHOM: tiles merged, bytes processed, current region           │
+│  • Raster: files processed, COGs created, output size              │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+#### Phase 1: Core Infrastructure ✅ COMPLETE (28 DEC 2025)
+
+| Story | Description | Effort | Owner | Status |
+|-------|-------------|--------|-------|--------|
+| **F13.1: Config** | | | | ✅ |
+| S13.1.1 | Create `config/metrics_config.py` with env vars | 0.5 day | Claude | ✅ 28 DEC |
+| **F13.2: Storage** | | | | ✅ |
+| S13.2.1 | Create `app.job_metrics` table (self-bootstrapping) | 0.5 day | Claude | ✅ 28 DEC |
+| S13.2.2 | Create `infrastructure/metrics_repository.py` | 0.5 day | Claude | ✅ 28 DEC |
+| **F13.3: Tracker** | | | | ✅ |
+| S13.3.1 | Create `infrastructure/job_progress.py` - base tracker | 1 day | Claude | ✅ 28 DEC |
+| S13.3.2 | Create `infrastructure/job_progress_contexts.py` - mixins | 0.5 day | Claude | ✅ 28 DEC |
+
+**Files Created**:
+- `config/metrics_config.py` - MetricsConfig with env vars
+- `infrastructure/metrics_repository.py` - PostgreSQL storage
+- `infrastructure/job_progress.py` - JobProgressTracker base
+- `infrastructure/job_progress_contexts.py` - H3/FATHOM/Raster mixins
+
+#### Phase 2: HTTP API + Dashboard ✅ COMPLETE (28 DEC 2025)
+
+| Story | Description | Effort | Owner | Status |
+|-------|-------------|--------|-------|--------|
+| **F13.4: HTTP API** | | | | ✅ |
+| S13.4.1 | Create `web_interfaces/metrics/interface.py` | 1 day | Claude | ✅ 28 DEC |
+| **F13.5: Dashboard** | | | | ✅ |
+| S13.5.1 | Create pipeline monitor at `/api/interface/metrics` | 1 day | Claude | ✅ 28 DEC |
+
+**Dashboard Features**:
+- HTMX live updates (auto-refresh 5s)
+- Job cards with progress bars
+- Rate display (tasks/min, cells/sec)
+- ETA calculation
+- Context-specific metrics (H3, FATHOM, Raster)
+- Job details panel with event log
+
+#### Phase 3: Handler Integration ✅ COMPLETE (28 DEC 2025)
+
+| Story | Description | Effort | Owner | Status |
+|-------|-------------|--------|-------|--------|
+| **F13.6: H3 Integration** | | | | ✅ |
+| S13.6.1 | Integrate `H3AggregationTracker` into `handler_raster_zonal.py` | 0.5 day | Claude | ✅ 28 DEC |
+| S13.6.2 | Integrate into `handler_inventory_cells.py` | 0.5 day | Claude | 📋 Deferred |
+| **F13.7: FATHOM Integration** | | | | ✅ |
+| S13.7.1 | Integrate `FathomETLTracker` into FATHOM handlers | 0.5 day | Claude | ✅ 28 DEC |
+
+**Handler Integration**:
+- `handler_raster_zonal.py`: H3AggregationTracker tracks cells, stats, tiles
+- `fathom_etl.py`: FathomETLTracker tracks tiles merged, bytes processed, regions
+
+**Debug Mode Output** (when `METRICS_DEBUG_MODE=true`):
+```
+[METRICS] Job abc123 started: h3_raster_aggregation
+[METRICS] Stage 2/3: compute_stats (5 tasks)
+[METRICS]   Task batch-0 started
+[METRICS]   Processing tile: Copernicus_DSM_COG_10_S02_00_E029_00
+[METRICS]     Batch 0: 1000 cells
+[METRICS]     ✓ 4000 stats @ 842 cells/sec
+[METRICS]   Task batch-0 completed (2.3s, 2000 cells, 8000 stats)
+[METRICS]   Progress: 2000/68597 cells (2.9%), ETA: 74s
+```
+
+**API Response Schema** (`GET /api/metrics/jobs/{job_id}`):
+```json
+{
+  "job_id": "abc123...",
+  "job_type": "h3_raster_aggregation",
+  "status": "processing",
+  "progress": {
+    "stage": 2, "total_stages": 3, "stage_name": "compute_stats",
+    "tasks_total": 5, "tasks_completed": 2, "tasks_failed": 0
+  },
+  "rates": {
+    "tasks_per_minute": 1.5,
+    "elapsed_seconds": 120,
+    "eta_seconds": 180
+  },
+  "context": {
+    "type": "h3_aggregation",
+    "cells_total": 68597,
+    "cells_processed": 25000,
+    "cells_rate_per_sec": 850,
+    "stats_computed": 100000,
+    "current_tile": "Copernicus_DSM_COG_10_S02_00_E029_00"
+  },
+  "recent_events": [
+    {"timestamp": "...", "type": "batch_done", "message": "Batch 2: 1000 cells, 4000 stats"}
+  ]
+}
+```
+
+**Total Effort**: ~7-9 days
+
 ---
 
 ## DevOps / Non-Geospatial Tasks
@@ -145,6 +265,8 @@ Tasks suitable for a colleague with Azure/Python/pipeline expertise but without 
 
 | Date | Item | Epic |
 |------|------|------|
+| 28 DEC 2025 | **E13 Pipeline Observability DESIGNED** - Universal metrics + H3/FATHOM contexts | E13 |
+| 28 DEC 2025 | **H3 Phase 1 COMPLETE** - source_catalog, repository, API, dynamic tile discovery | E8 |
 | 27 DEC 2025 | **Vector Workflow UI COMPLETE** - Submit Vector + Promote interfaces polished | E12 |
 | 27 DEC 2025 | Timestamps standardized to Eastern Time across all interfaces | E12 |
 | 27 DEC 2025 | Architecture diagram v2 created (grid layout, component mapping) | — |

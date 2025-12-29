@@ -75,10 +75,22 @@ Usage (Planetary Computer - Dynamic Tile Discovery, 27 DEC 2025):
 """
 
 import time
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from util_logger import LoggerFactory, ComponentType, log_memory_checkpoint
 
 from .base import validate_resolution, validate_stat_types, validate_dataset_id
+
+# E13: Pipeline Observability (28 DEC 2025)
+# Lazy import to avoid circular dependencies
+_tracker_class = None
+
+def _get_tracker_class():
+    """Lazy load H3AggregationTracker to avoid import-time issues."""
+    global _tracker_class
+    if _tracker_class is None:
+        from infrastructure.job_progress_contexts import H3AggregationTracker
+        _tracker_class = H3AggregationTracker
+    return _tracker_class
 
 
 def h3_raster_zonal_stats(params: Dict[str, Any], context: Dict[str, Any] = None) -> Dict[str, Any]:
@@ -210,6 +222,22 @@ def h3_raster_zonal_stats(params: Dict[str, Any], context: Dict[str, Any] = None
     logger.info(f"   Range: offset={batch_start}, size={batch_size}")
     logger.info(f"   Stats: {stats}")
 
+    # E13: Pipeline Observability - Create tracker for batch metrics (28 DEC 2025)
+    tracker = None
+    if source_job_id:
+        try:
+            TrackerClass = _get_tracker_class()
+            tracker = TrackerClass(
+                job_id=source_job_id,
+                job_type="h3_raster_aggregation",
+                auto_persist=True  # Write snapshots to app.job_metrics
+            )
+            # Note: Stage and task tracking is done at job level
+            # Handler only records batch progress
+        except Exception as e:
+            logger.warning(f"Could not create metrics tracker: {e}")
+            tracker = None
+
     try:
         from infrastructure.h3_repository import H3Repository
 
@@ -266,6 +294,10 @@ def h3_raster_zonal_stats(params: Dict[str, Any], context: Dict[str, Any] = None
 
         logger.info(f"   Loaded {cells_count:,} cells")
 
+        # E13: Record cells loaded in tracker
+        if tracker:
+            tracker.set_cells_total(cells_count)
+
         # Memory checkpoint 1: After loading cells from database
         task_id = f"{source_job_id[:8] if source_job_id else 'unknown'}-b{batch_index}"
         log_memory_checkpoint(logger, "After loading H3 cells",
@@ -291,7 +323,8 @@ def h3_raster_zonal_stats(params: Dict[str, Any], context: Dict[str, Any] = None
                 batch_size=batch_size,
                 start_time=start_time,
                 h3_repo=h3_repo,
-                logger=logger
+                logger=logger,
+                tracker=tracker  # E13: Pass tracker for dynamic discovery
             )
 
         # Standard single-tile mode
@@ -324,6 +357,16 @@ def h3_raster_zonal_stats(params: Dict[str, Any], context: Dict[str, Any] = None
         )
 
         logger.info(f"   Computed {len(zonal_results):,} stat values")
+
+        # E13: Record batch progress in tracker
+        if tracker:
+            stats_count = len(zonal_results) * len(stats)
+            tracker.record_batch(
+                cells=cells_count,
+                stats=stats_count,
+                tile_id=item_id if item_id else (blob_path if blob_path else None),
+                batch_index=batch_index
+            )
 
         # Memory checkpoint 3: After zonal stats computation (PEAK MEMORY - rasterstats loads raster data)
         log_memory_checkpoint(logger, "After rasterstats computation",
@@ -610,7 +653,8 @@ def _process_with_dynamic_tile_discovery(
     batch_size: int,
     start_time: float,
     h3_repo,
-    logger
+    logger,
+    tracker=None  # E13: Optional H3AggregationTracker (28 DEC 2025)
 ) -> Dict[str, Any]:
     """
     Process H3 cells using dynamic tile discovery from source catalog.
@@ -683,6 +727,14 @@ def _process_with_dynamic_tile_discovery(
     items = list(search.items())
     logger.info(f"   Discovered {len(items)} tiles covering the batch")
 
+    # E13: Record tiles discovered in tracker
+    if tracker:
+        tracker.set_tiles_discovered(
+            count=len(items),
+            tile_ids=[item.id for item in items[:10]]  # First 10 for context
+        )
+        tracker.set_cells_total(len(cells))
+
     if len(items) == 0:
         logger.warning(f"⚠️ No tiles found for bbox {bbox}")
         return {
@@ -704,6 +756,10 @@ def _process_with_dynamic_tile_discovery(
     for item in items:
         tile_id = item.id
         logger.debug(f"   Processing tile: {tile_id}")
+
+        # E13: Record tile start
+        if tracker:
+            tracker.start_tile(tile_id)
 
         # Get asset URL
         if asset_key not in item.assets:
@@ -753,6 +809,18 @@ def _process_with_dynamic_tile_discovery(
                             'pixel_count': result.get('count'),
                             'nodata_count': result.get('nodata_count')
                         })
+
+            # E13: Record batch progress for this tile
+            if tracker:
+                cells_in_tile = len(tile_cells)
+                stats_in_tile = len(zonal_results) * len(stats)
+                tracker.record_batch(
+                    cells=cells_in_tile,
+                    stats=stats_in_tile,
+                    tile_id=tile_id,
+                    batch_index=batch_index
+                )
+                tracker.complete_tile(tile_id)
 
         except Exception as e:
             logger.warning(f"   Failed to process tile {tile_id}: {e}")

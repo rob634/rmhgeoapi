@@ -167,11 +167,13 @@ class GalleryInterface(BaseInterface):
         content = self._render_gallery_content(items)
 
         custom_css = self._generate_css()
+        custom_js = self._generate_js()
 
         return self.wrap_html(
             title="Data Gallery - Geospatial API",
             content=content,
             custom_css=custom_css,
+            custom_js=custom_js,
             include_htmx=True
         )
 
@@ -293,14 +295,40 @@ class GalleryInterface(BaseInterface):
                 </p>
             </div>
 
+            <!-- Tools Section -->
+            <div class="section-header">
+                <h2>Tools & Viewers</h2>
+                <p>Explore data visualization interfaces</p>
+            </div>
+
             <div class="gallery-grid">
                 {cards_html}
+            </div>
+
+            <!-- Featured Datasets Section (Dynamic) -->
+            <div class="section-header" id="featured-section" style="display: none;">
+                <h2>Featured Datasets</h2>
+                <p>Promoted vector datasets with custom styling</p>
+            </div>
+
+            <div id="promoted-grid" class="gallery-grid">
+                <!-- Promoted datasets loaded dynamically -->
+            </div>
+
+            <div id="promoted-loading" class="loading-indicator">
+                <div class="spinner-small"></div>
+                Loading featured datasets...
+            </div>
+
+            <div id="promoted-empty" class="empty-message" style="display: none;">
+                No featured datasets yet. <a href="/api/interface/promote-vector">Promote a dataset</a>
             </div>
 
             <div class="gallery-footer">
                 <p>
                     <strong>Add Your Data:</strong> Process data via
-                    <a href="/api/interface/pipeline">Pipelines</a>
+                    <a href="/api/interface/pipeline">Pipelines</a> or
+                    <a href="/api/interface/promote-vector">Promote a Dataset</a>
                 </p>
             </div>
         </div>
@@ -530,6 +558,82 @@ class GalleryInterface(BaseInterface):
             color: var(--ds-navy);
         }
 
+        /* Section Header */
+        .section-header {
+            margin: 40px 0 24px 0;
+            padding-bottom: 12px;
+            border-bottom: 2px solid var(--ds-blue-primary);
+        }
+
+        .section-header h2 {
+            font-size: 24px;
+            color: var(--ds-navy);
+            margin: 0 0 8px 0;
+        }
+
+        .section-header p {
+            font-size: 14px;
+            color: var(--ds-gray);
+            margin: 0;
+        }
+
+        /* Loading Indicator */
+        .loading-indicator {
+            text-align: center;
+            padding: 40px;
+            color: var(--ds-gray);
+            font-size: 14px;
+        }
+
+        .spinner-small {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid #e9ecef;
+            border-top-color: var(--ds-blue-primary);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-right: 10px;
+            vertical-align: middle;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* Empty Message */
+        .empty-message {
+            text-align: center;
+            padding: 40px;
+            color: var(--ds-gray);
+            font-size: 14px;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        }
+
+        .empty-message a {
+            color: var(--ds-blue-primary);
+        }
+
+        /* Promoted Card Tags */
+        .promoted-tags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-bottom: 12px;
+        }
+
+        .promoted-tag {
+            display: inline-block;
+            padding: 3px 8px;
+            background: var(--ds-bg);
+            color: var(--ds-navy);
+            border-radius: 10px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+
         /* Responsive */
         @media (max-width: 768px) {
             .gallery-grid {
@@ -544,4 +648,100 @@ class GalleryInterface(BaseInterface):
                 height: 160px;
             }
         }
+        """
+
+    def _generate_js(self) -> str:
+        """Generate JavaScript for fetching and rendering promoted datasets."""
+        return """
+        // Fetch and render promoted datasets
+        (function() {
+            const API_BASE_URL = window.location.origin;
+            const promotedGrid = document.getElementById('promoted-grid');
+            const promotedLoading = document.getElementById('promoted-loading');
+            const featuredSection = document.getElementById('featured-section');
+
+            async function loadPromotedDatasets() {
+                try {
+                    const response = await fetch(`${API_BASE_URL}/api/promote`);
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}`);
+                    }
+                    const data = await response.json();
+
+                    // Filter for gallery-visible datasets
+                    const datasets = (data.promoted_datasets || [])
+                        .filter(d => d.in_gallery === true);
+
+                    // Hide loading indicator
+                    promotedLoading.style.display = 'none';
+
+                    if (datasets.length === 0) {
+                        // No promoted datasets - hide section entirely
+                        featuredSection.style.display = 'none';
+                        return;
+                    }
+
+                    // Show section header
+                    featuredSection.style.display = 'block';
+
+                    // Render cards
+                    promotedGrid.innerHTML = datasets.map(dataset => {
+                        const tags = (dataset.tags || []).slice(0, 3);
+                        const tagsHtml = tags.map(tag =>
+                            `<span class="promoted-tag">${escapeHtml(tag)}</span>`
+                        ).join('');
+
+                        const description = dataset.description || 'Promoted vector dataset';
+                        const truncatedDesc = description.length > 120
+                            ? description.substring(0, 117) + '...'
+                            : description;
+
+                        return `
+                            <a href="${API_BASE_URL}/api/interface/promoted-viewer?id=${dataset.promoted_id}" class="card">
+                                <div class="card-thumbnail" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); display: flex; align-items: center; justify-content: center;">
+                                    <span style="font-size: 48px;">🗺️</span>
+                                </div>
+                                <div class="card-content">
+                                    <div class="card-header">
+                                        <span class="card-icon">📍</span>
+                                        <h3 class="card-title">${escapeHtml(dataset.title || dataset.promoted_id)}</h3>
+                                    </div>
+                                    ${tagsHtml ? `<div class="promoted-tags">${tagsHtml}</div>` : ''}
+                                    <p class="card-description">${escapeHtml(truncatedDesc)}</p>
+                                    <div class="card-meta">
+                                        <span>Promoted Dataset</span>
+                                        <span class="card-arrow">→</span>
+                                    </div>
+                                </div>
+                            </a>
+                        `;
+                    }).join('');
+
+                } catch (error) {
+                    console.error('Failed to load promoted datasets:', error);
+                    promotedLoading.style.display = 'none';
+                    // Show empty message
+                    promotedGrid.innerHTML = `
+                        <div class="empty-message" style="grid-column: 1 / -1;">
+                            Unable to load featured datasets.
+                            <a href="/api/interface/promote-vector">Promote a dataset</a> to see it here.
+                        </div>
+                    `;
+                    featuredSection.style.display = 'block';
+                }
+            }
+
+            function escapeHtml(text) {
+                const div = document.createElement('div');
+                div.textContent = text;
+                return div.innerHTML;
+            }
+
+            // Load on page ready
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', loadPromotedDatasets);
+            } else {
+                loadPromotedDatasets();
+            }
+        })();
         """

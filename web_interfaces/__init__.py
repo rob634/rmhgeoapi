@@ -395,6 +395,12 @@ try:
 except ImportError as e:
     logger.warning(f"⚠️ Could not import Execution interface: {e}")
 
+try:
+    from .promoted_viewer import interface as _promoted_viewer
+    logger.info("✅ Imported Promoted Viewer interface module")
+except ImportError as e:
+    logger.warning(f"⚠️ Could not import Promoted Viewer interface: {e}")
+
 
 # Public API
 __all__ = [

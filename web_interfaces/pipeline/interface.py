@@ -101,6 +101,8 @@ class PipelineInterface(BaseInterface):
                 border-radius: 8px;
                 padding: 20px;
                 transition: all 0.2s;
+                display: flex;
+                flex-direction: column;
             }
 
             .pipeline-card:hover {
@@ -176,7 +178,7 @@ class PipelineInterface(BaseInterface):
 
             /* Pipeline action button */
             .pipeline-action {
-                margin-top: 16px;
+                margin-top: auto;
                 padding-top: 16px;
                 border-top: 1px solid var(--ds-gray-light);
             }
@@ -197,6 +199,19 @@ class PipelineInterface(BaseInterface):
 
             .btn-submit:hover {
                 background: var(--ds-cyan);
+            }
+
+            .btn-placeholder {
+                display: inline-block;
+                width: 100%;
+                padding: 10px 16px;
+                background: #e5e7eb;
+                color: #9ca3af;
+                text-align: center;
+                border-radius: 6px;
+                font-weight: 600;
+                font-size: 14px;
+                cursor: not-allowed;
             }
 
             /* Custom pipelines section */
@@ -436,7 +451,7 @@ class PipelineInterface(BaseInterface):
                 align-items: center;
                 gap: 6px;
                 padding: 10px 18px;
-                background: linear-gradient(135deg, #8B5CF6 0%, #7C3AED 100%);
+                background: linear-gradient(135deg, #0071BC 0%, #00A3DA 100%);
                 color: white;
                 text-decoration: none;
                 border-radius: 6px;
@@ -559,6 +574,9 @@ class PipelineInterface(BaseInterface):
                                 <div class="stat-value" id="collection-success">--</div>
                                 <div class="stat-label">Success Rate</div>
                             </div>
+                        </div>
+                        <div class="pipeline-action">
+                            <span class="btn-placeholder">🗂️ Coming Soon</span>
                         </div>
                     </div>
                 </div>

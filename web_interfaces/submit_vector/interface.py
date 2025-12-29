@@ -594,6 +594,8 @@ class SubmitVectorInterface(BaseInterface):
                                     <label for="license">License</label>
                                     <select id="license" name="license">
                                         <option value="">Not specified</option>
+                                        <option value="OUO">OUO (Official Use Only)</option>
+                                        <option value="Commercial">Commercial (Proprietary)</option>
                                         <option value="CC0-1.0">CC0-1.0 (Public Domain)</option>
                                         <option value="CC-BY-4.0">CC-BY-4.0 (Attribution)</option>
                                         <option value="CC-BY-SA-4.0">CC-BY-SA-4.0 (Attribution-ShareAlike)</option>

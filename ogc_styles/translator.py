@@ -246,8 +246,11 @@ class StyleTranslator:
 }}"""
 
     def _find_rule_by_type(self, sym_type: str) -> Optional[Dict[str, Any]]:
-        """Find first rule matching symbolizer type."""
+        """Find first rule matching geometry type."""
         for rule in self.rules:
+            # Check geometryType (CartoSym-JSON standard) or symbolizer.type (legacy)
+            if rule.get("geometryType") == sym_type:
+                return rule
             if rule.get("symbolizer", {}).get("type") == sym_type:
                 return rule
         return None

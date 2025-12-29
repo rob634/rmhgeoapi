@@ -389,6 +389,12 @@ try:
 except ImportError as e:
     logger.warning(f"⚠️ Could not import Metrics interface: {e}")
 
+try:
+    from .execution import interface as _execution
+    logger.info("✅ Imported Execution interface module")
+except ImportError as e:
+    logger.warning(f"⚠️ Could not import Execution interface: {e}")
+
 
 # Public API
 __all__ = [

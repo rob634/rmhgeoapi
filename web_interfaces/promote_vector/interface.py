@@ -1145,43 +1145,38 @@ class PromoteVectorInterface(BaseInterface):
             }
         }
 
-        // Build CartoSym-JSON style spec
+        // Build CartoSym-JSON style spec (OGC compliant format)
         function buildCartoSymStyle() {
             const s = getStyleValues();
-            const symbolizers = [];
+            let geometryType, symbolizer;
 
             if (currentGeometryType === 'polygon') {
-                symbolizers.push({
-                    type: 'fill',
-                    fill: s.fillColor,
-                    fillOpacity: s.fillOpacity,
-                    stroke: s.strokeColor,
-                    strokeWidth: s.strokeWidth,
-                    strokeOpacity: s.strokeOpacity
-                });
+                geometryType = 'Polygon';
+                symbolizer = {
+                    fill: { color: s.fillColor, opacity: s.fillOpacity },
+                    stroke: { color: s.strokeColor, width: s.strokeWidth, opacity: s.strokeOpacity }
+                };
             } else if (currentGeometryType === 'line') {
-                symbolizers.push({
-                    type: 'stroke',
-                    stroke: s.strokeColor,
-                    strokeWidth: s.strokeWidth,
-                    strokeOpacity: s.strokeOpacity
-                });
+                geometryType = 'Line';
+                symbolizer = {
+                    stroke: { color: s.strokeColor, width: s.strokeWidth, opacity: s.strokeOpacity }
+                };
             } else {
-                symbolizers.push({
-                    type: 'marker',
-                    fill: s.fillColor,
-                    fillOpacity: s.fillOpacity,
-                    stroke: s.strokeColor,
-                    strokeWidth: s.strokeWidth,
-                    strokeOpacity: s.strokeOpacity,
-                    radius: s.markerSize
-                });
+                geometryType = 'Point';
+                symbolizer = {
+                    marker: {
+                        fill: { color: s.fillColor, opacity: s.fillOpacity },
+                        stroke: { color: s.strokeColor, width: s.strokeWidth, opacity: s.strokeOpacity },
+                        size: s.markerSize
+                    }
+                };
             }
 
             return {
-                version: '1.0',
-                name: document.getElementById('promotedId').value + '-style',
-                rules: [{ symbolizers }]
+                stylingRules: [{
+                    geometryType: geometryType,
+                    symbolizer: symbolizer
+                }]
             };
         }
 

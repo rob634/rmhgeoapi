@@ -1,6 +1,6 @@
 # Working Backlog
 
-**Last Updated**: 29 DEC 2025
+**Last Updated**: 30 DEC 2025
 **Source of Truth**: [EPICS.md](/EPICS.md) — Epic/Feature/Story definitions live there
 **Purpose**: Sprint-level task tracking and delegation
 
@@ -47,13 +47,20 @@
 
 | Story | Description | Owner | Status |
 |-------|-------------|-------|--------|
+| **S2.2.5** | **🔴 HIGH: Fix TiTiler URLs for >3 band rasters** | Claude | 📋 |
 | F2.7 | Raster Collection Processing (pgstac searches) | Claude | 📋 |
-| S2.2.5 | Dynamic TiTiler preview URLs based on band count | Claude | 📋 |
 
-**S2.2.5 Details**: TiTiler fails for >4 band imagery (e.g., WorldView-3 8-band) when default URLs don't specify `bidx` parameters. Need to:
-- Detect band count in STAC metadata extraction
-- Generate band-appropriate preview URLs (e.g., `&bidx=5&bidx=3&bidx=2` for WV RGB)
-- Add WorldView-3 profile to `models/band_mapping.py` ✅ Done 21 DEC 2025
+**S2.2.5 Details** (HIGH PRIORITY): TiTiler viewer URLs fail for rasters with >3 bands because the default URL doesn't specify which bands to render. The 4th band (alpha or extra band) confuses TiTiler, but specifying `&bidx=1&bidx=2&bidx=3` works.
+
+**Root Cause**: Raster ETL generates default viewer URLs without `bidx` parameters. Need to:
+- Detect band count during raster ETL (STAC metadata extraction phase)
+- For 4+ band rasters: add `&bidx=1&bidx=2&bidx=3` to viewer/preview URLs
+- For WorldView-3 8-band: use `&bidx=5&bidx=3&bidx=2` (RGB mapping)
+- Store band mapping in STAC item properties for downstream use
+
+**Affected Files**:
+- `services/raster_handlers.py` - STAC metadata extraction
+- `models/band_mapping.py` - Band profiles (WorldView-3 added 21 DEC 2025)
 
 | Story | Description | Owner | Status |
 |-------|-------------|-------|--------|
@@ -111,6 +118,19 @@
 
 **Progress**: 14/18 interfaces HTMX-enabled (4 specialized full-page interfaces use custom HTML: map, zarr, swagger, stac-map)
 
+#### Phase 1.5: Health Interface Enhancements
+
+| Story | Description | Owner | Status |
+|-------|-------------|-------|--------|
+| S12.5.1 | Multi-Function App Health Display | Claude | 📋 Ready |
+
+**S12.5.1 Details**: When `APP_MODE` indicates external workers exist (`routes_raster_externally` or `routes_vector_externally`), fetch health data from worker URLs and display additional "Function App Resources" blocks:
+- Check `app_mode.details.routing` for `raster_app_url` and `vector_app_url`
+- Fetch `/api/health` from each worker URL
+- Render additional hardware blocks with worker name labels
+- Handle errors gracefully when workers are unreachable
+- Display in "Worker Environments" section below main Function App Resources
+
 #### Phase 2: NiceGUI Evaluation (Future)
 
 | Story | Description | Owner | Status |
@@ -167,6 +187,7 @@ Tasks suitable for a colleague with Azure/Python/pipeline expertise but without 
 
 | Date | Item | Epic |
 |------|------|------|
+| 30 DEC 2025 | **Platform API Submit UI COMPLETE** - submit-vector + submit-raster migrated to Platform API | E3 |
 | 29 DEC 2025 | **Epic Consolidation** - E10,E11,E13,E14,E15 absorbed into E7/E8 | — |
 | 29 DEC 2025 | **F7.5 Collection Ingestion COMPLETE** - Pre-processed COG ingest (MapSPAM) | E7 |
 | 29 DEC 2025 | **Agriculture theme added** - New H3 theme for crop data | E8 |

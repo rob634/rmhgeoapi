@@ -198,7 +198,7 @@ class PlatformRequest(BaseModel):
         ext = file_name.lower().split('.')[-1]
 
         # Map extension to data type
-        if ext in ['geojson', 'gpkg', 'shp', 'zip', 'csv', 'gdb']:
+        if ext in ['geojson', 'gpkg', 'shp', 'zip', 'csv', 'gdb', 'kml', 'kmz']:
             return DataType.VECTOR
         elif ext in ['tif', 'tiff', 'img', 'hdf', 'nc']:
             return DataType.RASTER

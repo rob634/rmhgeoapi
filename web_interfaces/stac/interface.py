@@ -51,46 +51,40 @@ class StacInterface(BaseInterface):
         """Generate HTML content structure."""
         return """
         <div class="container">
-            <!-- Header -->
-            <header class="dashboard-header">
-                <h1>🛰️ STAC Collections Dashboard</h1>
-                <p class="subtitle">Browse and explore SpatioTemporal Asset Catalog collections</p>
+            <!-- Header with count -->
+            <header class="dashboard-header header-with-count">
+                <div class="header-left">
+                    <h1>🛰️ STAC Collections</h1>
+                </div>
+                <div class="header-right">
+                    <span class="collection-count" id="total-collections">Loading...</span>
+                </div>
             </header>
 
             <!-- Collections List View -->
             <div id="collections-view">
-                <!-- Stats Banner -->
-                <div class="stats-banner hidden" id="stats-banner">
-                    <div class="stat-item">
-                        <span class="stat-label">Total Collections</span>
-                        <span class="stat-value" id="total-collections">0</span>
-                    </div>
-                    <div class="stat-item">
-                        <span class="stat-label">Total Items</span>
-                        <span class="stat-value" id="total-items">0</span>
+                <!-- Action Bar -->
+                <div class="action-bar">
+                    <a href="/api/interface/submit-raster" class="btn btn-primary">
+                        ➕ Create New Raster Collection
+                    </a>
+                    <div class="filter-group">
+                        <input type="text" class="search-input" id="search-filter"
+                               placeholder="Search collections..." onkeyup="filterCollections()">
+                        <select class="filter-select" id="type-filter" onchange="filterCollections()">
+                            <option value="">All Types</option>
+                            <option value="raster">Raster Only</option>
+                            <option value="vector">Vector Only</option>
+                        </select>
                     </div>
                 </div>
 
-                <!-- Filters -->
-                <div class="filters">
-                    <input type="text" class="filter-input" id="search-filter"
-                           placeholder="Search collections..." onkeyup="filterCollections()">
-                    <select class="filter-select" id="type-filter" onchange="filterCollections()">
-                        <option value="">All Types</option>
-                        <option value="raster">Raster Only</option>
-                        <option value="vector">Vector Only</option>
-                    </select>
-                </div>
+                <!-- Loading Spinner -->
+                <div id="loading-spinner" class="spinner"></div>
 
                 <!-- Collections Grid -->
                 <div class="collections-grid" id="collections-grid">
                     <!-- Collections will be inserted here by JavaScript -->
-                </div>
-
-                <!-- Loading Spinner -->
-                <div class="spinner-container hidden" id="loading-spinner">
-                    <div class="spinner"></div>
-                    <div class="spinner-text">Loading collections...</div>
                 </div>
 
                 <!-- Empty State -->
@@ -99,9 +93,6 @@ class StacInterface(BaseInterface):
                     <h3>No Collections Found</h3>
                     <p>There are no STAC collections available yet.</p>
                 </div>
-
-                <!-- Status Message -->
-                <div id="status" class="hidden"></div>
             </div>
 
             <!-- Collection Detail View (hidden by default) -->
@@ -157,18 +148,93 @@ class StacInterface(BaseInterface):
 
         Note: Most styles now in COMMON_CSS (S12.1.1).
         Only STAC-specific styles remain here.
+
+        Updated 30 DEC 2025: Smaller cards, header with count, action bar.
         """
         return """
-        /* STAC-specific: Filters row */
-        .filters {
+        /* Header with count - flex layout */
+        .header-with-count {
             display: flex;
-            gap: 15px;
-            margin-bottom: 20px;
+            justify-content: space-between;
+            align-items: center;
+            padding-bottom: 12px;
         }
 
-        .filters .filter-input {
-            flex: 1;
-            max-width: 400px;
+        .header-with-count h1 {
+            margin: 0;
+        }
+
+        .collection-count {
+            background: var(--ds-blue-primary);
+            color: white;
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: 600;
+        }
+
+        /* Action bar with button and filters */
+        .action-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+            gap: 16px;
+        }
+
+        .filter-group {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+        }
+
+        .filter-group .search-input {
+            width: 200px;
+        }
+
+        .filter-select {
+            padding: 8px 12px;
+            border: 1px solid var(--ds-gray-light);
+            border-radius: 4px;
+            font-size: 13px;
+        }
+
+        /* Smaller cards - 4 per row */
+        .collections-grid {
+            grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)) !important;
+            gap: 12px !important;
+        }
+
+        .collection-card {
+            padding: 12px !important;
+            cursor: pointer;
+        }
+
+        .collection-card h3 {
+            font-size: 13px !important;
+            margin-bottom: 6px !important;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .collection-card .description {
+            font-size: 11px;
+            max-height: 32px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            color: var(--ds-gray);
+            margin-bottom: 8px;
+        }
+
+        .collection-card .meta {
+            font-size: 11px;
+            color: var(--ds-gray);
+            display: flex;
+            gap: 12px;
         }
 
         /* STAC-specific: Detail view */
@@ -293,13 +359,13 @@ class StacInterface(BaseInterface):
             const grid = document.getElementById('collections-grid');
             const spinner = document.getElementById('loading-spinner');
             const emptyState = document.getElementById('empty-state');
-            const statsBanner = document.getElementById('stats-banner');
+            const countDisplay = document.getElementById('total-collections');
 
             // Show loading
             grid.innerHTML = '';
             spinner.classList.remove('hidden');
             emptyState.classList.add('hidden');
-            statsBanner.classList.add('hidden');
+            countDisplay.textContent = 'Loading...';
 
             try {
                 const data = await fetchJSON(`${API_BASE_URL}/api/stac/collections`);
@@ -308,15 +374,13 @@ class StacInterface(BaseInterface):
                 spinner.classList.add('hidden');
 
                 if (allCollections.length === 0) {
+                    countDisplay.textContent = '0 Collections';
                     emptyState.classList.remove('hidden');
                     return;
                 }
 
-                // Show stats
-                const totalItems = allCollections.reduce((sum, c) => sum + (c.summaries?.total_items || 0), 0);
-                document.getElementById('total-collections').textContent = allCollections.length;
-                document.getElementById('total-items').textContent = totalItems.toLocaleString();
-                statsBanner.classList.remove('hidden');
+                // Update count in header
+                countDisplay.textContent = `${allCollections.length} Collections`;
 
                 // Render collections
                 renderCollections(allCollections);
@@ -324,7 +388,7 @@ class StacInterface(BaseInterface):
             } catch (error) {
                 console.error('Error loading collections:', error);
                 spinner.classList.add('hidden');
-                // Error already shown by fetchJSON
+                countDisplay.textContent = 'Error';
             }
         }
 
@@ -334,14 +398,16 @@ class StacInterface(BaseInterface):
             grid.innerHTML = collections.map(c => {
                 const itemCount = c.summaries?.total_items || 0;
                 const type = c.type || 'unknown';
+                const title = c.title || c.id;
+                const desc = c.description || 'No description available';
 
                 return `
-                    <div class="collection-card" onclick="showCollectionDetail('${c.id}')">
-                        <h3>${c.title || c.id}</h3>
-                        <div class="description">${c.description || 'No description available'}</div>
+                    <div class="collection-card" onclick="showCollectionDetail('${c.id}')" title="${title}">
+                        <h3>${title}</h3>
+                        <div class="description">${desc}</div>
                         <div class="meta">
-                            <div>📄 ${itemCount.toLocaleString()} items</div>
-                            <div>${type === 'raster' ? '🌍' : '📐'} ${type}</div>
+                            <span>📄 ${itemCount.toLocaleString()} items</span>
+                            <span>${type === 'raster' ? '🌍' : '📐'} ${type}</span>
                         </div>
                     </div>
                 `;

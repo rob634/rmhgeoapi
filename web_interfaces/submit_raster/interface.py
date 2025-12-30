@@ -424,8 +424,7 @@ class SubmitRasterInterface(BaseInterface):
                 </div>
             </div>
             <div class="result-actions">
-                <a href="/api/platform/status/{request_id}" class="btn btn-primary" target="_blank">View Status</a>
-                <a href="/api/interface/tasks?job_id={job_id}" class="btn btn-secondary">View Job Tasks</a>
+                <a href="/api/interface/tasks?job_id={job_id}" class="btn btn-primary">Workflow Monitor</a>
             </div>
         </div>
         '''
@@ -456,8 +455,7 @@ class SubmitRasterInterface(BaseInterface):
                 </div>
             </div>
             <div class="result-actions">
-                <a href="/api/interface/tasks?job_id={job_id}" class="btn btn-primary">View Job Tasks</a>
-                <a href="/api/interface/pipeline" class="btn btn-secondary">View Pipeline Dashboard</a>
+                <a href="/api/interface/tasks?job_id={job_id}" class="btn btn-primary">Workflow Monitor</a>
             </div>
         </div>
         '''

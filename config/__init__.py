@@ -37,7 +37,7 @@ Created: 20 NOV 2025 as part of config.py god object refactoring
 # ============================================================================
 # VERSION
 # ============================================================================
-__version__ = "0.5.0"
+__version__ = "0.5.3"
 
 from typing import Optional
 

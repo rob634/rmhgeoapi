@@ -51,26 +51,21 @@ class VectorInterface(BaseInterface):
         """Generate HTML content structure."""
         return """
         <div class="container">
-            <!-- Header -->
-            <header class="dashboard-header">
-                <h1>📐 OGC Features Collections</h1>
-                <p class="subtitle">Browse vector feature collections via OGC API - Features standard</p>
+            <!-- Header with count -->
+            <header class="dashboard-header header-with-count">
+                <div class="header-left">
+                    <h1>📐 OGC Features</h1>
+                </div>
+                <div class="header-right">
+                    <span class="collection-count" id="total-collections">Loading...</span>
+                </div>
             </header>
 
-            <!-- Stats Banner -->
-            <div class="stats-banner hidden" id="stats-banner">
-                <div class="stat-item">
-                    <span class="stat-label">Total Collections</span>
-                    <span class="stat-value" id="total-collections">0</span>
-                </div>
-                <div class="stat-item">
-                    <span class="stat-label">Total Features</span>
-                    <span class="stat-value" id="total-features">0</span>
-                </div>
-            </div>
-
-            <!-- Search/Filter -->
-            <div class="controls">
+            <!-- Action Bar -->
+            <div class="action-bar">
+                <a href="/api/interface/submit-vector" class="btn btn-primary">
+                    ➕ Create New Feature Collection
+                </a>
                 <input
                     type="text"
                     id="search-filter"
@@ -102,28 +97,91 @@ class VectorInterface(BaseInterface):
 
         Note: Most styles now in COMMON_CSS (S12.1.1).
         Only vector-specific styles remain here.
+
+        Updated 30 DEC 2025: Smaller cards, 4 per row, promoted badges, delete buttons.
         """
         return """
-        /* Vector-specific: Stats banner as grid layout */
-        .stats-banner {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 20px;
-            padding: 20px;
+        /* Header with count - flex layout */
+        .header-with-count {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding-bottom: 12px;
+        }
+
+        .header-with-count h1 {
+            margin: 0;
+        }
+
+        .collection-count {
+            background: var(--ds-blue-primary);
+            color: white;
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: 600;
+        }
+
+        /* Action bar with button and search */
+        .action-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+            gap: 16px;
+        }
+
+        .action-bar .search-input {
+            flex: 1;
+            max-width: 300px;
+        }
+
+        /* Smaller cards - 4 per row */
+        .collections-grid {
+            grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)) !important;
+            gap: 12px !important;
+        }
+
+        .collection-card {
+            padding: 12px !important;
+            cursor: pointer;
+            position: relative;
+        }
+
+        .collection-card h3 {
+            font-size: 13px !important;
+            margin-bottom: 6px !important;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .collection-card .description {
+            font-size: 11px;
+            max-height: 32px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            color: var(--ds-gray);
+            margin-bottom: 8px;
         }
 
         /* Vector-specific: Card meta section with border */
         .collection-card .meta {
-            margin-top: 15px;
-            padding-top: 15px;
+            margin-top: 8px;
+            padding-top: 8px;
             border-top: 1px solid var(--ds-gray-light);
             color: var(--ds-gray);
+            font-size: 11px;
         }
 
         .collection-card .meta-item {
             display: flex;
             align-items: center;
-            gap: 5px;
+            gap: 4px;
+            margin-bottom: 2px;
         }
 
         .collection-card .feature-count {
@@ -133,17 +191,35 @@ class VectorInterface(BaseInterface):
 
         .collection-card .bbox {
             font-family: 'Courier New', monospace;
-            font-size: 11px;
+            font-size: 10px;
             color: var(--ds-gray);
         }
 
         .collection-card .links {
-            margin-top: 12px;
+            margin-top: 8px;
             display: flex;
-            gap: 10px;
+            gap: 6px;
             flex-wrap: wrap;
         }
 
+        .collection-card .link-badge {
+            font-size: 11px !important;
+            padding: 3px 8px !important;
+        }
+
+        /* Promoted badge */
+        .promoted-badge {
+            display: inline-block;
+            background: linear-gradient(135deg, #10B981 0%, #059669 100%);
+            color: white;
+            font-size: 10px;
+            font-weight: 600;
+            padding: 2px 6px;
+            border-radius: 4px;
+            margin-bottom: 6px;
+        }
+
+        /* Promote button */
         .link-badge-promote {
             background: linear-gradient(135deg, #10B981 0%, #059669 100%) !important;
             color: white !important;
@@ -153,13 +229,183 @@ class VectorInterface(BaseInterface):
         .link-badge-promote:hover {
             background: linear-gradient(135deg, #059669 0%, #047857 100%) !important;
         }
+
+        /* Delete button */
+        .link-badge-delete {
+            background: linear-gradient(135deg, #EF4444 0%, #DC2626 100%) !important;
+            color: white !important;
+            border-color: #DC2626 !important;
+        }
+
+        .link-badge-delete:hover {
+            background: linear-gradient(135deg, #DC2626 0%, #B91C1C 100%) !important;
+        }
+
+        /* Modal overlay */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.6);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+
+        .modal-content {
+            background: white;
+            border-radius: 8px;
+            max-width: 700px;
+            max-height: 80vh;
+            overflow-y: auto;
+            padding: 24px;
+            position: relative;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+        }
+
+        .modal-close {
+            position: absolute;
+            top: 12px;
+            right: 12px;
+            background: none;
+            border: none;
+            font-size: 24px;
+            cursor: pointer;
+            color: var(--ds-gray);
+        }
+
+        .modal-close:hover {
+            color: var(--ds-blue-primary);
+        }
+
+        .modal-content h2 {
+            margin-bottom: 16px;
+            padding-right: 30px;
+        }
+
+        .modal-section {
+            margin-bottom: 16px;
+        }
+
+        .modal-section h4 {
+            color: var(--ds-gray);
+            font-size: 12px;
+            text-transform: uppercase;
+            margin-bottom: 6px;
+        }
+
+        .modal-section pre {
+            background: var(--ds-gray-lighter);
+            padding: 12px;
+            border-radius: 4px;
+            font-size: 11px;
+            overflow-x: auto;
+        }
+
+        .modal-links {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin-top: 16px;
+        }
+
+        /* Confirm/Alert modal specific styles */
+        .modal-content.modal-confirm {
+            max-width: 400px;
+            text-align: center;
+        }
+
+        .modal-confirm .modal-icon {
+            font-size: 48px;
+            margin-bottom: 16px;
+        }
+
+        .modal-confirm .modal-message {
+            color: var(--ds-gray);
+            margin-bottom: 20px;
+            line-height: 1.5;
+        }
+
+        .modal-confirm .modal-buttons {
+            display: flex;
+            gap: 12px;
+            justify-content: center;
+        }
+
+        .modal-confirm .btn-danger {
+            background: linear-gradient(135deg, #EF4444 0%, #DC2626 100%);
+            color: white;
+            border: none;
+            padding: 10px 24px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 600;
+        }
+
+        .modal-confirm .btn-danger:hover {
+            background: linear-gradient(135deg, #DC2626 0%, #B91C1C 100%);
+        }
+
+        .modal-confirm .btn-cancel {
+            background: var(--ds-gray-lighter);
+            color: var(--ds-gray-dark);
+            border: 1px solid var(--ds-gray-light);
+            padding: 10px 24px;
+            border-radius: 6px;
+            cursor: pointer;
+        }
+
+        .modal-confirm .btn-cancel:hover {
+            background: var(--ds-gray-light);
+        }
+
+        .modal-content.modal-success {
+            max-width: 450px;
+            text-align: center;
+        }
+
+        .modal-success .modal-icon {
+            font-size: 48px;
+            margin-bottom: 16px;
+        }
+
+        .modal-success .modal-details {
+            background: var(--ds-gray-lighter);
+            padding: 12px;
+            border-radius: 6px;
+            margin: 16px 0;
+            text-align: left;
+        }
+
+        .modal-success .detail-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 6px;
+        }
+
+        .modal-success .detail-label {
+            color: var(--ds-gray);
+            font-size: 12px;
+        }
+
+        .modal-success .detail-value {
+            font-family: monospace;
+            font-size: 12px;
+        }
         """
 
     def _generate_custom_js(self) -> str:
-        """Generate custom JavaScript for OGC Features dashboard."""
+        """Generate custom JavaScript for OGC Features dashboard.
+
+        Updated 30 DEC 2025: Fetch promoted datasets, conditional buttons, delete, modal.
+        """
         return """
         // State
         let allCollections = [];
+        let promotedCollectionIds = new Set();
 
         // Load collections on page load
         document.addEventListener('DOMContentLoaded', loadCollections);
@@ -169,17 +415,27 @@ class VectorInterface(BaseInterface):
             const grid = document.getElementById('collections-grid');
             const spinner = document.getElementById('loading-spinner');
             const emptyState = document.getElementById('empty-state');
-            const statsBanner = document.getElementById('stats-banner');
+            const countDisplay = document.getElementById('total-collections');
 
             // Show loading
             grid.innerHTML = '';
             spinner.classList.remove('hidden');
             emptyState.classList.add('hidden');
-            statsBanner.classList.add('hidden');
+            countDisplay.textContent = 'Loading...';
 
             try {
-                const data = await fetchJSON(`${API_BASE_URL}/api/features/collections`);
-                allCollections = data.collections || [];
+                // Fetch collections and promoted datasets in parallel
+                const [collectionsData, promotedData] = await Promise.all([
+                    fetchJSON(`${API_BASE_URL}/api/features/collections`),
+                    fetchJSON(`${API_BASE_URL}/api/promote`).catch(() => ({ data: [] }))
+                ]);
+
+                allCollections = collectionsData.collections || [];
+
+                // Build Set of promoted collection IDs
+                promotedCollectionIds = new Set(
+                    (promotedData.data || []).map(p => p.stac_collection_id)
+                );
 
                 spinner.classList.add('hidden');
 
@@ -188,17 +444,8 @@ class VectorInterface(BaseInterface):
                     return;
                 }
 
-                // Calculate total features
-                const totalFeatures = allCollections.reduce((sum, c) => {
-                    const desc = c.description || '';
-                    const match = desc.match(/\\((\\d+) features\\)/);
-                    return sum + (match ? parseInt(match[1]) : 0);
-                }, 0);
-
-                // Show stats
-                document.getElementById('total-collections').textContent = allCollections.length;
-                document.getElementById('total-features').textContent = totalFeatures.toLocaleString();
-                statsBanner.classList.remove('hidden');
+                // Update count in header
+                countDisplay.textContent = `${allCollections.length} Collections`;
 
                 // Render collections
                 renderCollections(allCollections);
@@ -227,14 +474,46 @@ class VectorInterface(BaseInterface):
                     'No extent';
 
                 // Get links
-                const selfLink = c.links?.find(l => l.rel === 'self')?.href;
-                const itemsLink = c.links?.find(l => l.rel === 'items')?.href;
+                const selfLink = c.links?.find(l => l.rel === 'self')?.href || '';
                 const viewerLink = `${API_BASE_URL}/api/vector/viewer?collection=${encodeURIComponent(c.id)}`;
                 const promoteLink = `/api/interface/promote-vector?collection=${encodeURIComponent(c.id)}`;
 
+                // Check if promoted
+                const isPromoted = promotedCollectionIds.has(c.id);
+                const title = c.title || c.id;
+
+                // Build action buttons
+                let actionButtons = `
+                    <a href="${viewerLink}"
+                       class="link-badge link-badge-primary"
+                       onclick="event.stopPropagation()"
+                       target="_blank"
+                       title="Interactive map viewer">
+                        🗺️ Map
+                    </a>`;
+
+                if (isPromoted) {
+                    // No action buttons for promoted - just view
+                } else {
+                    // Promote and Delete buttons for non-promoted
+                    actionButtons += `
+                        <a href="${promoteLink}"
+                           class="link-badge link-badge-promote"
+                           onclick="event.stopPropagation()"
+                           title="Promote to gallery with styling">
+                            ⬆️ Promote
+                        </a>
+                        <button class="link-badge link-badge-delete"
+                                onclick="deleteCollection('${c.id}', event)"
+                                title="Delete this collection (unpublish)">
+                            🗑️ Delete
+                        </button>`;
+                }
+
                 return `
-                    <div class="collection-card" onclick="openCollection('${selfLink}', event)">
-                        <h3>${c.title || c.id}</h3>
+                    <div class="collection-card" onclick="showCollectionDetail('${c.id}', event)" title="${title}">
+                        ${isPromoted ? '<span class="promoted-badge">⭐ Promoted</span>' : ''}
+                        <h3>${title}</h3>
                         <div class="description">${desc}</div>
 
                         <div class="meta">
@@ -249,33 +528,7 @@ class VectorInterface(BaseInterface):
                         </div>
 
                         <div class="links">
-                            <a href="${viewerLink}"
-                               class="link-badge link-badge-primary"
-                               onclick="event.stopPropagation()"
-                               target="_blank"
-                               title="Interactive map viewer">
-                                🗺️ View Map
-                            </a>
-                            <a href="${promoteLink}"
-                               class="link-badge link-badge-promote"
-                               onclick="event.stopPropagation()"
-                               title="Promote to gallery with styling">
-                                ⬆️ Promote
-                            </a>
-                            <a href="${selfLink}"
-                               class="link-badge"
-                               onclick="event.stopPropagation()"
-                               target="_blank"
-                               title="Collection metadata (JSON)">
-                                🔗 Collection
-                            </a>
-                            <a href="${itemsLink}"
-                               class="link-badge"
-                               onclick="event.stopPropagation()"
-                               target="_blank"
-                               title="Features endpoint (GeoJSON)">
-                                📄 Items
-                            </a>
+                            ${actionButtons}
                         </div>
                     </div>
                 `;
@@ -295,11 +548,180 @@ class VectorInterface(BaseInterface):
             renderCollections(filtered);
         }
 
-        // Open collection API endpoint
-        function openCollection(url, event) {
-            // Only open if clicking the card itself, not the links
-            if (event.target.tagName !== 'A') {
-                window.open(url, '_blank');
+        // Show collection detail modal
+        async function showCollectionDetail(collectionId, event) {
+            // Don't open modal if clicking links/buttons
+            if (event.target.tagName === 'A' || event.target.tagName === 'BUTTON') {
+                return;
+            }
+
+            try {
+                const data = await fetchJSON(`${API_BASE_URL}/api/features/collections/${encodeURIComponent(collectionId)}`);
+
+                const selfLink = data.links?.find(l => l.rel === 'self')?.href || '';
+                const itemsLink = data.links?.find(l => l.rel === 'items')?.href || '';
+                const viewerLink = `${API_BASE_URL}/api/vector/viewer?collection=${encodeURIComponent(collectionId)}`;
+
+                // Format extent
+                const bbox = data.extent?.spatial?.bbox?.[0];
+                const bboxStr = bbox ? `[${bbox.map(v => v.toFixed(4)).join(', ')}]` : 'Not available';
+
+                // Format temporal extent
+                const temporal = data.extent?.temporal?.interval?.[0];
+                const temporalStr = temporal ? `${temporal[0] || 'Unknown'} to ${temporal[1] || 'Present'}` : 'Not available';
+
+                const modal = document.createElement('div');
+                modal.className = 'modal-overlay';
+                modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
+                modal.innerHTML = `
+                    <div class="modal-content">
+                        <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">&times;</button>
+                        <h2>${data.title || data.id}</h2>
+
+                        <div class="modal-section">
+                            <h4>Description</h4>
+                            <p>${data.description || 'No description available'}</p>
+                        </div>
+
+                        <div class="modal-section">
+                            <h4>Collection ID</h4>
+                            <code>${data.id}</code>
+                        </div>
+
+                        <div class="modal-section">
+                            <h4>Spatial Extent (BBOX)</h4>
+                            <code>${bboxStr}</code>
+                        </div>
+
+                        <div class="modal-section">
+                            <h4>Temporal Extent</h4>
+                            <code>${temporalStr}</code>
+                        </div>
+
+                        <div class="modal-section">
+                            <h4>CRS</h4>
+                            <code>${(data.crs || ['Unknown']).join(', ')}</code>
+                        </div>
+
+                        <div class="modal-links">
+                            <a href="${viewerLink}" class="link-badge link-badge-primary" target="_blank">🗺️ View Map</a>
+                            <a href="${selfLink}" class="link-badge" target="_blank">🔗 Collection JSON</a>
+                            <a href="${itemsLink}" class="link-badge" target="_blank">📄 Items GeoJSON</a>
+                        </div>
+                    </div>
+                `;
+                document.body.appendChild(modal);
+            } catch (error) {
+                console.error('Error loading collection detail:', error);
+                alert('Failed to load collection details');
+            }
+        }
+
+        // Show confirmation modal - returns Promise that resolves to true/false
+        function showConfirmModal(title, message, confirmText = 'Delete', icon = '⚠️') {
+            return new Promise((resolve) => {
+                const modal = document.createElement('div');
+                modal.className = 'modal-overlay';
+                modal.innerHTML = `
+                    <div class="modal-content modal-confirm">
+                        <div class="modal-icon">${icon}</div>
+                        <h3>${title}</h3>
+                        <p class="modal-message">${message}</p>
+                        <div class="modal-buttons">
+                            <button class="btn-cancel" onclick="this.closest('.modal-overlay').remove(); window._confirmResolve(false);">Cancel</button>
+                            <button class="btn-danger" onclick="this.closest('.modal-overlay').remove(); window._confirmResolve(true);">${confirmText}</button>
+                        </div>
+                    </div>
+                `;
+                window._confirmResolve = resolve;
+                document.body.appendChild(modal);
+            });
+        }
+
+        // Show success/info modal
+        function showResultModal(title, message, details = null, icon = '✅') {
+            const modal = document.createElement('div');
+            modal.className = 'modal-overlay';
+            modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
+
+            let detailsHtml = '';
+            if (details) {
+                detailsHtml = `<div class="modal-details">
+                    ${Object.entries(details).map(([k, v]) => `
+                        <div class="detail-row">
+                            <span class="detail-label">${k}</span>
+                            <span class="detail-value">${v}</span>
+                        </div>
+                    `).join('')}
+                </div>`;
+            }
+
+            modal.innerHTML = `
+                <div class="modal-content modal-success">
+                    <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">&times;</button>
+                    <div class="modal-icon">${icon}</div>
+                    <h3>${title}</h3>
+                    <p class="modal-message">${message}</p>
+                    ${detailsHtml}
+                    <button class="btn btn-primary" onclick="this.closest('.modal-overlay').remove()">OK</button>
+                </div>
+            `;
+            document.body.appendChild(modal);
+        }
+
+        // Delete collection (trigger unpublish)
+        async function deleteCollection(collectionId, event) {
+            event.stopPropagation();
+
+            const confirmed = await showConfirmModal(
+                'Delete Collection?',
+                `This will unpublish <strong>${collectionId}</strong> and remove it from the database. This action cannot be undone.`,
+                'Delete',
+                '🗑️'
+            );
+
+            if (!confirmed) return;
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/api/platform/unpublish/vector`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        table_name: collectionId,
+                        dry_run: false
+                    })
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    showResultModal(
+                        'Unpublish Submitted',
+                        'The collection will be removed shortly.',
+                        {
+                            'Job ID': result.job_id,
+                            'Collection': collectionId
+                        },
+                        '✅'
+                    );
+                    // Refresh the grid
+                    loadCollections();
+                } else {
+                    showResultModal(
+                        'Delete Failed',
+                        result.error || 'Unknown error occurred',
+                        null,
+                        '❌'
+                    );
+                }
+            } catch (error) {
+                console.error('Error deleting collection:', error);
+                showResultModal(
+                    'Request Failed',
+                    'Failed to submit delete request: ' + error.message,
+                    null,
+                    '❌'
+                );
             }
         }
         """

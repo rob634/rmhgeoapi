@@ -2,7 +2,7 @@
 
 > **Navigation**: [Quick Start](WIKI_QUICK_START.md) | [Platform API](WIKI_PLATFORM_API.md) | [All Jobs](WIKI_API_JOB_SUBMISSION.md) | [Errors](WIKI_API_ERRORS.md) | [Glossary](WIKI_API_GLOSSARY.md)
 
-**Last Updated**: 23 DEC 2025
+**Last Updated**: 29 DEC 2025
 **Audience**: Development team (all disciplines)
 **Purpose**: High-level understanding of platform architecture, patterns, and technology stack
 **Wiki**: Azure DevOps Wiki - Technical architecture documentation
@@ -104,6 +104,8 @@ def process_task(msg: ServiceBusMessage):
 ---
 
 ## Distributed Systems Patterns
+
+> **Note**: For formal definitions of these patterns, see [Glossary: Architecture Terms](WIKI_API_GLOSSARY.md#architecture-terms).
 
 ### Fan-Out / Fan-In Pattern
 

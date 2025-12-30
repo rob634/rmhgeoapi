@@ -285,15 +285,15 @@ class TaskRoutingDefaults:
         "process_vector_upload",
         "vector_create_stac",
         "vector_extract_stac_metadata",
-        # H3 handlers (DB-bound PostGIS operations)
+        # H3 handlers (DB-bound PostGIS operations), renamed (29 DEC 2025)
         "h3_level4_generate",
         "h3_base_generate",
-        "insert_h3_to_postgis",
-        "create_h3_stac",
+        "h3_insert_to_postgis",
+        "h3_create_stac",
         "h3_native_streaming_postgis",
-        "generate_h3_grid",
-        "cascade_h3_descendants",
-        "finalize_h3_pyramid",
+        "h3_generate_grid",
+        "h3_cascade_descendants",
+        "h3_finalize_pyramid",
         # H3 Aggregation handlers (DB-bound) - 22 DEC 2025
         "h3_inventory_cells",       # Stage 1: Count cells, calculate batches
         "h3_aggregation_finalize",  # Stage 3: Update registry, verify counts

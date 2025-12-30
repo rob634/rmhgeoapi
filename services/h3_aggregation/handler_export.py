@@ -606,14 +606,15 @@ def _add_table_comment(
         f"Job: {source_job_id[:8] if source_job_id else 'unknown'}."
     )
 
-    query = sql.SQL("COMMENT ON TABLE {schema}.{table} IS %s").format(
+    query = sql.SQL("COMMENT ON TABLE {schema}.{table} IS {comment}").format(
         schema=sql.Identifier('geo'),
-        table=sql.Identifier(table_name)
+        table=sql.Identifier(table_name),
+        comment=sql.Literal(comment)
     )
 
     with repo._get_connection() as conn:
         with conn.cursor() as cur:
-            cur.execute(query, (comment,))
+            cur.execute(query)
         conn.commit()
 
 

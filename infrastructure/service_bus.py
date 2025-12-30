@@ -239,6 +239,11 @@ class ServiceBusRepository(IQueueRepository):
 
         Returns dict with health status and diagnostic info.
         Added 14 DEC 2025 for debugging message loss issues.
+
+        WARNING: This method accesses private SDK attributes (_running, _shutdown, _handler)
+        which are internal implementation details of azure-servicebus SDK.
+        These may change in future SDK versions. Uses getattr() with defaults for safety.
+        If SDK changes break this, health checks will report "unknown" but app continues working.
         """
         health = {
             "queue": queue_name,

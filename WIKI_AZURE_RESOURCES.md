@@ -1,16 +1,16 @@
-# Platform Component Glossary
+# Azure Resource Mapping
 
-**Last Updated**: 19 DEC 2025
+**Last Updated**: 29 DEC 2025
 **Purpose**: Stable reference names for Azure DevOps work items
 **Audience**: Development team, Product Owners, DevOps engineers
 
 ---
 
-## Why This Glossary Exists
+## Why This Document Exists
 
 When writing work items, stories, or acceptance criteria, use **logical names** from this document instead of Azure resource names.
 
-**Problem solved**: Azure resources get renamed, environments differ, and not everyone knows that `rmhazuregeosilver` means "processed data storage". This glossary creates a stable abstraction layer.
+**Problem solved**: Azure resources get renamed, environments differ, and not everyone knows that `rmhazuregeosilver` means "processed data storage". This document creates a stable abstraction layer.
 
 **Example work item (GOOD)**:
 > "Copy approved datasets from **Silver Storage Account** to **External Storage Account** using **Data Factory Instance**"
@@ -20,22 +20,19 @@ When writing work items, stories, or acceptance criteria, use **logical names** 
 
 The "good" version survives resource renames and works across environments.
 
+> **Note**: For technical definitions of terms like "Bronze Container" or "COG", see the [Glossary](WIKI_API_GLOSSARY.md).
+
 ---
 
 ## Storage
 
-Data flows through tiers: **Bronze → Silver → External**
+Data flows through tiers: **Bronze → Silver → External** (see [Glossary: Data Storage Terms](WIKI_API_GLOSSARY.md#data-storage-terms) for definitions)
 
 | Logical Name | Purpose | Access Pattern |
 |--------------|---------|----------------|
 | **Bronze Storage Account** | Raw uploaded data (input zone) | Write: Users, ETL jobs · Read: Processing handlers |
 | **Silver Storage Account** | Processed COGs, validated vectors, Zarr stores | Write: ETL jobs · Read: TiTiler, STAC API, OGC API |
 | **External Storage Account** | Public-facing approved datasets | Write: Data Factory · Read: External consumers via CDN |
-
-**Data tier meanings**:
-- **Bronze**: "I uploaded it but nothing has verified it yet"
-- **Silver**: "ETL processed it, it's valid and cloud-optimized"
-- **External**: "Approved for public access, protected by WAF"
 
 ---
 
@@ -70,18 +67,12 @@ Data flows through tiers: **Bronze → Silver → External**
 
 ## Database
 
-Single PostgreSQL Flexible Server with logically separated concerns:
+Single PostgreSQL Flexible Server with logically separated concerns (see [Glossary: Database Terms](WIKI_API_GLOSSARY.md#database-terms) for schema definitions):
 
 | Logical Name | Purpose | Protection Level |
 |--------------|---------|------------------|
 | **App Database** | Job/task state, curated datasets, H3 grids | Nukeable (can rebuild) |
 | **Business Database** | PostGIS `geo` schema, pgSTAC catalog | Protected (user data) |
-
-**Schemas**:
-- `app.*` - CoreMachine orchestration tables (jobs, tasks, stages)
-- `geo.*` - PostGIS vector feature tables
-- `pgstac.*` - STAC catalog (items, collections)
-- `h3.*` - Hexagonal grid analytics
 
 | Logical Name | Purpose |
 |--------------|---------|

@@ -247,7 +247,7 @@ class SubmitRasterInterface(BaseInterface):
         '''
 
     def _render_submit_fragment(self, request: func.HttpRequest) -> str:
-        """Handle job submission and return result HTML."""
+        """Handle job submission via Platform API and return result HTML."""
         try:
             # Get form data
             body = request.get_body().decode('utf-8')
@@ -259,109 +259,179 @@ class SubmitRasterInterface(BaseInterface):
                 values = form_data.get(key, [])
                 return values[0] if values else default
 
+            # DDH Identifiers (required)
+            dataset_id = get_param('dataset_id')
+            resource_id = get_param('resource_id')
+            version_id = get_param('version_id')
+
+            # File info
             blob_name = get_param('blob_name')
             container_name = get_param('container_name')
 
             # Validate required fields
+            if not dataset_id:
+                return self._render_submit_error("Missing dataset_id. Please enter a DDH dataset identifier.")
+            if not resource_id:
+                return self._render_submit_error("Missing resource_id. Please enter a DDH resource identifier.")
+            if not version_id:
+                return self._render_submit_error("Missing version_id. Please enter a DDH version identifier.")
             if not blob_name:
                 return self._render_submit_error("Missing blob_name. Please select a file.")
-            if not container_name:
-                return self._render_submit_error("Missing container_name. Please select a container.")
 
-            # Build job parameters
-            job_params = {
-                'blob_name': blob_name,
-                'container_name': container_name
+            # Build Platform API payload
+            platform_payload = {
+                'dataset_id': dataset_id,
+                'resource_id': resource_id,
+                'version_id': version_id,
+                'container_name': container_name,
+                'file_name': blob_name
             }
 
-            # Optional CRS parameters
-            input_crs = get_param('input_crs')
-            target_crs = get_param('target_crs')
-            if input_crs:
-                job_params['input_crs'] = input_crs
-            if target_crs:
-                job_params['target_crs'] = target_crs
+            # Optional metadata
+            service_name = get_param('service_name')
+            description = get_param('description')
+            access_level = get_param('access_level')
+            tags = get_param('tags')
+
+            if service_name:
+                platform_payload['service_name'] = service_name
+            if description:
+                platform_payload['description'] = description
+            if access_level:
+                platform_payload['access_level'] = access_level
+            if tags:
+                platform_payload['tags'] = [t.strip() for t in tags.split(',') if t.strip()]
+
+            # Processing options
+            processing_options = {}
 
             # Raster type
             raster_type = get_param('raster_type', 'auto')
             if raster_type and raster_type != 'auto':
-                job_params['raster_type'] = raster_type
+                processing_options['raster_type'] = raster_type
 
             # Output tier
             output_tier = get_param('output_tier', 'analysis')
-            if output_tier:
-                job_params['output_tier'] = output_tier
+            if output_tier and output_tier != 'analysis':
+                processing_options['output_tier'] = output_tier
 
-            # JPEG quality (for visualization tier)
-            jpeg_quality = get_param('jpeg_quality')
-            if jpeg_quality:
-                try:
-                    job_params['jpeg_quality'] = int(jpeg_quality)
-                except ValueError:
-                    pass
+            # CRS
+            input_crs = get_param('input_crs')
+            if input_crs:
+                processing_options['crs'] = input_crs
 
-            # Output folder
-            output_folder = get_param('output_folder')
-            if output_folder:
-                job_params['output_folder'] = output_folder
+            if processing_options:
+                platform_payload['processing_options'] = processing_options
 
-            # Collection ID
-            collection_id = get_param('collection_id')
-            if collection_id:
-                job_params['collection_id'] = collection_id
+            # Submit via Platform Raster API internal functions
+            from triggers.trigger_platform import (
+                PlatformRequest,
+                generate_platform_request_id,
+                _translate_single_raster,
+                _create_and_submit_job,
+                config
+            )
+            from infrastructure.repositories.platform_repository import PlatformRepository, ApiRequest
 
-            # Behavior flags
-            strict_mode = get_param('strict_mode')
-            if strict_mode == 'true':
-                job_params['strict_mode'] = True
+            # Force data_type to raster
+            platform_payload['data_type'] = 'raster'
 
-            in_memory = get_param('in_memory')
-            if in_memory == 'true':
-                job_params['in_memory'] = True
-            elif in_memory == 'false':
-                job_params['in_memory'] = False
+            # Create Platform request object
+            platform_req = PlatformRequest(**platform_payload)
 
-            # Submit job
-            from jobs import ALL_JOBS
-            from infrastructure.factory import RepositoryFactory
+            # Generate deterministic request ID
+            request_id = generate_platform_request_id(
+                platform_req.dataset_id,
+                platform_req.resource_id,
+                platform_req.version_id
+            )
 
-            if 'process_raster_v2' not in ALL_JOBS:
-                return self._render_submit_error("ProcessRasterV2Job not found in registry")
+            # Check for existing request (idempotent)
+            platform_repo = PlatformRepository()
+            existing = platform_repo.get_request(request_id)
+            if existing:
+                return self._render_submit_success_platform({
+                    'request_id': request_id,
+                    'job_id': existing.job_id,
+                    'status': 'exists'
+                }, platform_payload)
 
-            controller_class = ALL_JOBS['process_raster_v2']
-            controller = controller_class()
+            # Translate to CoreMachine job parameters (single raster path)
+            job_type, job_params = _translate_single_raster(platform_req, config)
 
-            # Validate parameters
-            validated_params = controller.validate_job_parameters(job_params)
+            # Create and submit job
+            job_id = _create_and_submit_job(job_type, job_params, request_id)
 
-            # Generate job ID
-            job_id = controller.generate_job_id(validated_params)
+            if not job_id:
+                return self._render_submit_error("Failed to create CoreMachine job")
 
-            # Check if job already exists
-            repos = RepositoryFactory.create_repositories()
-            existing_job = repos['job_repo'].get_job(job_id)
+            # Store tracking record
+            api_request = ApiRequest(
+                request_id=request_id,
+                dataset_id=platform_req.dataset_id,
+                resource_id=platform_req.resource_id,
+                version_id=platform_req.version_id,
+                job_id=job_id,
+                data_type='raster'
+            )
+            platform_repo.create_request(api_request)
 
-            if existing_job:
-                job_status = existing_job.status.value if hasattr(existing_job.status, 'value') else str(existing_job.status)
-                if job_status == 'completed':
-                    return self._render_submit_success(job_id, validated_params, message="Job already completed (idempotent)")
-                elif job_status in ('pending', 'processing'):
-                    return self._render_submit_success(job_id, validated_params, message=f"Job already {job_status}")
-
-            # Create job record
-            controller.create_job_record(job_id, validated_params)
-
-            # Queue job for processing
-            controller.queue_job(job_id, validated_params)
-
-            return self._render_submit_success(job_id, validated_params)
+            return self._render_submit_success_platform({
+                'request_id': request_id,
+                'job_id': job_id,
+                'job_type': job_type,
+                'status': 'accepted'
+            }, platform_payload)
 
         except Exception as e:
             logger.error(f"Error submitting job: {e}", exc_info=True)
             return self._render_submit_error(str(e))
 
+    def _render_submit_success_platform(self, result: dict, payload: dict) -> str:
+        """Render successful Platform API submission result."""
+        request_id = result.get('request_id', 'N/A')
+        job_id = result.get('job_id', 'N/A')
+        status = result.get('status', 'accepted')
+
+        # Determine message based on status
+        if status == 'exists':
+            title = "Request Already Processed (Idempotent)"
+        elif status == 'accepted':
+            title = "Request Submitted Successfully"
+        else:
+            title = "Request Processed"
+
+        return f'''
+        <div class="submit-result success">
+            <div class="result-icon">✅</div>
+            <h3>{title}</h3>
+            <div class="result-details">
+                <div class="detail-row">
+                    <span class="detail-label">Request ID</span>
+                    <span class="detail-value mono">{request_id}</span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">Job ID</span>
+                    <span class="detail-value mono">{job_id}</span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">DDH Identifier</span>
+                    <span class="detail-value">{payload.get('dataset_id')}/{payload.get('resource_id')}/{payload.get('version_id')}</span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">Source File</span>
+                    <span class="detail-value">{payload.get('file_name', 'N/A')}</span>
+                </div>
+            </div>
+            <div class="result-actions">
+                <a href="/api/platform/status/{request_id}" class="btn btn-primary" target="_blank">View Status</a>
+                <a href="/api/interface/tasks?job_id={job_id}" class="btn btn-secondary">View Job Tasks</a>
+            </div>
+        </div>
+        '''
+
     def _render_submit_success(self, job_id: str, params: dict, message: str = None) -> str:
-        """Render successful job submission result."""
+        """Render successful job submission result (legacy)."""
         title = message if message else "Job Submitted Successfully"
         return f'''
         <div class="submit-result success">
@@ -413,7 +483,7 @@ class SubmitRasterInterface(BaseInterface):
             <!-- Header -->
             <header class="dashboard-header">
                 <h1>🗺️ Submit Raster Job</h1>
-                <p class="subtitle">Convert raster imagery to Cloud-Optimized GeoTIFF with STAC cataloging</p>
+                <p class="subtitle">Convert raster imagery via Platform API - generate cURL or submit directly</p>
             </header>
 
             <div class="two-column-layout">
@@ -508,8 +578,8 @@ class SubmitRasterInterface(BaseInterface):
                 <!-- Right Column: Job Form -->
                 <div class="form-section">
                     <div class="section-header">
-                        <h2>2. Configure Job</h2>
-                        <p class="section-subtitle">Set processing options</p>
+                        <h2>2. Configure Platform API Request</h2>
+                        <p class="section-subtitle">Set DDH identifiers and processing options</p>
                     </div>
 
                     <form id="submit-form"
@@ -534,6 +604,39 @@ class SubmitRasterInterface(BaseInterface):
                             ⚠️ Large file detected (>1GB). Processing may take longer.
                         </div>
 
+                        <!-- DDH Identifiers Section -->
+                        <div class="ddh-section">
+                            <div class="form-group-header">DDH Identifiers (Required)</div>
+                            <div class="form-group required">
+                                <label for="dataset_id">Dataset ID *</label>
+                                <input type="text" id="dataset_id" name="dataset_id" required
+                                       placeholder="e.g., aerial-imagery-2024"
+                                       pattern="[a-z0-9][a-z0-9-]*[a-z0-9]"
+                                       title="Lowercase letters, numbers, hyphens. No leading/trailing hyphens.">
+                                <span class="field-hint">DDH dataset identifier (lowercase, hyphens allowed)</span>
+                            </div>
+
+                            <div class="form-row">
+                                <div class="form-group required">
+                                    <label for="resource_id">Resource ID *</label>
+                                    <input type="text" id="resource_id" name="resource_id" required
+                                           placeholder="e.g., site-alpha"
+                                           pattern="[a-z0-9][a-z0-9-]*[a-z0-9]"
+                                           title="Lowercase letters, numbers, hyphens.">
+                                    <span class="field-hint">DDH resource identifier</span>
+                                </div>
+                                <div class="form-group required">
+                                    <label for="version_id">Version ID *</label>
+                                    <input type="text" id="version_id" name="version_id" required
+                                           value="v1.0"
+                                           placeholder="e.g., v1.0"
+                                           pattern="v[0-9]+\\.[0-9]+"
+                                           title="Version format: v1.0, v2.1, etc.">
+                                    <span class="field-hint">DDH version identifier</span>
+                                </div>
+                            </div>
+                        </div>
+
                         <!-- Raster Type -->
                         <div class="form-group">
                             <label for="raster_type">Raster Type</label>
@@ -556,18 +659,8 @@ class SubmitRasterInterface(BaseInterface):
                                 <option value="analysis" selected>Analysis (LZW compression)</option>
                                 <option value="visualization">Visualization (JPEG for web)</option>
                                 <option value="archive">Archive (DEFLATE, max compression)</option>
-                                <option value="all">All tiers</option>
                             </select>
                             <span class="field-hint">Analysis tier recommended for most use cases</span>
-                        </div>
-
-                        <!-- JPEG Quality (shown for visualization tier) -->
-                        <div id="jpeg-quality-group" class="form-group hidden">
-                            <label for="jpeg_quality">JPEG Quality</label>
-                            <input type="number" id="jpeg_quality" name="jpeg_quality"
-                                   min="1" max="100" value="85"
-                                   placeholder="1-100">
-                            <span class="field-hint">Higher = better quality, larger file</span>
                         </div>
 
                         <!-- CRS Section -->
@@ -580,71 +673,64 @@ class SubmitRasterInterface(BaseInterface):
                                            placeholder="e.g., EPSG:32618">
                                     <span class="field-hint">Override if source CRS is missing or wrong</span>
                                 </div>
+                            </div>
+                        </details>
+
+                        <!-- Metadata Section (collapsible) -->
+                        <details class="metadata-section">
+                            <summary>Optional Metadata</summary>
+                            <div class="metadata-fields">
                                 <div class="form-group">
-                                    <label for="target_crs">Target CRS (optional)</label>
-                                    <input type="text" id="target_crs" name="target_crs"
-                                           placeholder="e.g., EPSG:4326">
-                                    <span class="field-hint">Reproject to different CRS (default: EPSG:4326)</span>
+                                    <label for="service_name">Service Name</label>
+                                    <input type="text" id="service_name" name="service_name"
+                                           placeholder="Human-readable dataset name">
+                                </div>
+                                <div class="form-group">
+                                    <label for="description">Description</label>
+                                    <textarea id="description" name="description" rows="2"
+                                              placeholder="Full dataset description"></textarea>
+                                </div>
+                                <div class="form-group">
+                                    <label for="access_level">Access Level</label>
+                                    <select id="access_level" name="access_level">
+                                        <option value="">Not specified</option>
+                                        <option value="OUO">OUO (Official Use Only)</option>
+                                        <option value="PUBLIC">PUBLIC</option>
+                                        <option value="restricted">Restricted</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label for="tags">Tags</label>
+                                    <input type="text" id="tags" name="tags"
+                                           placeholder="Comma-separated tags, e.g., aerial,rgb,2024">
                                 </div>
                             </div>
                         </details>
 
-                        <!-- Advanced Options -->
-                        <details class="advanced-section">
-                            <summary>Advanced Options</summary>
-                            <div class="advanced-fields">
-                                <div class="form-group">
-                                    <label for="output_folder">Output Folder</label>
-                                    <input type="text" id="output_folder" name="output_folder"
-                                           placeholder="e.g., processed/2025/">
-                                    <span class="field-hint">Custom output path in silver-cogs container</span>
-                                </div>
-
-                                <div class="form-group">
-                                    <label for="collection_id">STAC Collection ID</label>
-                                    <input type="text" id="collection_id" name="collection_id"
-                                           placeholder="e.g., satellite-imagery">
-                                    <span class="field-hint">Group related items in STAC catalog</span>
-                                </div>
-
-                                <div class="form-group checkbox-group">
-                                    <label>
-                                        <input type="checkbox" id="strict_mode" name="strict_mode" value="true">
-                                        Strict mode (fail on any warning)
-                                    </label>
-                                </div>
-
-                                <div class="form-group checkbox-group">
-                                    <label>
-                                        <input type="checkbox" id="in_memory" name="in_memory" value="true">
-                                        Process in-memory (faster for small files)
-                                    </label>
-                                </div>
-                            </div>
-                        </details>
-
-                        <!-- Submit Button -->
-                        <div class="form-actions">
-                            <button type="submit" id="submit-btn" class="btn btn-primary" disabled>
-                                🚀 Submit Job
-                            </button>
-                            <span id="submit-spinner" class="htmx-indicator spinner-inline"></span>
-                        </div>
-                    </form>
-
-                    <!-- cURL Preview Section -->
-                    <details class="curl-section" id="curl-section">
-                        <summary>📋 cURL Command</summary>
-                        <div class="curl-container">
-                            <div class="curl-header">
-                                <span class="curl-hint">Equivalent API call - click to copy</span>
+                        <!-- Platform API cURL Section (Prominent) -->
+                        <div class="curl-section-prominent" id="curl-section">
+                            <div class="curl-section-header">
+                                <span class="curl-title">📋 Platform API cURL</span>
                                 <button type="button" class="btn btn-sm btn-copy" onclick="copyCurl()">
                                     <span id="copy-icon">📋</span> Copy
                                 </button>
                             </div>
-                            <pre id="curl-command" class="curl-code">Select a file and fill in the form to see the cURL command</pre>
+                            <pre id="curl-command" class="curl-code">Fill in DDH identifiers to see the Platform API cURL command</pre>
+                            <div class="curl-hint">Copy to Postman or terminal - or use the Submit button below</div>
                         </div>
-                    </details>
+
+                        <div class="submit-divider">
+                            <span>OR submit directly</span>
+                        </div>
+
+                        <!-- Submit Button -->
+                        <div class="form-actions">
+                            <button type="submit" id="submit-btn" class="btn btn-primary" disabled>
+                                🚀 Submit via Platform API
+                            </button>
+                            <span id="submit-spinner" class="htmx-indicator spinner-inline"></span>
+                        </div>
+                    </form>
 
                     <!-- Result Display -->
                     <div id="submit-result" class="submit-result-container hidden">
@@ -1090,35 +1176,130 @@ class SubmitRasterInterface(BaseInterface):
             bottom: 10px;
         }
 
-        /* cURL Preview Section */
-        .curl-section {
-            margin-top: 20px;
-            background: var(--ds-bg);
-            border-radius: 8px;
-            border: 1px solid var(--ds-gray-light);
+        /* DDH Section */
+        .ddh-section {
+            background: #f0f7ff;
+            border: 1px solid var(--ds-blue-primary);
+            border-radius: 6px;
+            padding: 16px;
+            margin-bottom: 16px;
         }
 
-        .curl-section summary {
-            padding: 12px 16px;
-            cursor: pointer;
+        .ddh-section .form-group-header {
+            color: var(--ds-blue-primary);
+            margin-bottom: 12px;
+        }
+
+        .form-group-header {
+            font-size: 13px;
             font-weight: 600;
             color: var(--ds-navy);
-            user-select: none;
         }
 
-        .curl-section summary:hover {
-            background: white;
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
         }
 
-        .curl-container {
-            padding: 0 16px 16px 16px;
+        /* Metadata section */
+        .metadata-section {
+            border: 1px solid var(--ds-gray-light);
+            border-radius: 4px;
+            margin-bottom: 16px;
         }
 
-        .curl-header {
+        .metadata-section summary {
+            padding: 12px 16px;
+            font-weight: 600;
+            color: var(--ds-navy);
+            cursor: pointer;
+            background: var(--ds-bg);
+        }
+
+        .metadata-section[open] summary {
+            border-bottom: 1px solid var(--ds-gray-light);
+        }
+
+        .metadata-fields {
+            padding: 16px;
+        }
+
+        /* Prominent cURL Section */
+        .curl-section-prominent {
+            background: #1e293b;
+            border-radius: 8px;
+            padding: 16px;
+            margin: 20px 0;
+        }
+
+        .curl-section-header {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 8px;
+            margin-bottom: 12px;
+        }
+
+        .curl-title {
+            color: #e2e8f0;
+            font-weight: 600;
+            font-size: 14px;
+        }
+
+        .curl-section-prominent .curl-hint {
+            color: #94a3b8;
+            font-size: 11px;
+            margin-top: 8px;
+            text-align: center;
+        }
+
+        .curl-section-prominent .btn-copy {
+            background: #334155;
+            border-color: #475569;
+            color: #e2e8f0;
+        }
+
+        .curl-section-prominent .btn-copy:hover {
+            background: var(--ds-blue-primary);
+            border-color: var(--ds-blue-primary);
+        }
+
+        .curl-code {
+            background: #0f172a;
+            color: #e2e8f0;
+            padding: 16px;
+            border-radius: 6px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            line-height: 1.5;
+            overflow-x: auto;
+            white-space: pre-wrap;
+            word-break: break-all;
+            margin: 0;
+            max-height: 300px;
+        }
+
+        /* Submit Divider */
+        .submit-divider {
+            display: flex;
+            align-items: center;
+            text-align: center;
+            margin: 16px 0;
+        }
+
+        .submit-divider::before,
+        .submit-divider::after {
+            content: '';
+            flex: 1;
+            border-bottom: 1px solid var(--ds-gray-light);
+        }
+
+        .submit-divider span {
+            padding: 0 12px;
+            color: var(--ds-gray);
+            font-size: 12px;
+            font-weight: 500;
+            text-transform: uppercase;
         }
 
         .curl-hint {
@@ -1140,24 +1321,10 @@ class SubmitRasterInterface(BaseInterface):
             color: white;
             border-color: var(--ds-blue-primary);
         }
-
-        .curl-code {
-            background: #1e293b;
-            color: #e2e8f0;
-            padding: 16px;
-            border-radius: 6px;
-            font-family: 'Courier New', monospace;
-            font-size: 12px;
-            line-height: 1.5;
-            overflow-x: auto;
-            white-space: pre-wrap;
-            word-break: break-all;
-            margin: 0;
-        }
         """
 
     def _generate_custom_js(self) -> str:
-        """Generate JavaScript for Submit Raster interface."""
+        """Generate JavaScript for Submit Raster interface with Platform API support."""
         return """
         // Update load button state based on selections
         function updateLoadButton() {
@@ -1180,11 +1347,22 @@ class SubmitRasterInterface(BaseInterface):
             const tier = document.getElementById('output_tier').value;
             const jpegGroup = document.getElementById('jpeg-quality-group');
 
-            if (tier === 'visualization' || tier === 'all') {
+            if (jpegGroup && (tier === 'visualization' || tier === 'all')) {
                 jpegGroup.classList.remove('hidden');
-            } else {
+            } else if (jpegGroup) {
                 jpegGroup.classList.add('hidden');
             }
+        }
+
+        // Update submit button state based on required fields
+        function updateSubmitButton() {
+            const blobName = document.getElementById('blob_name').value;
+            const datasetId = document.getElementById('dataset_id').value;
+            const resourceId = document.getElementById('resource_id').value;
+            const versionId = document.getElementById('version_id').value;
+
+            const submitBtn = document.getElementById('submit-btn');
+            submitBtn.disabled = !(blobName && datasetId && resourceId && versionId);
         }
 
         // Select a file from the browser
@@ -1216,8 +1394,20 @@ class SubmitRasterInterface(BaseInterface):
                 sizeWarning.classList.add('hidden');
             }
 
-            // Enable submit button
-            document.getElementById('submit-btn').disabled = false;
+            // Auto-suggest dataset_id from filename if empty
+            const datasetInput = document.getElementById('dataset_id');
+            if (!datasetInput.value) {
+                // Convert filename to valid DDH identifier
+                let datasetId = shortName.split('.')[0]
+                    .toLowerCase()
+                    .replace(/[^a-z0-9-]/g, '-')
+                    .replace(/^-+|-+$/g, '')
+                    .replace(/--+/g, '-');
+                datasetInput.value = datasetId;
+            }
+
+            updateSubmitButton();
+            updateCurlPreview();
         }
 
         // Listen for HTMX events
@@ -1240,45 +1430,67 @@ class SubmitRasterInterface(BaseInterface):
             }
         });
 
-        // Generate cURL command from form values
+        // Generate Platform API cURL command from form values
         function generateCurl() {
             const blobName = document.getElementById('blob_name').value;
             const containerName = document.getElementById('container_name').value;
+
+            // DDH Identifiers
+            const datasetId = document.getElementById('dataset_id').value;
+            const resourceId = document.getElementById('resource_id').value;
+            const versionId = document.getElementById('version_id').value;
+
+            // Processing options
             const rasterType = document.getElementById('raster_type').value;
             const outputTier = document.getElementById('output_tier').value;
-            const jpegQuality = document.getElementById('jpeg_quality').value;
             const inputCrs = document.getElementById('input_crs').value;
-            const targetCrs = document.getElementById('target_crs').value;
-            const outputFolder = document.getElementById('output_folder').value;
-            const collectionId = document.getElementById('collection_id').value;
-            const strictMode = document.getElementById('strict_mode').checked;
-            const inMemory = document.getElementById('in_memory').checked;
+
+            // Optional metadata
+            const serviceName = document.getElementById('service_name').value;
+            const description = document.getElementById('description').value;
+            const accessLevel = document.getElementById('access_level').value;
+            const tags = document.getElementById('tags').value;
+
+            if (!datasetId || !resourceId || !versionId) {
+                return 'Fill in DDH identifiers (dataset_id, resource_id, version_id) to see the Platform API cURL command';
+            }
 
             if (!blobName) {
-                return 'Select a file to see the cURL command';
+                return 'Select a file to see the Platform API cURL command';
             }
 
             const baseUrl = window.location.origin;
 
-            // Build params object
-            const params = {
-                blob_name: blobName,
-                container_name: containerName
+            // Build Platform API payload
+            const payload = {
+                dataset_id: datasetId,
+                resource_id: resourceId,
+                version_id: versionId,
+                container_name: containerName,
+                file_name: blobName
             };
 
-            if (rasterType && rasterType !== 'unknown') params.raster_type = rasterType;
-            if (outputTier && outputTier !== 'silver') params.output_tier = outputTier;
-            if (jpegQuality && outputTier === 'jpeg') params.jpeg_quality = parseInt(jpegQuality);
-            if (inputCrs) params.input_crs = inputCrs;
-            if (targetCrs) params.target_crs = targetCrs;
-            if (outputFolder) params.output_folder = outputFolder;
-            if (collectionId) params.collection_id = collectionId;
-            if (strictMode) params.strict_mode = true;
-            if (inMemory) params.in_memory = true;
+            // Optional metadata
+            if (serviceName) payload.service_name = serviceName;
+            if (accessLevel) payload.access_level = accessLevel;
+            if (description) payload.description = description;
+            if (tags) {
+                payload.tags = tags.split(',').map(t => t.trim()).filter(t => t);
+            }
 
-            const jsonStr = JSON.stringify(params, null, 2);
+            // Processing options
+            const processingOptions = {};
+            if (outputTier && outputTier !== 'analysis') processingOptions.output_tier = outputTier;
+            if (inputCrs) processingOptions.crs = inputCrs;
+            if (rasterType && rasterType !== 'auto') processingOptions.raster_type = rasterType;
 
-            return `curl -X POST "${baseUrl}/api/jobs/submit/process_raster_v2" \\
+            if (Object.keys(processingOptions).length > 0) {
+                payload.processing_options = processingOptions;
+            }
+
+            const jsonStr = JSON.stringify(payload, null, 2);
+
+            return `curl -X POST "${baseUrl}/api/platform/raster" \\
   -H "Content-Type: application/json" \\
   -d '${jsonStr}'`;
         }
@@ -1304,23 +1516,23 @@ class SubmitRasterInterface(BaseInterface):
             });
         }
 
-        // Add event listeners for form changes to update cURL
+        // Add event listeners for form changes to update cURL and submit button
         document.addEventListener('DOMContentLoaded', () => {
-            const formInputs = ['raster_type', 'output_tier', 'jpeg_quality', 'input_crs',
-                                'target_crs', 'output_folder', 'collection_id', 'strict_mode', 'in_memory'];
+            const formInputs = ['dataset_id', 'resource_id', 'version_id', 'raster_type',
+                                'output_tier', 'input_crs', 'service_name', 'description',
+                                'access_level', 'tags'];
             formInputs.forEach(id => {
                 const el = document.getElementById(id);
                 if (el) {
-                    el.addEventListener('input', updateCurlPreview);
-                    el.addEventListener('change', updateCurlPreview);
+                    el.addEventListener('input', () => {
+                        updateCurlPreview();
+                        updateSubmitButton();
+                    });
+                    el.addEventListener('change', () => {
+                        updateCurlPreview();
+                        updateSubmitButton();
+                    });
                 }
             });
         });
-
-        // Override selectFile to also update cURL
-        const originalSelectFile = selectFile;
-        selectFile = function(blobName, container, zone, sizeMb) {
-            originalSelectFile(blobName, container, zone, sizeMb);
-            updateCurlPreview();
-        };
         """

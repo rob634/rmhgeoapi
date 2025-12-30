@@ -10,32 +10,38 @@
 
 | Priority | Epic | Name | Status | Next Action |
 |:--------:|------|------|--------|-------------|
-| 1 | E10 | FATHOM Flood Data Pipeline | 🚧 | Phase 2 retry, scale testing |
-| 2 | E2 | Raster Data as API | 🚧 | F2.7: Collection Processing |
-| 3 | E3 | DDH Platform Integration | 🚧 | F3.1: Validate Swagger UI |
-| 4 | E4 | Data Externalization | 📋 | F4.1: Publishing Workflow |
-| 5 | E9 | Zarr/Climate Data as API | 🚧 | F9.2: Virtual Zarr Pipeline |
-| **NEW** | **E12** | **Interface Modernization** | ✅ | **Phase 1 Complete** |
-| **NEW** | **E13** | **Pipeline Observability** | ✅ | **Complete (9/10 stories)** |
-| **NEW** | **E14** | **H3 Export Pipeline** | ✅ | **Complete** |
-| **NEW** | **E15** | **Ingest Collection Pipeline** | ✅ | **Complete** |
+| 1 | E2 | Raster Data as API | 🚧 | F2.7: Collection Processing |
+| 2 | E3 | DDH Platform Integration | 🚧 | F3.1: Validate Swagger UI |
+| 3 | E4 | Data Externalization | 📋 | F4.1: Publishing Workflow |
+| 4 | E9 | Zarr/Climate Data as API | 🚧 | F9.2: Virtual Zarr Pipeline |
+| 5 | E7 | Pipeline Extensibility | 🚧 | F7.4: FATHOM Phase 2 retry |
+| 6 | E5 | OGC Styles | 🚧 | F5.2: ETL Integration |
+| 7 | E8 | H3 Analytics Pipeline | 🚧 | F8.4: Vector→H3 |
+| — | E12 | Interface Modernization | ✅ | Phase 1 Complete |
+
+**Epic Consolidation (29 DEC 2025)**:
+- ~~E10~~ → F7.4 (FATHOM ETL Operations)
+- ~~E11~~ → F7.7 (Pipeline Builder UI)
+- ~~E13~~ → F7.6 (Pipeline Observability) ✅
+- ~~E14~~ → F8.12 (H3 Export Pipeline) ✅
+- ~~E15~~ → F7.5 (Collection Ingestion) ✅
 
 ---
 
 ## Current Sprint Focus
 
-### E10: FATHOM Flood Data Pipeline
+### E7: Pipeline Extensibility
 
+**Consolidated from**: E7 + E10 + E11 + E13 + E15
+
+| Feature | Description | Status |
+|---------|-------------|--------|
+| F7.4: FATHOM ETL | Band stacking + spatial merge | 🚧 46/47 tasks |
+| F7.5: Collection Ingestion | Pre-processed COG ingest (MapSPAM) | ✅ Complete |
+| F7.6: Pipeline Observability | Real-time job metrics | ✅ Complete |
+
+**F7.4 Current Issue**: Phase 2 task `n10-n15_w005-w010` failed. Need retry with `force_reprocess=true`.
 **Docs**: [FATHOM_ETL.md](./FATHOM_ETL.md)
-
-| Story | Description | Owner | Status |
-|-------|-------------|-------|--------|
-| F10.1: Phase 1 | Band stacking (8 return periods → 1 COG) | Claude | ✅ CI Complete |
-| F10.2: Phase 2 | Spatial merge (N×N tiles → 1 COG) | Claude | ⚠️ 46/47 tasks |
-| F10.3: STAC | Register merged COGs to catalog | Claude | 📋 Blocked |
-| F10.4: Scale | West Africa / Africa processing | Claude | 📋 |
-
-**Current Issue**: Phase 2 task `n10-n15_w005-w010` failed. Need retry with `force_reprocess=true`.
 
 ### E2: Raster Data as API
 
@@ -111,240 +117,18 @@
 |-------|-------------|-------|--------|
 | S12.4.1-5 | NiceGUI PoC on Docker Web App | Claude | 📋 After Phase 1 |
 
-### E13: Pipeline Observability ✅ COMPLETE
+### E8: H3 Analytics Pipeline
 
-**Goal**: Real-time metrics for long-running jobs with massive task counts (H3 aggregation, FATHOM ETL, raster collections)
+**Consolidated from**: E8 + E14
 
-**Problem Statement**: Jobs with 100s-1000s of tasks lack visibility into:
-- Progress (which stage, how many tasks done)
-- Throughput (tasks/minute, cells/second)
-- ETA (when will it finish)
-- Health (error rates, stalled detection)
-
-**Architecture**:
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│  UNIVERSAL METRICS (all long-running jobs)                          │
-│  • stage progress, task counts, rates, ETA, error tracking         │
-└─────────────────────────────────────────────────────────────────────┘
-                              │ extends
-                              ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│  CONTEXT-SPECIFIC METRICS (domain knowledge)                        │
-│  • H3: cells processed, stats computed, current tile               │
-│  • FATHOM: tiles merged, bytes processed, current region           │
-│  • Raster: files processed, COGs created, output size              │
-└─────────────────────────────────────────────────────────────────────┘
-```
-
-#### Phase 1: Core Infrastructure ✅ COMPLETE (28 DEC 2025)
-
-| Story | Description | Effort | Owner | Status |
-|-------|-------------|--------|-------|--------|
-| **F13.1: Config** | | | | ✅ |
-| S13.1.1 | Create `config/metrics_config.py` with env vars | 0.5 day | Claude | ✅ 28 DEC |
-| **F13.2: Storage** | | | | ✅ |
-| S13.2.1 | Create `app.job_metrics` table (self-bootstrapping) | 0.5 day | Claude | ✅ 28 DEC |
-| S13.2.2 | Create `infrastructure/metrics_repository.py` | 0.5 day | Claude | ✅ 28 DEC |
-| **F13.3: Tracker** | | | | ✅ |
-| S13.3.1 | Create `infrastructure/job_progress.py` - base tracker | 1 day | Claude | ✅ 28 DEC |
-| S13.3.2 | Create `infrastructure/job_progress_contexts.py` - mixins | 0.5 day | Claude | ✅ 28 DEC |
-
-**Files Created**:
-- `config/metrics_config.py` - MetricsConfig with env vars
-- `infrastructure/metrics_repository.py` - PostgreSQL storage
-- `infrastructure/job_progress.py` - JobProgressTracker base
-- `infrastructure/job_progress_contexts.py` - H3/FATHOM/Raster mixins
-
-#### Phase 2: HTTP API + Dashboard ✅ COMPLETE (28 DEC 2025)
-
-| Story | Description | Effort | Owner | Status |
-|-------|-------------|--------|-------|--------|
-| **F13.4: HTTP API** | | | | ✅ |
-| S13.4.1 | Create `web_interfaces/metrics/interface.py` | 1 day | Claude | ✅ 28 DEC |
-| **F13.5: Dashboard** | | | | ✅ |
-| S13.5.1 | Create pipeline monitor at `/api/interface/metrics` | 1 day | Claude | ✅ 28 DEC |
-
-**Dashboard Features**:
-- HTMX live updates (auto-refresh 5s)
-- Job cards with progress bars
-- Rate display (tasks/min, cells/sec)
-- ETA calculation
-- Context-specific metrics (H3, FATHOM, Raster)
-- Job details panel with event log
-
-#### Phase 3: Handler Integration ✅ COMPLETE (28 DEC 2025)
-
-| Story | Description | Effort | Owner | Status |
-|-------|-------------|--------|-------|--------|
-| **F13.6: H3 Integration** | | | | ✅ |
-| S13.6.1 | Integrate `H3AggregationTracker` into `handler_raster_zonal.py` | 0.5 day | Claude | ✅ 28 DEC |
-| S13.6.2 | Integrate into `handler_inventory_cells.py` | 0.5 day | Claude | 📋 Deferred |
-| **F13.7: FATHOM Integration** | | | | ✅ |
-| S13.7.1 | Integrate `FathomETLTracker` into FATHOM handlers | 0.5 day | Claude | ✅ 28 DEC |
-
-**Handler Integration**:
-- `handler_raster_zonal.py`: H3AggregationTracker tracks cells, stats, tiles
-- `fathom_etl.py`: FathomETLTracker tracks tiles merged, bytes processed, regions
-
-**Debug Mode Output** (when `METRICS_DEBUG_MODE=true`):
-```
-[METRICS] Job abc123 started: h3_raster_aggregation
-[METRICS] Stage 2/3: compute_stats (5 tasks)
-[METRICS]   Task batch-0 started
-[METRICS]   Processing tile: Copernicus_DSM_COG_10_S02_00_E029_00
-[METRICS]     Batch 0: 1000 cells
-[METRICS]     ✓ 4000 stats @ 842 cells/sec
-[METRICS]   Task batch-0 completed (2.3s, 2000 cells, 8000 stats)
-[METRICS]   Progress: 2000/68597 cells (2.9%), ETA: 74s
-```
-
-**API Response Schema** (`GET /api/metrics/jobs/{job_id}`):
-```json
-{
-  "job_id": "abc123...",
-  "job_type": "h3_raster_aggregation",
-  "status": "processing",
-  "progress": {
-    "stage": 2, "total_stages": 3, "stage_name": "compute_stats",
-    "tasks_total": 5, "tasks_completed": 2, "tasks_failed": 0
-  },
-  "rates": {
-    "tasks_per_minute": 1.5,
-    "elapsed_seconds": 120,
-    "eta_seconds": 180
-  },
-  "context": {
-    "type": "h3_aggregation",
-    "cells_total": 68597,
-    "cells_processed": 25000,
-    "cells_rate_per_sec": 850,
-    "stats_computed": 100000,
-    "current_tile": "Copernicus_DSM_COG_10_S02_00_E029_00"
-  },
-  "recent_events": [
-    {"timestamp": "...", "type": "batch_done", "message": "Batch 2: 1000 cells, 4000 stats"}
-  ]
-}
-```
-
-**Total Effort**: ~7-9 days
-
-### E14: H3 Export Pipeline ✅ COMPLETE
-
-**Goal**: Create denormalized, wide-format exports from H3 zonal_stats for mapping and download applications.
-
-**Use Case**: "I want a specific map" or "I want a copy of a specific extract" (NOT for analytics)
-
-**Architecture**:
-```
-POST /api/jobs/submit/h3_export_dataset
-    │
-    ├── Stage 1: Validate
-    │   ├── Check table doesn't exist (or overwrite=true)
-    │   └── Verify datasets exist in registry
-    │
-    ├── Stage 2: Build
-    │   ├── Join h3.cells with h3.zonal_stats
-    │   ├── Pivot to wide format (one column per stat)
-    │   └── Create geo.{table_name}
-    │
-    └── Stage 3: Register
-        └── Update export catalog
-```
-
-**Features**:
-- Explicit overwrite control (`overwrite: true` or fail)
-- Multiple geometry options: polygon (full hex) or centroid (point)
-- Spatial scope filtering (iso3, bbox, polygon_wkt)
-- Variable selection from multiple datasets/stat_types
-- Auto-indexed (h3_index PK, spatial GIST, iso3)
-
-**Output Table**:
-```sql
-geo.{table_name}
-├── h3_index BIGINT PRIMARY KEY
-├── geom GEOMETRY(Polygon/Point, 4326)
-├── iso3 VARCHAR(3)          -- optional
-├── {dataset_id}_{stat_type} -- pivot columns
-└── ...
-```
-
-**Usage**:
-```bash
-POST /api/jobs/submit/h3_export_dataset
-{
-    "table_name": "rwanda_terrain_res6",
-    "resolution": 6,
-    "iso3": "RWA",
-    "variables": [
-        {"dataset_id": "cop_dem_rwanda_res6", "stat_types": ["mean", "min", "max"]}
-    ],
-    "geometry_type": "polygon",
-    "overwrite": false
-}
-```
-
-**Files Created** (28 DEC 2025):
-- `jobs/h3_export_dataset.py` - Job definition (3-stage workflow)
-- `services/h3_aggregation/handler_export.py` - Handlers (validate, build, register)
-
-### E15: Ingest Collection Pipeline ✅ COMPLETE
-
-**Goal**: Ingest pre-processed COG collections with existing STAC metadata from bronze to silver storage, registering in pgSTAC for discovery.
-
-**Use Case**: Data already converted to COG with STAC JSON sidecars (like MapSPAM agricultural data). No processing needed - just copy and register.
-
-**Architecture**:
-```
-POST /api/jobs/submit/ingest_collection
-    │
-    ├── Stage 1: Inventory
-    │   ├── Download collection.json
-    │   ├── Parse item links
-    │   └── Create batches for parallel stages
-    │
-    ├── Stage 2: Copy (parallel batches)
-    │   └── Copy COG files: bronze → silver
-    │
-    ├── Stage 3: Register Collection
-    │   └── Upsert collection to pgSTAC
-    │
-    ├── Stage 4: Register Items (parallel batches)
-    │   ├── Download item JSONs
-    │   ├── Update asset hrefs to silver
-    │   └── Upsert items to pgSTAC
-    │
-    └── Stage 5: Finalize
-        └── Create h3.source_catalog entry
-```
-
-**Features**:
-- Reads existing collection.json and item JSONs from source
-- Parallel blob copy with batching (server-side copy)
-- Updates asset hrefs to silver container
-- Creates h3.source_catalog entry for H3 pipeline integration
-- Preserves all dimension properties from source STAC
-
-**Usage**:
-```bash
-POST /api/jobs/submit/ingest_collection
-{
-    "source_container": "bronzemapspam",
-    "target_container": "silvermapspam",
-    "batch_size": 100
-}
-```
-
-**Files Created** (29 DEC 2025):
-- `jobs/ingest_collection.py` - Job definition (5-stage workflow)
-- `services/ingest/__init__.py` - Module initialization
-- `services/ingest/handler_inventory.py` - Inventory handler
-- `services/ingest/handler_copy.py` - Blob copy handler
-- `services/ingest/handler_register.py` - pgSTAC registration handlers
-
-**Also Added**:
-- `agriculture` theme to h3_schema.py, h3_repository.py, h3_source_repository.py
+| Feature | Description | Status |
+|---------|-------------|--------|
+| F8.1-F8.3 | Grid infrastructure, bootstrap, raster aggregation | ✅ Complete |
+| F8.8 | Source Catalog | ✅ Complete |
+| F8.12 | H3 Export Pipeline (~~E14~~) | ✅ Complete |
+| F8.4 | Vector→H3 Aggregation | ⬜ Ready |
+| F8.5-F8.7 | GeoParquet, Analytics API, Building Exposure | 📋 Planned |
+| F8.9-F8.11 | Pipeline Framework, Multi-Step, Rwanda Demo | 📋 Planned |
 
 ---
 
@@ -383,11 +167,12 @@ Tasks suitable for a colleague with Azure/Python/pipeline expertise but without 
 
 | Date | Item | Epic |
 |------|------|------|
-| 29 DEC 2025 | **E15 Ingest Collection Pipeline COMPLETE** - Pre-processed COG ingest (MapSPAM) | E15 |
-| 29 DEC 2025 | **Agriculture theme added** - New H3 theme for crop data | E15 |
-| 28 DEC 2025 | **E14 H3 Export Pipeline COMPLETE** - Denormalized map exports from zonal_stats | E14 |
-| 28 DEC 2025 | **E13 Pipeline Observability COMPLETE** - Universal metrics + H3/FATHOM contexts | E13 |
-| 28 DEC 2025 | **H3 Phase 1 COMPLETE** - source_catalog, repository, API, dynamic tile discovery | E8 |
+| 29 DEC 2025 | **Epic Consolidation** - E10,E11,E13,E14,E15 absorbed into E7/E8 | — |
+| 29 DEC 2025 | **F7.5 Collection Ingestion COMPLETE** - Pre-processed COG ingest (MapSPAM) | E7 |
+| 29 DEC 2025 | **Agriculture theme added** - New H3 theme for crop data | E8 |
+| 28 DEC 2025 | **F8.12 H3 Export Pipeline COMPLETE** - Denormalized map exports from zonal_stats | E8 |
+| 28 DEC 2025 | **F7.6 Pipeline Observability COMPLETE** - Universal metrics + H3/FATHOM contexts | E7 |
+| 28 DEC 2025 | **F8.8 Source Catalog COMPLETE** - source_catalog, repository, API, dynamic tile discovery | E8 |
 | 27 DEC 2025 | **Vector Workflow UI COMPLETE** - Submit Vector + Promote interfaces polished | E12 |
 | 27 DEC 2025 | Timestamps standardized to Eastern Time across all interfaces | E12 |
 | 27 DEC 2025 | Architecture diagram v2 created (grid layout, component mapping) | — |
@@ -397,14 +182,14 @@ Tasks suitable for a colleague with Azure/Python/pipeline expertise but without 
 | 23 DEC 2025 | F12.1 Cleanup complete (COMMON_CSS, COMMON_JS, component helpers) | E12 |
 | 23 DEC 2025 | F12.2 HTMX complete (Storage + Submit Vector interfaces) | E12 |
 | 23 DEC 2025 | Interface audit, E12 epic created, NICEGUI.md documentation | E12 |
-| 21 DEC 2025 | FATHOM Phase 1 complete (CI), Phase 2 46/47 tasks | E10.F10.1-2 |
-| 21 DEC 2025 | Fixed dict_row + source_container bugs in fathom_etl.py | E10 |
+| 21 DEC 2025 | F7.4 FATHOM Phase 1 complete (CI), Phase 2 46/47 tasks | E7 |
+| 21 DEC 2025 | Fixed dict_row + source_container bugs in fathom_etl.py | E7 |
 | 20 DEC 2025 | Swagger UI + OpenAPI spec (19 endpoints, 20 schemas) | E3.F3.1 |
 | 18 DEC 2025 | OGC API Styles module | E5.F5.1 |
 | 18 DEC 2025 | Service Layer API Phase 4 | E2.F2.5 |
 | 12 DEC 2025 | Unpublish workflows | E1.F1.4, E2.F2.4 |
 | 11 DEC 2025 | Service Bus queue standardization | EN3 |
-| 07 DEC 2025 | Container inventory consolidation | E6 |
+| 07 DEC 2025 | Container inventory consolidation | — |
 | DEC 2025 | PgSTAC Repository Consolidation | EN (completed) |
 
 ---

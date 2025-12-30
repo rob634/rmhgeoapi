@@ -2,7 +2,7 @@
 
 > **Navigation**: [Quick Start](WIKI_QUICK_START.md) | [Platform API](WIKI_PLATFORM_API.md) | [All Jobs](WIKI_API_JOB_SUBMISSION.md) | [Errors](WIKI_API_ERRORS.md) | [Glossary](WIKI_API_GLOSSARY.md)
 
-**Date**: 24 NOV 2025
+**Date**: 29 DEC 2025
 **Status**: Reference Documentation
 **Wiki**: Azure DevOps Wiki - Storage configuration documentation
 **Purpose**: Developer guide for configuring Azure Blob Storage in the geospatial ETL pipeline
@@ -36,7 +36,7 @@ This document provides setup and configuration instructions for Azure Blob Stora
 
 ### Data Lake Pattern
 
-The platform uses a medallion architecture (Bronze/Silver/Gold) for data organization:
+The platform uses a medallion architecture (Bronze/Silver/Gold) for data organization. See [Glossary: Data Storage Terms](WIKI_API_GLOSSARY.md#data-storage-terms) for tier definitions.
 
 ```
 Azure Storage Account
@@ -713,4 +713,4 @@ az storage account management-policy create \
 
 ---
 
-**Last Updated**: 08 DEC 2025
+**Last Updated**: 29 DEC 2025

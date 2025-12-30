@@ -37,7 +37,7 @@ class GenerateH3Level4Job(JobBase):
         {
             "number": 2,
             "name": "create_stac",
-            "task_type": "create_h3_stac",
+            "task_type": "h3_create_stac",
             "parallelism": "single",
             "description": "Create STAC item for H3 land grid in system-h3-grids collection"
         }
@@ -128,7 +128,7 @@ class GenerateH3Level4Job(JobBase):
 
             return [{
                 "task_id": f"{job_id[:8]}-h3level4-stage2",
-                "task_type": "create_h3_stac",
+                "task_type": "h3_create_stac",
                 "parameters": {
                     "grid_id": grid_id,
                     "table_name": "geo.h3_grids",

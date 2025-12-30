@@ -1,6 +1,6 @@
 # SAFe Epic & Feature Registry
 
-**Last Updated**: 28 DEC 2025
+**Last Updated**: 29 DEC 2025
 **Framework**: SAFe (Scaled Agile Framework)
 **Purpose**: Master reference for Azure DevOps Boards import
 **Source of Truth**: This file defines Epic/Feature numbers; TODO.md should align
@@ -14,22 +14,28 @@
 | Priority | Epic | Name | Status | Features | WSJF |
 |:--------:|------|------|--------|:--------:|:----:|
 | — | E1 | Vector Data as API | ✅ Complete | 4 | — |
-| 1 | E2 | Raster Data as API | 🚧 Partial | 7 | 5.9 |
+| 1 | E2 | Raster Data as API | 🚧 Partial | 8 | 5.9 |
 | 2 | E3 | DDH Platform Integration | 🚧 Partial | 8 | 4.8 |
 | 3 | E4 | Data Externalization | 🚧 Partial | 5 | 4.3 |
 | 4 | E9 | Zarr/Climate Data as API | 🚧 Partial | 3 | 2.0 |
-| 5 | E7 | Custom Data Pipelines | 🚧 Partial | 3 | 2.6 |
+| 5 | E7 | Pipeline Extensibility | 🚧 Partial | 7 | 2.6 |
 | 6 | E5 | OGC Styles | 🚧 Partial | 2 | 3.7 |
-| 7 | E8 | H3 Analytics Pipeline | 🚧 Partial | 11 | 1.2 |
-| NEW | E11 | Pipeline Builder Demo | 📋 Proposed | 4 | — |
-| NEW | E12 | Interface Modernization | ✅ Phase 1 | 4 | — |
-| NEW | E13 | Pipeline Observability | 📋 Designed | 7 | — |
+| 7 | E8 | H3 Analytics Pipeline | 🚧 Partial | 12 | 1.2 |
+| — | E12 | Interface Modernization | ✅ Phase 1 | 4 | — |
+
+**Deprecated Epics** (absorbed into E7 or E8):
+- ~~E10~~ → F7.4 (FATHOM ETL Operations)
+- ~~E11~~ → F7.7 (Pipeline Builder UI)
+- ~~E13~~ → F7.6 (Pipeline Observability)
+- ~~E14~~ → F8.12 (H3 Export Pipeline)
+- ~~E15~~ → F7.5 (Collection Ingestion)
 
 **Priority Notes**:
 - **E3 includes Observability**: Merged E6 into E3 — observability is app-to-app monitoring for integration
 - **E3 requires ITSDA coordination**: See ITSDA dependency tags on stories below
+- **E7 consolidation**: All pipeline infrastructure now in E7 (FATHOM, ingestion, observability, builder)
+- **E8 consolidation**: All H3 analytics now in E8 (aggregation, export, pipelines, demos)
 - **E7 + E9 synergy**: FATHOM pipeline (E7) drives Zarr/xarray capabilities (E9) — "future ready" patterns
-- **E9, E7, E5, E8**: Secondary priority for FY26; E7 (FATHOM) may elevate based on partner timeline
 
 ### WSJF Calculation
 
@@ -1087,16 +1093,29 @@ F4.3: External Storage ─────────────────▶ F4
 
 ---
 
-## Epic E7: Custom Data Pipelines 🚧
+## Epic E7: Pipeline Extensibility 🚧
 
-**Business Requirement**: Custom ETL pipelines for strategic partners with modern, cloud-native data patterns
-**Status**: 🚧 PARTIAL (infrastructure complete, FATHOM pipeline in progress)
-**Key Partner**: FATHOM (flood risk analytics)
+**Business Requirement**: Extensible pipeline infrastructure for custom ETL, partner data, and operational workflows
+**Status**: 🚧 PARTIAL (F7.1 infrastructure ✅, F7.4 FATHOM 🚧, F7.5 ingestion ✅, F7.6 observability ✅)
+**Last Updated**: 29 DEC 2025
 
 **Strategic Context**:
-> Partners like FATHOM are embracing "future ready" data patterns — Zarr-first, cloud-optimized,
-> analysis-ready. E7 builds partner-specific pipelines that align with these modern standards
-> while leveraging our core ETL infrastructure.
+> E7 consolidates all pipeline-related capabilities: partner pipelines (FATHOM), ingestion patterns
+> (MapSPAM), observability infrastructure, and future pipeline builder UI. This provides a single
+> epic for pipeline extensibility rather than fragmenting across multiple epics.
+
+**Feature Summary**:
+| Feature | Status | Description |
+|---------|--------|-------------|
+| F7.1 | ✅ | Pipeline Infrastructure (registry, scheduler) |
+| F7.2 | ⬜ | FATHOM Flood Pipeline (Zarr conversion) |
+| F7.3 | 📋 | Reference Data Pipelines (Admin0, WDPA) |
+| F7.4 | 🚧 | FATHOM ETL Operations (~~E10~~) |
+| F7.5 | ✅ | Collection Ingestion Pipeline (~~E15~~) |
+| F7.6 | ✅ | Pipeline Observability (~~E13~~) |
+| F7.7 | 📋 | Pipeline Builder UI (~~E11~~) |
+
+---
 
 ### Feature F7.1: Pipeline Infrastructure ✅
 
@@ -1138,19 +1157,6 @@ F4.3: External Storage ─────────────────▶ F4
 - High resolution (3 arcsec / ~90m)
 - Time-series projections (climate scenarios)
 
-**Target Architecture**:
-```
-FATHOM Source       ETL Function App       Consumer Access
-┌─────────────┐    ┌─────────────────┐    ┌───────────────────┐
-│ GeoTIFF or  │───▶│ Zarr conversion │───▶│ TiTiler Zarr      │
-│ NetCDF      │    │ + STAC catalog  │    │ Service           │
-└─────────────┘    └─────────────────┘    └───────────────────┘
-                          │
-                          ▼
-                   Silver Storage Account
-                   (cloud-optimized Zarr)
-```
-
 ---
 
 ### Feature F7.3: Reference Data Pipelines 📋 PLANNED
@@ -1165,13 +1171,108 @@ FATHOM Source       ETL Function App       Consumer Access
 
 ---
 
+### Feature F7.4: FATHOM ETL Operations 🚧 (formerly E10)
+
+**Deliverable**: Band stacking, spatial merge, STAC registration for FATHOM flood data
+**Documentation**: [FATHOM_ETL.md](docs_claude/FATHOM_ETL.md)
+**Status**: 🚧 Phase 1 ✅, Phase 2 46/47 tasks
+
+| Story | Status | Description |
+|-------|--------|-------------|
+| S7.4.1 | ✅ | Phase 1: Band stacking (8 return periods → 1 COG) |
+| S7.4.2 | 🚧 | Phase 2: Spatial merge (N×N tiles → 1 COG) - 46/47 tasks |
+| S7.4.3 | 📋 | Phase 3: STAC registration for merged COGs |
+| S7.4.4 | 📋 | Phase 4: West Africa / Africa scale processing |
+
+**Current Issue**: Phase 2 task `n10-n15_w005-w010` failed. Need retry with `force_reprocess=true`.
+
+**Key Files**: `services/fathom/fathom_etl.py`, `jobs/fathom_*.py`
+
+---
+
+### Feature F7.5: Collection Ingestion Pipeline ✅ (formerly E15)
+
+**Deliverable**: Ingest pre-processed COG collections with existing STAC metadata
+**Completed**: 29 DEC 2025
+**Use Case**: Data already converted to COG with STAC JSON sidecars (MapSPAM agricultural data)
+
+| Story | Status | Description |
+|-------|--------|-------------|
+| S7.5.1 | ✅ | Create `ingest_collection` job definition (5-stage workflow) |
+| S7.5.2 | ✅ | Inventory handler (download collection.json, parse items) |
+| S7.5.3 | ✅ | Copy handler (parallel blob copy bronze → silver) |
+| S7.5.4 | ✅ | Register handlers (pgSTAC collection + items) |
+| S7.5.5 | ✅ | Finalize handler (h3.source_catalog entry) |
+
+**Key Files**:
+- `jobs/ingest_collection.py`
+- `services/ingest/handler_inventory.py`
+- `services/ingest/handler_copy.py`
+- `services/ingest/handler_register.py`
+
+**Usage**:
+```bash
+POST /api/jobs/submit/ingest_collection
+{
+    "source_container": "bronzemapspam",
+    "target_container": "silvermapspam",
+    "batch_size": 100
+}
+```
+
+---
+
+### Feature F7.6: Pipeline Observability ✅ (formerly E13)
+
+**Deliverable**: Real-time metrics for long-running jobs with massive task counts
+**Completed**: 28 DEC 2025
+
+| Story | Status | Description |
+|-------|--------|-------------|
+| S7.6.1 | ✅ | Create `config/metrics_config.py` with env vars |
+| S7.6.2 | ✅ | Create `app.job_metrics` table (self-bootstrapping) |
+| S7.6.3 | ✅ | Create `infrastructure/metrics_repository.py` |
+| S7.6.4 | ✅ | Create `infrastructure/job_progress.py` - base tracker |
+| S7.6.5 | ✅ | Create `infrastructure/job_progress_contexts.py` - H3/FATHOM/Raster mixins |
+| S7.6.6 | ✅ | Create HTTP API + dashboard at `/api/interface/metrics` |
+| S7.6.7 | ✅ | Integrate H3AggregationTracker into `handler_raster_zonal.py` |
+| S7.6.8 | ✅ | Integrate FathomETLTracker into FATHOM handlers |
+| S7.6.9 | 📋 | Integrate into `handler_inventory_cells.py` (deferred) |
+
+**Key Files**:
+- `config/metrics_config.py`
+- `infrastructure/metrics_repository.py`
+- `infrastructure/job_progress.py`
+- `infrastructure/job_progress_contexts.py`
+- `web_interfaces/metrics/interface.py`
+
+**Dashboard Features**: HTMX live updates, job cards with progress bars, rate display, ETA calculation, context-specific metrics
+
+---
+
+### Feature F7.7: Pipeline Builder UI 📋 (formerly E11)
+
+**Deliverable**: Visual interface for defining and executing pipelines
+**Status**: 📋 PLANNED (after F8.9 Pipeline Definition Framework)
+
+| Story | Status | Description |
+|-------|--------|-------------|
+| S7.7.1 | 📋 | Design pipeline builder wireframes |
+| S7.7.2 | 📋 | Create drag-and-drop step editor |
+| S7.7.3 | 📋 | Integrate with F8.9 pipeline definitions |
+| S7.7.4 | 📋 | Add execution monitoring view |
+
+**Depends On**: F8.9 (Pipeline Definition Framework)
+
+---
+
 ---
 
 ## Epic E8: H3 Analytics Pipeline 🚧
 
 **Business Requirement**: Columnar aggregations of raster/vector data to H3 hexagonal grid
-**Status**: 🚧 PARTIAL (F8.1-F8.3 complete, F8.8 Source Catalog complete, F8.4-F8.7 pending)
-**Last Review**: 28 DEC 2025
+**Status**: 🚧 PARTIAL (F8.1-F8.3 ✅, F8.8 ✅, F8.12 ✅, F8.4-F8.7 pending)
+**Last Updated**: 29 DEC 2025
 
 **Architecture**:
 ```
@@ -1195,10 +1296,11 @@ Source Data           H3 Aggregation          Output
 | F8.5 | 📋 | GeoParquet Export |
 | F8.6 | 🚧 | Analytics API (partial) |
 | F8.7 | 📋 | Building Exposure Analysis |
-| F8.8 | ✅ | Source Catalog (NEW 27 DEC) |
-| F8.9 | 📋 | Pipeline Definition Framework (NEW) |
-| F8.10 | 📋 | Multi-Step Pipeline Operations (NEW) |
-| F8.11 | 📋 | Rwanda Coffee Climate Risk Demo (NEW) |
+| F8.8 | ✅ | Source Catalog |
+| F8.9 | 📋 | Pipeline Definition Framework |
+| F8.10 | 📋 | Multi-Step Pipeline Operations |
+| F8.11 | 📋 | Rwanda Coffee Climate Risk Demo |
+| F8.12 | ✅ | H3 Export Pipeline (~~E14~~) |
 
 ### Feature F8.1: H3 Grid Infrastructure ✅
 
@@ -1533,6 +1635,52 @@ suitability = f(
      "inputs": ["$prev_step.soil_ph", "$prev_step.soil_carbon", "$prev_step.temp", "$prev_step.precip"],
      "formula": "coffee_suitability_v1"}
   ]
+}
+```
+
+---
+
+### Feature F8.12: H3 Export Pipeline ✅ (formerly E14)
+
+**Deliverable**: Denormalized, wide-format exports from H3 zonal_stats for mapping and download
+**Completed**: 28 DEC 2025
+**Use Case**: "I want a specific map" or "I want a copy of a specific extract" (NOT for analytics)
+
+| Story | Status | Description |
+|-------|--------|-------------|
+| S8.12.1 | ✅ | Create `h3_export_dataset` job definition (3-stage workflow) |
+| S8.12.2 | ✅ | Validate handler (check table doesn't exist or overwrite=true) |
+| S8.12.3 | ✅ | Build handler (join h3.cells with h3.zonal_stats, pivot to wide format) |
+| S8.12.4 | ✅ | Register handler (update export catalog) |
+| S8.12.5 | ✅ | Support multiple geometry options (polygon/centroid) |
+| S8.12.6 | ✅ | Support spatial scope filtering (iso3, bbox, polygon_wkt) |
+
+**Key Files**:
+- `jobs/h3_export_dataset.py`
+- `services/h3_aggregation/handler_export.py`
+
+**Output Table**:
+```sql
+geo.{table_name}
+├── h3_index BIGINT PRIMARY KEY
+├── geom GEOMETRY(Polygon/Point, 4326)
+├── iso3 VARCHAR(3)          -- optional
+├── {dataset_id}_{stat_type} -- pivot columns
+└── ...
+```
+
+**Usage**:
+```bash
+POST /api/jobs/submit/h3_export_dataset
+{
+    "table_name": "rwanda_terrain_res6",
+    "resolution": 6,
+    "iso3": "RWA",
+    "variables": [
+        {"dataset_id": "cop_dem_rwanda_res6", "stat_types": ["mean", "min", "max"]}
+    ],
+    "geometry_type": "polygon",
+    "overwrite": false
 }
 ```
 

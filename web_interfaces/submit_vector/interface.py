@@ -232,7 +232,7 @@ class SubmitVectorInterface(BaseInterface):
         '''
 
     def _render_submit_fragment(self, request: func.HttpRequest) -> str:
-        """Handle job submission and return result HTML."""
+        """Handle job submission via Platform API and return result HTML."""
         try:
             # Get form data
             body = request.get_body().decode('utf-8')
@@ -245,42 +245,58 @@ class SubmitVectorInterface(BaseInterface):
                 values = form_data.get(key, [])
                 return values[0] if values else default
 
+            # DDH Identifiers (required)
+            dataset_id = get_param('dataset_id')
+            resource_id = get_param('resource_id')
+            version_id = get_param('version_id')
+
+            # File info
             blob_name = get_param('blob_name')
             container_name = get_param('container_name')
-            table_name = get_param('table_name')
             file_extension = get_param('file_extension')
 
             # Validate required fields
+            if not dataset_id:
+                return self._render_submit_error("Missing dataset_id. Please enter a DDH dataset identifier.")
+            if not resource_id:
+                return self._render_submit_error("Missing resource_id. Please enter a DDH resource identifier.")
+            if not version_id:
+                return self._render_submit_error("Missing version_id. Please enter a DDH version identifier.")
             if not blob_name:
                 return self._render_submit_error("Missing blob_name. Please select a file.")
-            if not table_name:
-                return self._render_submit_error("Missing table_name. Please enter a table name.")
 
-            # Auto-detect extension if not provided
-            if not file_extension and '.' in blob_name:
-                file_extension = blob_name.split('.')[-1].lower()
-
-            if not file_extension:
-                return self._render_submit_error("Could not detect file extension. Please provide it explicitly.")
-
-            # Build job parameters
-            job_params = {
-                'blob_name': blob_name,
-                'file_extension': file_extension,
-                'table_name': table_name
+            # Build Platform API payload
+            platform_payload = {
+                'dataset_id': dataset_id,
+                'resource_id': resource_id,
+                'version_id': version_id,
+                'data_type': 'vector',
+                'operation': 'CREATE',
+                'container_name': container_name,
+                'file_name': blob_name
             }
 
-            # Add optional parameters
-            if container_name:
-                job_params['container_name'] = container_name
+            # Optional metadata
+            service_name = get_param('service_name')
+            description = get_param('description')
+            access_level = get_param('access_level')
+            tags = get_param('tags')
 
-            schema = get_param('schema')
-            if schema:
-                job_params['schema'] = schema
+            if service_name:
+                platform_payload['service_name'] = service_name
+            if description:
+                platform_payload['description'] = description
+            if access_level:
+                platform_payload['access_level'] = access_level
+            if tags:
+                platform_payload['tags'] = [t.strip() for t in tags.split(',') if t.strip()]
+
+            # Processing options
+            processing_options = {}
 
             overwrite = get_param('overwrite')
             if overwrite == 'true':
-                job_params['overwrite'] = True
+                processing_options['overwrite'] = True
 
             # CSV-specific parameters
             lat_name = get_param('lat_name')
@@ -288,72 +304,126 @@ class SubmitVectorInterface(BaseInterface):
             wkt_column = get_param('wkt_column')
 
             if lat_name:
-                job_params['lat_name'] = lat_name
+                processing_options['lat_column'] = lat_name
             if lon_name:
-                job_params['lon_name'] = lon_name
+                processing_options['lon_column'] = lon_name
             if wkt_column:
-                job_params['wkt_column'] = wkt_column
+                processing_options['wkt_column'] = wkt_column
 
-            # Metadata parameters
-            title = get_param('title')
-            description = get_param('description')
-            attribution = get_param('attribution')
-            license_val = get_param('license')
-            keywords = get_param('keywords')
+            if processing_options:
+                platform_payload['processing_options'] = processing_options
 
-            if title:
-                job_params['title'] = title
-            if description:
-                job_params['description'] = description
-            if attribution:
-                job_params['attribution'] = attribution
-            if license_val:
-                job_params['license'] = license_val
-            if keywords:
-                job_params['keywords'] = keywords
+            # Submit via Platform API internal functions
+            from triggers.trigger_platform import (
+                PlatformRequest,
+                generate_platform_request_id,
+                _translate_to_coremachine,
+                _create_and_submit_job,
+                config
+            )
+            from infrastructure.repositories.platform_repository import PlatformRepository, ApiRequest
 
-            # Submit job using the same pattern as submit_job_trigger
-            from jobs import ALL_JOBS
-            from infrastructure.factory import RepositoryFactory
+            # Create Platform request object
+            platform_req = PlatformRequest(**platform_payload)
 
-            if 'process_vector' not in ALL_JOBS:
-                return self._render_submit_error("ProcessVectorJob not found in registry")
+            # Generate deterministic request ID
+            request_id = generate_platform_request_id(
+                platform_req.dataset_id,
+                platform_req.resource_id,
+                platform_req.version_id
+            )
 
-            # Get job controller
-            controller_class = ALL_JOBS['process_vector']
-            controller = controller_class()
+            # Check for existing request (idempotent)
+            platform_repo = PlatformRepository()
+            existing = platform_repo.get_request(request_id)
+            if existing:
+                return self._render_submit_success_platform({
+                    'request_id': request_id,
+                    'job_id': existing.job_id,
+                    'status': 'exists'
+                }, platform_payload)
 
-            # Validate parameters
-            validated_params = controller.validate_job_parameters(job_params)
+            # Translate to CoreMachine job parameters
+            job_type, job_params = _translate_to_coremachine(platform_req, config)
 
-            # Generate job ID
-            job_id = controller.generate_job_id(validated_params)
+            # Create and submit job
+            job_id = _create_and_submit_job(job_type, job_params, request_id)
 
-            # Check if job already exists
-            repos = RepositoryFactory.create_repositories()
-            existing_job = repos['job_repo'].get_job(job_id)
+            if not job_id:
+                return self._render_submit_error("Failed to create CoreMachine job")
 
-            if existing_job:
-                job_status = existing_job.status.value if hasattr(existing_job.status, 'value') else str(existing_job.status)
-                if job_status == 'completed':
-                    return self._render_submit_success(job_id, validated_params, message="Job already completed (idempotent)")
-                elif job_status in ('pending', 'processing'):
-                    return self._render_submit_success(job_id, validated_params, message=f"Job already {job_status}")
+            # Store tracking record
+            api_request = ApiRequest(
+                request_id=request_id,
+                dataset_id=platform_req.dataset_id,
+                resource_id=platform_req.resource_id,
+                version_id=platform_req.version_id,
+                job_id=job_id,
+                data_type=platform_req.data_type.value
+            )
+            platform_repo.create_request(api_request)
 
-            # Create job record
-            controller.create_job_record(job_id, validated_params)
-
-            # Queue job for processing
-            controller.queue_job(job_id, validated_params)
-
-            return self._render_submit_success(job_id, validated_params)
+            return self._render_submit_success_platform({
+                'request_id': request_id,
+                'job_id': job_id,
+                'job_type': job_type,
+                'status': 'accepted'
+            }, platform_payload)
 
         except Exception as e:
             logger.error(f"Error submitting job: {e}", exc_info=True)
             return self._render_submit_error(str(e))
 
+    def _render_submit_success_platform(self, result: dict, payload: dict) -> str:
+        """Render successful Platform API submission result."""
+        request_id = result.get('request_id', 'N/A')
+        job_id = result.get('job_id', 'N/A')
+        table_name = result.get('table_name', 'Auto-generated')
+        status = result.get('status', 'accepted')
+
+        # Determine message based on status
+        if status == 'exists':
+            title = "Request Already Processed (Idempotent)"
+        elif status == 'accepted':
+            title = "Request Submitted Successfully"
+        else:
+            title = "Request Processed"
+
+        return f'''
+        <div class="submit-result success">
+            <div class="result-icon">✅</div>
+            <h3>{title}</h3>
+            <div class="result-details">
+                <div class="detail-row">
+                    <span class="detail-label">Request ID</span>
+                    <span class="detail-value mono">{request_id}</span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">Job ID</span>
+                    <span class="detail-value mono">{job_id}</span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">Table Name</span>
+                    <span class="detail-value">{table_name}</span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">DDH Identifier</span>
+                    <span class="detail-value">{payload.get('dataset_id')}/{payload.get('resource_id')}/{payload.get('version_id')}</span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">Source File</span>
+                    <span class="detail-value">{payload.get('file_name', 'N/A')}</span>
+                </div>
+            </div>
+            <div class="result-actions">
+                <a href="/api/platform/status/{request_id}" class="btn btn-primary" target="_blank">View Status</a>
+                <a href="/api/interface/tasks?job_id={job_id}" class="btn btn-secondary">View Job Tasks</a>
+            </div>
+        </div>
+        '''
+
     def _render_submit_success(self, job_id: str, params: dict, message: str = None) -> str:
-        """Render successful job submission result."""
+        """Render successful job submission result (legacy)."""
         title = message if message else "Job Submitted Successfully"
         return f'''
         <div class="submit-result success">
@@ -401,7 +471,7 @@ class SubmitVectorInterface(BaseInterface):
             <!-- Header -->
             <header class="dashboard-header">
                 <h1>📤 Submit Vector Job</h1>
-                <p class="subtitle">Upload vector data to PostGIS with STAC cataloging</p>
+                <p class="subtitle">Upload vector data via Platform API - generate cURL or submit directly</p>
             </header>
 
             <div class="two-column-layout">
@@ -496,8 +566,8 @@ class SubmitVectorInterface(BaseInterface):
                 <!-- Right Column: Job Form -->
                 <div class="form-section">
                     <div class="section-header">
-                        <h2>2. Configure Job</h2>
-                        <p class="section-subtitle">Set table name and options</p>
+                        <h2>2. Configure Platform API Request</h2>
+                        <p class="section-subtitle">Set DDH identifiers and processing options</p>
                     </div>
 
                     <form id="submit-form"
@@ -518,29 +588,43 @@ class SubmitVectorInterface(BaseInterface):
                             </div>
                         </div>
 
-                        <!-- Required Fields -->
-                        <div class="form-group required">
-                            <label for="table_name">Table Name *</label>
-                            <input type="text" id="table_name" name="table_name" required
-                                   placeholder="e.g., my_vector_data"
-                                   pattern="[a-z][a-z0-9_]*"
-                                   title="Lowercase letters, numbers, underscores. Must start with letter.">
-                            <span class="field-hint">Target PostGIS table name</span>
-                        </div>
+                        <!-- DDH Identifiers Section -->
+                        <div class="ddh-section">
+                            <div class="form-group-header">DDH Identifiers (Required)</div>
+                            <div class="form-group required">
+                                <label for="dataset_id">Dataset ID *</label>
+                                <input type="text" id="dataset_id" name="dataset_id" required
+                                       placeholder="e.g., parcels-2024"
+                                       pattern="[a-z0-9][a-z0-9-]*[a-z0-9]"
+                                       title="Lowercase letters, numbers, hyphens. No leading/trailing hyphens.">
+                                <span class="field-hint">DDH dataset identifier (lowercase, hyphens allowed)</span>
+                            </div>
 
-                        <div class="form-group">
-                            <label for="schema">Schema</label>
-                            <select id="schema" name="schema">
-                                <option value="geo" selected>geo (default)</option>
-                                <option value="public">public</option>
-                            </select>
-                            <span class="field-hint">Target PostGIS schema</span>
+                            <div class="form-row">
+                                <div class="form-group required">
+                                    <label for="resource_id">Resource ID *</label>
+                                    <input type="text" id="resource_id" name="resource_id" required
+                                           placeholder="e.g., county-king"
+                                           pattern="[a-z0-9][a-z0-9-]*[a-z0-9]"
+                                           title="Lowercase letters, numbers, hyphens.">
+                                    <span class="field-hint">DDH resource identifier</span>
+                                </div>
+                                <div class="form-group required">
+                                    <label for="version_id">Version ID *</label>
+                                    <input type="text" id="version_id" name="version_id" required
+                                           value="v1.0"
+                                           placeholder="e.g., v1.0"
+                                           pattern="v[0-9]+\\.[0-9]+"
+                                           title="Version format: v1.0, v2.1, etc.">
+                                    <span class="field-hint">DDH version identifier</span>
+                                </div>
+                            </div>
                         </div>
 
                         <div class="form-group checkbox-group">
                             <label>
                                 <input type="checkbox" id="overwrite" name="overwrite" value="true">
-                                Allow overwrite if table exists
+                                Allow overwrite if data exists
                             </label>
                         </div>
 
@@ -576,8 +660,8 @@ class SubmitVectorInterface(BaseInterface):
                             <summary>Optional Metadata</summary>
                             <div class="metadata-fields">
                                 <div class="form-group">
-                                    <label for="title">Title</label>
-                                    <input type="text" id="title" name="title"
+                                    <label for="service_name">Service Name</label>
+                                    <input type="text" id="service_name" name="service_name"
                                            placeholder="Human-readable dataset name">
                                 </div>
                                 <div class="form-group">
@@ -586,53 +670,46 @@ class SubmitVectorInterface(BaseInterface):
                                               placeholder="Full dataset description"></textarea>
                                 </div>
                                 <div class="form-group">
-                                    <label for="attribution">Attribution</label>
-                                    <input type="text" id="attribution" name="attribution"
-                                           placeholder="e.g., Natural Earth - naturalearthdata.com">
-                                </div>
-                                <div class="form-group">
-                                    <label for="license">License</label>
-                                    <select id="license" name="license">
+                                    <label for="access_level">Access Level</label>
+                                    <select id="access_level" name="access_level">
                                         <option value="">Not specified</option>
                                         <option value="OUO">OUO (Official Use Only)</option>
-                                        <option value="Commercial">Commercial (Proprietary)</option>
-                                        <option value="CC0-1.0">CC0-1.0 (Public Domain)</option>
-                                        <option value="CC-BY-4.0">CC-BY-4.0 (Attribution)</option>
-                                        <option value="CC-BY-SA-4.0">CC-BY-SA-4.0 (Attribution-ShareAlike)</option>
-                                        <option value="MIT">MIT</option>
-                                        <option value="ODbL-1.0">ODbL-1.0 (Open Database)</option>
+                                        <option value="PUBLIC">PUBLIC</option>
+                                        <option value="restricted">Restricted</option>
                                     </select>
                                 </div>
                                 <div class="form-group">
-                                    <label for="keywords">Keywords</label>
-                                    <input type="text" id="keywords" name="keywords"
+                                    <label for="tags">Tags</label>
+                                    <input type="text" id="tags" name="tags"
                                            placeholder="Comma-separated tags, e.g., boundaries,admin">
                                 </div>
                             </div>
                         </details>
 
-                        <!-- Submit Button -->
-                        <div class="form-actions">
-                            <button type="submit" id="submit-btn" class="btn btn-primary" disabled>
-                                🚀 Submit Job
-                            </button>
-                            <span id="submit-spinner" class="htmx-indicator spinner-inline"></span>
-                        </div>
-                    </form>
-
-                    <!-- cURL Preview Section -->
-                    <details class="curl-section" id="curl-section">
-                        <summary>📋 cURL Command</summary>
-                        <div class="curl-container">
-                            <div class="curl-header">
-                                <span class="curl-hint">Equivalent API call - click to copy</span>
+                        <!-- Platform API cURL Section (Prominent) -->
+                        <div class="curl-section-prominent" id="curl-section">
+                            <div class="curl-section-header">
+                                <span class="curl-title">📋 Platform API cURL</span>
                                 <button type="button" class="btn btn-sm btn-copy" onclick="copyCurl()">
                                     <span id="copy-icon">📋</span> Copy
                                 </button>
                             </div>
-                            <pre id="curl-command" class="curl-code">Select a file and fill in the form to see the cURL command</pre>
+                            <pre id="curl-command" class="curl-code">Fill in DDH identifiers to see the Platform API cURL command</pre>
+                            <div class="curl-hint">Copy to Postman or terminal - or use the Submit button below</div>
                         </div>
-                    </details>
+
+                        <div class="submit-divider">
+                            <span>OR submit directly</span>
+                        </div>
+
+                        <!-- Submit Button -->
+                        <div class="form-actions">
+                            <button type="submit" id="submit-btn" class="btn btn-primary" disabled>
+                                🚀 Submit via Platform API
+                            </button>
+                            <span id="submit-spinner" class="htmx-indicator spinner-inline"></span>
+                        </div>
+                    </form>
 
                     <!-- Result Display -->
                     <div id="submit-result" class="submit-result-container hidden">
@@ -1092,7 +1169,98 @@ class SubmitVectorInterface(BaseInterface):
             bottom: 10px;
         }
 
-        /* cURL Preview Section */
+        /* DDH Section */
+        .ddh-section {
+            background: #f0f7ff;
+            border: 1px solid var(--ds-blue-primary);
+            border-radius: 6px;
+            padding: 16px;
+            margin-bottom: 16px;
+        }
+
+        .ddh-section .form-group-header {
+            color: var(--ds-blue-primary);
+            margin-bottom: 12px;
+        }
+
+        /* Prominent cURL Section */
+        .curl-section-prominent {
+            background: #1e293b;
+            border-radius: 8px;
+            padding: 16px;
+            margin: 20px 0;
+        }
+
+        .curl-section-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+
+        .curl-title {
+            color: #e2e8f0;
+            font-weight: 600;
+            font-size: 14px;
+        }
+
+        .curl-section-prominent .curl-hint {
+            color: #94a3b8;
+            font-size: 11px;
+            margin-top: 8px;
+            text-align: center;
+        }
+
+        .curl-section-prominent .btn-copy {
+            background: #334155;
+            border-color: #475569;
+            color: #e2e8f0;
+        }
+
+        .curl-section-prominent .btn-copy:hover {
+            background: var(--ds-blue-primary);
+            border-color: var(--ds-blue-primary);
+        }
+
+        .curl-code {
+            background: #0f172a;
+            color: #e2e8f0;
+            padding: 16px;
+            border-radius: 6px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            line-height: 1.5;
+            overflow-x: auto;
+            white-space: pre-wrap;
+            word-break: break-all;
+            margin: 0;
+            max-height: 300px;
+        }
+
+        /* Submit Divider */
+        .submit-divider {
+            display: flex;
+            align-items: center;
+            text-align: center;
+            margin: 16px 0;
+        }
+
+        .submit-divider::before,
+        .submit-divider::after {
+            content: '';
+            flex: 1;
+            border-bottom: 1px solid var(--ds-gray-light);
+        }
+
+        .submit-divider span {
+            padding: 0 12px;
+            color: var(--ds-gray);
+            font-size: 12px;
+            font-weight: 500;
+            text-transform: uppercase;
+        }
+
+        /* Legacy cURL section (collapsible) - kept for backwards compat */
         .curl-section {
             margin-top: 20px;
             background: var(--ds-bg);
@@ -1142,24 +1310,10 @@ class SubmitVectorInterface(BaseInterface):
             color: white;
             border-color: var(--ds-blue-primary);
         }
-
-        .curl-code {
-            background: #1e293b;
-            color: #e2e8f0;
-            padding: 16px;
-            border-radius: 6px;
-            font-family: 'Courier New', monospace;
-            font-size: 12px;
-            line-height: 1.5;
-            overflow-x: auto;
-            white-space: pre-wrap;
-            word-break: break-all;
-            margin: 0;
-        }
         """
 
     def _generate_custom_js(self) -> str:
-        """Generate minimal JavaScript for Submit Vector interface."""
+        """Generate JavaScript for Submit Vector interface with Platform API support."""
         return """
         // Update load button state based on selections
         function updateLoadButton() {
@@ -1175,6 +1329,17 @@ class SubmitVectorInterface(BaseInterface):
             document.getElementById('initial-state')?.classList.add('hidden');
             document.getElementById('files-table')?.classList.remove('hidden');
             document.getElementById('stats-banner')?.classList.remove('hidden');
+        }
+
+        // Update submit button state based on required fields
+        function updateSubmitButton() {
+            const blobName = document.getElementById('blob_name').value;
+            const datasetId = document.getElementById('dataset_id').value;
+            const resourceId = document.getElementById('resource_id').value;
+            const versionId = document.getElementById('version_id').value;
+
+            const submitBtn = document.getElementById('submit-btn');
+            submitBtn.disabled = !(blobName && datasetId && resourceId && versionId);
         }
 
         // Select a file from the browser
@@ -1210,19 +1375,20 @@ class SubmitVectorInterface(BaseInterface):
                 csvFields.classList.add('hidden');
             }
 
-            // Enable submit button
-            document.getElementById('submit-btn').disabled = false;
-
-            // Auto-suggest table name from filename
-            const tableInput = document.getElementById('table_name');
-            if (!tableInput.value) {
-                // Convert filename to valid table name
-                let tableName = shortName.split('.')[0]
+            // Auto-suggest dataset_id from filename if empty
+            const datasetInput = document.getElementById('dataset_id');
+            if (!datasetInput.value) {
+                // Convert filename to valid DDH identifier
+                let datasetId = shortName.split('.')[0]
                     .toLowerCase()
-                    .replace(/[^a-z0-9_]/g, '_')
-                    .replace(/^[0-9]/, 't_$&');
-                tableInput.value = tableName;
+                    .replace(/[^a-z0-9-]/g, '-')
+                    .replace(/^-+|-+$/g, '')
+                    .replace(/--+/g, '-');
+                datasetInput.value = datasetId;
             }
+
+            updateSubmitButton();
+            updateCurlPreview();
         }
 
         // Listen for HTMX events
@@ -1245,61 +1411,78 @@ class SubmitVectorInterface(BaseInterface):
             }
         });
 
-        // Generate cURL command from form values
+        // Generate Platform API cURL command from form values
         function generateCurl() {
             const blobName = document.getElementById('blob_name').value;
             const containerName = document.getElementById('container_name').value;
-            const tableName = document.getElementById('table_name').value;
-            const schema = document.getElementById('schema').value;
-            const overwrite = document.getElementById('overwrite').checked;
             const fileExtension = document.getElementById('file_extension').value;
 
+            // DDH Identifiers
+            const datasetId = document.getElementById('dataset_id').value;
+            const resourceId = document.getElementById('resource_id').value;
+            const versionId = document.getElementById('version_id').value;
+
+            // Processing options
+            const overwrite = document.getElementById('overwrite').checked;
+
             // Optional metadata
-            const title = document.getElementById('title').value;
+            const serviceName = document.getElementById('service_name').value;
             const description = document.getElementById('description').value;
-            const attribution = document.getElementById('attribution').value;
-            const license = document.getElementById('license').value;
-            const keywords = document.getElementById('keywords').value;
+            const accessLevel = document.getElementById('access_level').value;
+            const tags = document.getElementById('tags').value;
 
             // CSV-specific
             const latName = document.getElementById('lat_name').value;
             const lonName = document.getElementById('lon_name').value;
             const wktColumn = document.getElementById('wkt_column').value;
 
-            if (!blobName || !tableName) {
-                return 'Select a file and fill in the form to see the cURL command';
+            if (!datasetId || !resourceId || !versionId) {
+                return 'Fill in DDH identifiers (dataset_id, resource_id, version_id) to see the Platform API cURL command';
+            }
+
+            if (!blobName) {
+                return 'Select a file to see the Platform API cURL command';
             }
 
             const baseUrl = window.location.origin;
 
-            // Build params object
-            const params = {
-                blob_name: blobName,
+            // Build Platform API payload
+            const payload = {
+                dataset_id: datasetId,
+                resource_id: resourceId,
+                version_id: versionId,
+                data_type: "vector",
+                operation: "CREATE",
                 container_name: containerName,
-                table_name: tableName
+                file_name: blobName
             };
 
-            if (schema && schema !== 'geo') params.schema = schema;
-            if (overwrite) params.overwrite = true;
-            if (fileExtension) params.file_extension = fileExtension;
+            // Optional metadata
+            if (serviceName) payload.service_name = serviceName;
+            if (accessLevel) payload.access_level = accessLevel;
+            if (description) payload.description = description;
+            if (tags) {
+                payload.tags = tags.split(',').map(t => t.trim()).filter(t => t);
+            }
 
-            // Metadata
-            if (title) params.title = title;
-            if (description) params.description = description;
-            if (attribution) params.attribution = attribution;
-            if (license) params.license = license;
-            if (keywords) params.keywords = keywords.split(',').map(k => k.trim()).filter(k => k);
+            // Processing options
+            const processingOptions = {};
+            if (overwrite) processingOptions.overwrite = true;
 
             // CSV fields
             if (fileExtension === 'csv') {
-                if (latName) params.lat_name = latName;
-                if (lonName) params.lon_name = lonName;
-                if (wktColumn) params.wkt_column = wktColumn;
+                if (latName) processingOptions.lat_column = latName;
+                if (lonName) processingOptions.lon_column = lonName;
+                if (wktColumn) processingOptions.wkt_column = wktColumn;
             }
 
-            const jsonStr = JSON.stringify(params, null, 2);
+            if (Object.keys(processingOptions).length > 0) {
+                payload.processing_options = processingOptions;
+            }
 
-            return `curl -X POST "${baseUrl}/api/jobs/submit/process_vector" \\
+            const jsonStr = JSON.stringify(payload, null, 2);
+
+            return `curl -X POST "${baseUrl}/api/platform/submit" \\
   -H "Content-Type: application/json" \\
   -d '${jsonStr}'`;
         }
@@ -1325,23 +1508,23 @@ class SubmitVectorInterface(BaseInterface):
             });
         }
 
-        // Add event listeners for form changes to update cURL
+        // Add event listeners for form changes to update cURL and submit button
         document.addEventListener('DOMContentLoaded', () => {
-            const formInputs = ['table_name', 'schema', 'overwrite', 'title', 'description',
-                                'attribution', 'license', 'keywords', 'lat_name', 'lon_name', 'wkt_column'];
+            const formInputs = ['dataset_id', 'resource_id', 'version_id', 'overwrite',
+                                'service_name', 'description', 'access_level', 'tags',
+                                'lat_name', 'lon_name', 'wkt_column'];
             formInputs.forEach(id => {
                 const el = document.getElementById(id);
                 if (el) {
-                    el.addEventListener('input', updateCurlPreview);
-                    el.addEventListener('change', updateCurlPreview);
+                    el.addEventListener('input', () => {
+                        updateCurlPreview();
+                        updateSubmitButton();
+                    });
+                    el.addEventListener('change', () => {
+                        updateCurlPreview();
+                        updateSubmitButton();
+                    });
                 }
             });
         });
-
-        // Override selectFile to also update cURL
-        const originalSelectFile = selectFile;
-        selectFile = function(blobName, container, zone) {
-            originalSelectFile(blobName, container, zone);
-            updateCurlPreview();
-        };
         """

@@ -208,15 +208,15 @@ ALL_HANDLERS = {
     "create_cog": create_cog,
     "h3_level4_generate": h3_level4_generate,
     "h3_base_generate": h3_base_generate,
-    # H3 PostGIS + STAC handlers (9 NOV 2025 - Phase 2)
-    "insert_h3_to_postgis": insert_h3_to_postgis,  # Stage 2: Load GeoParquet → PostGIS (DEPRECATED - use h3_native_streaming_postgis)
-    "create_h3_stac": create_h3_stac,              # Stage 3: Create STAC item for H3 grid
+    # H3 PostGIS + STAC handlers (9 NOV 2025 - Phase 2), renamed (29 DEC 2025)
+    "h3_insert_to_postgis": insert_h3_to_postgis,  # Stage 2: Load GeoParquet → PostGIS (DEPRECATED - use h3_native_streaming_postgis)
+    "h3_create_stac": create_h3_stac,              # Stage 3: Create STAC item for H3 grid
     # H3 Native Streaming Handler (9 NOV 2025 - Phase 3)
     "h3_native_streaming_postgis": h3_native_streaming_postgis,  # Stage 1: h3-py → async stream → PostGIS (3.5x faster)
-    # H3 Universal Handlers (14-15 NOV 2025 - DRY Architecture)
-    "generate_h3_grid": generate_h3_grid,  # Universal handler for ALL resolutions (0-15), base OR cascade, flexible filtering (replaces bootstrap_res2)
-    "cascade_h3_descendants": cascade_h3_descendants,  # Multi-level cascade handler (15 NOV 2025) - res N → [N+1, N+2, ..., N+K] in one operation
-    "finalize_h3_pyramid": finalize_h3_pyramid,  # H3 pyramid finalization and verification (14 NOV 2025)
+    # H3 Universal Handlers (14-15 NOV 2025 - DRY Architecture), renamed (29 DEC 2025)
+    "h3_generate_grid": generate_h3_grid,  # Universal handler for ALL resolutions (0-15), base OR cascade, flexible filtering (replaces bootstrap_res2)
+    "h3_cascade_descendants": cascade_h3_descendants,  # Multi-level cascade handler (15 NOV 2025) - res N → [N+1, N+2, ..., N+K] in one operation
+    "h3_finalize_pyramid": finalize_h3_pyramid,  # H3 pyramid finalization and verification (14 NOV 2025)
     # Vector ETL handlers - OLD ingest_vector handlers REMOVED (27 NOV 2025)
     # "prepare_vector_chunks" and "upload_pickled_chunk" removed - use process_vector idempotent handlers
     "vector_create_stac": create_vector_stac,        # Stage 3: Create STAC record (shared by process_vector)

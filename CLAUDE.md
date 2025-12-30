@@ -1,6 +1,6 @@
 # CLAUDE.md - Project Context
 
-**Last Updated**: 23 DEC 2025
+**Last Updated**: 29 DEC 2025
 
 ---
 
@@ -36,6 +36,14 @@ All Claude-optimized documentation is in **`/docs_claude/`**.
 
 **This project uses SAFe (Scaled Agile Framework) terminology for planning and tracking.**
 
+### GitHub Project (Primary Tracking)
+- **Project URL**: https://github.com/users/rob634/projects/1
+- **Repository**: https://github.com/rob634/rmhgeoapi
+- **Setup Guide**: `docs_claude/github_safe.md`
+
+Work items are tracked as GitHub Issues with SAFe labels (`epic`, `feature`, `story`, `enabler`).
+Custom fields: Type, Epic (parent), Priority (WSJF-based).
+
 When planning work or discussing priorities with Robert, use SAFe language:
 
 | SAFe Term | Definition | Example |
@@ -58,7 +66,10 @@ When planning work or discussing priorities with Robert, use SAFe language:
 - Prioritize by business value (which Epic does this serve?)
 - Think in terms of increments, not big-bang releases
 
-**TODO.md follows this structure** - see `docs_claude/TODO.md` for the canonical backlog
+### Source of Truth
+- **GitHub Project**: Primary tracking for Epics, Features, Stories
+- **EPICS.md**: Master definitions and WSJF calculations
+- **TODO.md**: Sprint-level task details and delegation notes
 
 ### Git Commit Format
 ```

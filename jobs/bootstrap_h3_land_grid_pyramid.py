@@ -57,21 +57,21 @@ class BootstrapH3LandGridPyramidJob(JobBaseMixin, JobBase):  # Mixin FIRST for c
         {
             "number": 1,
             "name": "generate_res2_base",
-            "task_type": "generate_h3_grid",
+            "task_type": "h3_generate_grid",
             "parallelism": "single",
             "description": "Generate res 2 base grid with land/country/bbox filter"
         },
         {
             "number": 2,
             "name": "cascade_descendants",
-            "task_type": "cascade_h3_descendants",
+            "task_type": "h3_cascade_descendants",
             "parallelism": "fan_out",
             "description": "Cascade res 2 → res 3,4,5,6,7 (batched parallel tasks)"
         },
         {
             "number": 3,
             "name": "finalize_pyramid",
-            "task_type": "finalize_h3_pyramid",
+            "task_type": "h3_finalize_pyramid",
             "parallelism": "single",
             "description": "Verify cell counts and update metadata (all resolutions)"
         }
@@ -231,7 +231,7 @@ class BootstrapH3LandGridPyramidJob(JobBaseMixin, JobBase):  # Mixin FIRST for c
             return [
                 {
                     "task_id": f"{job_id[:8]}-s1-res2-base",
-                    "task_type": "generate_h3_grid",
+                    "task_type": "h3_generate_grid",
                     "parameters": task_params
                 }
             ]
@@ -291,7 +291,7 @@ class BootstrapH3LandGridPyramidJob(JobBaseMixin, JobBase):  # Mixin FIRST for c
 
                 tasks.append({
                     "task_id": batch_id,
-                    "task_type": "cascade_h3_descendants",
+                    "task_type": "h3_cascade_descendants",
                     "parameters": task_params
                 })
 
@@ -343,7 +343,7 @@ class BootstrapH3LandGridPyramidJob(JobBaseMixin, JobBase):  # Mixin FIRST for c
             return [
                 {
                     "task_id": f"{job_id[:8]}-s3-finalize",
-                    "task_type": "finalize_h3_pyramid",
+                    "task_type": "h3_finalize_pyramid",
                     "parameters": {
                         "grid_id_prefix": grid_id_prefix,
                         "resolutions": all_resolutions,
@@ -421,8 +421,8 @@ class BootstrapH3LandGridPyramidJob(JobBaseMixin, JobBase):  # Mixin FIRST for c
         # Extract cascade statistics from Stage 2
         cascade_stats = {}
         if len(task_results) >= 2:
-            # Stage 2 results are cascade tasks (task_type = "cascade_h3_descendants")
-            stage2_results = [tr for tr in task_results if tr.task_type == "cascade_h3_descendants"]
+            # Stage 2 results are cascade tasks (task_type = "h3_cascade_descendants")
+            stage2_results = [tr for tr in task_results if tr.task_type == "h3_cascade_descendants"]
             cascade_stats = {
                 "batches_completed": len(stage2_results),
                 "batch_size": cascade_batch_size,
@@ -448,7 +448,7 @@ class BootstrapH3LandGridPyramidJob(JobBaseMixin, JobBase):  # Mixin FIRST for c
             "metadata": {
                 "workflow": "3-stage cascade (base + batched descendants + finalize)",
                 "architecture": "Optimized cascade (res 2 → res 3-7 in parallel batches)",
-                "cascade_handler": "cascade_h3_descendants (multi-level)",
+                "cascade_handler": "h3_cascade_descendants (multi-level)",
                 "pattern": "JobBaseMixin (77% less boilerplate)",
                 "performance": f"Batched fan-out with {cascade_batch_size} parents per task"
             }

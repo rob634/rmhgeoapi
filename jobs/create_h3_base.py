@@ -51,7 +51,7 @@ class CreateH3BaseJob(JobBase):
         {
             "number": 2,
             "name": "create_stac",
-            "task_type": "create_h3_stac",
+            "task_type": "h3_create_stac",
             "parallelism": "single",
             "description": "Create STAC item for H3 grid in system-h3-grids collection"
         }
@@ -165,7 +165,7 @@ class CreateH3BaseJob(JobBase):
             return [
                 {
                     "task_id": f"{job_id[:8]}-h3base-res{resolution}-stage2",
-                    "task_type": "create_h3_stac",
+                    "task_type": "h3_create_stac",
                     "parameters": task_params
                 }
             ]

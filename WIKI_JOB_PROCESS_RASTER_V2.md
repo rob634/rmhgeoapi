@@ -2,8 +2,8 @@
 
 > **Navigation**: [Quick Start](WIKI_QUICK_START.md) | [Platform API](WIKI_PLATFORM_API.md) | [All Jobs](WIKI_API_JOB_SUBMISSION.md) | [Errors](WIKI_API_ERRORS.md) | [Glossary](WIKI_API_GLOSSARY.md)
 
-**Date**: 28 NOV 2025
-**Status**: NEW - Clean slate implementation
+**Date**: 29 DEC 2025
+**Status**: Production
 
 ---
 
@@ -70,6 +70,14 @@ curl -X POST \
 | `in_memory` | bool | No | config | Override in-memory processing (true=faster for small files) |
 | `collection_id` | string | No | config | STAC collection ID (default: system-rasters) |
 | `item_id` | string | No | auto | Custom STAC item ID |
+
+### Size Limits
+
+| Limit | Value | Behavior |
+|-------|-------|----------|
+| **Max file size** | 800 MB | Files >800 MB rejected at pre-flight validation |
+
+**For files exceeding 800 MB**: Use `process_large_raster_v2` which routes to the Docker worker for long-running processing.
 
 ### Platform Passthrough Parameters (DDH Integration)
 
@@ -375,4 +383,4 @@ If you're currently using `process_raster`, migration is straightforward:
 
 ---
 
-**Last Updated**: 28 NOV 2025
+**Last Updated**: 29 DEC 2025

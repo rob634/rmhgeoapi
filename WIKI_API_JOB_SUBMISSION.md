@@ -2,7 +2,7 @@
 
 > **Navigation**: [Quick Start](WIKI_QUICK_START.md) | [Platform API](WIKI_PLATFORM_API.md) | [All Jobs](WIKI_API_JOB_SUBMISSION.md) | [Errors](WIKI_API_ERRORS.md) | [Glossary](WIKI_API_GLOSSARY.md)
 
-**Date**: 27 NOV 2025
+**Date**: 29 DEC 2025
 **Purpose**: Quick reference for submitting jobs via REST API
 **Wiki**: Azure DevOps Wiki - API reference documentation
 
@@ -973,37 +973,7 @@ azure://silver-cogs/{blob_name}_cog.tif
 
 ### Platform API (DDH Integration)
 
-<!-- TODO: Add Platform API examples after testing (22 NOV 2025)
-
-     Platform API uses DDH identifiers instead of CoreMachine parameters:
-     - dataset_id, resource_id, version_id → auto-generated output folders and STAC IDs
-     - Endpoint: POST /api/platform/request
-     - Status: GET /api/platform/status/{request_id}
-
-     Example structure (to be tested and verified):
-     {
-       "dataset_id": "aerial-imagery",
-       "resource_id": "site-alpha",
-       "version_id": "v1-0",
-       "data_type": "raster",
-       "file_name": "image.tif",
-       "container_name": "bronze-rasters",
-       "service_name": "DDH Raster Import",
-       "description": "Aerial imagery for Site Alpha",
-       "tags": ["aerial", "rgb"],
-       "access_level": "public",
-       "options": {
-         "output_tier": "analysis",
-         "target_crs": "EPSG:4326"
-       }
-     }
-
-     Output:
-     - Output folder: aerial-imagery/site-alpha/v1-0 (auto-generated)
-     - Collection ID: aerial-imagery (auto-generated)
-     - STAC item ID: aerial-imagery_site-alpha_v1-0 (auto-generated)
-     - TiTiler viewer URL: auto-generated with search_id
--->
+For Platform API usage with DDH identifiers (`dataset_id`, `resource_id`, `version_id`), see **[WIKI_PLATFORM_API.md](WIKI_PLATFORM_API.md)**.
 
 ---
 
@@ -1244,42 +1214,7 @@ When you open the `share_url`, the map automatically zooms to the collection ext
 
 ### Platform API (DDH Integration)
 
-<!-- TODO: Add Platform API examples after testing (22 NOV 2025)
-
-     Platform API uses DDH identifiers instead of CoreMachine parameters:
-     - dataset_id, resource_id, version_id → auto-generated collection ID and output folder
-     - Endpoint: POST /api/platform/request
-     - Status: GET /api/platform/status/{request_id}
-
-     Example structure (to be tested and verified):
-     {
-       "dataset_id": "satellite-imagery",
-       "resource_id": "region-alpha",
-       "version_id": "v1-0",
-       "data_type": "raster_collection",
-       "file_list": [
-         "satellite/tile1.tif",
-         "satellite/tile2.tif",
-         "satellite/tile3.tif"
-       ],
-       "container_name": "bronze-rasters",
-       "service_name": "DDH Satellite Import",
-       "description": "Multi-tile satellite collection for Region Alpha",
-       "tags": ["satellite", "multispectral"],
-       "access_level": "public",
-       "options": {
-         "output_tier": "analysis",
-         "target_crs": "EPSG:4326",
-         "create_mosaicjson": true
-       }
-     }
-
-     Output:
-     - Collection ID: satellite-imagery (auto-generated from dataset_id)
-     - Output folder: satellite-imagery/region-alpha/v1-0 (auto-generated)
-     - MosaicJSON: satellite-imagery/region-alpha/v1-0/collection.json
-     - TiTiler viewer URL: auto-generated with auto-zoom to collection bbox
--->
+For Platform API usage with raster collections, see **[WIKI_PLATFORM_API.md](WIKI_PLATFORM_API.md)**.
 
 ---
 
@@ -1321,30 +1256,7 @@ curl "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/db
 
 ### Platform API - Request Status Monitoring
 
-<!-- TODO: Add Platform API status examples after testing (22 NOV 2025)
-
-     Platform status endpoint queries by request_id (DDH identifier hash):
-     - Endpoint: GET /api/platform/status/{request_id}
-     - Lists all requests: GET /api/platform/status?limit=100
-     - Filter by dataset: GET /api/platform/status?dataset_id=aerial-imagery
-
-     Example response structure (to be verified):
-     {
-       "success": true,
-       "request_id": "a3f2c1b8...",
-       "dataset_id": "aerial-imagery",
-       "resource_id": "site-alpha",
-       "version_id": "v1-0",
-       "job_id": "abc123...",
-       "job_status": "completed",
-       "job_result": {...},
-       "data_access": {
-         "ogc_features": "...",
-         "stac": "...",
-         "titiler": "..."
-       }
-     }
--->
+For Platform API status monitoring endpoints, see **[WIKI_PLATFORM_API.md](WIKI_PLATFORM_API.md#status-endpoints)**.
 
 ---
 

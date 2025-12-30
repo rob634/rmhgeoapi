@@ -21,14 +21,16 @@
 | 5 | E7 | Pipeline Extensibility | 🚧 Partial | 7 | 2.6 |
 | 6 | E5 | OGC Styles | 🚧 Partial | 2 | 3.7 |
 | 7 | E8 | H3 Analytics Pipeline | 🚧 Partial | 12 | 1.2 |
-| — | E12 | Interface Modernization | ✅ Phase 1 | 4 | — |
+| — | E12 | Interface Modernization | ✅ Phase 1 | 5 | — |
 
-**Deprecated Epics** (absorbed into E7 or E8):
+**Consolidated Epics** (absorbed into E7 or E8):
 - ~~E10~~ → F7.4 (FATHOM ETL Operations)
-- ~~E11~~ → F7.7 (Pipeline Builder UI)
 - ~~E13~~ → F7.6 (Pipeline Observability)
 - ~~E14~~ → F8.12 (H3 Export Pipeline)
 - ~~E15~~ → F7.5 (Collection Ingestion)
+
+**Repurposed Epic**:
+- E11: Originally "Pipeline Builder UI" → consolidated to F7.7. Epic ID reused for "Pipeline Builder Demo App" (stakeholder demo)
 
 **Priority Notes**:
 - **E3 includes Observability**: Merged E6 into E3 — observability is app-to-app monitoring for integration
@@ -1354,7 +1356,7 @@ Source Data           H3 Aggregation          Output
 | S8.3.5 | ✅ | Implement h3_aggregation_finalize handler |
 | S8.3.6 | ✅ | Create insert_zonal_stats_batch() repository method |
 | S8.3.7 | ✅ | Add dynamic STAC tile discovery for Planetary Computer (27 DEC) |
-| S8.3.8 | ✅ | Add theme-based zonal_stats partitioning (7 partitions) |
+| S8.3.8 | ✅ | Add theme-based zonal_stats partitioning (8 partitions) |
 
 **Key Files**:
 - `jobs/h3_raster_aggregation.py`
@@ -1995,16 +1997,18 @@ if __name__ == "__main__":
 
 ## Counts
 
+*Updated: 30 DEC 2025*
+
 | Category | Count |
 |----------|-------|
 | Completed Epics | 1 |
 | Active Epics | 7 |
-| Planned Epics | 2 |
-| **Total Epics** | **10** |
-| Completed Features | 18 |
-| Active Features | 6 |
-| Planned Features | 19 |
-| **Total Features** | **43** |
+| Planned Epics | 3 |
+| **Total Epics** | **11** |
+| Completed Features | 26 |
+| Active Features | 7 |
+| Planned Features | 30 |
+| **Total Features** | **63** |
 | Completed Enablers | 6 |
 | Backlog Enablers | 3 |
 
@@ -2133,10 +2137,10 @@ Demo successful if leadership says:
 
 ---
 
-## Epic E12: Interface Modernization 🚧 ACTIVE
+## Epic E12: Interface Modernization ✅ Phase 1 Complete
 
 **Business Requirement**: Clean, maintainable admin interfaces with modern interactivity
-**Status**: 🚧 ACTIVE (Phase 1 in progress)
+**Status**: ✅ Phase 1 Complete (24 DEC 2025), Phase 2 (NiceGUI) planned
 **Owner**: Geospatial Team
 **Documentation**: [NICEGUI.md](docs_claude/NICEGUI.md)
 
@@ -2158,10 +2162,11 @@ Phase 1: HTMX (Azure Functions)     Phase 2: NiceGUI (Docker Web App)
 
 ---
 
-### Feature F12.1: Interface Cleanup (Enabler) 🚧 IN PROGRESS
+### Feature F12.1: Interface Cleanup (Enabler) ✅ COMPLETE
 
 **Deliverable**: Consolidated CSS/JS, reusable Python components
 **Effort**: 2.5 days
+**Completed**: 23 DEC 2025
 
 **Current State Audit (23 DEC 2025)**:
 | Metric | Value | Issue |
@@ -2174,9 +2179,9 @@ Phase 1: HTMX (Azure Functions)     Phase 2: NiceGUI (Docker Web App)
 
 | Story | Status | Description | Effort | Acceptance Criteria |
 |-------|--------|-------------|--------|---------------------|
-| S12.1.1 | ⬜ | CSS Consolidation | 1 day | Move duplicates to `COMMON_CSS`, remove ~1,500 LOC |
-| S12.1.2 | ⬜ | JavaScript Utilities | 0.5 day | Add `formatDate()`, `formatBytes()`, `debounce()`, `handleError()` to `COMMON_JS` |
-| S12.1.3 | ⬜ | Python Component Helpers | 1 day | Add `render_header()`, `render_status_badge()`, `render_card()`, `render_empty_state()`, `render_table()` to `BaseInterface` |
+| S12.1.1 | ✅ | CSS Consolidation | 1 day | Move duplicates to `COMMON_CSS`, remove ~1,500 LOC |
+| S12.1.2 | ✅ | JavaScript Utilities | 0.5 day | Add `formatDate()`, `formatBytes()`, `debounce()`, `handleError()` to `COMMON_JS` |
+| S12.1.3 | ✅ | Python Component Helpers | 1 day | Add `render_header()`, `render_status_badge()`, `render_card()`, `render_empty_state()`, `render_table()` to `BaseInterface` |
 
 **Key Files**: `web_interfaces/base.py`
 
@@ -2259,6 +2264,22 @@ Phase 1: HTMX (Azure Functions)     Phase 2: NiceGUI (Docker Web App)
 - Requires persistent WebSocket connection
 - Cannot run on Azure Functions (serverless)
 - Needs Docker Web App or Container Apps
+
+---
+
+### Feature F12.5: Promote Vector Interface ✅ COMPLETE
+
+**Deliverable**: Interface for promoting vector datasets from geo schema to OGC Features
+**Status**: ✅ Complete (29 DEC 2025)
+
+| Story | Status | Description |
+|-------|--------|-------------|
+| S12.5.1 | ✅ | Create promote_vector interface with collection dropdown |
+| S12.5.2 | ✅ | Add license selection (CC-BY-4.0, CC-BY-NC-4.0, CC0-1.0) |
+| S12.5.3 | ✅ | Integrate with promote service backend |
+| S12.5.4 | ✅ | Add success feedback with OGC Features links |
+
+**Key Files**: `web_interfaces/promote_vector/interface.py`
 
 ---
 

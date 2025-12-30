@@ -1,19 +1,20 @@
-# GitHub Project SAFe Setup - Remaining Tasks
+# GitHub Project SAFe Setup - COMPLETE
 
 **Created**: 29 DEC 2025
-**Purpose**: Hand-off document for completing GitHub Project SAFe structure
+**Completed**: 29 DEC 2025
+**Purpose**: Reference document for GitHub Project SAFe structure
 **Project URL**: https://github.com/users/rob634/projects/1
 
 ---
 
-## Completed Work
+## Setup Complete ✅
 
-### 1. GitHub Project Created
+### 1. GitHub Project Created ✅
 - Project: `rmhgeoapi` (Project #1)
 - Owner: `rob634`
-- Status: Open, 0 items currently
+- Status: **30+ items tracked**
 
-### 2. Custom Fields Added
+### 2. Custom Fields Added ✅
 | Field | Type | Options |
 |-------|------|---------|
 | Type | Single Select | Epic, Feature, Story, Enabler, Spike |
@@ -21,7 +22,7 @@
 | Priority | Number | WSJF-based priority ranking |
 | Status | Single Select | Todo, In Progress, Done (default) |
 
-### 3. Labels Created
+### 3. Labels Created ✅
 | Label | Color | Description |
 |-------|-------|-------------|
 | `epic` | #8B0000 (dark red) | SAFe Epic - Strategic initiative |
@@ -29,115 +30,92 @@
 | `story` | #2E7D32 (green) | SAFe Story - Smallest work unit |
 | `enabler` | #6A1B9A (purple) | SAFe Enabler - Technical foundation |
 
-### 4. Epic Issues Created (4 of 9)
+### 4. All Epic Issues Created ✅ (9 of 9)
 | Issue # | Epic | Title | Status |
 |---------|------|-------|--------|
-| #1 | E1 | Vector Data as API | Created |
-| #2 | E2 | Raster Data as API | Created |
-| #3 | E3 | DDH Platform Integration | Created |
-| #4 | E4 | Data Externalization | Created |
+| #1 | E1 | Vector Data as API | CLOSED |
+| #2 | E2 | Raster Data as API | OPEN |
+| #3 | E3 | DDH Platform Integration | OPEN |
+| #4 | E4 | Data Externalization | OPEN |
+| #5 | E5 | OGC Styles | OPEN |
+| #6 | E7 | Pipeline Extensibility | OPEN |
+| #7 | E8 | H3 Analytics Pipeline | OPEN |
+| #8 | E9 | Zarr/Climate Data as API | OPEN |
+| #9 | E12 | Interface Modernization | CLOSED |
+
+### 5. Feature Issues Created ✅ (45+ features)
+All features from EPICS.md imported with proper labels and parent epic references.
 
 ---
 
-## Remaining Tasks
+## Reference: gh CLI Commands
 
-### Task 1: Create Remaining Epic Issues
-
-Create issues for E5, E7, E8, E9, E12 using this pattern:
+### Create New Epic Issue
 
 ```bash
 gh issue create --repo rob634/rmhgeoapi \
-  --title "E5: OGC Styles" \
+  --title "E##: Epic Title" \
   --body "$(cat <<'EOF'
-## Epic: OGC Styles
+## Epic: Title
 
-**Status**: 🚧 Partial
-**Priority**: 6
-**WSJF**: 3.7
+**Status**: 📋 Planned
+**Priority**: #
+**WSJF**: #.#
 
 ### Description
-Implement OGC API Styles for consistent data visualization.
+Brief description of the epic.
 
 ### Features
-- F5.1: Style Registry ✅
-- F5.2: ETL Integration 📋
-
-### WSJF Rationale
-- Business Value: 5 (styling metadata)
-- Time Criticality: 3
-- Risk Reduction: 3
+- F#.1: Feature name 📋
+- F#.2: Feature name 📋
 EOF
 )" \
   --label "epic"
 ```
 
-**Epics to create:**
-
-| Epic | Title | Priority | WSJF | Key Features |
-|------|-------|----------|------|--------------|
-| E5 | OGC Styles | 6 | 3.7 | F5.1 Style Registry ✅, F5.2 ETL Integration |
-| E7 | Pipeline Extensibility | 5 | 2.6 | F7.1-F7.7 (consolidated from E10, E11, E13, E15) |
-| E8 | H3 Analytics Pipeline | 7 | 1.2 | F8.1-F8.12 (consolidated from E14) |
-| E9 | Zarr/Climate Data as API | 4 | 2.0 | F9.1-F9.3 |
-| E12 | Interface Modernization | — | — | F12.1-F12.4, Phase 1 Complete |
-
-### Task 2: Add Issues to Project
-
-After creating issues, add them to the project:
+### Create New Feature Issue
 
 ```bash
-# Add issue to project (repeat for each issue)
-gh project item-add 1 --owner rob634 --url https://github.com/rob634/rmhgeoapi/issues/1
-gh project item-add 1 --owner rob634 --url https://github.com/rob634/rmhgeoapi/issues/2
-# ... etc for all issues
+gh issue create --repo rob634/rmhgeoapi \
+  --title "F#.#: Feature Title" \
+  --body "$(cat <<'EOF'
+## Feature: Title
+
+**Parent Epic**: E# - Epic Name
+**Status**: 📋 Planned
+
+### Description
+Brief description.
+
+### Stories
+- S#.#.1: Story description 📋
+EOF
+)" \
+  --label "feature"
 ```
 
-### Task 3: Set Custom Field Values
-
-After adding to project, set the Type and Priority fields:
+### Add Issue to Project
 
 ```bash
-# Get item IDs first
+gh project item-add 1 --owner rob634 --url https://github.com/rob634/rmhgeoapi/issues/##
+```
+
+### Set Custom Field Values
+
+```bash
+# Get item IDs
 gh project item-list 1 --owner rob634 --format json
 
-# Then update fields (need item ID from above)
-gh project item-edit --project-id PVT_kwHOAK7mpM4BLi8z --id <ITEM_ID> \
-  --field-id PVTSSF_lAHOAK7mpM4BLi8zzg7Fm_Y --single-select-option-id 1a12aab1
-
-# Field IDs (from field-list):
+# Field IDs:
 # Type field: PVTSSF_lAHOAK7mpM4BLi8zzg7Fm_Y
 #   Epic option: 1a12aab1
 #   Feature option: ae512a81
 #   Story option: 9a6c5393
 # Priority field: PVTF_lAHOAK7mpM4BLi8zzg7FnAU
 # Epic (text) field: PVTF_lAHOAK7mpM4BLi8zzg7Fm_g
-```
 
-### Task 4: Create Feature Issues (Optional - Phase 2)
-
-For active features, create child issues with `feature` label:
-
-```bash
-gh issue create --repo rob634/rmhgeoapi \
-  --title "F7.4: FATHOM ETL Operations" \
-  --body "$(cat <<'EOF'
-## Feature: FATHOM ETL Operations
-
-**Parent Epic**: E7 - Pipeline Extensibility
-**Status**: 🚧 46/47 tasks complete
-
-### Description
-Band stacking and spatial merge for FATHOM flood data.
-
-### Stories
-- S7.4.1: Phase 1 - CI processing ✅
-- S7.4.2: Phase 2 - Global processing 🚧
-
-### Current Issue
-Task `n10-n15_w005-w010` failed. Need retry with `force_reprocess=true`.
-EOF
-)" \
-  --label "feature"
+gh project item-edit --project-id PVT_kwHOAK7mpM4BLi8z --id <ITEM_ID> \
+  --field-id PVTSSF_lAHOAK7mpM4BLi8zzg7Fm_Y --single-select-option-id <OPTION_ID>
 ```
 
 ---
@@ -187,6 +165,7 @@ Absorbed: E14
 | F12.2 | HTMX Integration | ✅ |
 | F12.3 | Interface Migration | ✅ |
 | F12.4 | NiceGUI Evaluation | 📋 Future |
+| F12.5 | Promote Vector Interface | ✅ |
 
 ---
 

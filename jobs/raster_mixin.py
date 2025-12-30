@@ -179,7 +179,7 @@ class RasterMixin:
             )
             tasks.append({
                 "task_id": f"{job_id[:8]}-s{stage_num}-validate-{i}",
-                "task_type": "validate_raster",
+                "task_type": "raster_validate",
                 "parameters": {
                     "blob_url": blob_url,
                     "blob_name": blob_name,
@@ -273,7 +273,7 @@ class RasterMixin:
 
             tasks.append({
                 "task_id": f"{job_id[:8]}-s{stage_num}-cog-{i}",
-                "task_type": "create_cog",
+                "task_type": "raster_create_cog",
                 "parameters": {
                     "blob_name": blob_name,
                     "container_name": container,

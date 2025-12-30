@@ -200,12 +200,13 @@ ALL_HANDLERS = {
     # Old container_list handlers ARCHIVED (07 DEC 2025) - see Container Inventory handlers below
     # "list_container_blobs": list_container_blobs,
     # "analyze_single_blob": analyze_single_blob,
-    "list_raster_files": list_raster_files,
-    "extract_stac_metadata": extract_stac_metadata,
+    # Raster handlers, renamed (29 DEC 2025)
+    "raster_list_files": list_raster_files,
+    "raster_extract_stac_metadata": extract_stac_metadata,
     "vector_extract_stac_metadata": extract_vector_stac_metadata,
     # "test_minimal" removed (30 NOV 2025) - file doesn't exist
-    "validate_raster": validate_raster,
-    "create_cog": create_cog,
+    "raster_validate": validate_raster,
+    "raster_create_cog": create_cog,
     "h3_level4_generate": h3_level4_generate,
     "h3_base_generate": h3_base_generate,
     # H3 PostGIS + STAC handlers (9 NOV 2025 - Phase 2), renamed (29 DEC 2025)
@@ -220,12 +221,12 @@ ALL_HANDLERS = {
     # Vector ETL handlers - OLD ingest_vector handlers REMOVED (27 NOV 2025)
     # "prepare_vector_chunks" and "upload_pickled_chunk" removed - use process_vector idempotent handlers
     "vector_create_stac": create_vector_stac,        # Stage 3: Create STAC record (shared by process_vector)
-    # Raster collection handlers (20 OCT 2025)
-    "create_mosaicjson": create_mosaicjson,          # Stage 3: Create MosaicJSON from COG collection
-    "create_stac_collection": create_stac_collection,  # Stage 4: Create STAC collection item
-    # Big Raster ETL handlers (24 OCT 2025)
-    "generate_tiling_scheme": generate_tiling_scheme,  # Stage 1: Generate tiling scheme in EPSG:4326
-    "extract_tiles": extract_tiles,                   # Stage 2: Extract tiles sequentially
+    # Raster collection handlers (20 OCT 2025), renamed (29 DEC 2025)
+    "raster_create_mosaicjson": create_mosaicjson,          # Stage 3: Create MosaicJSON from COG collection
+    "raster_create_stac_collection": create_stac_collection,  # Stage 4: Create STAC collection item
+    # Big Raster ETL handlers (24 OCT 2025), renamed (29 DEC 2025)
+    "raster_generate_tiling_scheme": generate_tiling_scheme,  # Stage 1: Generate tiling scheme in EPSG:4326
+    "raster_extract_tiles": extract_tiles,                   # Stage 2: Extract tiles sequentially
     # Fathom ETL handlers - Two-Phase Architecture (03 DEC 2025)
     # Phase 1: Band stacking (~500MB/task, 16+ concurrent)
     "fathom_tile_inventory": fathom_tile_inventory,   # Stage 1: Group by tile + scenario

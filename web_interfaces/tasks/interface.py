@@ -1187,17 +1187,17 @@ class TasksInterface(BaseInterface):
             'process_raster': {{
                 name: 'Raster ETL Pipeline',
                 stages: [
-                    {{ number: 1, name: 'Validate', taskType: 'validate_raster', description: 'Validate raster file' }},
-                    {{ number: 2, name: 'Create COG', taskType: 'create_cog', description: 'Convert to Cloud Optimized GeoTIFF' }},
-                    {{ number: 3, name: 'Catalog', taskType: 'extract_stac_metadata', description: 'Extract STAC metadata' }}
+                    {{ number: 1, name: 'Validate', taskType: 'raster_validate', description: 'Validate raster file' }},
+                    {{ number: 2, name: 'Create COG', taskType: 'raster_create_cog', description: 'Convert to Cloud Optimized GeoTIFF' }},
+                    {{ number: 3, name: 'Catalog', taskType: 'raster_extract_stac_metadata', description: 'Extract STAC metadata' }}
                 ]
             }},
             'process_raster_v2': {{
                 name: 'Raster ETL Pipeline v2',
                 stages: [
-                    {{ number: 1, name: 'Validate', taskType: 'validate_raster', description: 'Validate raster file' }},
-                    {{ number: 2, name: 'Create COG', taskType: 'create_cog', description: 'Convert to Cloud Optimized GeoTIFF' }},
-                    {{ number: 3, name: 'Catalog', taskType: 'extract_stac_metadata', description: 'Extract STAC metadata' }}
+                    {{ number: 1, name: 'Validate', taskType: 'raster_validate', description: 'Validate raster file' }},
+                    {{ number: 2, name: 'Create COG', taskType: 'raster_create_cog', description: 'Convert to Cloud Optimized GeoTIFF' }},
+                    {{ number: 3, name: 'Catalog', taskType: 'raster_extract_stac_metadata', description: 'Extract STAC metadata' }}
                 ]
             }},
             'hello_world': {{

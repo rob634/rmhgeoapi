@@ -62,11 +62,11 @@ class ProcessLargeRasterV2Job(RasterMixin, RasterWorkflowsBase, JobBaseMixin, Jo
     description = "Process large raster (1-30 GB) to tiled COG mosaic with STAC (v2 mixin pattern)"
 
     stages = [
-        {"number": 1, "name": "generate_tiling_scheme", "task_type": "generate_tiling_scheme", "parallelism": "single"},
-        {"number": 2, "name": "extract_tiles", "task_type": "extract_tiles", "parallelism": "single"},
-        {"number": 3, "name": "create_cogs", "task_type": "create_cog", "parallelism": "fan_out"},
-        {"number": 4, "name": "create_mosaicjson", "task_type": "create_mosaicjson", "parallelism": "fan_in"},
-        {"number": 5, "name": "create_stac", "task_type": "create_stac_collection", "parallelism": "fan_in"}
+        {"number": 1, "name": "generate_tiling_scheme", "task_type": "raster_generate_tiling_scheme", "parallelism": "single"},
+        {"number": 2, "name": "extract_tiles", "task_type": "raster_extract_tiles", "parallelism": "single"},
+        {"number": 3, "name": "create_cogs", "task_type": "raster_create_cog", "parallelism": "fan_out"},
+        {"number": 4, "name": "create_mosaicjson", "task_type": "raster_create_mosaicjson", "parallelism": "fan_in"},
+        {"number": 5, "name": "create_stac", "task_type": "raster_create_stac_collection", "parallelism": "fan_in"}
     ]
 
     # Compose parameters schema from RasterMixin shared schemas
@@ -130,7 +130,7 @@ class ProcessLargeRasterV2Job(RasterMixin, RasterWorkflowsBase, JobBaseMixin, Jo
 
             return [{
                 "task_id": f"{job_id[:8]}-s1-tiling",
-                "task_type": "generate_tiling_scheme",
+                "task_type": "raster_generate_tiling_scheme",
                 "parameters": {
                     "container_name": container,
                     "blob_name": job_params["blob_name"],
@@ -161,7 +161,7 @@ class ProcessLargeRasterV2Job(RasterMixin, RasterWorkflowsBase, JobBaseMixin, Jo
 
             return [{
                 "task_id": f"{job_id[:8]}-s2-extract",
-                "task_type": "extract_tiles",
+                "task_type": "raster_extract_tiles",
                 "parameters": {
                     "container_name": container,
                     "blob_name": job_params["blob_name"],
@@ -216,7 +216,7 @@ class ProcessLargeRasterV2Job(RasterMixin, RasterWorkflowsBase, JobBaseMixin, Jo
 
                 tasks.append({
                     "task_id": f"{job_id[:8]}-s3-cog-{tile_id}",
-                    "task_type": "create_cog",
+                    "task_type": "raster_create_cog",
                     "parameters": {
                         "container_name": config.resolved_intermediate_tiles_container,
                         "blob_name": tile_blob,
@@ -266,7 +266,7 @@ class ProcessLargeRasterV2Job(RasterMixin, RasterWorkflowsBase, JobBaseMixin, Jo
         params = context.parameters
 
         # Extract Stage 1 (tiling) summary
-        tiling_tasks = [t for t in task_results if t.task_type == "generate_tiling_scheme"]
+        tiling_tasks = [t for t in task_results if t.task_type == "raster_generate_tiling_scheme"]
         tiling_summary = {}
         if tiling_tasks and tiling_tasks[0].result_data:
             tiling_result = tiling_tasks[0].result_data.get("result", {})
@@ -277,7 +277,7 @@ class ProcessLargeRasterV2Job(RasterMixin, RasterWorkflowsBase, JobBaseMixin, Jo
             }
 
         # Extract Stage 2 (extraction) summary
-        extraction_tasks = [t for t in task_results if t.task_type == "extract_tiles"]
+        extraction_tasks = [t for t in task_results if t.task_type == "raster_extract_tiles"]
         extraction_summary = {}
         if extraction_tasks and extraction_tasks[0].result_data:
             extraction_result = extraction_tasks[0].result_data.get("result", {})

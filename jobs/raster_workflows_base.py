@@ -97,7 +97,7 @@ class RasterWorkflowsBase:
         # ================================================================
         # Extract COG results (fan-out stage - N tasks)
         # ================================================================
-        cog_tasks = [t for t in task_results if t.task_type == "create_cog"]
+        cog_tasks = [t for t in task_results if t.task_type == "raster_create_cog"]
         successful_cogs = [t for t in cog_tasks if t.status == TaskStatus.COMPLETED]
         failed_cogs = [t for t in cog_tasks if t.status == TaskStatus.FAILED]
 
@@ -117,7 +117,7 @@ class RasterWorkflowsBase:
         # ================================================================
         # Extract MosaicJSON result (fan-in stage - 1 task)
         # ================================================================
-        mosaicjson_tasks = [t for t in task_results if t.task_type == "create_mosaicjson"]
+        mosaicjson_tasks = [t for t in task_results if t.task_type == "raster_create_mosaicjson"]
         mosaicjson_summary = {}
         if mosaicjson_tasks and mosaicjson_tasks[0].result_data:
             # CRITICAL (11 NOV 2025): result_data IS the result dict already.
@@ -143,7 +143,7 @@ class RasterWorkflowsBase:
         # ================================================================
         # Extract STAC result (fan-in stage - 1 task)
         # ================================================================
-        stac_tasks = [t for t in task_results if t.task_type == "create_stac_collection"]
+        stac_tasks = [t for t in task_results if t.task_type == "raster_create_stac_collection"]
         stac_summary = {}
         titiler_urls = None
         share_url = None

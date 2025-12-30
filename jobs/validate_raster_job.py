@@ -37,7 +37,7 @@ class ValidateRasterJob(JobBase):
         {
             "number": 1,
             "name": "validate",
-            "task_type": "validate_raster",
+            "task_type": "raster_validate",
             "description": "Validate raster: CRS, bit-depth, type detection, bounds",
             "parallelism": "single"
         }
@@ -172,7 +172,7 @@ class ValidateRasterJob(JobBase):
         return [
             {
                 "task_id": task_id,
-                "task_type": "validate_raster",
+                "task_type": "raster_validate",
                 "parameters": {
                     "blob_url": blob_url,
                     "blob_name": job_params['blob_name'],

@@ -463,11 +463,11 @@ class JobBase(ABC):
                 logger = LoggerFactory.create_logger(ComponentType.CONTROLLER, "ProcessRasterWorkflow.finalize_job")
 
                 # Extract STAC item from Stage 3 results
-                stac_results = [r for r in context.task_results if r.get('task_type') == 'create_stac_collection']
+                stac_results = [r for r in context.task_results if r.get('task_type') == 'raster_create_stac_collection']
                 stac_item_id = stac_results[0]['result']['stac_item_id'] if stac_results else None
 
                 # Extract COG path from Stage 2 results
-                cog_results = [r for r in context.task_results if r.get('task_type') == 'create_cog']
+                cog_results = [r for r in context.task_results if r.get('task_type') == 'raster_create_cog']
                 cog_path = cog_results[0]['result']['output_blob'] if cog_results else None
 
                 summary = {

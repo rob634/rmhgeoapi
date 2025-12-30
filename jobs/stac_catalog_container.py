@@ -38,14 +38,14 @@ class StacCatalogContainerWorkflow(JobBase):
         {
             "number": 1,
             "name": "list_rasters",
-            "task_type": "list_raster_files",
+            "task_type": "raster_list_files",
             "description": "Enumerate all raster files in container with extension filter",
             "parallelism": "single"
         },
         {
             "number": 2,
             "name": "extract_stac",
-            "task_type": "extract_stac_metadata",
+            "task_type": "raster_extract_stac_metadata",
             "description": "Extract STAC metadata and insert into PgSTAC (parallel per file)",
             "parallelism": "fan_out"
         }
@@ -179,7 +179,7 @@ class StacCatalogContainerWorkflow(JobBase):
             return [
                 {
                     "task_id": task_id,
-                    "task_type": "list_raster_files",
+                    "task_type": "raster_list_files",
                     "parameters": {
                         "container_name": job_params["container_name"],
                         "extension_filter": job_params.get("extension_filter", ".tif"),
@@ -211,7 +211,7 @@ class StacCatalogContainerWorkflow(JobBase):
                 task_id = generate_deterministic_task_id(job_id, 2, raster_file)
                 tasks.append({
                     "task_id": task_id,
-                    "task_type": "extract_stac_metadata",
+                    "task_type": "raster_extract_stac_metadata",
                     "parameters": {
                         "container_name": job_params["container_name"],
                         "blob_name": raster_file,
@@ -335,8 +335,8 @@ class StacCatalogContainerWorkflow(JobBase):
         params = context.parameters
 
         # Separate by stage
-        stage_1_tasks = [t for t in task_results if t.task_type == "list_raster_files"]
-        stage_2_tasks = [t for t in task_results if t.task_type == "extract_stac_metadata"]
+        stage_1_tasks = [t for t in task_results if t.task_type == "raster_list_files"]
+        stage_2_tasks = [t for t in task_results if t.task_type == "raster_extract_stac_metadata"]
 
         # Extract file list from Stage 1
         total_files_found = 0

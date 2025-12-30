@@ -38,9 +38,9 @@ class ProcessRasterV2Job(JobBaseMixin, JobBase):
     description = "Process raster to COG with STAC metadata (mixin pattern)"
 
     stages = [
-        {"number": 1, "name": "validate", "task_type": "validate_raster", "parallelism": "single"},
-        {"number": 2, "name": "create_cog", "task_type": "create_cog", "parallelism": "single"},
-        {"number": 3, "name": "create_stac", "task_type": "extract_stac_metadata", "parallelism": "single"}
+        {"number": 1, "name": "validate", "task_type": "raster_validate", "parallelism": "single"},
+        {"number": 2, "name": "create_cog", "task_type": "raster_create_cog", "parallelism": "single"},
+        {"number": 3, "name": "create_stac", "task_type": "raster_extract_stac_metadata", "parallelism": "single"}
     ]
 
     # Clean parameters schema - no deprecated fields
@@ -124,7 +124,7 @@ class ProcessRasterV2Job(JobBaseMixin, JobBase):
 
             return [{
                 'task_id': generate_deterministic_task_id(job_id, 1, "validate"),
-                'task_type': 'validate_raster',
+                'task_type': 'raster_validate',
                 'parameters': {
                     'blob_url': blob_url,
                     'blob_name': job_params['blob_name'],
@@ -164,7 +164,7 @@ class ProcessRasterV2Job(JobBaseMixin, JobBase):
 
             return [{
                 'task_id': generate_deterministic_task_id(job_id, 2, "create_cog"),
-                'task_type': 'create_cog',
+                'task_type': 'raster_create_cog',
                 'parameters': {
                     'blob_name': job_params['blob_name'],
                     'container_name': job_params['container_name'],
@@ -218,7 +218,7 @@ class ProcessRasterV2Job(JobBaseMixin, JobBase):
 
             return [{
                 'task_id': generate_deterministic_task_id(job_id, 3, "stac"),
-                'task_type': 'extract_stac_metadata',
+                'task_type': 'raster_extract_stac_metadata',
                 'parameters': task_params
             }]
 
@@ -236,9 +236,9 @@ class ProcessRasterV2Job(JobBaseMixin, JobBase):
         config = get_config()
 
         # Extract results by stage
-        stage_1 = [t for t in task_results if t.task_type == "validate_raster"]
-        stage_2 = [t for t in task_results if t.task_type == "create_cog"]
-        stage_3 = [t for t in task_results if t.task_type == "extract_stac_metadata"]
+        stage_1 = [t for t in task_results if t.task_type == "raster_validate"]
+        stage_2 = [t for t in task_results if t.task_type == "raster_create_cog"]
+        stage_3 = [t for t in task_results if t.task_type == "raster_extract_stac_metadata"]
 
         # Build validation summary
         validation_summary = {}

@@ -255,19 +255,20 @@ class TaskRoutingDefaults:
     # Raster tasks → raster-tasks queue (memory-intensive, low concurrency)
     # ORPHANED ENTRIES REMOVED 29 DEC 2025: handler_raster_*, handler_stac_* prefixed
     # entries did not exist in ALL_HANDLERS - they were never implemented.
+    # Raster handlers renamed (29 DEC 2025)
     RASTER_TASKS = [
         # Raster validation and COG creation
-        "validate_raster",
-        "create_cog",
-        "extract_stac_metadata",
+        "raster_validate",
+        "raster_create_cog",
+        "raster_extract_stac_metadata",
         # STAC raster catalog
-        "list_raster_files",
+        "raster_list_files",
         # Tiling and extraction
-        "generate_tiling_scheme",
-        "extract_tiles",
+        "raster_generate_tiling_scheme",
+        "raster_extract_tiles",
         # MosaicJSON and STAC collection
-        "create_mosaicjson",
-        "create_stac_collection",
+        "raster_create_mosaicjson",
+        "raster_create_stac_collection",
         # Fathom ETL (memory-intensive raster operations)
         # NOTE: Inventory handlers moved to VECTOR_TASKS (database queries)
         "fathom_band_stack",     # Actual raster: Stack 8 return periods

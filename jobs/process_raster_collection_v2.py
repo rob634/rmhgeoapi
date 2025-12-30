@@ -65,10 +65,10 @@ class ProcessRasterCollectionV2Job(RasterMixin, RasterWorkflowsBase, JobBaseMixi
     description = "Process raster tile collection to COGs with MosaicJSON (v2 mixin pattern)"
 
     stages = [
-        {"number": 1, "name": "validate_tiles", "task_type": "validate_raster", "parallelism": "fan_out"},
-        {"number": 2, "name": "create_cogs", "task_type": "create_cog", "parallelism": "fan_out"},
-        {"number": 3, "name": "create_mosaicjson", "task_type": "create_mosaicjson", "parallelism": "fan_in"},
-        {"number": 4, "name": "create_stac", "task_type": "create_stac_collection", "parallelism": "fan_in"}
+        {"number": 1, "name": "validate_tiles", "task_type": "raster_validate", "parallelism": "fan_out"},
+        {"number": 2, "name": "create_cogs", "task_type": "raster_create_cog", "parallelism": "fan_out"},
+        {"number": 3, "name": "create_mosaicjson", "task_type": "raster_create_mosaicjson", "parallelism": "fan_in"},
+        {"number": 4, "name": "create_stac", "task_type": "raster_create_stac_collection", "parallelism": "fan_in"}
     ]
 
     # Compose parameters schema from RasterMixin shared schemas

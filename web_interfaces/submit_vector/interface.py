@@ -620,6 +620,20 @@ class SubmitVectorInterface(BaseInterface):
                         </div>
                     </form>
 
+                    <!-- cURL Preview Section -->
+                    <details class="curl-section" id="curl-section">
+                        <summary>📋 cURL Command</summary>
+                        <div class="curl-container">
+                            <div class="curl-header">
+                                <span class="curl-hint">Equivalent API call - click to copy</span>
+                                <button type="button" class="btn btn-sm btn-copy" onclick="copyCurl()">
+                                    <span id="copy-icon">📋</span> Copy
+                                </button>
+                            </div>
+                            <pre id="curl-command" class="curl-code">Select a file and fill in the form to see the cURL command</pre>
+                        </div>
+                    </details>
+
                     <!-- Result Display -->
                     <div id="submit-result" class="submit-result-container hidden">
                         <!-- Result will be inserted here via HTMX -->
@@ -1077,6 +1091,71 @@ class SubmitVectorInterface(BaseInterface):
             right: -24px;
             bottom: 10px;
         }
+
+        /* cURL Preview Section */
+        .curl-section {
+            margin-top: 20px;
+            background: var(--ds-bg);
+            border-radius: 8px;
+            border: 1px solid var(--ds-gray-light);
+        }
+
+        .curl-section summary {
+            padding: 12px 16px;
+            cursor: pointer;
+            font-weight: 600;
+            color: var(--ds-navy);
+            user-select: none;
+        }
+
+        .curl-section summary:hover {
+            background: white;
+        }
+
+        .curl-container {
+            padding: 0 16px 16px 16px;
+        }
+
+        .curl-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .curl-hint {
+            font-size: 12px;
+            color: var(--ds-gray);
+        }
+
+        .btn-copy {
+            padding: 4px 10px;
+            font-size: 12px;
+            background: white;
+            border: 1px solid var(--ds-gray-light);
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        .btn-copy:hover {
+            background: var(--ds-blue-primary);
+            color: white;
+            border-color: var(--ds-blue-primary);
+        }
+
+        .curl-code {
+            background: #1e293b;
+            color: #e2e8f0;
+            padding: 16px;
+            border-radius: 6px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            line-height: 1.5;
+            overflow-x: auto;
+            white-space: pre-wrap;
+            word-break: break-all;
+            margin: 0;
+        }
         """
 
     def _generate_custom_js(self) -> str:
@@ -1165,4 +1244,104 @@ class SubmitVectorInterface(BaseInterface):
                 document.getElementById('load-btn').click();
             }
         });
+
+        // Generate cURL command from form values
+        function generateCurl() {
+            const blobName = document.getElementById('blob_name').value;
+            const containerName = document.getElementById('container_name').value;
+            const tableName = document.getElementById('table_name').value;
+            const schema = document.getElementById('schema').value;
+            const overwrite = document.getElementById('overwrite').checked;
+            const fileExtension = document.getElementById('file_extension').value;
+
+            // Optional metadata
+            const title = document.getElementById('title').value;
+            const description = document.getElementById('description').value;
+            const attribution = document.getElementById('attribution').value;
+            const license = document.getElementById('license').value;
+            const keywords = document.getElementById('keywords').value;
+
+            // CSV-specific
+            const latName = document.getElementById('lat_name').value;
+            const lonName = document.getElementById('lon_name').value;
+            const wktColumn = document.getElementById('wkt_column').value;
+
+            if (!blobName || !tableName) {
+                return 'Select a file and fill in the form to see the cURL command';
+            }
+
+            const baseUrl = window.location.origin;
+
+            // Build params object
+            const params = {
+                blob_name: blobName,
+                container_name: containerName,
+                table_name: tableName
+            };
+
+            if (schema && schema !== 'geo') params.schema = schema;
+            if (overwrite) params.overwrite = true;
+            if (fileExtension) params.file_extension = fileExtension;
+
+            // Metadata
+            if (title) params.title = title;
+            if (description) params.description = description;
+            if (attribution) params.attribution = attribution;
+            if (license) params.license = license;
+            if (keywords) params.keywords = keywords.split(',').map(k => k.trim()).filter(k => k);
+
+            // CSV fields
+            if (fileExtension === 'csv') {
+                if (latName) params.lat_name = latName;
+                if (lonName) params.lon_name = lonName;
+                if (wktColumn) params.wkt_column = wktColumn;
+            }
+
+            const jsonStr = JSON.stringify(params, null, 2);
+
+            return `curl -X POST "${baseUrl}/api/jobs/submit/process_vector" \\
+  -H "Content-Type: application/json" \\
+  -d '${jsonStr}'`;
+        }
+
+        // Update cURL preview
+        function updateCurlPreview() {
+            const curlEl = document.getElementById('curl-command');
+            if (curlEl) {
+                curlEl.textContent = generateCurl();
+            }
+        }
+
+        // Copy cURL to clipboard
+        function copyCurl() {
+            const curlText = generateCurl();
+            navigator.clipboard.writeText(curlText).then(() => {
+                const copyIcon = document.getElementById('copy-icon');
+                copyIcon.textContent = '✅';
+                setTimeout(() => { copyIcon.textContent = '📋'; }, 1500);
+            }).catch(err => {
+                console.error('Copy failed:', err);
+                alert('Copy failed. Please select and copy manually.');
+            });
+        }
+
+        // Add event listeners for form changes to update cURL
+        document.addEventListener('DOMContentLoaded', () => {
+            const formInputs = ['table_name', 'schema', 'overwrite', 'title', 'description',
+                                'attribution', 'license', 'keywords', 'lat_name', 'lon_name', 'wkt_column'];
+            formInputs.forEach(id => {
+                const el = document.getElementById(id);
+                if (el) {
+                    el.addEventListener('input', updateCurlPreview);
+                    el.addEventListener('change', updateCurlPreview);
+                }
+            });
+        });
+
+        // Override selectFile to also update cURL
+        const originalSelectFile = selectFile;
+        selectFile = function(blobName, container, zone) {
+            originalSelectFile(blobName, container, zone);
+            updateCurlPreview();
+        };
         """

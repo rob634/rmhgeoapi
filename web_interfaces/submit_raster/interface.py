@@ -632,6 +632,20 @@ class SubmitRasterInterface(BaseInterface):
                         </div>
                     </form>
 
+                    <!-- cURL Preview Section -->
+                    <details class="curl-section" id="curl-section">
+                        <summary>📋 cURL Command</summary>
+                        <div class="curl-container">
+                            <div class="curl-header">
+                                <span class="curl-hint">Equivalent API call - click to copy</span>
+                                <button type="button" class="btn btn-sm btn-copy" onclick="copyCurl()">
+                                    <span id="copy-icon">📋</span> Copy
+                                </button>
+                            </div>
+                            <pre id="curl-command" class="curl-code">Select a file and fill in the form to see the cURL command</pre>
+                        </div>
+                    </details>
+
                     <!-- Result Display -->
                     <div id="submit-result" class="submit-result-container hidden">
                         <!-- Result will be inserted here via HTMX -->
@@ -1075,6 +1089,71 @@ class SubmitRasterInterface(BaseInterface):
             right: -24px;
             bottom: 10px;
         }
+
+        /* cURL Preview Section */
+        .curl-section {
+            margin-top: 20px;
+            background: var(--ds-bg);
+            border-radius: 8px;
+            border: 1px solid var(--ds-gray-light);
+        }
+
+        .curl-section summary {
+            padding: 12px 16px;
+            cursor: pointer;
+            font-weight: 600;
+            color: var(--ds-navy);
+            user-select: none;
+        }
+
+        .curl-section summary:hover {
+            background: white;
+        }
+
+        .curl-container {
+            padding: 0 16px 16px 16px;
+        }
+
+        .curl-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .curl-hint {
+            font-size: 12px;
+            color: var(--ds-gray);
+        }
+
+        .btn-copy {
+            padding: 4px 10px;
+            font-size: 12px;
+            background: white;
+            border: 1px solid var(--ds-gray-light);
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        .btn-copy:hover {
+            background: var(--ds-blue-primary);
+            color: white;
+            border-color: var(--ds-blue-primary);
+        }
+
+        .curl-code {
+            background: #1e293b;
+            color: #e2e8f0;
+            padding: 16px;
+            border-radius: 6px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            line-height: 1.5;
+            overflow-x: auto;
+            white-space: pre-wrap;
+            word-break: break-all;
+            margin: 0;
+        }
         """
 
     def _generate_custom_js(self) -> str:
@@ -1160,4 +1239,88 @@ class SubmitRasterInterface(BaseInterface):
                 document.getElementById('load-btn').click();
             }
         });
+
+        // Generate cURL command from form values
+        function generateCurl() {
+            const blobName = document.getElementById('blob_name').value;
+            const containerName = document.getElementById('container_name').value;
+            const rasterType = document.getElementById('raster_type').value;
+            const outputTier = document.getElementById('output_tier').value;
+            const jpegQuality = document.getElementById('jpeg_quality').value;
+            const inputCrs = document.getElementById('input_crs').value;
+            const targetCrs = document.getElementById('target_crs').value;
+            const outputFolder = document.getElementById('output_folder').value;
+            const collectionId = document.getElementById('collection_id').value;
+            const strictMode = document.getElementById('strict_mode').checked;
+            const inMemory = document.getElementById('in_memory').checked;
+
+            if (!blobName) {
+                return 'Select a file to see the cURL command';
+            }
+
+            const baseUrl = window.location.origin;
+
+            // Build params object
+            const params = {
+                blob_name: blobName,
+                container_name: containerName
+            };
+
+            if (rasterType && rasterType !== 'unknown') params.raster_type = rasterType;
+            if (outputTier && outputTier !== 'silver') params.output_tier = outputTier;
+            if (jpegQuality && outputTier === 'jpeg') params.jpeg_quality = parseInt(jpegQuality);
+            if (inputCrs) params.input_crs = inputCrs;
+            if (targetCrs) params.target_crs = targetCrs;
+            if (outputFolder) params.output_folder = outputFolder;
+            if (collectionId) params.collection_id = collectionId;
+            if (strictMode) params.strict_mode = true;
+            if (inMemory) params.in_memory = true;
+
+            const jsonStr = JSON.stringify(params, null, 2);
+
+            return `curl -X POST "${baseUrl}/api/jobs/submit/process_raster_v2" \\
+  -H "Content-Type: application/json" \\
+  -d '${jsonStr}'`;
+        }
+
+        // Update cURL preview
+        function updateCurlPreview() {
+            const curlEl = document.getElementById('curl-command');
+            if (curlEl) {
+                curlEl.textContent = generateCurl();
+            }
+        }
+
+        // Copy cURL to clipboard
+        function copyCurl() {
+            const curlText = generateCurl();
+            navigator.clipboard.writeText(curlText).then(() => {
+                const copyIcon = document.getElementById('copy-icon');
+                copyIcon.textContent = '✅';
+                setTimeout(() => { copyIcon.textContent = '📋'; }, 1500);
+            }).catch(err => {
+                console.error('Copy failed:', err);
+                alert('Copy failed. Please select and copy manually.');
+            });
+        }
+
+        // Add event listeners for form changes to update cURL
+        document.addEventListener('DOMContentLoaded', () => {
+            const formInputs = ['raster_type', 'output_tier', 'jpeg_quality', 'input_crs',
+                                'target_crs', 'output_folder', 'collection_id', 'strict_mode', 'in_memory'];
+            formInputs.forEach(id => {
+                const el = document.getElementById(id);
+                if (el) {
+                    el.addEventListener('input', updateCurlPreview);
+                    el.addEventListener('change', updateCurlPreview);
+                }
+            });
+        });
+
+        // Override selectFile to also update cURL
+        const originalSelectFile = selectFile;
+        selectFile = function(blobName, container, zone, sizeMb) {
+            originalSelectFile(blobName, container, zone, sizeMb);
+            updateCurlPreview();
+        };
         """

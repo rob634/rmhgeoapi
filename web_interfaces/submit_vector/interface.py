@@ -314,14 +314,14 @@ class SubmitVectorInterface(BaseInterface):
                 platform_payload['processing_options'] = processing_options
 
             # Submit via Platform API internal functions
+            from config import get_config, generate_platform_request_id
+            from infrastructure import PlatformRepository
+            from core.models import ApiRequest, PlatformRequest
             from triggers.trigger_platform import (
-                PlatformRequest,
-                generate_platform_request_id,
                 _translate_to_coremachine,
-                _create_and_submit_job,
-                config
+                _create_and_submit_job
             )
-            from infrastructure.repositories.platform_repository import PlatformRepository, ApiRequest
+            config = get_config()
 
             # Create Platform request object
             platform_req = PlatformRequest(**platform_payload)

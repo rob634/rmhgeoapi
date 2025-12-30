@@ -51,19 +51,19 @@ class UnpublishVectorJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
         {
             "number": 1,
             "name": "inventory",
-            "task_type": "inventory_vector_item",
+            "task_type": "unpublish_inventory_vector",
             "parallelism": "single"
         },
         {
             "number": 2,
             "name": "drop_table",
-            "task_type": "drop_postgis_table",
+            "task_type": "unpublish_drop_table",
             "parallelism": "single"
         },
         {
             "number": 3,
             "name": "cleanup",
-            "task_type": "delete_stac_and_audit",
+            "task_type": "unpublish_delete_stac",
             "parallelism": "single"
         }
     ]
@@ -132,7 +132,7 @@ class UnpublishVectorJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
             # Stage 1: Inventory - query geo.table_metadata for ETL/STAC linkage
             return [{
                 "task_id": f"{job_id[:8]}-s1-inventory",
-                "task_type": "inventory_vector_item",
+                "task_type": "unpublish_inventory_vector",
                 "parameters": {
                     "table_name": table_name,
                     "schema_name": schema_name,
@@ -150,7 +150,7 @@ class UnpublishVectorJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
 
             return [{
                 "task_id": f"{job_id[:8]}-s2-drop",
-                "task_type": "drop_postgis_table",
+                "task_type": "unpublish_drop_table",
                 "parameters": {
                     "table_name": table_name,
                     "schema_name": schema_name,
@@ -174,7 +174,7 @@ class UnpublishVectorJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
 
             return [{
                 "task_id": f"{job_id[:8]}-s3-cleanup",
-                "task_type": "delete_stac_and_audit",
+                "task_type": "unpublish_delete_stac",
                 "parameters": {
                     # Use STAC info from inventory if available
                     "stac_item_id": inventory_data.get("stac_item_id"),
@@ -227,11 +227,11 @@ class UnpublishVectorJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
                 task_type = getattr(result, "task_type", None)
                 task_result = getattr(result, "result_data", {}) or {}
 
-                if task_type == "inventory_vector_item":
+                if task_type == "unpublish_inventory_vector":
                     inventory_data = task_result
-                elif task_type == "drop_postgis_table":
+                elif task_type == "unpublish_drop_table":
                     table_dropped = task_result.get("table_dropped", False)
-                elif task_type == "delete_stac_and_audit":
+                elif task_type == "unpublish_delete_stac":
                     stac_deleted = task_result.get("stac_item_deleted", False)
                     dry_run = task_result.get("dry_run", True)
 

@@ -41,21 +41,21 @@ class InventoryContainerContentsJob(JobBaseMixin, JobBase):
         {
             "number": 1,
             "name": "list_blobs",
-            "task_type": "list_blobs_with_metadata",
+            "task_type": "inventory_list_blobs",
             "description": "Enumerate blobs with full metadata",
             "parallelism": "single"
         },
         {
             "number": 2,
             "name": "analyze_blobs",
-            "task_type": "analyze_blob_basic",  # Dynamic: can be classify_geospatial_file
+            "task_type": "inventory_analyze_blob",  # Dynamic: can be inventory_classify_geospatial
             "description": "Per-blob analysis (basic or geospatial)",
             "parallelism": "fan_out"
         },
         {
             "number": 3,
             "name": "aggregate",
-            "task_type": "aggregate_blob_analysis",  # Dynamic: can be aggregate_geospatial_inventory
+            "task_type": "inventory_aggregate_analysis",  # Dynamic: can be inventory_aggregate_geospatial
             "description": "Aggregate results into summary",
             "parallelism": "fan_in"
         }
@@ -103,7 +103,7 @@ class InventoryContainerContentsJob(JobBaseMixin, JobBase):
             # Stage 1: List blobs with full metadata
             return [{
                 'task_id': generate_deterministic_task_id(job_id, 1, "list"),
-                'task_type': 'list_blobs_with_metadata',
+                'task_type': 'inventory_list_blobs',
                 'parameters': {
                     'container_name': job_params['container_name'],
                     'prefix': job_params.get('prefix'),
@@ -130,9 +130,9 @@ class InventoryContainerContentsJob(JobBaseMixin, JobBase):
 
             # Select handler based on analysis mode
             if analysis_mode == 'geospatial':
-                task_type = 'classify_geospatial_file'
+                task_type = 'inventory_classify_geospatial'
             else:
-                task_type = 'analyze_blob_basic'
+                task_type = 'inventory_analyze_blob'
 
             tasks = []
             for i, blob in enumerate(blobs):
@@ -161,9 +161,9 @@ class InventoryContainerContentsJob(JobBaseMixin, JobBase):
 
             # Select aggregation handler based on analysis mode
             if analysis_mode == 'geospatial':
-                task_type = 'aggregate_geospatial_inventory'
+                task_type = 'inventory_aggregate_geospatial'
             else:
-                task_type = 'aggregate_blob_analysis'
+                task_type = 'inventory_aggregate_analysis'
 
             return [{
                 'task_id': generate_deterministic_task_id(job_id, 3, "aggregate"),
@@ -188,9 +188,9 @@ class InventoryContainerContentsJob(JobBaseMixin, JobBase):
 
         # Find Stage 3 aggregation result
         if analysis_mode == 'geospatial':
-            agg_task_type = "aggregate_geospatial_inventory"
+            agg_task_type = "inventory_aggregate_geospatial"
         else:
-            agg_task_type = "aggregate_blob_analysis"
+            agg_task_type = "inventory_aggregate_analysis"
 
         stage_3_tasks = [t for t in task_results if t.task_type == agg_task_type]
 

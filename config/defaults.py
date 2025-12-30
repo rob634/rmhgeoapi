@@ -297,13 +297,13 @@ class TaskRoutingDefaults:
         # H3 Aggregation handlers (DB-bound) - 22 DEC 2025
         "h3_inventory_cells",       # Stage 1: Count cells, calculate batches
         "h3_aggregation_finalize",  # Stage 3: Update registry, verify counts
-        # Container inventory (lightweight blob listing)
-        "container_summary_task",
-        "list_blobs_with_metadata",
-        "analyze_blob_basic",
-        "aggregate_blob_analysis",
-        "classify_geospatial_file",
-        "aggregate_geospatial_inventory",
+        # Container inventory (lightweight blob listing), renamed (29 DEC 2025)
+        "inventory_container_summary",
+        "inventory_list_blobs",
+        "inventory_analyze_blob",
+        "inventory_aggregate_analysis",
+        "inventory_classify_geospatial",
+        "inventory_aggregate_geospatial",
         # Fathom container inventory (lightweight)
         "fathom_generate_scan_prefixes",
         "fathom_scan_prefix",
@@ -316,13 +316,13 @@ class TaskRoutingDefaults:
         # Hello world and test handlers (lightweight)
         "hello_world_greeting",
         "hello_world_reply",
-        # Unpublish handlers - surgical data removal (12 DEC 2025)
+        # Unpublish handlers - surgical data removal (12 DEC 2025), renamed (29 DEC 2025)
         # All unpublish tasks are lightweight (STAC queries, blob deletes, DROP TABLE)
-        "inventory_raster_item",
-        "inventory_vector_item",
-        "delete_blob",
-        "drop_postgis_table",
-        "delete_stac_and_audit",
+        "unpublish_inventory_raster",
+        "unpublish_inventory_vector",
+        "unpublish_delete_blob",
+        "unpublish_drop_table",
+        "unpublish_delete_stac",
         # Curated dataset update handlers (15 DEC 2025)
         # Lightweight: HTTP calls, DB operations, file downloads
         "curated_check_source",

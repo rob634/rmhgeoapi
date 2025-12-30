@@ -196,7 +196,7 @@ from .stac_metadata_helper import (
 ALL_HANDLERS = {
     "hello_world_greeting": handle_greeting,
     "hello_world_reply": handle_reply,
-    "container_summary_task": analyze_container_summary,
+    "inventory_container_summary": analyze_container_summary,
     # Old container_list handlers ARCHIVED (07 DEC 2025) - see Container Inventory handlers below
     # "list_container_blobs": list_container_blobs,
     # "analyze_single_blob": analyze_single_blob,
@@ -240,25 +240,25 @@ ALL_HANDLERS = {
     "process_vector_prepare": process_vector_prepare,  # Stage 1: Load, validate, chunk, create table
     "process_vector_upload": process_vector_upload,    # Stage 2: DELETE+INSERT idempotent upload
     # Note: vector_create_stac already registered above - reused for Stage 3
-    # Container Inventory handlers - consolidated (07 DEC 2025)
+    # Container Inventory handlers - consolidated (07 DEC 2025), renamed (29 DEC 2025)
     # Base handlers (analysis_mode="basic")
-    "list_blobs_with_metadata": list_blobs_with_metadata,  # Stage 1: List blobs with full metadata
-    "analyze_blob_basic": analyze_blob_basic,  # Stage 2: Basic per-blob analysis
-    "aggregate_blob_analysis": aggregate_blob_analysis_v2,  # Stage 3: Aggregate basic analysis (replaces old handler)
+    "inventory_list_blobs": list_blobs_with_metadata,  # Stage 1: List blobs with full metadata
+    "inventory_analyze_blob": analyze_blob_basic,  # Stage 2: Basic per-blob analysis
+    "inventory_aggregate_analysis": aggregate_blob_analysis_v2,  # Stage 3: Aggregate basic analysis (replaces old handler)
     # Geospatial handlers (analysis_mode="geospatial")
-    "classify_geospatial_file": classify_geospatial_file,  # Stage 2: Per-blob geospatial classification
-    "aggregate_geospatial_inventory": aggregate_geospatial_inventory,  # Stage 3: Group into collections
+    "inventory_classify_geospatial": classify_geospatial_file,  # Stage 2: Per-blob geospatial classification
+    "inventory_aggregate_geospatial": aggregate_geospatial_inventory,  # Stage 3: Group into collections
     # Fathom Container Inventory handlers (05 DEC 2025)
     "fathom_generate_scan_prefixes": fathom_generate_scan_prefixes,  # Stage 1: Generate prefix list
     "fathom_scan_prefix": fathom_scan_prefix,  # Stage 2: Parallel scan + batch insert
     "fathom_assign_grid_cells": fathom_assign_grid_cells,  # Stage 3: Calculate grid assignments
     "fathom_inventory_summary": fathom_inventory_summary,  # Stage 4: Generate statistics
-    # Unpublish handlers - surgical data removal (12 DEC 2025)
-    "inventory_raster_item": inventory_raster_item,  # Stage 1: Query STAC, extract blob list
-    "inventory_vector_item": inventory_vector_item,  # Stage 1: Query STAC, extract table ref
-    "delete_blob": delete_blob,  # Stage 2: Delete blob from Azure Storage
-    "drop_postgis_table": drop_postgis_table,  # Stage 2: DROP TABLE IF EXISTS
-    "delete_stac_and_audit": delete_stac_and_audit,  # Stage 3: Delete STAC item, audit
+    # Unpublish handlers - surgical data removal (12 DEC 2025), renamed (29 DEC 2025)
+    "unpublish_inventory_raster": inventory_raster_item,  # Stage 1: Query STAC, extract blob list
+    "unpublish_inventory_vector": inventory_vector_item,  # Stage 1: Query STAC, extract table ref
+    "unpublish_delete_blob": delete_blob,  # Stage 2: Delete blob from Azure Storage
+    "unpublish_drop_table": drop_postgis_table,  # Stage 2: DROP TABLE IF EXISTS
+    "unpublish_delete_stac": delete_stac_and_audit,  # Stage 3: Delete STAC item, audit
     # Curated dataset update handlers (15 DEC 2025)
     "curated_check_source": curated_check_source,  # Stage 1: Check source for updates
     "curated_fetch_data": curated_fetch_data,  # Stage 2: Download data

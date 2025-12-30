@@ -27,7 +27,7 @@ class ContainerSummaryWorkflow(JobBase):
         {
             "number": 1,
             "name": "analyze_container",
-            "task_type": "container_summary_task",
+            "task_type": "inventory_container_summary",
             "description": "Scan container and compute aggregate statistics",
             "creates_tasks": lambda params, results: [
                 {
@@ -115,7 +115,7 @@ class ContainerSummaryWorkflow(JobBase):
             return [
                 {
                     "task_id": f"{job_id[:8]}-s1-summary",
-                    "task_type": "container_summary_task",
+                    "task_type": "inventory_container_summary",
                     "parameters": {
                         "container_name": job_params["container_name"],
                         "file_limit": job_params.get("file_limit"),

@@ -51,19 +51,19 @@ class UnpublishRasterJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
         {
             "number": 1,
             "name": "inventory",
-            "task_type": "inventory_raster_item",
+            "task_type": "unpublish_inventory_raster",
             "parallelism": "single"
         },
         {
             "number": 2,
             "name": "delete_blobs",
-            "task_type": "delete_blob",
+            "task_type": "unpublish_delete_blob",
             "parallelism": "fan_out"  # One task per blob from stage 1 results
         },
         {
             "number": 3,
             "name": "cleanup",
-            "task_type": "delete_stac_and_audit",
+            "task_type": "unpublish_delete_stac",
             "parallelism": "single"
         }
     ]
@@ -125,7 +125,7 @@ class UnpublishRasterJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
             # Pass through _stac_item from validator for handler to use
             return [{
                 "task_id": f"{job_id[:8]}-s1-inventory",
-                "task_type": "inventory_raster_item",
+                "task_type": "unpublish_inventory_raster",
                 "parameters": {
                     "stac_item_id": job_params["stac_item_id"],
                     "collection_id": job_params["collection_id"],
@@ -161,7 +161,7 @@ class UnpublishRasterJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
             for i, blob_info in enumerate(blobs_to_delete):
                 tasks.append({
                     "task_id": f"{job_id[:8]}-s2-blob{i}",
-                    "task_type": "delete_blob",
+                    "task_type": "unpublish_delete_blob",
                     "parameters": {
                         "container": blob_info.get("container"),
                         "blob_path": blob_info.get("blob_path"),
@@ -192,7 +192,7 @@ class UnpublishRasterJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
 
             return [{
                 "task_id": f"{job_id[:8]}-s3-cleanup",
-                "task_type": "delete_stac_and_audit",
+                "task_type": "unpublish_delete_stac",
                 "parameters": {
                     "stac_item_id": job_params["stac_item_id"],
                     "collection_id": job_params["collection_id"],
@@ -235,7 +235,7 @@ class UnpublishRasterJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
             # Extract cleanup result - task_results are objects with attributes
             cleanup_results = [
                 r for r in context.task_results
-                if getattr(r, "task_type", None) == "delete_stac_and_audit"
+                if getattr(r, "task_type", None) == "unpublish_delete_stac"
             ]
 
             if cleanup_results:

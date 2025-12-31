@@ -20,7 +20,7 @@
 | 4 | E9 | Large and Multidimensional Data | 🚧 Partial | 7 | 2.5 | [E9](E9_large_data.md) |
 | 5 | E8 | GeoAnalytics Pipeline | 🚧 Partial | 12 | 1.8 | [E8](E8_geoanalytics.md) |
 | 6 | E7 | Pipeline Infrastructure | 🚧 Partial | 5 | — | [E7](E7_pipeline_infra.md) |
-| — | E12 | Interface Modernization | ✅ Phase 1 | 5 | — | [E12](E12_interfaces.md) |
+| — | E12 | Platform Interfaces | 🚧 Partial | 10 | — | [E12](E12_interfaces.md) |
 
 **Consolidated Epics** (absorbed into E1, E7, E8, or E9):
 - ~~E5~~ → F1.7-F1.8 (OGC Styles) - now in E1
@@ -151,7 +151,7 @@ docs/epics/
 ├── E7_pipeline_infra.md   # Epic E7: Pipeline Infrastructure
 ├── E8_geoanalytics.md     # Epic E8: GeoAnalytics Pipeline
 ├── E9_large_data.md       # Epic E9: Large and Multidimensional Data
-├── E12_interfaces.md      # Epic E12: Interface Modernization
+├── E12_interfaces.md      # Epic E12: Platform Interfaces
 └── ENABLERS.md            # Technical foundation enablers (EN1-EN6)
 ```
 

@@ -727,7 +727,7 @@ class StacInterface(BaseInterface):
             document.body.appendChild(modal);
         }
 
-        // Delete collection - currently items must be deleted individually
+        // Delete collection - unpublish all items in the collection
         async function deleteCollection(collectionId, event) {
             event.stopPropagation();
 
@@ -738,27 +738,67 @@ class StacInterface(BaseInterface):
                 itemCount = collection.summaries?.total_items || 0;
             }
 
-            if (itemCount > 0) {
+            if (itemCount === 0) {
                 showResultModal(
                     'Delete Collection',
-                    `Collection <strong>${collectionId}</strong> has ${itemCount} item(s).<br><br>` +
-                    'To delete this collection, use the <strong>Raster Viewer</strong> to delete items individually, ' +
-                    'or use the API to unpublish each item.',
-                    {
-                        'Collection': collectionId,
-                        'Items': itemCount,
-                        'Viewer': `Click collection → Delete individual items`
-                    },
-                    'ℹ️'
-                );
-            } else {
-                // Empty collection - could potentially delete, but collection deletion not yet implemented
-                showResultModal(
-                    'Delete Collection',
-                    `Collection <strong>${collectionId}</strong> is empty.<br><br>` +
-                    'Batch collection deletion is coming soon.',
+                    `Collection <strong>${collectionId}</strong> has no items to delete.`,
                     { 'Collection': collectionId },
                     'ℹ️'
+                );
+                return;
+            }
+
+            const confirmed = await showConfirmModal(
+                'Delete Collection?',
+                `This will unpublish <strong>${collectionId}</strong> and delete all <strong>${itemCount}</strong> item(s) and their associated blobs. This action cannot be undone.`,
+                'Delete All',
+                '🗑️'
+            );
+
+            if (!confirmed) return;
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/api/platform/unpublish/raster`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        collection_id: collectionId,
+                        delete_collection: true,
+                        dry_run: false
+                    })
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    showResultModal(
+                        'Collection Unpublish Submitted',
+                        `Submitted ${result.jobs_submitted} unpublish job(s) for collection.`,
+                        {
+                            'Collection': collectionId,
+                            'Total Items': result.total_items,
+                            'Jobs Submitted': result.jobs_submitted,
+                            'Jobs Skipped': result.jobs_skipped || 0
+                        },
+                        '✅'
+                    );
+                    // Refresh the grid after a short delay
+                    setTimeout(loadCollections, 2000);
+                } else {
+                    showResultModal(
+                        'Delete Failed',
+                        result.error || 'Unknown error occurred',
+                        null,
+                        '❌'
+                    );
+                }
+            } catch (error) {
+                console.error('Error deleting collection:', error);
+                showResultModal(
+                    'Request Failed',
+                    'Failed to submit delete request: ' + error.message,
+                    null,
+                    '❌'
                 );
             }
         }

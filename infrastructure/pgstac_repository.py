@@ -429,6 +429,41 @@ class PgStacRepository:
             logger.error(f"❌ Error updating item properties '{item_id}': {e}")
             return False
 
+    def get_collection_item_ids(self, collection_id: str) -> List[str]:
+        """
+        Get all item IDs in a collection.
+
+        Used for collection-level operations like bulk unpublish.
+
+        Args:
+            collection_id: STAC collection ID
+
+        Returns:
+            List of item IDs in the collection
+        """
+        logger.debug(f"🔍 Getting item IDs for collection '{collection_id}'")
+
+        try:
+            with self._pg_repo._get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT id
+                        FROM pgstac.items
+                        WHERE collection = %s
+                        ORDER BY id
+                        """,
+                        (collection_id,)
+                    )
+                    results = cur.fetchall()
+                    item_ids = [row['id'] for row in results]
+                    logger.debug(f"   ✅ Found {len(item_ids)} items in collection '{collection_id}'")
+                    return item_ids
+
+        except Exception as e:
+            logger.error(f"❌ Error getting item IDs for collection '{collection_id}': {e}")
+            return []
+
     def list_collections(self, limit: int = 100, offset: int = 0) -> List[Dict[str, Any]]:
         """
         List all collections.

@@ -660,8 +660,8 @@ def platform_unpublish_raster(req: func.HttpRequest) -> func.HttpResponse:
 
     POST /api/platform/unpublish/raster
 
-    Accepts DDH identifiers, request_id, or direct STAC identifiers (cleanup mode).
-    Translates to CoreMachine unpublish_raster job.
+    Accepts DDH identifiers, request_id, direct STAC identifiers, or collection_id
+    for collection-level deletion. Translates to CoreMachine unpublish_raster job(s).
 
     Request Body Options:
 
@@ -679,14 +679,22 @@ def platform_unpublish_raster(req: func.HttpRequest) -> func.HttpResponse:
         "dry_run": true
     }
 
-    Option 3 - Cleanup Mode (direct STAC identifiers):
+    Option 3 - Cleanup Mode (direct STAC identifiers for single item):
     {
         "stac_item_id": "aerial-imagery-2024-site-alpha-v1-0",
         "collection_id": "aerial-imagery-2024",
         "dry_run": true
     }
 
-    Response:
+    Option 4 - Collection Mode (delete entire collection):
+    {
+        "collection_id": "aerial-imagery-2024",
+        "delete_collection": true,
+        "dry_run": false
+    }
+    Submits one unpublish job per item in the collection.
+
+    Response (single item):
     {
         "success": true,
         "request_id": "unpublish-abc123...",
@@ -695,6 +703,17 @@ def platform_unpublish_raster(req: func.HttpRequest) -> func.HttpResponse:
         "mode": "platform",  // or "cleanup"
         "message": "Raster unpublish job submitted (dry_run=true)",
         "monitor_url": "/api/platform/status/unpublish-abc123..."
+    }
+
+    Response (collection mode):
+    {
+        "success": true,
+        "mode": "collection",
+        "collection_id": "aerial-imagery-2024",
+        "total_items": 5,
+        "jobs_submitted": 5,
+        "jobs_skipped": 0,
+        "message": "Submitted 5 unpublish jobs..."
     }
     """
     logger.info("Platform unpublish raster endpoint called")
@@ -719,11 +738,21 @@ def platform_unpublish_raster(req: func.HttpRequest) -> func.HttpResponse:
 
         logger.info(f"Unpublish raster: stac_item_id={stac_item_id}, collection_id={collection_id}, mode={mode}, dry_run={dry_run}")
 
+        platform_repo = PlatformRepository()
+
+        # Handle collection-level deletion
+        if mode == "collection":
+            return _handle_collection_unpublish(
+                collection_id=collection_id,
+                dry_run=dry_run,
+                platform_repo=platform_repo
+            )
+
+        # Single item deletion (existing behavior)
         # Generate unpublish request ID (different from create to avoid collision)
         unpublish_request_id = _generate_unpublish_request_id("raster", stac_item_id)
 
         # Check for existing unpublish request (idempotent)
-        platform_repo = PlatformRepository()
         existing = platform_repo.get_request(unpublish_request_id)
         if existing:
             logger.info(f"Unpublish request already exists: {unpublish_request_id[:16]} → job {existing.job_id[:16]}")
@@ -933,6 +962,14 @@ def _resolve_raster_unpublish_params(req_body: dict) -> tuple:
         logger.warning(f"Direct STAC IDs provided - cleanup mode: {req_body['stac_item_id']}")
         return req_body['stac_item_id'], req_body['collection_id'], "cleanup", None
 
+    # Option 4: Collection-only mode (delete entire collection)
+    # Returns special marker for collection-level deletion
+    if 'collection_id' in req_body and req_body.get('delete_collection', False):
+        collection_id = req_body['collection_id']
+        logger.info(f"Collection-level unpublish requested: {collection_id}")
+        # Return special marker "__COLLECTION__" as stac_item_id
+        return "__COLLECTION__", collection_id, "collection", None
+
     return None, None, None, None
 
 
@@ -956,6 +993,118 @@ def _generate_unpublish_request_id(data_type: str, internal_id: str) -> str:
     combined = f"unpublish-{data_type}|{internal_id}"
     hash_hex = hashlib.sha256(combined.encode('utf-8')).hexdigest()
     return hash_hex[:32]
+
+
+def _handle_collection_unpublish(
+    collection_id: str,
+    dry_run: bool,
+    platform_repo: 'PlatformRepository'
+) -> func.HttpResponse:
+    """
+    Handle collection-level unpublish by submitting jobs for all items.
+
+    Queries all items in the collection and submits an unpublish_raster job
+    for each item. Jobs run in parallel via Service Bus.
+
+    Args:
+        collection_id: STAC collection ID to unpublish
+        dry_run: If True, preview only (no deletions)
+        platform_repo: PlatformRepository instance
+
+    Returns:
+        HttpResponse with summary of submitted jobs
+    """
+    from infrastructure.pgstac_repository import PgStacRepository
+
+    logger.info(f"Collection-level unpublish: {collection_id} (dry_run={dry_run})")
+
+    # Query all items in the collection
+    pgstac_repo = PgStacRepository()
+    item_ids = pgstac_repo.get_collection_item_ids(collection_id)
+
+    if not item_ids:
+        logger.warning(f"Collection '{collection_id}' has no items to unpublish")
+        return func.HttpResponse(
+            json.dumps({
+                "success": False,
+                "error": f"Collection '{collection_id}' has no items to unpublish",
+                "error_type": "ValidationError",
+                "collection_id": collection_id
+            }),
+            status_code=400,
+            headers={"Content-Type": "application/json"}
+        )
+
+    logger.info(f"Found {len(item_ids)} items in collection '{collection_id}'")
+
+    # Submit unpublish job for each item
+    submitted_jobs = []
+    skipped_jobs = []
+
+    for stac_item_id in item_ids:
+        unpublish_request_id = _generate_unpublish_request_id("raster", stac_item_id)
+
+        # Check for existing request (idempotent)
+        existing = platform_repo.get_request(unpublish_request_id)
+        if existing:
+            skipped_jobs.append({
+                "stac_item_id": stac_item_id,
+                "request_id": unpublish_request_id,
+                "job_id": existing.job_id,
+                "status": "already_submitted"
+            })
+            continue
+
+        # Submit job
+        job_params = {
+            "stac_item_id": stac_item_id,
+            "collection_id": collection_id,
+            "dry_run": dry_run
+        }
+
+        job_id = _create_and_submit_job("unpublish_raster", job_params, unpublish_request_id)
+
+        if job_id:
+            # Track in Platform layer
+            api_request = ApiRequest(
+                request_id=unpublish_request_id,
+                dataset_id=collection_id,
+                resource_id=stac_item_id,
+                version_id="collection_unpublish",
+                job_id=job_id,
+                data_type="unpublish_raster"
+            )
+            platform_repo.create_request(api_request)
+
+            submitted_jobs.append({
+                "stac_item_id": stac_item_id,
+                "request_id": unpublish_request_id,
+                "job_id": job_id
+            })
+        else:
+            logger.error(f"Failed to submit unpublish job for item: {stac_item_id}")
+
+    logger.info(
+        f"Collection unpublish submitted: {len(submitted_jobs)} new jobs, "
+        f"{len(skipped_jobs)} already submitted"
+    )
+
+    return func.HttpResponse(
+        json.dumps({
+            "success": True,
+            "mode": "collection",
+            "collection_id": collection_id,
+            "dry_run": dry_run,
+            "total_items": len(item_ids),
+            "jobs_submitted": len(submitted_jobs),
+            "jobs_skipped": len(skipped_jobs),
+            "message": f"Submitted {len(submitted_jobs)} unpublish jobs for collection '{collection_id}' (dry_run={dry_run})",
+            "submitted_jobs": submitted_jobs[:10],  # Limit to first 10 for response size
+            "skipped_jobs": skipped_jobs[:10]
+        }),
+        status_code=202,
+        headers={"Content-Type": "application/json"}
+    )
 
 
 # ============================================================================

@@ -550,7 +550,7 @@ class TasksInterface(BaseInterface):
         }
 
         .metric-card.time .metric-value {
-            color: #8B5CF6;
+            color: #0071BC;
         }
 
         /* Results panel for completed jobs */
@@ -692,7 +692,7 @@ class TasksInterface(BaseInterface):
         }
 
         .progress-segment.pending {
-            background: linear-gradient(90deg, #9333EA 0%, #A855F7 100%);
+            background: linear-gradient(90deg, #0071BC 0%, #60A5FA 100%);
         }
 
         @keyframes progress-pulse {
@@ -737,8 +737,8 @@ class TasksInterface(BaseInterface):
         }
 
         .count-pending {
-            background: #f3e8ff;
-            color: #9333ea;
+            background: #E3F2FD;
+            color: #0071BC;
         }
 
         .count-queued {
@@ -781,8 +781,8 @@ class TasksInterface(BaseInterface):
         }
 
         .status-pending {
-            background: #f3e8ff;
-            color: #9333ea;
+            background: #E3F2FD;
+            color: #0071BC;
         }
 
         .status-queued {
@@ -822,108 +822,242 @@ class TasksInterface(BaseInterface):
             border-bottom: 1px solid #e9ecef;
         }
 
-        .stage-group {
-            background: #f8f9fa;
+        /* Stage Summary Cards */
+        .stage-summary-card {
+            background: white;
             border: 1px solid #e9ecef;
-            border-radius: 3px;
-            padding: 15px;
-            margin-bottom: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+            overflow: hidden;
         }
 
-        .stage-header {
+        .stage-summary-header {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            cursor: pointer;
-            padding: 10px;
-            background: white;
-            border-radius: 3px;
-            transition: background 0.2s;
+            padding: 16px 20px;
+            background: linear-gradient(135deg, #053657 0%, #0a4a7a 100%);
+            color: white;
         }
 
-        .stage-header:hover {
-            background: #f8f9fa;
+        .stage-summary-title {
+            display: flex;
+            align-items: center;
+            gap: 12px;
         }
 
-        .stage-header h4 {
+        .stage-number-badge {
+            width: 32px;
+            height: 32px;
+            background: rgba(255,255,255,0.2);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
             font-size: 14px;
+        }
+
+        .stage-summary-title h4 {
+            margin: 0;
+            font-size: 16px;
+            font-weight: 700;
+        }
+
+        .task-type-label {
+            font-size: 11px;
+            opacity: 0.8;
+            font-family: 'Courier New', monospace;
+        }
+
+        .stage-status-counts {
+            display: flex;
+            gap: 8px;
+        }
+
+        .stage-summary-body {
+            padding: 20px;
+        }
+
+        .summary-stats-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 16px;
+            margin-bottom: 16px;
+        }
+
+        .summary-stat {
+            text-align: center;
+            padding: 12px;
+            background: #f8f9fa;
+            border-radius: 6px;
+        }
+
+        .summary-stat .stat-value {
+            font-size: 24px;
             font-weight: 700;
             color: #053657;
-            margin: 0;
+            display: block;
         }
 
-        .stage-stats {
+        .summary-stat .stat-label {
+            font-size: 11px;
+            color: #626F86;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-top: 4px;
+            display: block;
+        }
+
+        /* Execution Time Summary */
+        .exec-time-summary {
+            background: #F0F9FF;
+            border: 1px solid #BAE6FD;
+            border-radius: 6px;
+            padding: 16px;
+            margin-bottom: 16px;
+        }
+
+        .exec-time-header {
+            font-size: 12px;
+            font-weight: 600;
+            color: #0369A1;
+            margin-bottom: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .exec-time-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 12px;
+        }
+
+        .exec-time-stat {
+            text-align: center;
+        }
+
+        .exec-time-stat .stat-label {
+            font-size: 10px;
+            color: #64748B;
+            display: block;
+            margin-bottom: 2px;
+        }
+
+        .exec-time-stat .stat-value {
+            font-size: 14px;
+            font-weight: 600;
+            color: #0284C7;
+            font-family: 'Courier New', monospace;
+        }
+
+        /* Memory Summary Section */
+        .memory-summary-section {
+            background: #F0FDF4;
+            border: 1px solid #BBF7D0;
+            border-radius: 6px;
+            padding: 16px;
+            margin-bottom: 16px;
+        }
+
+        .memory-summary-header {
+            font-size: 12px;
+            font-weight: 600;
+            color: #166534;
+            margin-bottom: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .memory-summary-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 12px;
+        }
+
+        .memory-stat {
+            text-align: center;
+        }
+
+        .memory-stat .stat-label {
+            font-size: 10px;
+            color: #64748B;
+            display: block;
+            margin-bottom: 2px;
+        }
+
+        .memory-stat .stat-value {
+            font-size: 14px;
+            font-weight: 600;
+            color: #15803D;
+            font-family: 'Courier New', monospace;
+        }
+
+        /* Errors Summary */
+        .errors-summary {
+            background: #FEF2F2;
+            border: 1px solid #FECACA;
+            border-left: 4px solid #DC2626;
+            border-radius: 6px;
+            padding: 16px;
+        }
+
+        .errors-header {
+            font-size: 12px;
+            font-weight: 600;
+            color: #DC2626;
+            margin-bottom: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .errors-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .error-item {
             display: flex;
             gap: 12px;
-            align-items: center;
-            font-size: 12px;
-            font-weight: 600;
-        }
-
-        .stage-tasks {
-            margin-top: 15px;
-            display: grid;
-            gap: 10px;
-        }
-
-        .task-card {
+            padding: 8px 12px;
             background: white;
-            border: 1px solid #e9ecef;
-            padding: 15px;
-            border-radius: 3px;
-            transition: box-shadow 0.2s;
+            border-radius: 4px;
+            border: 1px solid #FECACA;
         }
 
-        .task-card:hover {
-            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-        }
-
-        .task-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: start;
-            margin-bottom: 10px;
-        }
-
-        .task-type {
-            font-size: 13px;
-            font-weight: 600;
-            color: #053657;
-        }
-
-        .task-id {
-            font-size: 10px;
-            color: #626F86;
+        .error-task-id {
             font-family: 'Courier New', monospace;
-            margin-top: 4px;
-        }
-
-        .task-actions {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 8px;
-            margin-top: 10px;
-        }
-
-        .error-details {
-            margin-top: 10px;
-            padding: 10px;
-            background: #FEE2E2;
-            border-left: 3px solid #DC2626;
-            border-radius: 3px;
-        }
-
-        .error-details strong {
-            color: #DC2626;
-            font-size: 12px;
-        }
-
-        .error-details p {
+            font-size: 11px;
             color: #991B1B;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+
+        .error-message {
             font-size: 12px;
-            margin: 5px 0 0 0;
+            color: #7F1D1D;
             line-height: 1.4;
-            word-break: break-word;
+        }
+
+        .error-more {
+            font-size: 11px;
+            color: #DC2626;
+            font-style: italic;
+            padding-top: 4px;
+        }
+
+        @media (max-width: 768px) {
+            .summary-stats-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+            .exec-time-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+            .memory-summary-grid {
+                grid-template-columns: 1fr;
+            }
         }
 
         .view-result-button, .view-memory-button {
@@ -946,13 +1080,13 @@ class TasksInterface(BaseInterface):
         }
 
         .view-memory-button {
-            color: #7c3aed;
-            border-color: #ddd6fe;
+            color: #0071BC;
+            border-color: #BAE6FD;
         }
 
         .view-memory-button:hover {
-            border-color: #7c3aed;
-            background: #f5f3ff;
+            border-color: #0071BC;
+            background: #E3F2FD;
         }
 
         .result-json {
@@ -1004,7 +1138,7 @@ class TasksInterface(BaseInterface):
         }
 
         .memory-timeline-header {
-            background: #7c3aed;
+            background: #0071BC;
             color: white;
             padding: 10px 15px;
             font-size: 12px;
@@ -1821,7 +1955,7 @@ class TasksInterface(BaseInterface):
             `;
         }}
 
-        // Render task details grouped by stage
+        // Render task details grouped by stage - SUMMARY VIEW
         function renderTaskDetails(job, tasks) {{
             // Group tasks by stage
             const tasksByStage = {{}};
@@ -1833,7 +1967,7 @@ class TasksInterface(BaseInterface):
                 tasksByStage[stage].push(task);
             }});
 
-            let html = `<div class="tasks-header">Task Details (${{tasks.length}} total)</div>`;
+            let html = `<div class="tasks-header">Stage Summary (${{tasks.length}} total tasks)</div>`;
 
             const stages = Object.keys(tasksByStage).sort((a, b) => parseInt(a) - parseInt(b));
             stages.forEach(stage => {{
@@ -1844,74 +1978,166 @@ class TasksInterface(BaseInterface):
                 const completed = stageTasks.filter(t => t.status === 'completed').length;
                 const failed = stageTasks.filter(t => t.status === 'failed').length;
 
+                // Get task type (should be same for all tasks in stage)
+                const taskType = stageTasks[0]?.task_type || 'unknown';
+
+                // Calculate execution time stats for completed tasks
+                const completedTasks = stageTasks.filter(t => t.status === 'completed' && t.execution_time_ms);
+                let execTimeStats = null;
+                if (completedTasks.length > 0) {{
+                    const times = completedTasks.map(t => t.execution_time_ms);
+                    const avgMs = times.reduce((a, b) => a + b, 0) / times.length;
+                    const minMs = Math.min(...times);
+                    const maxMs = Math.max(...times);
+                    execTimeStats = {{
+                        avg: formatDuration(avgMs),
+                        min: formatDuration(minMs),
+                        max: formatDuration(maxMs),
+                        total: formatDuration(times.reduce((a, b) => a + b, 0))
+                    }};
+                }}
+
+                // Collect errors from failed tasks
+                const failedTasks = stageTasks.filter(t => t.status === 'failed' && t.error_details);
+
+                // Get memory stats
+                const memoryStats = getStageMemoryStats(stageTasks);
+
                 html += `
-                    <div class="stage-group" id="stage-group-${{stage}}">
-                        <div class="stage-header" onclick="toggleStage('stage-${{stage}}')">
-                            <h4>Stage ${{stage}} (${{stageTasks.length}} tasks)</h4>
-                            <div class="stage-stats">
-                                <span style="color: #9333ea;">P:${{pending}}</span>
-                                <span style="color: #626F86;">Q:${{queued}}</span>
-                                <span style="color: #F59E0B;">R:${{processing}}</span>
-                                <span style="color: #10B981;">C:${{completed}}</span>
-                                <span style="color: #DC2626;">F:${{failed}}</span>
-                                <span style="font-size: 10px;">&#9660;</span>
-                            </div>
-                        </div>
-                        <div id="stage-${{stage}}" class="stage-tasks hidden">
-                `;
-
-                stageTasks.forEach(task => {{
-                    const errorHTML = task.status === 'failed' && task.error_details ? `
-                        <div class="error-details">
-                            <strong>Error:</strong>
-                            <p>${{task.error_details}}</p>
-                        </div>
-                    ` : '';
-
-                    // Check for OOM warning (failed task with high memory at last checkpoint)
-                    const oomWarningHTML = renderOOMWarning(task);
-
-                    const resultButton = task.result_data ? `
-                        <button class="view-result-button" onclick="event.stopPropagation(); toggleResult('task-${{task.task_id}}')">
-                            View Result
-                        </button>
-                        <div id="task-${{task.task_id}}" class="result-json hidden">
-                            <pre>${{JSON.stringify(task.result_data, null, 2)}}</pre>
-                        </div>
-                    ` : '';
-
-                    // Memory button and timeline
-                    const memoryHTML = renderMemorySection(task);
-
-                    // Memory badge for task header
-                    const memoryBadge = renderMemoryBadge(task);
-
-                    html += `
-                        <div class="task-card">
-                            <div class="task-header">
+                    <div class="stage-summary-card" id="stage-group-${{stage}}">
+                        <div class="stage-summary-header">
+                            <div class="stage-summary-title">
+                                <span class="stage-number-badge">${{stage}}</span>
                                 <div>
-                                    <div class="task-type">${{task.task_type}}${{memoryBadge}}</div>
-                                    <div class="task-id">${{task.task_id.substring(0, 8)}}...${{task.task_id.slice(-8)}}</div>
+                                    <h4>Stage ${{stage}}</h4>
+                                    <span class="task-type-label">${{taskType}}</span>
                                 </div>
-                                <span class="status-badge status-${{task.status}}">${{task.status}}</span>
                             </div>
-                            ${{errorHTML}}
-                            ${{oomWarningHTML}}
-                            <div class="task-actions">
-                                ${{resultButton}}
-                                ${{memoryHTML}}
+                            <div class="stage-status-counts">
+                                ${{pending > 0 ? `<span class="count-badge count-pending">P: ${{pending}}</span>` : ''}}
+                                ${{queued > 0 ? `<span class="count-badge count-queued">Q: ${{queued}}</span>` : ''}}
+                                ${{processing > 0 ? `<span class="count-badge count-processing">R: ${{processing}}</span>` : ''}}
+                                ${{completed > 0 ? `<span class="count-badge count-completed">C: ${{completed}}</span>` : ''}}
+                                ${{failed > 0 ? `<span class="count-badge count-failed">F: ${{failed}}</span>` : ''}}
                             </div>
                         </div>
-                    `;
-                }});
 
-                html += `
+                        <div class="stage-summary-body">
+                            <div class="summary-stats-grid">
+                                <div class="summary-stat">
+                                    <span class="stat-value">${{stageTasks.length}}</span>
+                                    <span class="stat-label">Total Tasks</span>
+                                </div>
+                                <div class="summary-stat">
+                                    <span class="stat-value" style="color: #10B981;">${{completed}}</span>
+                                    <span class="stat-label">Completed</span>
+                                </div>
+                                <div class="summary-stat">
+                                    <span class="stat-value" style="color: #F59E0B;">${{pending + queued + processing}}</span>
+                                    <span class="stat-label">In Progress</span>
+                                </div>
+                                <div class="summary-stat">
+                                    <span class="stat-value" style="color: #DC2626;">${{failed}}</span>
+                                    <span class="stat-label">Failed</span>
+                                </div>
+                            </div>
+
+                            ${{execTimeStats ? `
+                                <div class="exec-time-summary">
+                                    <div class="exec-time-header">Execution Times</div>
+                                    <div class="exec-time-grid">
+                                        <div class="exec-time-stat">
+                                            <span class="stat-label">Avg</span>
+                                            <span class="stat-value">${{execTimeStats.avg}}</span>
+                                        </div>
+                                        <div class="exec-time-stat">
+                                            <span class="stat-label">Min</span>
+                                            <span class="stat-value">${{execTimeStats.min}}</span>
+                                        </div>
+                                        <div class="exec-time-stat">
+                                            <span class="stat-label">Max</span>
+                                            <span class="stat-value">${{execTimeStats.max}}</span>
+                                        </div>
+                                        <div class="exec-time-stat">
+                                            <span class="stat-label">Total</span>
+                                            <span class="stat-value">${{execTimeStats.total}}</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            ` : ''}}
+
+                            ${{memoryStats ? `
+                                <div class="memory-summary-section">
+                                    <div class="memory-summary-header">Memory Usage</div>
+                                    <div class="memory-summary-grid">
+                                        <div class="memory-stat">
+                                            <span class="stat-label">Peak RSS</span>
+                                            <span class="stat-value">${{memoryStats.peakFormatted}}</span>
+                                        </div>
+                                        <div class="memory-stat">
+                                            <span class="stat-label">Avg Peak</span>
+                                            <span class="stat-value">${{memoryStats.avgFormatted}}</span>
+                                        </div>
+                                        <div class="memory-stat">
+                                            <span class="stat-label">Tasks Tracked</span>
+                                            <span class="stat-value">${{memoryStats.taskCount}}</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            ` : ''}}
+
+                            ${{failedTasks.length > 0 ? `
+                                <div class="errors-summary">
+                                    <div class="errors-header">Failed Tasks (${{failedTasks.length}})</div>
+                                    <div class="errors-list">
+                                        ${{failedTasks.slice(0, 3).map(t => `
+                                            <div class="error-item">
+                                                <span class="error-task-id">${{t.task_id.substring(0, 8)}}...</span>
+                                                <span class="error-message">${{(t.error_details || 'Unknown error').substring(0, 100)}}${{(t.error_details || '').length > 100 ? '...' : ''}}</span>
+                                            </div>
+                                        `).join('')}}
+                                        ${{failedTasks.length > 3 ? `<div class="error-more">+ ${{failedTasks.length - 3}} more errors</div>` : ''}}
+                                    </div>
+                                </div>
+                            ` : ''}}
                         </div>
                     </div>
                 `;
             }});
 
             document.getElementById('tasks-container').innerHTML = html;
+        }}
+
+        // Format duration from milliseconds
+        function formatDuration(ms) {{
+            if (ms < 1000) return ms.toFixed(0) + 'ms';
+            if (ms < 60000) return (ms / 1000).toFixed(1) + 's';
+            if (ms < 3600000) return (ms / 60000).toFixed(1) + 'm';
+            return (ms / 3600000).toFixed(1) + 'h';
+        }}
+
+        // Get memory stats for a stage
+        function getStageMemoryStats(tasks) {{
+            const peakMemories = [];
+            tasks.forEach(task => {{
+                const peak = getPeakMemory(task);
+                if (peak) {{
+                    peakMemories.push(peak.rss_mb);
+                }}
+            }});
+
+            if (peakMemories.length === 0) return null;
+
+            const maxPeak = Math.max(...peakMemories);
+            const avgPeak = peakMemories.reduce((a, b) => a + b, 0) / peakMemories.length;
+
+            return {{
+                peak: maxPeak,
+                avg: avgPeak,
+                taskCount: peakMemories.length,
+                peakFormatted: maxPeak >= 1024 ? (maxPeak / 1024).toFixed(1) + ' GB' : maxPeak.toFixed(0) + ' MB',
+                avgFormatted: avgPeak >= 1024 ? (avgPeak / 1024).toFixed(1) + ' GB' : avgPeak.toFixed(0) + ' MB'
+            }};
         }}
 
         // Toggle stage visibility

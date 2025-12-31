@@ -48,6 +48,8 @@
 | Story | Description | Owner | Status |
 |-------|-------------|-------|--------|
 | **S2.2.5** | **🔴 HIGH: Fix TiTiler URLs for >3 band rasters** | Claude | 📋 |
+| **S2.2.6** | **🔴 HIGH: Auto-rescale DEM TiTiler URLs** | Claude | 📋 |
+| **F2.9** | **🆕 STAC-Integrated Raster Viewer** (14 stories) | Claude | 📋 |
 | F2.7 | Raster Collection Processing (pgstac searches) | Claude | 📋 |
 
 **S2.2.5 Details** (HIGH PRIORITY): TiTiler viewer URLs fail for rasters with >3 bands because the default URL doesn't specify which bands to render. The 4th band (alpha or extra band) confuses TiTiler, but specifying `&bidx=1&bidx=2&bidx=3` works.
@@ -70,6 +72,199 @@
 - Query TiTiler `/cog/statistics` for p2/p98 percentiles during STAC extraction
 - Add `&rescale={p2},{p98}&colormap_name=terrain` to DEM preview/viewer URLs
 - Store rescale values in STAC item properties for client use
+
+---
+
+### F2.9: STAC-Integrated Raster Viewer 🆕
+
+**Created**: 30 DEC 2025
+**Goal**: Create a collection-aware raster viewer (like vector viewer) that loads STAC items and generates appropriate TiTiler URLs based on raster type.
+**Reference**: TiTiler URL Guide at `/rmhtitiler/docs/TITILER-URL-GUIDE.md`
+
+#### Current State Assessment
+
+| Component | Status | Location |
+|-----------|--------|----------|
+| Raster type detection | ✅ Complete | `services/raster_validation.py:835` (`_detect_raster_type()`) |
+| Band count/dtype capture | ✅ Complete | `services/raster_validation.py:247` |
+| ColorInterp checking | ✅ Complete | `services/raster_validation.py:871` |
+| Band mapping models | ✅ Complete | `models/band_mapping.py` (WV-2/3, Sentinel-2, Landsat) |
+| Statistics extraction | ⚠️ Partial | Skipped for files >1GB in `service_stac_metadata.py:188` |
+| Raster type in STAC items | ❌ Missing | Detected but not persisted to item properties |
+| Smart TiTiler URLs | ❌ Missing | `stac_metadata_helper.py:329` generates generic URLs only |
+| Collection-aware viewer | ❌ Missing | Existing `raster-viewer` requires manual URL entry |
+| Vector viewer reference | ✅ Complete | `vector_viewer/service.py` - 30/70 layout, Leaflet, OGC Features |
+
+#### Implementation Plan
+
+##### Phase 1: Persist Raster Metadata in STAC Items
+
+| Story | Description | Owner | Status |
+|-------|-------------|-------|--------|
+| S2.9.1 | Add `rmh:raster_type` to STAC item properties | Claude | 📋 |
+| S2.9.2 | Add `rmh:band_count` and `rmh:dtype` explicitly | Claude | 📋 |
+| S2.9.3 | Add `rmh:rgb_bands` array for multi-band (e.g., `[5,3,2]` for WV-3) | Claude | 📋 |
+| S2.9.4 | Add `rmh:rescale` object with p2/p98 values when stats available | Claude | 📋 |
+| S2.9.5 | Add `rmh:colormap` recommendation based on raster type | Claude | 📋 |
+
+**S2.9.1-5 Implementation Details**:
+
+Files to modify:
+- `services/service_stac_metadata.py` - Add properties after rio-stac extraction
+- `services/stac_metadata_helper.py` - New method `build_raster_visualization_properties()`
+
+Property schema:
+```python
+{
+    "rmh:raster_type": "dem",           # rgb, rgba, dem, nir, multispectral, categorical
+    "rmh:band_count": 1,
+    "rmh:dtype": "float32",
+    "rmh:rgb_bands": null,              # [5,3,2] for WV-3, [4,3,2] for Sentinel-2
+    "rmh:rescale": {
+        "min": 276.0,
+        "max": 362.0,
+        "source": "p2_p98"              # or "min_max", "manual"
+    },
+    "rmh:colormap": "terrain",          # terrain, viridis, rdylgn, null
+    "rmh:colorinterp": ["gray"]         # or ["red","green","blue"], ["blue","green","red","alpha"]
+}
+```
+
+##### Phase 2: Smart TiTiler URL Generation
+
+| Story | Description | Owner | Status |
+|-------|-------------|-------|--------|
+| S2.9.6 | Create `TiTilerUrlBuilder` utility class | Claude | 📋 |
+| S2.9.7 | Integrate URL builder into `stac_metadata_helper.py` | Claude | 📋 |
+| S2.9.8 | Update existing STAC items via migration script (optional) | Claude | 📋 |
+
+**S2.9.6 Implementation Details** (`services/titiler_url_builder.py`):
+
+```python
+class TiTilerUrlBuilder:
+    """Generate TiTiler URLs based on raster metadata."""
+
+    @staticmethod
+    def build_viewer_url(base_url: str, cog_path: str, metadata: dict) -> str:
+        """
+        Build TiTiler viewer URL with appropriate parameters.
+
+        Decision tree (from TITILER-URL-GUIDE.md):
+        - 1 band + float → rescale + colormap
+        - 1 band + uint8 → grayscale (no params)
+        - 3 bands RGB → no params
+        - 3 bands BGR → bidx=3&bidx=2&bidx=1
+        - 4+ bands → bidx=1&bidx=2&bidx=3 (or custom rgb_bands)
+        """
+```
+
+URL patterns by raster type:
+| Type | URL Pattern |
+|------|-------------|
+| DEM | `?url={cog}&rescale={p2},{p98}&colormap_name=terrain` |
+| RGB (3 bands) | `?url={cog}` |
+| BGR (3 bands) | `?url={cog}&bidx=3&bidx=2&bidx=1` |
+| RGBA (4 bands) | `?url={cog}&bidx=1&bidx=2&bidx=3` |
+| WV-3 (8 bands) | `?url={cog}&bidx=5&bidx=3&bidx=2` |
+| NDVI | `?url={cog}&rescale=-1,1&colormap_name=rdylgn` |
+
+##### Phase 3: Collection-Aware Raster Viewer Interface
+
+| Story | Description | Owner | Status |
+|-------|-------------|-------|--------|
+| S2.9.9 | Create `RasterCollectionViewerService` (like `VectorViewerService`) | Claude | 📋 |
+| S2.9.10 | Create viewer endpoint `/api/raster/viewer?collection={id}` | Claude | 📋 |
+| S2.9.11 | Build Leaflet UI with item browser sidebar | Claude | 📋 |
+| S2.9.12 | Add band combo selector (presets + custom) | Claude | 📋 |
+| S2.9.13 | Add rescale controls (auto/manual) | Claude | 📋 |
+| S2.9.14 | Add colormap selector for single-band | Claude | 📋 |
+
+**S2.9.9-14 Implementation Details**:
+
+New files:
+- `raster_collection_viewer/service.py` - Main service class
+- `raster_collection_viewer/triggers.py` - HTTP trigger registration
+
+UI Layout (30/70 like vector viewer):
+```
+┌─────────────────┬───────────────────────────────────────┐
+│   SIDEBAR 30%   │              MAP 70%                  │
+├─────────────────┤                                       │
+│ 🗺️ Raster       │                                       │
+│ Collection      │         [TiTiler XYZ Tiles]           │
+│ Viewer          │                                       │
+├─────────────────┤                                       │
+│ Collection:     │                                       │
+│ [aerial-2024]   │                                       │
+├─────────────────┤                                       │
+│ Items (12)      │                                       │
+│ ┌─────────────┐ │                                       │
+│ │ tile_001 ▶  │ │                                       │
+│ │ tile_002    │ │                                       │
+│ │ tile_003    │ │                                       │
+│ └─────────────┘ │                                       │
+├─────────────────┤                                       │
+│ Band Selection  │                                       │
+│ R: [Band 5 ▼]   │                                       │
+│ G: [Band 3 ▼]   │                                       │
+│ B: [Band 2 ▼]   │                                       │
+│                 │                                       │
+│ Presets:        │                                       │
+│ [RGB] [NIR] [1] │                                       │
+├─────────────────┤                                       │
+│ Rescale         │                                       │
+│ ○ Auto (stats)  │                                       │
+│ ○ Manual        │                                       │
+│ Min: [___]      │                                       │
+│ Max: [___]      │                                       │
+├─────────────────┤                                       │
+│ Colormap        │                                       │
+│ [terrain ▼]     │                                       │
+├─────────────────┤                                       │
+│ QA Section      │                                       │
+│ [Approve][Reject│                                       │
+└─────────────────┴───────────────────────────────────────┘
+```
+
+Features:
+- Load STAC items from collection via `/api/stac/collections/{id}/items`
+- Click item → load on map with smart TiTiler URL
+- Band combo selector (populated from item's `rmh:band_count`)
+- Auto-apply `rmh:rgb_bands` preset if available
+- Rescale from `rmh:rescale` or manual override
+- Colormap from `rmh:colormap` or selector
+- Point query on click (all band values)
+- QA approve/reject (future: update item metadata)
+
+#### Dependencies
+
+| Dependency | Required For | Status |
+|------------|--------------|--------|
+| S2.2.5 (bidx fix) | S2.9.6, S2.9.7 | 📋 Planned |
+| S2.2.6 (DEM rescale) | S2.9.6, S2.9.7 | 📋 Planned |
+| TiTiler deployment | All | ✅ Available |
+| pgSTAC collections | S2.9.9-14 | ✅ Available |
+
+#### Acceptance Criteria
+
+1. **Metadata Persistence** (Phase 1):
+   - [ ] New raster ETL jobs store `rmh:*` properties in STAC items
+   - [ ] Raster type correctly identified (RGB/RGBA/DEM/NIR/multispectral)
+   - [ ] Band statistics captured when file size <1GB
+
+2. **Smart URLs** (Phase 2):
+   - [ ] DEM viewer URLs include `rescale` + `colormap_name=terrain`
+   - [ ] 4+ band rasters include appropriate `bidx` parameters
+   - [ ] WorldView-3 uses `bidx=5&bidx=3&bidx=2`
+
+3. **Viewer Interface** (Phase 3):
+   - [ ] `/api/raster/viewer?collection={id}` returns Leaflet viewer
+   - [ ] Sidebar shows collection items with click-to-load
+   - [ ] Band selector populated from item metadata
+   - [ ] Rescale/colormap controls functional
+   - [ ] Point query returns all band values
+
+---
 
 ### E3: DDH Platform Integration
 

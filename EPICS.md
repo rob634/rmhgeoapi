@@ -20,17 +20,15 @@
 | 4 | E9 | Zarr/Climate Data as API | 🚧 Partial | 3 | 2.0 |
 | 5 | E7 | Pipeline Extensibility | 🚧 Partial | 7 | 2.6 |
 | 6 | E5 | OGC Styles | 🚧 Partial | 2 | 3.7 |
-| 7 | E8 | H3 Analytics Pipeline | 🚧 Partial | 12 | 1.2 |
+| 7 | E8 | H3 Analytics Pipeline | 🚧 Partial | 15 | 1.2 |
 | — | E12 | Interface Modernization | ✅ Phase 1 | 5 | — |
 
 **Consolidated Epics** (absorbed into E7 or E8):
 - ~~E10~~ → F7.4 (FATHOM ETL Operations)
+- ~~E11~~ → F8.13-15 (Analytics UI: Data Browser, H3 Visualization, Export)
 - ~~E13~~ → F7.6 (Pipeline Observability)
 - ~~E14~~ → F8.12 (H3 Export Pipeline)
 - ~~E15~~ → F7.5 (Collection Ingestion)
-
-**Repurposed Epic**:
-- E11: Originally "Pipeline Builder UI" → consolidated to F7.7. Epic ID reused for "Pipeline Builder Demo App" (stakeholder demo)
 
 **Priority Notes**:
 - **E3 includes Observability**: Merged E6 into E3 — observability is app-to-app monitoring for integration
@@ -139,6 +137,15 @@ Abstract component names for ADO work items. Actual Azure resource names assigne
 **Status**: ✅ COMPLETE
 **Completed**: NOV 2025
 
+**Feature Overview**:
+| Feature | Status | Scope |
+|---------|--------|-------|
+| F1.1 | ✅ | Vector ETL Pipeline |
+| F1.2 | ✅ | OGC Features API |
+| F1.3 | ✅ | Vector STAC Integration |
+| F1.4 | ✅ | Vector Unpublish |
+| F1.5 | ✅ | Vector Map Viewer |
+
 ### Feature F1.1: Vector ETL Pipeline ✅
 
 **Deliverable**: `process_vector` job with idempotent DELETE+INSERT pattern
@@ -201,12 +208,39 @@ Abstract component names for ADO work items. Actual Azure resource names assigne
 
 ---
 
+### Feature F1.5: Vector Map Viewer ✅ COMPLETE
+
+**Deliverable**: Interactive Leaflet map viewer for browsing OGC Features collections
+**Completed**: DEC 2025
+
+| Story | Status | Description |
+|-------|--------|-------------|
+| S1.5.1 | ✅ | Create `VectorViewerService` with Leaflet HTML generation |
+| S1.5.2 | ✅ | Add 30/70 sidebar+map layout |
+| S1.5.3 | ✅ | Implement feature loading with limit/bbox/simplification controls |
+| S1.5.4 | ✅ | Add click-to-inspect feature properties |
+| S1.5.5 | ✅ | Add QA approve/reject section |
+
+**Endpoint**: `/api/vector/viewer?collection={collection_id}`
+
+**Key Files**: `vector_viewer/service.py`, `vector_viewer/triggers.py`
+
+**Features**:
+- OGC Features API integration (`/api/features/collections/{id}/items`)
+- Pagination with limit control
+- Bbox filtering (draw rectangle on map)
+- Geometry simplification slider
+- Feature property popup on click
+- QA workflow buttons
+
+---
+
 ---
 
 ## Epic E2: Raster Data as API 🚧
 
 **Business Requirement**: "Make GeoTIFF available as API"
-**Status**: 🚧 PARTIAL (F2.7 Collection + F2.8 Classification pending)
+**Status**: 🚧 PARTIAL (F2.7 Collection + F2.8 Classification + F2.9 Viewer pending)
 **Core Complete**: NOV 2025
 
 **Feature Overview**:
@@ -220,6 +254,7 @@ Abstract component names for ADO work items. Actual Azure resource names assigne
 | F2.6 | ✅ | Large Raster Tiling |
 | F2.7 | 📋 | Raster Collection Pipeline |
 | F2.8 | 📋 | Classification & Detection |
+| F2.9 | 📋 | STAC-Integrated Raster Map Viewer |
 
 ### Feature F2.1: Raster ETL Pipeline ✅
 
@@ -408,6 +443,86 @@ Raster Input → F2.8 (Classify) → Route to F2.1/F2.6/F2.7 → Tier Selection 
 **Key Files**: `services/raster_classifier.py` (planned), `models/band_mapping.py` (exists)
 
 **Existing Foundation**: `models/band_mapping.py` added 21 DEC 2025 contains WorldView-3 profile
+
+---
+
+### Feature F2.9: STAC-Integrated Raster Map Viewer 📋 PLANNED
+
+**Deliverable**: Interactive Leaflet map viewer for browsing STAC raster collections with smart TiTiler URL generation
+**Created**: 30 DEC 2025
+**Reference**: TiTiler URL Guide at `/rmhtitiler/docs/TITILER-URL-GUIDE.md`
+
+**Goal**: Create a collection-aware raster viewer (like F1.5 Vector Viewer) that loads STAC items and generates appropriate TiTiler URLs based on raster type (DEM, RGB, multi-band, etc.).
+
+#### Phase 1: Persist Raster Metadata in STAC Items
+
+| Story | Status | Description |
+|-------|--------|-------------|
+| S2.9.1 | 📋 | Add `rmh:raster_type` to STAC item properties (rgb, rgba, dem, nir, multispectral) |
+| S2.9.2 | 📋 | Add `rmh:band_count` and `rmh:dtype` explicitly |
+| S2.9.3 | 📋 | Add `rmh:rgb_bands` array for multi-band (e.g., `[5,3,2]` for WV-3) |
+| S2.9.4 | 📋 | Add `rmh:rescale` object with p2/p98 values when stats available |
+| S2.9.5 | 📋 | Add `rmh:colormap` recommendation based on raster type |
+
+**Files**: `services/service_stac_metadata.py`, `services/stac_metadata_helper.py`
+
+#### Phase 2: Smart TiTiler URL Generation
+
+| Story | Status | Description |
+|-------|--------|-------------|
+| S2.9.6 | 📋 | Create `TiTilerUrlBuilder` utility class with decision tree |
+| S2.9.7 | 📋 | Integrate URL builder into `stac_metadata_helper.py` |
+| S2.9.8 | 📋 | Update existing STAC items via migration script (optional) |
+
+**URL Patterns by Raster Type**:
+| Type | URL Pattern |
+|------|-------------|
+| DEM | `?url={cog}&rescale={p2},{p98}&colormap_name=terrain` |
+| RGB (3 bands) | `?url={cog}` |
+| RGBA (4 bands) | `?url={cog}&bidx=1&bidx=2&bidx=3` |
+| WV-3 (8 bands) | `?url={cog}&bidx=5&bidx=3&bidx=2` |
+
+**Files**: `services/titiler_url_builder.py` (new)
+
+#### Phase 3: Collection-Aware Raster Viewer Interface
+
+| Story | Status | Description |
+|-------|--------|-------------|
+| S2.9.9 | 📋 | Create `RasterCollectionViewerService` (like `VectorViewerService`) |
+| S2.9.10 | 📋 | Create viewer endpoint `/api/raster/viewer?collection={id}` |
+| S2.9.11 | 📋 | Build Leaflet UI with item browser sidebar (30/70 layout) |
+| S2.9.12 | 📋 | Add band combo selector (presets + custom R/G/B dropdowns) |
+| S2.9.13 | 📋 | Add rescale controls (auto from stats / manual override) |
+| S2.9.14 | 📋 | Add colormap selector for single-band rasters |
+
+**Endpoint**: `/api/raster/viewer?collection={collection_id}`
+
+**Files**: `raster_collection_viewer/service.py`, `raster_collection_viewer/triggers.py`
+
+**UI Features**:
+- Load STAC items from collection via `/api/stac/collections/{id}/items`
+- Click item → load on map with smart TiTiler URL
+- Band combo selector populated from item's `rmh:band_count`
+- Auto-apply `rmh:rgb_bands` preset if available
+- Rescale from `rmh:rescale` or manual override
+- Colormap from `rmh:colormap` or dropdown
+- Point query on click (all band values)
+- QA approve/reject section
+
+**Dependencies**:
+- S2.2.5 (bidx fix for >3 band rasters) - planned
+- S2.2.6 (DEM auto-rescale) - planned
+- F2.8 (Raster Classification) - shares detection logic
+
+**Current State Assessment**:
+| Component | Status | Location |
+|-----------|--------|----------|
+| Raster type detection | ✅ | `services/raster_validation.py:835` |
+| Band mapping models | ✅ | `models/band_mapping.py` |
+| Statistics extraction | ⚠️ | Skipped for >1GB files |
+| Raster type in STAC | ❌ | Detected but not persisted |
+| Smart TiTiler URLs | ❌ | Generic URLs only |
+| Collection-aware viewer | ❌ | Existing viewer requires manual URL |
 
 ---
 
@@ -1303,6 +1418,9 @@ Source Data           H3 Aggregation          Output
 | F8.10 | 📋 | Multi-Step Pipeline Operations |
 | F8.11 | 📋 | Rwanda Coffee Climate Risk Demo |
 | F8.12 | ✅ | H3 Export Pipeline (~~E14~~) |
+| F8.13 | 📋 | Analytics Data Browser (~~E11.F11.1~~) |
+| F8.14 | 📋 | H3 Visualization UI (~~E11.F11.3~~) |
+| F8.15 | 📋 | Analytics Export UI (~~E11.F11.4~~) |
 
 ### Feature F8.1: H3 Grid Infrastructure ✅
 
@@ -1688,6 +1806,52 @@ POST /api/jobs/submit/h3_export_dataset
 
 ---
 
+### Feature F8.13: Analytics Data Browser 📋 (~~E11.F11.1~~)
+
+**Deliverable**: STAC + Promoted datasets gallery view for analytics exploration
+**Origin**: Absorbed from E11 (Pipeline Builder Demo App)
+
+| Story | Status | Description | Backend Dep |
+|-------|--------|-------------|-------------|
+| S8.13.1 | 📋 | STAC collection browser with search | `/api/stac/*` ✅ |
+| S8.13.2 | 📋 | Promoted datasets gallery view | `/api/promote/gallery` ✅ |
+| S8.13.3 | 📋 | Preview thumbnails from TiTiler | TiTiler ✅ |
+| S8.13.4 | 📋 | Click to view on map | TiTiler ✅ |
+
+---
+
+### Feature F8.14: H3 Visualization UI 📋 (~~E11.F11.3~~)
+
+**Deliverable**: Hexagonal analytics visualization with drill-down (KEY FEATURE)
+**Origin**: Absorbed from E11 (Pipeline Builder Demo App)
+
+| Story | Status | Description | Backend Dep |
+|-------|--------|-------------|-------------|
+| S8.14.1 | 📋 | H3 hexagon layer (Mapbox GL + deck.gl) | `/api/h3/stats/*/cells` (F8.6) |
+| S8.14.2 | 📋 | Resolution switcher (zoom mapping) | H3 pyramid ✅ |
+| S8.14.3 | 📋 | Click hexagon → drill to children | H3 schema ✅ |
+| S8.14.4 | 📋 | Choropleth styling by stat value | OGC Styles ✅ |
+| S8.14.5 | 📋 | Country/Admin filter | `/api/h3/stats?iso3=` (F8.6) |
+| S8.14.6 | 📋 | Time slider for temporal stats | xarray service ✅ |
+
+**Blockers**: Requires F8.3 (H3 aggregation handlers) + F8.6 (H3 API)
+
+---
+
+### Feature F8.15: Analytics Export UI 📋 (~~E11.F11.4~~)
+
+**Deliverable**: Export capabilities for external tools
+**Origin**: Absorbed from E11 (Pipeline Builder Demo App)
+
+| Story | Status | Description | Backend Dep |
+|-------|--------|-------------|-------------|
+| S8.15.1 | 📋 | Export H3 stats as GeoParquet | `/api/h3/export` (F8.5) |
+| S8.15.2 | 📋 | DuckDB SQL preview (WASM) | Client-side |
+| S8.15.3 | 📋 | Copy tile URL for other tools | TiTiler URLs ✅ |
+| S8.15.4 | 📋 | STAC item JSON download | `/api/stac/items/*` ✅ |
+
+---
+
 ---
 
 ## Epic E9: Zarr/Climate Data as API 🚧
@@ -2027,116 +2191,6 @@ if __name__ == "__main__":
 
 ---
 
-## Epic E11: Pipeline Builder Demo App 📋 NEW
-
-**Business Requirement**: Visual demonstration of platform capabilities for stakeholder engagement
-**Status**: 📋 PROPOSED
-**Owner**: Geospatial Team (demo) → UI Team (production)
-**Documentation**: [PIPELINE_BUILDER_VISION.md](docs_claude/PIPELINE_BUILDER_VISION.md)
-
-**Strategic Purpose**:
-> "Show leadership what the backend can do. Demonstrate why proper UI investment unlocks value."
-
-**Buzzword Summary** (What we already have):
-- ✅ H3 Hexagonal Hierarchical Spatial Index
-- ✅ Cloud-Optimized GeoTIFFs (COG)
-- ✅ SpatioTemporal Asset Catalog (STAC)
-- ✅ OGC API Features & Styles
-- ✅ Declarative Pipeline Orchestration
-- ✅ Zero-Secret Azure Architecture
-- 🚧 Zonal Statistics at Scale
-- 📋 Columnar OLAP Export (GeoParquet)
-
-### Feature F11.1: Data Source Browser 📋
-
-**Deliverable**: STAC + Promoted datasets gallery view
-
-| Story | Status | Description | Backend Dep |
-|-------|--------|-------------|-------------|
-| S11.1.1 | 📋 | STAC collection browser with search | `/api/stac/*` ✅ |
-| S11.1.2 | 📋 | Promoted datasets gallery view | `/api/promote/gallery` ✅ |
-| S11.1.3 | 📋 | Preview thumbnails from TiTiler | TiTiler ✅ |
-| S11.1.4 | 📋 | Click to view on map | TiTiler ✅ |
-
----
-
-### Feature F11.2: Pipeline Composer 📋
-
-**Deliverable**: Visual job submission interface
-
-| Story | Status | Description | Backend Dep |
-|-------|--------|-------------|-------------|
-| S11.2.1 | 📋 | List available job types | `/api/jobs/types` (new) |
-| S11.2.2 | 📋 | Visual parameter form generator | Job.parameters_schema ✅ |
-| S11.2.3 | 📋 | Submit pipeline and show queue | `/api/jobs/submit/*` ✅ |
-| S11.2.4 | 📋 | Real-time job progress tracker | `/api/jobs/status/*` ✅ |
-
----
-
-### Feature F11.3: H3 Analytics Viewer 📋 (KEY FEATURE)
-
-**Deliverable**: Hexagonal analytics visualization with drill-down
-
-| Story | Status | Description | Backend Dep |
-|-------|--------|-------------|-------------|
-| S11.3.1 | 📋 | H3 hexagon layer (Mapbox GL + deck.gl) | `/api/h3/stats/*/cells` (F8.6) |
-| S11.3.2 | 📋 | Resolution switcher (zoom mapping) | H3 pyramid ✅ |
-| S11.3.3 | 📋 | Click hexagon → drill to children | H3 schema ✅ |
-| S11.3.4 | 📋 | Choropleth styling by stat value | OGC Styles ✅ |
-| S11.3.5 | 📋 | Country/Admin filter | `/api/h3/stats?iso3=` (F8.6) |
-| S11.3.6 | 📋 | Time slider for temporal stats | xarray service ✅ |
-
-**Blockers**: Requires E8.F8.3 (H3 aggregation handlers) + E8.F8.6 (H3 API)
-
----
-
-### Feature F11.4: Export & Interoperability 📋
-
-**Deliverable**: Export capabilities for external tools
-
-| Story | Status | Description | Backend Dep |
-|-------|--------|-------------|-------------|
-| S11.4.1 | 📋 | Export H3 stats as GeoParquet | `/api/h3/export` (F8.5) |
-| S11.4.2 | 📋 | DuckDB SQL preview (WASM) | Client-side |
-| S11.4.3 | 📋 | Copy tile URL for other tools | TiTiler URLs ✅ |
-| S11.4.4 | 📋 | STAC item JSON download | `/api/stac/items/*` ✅ |
-
----
-
-### E11 Technology Stack (Demo Quality)
-
-| Component | Technology | Rationale |
-|-----------|------------|-----------|
-| Frontend | Vanilla JS + Mapbox GL | "Demo quality" - no framework |
-| H3 Rendering | h3-js + deck.gl | Purpose-built for hexagons |
-| Hosting | Azure Static Web App | Free tier |
-| Backend | Existing APIs | Already production-ready |
-
----
-
-### E11 Dependencies
-
-```
-E8.F8.3: H3 Aggregation Handlers ──┬──▶ E11.F11.3: H3 Viewer
-E8.F8.6: H3 Analytics API ─────────┘
-E8.F8.5: GeoParquet Export ───────────▶ E11.F11.4: Export
-```
-
-**Critical Path**: F8.3 → F8.6 → F11.3 → Demo Ready
-
----
-
-### E11 Success Criteria
-
-Demo successful if leadership says:
-1. "Get real UI developers on this."
-2. "Can we show this to [external stakeholder]?"
-3. "When can we have a production version?"
-
----
-
----
-
 ## Epic E12: Interface Modernization ✅ Phase 1 Complete
 
 **Business Requirement**: Clean, maintainable admin interfaces with modern interactivity
@@ -2318,200 +2372,4 @@ After Phase 1, evaluate:
 
 ---
 
----
-
-## Epic E13: Pipeline Observability 📋 DESIGNED
-
-**Business Requirement**: Real-time metrics for long-running jobs with massive task counts
-**Status**: 📋 DESIGNED (28 DEC 2025)
-**Total Effort**: ~7-9 days
-
-**Problem Statement**: Jobs with 100s-1000s of tasks (H3 aggregation, FATHOM ETL, raster collections) lack visibility into:
-- Progress (which stage, how many tasks done)
-- Throughput (tasks/minute, cells/second)
-- ETA (when will it finish)
-- Health (error rates, stalled detection)
-
-**Architecture**:
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│  UNIVERSAL METRICS (all long-running jobs)                          │
-│  • stage progress, task counts, rates, ETA, error tracking         │
-└─────────────────────────────────────────────────────────────────────┘
-                              │ extends
-                              ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│  CONTEXT-SPECIFIC METRICS (domain knowledge)                        │
-│  • H3: cells processed, stats computed, current tile               │
-│  • FATHOM: tiles merged, bytes processed, current region           │
-│  • Raster: files processed, COGs created, output size              │
-└─────────────────────────────────────────────────────────────────────┘
-```
-
-**Feature Summary**:
-| Feature | Status | Description |
-|---------|--------|-------------|
-| F13.1 | 📋 | Config (env vars, debug mode) |
-| F13.2 | 📋 | Storage (job_metrics table, repository) |
-| F13.3 | 📋 | Tracker (base class, rate calculation, ETA) |
-| F13.4 | 📋 | HTTP API (metrics endpoints) |
-| F13.5 | 📋 | Dashboard (pipeline-monitor interface) |
-| F13.6 | 📋 | H3 Integration (handler instrumentation) |
-| F13.7 | 📋 | FATHOM Integration (handler instrumentation) |
-
----
-
-### Feature F13.1: Metrics Config 📋
-
-**Deliverable**: Configuration system for metrics collection
-
-| Story | Status | Description |
-|-------|--------|-------------|
-| S13.1.1 | 📋 | Create `config/metrics_config.py` with env vars |
-
-**Environment Variables**:
-- `METRICS_DEBUG_MODE` - Chattery stdout logging
-- `METRICS_ENABLED` - Master switch
-- `METRICS_SAMPLE_INTERVAL` - Snapshot frequency (seconds)
-- `METRICS_RETENTION_MINUTES` - Auto-cleanup threshold
-
----
-
-### Feature F13.2: Metrics Storage 📋
-
-**Deliverable**: Database storage for job metrics
-
-| Story | Status | Description |
-|-------|--------|-------------|
-| S13.2.1 | 📋 | Create `app.job_metrics` table in schema |
-| S13.2.2 | 📋 | Create `infrastructure/metrics_repository.py` |
-
-**Table Schema**:
-- Columns: job_id, timestamp, metric_type, payload (JSONB)
-- Indexes: job_id, timestamp, (job_id, timestamp)
-
-**Repository Methods**: write_snapshot(), get_latest(), get_history(), cleanup()
-
----
-
-### Feature F13.3: Job Progress Tracker 📋
-
-**Deliverable**: Base tracker class with rate calculation and ETA
-
-| Story | Status | Description |
-|-------|--------|-------------|
-| S13.3.1 | 📋 | Create `infrastructure/job_progress.py` - base tracker |
-| S13.3.2 | 📋 | Create `infrastructure/job_progress_contexts.py` - mixins |
-
-**Base Class Methods**:
-- Universal: start_stage(), task_started/completed/failed()
-- Rates: calculate tasks/min, error rate, ETA
-- Debug: emit_debug() - chattery when METRICS_DEBUG_MODE=true
-
-**Context Mixins**:
-- `H3AggregationContext` - cells, stats, tiles
-- `FathomETLContext` - tiles, bytes, regions
-- `RasterCollectionContext` - files, COGs, sizes
-
----
-
-### Feature F13.4: Metrics HTTP API 📋
-
-**Deliverable**: REST endpoints for metrics access
-
-| Story | Status | Description |
-|-------|--------|-------------|
-| S13.4.1 | 📋 | Create `web_interfaces/metrics/interface.py` |
-
-**Endpoints**:
-- `GET /api/metrics/jobs` - All active jobs with progress
-- `GET /api/metrics/jobs/{job_id}` - Single job details
-- `GET /api/metrics/jobs/{job_id}/events` - Event log (debug)
-
-**Response Schema**:
-```json
-{
-  "job_id": "abc123...",
-  "job_type": "h3_raster_aggregation",
-  "status": "processing",
-  "progress": {
-    "stage": 2, "total_stages": 3, "stage_name": "compute_stats",
-    "tasks_total": 5, "tasks_completed": 2, "tasks_failed": 0
-  },
-  "rates": {
-    "tasks_per_minute": 1.5,
-    "elapsed_seconds": 120,
-    "eta_seconds": 180
-  },
-  "context": {
-    "type": "h3_aggregation",
-    "cells_total": 68597,
-    "cells_processed": 25000,
-    "cells_rate_per_sec": 850,
-    "stats_computed": 100000
-  }
-}
-```
-
----
-
-### Feature F13.5: Pipeline Dashboard 📋
-
-**Deliverable**: Web interface for job monitoring
-
-| Story | Status | Description |
-|-------|--------|-------------|
-| S13.5.1 | 📋 | Create pipeline dashboard at `/api/interface/pipeline-monitor` |
-
-**UI Components**:
-- HTML + vanilla JS (no frameworks)
-- Auto-refresh every 30 seconds via fetch()
-- Job selector dropdown
-- Progress bars (stage, tasks, context-specific)
-- Rate display + ETA calculation
-- Event log (last 20 events)
-
----
-
-### Feature F13.6: H3 Integration 📋
-
-**Deliverable**: Instrument H3 aggregation handlers with metrics
-
-| Story | Status | Description |
-|-------|--------|-------------|
-| S13.6.1 | 📋 | Integrate `H3AggregationTracker` into `handler_raster_zonal.py` |
-| S13.6.2 | 📋 | Integrate into `handler_inventory_cells.py` |
-
-**Tracked Metrics**: cells_processed, stats_computed, current_tile
-
----
-
-### Feature F13.7: FATHOM Integration 📋
-
-**Deliverable**: Instrument FATHOM ETL handlers with metrics
-
-| Story | Status | Description |
-|-------|--------|-------------|
-| S13.7.1 | 📋 | Integrate `FathomETLTracker` into FATHOM handlers |
-
-**Tracked Metrics**: tiles_merged, bytes_processed, current_region
-
----
-
-**Debug Mode Output** (when `METRICS_DEBUG_MODE=true`):
-```
-[METRICS] Job abc123 started: h3_raster_aggregation
-[METRICS] Stage 2/3: compute_stats (5 tasks)
-[METRICS]   Task batch-0 started
-[METRICS]   Processing tile: Copernicus_DSM_COG_10_S02_00_E029_00
-[METRICS]     Batch 0: 1000 cells
-[METRICS]     ✓ 4000 stats @ 842 cells/sec
-[METRICS]   Task batch-0 completed (2.3s, 2000 cells, 8000 stats)
-[METRICS]   Progress: 2000/68597 cells (2.9%), ETA: 74s
-```
-
----
-
----
-
-**Last Updated**: 28 DEC 2025 (E8 updated, E13 added)
+**Last Updated**: 30 DEC 2025 (E11 absorbed into E8 as F8.13-15, duplicate E13 section removed)

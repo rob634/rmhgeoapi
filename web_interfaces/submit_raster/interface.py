@@ -268,6 +268,9 @@ class SubmitRasterInterface(BaseInterface):
             blob_name = get_param('blob_name')
             container_name = get_param('container_name')
 
+            # Optional metadata (service_name now required)
+            service_name = get_param('service_name')
+
             # Validate required fields
             if not dataset_id:
                 return self._render_submit_error("Missing dataset_id. Please enter a DDH dataset identifier.")
@@ -277,6 +280,8 @@ class SubmitRasterInterface(BaseInterface):
                 return self._render_submit_error("Missing version_id. Please enter a DDH version identifier.")
             if not blob_name:
                 return self._render_submit_error("Missing blob_name. Please select a file.")
+            if not service_name:
+                return self._render_submit_error("Missing service_name. Please enter a human-readable name for the dataset.")
 
             # Build Platform API payload
             platform_payload = {
@@ -287,14 +292,13 @@ class SubmitRasterInterface(BaseInterface):
                 'file_name': blob_name
             }
 
-            # Optional metadata
-            service_name = get_param('service_name')
+            # Optional metadata (service_name already extracted above as required)
             description = get_param('description')
             access_level = get_param('access_level')
             tags = get_param('tags')
 
-            if service_name:
-                platform_payload['service_name'] = service_name
+            # service_name is now required
+            platform_payload['service_name'] = service_name
             if description:
                 platform_payload['description'] = description
             if access_level:
@@ -492,47 +496,51 @@ class SubmitRasterInterface(BaseInterface):
                         <p class="section-subtitle">Browse and select a raster file</p>
                     </div>
 
-                    <!-- Controls -->
-                    <div class="controls">
-                        <div class="control-group">
-                            <label for="zone-select">Zone:</label>
-                            <select id="zone-select" name="zone" class="filter-select"
-                                    hx-get="/api/interface/submit-raster?fragment=containers"
-                                    hx-target="#container-select"
-                                    hx-trigger="change"
-                                    hx-indicator="#container-spinner"
-                                    hx-include="[name='zone']"
-                                    onchange="updateLoadButton()">
-                                <option value="">Select zone...</option>
-                                <option value="bronze">🟤 Bronze (raw uploads)</option>
-                                <option value="silver">⚪ Silver (processed)</option>
-                            </select>
-                            <span id="container-spinner" class="htmx-indicator spinner-sm"></span>
+                    <!-- Controls - Two rows -->
+                    <div class="controls-grid">
+                        <div class="controls-row">
+                            <div class="control-group">
+                                <label for="zone-select">Zone:</label>
+                                <select id="zone-select" name="zone" class="filter-select"
+                                        hx-get="/api/interface/submit-raster?fragment=containers"
+                                        hx-target="#container-select"
+                                        hx-trigger="change"
+                                        hx-indicator="#container-spinner"
+                                        hx-include="[name='zone']"
+                                        onchange="updateLoadButton()">
+                                    <option value="">Select zone...</option>
+                                    <option value="bronze">🟤 Bronze (raw uploads)</option>
+                                    <option value="silver">⚪ Silver (processed)</option>
+                                </select>
+                                <span id="container-spinner" class="htmx-indicator spinner-sm"></span>
+                            </div>
+
+                            <div class="control-group">
+                                <label for="container-select">Container:</label>
+                                <select id="container-select" name="container" class="filter-select"
+                                        onchange="updateLoadButton()">
+                                    <option value="">Select zone first</option>
+                                </select>
+                            </div>
                         </div>
 
-                        <div class="control-group">
-                            <label for="container-select">Container:</label>
-                            <select id="container-select" name="container" class="filter-select"
-                                    onchange="updateLoadButton()">
-                                <option value="">Select zone first</option>
-                            </select>
-                        </div>
+                        <div class="controls-row">
+                            <div class="control-group filter-group">
+                                <label for="prefix-input">Path Filter:</label>
+                                <input type="text" id="prefix-input" name="prefix" class="filter-input"
+                                       placeholder="e.g., rasters/">
+                            </div>
 
-                        <div class="control-group">
-                            <label for="prefix-input">Path Filter:</label>
-                            <input type="text" id="prefix-input" name="prefix" class="filter-input"
-                                   placeholder="e.g., rasters/">
+                            <button id="load-btn" class="refresh-button" disabled
+                                    hx-get="/api/interface/submit-raster?fragment=files"
+                                    hx-target="#files-tbody"
+                                    hx-trigger="click"
+                                    hx-indicator="#loading-spinner"
+                                    hx-include="#zone-select, #container-select, #prefix-input"
+                                    onclick="showFilesTable()">
+                                🔄 Load Files
+                            </button>
                         </div>
-
-                        <button id="load-btn" class="refresh-button" disabled
-                                hx-get="/api/interface/submit-raster?fragment=files"
-                                hx-target="#files-tbody"
-                                hx-trigger="click"
-                                hx-indicator="#loading-spinner"
-                                hx-include="#zone-select, #container-select, #prefix-input"
-                                onclick="showFilesTable()">
-                            🔄 Load Files
-                        </button>
                     </div>
 
                     <!-- Stats Banner -->
@@ -635,36 +643,68 @@ class SubmitRasterInterface(BaseInterface):
                             </div>
                         </div>
 
-                        <!-- Raster Type -->
-                        <div class="form-group">
-                            <label for="raster_type">Raster Type</label>
-                            <select id="raster_type" name="raster_type">
-                                <option value="auto" selected>Auto-detect</option>
-                                <option value="dem">DEM (elevation)</option>
-                                <option value="rgb">RGB imagery</option>
-                                <option value="rgba">RGBA imagery</option>
-                                <option value="multispectral">Multispectral</option>
-                                <option value="categorical">Categorical (landcover)</option>
-                                <option value="nir">Near-infrared</option>
-                            </select>
-                            <span class="field-hint">Auto-detect works for most files</span>
+                        <!-- Metadata Section (always open) -->
+                        <div class="metadata-section-open">
+                            <div class="form-group-header">Metadata</div>
+                            <div class="metadata-fields">
+                                <div class="form-group required">
+                                    <label for="service_name">Service Name *</label>
+                                    <input type="text" id="service_name" name="service_name" required
+                                           placeholder="Human-readable dataset name">
+                                    <span class="field-hint">Display name for the dataset (required)</span>
+                                </div>
+                                <div class="form-group">
+                                    <label for="description">Description</label>
+                                    <textarea id="description" name="description" rows="2"
+                                              placeholder="Full dataset description"></textarea>
+                                </div>
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label for="access_level">Access Level</label>
+                                        <select id="access_level" name="access_level">
+                                            <option value="">Not specified</option>
+                                            <option value="OUO">OUO (Official Use Only)</option>
+                                            <option value="PUBLIC">PUBLIC</option>
+                                            <option value="restricted">Restricted</option>
+                                        </select>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="tags">Tags</label>
+                                        <input type="text" id="tags" name="tags"
+                                               placeholder="e.g., aerial, rgb, 2024">
+                                    </div>
+                                </div>
+                            </div>
                         </div>
 
-                        <!-- Output Tier -->
-                        <div class="form-group">
-                            <label for="output_tier">Output Tier</label>
-                            <select id="output_tier" name="output_tier" onchange="toggleJpegQuality()">
-                                <option value="analysis" selected>Analysis (LZW compression)</option>
-                                <option value="visualization">Visualization (JPEG for web)</option>
-                                <option value="archive">Archive (DEFLATE, max compression)</option>
-                            </select>
-                            <span class="field-hint">Analysis tier recommended for most use cases</span>
-                        </div>
-
-                        <!-- CRS Section -->
-                        <details class="crs-section">
-                            <summary>CRS Options</summary>
-                            <div class="crs-fields">
+                        <!-- Processing Parameters Section -->
+                        <div class="processing-section">
+                            <div class="form-group-header">Processing Parameters</div>
+                            <div class="processing-fields">
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label for="raster_type">Raster Type</label>
+                                        <select id="raster_type" name="raster_type">
+                                            <option value="auto" selected>Auto-detect</option>
+                                            <option value="dem">DEM (elevation)</option>
+                                            <option value="rgb">RGB imagery</option>
+                                            <option value="rgba">RGBA imagery</option>
+                                            <option value="multispectral">Multispectral</option>
+                                            <option value="categorical">Categorical (landcover)</option>
+                                            <option value="nir">Near-infrared</option>
+                                        </select>
+                                        <span class="field-hint">Auto-detect works for most files</span>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="output_tier">Output Tier</label>
+                                        <select id="output_tier" name="output_tier">
+                                            <option value="analysis" selected>Analysis (LZW)</option>
+                                            <option value="visualization">Visualization (JPEG)</option>
+                                            <option value="archive">Archive (DEFLATE)</option>
+                                        </select>
+                                        <span class="field-hint">Analysis tier recommended</span>
+                                    </div>
+                                </div>
                                 <div class="form-group">
                                     <label for="input_crs">Input CRS (optional)</label>
                                     <input type="text" id="input_crs" name="input_crs"
@@ -672,38 +712,7 @@ class SubmitRasterInterface(BaseInterface):
                                     <span class="field-hint">Override if source CRS is missing or wrong</span>
                                 </div>
                             </div>
-                        </details>
-
-                        <!-- Metadata Section (collapsible) -->
-                        <details class="metadata-section">
-                            <summary>Optional Metadata</summary>
-                            <div class="metadata-fields">
-                                <div class="form-group">
-                                    <label for="service_name">Service Name</label>
-                                    <input type="text" id="service_name" name="service_name"
-                                           placeholder="Human-readable dataset name">
-                                </div>
-                                <div class="form-group">
-                                    <label for="description">Description</label>
-                                    <textarea id="description" name="description" rows="2"
-                                              placeholder="Full dataset description"></textarea>
-                                </div>
-                                <div class="form-group">
-                                    <label for="access_level">Access Level</label>
-                                    <select id="access_level" name="access_level">
-                                        <option value="">Not specified</option>
-                                        <option value="OUO">OUO (Official Use Only)</option>
-                                        <option value="PUBLIC">PUBLIC</option>
-                                        <option value="restricted">Restricted</option>
-                                    </select>
-                                </div>
-                                <div class="form-group">
-                                    <label for="tags">Tags</label>
-                                    <input type="text" id="tags" name="tags"
-                                           placeholder="Comma-separated tags, e.g., aerial,rgb,2024">
-                                </div>
-                            </div>
-                        </details>
+                        </div>
 
                         <!-- Platform API cURL Section (Prominent) -->
                         <div class="curl-section-prominent" id="curl-section">
@@ -742,10 +751,10 @@ class SubmitRasterInterface(BaseInterface):
     def _generate_custom_css(self) -> str:
         """Generate custom CSS for Submit Raster interface."""
         return """
-        /* Two-column layout */
+        /* Two-column layout - equal width columns */
         .two-column-layout {
             display: grid;
-            grid-template-columns: 1fr 400px;
+            grid-template-columns: 1fr 1fr;
             gap: 24px;
         }
 
@@ -788,13 +797,18 @@ class SubmitRasterInterface(BaseInterface):
             box-shadow: 0 1px 3px rgba(0,0,0,0.1);
         }
 
-        /* Controls */
-        .controls {
+        /* Controls - Grid layout */
+        .controls-grid {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            margin-bottom: 16px;
+        }
+
+        .controls-row {
             display: flex;
             gap: 16px;
-            flex-wrap: wrap;
             align-items: flex-end;
-            margin-bottom: 16px;
         }
 
         .control-group {
@@ -802,6 +816,11 @@ class SubmitRasterInterface(BaseInterface):
             flex-direction: column;
             gap: 4px;
             position: relative;
+            flex: 1;
+        }
+
+        .control-group.filter-group {
+            flex: 1;
         }
 
         .control-group label {
@@ -818,7 +837,7 @@ class SubmitRasterInterface(BaseInterface):
             border-radius: 3px;
             font-size: 14px;
             color: var(--ds-navy);
-            min-width: 150px;
+            width: 100%;
         }
 
         /* Stats banner */
@@ -1200,27 +1219,48 @@ class SubmitRasterInterface(BaseInterface):
             gap: 12px;
         }
 
-        /* Metadata section */
-        .metadata-section {
+        /* Metadata section (always open) */
+        .metadata-section-open {
             border: 1px solid var(--ds-gray-light);
-            border-radius: 4px;
+            border-radius: 6px;
             margin-bottom: 16px;
+            background: white;
         }
 
-        .metadata-section summary {
+        .metadata-section-open .form-group-header {
             padding: 12px 16px;
-            font-weight: 600;
-            color: var(--ds-navy);
-            cursor: pointer;
             background: var(--ds-bg);
-        }
-
-        .metadata-section[open] summary {
             border-bottom: 1px solid var(--ds-gray-light);
+            border-radius: 6px 6px 0 0;
+            margin-bottom: 0;
         }
 
         .metadata-fields {
             padding: 16px;
+        }
+
+        /* Processing Parameters section */
+        .processing-section {
+            border: 1px solid var(--ds-gray-light);
+            border-radius: 6px;
+            margin-bottom: 16px;
+            background: white;
+        }
+
+        .processing-section .form-group-header {
+            padding: 12px 16px;
+            background: var(--ds-bg);
+            border-bottom: 1px solid var(--ds-gray-light);
+            border-radius: 6px 6px 0 0;
+            margin-bottom: 0;
+        }
+
+        .processing-fields {
+            padding: 16px;
+        }
+
+        .processing-fields .form-group:last-child {
+            margin-bottom: 0;
         }
 
         /* Prominent cURL Section */
@@ -1358,9 +1398,10 @@ class SubmitRasterInterface(BaseInterface):
             const datasetId = document.getElementById('dataset_id').value;
             const resourceId = document.getElementById('resource_id').value;
             const versionId = document.getElementById('version_id').value;
+            const serviceName = document.getElementById('service_name').value;
 
             const submitBtn = document.getElementById('submit-btn');
-            submitBtn.disabled = !(blobName && datasetId && resourceId && versionId);
+            submitBtn.disabled = !(blobName && datasetId && resourceId && versionId && serviceName);
         }
 
         // Select a file from the browser

@@ -281,6 +281,9 @@ from stac_api import get_stac_triggers
 # Vector Viewer - Standalone module (13 NOV 2025) - OGC Features API
 from vector_viewer import get_vector_viewer_triggers
 
+# Raster Collection Viewer - STAC-integrated raster viewer (30 DEC 2025) - F2.9
+from raster_collection_viewer import get_raster_collection_viewer_triggers
+
 # Raster API - Service Layer convenience wrappers for TiTiler (18 DEC 2025)
 from raster_api import get_raster_triggers
 
@@ -1902,6 +1905,44 @@ def vector_collection_viewer(req: func.HttpRequest) -> func.HttpResponse:
         https://rmhazuregeoapi-.../api/vector/viewer?collection=qa_test_chunk_5000
     """
     return _vector_viewer_handler(req)
+
+
+# ============================================================================
+# RASTER COLLECTION VIEWER (30 DEC 2025) - F2.9
+# ============================================================================
+# STAC-integrated raster viewer with TiTiler XYZ tiles
+# Provides interactive Leaflet map for browsing STAC raster collections
+# with smart TiTiler URL generation based on raster metadata (rmh:*)
+# ============================================================================
+
+# Get trigger configuration
+_raster_collection_viewer_triggers = get_raster_collection_viewer_triggers()
+_raster_collection_viewer_handler = _raster_collection_viewer_triggers[0]['handler']
+
+
+@app.route(route="raster/viewer", methods=["GET"])
+def raster_collection_viewer(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Raster collection viewer for data curators.
+
+    GET /api/raster/viewer?collection={collection_id}
+
+    Query Parameters:
+        collection (required): STAC collection ID
+
+    Returns:
+        HTML page with Leaflet map showing raster items via TiTiler XYZ tiles.
+        Includes band selection, rescale, and colormap controls.
+
+    Use Case:
+        Data curators can browse STAC raster collections with proper
+        visualization based on raster type (DEM, RGB, multi-band).
+        Uses rmh:* STAC properties for smart TiTiler URL generation.
+
+    Example:
+        https://rmhazuregeoapi-.../api/raster/viewer?collection=aerial-2024
+    """
+    return _raster_collection_viewer_handler(req)
 
 
 # ============================================================================

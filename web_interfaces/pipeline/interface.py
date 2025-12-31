@@ -579,6 +579,37 @@ class PipelineInterface(BaseInterface):
                             <span class="btn-placeholder">🗂️ Coming Soon</span>
                         </div>
                     </div>
+
+                    <!-- H3 Pipeline -->
+                    <div class="pipeline-card">
+                        <h3><span class="icon">⬡</span> H3 Pipeline</h3>
+                        <p class="description">
+                            Aggregate vector features into Uber H3 hexagonal cells for
+                            spatial analytics, visualization, and efficient geospatial indexing.
+                        </p>
+                        <div class="pipeline-stages">
+                            <span class="stage">Select Layer</span>
+                            <span class="stage-arrow">→</span>
+                            <span class="stage">Configure H3</span>
+                            <span class="stage-arrow">→</span>
+                            <span class="stage">Aggregate</span>
+                            <span class="stage-arrow">→</span>
+                            <span class="stage">Store</span>
+                        </div>
+                        <div class="pipeline-stats">
+                            <div class="stat">
+                                <div class="stat-value" id="h3-24h">--</div>
+                                <div class="stat-label">Last 24h</div>
+                            </div>
+                            <div class="stat">
+                                <div class="stat-value" id="h3-success">--</div>
+                                <div class="stat-label">Success Rate</div>
+                            </div>
+                        </div>
+                        <div class="pipeline-action">
+                            <a href="/api/interface/h3" class="btn btn-submit">⬡ H3 Pipeline</a>
+                        </div>
+                    </div>
                 </div>
             </div>
 

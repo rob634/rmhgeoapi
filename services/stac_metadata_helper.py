@@ -5,13 +5,22 @@ Consolidates scattered metadata generation into a clean, type-safe architecture:
     - Platform metadata (DDH identifiers) → platform:* properties
     - App metadata (job linkage) → app:* properties
     - Geographic metadata (ISO3 codes) → geo:* properties
+    - Raster visualization metadata (band info, rescale, colormap) → rmh:* properties
     - Visualization metadata (TiTiler URLs) → links and assets
+
+Smart TiTiler URL Generation (F2.9 - 30 DEC 2025):
+    - Single-band DEMs → rescale + terrain colormap
+    - Single-band float → rescale + viridis colormap
+    - 3-band RGB → no extra params
+    - 3-band BGR → bidx reordering
+    - 4+ bands → bidx=1,2,3 or custom rgb_bands
 
 Exports:
     STACMetadataHelper: Main helper class for augmenting STAC items
     PlatformMetadata: Platform identifier dataclass
     AppMetadata: Job linkage dataclass
     VisualizationMetadata: TiTiler URL dataclass
+    RasterVisualizationMetadata: Raster band/type info for smart URLs
 """
 
 import logging
@@ -145,6 +154,113 @@ class AppMetadata:
             props['app:job_id'] = self.job_id
         if self.job_type:
             props['app:job_type'] = self.job_type
+        return props
+
+
+@dataclass
+class RasterVisualizationMetadata:
+    """
+    Raster visualization metadata for STAC properties.
+
+    Namespace: rmh:*
+    Source: Raster validation results + rio-stac extraction
+
+    Used to generate smart TiTiler URLs based on raster characteristics.
+    Stored in STAC item properties for downstream viewer use.
+
+    Attributes:
+        raster_type: Detected type (rgb, rgba, dem, nir, multispectral, categorical)
+        band_count: Number of bands
+        dtype: Data type (uint8, uint16, float32, etc.)
+        colorinterp: Color interpretation per band (red, green, blue, alpha, gray, etc.)
+        rgb_bands: Recommended band indices for RGB display (1-indexed)
+        rescale: Min/max rescale values with source info
+        colormap: Recommended colormap name for single-band
+        nodata: Nodata value if known
+    """
+    raster_type: Optional[str] = None
+    band_count: Optional[int] = None
+    dtype: Optional[str] = None
+    colorinterp: Optional[List[str]] = None
+    rgb_bands: Optional[List[int]] = None
+    rescale: Optional[Dict[str, Any]] = None
+    colormap: Optional[str] = None
+    nodata: Optional[float] = None
+
+    @classmethod
+    def from_validation_result(cls, validation_result: Dict[str, Any]) -> 'RasterVisualizationMetadata':
+        """
+        Factory method to extract RasterVisualizationMetadata from raster validation result.
+
+        Args:
+            validation_result: Result dict from raster_validation.validate_raster()
+
+        Returns:
+            RasterVisualizationMetadata populated from validation data
+        """
+        result = validation_result.get('result', {})
+        raster_type_info = result.get('raster_type', {})
+
+        # Extract detected type
+        detected_type = raster_type_info.get('detected_type', 'unknown')
+
+        # Determine colormap based on raster type
+        colormap = None
+        if detected_type == 'dem':
+            colormap = 'terrain'
+        elif detected_type in ['ndvi', 'vegetation_index']:
+            colormap = 'rdylgn'
+        elif result.get('band_count', 0) == 1:
+            colormap = 'viridis'
+
+        # Determine RGB bands for multi-band imagery
+        rgb_bands = None
+        band_count = result.get('band_count', 0)
+        if band_count == 4:
+            # RGBA - use first 3 bands
+            rgb_bands = [1, 2, 3]
+        elif band_count == 8:
+            # WorldView-3: use bands 5,3,2 for natural color
+            rgb_bands = [5, 3, 2]
+        elif band_count >= 10:
+            # Sentinel-2/Landsat style: use bands 4,3,2 for natural color
+            rgb_bands = [4, 3, 2]
+
+        return cls(
+            raster_type=detected_type,
+            band_count=result.get('band_count'),
+            dtype=result.get('dtype'),
+            colorinterp=None,  # Not in validation result, comes from rio-stac
+            rgb_bands=rgb_bands,
+            rescale=None,  # Populated later from statistics
+            colormap=colormap,
+            nodata=result.get('nodata')
+        )
+
+    def to_stac_properties(self) -> Dict[str, Any]:
+        """
+        Convert to STAC properties dict with rmh:* prefix.
+
+        Returns:
+            Dict of namespaced properties (only non-None values)
+        """
+        props = {}
+        if self.raster_type:
+            props['rmh:raster_type'] = self.raster_type
+        if self.band_count is not None:
+            props['rmh:band_count'] = self.band_count
+        if self.dtype:
+            props['rmh:dtype'] = self.dtype
+        if self.colorinterp:
+            props['rmh:colorinterp'] = self.colorinterp
+        if self.rgb_bands:
+            props['rmh:rgb_bands'] = self.rgb_bands
+        if self.rescale:
+            props['rmh:rescale'] = self.rescale
+        if self.colormap:
+            props['rmh:colormap'] = self.colormap
+        if self.nodata is not None:
+            props['rmh:nodata'] = self.nodata
         return props
 
 
@@ -326,10 +442,101 @@ class STACMetadataHelper:
 
         return attribution.to_stac_properties()
 
+    def build_raster_visualization_properties(
+        self,
+        raster_meta: RasterVisualizationMetadata
+    ) -> Dict[str, Any]:
+        """
+        Build STAC properties from raster visualization metadata.
+
+        Args:
+            raster_meta: RasterVisualizationMetadata with band/type info
+
+        Returns:
+            Dict of rmh:* prefixed properties
+        """
+        return raster_meta.to_stac_properties()
+
+    def _build_titiler_url_params(
+        self,
+        raster_meta: Optional[RasterVisualizationMetadata] = None
+    ) -> str:
+        """
+        Build TiTiler URL parameters based on raster metadata.
+
+        Implements the decision tree from TITILER-URL-GUIDE.md:
+        - 1 band + float → rescale + colormap
+        - 1 band + uint8 → grayscale (no params)
+        - 3 bands RGB → no params
+        - 4+ bands → bidx=1&bidx=2&bidx=3 (or custom rgb_bands)
+
+        Args:
+            raster_meta: Optional raster metadata for smart URL generation
+
+        Returns:
+            URL parameter string (without leading &)
+        """
+        if not raster_meta:
+            return ""
+
+        params = []
+        band_count = raster_meta.band_count or 0
+        dtype = raster_meta.dtype or ""
+        raster_type = raster_meta.raster_type or ""
+        colorinterp = raster_meta.colorinterp or []
+
+        # Single band handling
+        if band_count == 1:
+            # Add rescale if available
+            if raster_meta.rescale:
+                min_val = raster_meta.rescale.get('min')
+                max_val = raster_meta.rescale.get('max')
+                if min_val is not None and max_val is not None:
+                    params.append(f"rescale={min_val},{max_val}")
+
+            # Add colormap based on type
+            if raster_meta.colormap:
+                params.append(f"colormap_name={raster_meta.colormap}")
+            elif raster_type == 'dem':
+                params.append("colormap_name=terrain")
+            elif dtype in ['float32', 'float64', 'int16', 'int32']:
+                params.append("colormap_name=viridis")
+
+        # Multi-band handling (3+ bands)
+        elif band_count >= 3:
+            # Use custom rgb_bands if specified
+            if raster_meta.rgb_bands:
+                for band_idx in raster_meta.rgb_bands:
+                    params.append(f"bidx={band_idx}")
+
+            # Check colorinterp for BGR ordering
+            elif len(colorinterp) >= 3:
+                if colorinterp[:3] == ['blue', 'green', 'red']:
+                    # BGR order - reorder to RGB
+                    params.extend(["bidx=3", "bidx=2", "bidx=1"])
+                elif band_count == 4 and colorinterp[3] != 'alpha':
+                    # 4th band is not alpha - exclude it
+                    params.extend(["bidx=1", "bidx=2", "bidx=3"])
+
+            # Default for 4+ band without colorinterp info
+            elif band_count >= 4 and not colorinterp:
+                # Assume first 3 bands are RGB
+                params.extend(["bidx=1", "bidx=2", "bidx=3"])
+
+            # Add rescale for non-uint8 data
+            if dtype not in ['uint8', ''] and raster_meta.rescale:
+                min_val = raster_meta.rescale.get('min')
+                max_val = raster_meta.rescale.get('max')
+                if min_val is not None and max_val is not None:
+                    params.append(f"rescale={min_val},{max_val}")
+
+        return "&".join(params)
+
     def build_titiler_links_cog(
         self,
         container: str,
-        blob_name: str
+        blob_name: str,
+        raster_meta: Optional[RasterVisualizationMetadata] = None
     ) -> Tuple[List[Dict], Dict[str, Any]]:
         """
         Generate TiTiler visualization links and assets for single COG.
@@ -337,6 +544,7 @@ class STACMetadataHelper:
         Args:
             container: Azure container name
             blob_name: Blob path within container
+            raster_meta: Optional raster metadata for smart URL generation
 
         Returns:
             Tuple of (links list, assets dict) for STAC item
@@ -345,24 +553,29 @@ class STACMetadataHelper:
         vsiaz_path = f"/vsiaz/{container}/{blob_name}"
         encoded = urllib.parse.quote(vsiaz_path, safe='')
 
+        # Build smart URL parameters based on raster type
+        extra_params = self._build_titiler_url_params(raster_meta)
+        param_suffix = f"&{extra_params}" if extra_params else ""
+
         links = [
             {
                 'rel': 'preview',
-                'href': f"{base}/cog/WebMercatorQuad/map.html?url={encoded}",
+                'href': f"{base}/cog/WebMercatorQuad/map.html?url={encoded}{param_suffix}",
                 'type': 'text/html',
                 'title': 'Interactive map viewer (TiTiler)'
             },
             {
                 'rel': 'tilejson',
-                'href': f"{base}/cog/WebMercatorQuad/tilejson.json?url={encoded}",
+                'href': f"{base}/cog/WebMercatorQuad/tilejson.json?url={encoded}{param_suffix}",
                 'type': 'application/json',
                 'title': 'TileJSON specification'
             }
         ]
 
+        # Thumbnail also uses smart params for proper rendering
         assets = {
             'thumbnail': {
-                'href': f"{base}/cog/preview.png?url={encoded}&max_size=256",
+                'href': f"{base}/cog/preview.png?url={encoded}&max_size=256{param_suffix}",
                 'type': 'image/png',
                 'roles': ['thumbnail'],
                 'title': 'Thumbnail preview'
@@ -429,6 +642,7 @@ class STACMetadataHelper:
         blob_name: Optional[str] = None,
         platform: Optional[PlatformMetadata] = None,
         app: Optional[AppMetadata] = None,
+        raster: Optional[RasterVisualizationMetadata] = None,
         include_iso3: bool = True,
         include_titiler: bool = True
     ) -> Dict[str, Any]:
@@ -444,6 +658,7 @@ class STACMetadataHelper:
             blob_name: Blob path for TiTiler URLs
             platform: Platform-layer metadata (DDH)
             app: Application-layer metadata (job linkage)
+            raster: Raster visualization metadata (rmh:* properties + smart TiTiler URLs)
             include_iso3: Add ISO3 country codes (default True)
             include_titiler: Add TiTiler visualization links (default True)
 
@@ -470,6 +685,12 @@ class STACMetadataHelper:
             item_dict['properties'].update(props)
             logger.debug(f"   Added app metadata: {list(props.keys())}")
 
+        # Add raster visualization metadata (rmh:*)
+        if raster:
+            props = self.build_raster_visualization_properties(raster)
+            item_dict['properties'].update(props)
+            logger.debug(f"   Added raster visualization metadata: {list(props.keys())}")
+
         # Add geographic metadata (ISO3)
         if include_iso3 and bbox:
             props = self.build_geographic_properties(bbox=bbox)
@@ -477,9 +698,9 @@ class STACMetadataHelper:
                 item_dict['properties'].update(props)
                 logger.debug(f"   Added geographic metadata: {list(props.keys())}")
 
-        # Add TiTiler visualization
+        # Add TiTiler visualization (with smart URLs if raster metadata provided)
         if include_titiler and container and blob_name:
-            links, assets = self.build_titiler_links_cog(container, blob_name)
+            links, assets = self.build_titiler_links_cog(container, blob_name, raster)
 
             if 'links' not in item_dict:
                 item_dict['links'] = []
@@ -582,5 +803,6 @@ __all__ = [
     'STACMetadataHelper',
     'PlatformMetadata',
     'AppMetadata',
-    'VisualizationMetadata'
+    'VisualizationMetadata',
+    'RasterVisualizationMetadata'
 ]

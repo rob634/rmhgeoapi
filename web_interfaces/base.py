@@ -1859,10 +1859,9 @@ class BaseInterface(ABC):
             This is called automatically by wrap_html() unless
             include_navbar=False is specified.
 
-        Navigation structure (29 DEC 2025):
-            - System Status (includes links to Storage, Queues, Database)
-            - Pipelines (includes Submit Vector, Submit Raster, Jobs, Tasks)
-            - H3
+        Navigation structure (30 DEC 2025):
+            - System (includes links to Storage, Queues, Database)
+            - Pipelines (includes Submit Vector, Submit Raster, Jobs, Tasks, H3 Pipeline)
             - STAC
             - OGC Features (includes link to Promote Vector)
             - Gallery
@@ -1886,7 +1885,7 @@ class BaseInterface(ABC):
                           transition: color 0.2s;"
                    onmouseover="this.style.color='#00A3DA'"
                    onmouseout="this.style.color='#0071BC'">
-                    System Status
+                    System
                 </a>
                 <a href="/api/interface/pipeline"
                    style="color: #0071BC; text-decoration: none; font-weight: 600;
@@ -1894,13 +1893,6 @@ class BaseInterface(ABC):
                    onmouseover="this.style.color='#00A3DA'"
                    onmouseout="this.style.color='#0071BC'">
                     Pipelines
-                </a>
-                <a href="/api/interface/h3"
-                   style="color: #0071BC; text-decoration: none; font-weight: 600;
-                          transition: color 0.2s;"
-                   onmouseover="this.style.color='#00A3DA'"
-                   onmouseout="this.style.color='#0071BC'">
-                    H3
                 </a>
                 <a href="/api/interface/stac"
                    style="color: #0071BC; text-decoration: none; font-weight: 600;

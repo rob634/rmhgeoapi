@@ -119,13 +119,15 @@ class VectorViewerService:
         else:
             center_lon, center_lat = 0, 0
 
-        # Build items API URL
+        # Build API URLs
         if host_url:
             items_url = f"{host_url}{self.ogc_api_base_url}/collections/{collection_id}/items"
+            styles_url = f"{host_url}{self.ogc_api_base_url}/collections/{collection_id}/styles"
         else:
             items_url = f"{self.ogc_api_base_url}/collections/{collection_id}/items"
+            styles_url = f"{self.ogc_api_base_url}/collections/{collection_id}/styles"
 
-        # Generate HTML
+        # Generate HTML with 30/70 layout
         html = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -139,6 +141,18 @@ class VectorViewerService:
           crossorigin=""/>
 
     <style>
+        :root {{
+            --ds-navy: #053657;
+            --ds-blue: #0071BC;
+            --ds-light-blue: #00A3DA;
+            --ds-gray: #626F86;
+            --ds-gray-light: #e9ecef;
+            --ds-bg: #f8f9fa;
+            --ds-success: #10B981;
+            --ds-error: #DC2626;
+            --ds-warning: #F59E0B;
+        }}
+
         * {{
             margin: 0;
             padding: 0;
@@ -146,230 +160,711 @@ class VectorViewerService:
         }}
 
         body {{
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: #f5f5f5;
-        }}
-
-        #map {{
+            font-family: "Open Sans", -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--ds-bg);
             height: 100vh;
-            width: 100%;
+            overflow: hidden;
         }}
 
-        /* Metadata Panel */
-        .metadata-panel {{
-            position: absolute;
-            top: 10px;
-            right: 10px;
+        /* Main Layout - 30/70 split */
+        .app-container {{
+            display: flex;
+            height: 100vh;
+        }}
+
+        /* Right Sidebar - 30% */
+        .sidebar {{
+            width: 30%;
+            min-width: 320px;
+            max-width: 420px;
             background: white;
-            padding: 15px;
-            border-radius: 8px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
-            z-index: 1000;
-            max-width: 350px;
-            max-height: 90vh;
+            border-left: 1px solid var(--ds-gray-light);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }}
+
+        /* Sidebar Header */
+        .sidebar-header {{
+            padding: 20px;
+            background: linear-gradient(135deg, var(--ds-navy) 0%, #0a4a7a 100%);
+            color: white;
+        }}
+
+        .sidebar-header h1 {{
+            font-size: 18px;
+            font-weight: 700;
+            margin-bottom: 4px;
+        }}
+
+        .sidebar-header .collection-id {{
+            font-size: 12px;
+            opacity: 0.8;
+            font-family: 'Courier New', monospace;
+        }}
+
+        /* Sidebar Content */
+        .sidebar-content {{
+            flex: 1;
             overflow-y: auto;
+            padding: 20px;
         }}
 
-        .metadata-panel h3 {{
-            margin: 0 0 10px 0;
-            font-size: 16px;
-            color: #333;
-            border-bottom: 2px solid #3388ff;
-            padding-bottom: 5px;
+        /* Section Cards */
+        .section-card {{
+            background: white;
+            border: 1px solid var(--ds-gray-light);
+            border-radius: 8px;
+            margin-bottom: 16px;
+            overflow: hidden;
         }}
 
-        .metadata-row {{
-            margin-bottom: 8px;
+        .section-header {{
+            padding: 12px 16px;
+            background: var(--ds-bg);
+            border-bottom: 1px solid var(--ds-gray-light);
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--ds-navy);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }}
+
+        .section-body {{
+            padding: 16px;
+        }}
+
+        /* Feature Count Display */
+        .feature-count-display {{
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 16px;
+            background: linear-gradient(135deg, #F0F9FF 0%, #E0F2FE 100%);
+            border: 1px solid #BAE6FD;
+            border-radius: 8px;
+            margin-bottom: 16px;
+        }}
+
+        .feature-count-value {{
+            font-size: 28px;
+            font-weight: 700;
+            color: var(--ds-blue);
+        }}
+
+        .feature-count-label {{
+            font-size: 11px;
+            color: var(--ds-gray);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }}
+
+        .feature-count-loaded {{
+            text-align: right;
+        }}
+
+        .feature-count-loaded .loaded-value {{
+            font-size: 18px;
+            font-weight: 600;
+            color: var(--ds-success);
+        }}
+
+        .feature-count-loaded .loaded-label {{
+            font-size: 10px;
+            color: var(--ds-gray);
+        }}
+
+        /* Description */
+        .description-text {{
             font-size: 13px;
+            color: var(--ds-gray);
+            line-height: 1.5;
+            margin-bottom: 12px;
         }}
 
-        .metadata-label {{
-            font-weight: 600;
-            color: #555;
-            display: inline-block;
-            width: 100px;
+        /* Form Controls */
+        .control-row {{
+            margin-bottom: 16px;
         }}
 
-        .metadata-value {{
-            color: #333;
-            word-break: break-word;
-        }}
-
-        .bbox-display {{
-            font-family: monospace;
-            font-size: 11px;
-            background: #f0f0f0;
-            padding: 5px;
-            border-radius: 4px;
-            margin-top: 5px;
-        }}
-
-        .info-badge {{
-            display: inline-block;
-            padding: 3px 8px;
-            background: #3388ff;
-            color: white;
-            border-radius: 3px;
+        .control-label {{
+            display: block;
             font-size: 11px;
             font-weight: 600;
+            color: var(--ds-gray);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 6px;
         }}
 
-        .load-button {{
-            width: 100%;
-            padding: 8px;
-            background: #3388ff;
-            color: white;
-            border: none;
-            border-radius: 4px;
+        .control-hint {{
+            font-size: 10px;
+            color: #94a3b8;
+            margin-top: 4px;
+        }}
+
+        /* Numeric Input with Buttons */
+        .number-input-group {{
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }}
+
+        .number-input {{
+            flex: 1;
+            padding: 10px 12px;
+            border: 1px solid var(--ds-gray-light);
+            border-radius: 6px;
+            font-size: 14px;
+            color: var(--ds-navy);
+            text-align: center;
+            font-family: 'Courier New', monospace;
+        }}
+
+        .number-input:focus {{
+            outline: none;
+            border-color: var(--ds-blue);
+            box-shadow: 0 0 0 3px rgba(0,113,188,0.1);
+        }}
+
+        .number-btn {{
+            width: 36px;
+            height: 36px;
+            border: 1px solid var(--ds-gray-light);
+            background: white;
+            border-radius: 6px;
+            font-size: 18px;
+            font-weight: 600;
+            color: var(--ds-navy);
             cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }}
+
+        .number-btn:hover {{
+            background: var(--ds-bg);
+            border-color: var(--ds-blue);
+        }}
+
+        .number-btn:active {{
+            background: var(--ds-blue);
+            color: white;
+        }}
+
+        /* Checkbox Control */
+        .checkbox-control {{
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 12px;
+            background: var(--ds-bg);
+            border-radius: 6px;
+            cursor: pointer;
+        }}
+
+        .checkbox-control input {{
+            width: 18px;
+            height: 18px;
+            accent-color: var(--ds-blue);
+        }}
+
+        .checkbox-control span {{
             font-size: 13px;
-            margin-top: 10px;
+            color: var(--ds-navy);
         }}
 
-        .load-button:hover {{
-            background: #2266dd;
+        /* Buttons */
+        .btn {{
+            padding: 12px 20px;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
         }}
 
-        .load-button:disabled {{
+        .btn-primary {{
+            background: var(--ds-blue);
+            color: white;
+            width: 100%;
+        }}
+
+        .btn-primary:hover {{
+            background: var(--ds-light-blue);
+        }}
+
+        .btn-primary:disabled {{
             background: #ccc;
             cursor: not-allowed;
         }}
 
-        .status-text {{
-            font-size: 12px;
-            color: #666;
-            margin-top: 5px;
+        .btn-secondary {{
+            background: white;
+            color: var(--ds-navy);
+            border: 1px solid var(--ds-gray-light);
+        }}
+
+        .btn-secondary:hover {{
+            background: var(--ds-bg);
+            border-color: var(--ds-blue);
+        }}
+
+        .btn-row {{
+            display: flex;
+            gap: 8px;
+            margin-top: 12px;
+        }}
+
+        .btn-row .btn {{
+            flex: 1;
+        }}
+
+        /* Status Display */
+        .status-display {{
+            padding: 12px;
+            background: var(--ds-bg);
+            border-radius: 6px;
             text-align: center;
+            margin-top: 12px;
         }}
 
-        .qa-section {{
-            margin-top: 15px;
-            padding-top: 15px;
-            border-top: 1px solid #eee;
+        .status-text {{
+            font-size: 13px;
+            color: var(--ds-gray);
         }}
 
-        .qa-input {{
+        .status-text.success {{
+            color: var(--ds-success);
+        }}
+
+        .status-text.error {{
+            color: var(--ds-error);
+        }}
+
+        /* QA Section */
+        .qa-textarea {{
             width: 100%;
-            padding: 6px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            margin-bottom: 8px;
-            font-size: 12px;
+            padding: 12px;
+            border: 1px solid var(--ds-gray-light);
+            border-radius: 6px;
+            font-size: 13px;
             font-family: inherit;
+            resize: vertical;
+            min-height: 80px;
+        }}
+
+        .qa-textarea:focus {{
+            outline: none;
+            border-color: var(--ds-blue);
         }}
 
         .qa-buttons {{
             display: flex;
-            gap: 5px;
+            gap: 8px;
+            margin-top: 12px;
         }}
 
-        .approve-button {{
+        .btn-approve {{
             flex: 1;
-            padding: 8px;
-            background: #4CAF50;
+            background: var(--ds-success);
             color: white;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 13px;
         }}
 
-        .approve-button:hover {{
-            background: #45a049;
+        .btn-approve:hover {{
+            background: #059669;
         }}
 
-        .reject-button {{
+        .btn-reject {{
             flex: 1;
-            padding: 8px;
-            background: #f44336;
+            background: var(--ds-error);
             color: white;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 13px;
         }}
 
-        .reject-button:hover {{
-            background: #da190b;
+        .btn-reject:hover {{
+            background: #b91c1c;
         }}
 
-        .button-row {{
+        /* Style Dialog Placeholder */
+        .style-selector {{
             display: flex;
-            gap: 5px;
-            margin-top: 5px;
+            align-items: center;
+            gap: 8px;
         }}
 
-        .load-button-small {{
+        .style-select {{
             flex: 1;
-            padding: 8px;
-            background: #3388ff;
-            color: white;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 12px;
+            padding: 10px 12px;
+            border: 1px solid var(--ds-gray-light);
+            border-radius: 6px;
+            font-size: 13px;
+            color: var(--ds-navy);
+            background: white;
         }}
 
-        .load-button-small:hover {{
-            background: #2266dd;
+        /* Map Container - 70% */
+        .map-container {{
+            flex: 1;
+            position: relative;
+        }}
+
+        #map {{
+            height: 100%;
+            width: 100%;
+        }}
+
+        /* Map Overlay Status */
+        .map-status {{
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            background: white;
+            padding: 10px 16px;
+            border-radius: 6px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+            z-index: 1000;
+            font-size: 12px;
+            color: var(--ds-navy);
+        }}
+
+        /* Loading Overlay */
+        .loading-overlay {{
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(255,255,255,0.8);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 1001;
+        }}
+
+        .loading-overlay.active {{
+            display: flex;
+        }}
+
+        .loading-spinner {{
+            text-align: center;
+        }}
+
+        .spinner-icon {{
+            width: 48px;
+            height: 48px;
+            border: 4px solid var(--ds-gray-light);
+            border-top-color: var(--ds-blue);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            margin: 0 auto 12px;
+        }}
+
+        @keyframes spin {{
+            to {{ transform: rotate(360deg); }}
+        }}
+
+        .loading-text {{
+            font-size: 14px;
+            color: var(--ds-navy);
+            font-weight: 600;
+        }}
+
+        /* Popup styling */
+        .leaflet-popup-content {{
+            margin: 10px;
+            font-size: 13px;
+        }}
+
+        .popup-title {{
+            font-weight: 700;
+            font-size: 14px;
+            color: var(--ds-navy);
+            margin-bottom: 10px;
+            padding-bottom: 8px;
+            border-bottom: 2px solid var(--ds-blue);
+        }}
+
+        .popup-row {{
+            padding: 4px 0;
+            border-bottom: 1px solid #f0f0f0;
+        }}
+
+        .popup-row:last-child {{
+            border-bottom: none;
+        }}
+
+        .popup-label {{
+            font-weight: 600;
+            color: var(--ds-gray);
+            font-size: 11px;
+            text-transform: uppercase;
+        }}
+
+        .popup-value {{
+            color: var(--ds-navy);
+            display: block;
+            margin-top: 2px;
+        }}
+
+        /* Modal Dialog */
+        .modal-overlay {{
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.5);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 2000;
+        }}
+
+        .modal-overlay.active {{
+            display: flex;
+        }}
+
+        .modal-dialog {{
+            background: white;
+            border-radius: 12px;
+            width: 90%;
+            max-width: 500px;
+            max-height: 80vh;
+            overflow: hidden;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.3);
+        }}
+
+        .modal-header {{
+            padding: 20px;
+            background: var(--ds-navy);
+            color: white;
+        }}
+
+        .modal-header h3 {{
+            font-size: 18px;
+            font-weight: 700;
+        }}
+
+        .modal-body {{
+            padding: 20px;
+            max-height: 400px;
+            overflow-y: auto;
+        }}
+
+        .modal-footer {{
+            padding: 16px 20px;
+            border-top: 1px solid var(--ds-gray-light);
+            display: flex;
+            justify-content: flex-end;
+            gap: 8px;
+        }}
+
+        .style-list {{
+            list-style: none;
+        }}
+
+        .style-item {{
+            padding: 12px;
+            border: 1px solid var(--ds-gray-light);
+            border-radius: 6px;
+            margin-bottom: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }}
+
+        .style-item:hover {{
+            border-color: var(--ds-blue);
+            background: #f0f7ff;
+        }}
+
+        .style-item.selected {{
+            border-color: var(--ds-blue);
+            background: #e0f0ff;
+        }}
+
+        .style-item-name {{
+            font-weight: 600;
+            color: var(--ds-navy);
+        }}
+
+        .style-item-id {{
+            font-size: 11px;
+            color: var(--ds-gray);
+            font-family: monospace;
+        }}
+
+        .no-styles-message {{
+            text-align: center;
+            padding: 40px 20px;
+            color: var(--ds-gray);
+        }}
+
+        /* Responsive */
+        @media (max-width: 900px) {{
+            .app-container {{
+                flex-direction: column;
+            }}
+            .sidebar {{
+                width: 100%;
+                max-width: none;
+                height: 40%;
+            }}
+            .map-container {{
+                height: 60%;
+            }}
         }}
     </style>
 </head>
 <body>
-    <!-- Map Container -->
-    <div id="map"></div>
+    <div class="app-container">
+        <!-- Map Container (Left - 70%) -->
+        <div class="map-container">
+            <div id="map"></div>
 
-    <!-- Metadata Panel -->
-    <div class="metadata-panel">
-        <h3>📍 Vector Viewer</h3>
+            <!-- Loading Overlay -->
+            <div class="loading-overlay" id="loading-overlay">
+                <div class="loading-spinner">
+                    <div class="spinner-icon"></div>
+                    <div class="loading-text">Loading features...</div>
+                </div>
+            </div>
 
-        <div class="metadata-row">
-            <span class="metadata-label">Collection:</span>
-            <span class="metadata-value">{collection_id}</span>
-        </div>
-
-        <div class="metadata-row">
-            <span class="metadata-label">Title:</span>
-            <span class="metadata-value">{title}</span>
-        </div>
-
-        <div class="metadata-row">
-            <span class="metadata-label">Description:</span>
-            <span class="metadata-value">{description}</span>
-        </div>
-
-        <div class="metadata-row">
-            <span class="metadata-label">Bounding Box:</span>
-            <div class="bbox-display">
-                min: [{bbox[0]:.6f}, {bbox[1]:.6f}]<br>
-                max: [{bbox[2]:.6f}, {bbox[3]:.6f}]
+            <!-- Map Status -->
+            <div class="map-status" id="map-status">
+                Zoom: <span id="zoom-level">--</span> |
+                Center: <span id="map-center">--</span>
             </div>
         </div>
 
-        <div class="metadata-row">
-            <span class="metadata-label">Simplify (m):</span>
-            <input type="number" class="qa-input" id="simplify-input"
-                   min="0" step="0.1" value="0"
-                   placeholder="0 = no simplification"
-                   style="margin: 0; padding: 6px; font-size: 12px;">
-        </div>
-
-        <div class="button-row">
-            <button class="load-button-small" onclick="loadFeatures(100)">100</button>
-            <button class="load-button-small" onclick="loadFeatures(500)">500</button>
-            <button class="load-button-small" onclick="loadFeatures(10000)">All</button>
-        </div>
-        <div class="status-text" id="status">Ready to load features</div>
-
-        <!-- QA Section -->
-        <div class="qa-section">
-            <div class="metadata-row">
-                <span class="info-badge">Data Curator QA</span>
+        <!-- Right Sidebar (30%) -->
+        <div class="sidebar">
+            <div class="sidebar-header">
+                <h1>📍 Vector Viewer</h1>
+                <div class="collection-id">{collection_id}</div>
             </div>
-            <textarea class="qa-input" id="qa-notes" placeholder="QA notes (optional)..." rows="3"></textarea>
-            <div class="qa-buttons">
-                <button class="approve-button" onclick="handleApprove()">✓ Approve</button>
-                <button class="reject-button" onclick="handleReject()">✗ Reject</button>
+
+            <div class="sidebar-content">
+                <!-- Feature Count -->
+                <div class="feature-count-display">
+                    <div>
+                        <div class="feature-count-value" id="total-features">--</div>
+                        <div class="feature-count-label">Total Features</div>
+                    </div>
+                    <div class="feature-count-loaded">
+                        <div class="loaded-value" id="loaded-features">0</div>
+                        <div class="loaded-label">Loaded</div>
+                    </div>
+                </div>
+
+                <!-- Description -->
+                <div class="section-card">
+                    <div class="section-header">Description</div>
+                    <div class="section-body">
+                        <p class="description-text">{description}</p>
+                    </div>
+                </div>
+
+                <!-- Load Options -->
+                <div class="section-card">
+                    <div class="section-header">Load Features</div>
+                    <div class="section-body">
+                        <div class="control-row">
+                            <label class="control-label">Feature Limit</label>
+                            <div class="number-input-group">
+                                <button class="number-btn" onclick="adjustLimit(-100)">−</button>
+                                <input type="number" class="number-input" id="limit-input"
+                                       min="1" max="10000" value="100">
+                                <button class="number-btn" onclick="adjustLimit(100)">+</button>
+                            </div>
+                            <div class="control-hint">Max: <span id="max-features">10000</span></div>
+                        </div>
+
+                        <div class="control-row">
+                            <label class="control-label">Simplification (Decimal Degrees)</label>
+                            <div class="number-input-group">
+                                <button class="number-btn" onclick="adjustSimplify(-0.001)">−</button>
+                                <input type="number" class="number-input" id="simplify-input"
+                                       min="0" step="0.001" value="0">
+                                <button class="number-btn" onclick="adjustSimplify(0.001)">+</button>
+                            </div>
+                            <div class="control-hint">0 = no simplification, 0.001 ≈ 111m at equator</div>
+                        </div>
+
+                        <div class="control-row">
+                            <label class="checkbox-control">
+                                <input type="checkbox" id="bbox-checkbox">
+                                <span>Load visible bounding box only</span>
+                            </label>
+                        </div>
+
+                        <button class="btn btn-primary" id="load-btn" onclick="loadFeatures()">
+                            🔄 Load Features
+                        </button>
+
+                        <div class="btn-row">
+                            <button class="btn btn-secondary" onclick="zoomToFeatures()">Zoom to Fit</button>
+                            <button class="btn btn-secondary" onclick="clearFeatures()">Clear Map</button>
+                        </div>
+
+                        <div class="status-display">
+                            <div class="status-text" id="status">Ready to load features</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Style Selection -->
+                <div class="section-card">
+                    <div class="section-header">Styling</div>
+                    <div class="section-body">
+                        <div class="control-row">
+                            <label class="control-label">OGC Style</label>
+                            <div class="style-selector">
+                                <select class="style-select" id="style-select">
+                                    <option value="">Default (Blue)</option>
+                                </select>
+                                <button class="btn btn-secondary" onclick="openStyleDialog()">Browse</button>
+                            </div>
+                            <div class="control-hint">Load from OGC Styles API (feature pending)</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- QA Section -->
+                <div class="section-card">
+                    <div class="section-header">Data Curator QA</div>
+                    <div class="section-body">
+                        <textarea class="qa-textarea" id="qa-notes"
+                                  placeholder="Enter QA notes, observations, or issues..."></textarea>
+                        <div class="qa-buttons">
+                            <button class="btn btn-approve" onclick="handleApprove()">✓ Approve</button>
+                            <button class="btn btn-reject" onclick="handleReject()">✗ Reject</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Style Selection Modal -->
+    <div class="modal-overlay" id="style-modal">
+        <div class="modal-dialog">
+            <div class="modal-header">
+                <h3>Select OGC Style</h3>
+            </div>
+            <div class="modal-body" id="style-list-container">
+                <div class="no-styles-message">
+                    <p>Loading styles...</p>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeStyleDialog()">Cancel</button>
+                <button class="btn btn-primary" onclick="applySelectedStyle()">Apply Style</button>
             </div>
         </div>
     </div>
@@ -383,7 +878,15 @@ class VectorViewerService:
         // Collection metadata
         const COLLECTION_ID = '{collection_id}';
         const ITEMS_URL = '{items_url}';
+        const STYLES_URL = '{styles_url}';
         const BBOX = {json.dumps(bbox)};
+        const TOTAL_FEATURES = null; // Will be fetched
+
+        // State
+        let featureLayer = null;
+        let totalFeatureCount = null;
+        let currentStyle = null;
+        let selectedStyleId = null;
 
         // Initialize map
         const map = L.map('map').setView([{center_lat}, {center_lon}], 6);
@@ -394,23 +897,92 @@ class VectorViewerService:
             maxZoom: 19
         }}).addTo(map);
 
-        // GeoJSON layer for features
-        let featureLayer = null;
+        // Update map status on move
+        map.on('moveend', updateMapStatus);
+        map.on('zoomend', updateMapStatus);
 
-        // Load features from OGC Features API
-        async function loadFeatures(limit) {{
-            const statusDiv = document.getElementById('status');
-            const simplify = document.getElementById('simplify-input').value;
-            const limitText = limit >= 10000 ? 'all' : limit;
-            const simplifyNote = (simplify && parseFloat(simplify) > 0) ? ` (simplified: ${{simplify}}m)` : '';
-            statusDiv.textContent = `Loading ${{limitText}} features${{simplifyNote}}...`;
+        function updateMapStatus() {{
+            const center = map.getCenter();
+            document.getElementById('zoom-level').textContent = map.getZoom();
+            document.getElementById('map-center').textContent =
+                `${{center.lat.toFixed(4)}}, ${{center.lng.toFixed(4)}}`;
+        }}
+
+        // Fetch total feature count
+        async function fetchTotalFeatureCount() {{
+            try {{
+                const response = await fetch(`${{ITEMS_URL}}?limit=1`);
+                if (response.ok) {{
+                    const data = await response.json();
+                    totalFeatureCount = data.numberMatched || data.features?.length || 0;
+                    document.getElementById('total-features').textContent =
+                        totalFeatureCount.toLocaleString();
+                    document.getElementById('max-features').textContent =
+                        Math.min(totalFeatureCount, 10000).toLocaleString();
+
+                    // Update limit input max
+                    document.getElementById('limit-input').max = Math.min(totalFeatureCount, 10000);
+                }}
+            }} catch (error) {{
+                console.error('Failed to fetch feature count:', error);
+            }}
+        }}
+
+        // Adjust limit input
+        function adjustLimit(delta) {{
+            const input = document.getElementById('limit-input');
+            const max = parseInt(input.max) || 10000;
+            let newValue = parseInt(input.value || 100) + delta;
+            newValue = Math.max(1, Math.min(max, newValue));
+            input.value = newValue;
+        }}
+
+        // Adjust simplify input
+        function adjustSimplify(delta) {{
+            const input = document.getElementById('simplify-input');
+            let newValue = parseFloat(input.value || 0) + delta;
+            newValue = Math.max(0, parseFloat(newValue.toFixed(3)));
+            input.value = newValue;
+        }}
+
+        // Show/hide loading
+        function showLoading() {{
+            document.getElementById('loading-overlay').classList.add('active');
+        }}
+
+        function hideLoading() {{
+            document.getElementById('loading-overlay').classList.remove('active');
+        }}
+
+        // Set status
+        function setStatus(message, type = '') {{
+            const statusEl = document.getElementById('status');
+            statusEl.textContent = message;
+            statusEl.className = 'status-text' + (type ? ' ' + type : '');
+        }}
+
+        // Load features
+        async function loadFeatures() {{
+            const limit = parseInt(document.getElementById('limit-input').value) || 100;
+            const simplify = parseFloat(document.getElementById('simplify-input').value) || 0;
+            const useBbox = document.getElementById('bbox-checkbox').checked;
+
+            showLoading();
+            setStatus('Loading features...');
 
             try {{
-                // Build URL with optional simplification
                 let url = `${{ITEMS_URL}}?limit=${{limit}}`;
-                if (simplify && parseFloat(simplify) > 0) {{
+
+                if (simplify > 0) {{
                     url += `&simplify=${{simplify}}`;
                 }}
+
+                if (useBbox) {{
+                    const bounds = map.getBounds();
+                    const bbox = `${{bounds.getWest()}},${{bounds.getSouth()}},${{bounds.getEast()}},${{bounds.getNorth()}}`;
+                    url += `&bbox=${{bbox}}`;
+                }}
+
                 const response = await fetch(url);
                 if (!response.ok) {{
                     throw new Error(`HTTP ${{response.status}}: ${{response.statusText}}`);
@@ -419,106 +991,171 @@ class VectorViewerService:
                 const data = await response.json();
                 const features = data.features || [];
 
-                statusDiv.textContent = `Loaded ${{features.length}} features${{simplifyNote}}`;
+                // Update loaded count
+                document.getElementById('loaded-features').textContent = features.length.toLocaleString();
 
                 // Remove existing layer
                 if (featureLayer) {{
                     map.removeLayer(featureLayer);
                 }}
 
+                // Get style
+                const style = currentStyle || {{
+                    color: '#0071BC',
+                    weight: 2,
+                    fillOpacity: 0.25,
+                    fillColor: '#0071BC'
+                }};
+
                 // Add features to map
                 featureLayer = L.geoJSON(data, {{
                     style: function(feature) {{
-                        return {{
-                            color: '#3388ff',
-                            weight: 2,
-                            fillOpacity: 0.3,
-                            fillColor: '#3388ff'
-                        }};
+                        return style;
                     }},
                     onEachFeature: function(feature, layer) {{
-                        // Create popup with properties
                         const props = feature.properties || {{}};
-                        let popupContent = '<div style="font-size: 13px; max-width: 250px;"><b>Properties</b><br>';
+                        let popupContent = '<div class="popup-title">Feature Properties</div>';
 
-                        // Show first 5 properties
-                        const keys = Object.keys(props).slice(0, 5);
+                        const keys = Object.keys(props).slice(0, 8);
                         keys.forEach(key => {{
                             const value = props[key];
                             if (value !== null && value !== undefined) {{
-                                popupContent += `<b>${{key}}:</b> ${{value}}<br>`;
+                                popupContent += `<div class="popup-row">
+                                    <span class="popup-label">${{key}}</span>
+                                    <span class="popup-value">${{value}}</span>
+                                </div>`;
                             }}
                         }});
 
-                        if (Object.keys(props).length > 5) {{
-                            popupContent += `<i>...and ${{Object.keys(props).length - 5}} more</i>`;
+                        if (Object.keys(props).length > 8) {{
+                            popupContent += `<div class="popup-row" style="color: #626F86; font-style: italic;">
+                                +${{Object.keys(props).length - 8}} more properties
+                            </div>`;
                         }}
-                        popupContent += '</div>';
 
-                        layer.bindPopup(popupContent);
+                        layer.bindPopup(popupContent, {{ maxWidth: 300 }});
+
+                        // Hover effects
+                        layer.on('mouseover', function() {{
+                            this.setStyle({{ weight: 3, fillOpacity: 0.4 }});
+                        }});
+                        layer.on('mouseout', function() {{
+                            this.setStyle({{ weight: style.weight, fillOpacity: style.fillOpacity }});
+                        }});
                     }}
                 }}).addTo(map);
 
-                // Zoom to features
-                if (featureLayer.getBounds().isValid()) {{
+                const simplifyNote = simplify > 0 ? ` (simplified: ${{simplify}}°)` : '';
+                const bboxNote = useBbox ? ' (bbox)' : '';
+                setStatus(`Loaded ${{features.length}} features${{simplifyNote}}${{bboxNote}}`, 'success');
+
+                // Zoom to features if not using bbox
+                if (!useBbox && featureLayer.getBounds().isValid()) {{
                     map.fitBounds(featureLayer.getBounds(), {{ padding: [50, 50] }});
-                }} else if (BBOX && BBOX.length >= 4) {{
-                    // Fallback to collection bbox
-                    const bounds = [
-                        [BBOX[1], BBOX[0]],
-                        [BBOX[3], BBOX[2]]
-                    ];
-                    map.fitBounds(bounds, {{ padding: [50, 50] }});
                 }}
 
-                console.log(`Loaded ${{features.length}} features from ${{COLLECTION_ID}}`);
             }} catch (error) {{
-                statusDiv.textContent = `Error: ${{error.message}}`;
+                setStatus(`Error: ${{error.message}}`, 'error');
                 console.error('Failed to load features:', error);
+            }} finally {{
+                hideLoading();
             }}
         }}
 
-        // QA Approve Handler
+        function zoomToFeatures() {{
+            if (featureLayer && featureLayer.getBounds().isValid()) {{
+                map.fitBounds(featureLayer.getBounds(), {{ padding: [50, 50] }});
+            }} else if (BBOX && BBOX.length >= 4) {{
+                const bounds = [[BBOX[1], BBOX[0]], [BBOX[3], BBOX[2]]];
+                map.fitBounds(bounds, {{ padding: [50, 50] }});
+            }}
+        }}
+
+        function clearFeatures() {{
+            if (featureLayer) {{
+                map.removeLayer(featureLayer);
+                featureLayer = null;
+                document.getElementById('loaded-features').textContent = '0';
+                setStatus('Map cleared');
+            }}
+        }}
+
+        // Style Dialog
+        function openStyleDialog() {{
+            document.getElementById('style-modal').classList.add('active');
+            loadStyleList();
+        }}
+
+        function closeStyleDialog() {{
+            document.getElementById('style-modal').classList.remove('active');
+        }}
+
+        async function loadStyleList() {{
+            const container = document.getElementById('style-list-container');
+
+            try {{
+                // Placeholder - fetch styles from OGC Styles API
+                // const response = await fetch(STYLES_URL);
+                // const data = await response.json();
+
+                // For now, show placeholder
+                container.innerHTML = `
+                    <div class="no-styles-message">
+                        <p style="font-size: 36px; margin-bottom: 16px;">🎨</p>
+                        <p><strong>Style Loading Coming Soon</strong></p>
+                        <p style="margin-top: 8px; font-size: 12px;">
+                            OGC Styles API integration is pending.<br>
+                            Styles will be loaded from:<br>
+                            <code style="background: #f0f0f0; padding: 4px 8px; border-radius: 4px;">
+                                ${{STYLES_URL}}
+                            </code>
+                        </p>
+                    </div>
+                `;
+            }} catch (error) {{
+                container.innerHTML = `
+                    <div class="no-styles-message">
+                        <p>Failed to load styles: ${{error.message}}</p>
+                    </div>
+                `;
+            }}
+        }}
+
+        function applySelectedStyle() {{
+            // Placeholder for applying selected style
+            closeStyleDialog();
+            setStatus('Style feature coming soon...');
+        }}
+
+        // QA Handlers
         function handleApprove() {{
             const notes = document.getElementById('qa-notes').value;
-            const statusDiv = document.getElementById('status');
-
-            console.log('APPROVE clicked for collection:', COLLECTION_ID);
-            console.log('QA Notes:', notes);
-
-            statusDiv.textContent = '✓ Approved! (Feature coming soon...)';
-            statusDiv.style.color = '#4CAF50';
-
-            // Future: POST /api/qa/approve with collection and notes
-            // For now, just visual feedback
-            setTimeout(() => {{
-                statusDiv.textContent = 'Ready to load features';
-                statusDiv.style.color = '#666';
-            }}, 3000);
+            console.log('APPROVE:', COLLECTION_ID, notes);
+            setStatus('✓ Approved! (Feature coming soon...)', 'success');
+            setTimeout(() => setStatus('Ready'), 3000);
         }}
 
-        // QA Reject Handler
         function handleReject() {{
             const notes = document.getElementById('qa-notes').value;
-            const statusDiv = document.getElementById('status');
-
-            console.log('REJECT clicked for collection:', COLLECTION_ID);
-            console.log('QA Notes:', notes);
-
-            statusDiv.textContent = '✗ Rejected! (Feature coming soon...)';
-            statusDiv.style.color = '#f44336';
-
-            // Future: POST /api/qa/reject with collection and notes
-            // For now, just visual feedback
-            setTimeout(() => {{
-                statusDiv.textContent = 'Ready to load features';
-                statusDiv.style.color = '#666';
-            }}, 3000);
+            console.log('REJECT:', COLLECTION_ID, notes);
+            setStatus('✗ Rejected! (Feature coming soon...)', 'error');
+            setTimeout(() => setStatus('Ready'), 3000);
         }}
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {{
+            updateMapStatus();
+            fetchTotalFeatureCount();
+
+            // Zoom to bbox
+            if (BBOX && BBOX.length >= 4 && BBOX[0] !== 0) {{
+                const bounds = [[BBOX[1], BBOX[0]], [BBOX[3], BBOX[2]]];
+                map.fitBounds(bounds, {{ padding: [50, 50] }});
+            }}
+        }});
 
         console.log('Vector Viewer initialized');
         console.log('Collection:', COLLECTION_ID);
-        console.log('Items URL:', ITEMS_URL);
     </script>
 </body>
 </html>"""

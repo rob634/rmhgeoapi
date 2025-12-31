@@ -5,7 +5,7 @@ Consolidates scattered metadata generation into a clean, type-safe architecture:
     - Platform metadata (DDH identifiers) → platform:* properties
     - App metadata (job linkage) → app:* properties
     - Geographic metadata (ISO3 codes) → geo:* properties
-    - Raster visualization metadata (band info, rescale, colormap) → rmh:* properties
+    - Raster visualization metadata (band info, rescale, colormap) → app:* properties
     - Visualization metadata (TiTiler URLs) → links and assets
 
 Smart TiTiler URL Generation (F2.9 - 30 DEC 2025):
@@ -162,7 +162,7 @@ class RasterVisualizationMetadata:
     """
     Raster visualization metadata for STAC properties.
 
-    Namespace: rmh:*
+    Namespace: app:*
     Source: Raster validation results + rio-stac extraction
 
     Used to generate smart TiTiler URLs based on raster characteristics.
@@ -239,28 +239,28 @@ class RasterVisualizationMetadata:
 
     def to_stac_properties(self) -> Dict[str, Any]:
         """
-        Convert to STAC properties dict with rmh:* prefix.
+        Convert to STAC properties dict with app:* prefix.
 
         Returns:
             Dict of namespaced properties (only non-None values)
         """
         props = {}
         if self.raster_type:
-            props['rmh:raster_type'] = self.raster_type
+            props['app:raster_type'] = self.raster_type
         if self.band_count is not None:
-            props['rmh:band_count'] = self.band_count
+            props['app:band_count'] = self.band_count
         if self.dtype:
-            props['rmh:dtype'] = self.dtype
+            props['app:dtype'] = self.dtype
         if self.colorinterp:
-            props['rmh:colorinterp'] = self.colorinterp
+            props['app:colorinterp'] = self.colorinterp
         if self.rgb_bands:
-            props['rmh:rgb_bands'] = self.rgb_bands
+            props['app:rgb_bands'] = self.rgb_bands
         if self.rescale:
-            props['rmh:rescale'] = self.rescale
+            props['app:rescale'] = self.rescale
         if self.colormap:
-            props['rmh:colormap'] = self.colormap
+            props['app:colormap'] = self.colormap
         if self.nodata is not None:
-            props['rmh:nodata'] = self.nodata
+            props['app:nodata'] = self.nodata
         return props
 
 
@@ -453,7 +453,7 @@ class STACMetadataHelper:
             raster_meta: RasterVisualizationMetadata with band/type info
 
         Returns:
-            Dict of rmh:* prefixed properties
+            Dict of app:* prefixed properties
         """
         return raster_meta.to_stac_properties()
 
@@ -658,7 +658,7 @@ class STACMetadataHelper:
             blob_name: Blob path for TiTiler URLs
             platform: Platform-layer metadata (DDH)
             app: Application-layer metadata (job linkage)
-            raster: Raster visualization metadata (rmh:* properties + smart TiTiler URLs)
+            raster: Raster visualization metadata (app:* properties + smart TiTiler URLs)
             include_iso3: Add ISO3 country codes (default True)
             include_titiler: Add TiTiler visualization links (default True)
 
@@ -685,7 +685,7 @@ class STACMetadataHelper:
             item_dict['properties'].update(props)
             logger.debug(f"   Added app metadata: {list(props.keys())}")
 
-        # Add raster visualization metadata (rmh:*)
+        # Add raster visualization metadata (app:*)
         if raster:
             props = self.build_raster_visualization_properties(raster)
             item_dict['properties'].update(props)

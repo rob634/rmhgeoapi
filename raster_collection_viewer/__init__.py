@@ -4,7 +4,7 @@ Raster Collection Viewer - STAC-Integrated Raster Map Viewer.
 Feature: F2.9 (30 DEC 2025)
 
 Provides interactive Leaflet-based viewer for browsing STAC raster collections
-with smart TiTiler URL generation based on raster metadata (rmh:* properties).
+with smart TiTiler URL generation based on raster metadata (app:* properties).
 
 Exports:
     RasterCollectionViewerService: Service for generating viewer HTML

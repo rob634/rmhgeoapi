@@ -1912,7 +1912,7 @@ def vector_collection_viewer(req: func.HttpRequest) -> func.HttpResponse:
 # ============================================================================
 # STAC-integrated raster viewer with TiTiler XYZ tiles
 # Provides interactive Leaflet map for browsing STAC raster collections
-# with smart TiTiler URL generation based on raster metadata (rmh:*)
+# with smart TiTiler URL generation based on raster metadata (app:*)
 # ============================================================================
 
 # Get trigger configuration
@@ -1937,12 +1937,45 @@ def raster_collection_viewer(req: func.HttpRequest) -> func.HttpResponse:
     Use Case:
         Data curators can browse STAC raster collections with proper
         visualization based on raster type (DEM, RGB, multi-band).
-        Uses rmh:* STAC properties for smart TiTiler URL generation.
+        Uses app:* STAC properties for smart TiTiler URL generation.
 
     Example:
         https://rmhazuregeoapi-.../api/raster/viewer?collection=aerial-2024
     """
     return _raster_collection_viewer_handler(req)
+
+
+# QA Status endpoint for raster items
+_raster_qa_handler = _raster_collection_viewer_triggers[1]['handler']
+
+
+@app.route(route="raster/qa", methods=["POST"])
+def raster_qa_status(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Update QA status for STAC raster items.
+
+    POST /api/raster/qa
+
+    Request Body:
+        {
+            "item_id": "item-123",
+            "collection_id": "collection-abc",
+            "status": "approved" | "rejected" | "pending"
+        }
+
+    Returns:
+        JSON response with:
+        - success: boolean
+        - item_id: string
+        - collection_id: string
+        - status: string
+        - message: string
+
+    Use Case:
+        Data curators can approve or reject raster items from the viewer.
+        Sets app:qa_status and app:qa_updated properties on STAC item.
+    """
+    return _raster_qa_handler(req)
 
 
 # ============================================================================

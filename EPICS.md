@@ -17,25 +17,23 @@
 | 1 | E2 | Raster Data as API | 🚧 Partial | 8 | 5.9 |
 | 2 | E3 | DDH Platform Integration | 🚧 Partial | 8 | 4.8 |
 | 3 | E4 | Data Externalization | 🚧 Partial | 5 | 4.3 |
-| 4 | E9 | Zarr/Climate Data as API | 🚧 Partial | 3 | 2.0 |
-| 5 | E7 | Pipeline Extensibility | 🚧 Partial | 7 | 2.6 |
+| 4 | E9 | Large and Multidimensional Data | 🚧 Partial | 7 | 2.5 |
+| 5 | E8 | GeoAnalytics Pipeline | 🚧 Partial | 12 | 1.8 |
 | 6 | E5 | OGC Styles | 🚧 Partial | 2 | 3.7 |
-| 7 | E8 | H3 Analytics Pipeline | 🚧 Partial | 15 | 1.2 |
+| 7 | E7 | Pipeline Infrastructure | 🚧 Partial | 5 | — |
 | — | E12 | Interface Modernization | ✅ Phase 1 | 5 | — |
 
-**Consolidated Epics** (absorbed into E7 or E8):
-- ~~E10~~ → F7.4 (FATHOM ETL Operations)
-- ~~E11~~ → F8.13-15 (Analytics UI: Data Browser, H3 Visualization, Export)
-- ~~E13~~ → F7.6 (Pipeline Observability)
-- ~~E14~~ → F8.12 (H3 Export Pipeline)
-- ~~E15~~ → F7.5 (Collection Ingestion)
+**Consolidated Epics** (absorbed into E7, E8, or E9):
+- ~~E10~~ → F9.1 (FATHOM ETL Operations) - now in E9
+- ~~E11~~ → F8.10-12 (Analytics UI: Data Browser, H3 Visualization, Export)
+- ~~E13~~ → F7.4 (Pipeline Observability)
+- ~~E14~~ → F8.9 (H3 Export Pipeline)
+- ~~E15~~ → F7.3 (Collection Ingestion)
 
-**Priority Notes**:
-- **E3 includes Observability**: Merged E6 into E3 — observability is app-to-app monitoring for integration
-- **E3 requires ITSDA coordination**: See ITSDA dependency tags on stories below
-- **E7 consolidation**: All pipeline infrastructure now in E7 (FATHOM, ingestion, observability, builder)
-- **E8 consolidation**: All H3 analytics now in E8 (aggregation, export, pipelines, demos)
-- **E7 + E9 synergy**: FATHOM pipeline (E7) drives Zarr/xarray capabilities (E9) — "future ready" patterns
+**Epic Structure** (30 DEC 2025 restructure):
+- **E7**: Pipeline Infrastructure — generic orchestration enablers (observability, builder, ingestion)
+- **E8**: GeoAnalytics Pipeline — H3 aggregation, GeoParquet export, OGC Features output
+- **E9**: Large and Multidimensional Data — hosting FATHOM + CMIP6 + VirtualiZarr datasets
 
 ### WSJF Calculation
 
@@ -1229,27 +1227,25 @@ F4.3: External Storage ─────────────────▶ F4
 
 ---
 
-## Epic E7: Pipeline Extensibility 🚧
+## Epic E7: Pipeline Infrastructure 🚧
 
-**Business Requirement**: Extensible pipeline infrastructure for custom ETL, partner data, and operational workflows
-**Status**: 🚧 PARTIAL (F7.1 infrastructure ✅, F7.4 FATHOM 🚧, F7.5 ingestion ✅, F7.6 observability ✅)
-**Last Updated**: 29 DEC 2025
+**Business Requirement**: Generic pipeline orchestration infrastructure (enabler for E8 and E9)
+**Status**: 🚧 PARTIAL (F7.1 ✅, F7.3 ✅, F7.4 ✅)
+**Last Updated**: 30 DEC 2025
 
 **Strategic Context**:
-> E7 consolidates all pipeline-related capabilities: partner pipelines (FATHOM), ingestion patterns
-> (MapSPAM), observability infrastructure, and future pipeline builder UI. This provides a single
-> epic for pipeline extensibility rather than fragmenting across multiple epics.
+> E7 provides generic pipeline infrastructure that enables E8 (GeoAnalytics) and E9 (Large Data).
+> Domain-specific pipelines (FATHOM, CMIP6) are now in E9. H3 analytics pipelines are in E8.
+> E7 focuses on: job orchestration, ingestion patterns, observability, and pipeline builder UI.
 
 **Feature Summary**:
 | Feature | Status | Description |
 |---------|--------|-------------|
 | F7.1 | ✅ | Pipeline Infrastructure (registry, scheduler) |
-| F7.2 | ⬜ | FATHOM Flood Pipeline (Zarr conversion) |
-| F7.3 | 📋 | Reference Data Pipelines (Admin0, WDPA) |
-| F7.4 | 🚧 | FATHOM ETL Operations (~~E10~~) |
-| F7.5 | ✅ | Collection Ingestion Pipeline (~~E15~~) |
-| F7.6 | ✅ | Pipeline Observability (~~E13~~) |
-| F7.7 | 📋 | Pipeline Builder UI (~~E11~~) |
+| F7.2 | 📋 | Reference Data Pipelines (Admin0, WDPA) |
+| F7.3 | ✅ | Collection Ingestion Pipeline (~~E15~~) |
+| F7.4 | ✅ | Pipeline Observability (~~E13~~) |
+| F7.5 | 📋 | Pipeline Builder UI |
 
 ---
 
@@ -1272,61 +1268,19 @@ F4.3: External Storage ─────────────────▶ F4
 
 ---
 
-### Feature F7.2: FATHOM Flood Data Pipeline ⬜ READY
-
-**Deliverable**: End-to-end pipeline for FATHOM flood risk data
-**Partner**: FATHOM
-**Data Patterns**: Zarr (preferred), COG (fallback)
-
-| Story | Status | Description |
-|-------|--------|-------------|
-| S7.2.1 | ⬜ | FATHOM data inventory and schema analysis |
-| S7.2.2 | ⬜ | FATHOM handler implementation |
-| S7.2.3 | ⬜ | Zarr output configuration (chunking, compression) |
-| S7.2.4 | ⬜ | STAC collection with datacube extension |
-| S7.2.5 | ⬜ | **TiTiler Zarr Service** integration for tile serving |
-| S7.2.6 | ⬜ | Manual update trigger endpoint |
-
-**FATHOM Data Characteristics**:
-- Global flood hazard maps (fluvial, pluvial, coastal)
-- Multiple return periods (1-in-5 to 1-in-1000 year)
-- High resolution (3 arcsec / ~90m)
-- Time-series projections (climate scenarios)
-
----
-
-### Feature F7.3: Reference Data Pipelines 📋 PLANNED
+### Feature F7.2: Reference Data Pipelines 📋 PLANNED
 
 **Deliverable**: Common reference datasets for spatial joins
 
 | Story | Status | Description |
 |-------|--------|-------------|
-| S7.3.1 | 📋 | Admin0 handler (Natural Earth boundaries) |
-| S7.3.2 | 📋 | WDPA updates (protected areas) |
-| S7.3.3 | 📋 | Style integration (depends on E5) |
+| S7.2.1 | 📋 | Admin0 handler (Natural Earth boundaries) |
+| S7.2.2 | 📋 | WDPA updates (protected areas) |
+| S7.2.3 | 📋 | Style integration (depends on E5) |
 
 ---
 
-### Feature F7.4: FATHOM ETL Operations 🚧 (formerly E10)
-
-**Deliverable**: Band stacking, spatial merge, STAC registration for FATHOM flood data
-**Documentation**: [FATHOM_ETL.md](docs_claude/FATHOM_ETL.md)
-**Status**: 🚧 Phase 1 ✅, Phase 2 46/47 tasks
-
-| Story | Status | Description |
-|-------|--------|-------------|
-| S7.4.1 | ✅ | Phase 1: Band stacking (8 return periods → 1 COG) |
-| S7.4.2 | 🚧 | Phase 2: Spatial merge (N×N tiles → 1 COG) - 46/47 tasks |
-| S7.4.3 | 📋 | Phase 3: STAC registration for merged COGs |
-| S7.4.4 | 📋 | Phase 4: West Africa / Africa scale processing |
-
-**Current Issue**: Phase 2 task `n10-n15_w005-w010` failed. Need retry with `force_reprocess=true`.
-
-**Key Files**: `services/fathom/fathom_etl.py`, `jobs/fathom_*.py`
-
----
-
-### Feature F7.5: Collection Ingestion Pipeline ✅ (formerly E15)
+### Feature F7.3: Collection Ingestion Pipeline ✅ (formerly E15)
 
 **Deliverable**: Ingest pre-processed COG collections with existing STAC metadata
 **Completed**: 29 DEC 2025
@@ -1334,11 +1288,11 @@ F4.3: External Storage ─────────────────▶ F4
 
 | Story | Status | Description |
 |-------|--------|-------------|
-| S7.5.1 | ✅ | Create `ingest_collection` job definition (5-stage workflow) |
-| S7.5.2 | ✅ | Inventory handler (download collection.json, parse items) |
-| S7.5.3 | ✅ | Copy handler (parallel blob copy bronze → silver) |
-| S7.5.4 | ✅ | Register handlers (pgSTAC collection + items) |
-| S7.5.5 | ✅ | Finalize handler (h3.source_catalog entry) |
+| S7.3.1 | ✅ | Create `ingest_collection` job definition (5-stage workflow) |
+| S7.3.2 | ✅ | Inventory handler (download collection.json, parse items) |
+| S7.3.3 | ✅ | Copy handler (parallel blob copy bronze → silver) |
+| S7.3.4 | ✅ | Register handlers (pgSTAC collection + items) |
+| S7.3.5 | ✅ | Finalize handler (h3.source_catalog entry) |
 
 **Key Files**:
 - `jobs/ingest_collection.py`
@@ -1358,22 +1312,22 @@ POST /api/jobs/submit/ingest_collection
 
 ---
 
-### Feature F7.6: Pipeline Observability ✅ (formerly E13)
+### Feature F7.4: Pipeline Observability ✅ (formerly E13)
 
 **Deliverable**: Real-time metrics for long-running jobs with massive task counts
 **Completed**: 28 DEC 2025
 
 | Story | Status | Description |
 |-------|--------|-------------|
-| S7.6.1 | ✅ | Create `config/metrics_config.py` with env vars |
-| S7.6.2 | ✅ | Create `app.job_metrics` table (self-bootstrapping) |
-| S7.6.3 | ✅ | Create `infrastructure/metrics_repository.py` |
-| S7.6.4 | ✅ | Create `infrastructure/job_progress.py` - base tracker |
-| S7.6.5 | ✅ | Create `infrastructure/job_progress_contexts.py` - H3/FATHOM/Raster mixins |
-| S7.6.6 | ✅ | Create HTTP API + dashboard at `/api/interface/metrics` |
-| S7.6.7 | ✅ | Integrate H3AggregationTracker into `handler_raster_zonal.py` |
-| S7.6.8 | ✅ | Integrate FathomETLTracker into FATHOM handlers |
-| S7.6.9 | 📋 | Integrate into `handler_inventory_cells.py` (deferred) |
+| S7.4.1 | ✅ | Create `config/metrics_config.py` with env vars |
+| S7.4.2 | ✅ | Create `app.job_metrics` table (self-bootstrapping) |
+| S7.4.3 | ✅ | Create `infrastructure/metrics_repository.py` |
+| S7.4.4 | ✅ | Create `infrastructure/job_progress.py` - base tracker |
+| S7.4.5 | ✅ | Create `infrastructure/job_progress_contexts.py` - H3/FATHOM/Raster mixins |
+| S7.4.6 | ✅ | Create HTTP API + dashboard at `/api/interface/metrics` |
+| S7.4.7 | ✅ | Integrate H3AggregationTracker into `handler_raster_zonal.py` |
+| S7.4.8 | ✅ | Integrate FathomETLTracker into FATHOM handlers |
+| S7.4.9 | 📋 | Integrate into `handler_inventory_cells.py` (deferred) |
 
 **Key Files**:
 - `config/metrics_config.py`
@@ -1386,40 +1340,43 @@ POST /api/jobs/submit/ingest_collection
 
 ---
 
-### Feature F7.7: Pipeline Builder UI 📋 (formerly E11)
+### Feature F7.5: Pipeline Builder UI 📋
 
 **Deliverable**: Visual interface for defining and executing pipelines
-**Status**: 📋 PLANNED (after F8.9 Pipeline Definition Framework)
+**Status**: 📋 PLANNED
 
 | Story | Status | Description |
 |-------|--------|-------------|
-| S7.7.1 | 📋 | Design pipeline builder wireframes |
-| S7.7.2 | 📋 | Create drag-and-drop step editor |
-| S7.7.3 | 📋 | Integrate with F8.9 pipeline definitions |
-| S7.7.4 | 📋 | Add execution monitoring view |
-
-**Depends On**: F8.9 (Pipeline Definition Framework)
+| S7.5.1 | 📋 | Design pipeline builder wireframes |
+| S7.5.2 | 📋 | Create drag-and-drop step editor |
+| S7.5.3 | 📋 | Integrate with pipeline definitions |
+| S7.5.4 | 📋 | Add execution monitoring view |
 
 ---
 
 ---
 
-## Epic E8: H3 Analytics Pipeline 🚧
+## Epic E8: GeoAnalytics Pipeline 🚧
 
-**Business Requirement**: Columnar aggregations of raster/vector data to H3 hexagonal grid
-**Status**: 🚧 PARTIAL (F8.1-F8.3 ✅, F8.8 ✅, F8.12 ✅, F8.4-F8.7 pending)
-**Last Updated**: 29 DEC 2025
+**Business Requirement**: Transform raster/vector data to H3 hexagonal grid, export to GeoParquet and OGC Features
+**Status**: 🚧 PARTIAL (F8.1-F8.3 ✅, F8.8 ✅, F8.9 ✅)
+**Last Updated**: 30 DEC 2025
+
+**Strategic Context**:
+> E8 is the "transform and export" epic. Data hosted in E9 (FATHOM, CMIP6) gets aggregated to H3
+> hexagons and exported as: (a) gargantuan GeoParquet files (res 2-8, hundreds of columns) for
+> Databricks/DuckDB, or (b) OGC Feature collections for mapping and download.
 
 **Architecture**:
 ```
-Source Data           H3 Aggregation          Output
-┌─────────────┐       ┌───────────────┐       ┌─────────────────┐
-│ Rasters     │──────▶│ Zonal Stats   │──────▶│ PostgreSQL OLTP │
-│ (COGs)      │       │ (mean,sum,etc)│       │ (h3.zonal_stats)│
-├─────────────┤       ├───────────────┤       ├─────────────────┤
-│ Vectors     │──────▶│ Point Counts  │──────▶│ GeoParquet OLAP │
-│ (PostGIS)   │       │ (category agg)│       │ (DuckDB export) │
-└─────────────┘       └───────────────┘       └─────────────────┘
+E9: Large Data             E8: GeoAnalytics              Outputs
+┌─────────────┐           ┌───────────────┐           ┌──────────────────┐
+│ FATHOM COGs │──────────▶│ H3 Zonal      │──────────▶│ GeoParquet       │
+│ CMIP6 Zarr  │           │ Statistics    │           │ (res 2-8, OLAP)  │
+├─────────────┤           ├───────────────┤           ├──────────────────┤
+│ PostGIS     │──────────▶│ H3 Point      │──────────▶│ OGC Features     │
+│ Vectors     │           │ Aggregation   │           │ (API + download) │
+└─────────────┘           └───────────────┘           └──────────────────┘
 ```
 
 **Feature Summary**:
@@ -1429,17 +1386,14 @@ Source Data           H3 Aggregation          Output
 | F8.2 | ✅ | Grid Bootstrap System |
 | F8.3 | ✅ | Raster→H3 Aggregation |
 | F8.4 | ⬜ | Vector→H3 Aggregation |
-| F8.5 | 📋 | GeoParquet Export |
-| F8.6 | 🚧 | Analytics API (partial) |
+| F8.5 | 📋 | GeoParquet Export (res 2-8, 100s columns) |
+| F8.6 | 🚧 | Analytics API |
 | F8.7 | 📋 | Building Exposure Analysis |
 | F8.8 | ✅ | Source Catalog |
-| F8.9 | 📋 | Pipeline Definition Framework |
-| F8.10 | 📋 | Multi-Step Pipeline Operations |
-| F8.11 | 📋 | Rwanda Coffee Climate Risk Demo |
-| F8.12 | ✅ | H3 Export Pipeline (~~E14~~) |
-| F8.13 | 📋 | Analytics Data Browser (~~E11.F11.1~~) |
-| F8.14 | 📋 | H3 Visualization UI (~~E11.F11.3~~) |
-| F8.15 | 📋 | Analytics Export UI (~~E11.F11.4~~) |
+| F8.9 | ✅ | H3 Export to OGC Features (~~E14~~) |
+| F8.10 | 📋 | Analytics Data Browser (~~E11~~) |
+| F8.11 | 📋 | H3 Visualization UI (~~E11~~) |
+| F8.12 | 📋 | Analytics Export UI (~~E11~~) |
 
 ### Feature F8.1: H3 Grid Infrastructure ✅
 
@@ -1618,168 +1572,7 @@ Buildings (MS/Google) → Centroids → Raster Sample → H3 Aggregate → GeoPa
 
 ---
 
-### Feature F8.9: Pipeline Definition Framework 📋 PLANNED
-
-**Deliverable**: Declarative JSONB pipeline definitions with step dependencies
-**Origin**: NEW_ADVENTURE.md (28 DEC 2025)
-**Estimated Effort**: ~34 story points
-
-**Concept**: Instead of submitting jobs with explicit parameters, define reusable pipeline templates in the database.
-
-| Story | Status | Description |
-|-------|--------|-------------|
-| S8.9.1 | 📋 | Create `h3.pipeline_definition` table schema |
-| S8.9.2 | 📋 | Implement pipeline JSONB validation |
-| S8.9.3 | 📋 | Build step dependency resolver (topological sort) |
-| S8.9.4 | 📋 | Implement `$prev_step` reference pattern |
-| S8.9.5 | 📋 | Create `/api/h3/pipelines` CRUD endpoints |
-| S8.9.6 | 📋 | Create pipeline validation service (dry run) |
-| S8.9.7 | 📋 | Implement `PipelineFactory.build_job()` - compiles pipeline → CoreMachine job |
-| S8.9.8 | 📋 | Register `h3_pipeline` job type |
-| S8.9.9 | 📋 | Create `/api/h3/pipelines/run` execution endpoint |
-| S8.9.10 | 📋 | Create `/api/h3/pipelines/runs/{id}` status endpoint |
-
-**Pipeline Definition Schema**:
-```json
-{
-  "id": "elevation-stats",
-  "display_name": "Elevation Statistics",
-  "description": "Compute elevation stats from Copernicus DEM",
-  "steps": [
-    {
-      "id": "dem",
-      "operation": "zonal_stats",
-      "source_id": "cop-dem-glo-30",
-      "stats": ["mean", "min", "max"]
-    }
-  ],
-  "default_scope": {
-    "resolution": 6
-  }
-}
-```
-
-**Usage**:
-```bash
-# Define once
-POST /api/h3/pipelines
-{"id": "elevation-stats", "steps": [...]}
-
-# Run many times with different scopes
-POST /api/h3/pipelines/run
-{"pipeline_id": "elevation-stats", "scope": {"iso3": "RWA"}}
-```
-
-**Key Files** (planned):
-- `infrastructure/h3_schema.py` (pipeline_definition table)
-- `infrastructure/h3_pipeline_repository.py`
-- `services/h3_aggregation/pipeline_factory.py`
-- `jobs/h3_pipeline.py`
-- `web_interfaces/h3_pipelines/interface.py`
-
----
-
-### Feature F8.10: Multi-Step Pipeline Operations 📋 PLANNED
-
-**Deliverable**: Complex operations: spatial joins, weighted aggregates, intermediate storage
-**Origin**: NEW_ADVENTURE.md (28 DEC 2025)
-**Estimated Effort**: ~42 story points
-**Depends On**: F8.9 (Pipeline Definition Framework)
-
-| Story | Status | Description |
-|-------|--------|-------------|
-| S8.10.1 | 📋 | Design intermediate output storage strategy (temp tables vs blob) |
-| S8.10.2 | 📋 | Implement temp table intermediate storage |
-| S8.10.3 | 📋 | Implement `h3_spatial_join` handler |
-| S8.10.4 | 📋 | Implement `h3_weighted_aggregate` handler |
-| S8.10.5 | 📋 | Implement step output reference resolution (`$prev_step`) |
-| S8.10.6 | 📋 | Create intermediate cleanup service |
-| S8.10.7 | 📋 | End-to-end test: multi-step flood risk pipeline |
-
-**Multi-Step Pipeline Example**:
-```json
-{
-  "id": "flood-weighted-risk",
-  "steps": [
-    {"id": "flood", "operation": "zonal_stats", "source_id": "fathom-pluvial", "stats": ["max"]},
-    {"id": "pop", "operation": "zonal_stats", "source_id": "worldpop-2020", "stats": ["sum"]},
-    {"id": "risk", "operation": "weighted_aggregate",
-     "value_source": "$prev_step.flood",
-     "weight_source": "$prev_step.pop",
-     "output_dataset": "flood_pop_risk"}
-  ]
-}
-```
-
-**Operations Supported**:
-- `zonal_stats` - Raster to H3 aggregation (existing)
-- `point_stats` - Vector point counting (F8.4)
-- `spatial_join` - Join H3 stats with admin boundaries
-- `weighted_aggregate` - Combine datasets with weights
-- `normalize` - Scale values to 0-1 range
-- `classify` - Assign risk categories
-
----
-
-### Feature F8.11: Rwanda Coffee Climate Risk Demo 📋 PLANNED
-
-**Deliverable**: End-to-end demonstration pipeline for coffee suitability/risk analysis
-**Origin**: NEW_ADVENTURE.md (28 DEC 2025)
-**Estimated Effort**: ~34 story points
-**Depends On**: F8.9, F8.10
-**Business Value**: Showcase platform capabilities for stakeholder engagement
-
-| Story | Status | Description |
-|-------|--------|-------------|
-| S8.11.1 | 📋 | Register iSDA soil sources (pH, carbon, texture) in source_catalog |
-| S8.11.2 | 📋 | Register CMIP6 temperature/precipitation sources |
-| S8.11.3 | 📋 | Register MapSPAM coffee production source |
-| S8.11.4 | 📋 | Seed Rwanda H3 res-7 cells (~5,000 cells) |
-| S8.11.5 | 📋 | Define coffee suitability calculation logic |
-| S8.11.6 | 📋 | Define coffee climate risk pipeline |
-| S8.11.7 | 📋 | Execute pipeline for Rwanda |
-| S8.11.8 | 📋 | Export results to GeoParquet |
-| S8.11.9 | 📋 | Create demo visualization (integrate with E11 Pipeline Builder) |
-
-**Data Sources**:
-| Source | Provider | Theme | Resolution |
-|--------|----------|-------|------------|
-| iSDA Soil pH | iSDA Africa | soil | 30m |
-| iSDA Soil Carbon | iSDA Africa | soil | 30m |
-| iSDA Soil Texture | iSDA Africa | soil | 30m |
-| CMIP6 Temperature | Planetary Computer | climate | ~100km |
-| CMIP6 Precipitation | Planetary Computer | climate | ~100km |
-| MapSPAM Coffee | IFPRI | agriculture | 10km |
-
-**Coffee Suitability Formula** (simplified):
-```
-suitability = f(
-  soil_ph: optimal 5.0-6.5,
-  soil_carbon: >2% preferred,
-  temp_mean: 15-24°C optimal,
-  precip_annual: 1200-2200mm optimal
-)
-```
-
-**Pipeline Definition**:
-```json
-{
-  "id": "coffee-climate-risk-rwa",
-  "steps": [
-    {"id": "soil_ph", "operation": "zonal_stats", "source_id": "isda-soil-ph"},
-    {"id": "soil_carbon", "operation": "zonal_stats", "source_id": "isda-soil-carbon"},
-    {"id": "temp", "operation": "zonal_stats", "source_id": "cmip6-tas-ssp245"},
-    {"id": "precip", "operation": "zonal_stats", "source_id": "cmip6-pr-ssp245"},
-    {"id": "suitability", "operation": "composite_score",
-     "inputs": ["$prev_step.soil_ph", "$prev_step.soil_carbon", "$prev_step.temp", "$prev_step.precip"],
-     "formula": "coffee_suitability_v1"}
-  ]
-}
-```
-
----
-
-### Feature F8.12: H3 Export Pipeline ✅ (formerly E14)
+### Feature F8.9: H3 Export to OGC Features ✅ (formerly E14)
 
 **Deliverable**: Denormalized, wide-format exports from H3 zonal_stats for mapping and download
 **Completed**: 28 DEC 2025
@@ -1787,12 +1580,12 @@ suitability = f(
 
 | Story | Status | Description |
 |-------|--------|-------------|
-| S8.12.1 | ✅ | Create `h3_export_dataset` job definition (3-stage workflow) |
-| S8.12.2 | ✅ | Validate handler (check table doesn't exist or overwrite=true) |
-| S8.12.3 | ✅ | Build handler (join h3.cells with h3.zonal_stats, pivot to wide format) |
-| S8.12.4 | ✅ | Register handler (update export catalog) |
-| S8.12.5 | ✅ | Support multiple geometry options (polygon/centroid) |
-| S8.12.6 | ✅ | Support spatial scope filtering (iso3, bbox, polygon_wkt) |
+| S8.9.1 | ✅ | Create `h3_export_dataset` job definition (3-stage workflow) |
+| S8.9.2 | ✅ | Validate handler (check table doesn't exist or overwrite=true) |
+| S8.9.3 | ✅ | Build handler (join h3.cells with h3.zonal_stats, pivot to wide format) |
+| S8.9.4 | ✅ | Register handler (update export catalog) |
+| S8.9.5 | ✅ | Support multiple geometry options (polygon/centroid) |
+| S8.9.6 | ✅ | Support spatial scope filtering (iso3, bbox, polygon_wkt) |
 
 **Key Files**:
 - `jobs/h3_export_dataset.py`
@@ -1825,77 +1618,133 @@ POST /api/jobs/submit/h3_export_dataset
 
 ---
 
-### Feature F8.13: Analytics Data Browser 📋 (~~E11.F11.1~~)
+### Feature F8.10: Analytics Data Browser 📋 (~~E11~~)
 
 **Deliverable**: STAC + Promoted datasets gallery view for analytics exploration
-**Origin**: Absorbed from E11 (Pipeline Builder Demo App)
 
 | Story | Status | Description | Backend Dep |
 |-------|--------|-------------|-------------|
-| S8.13.1 | 📋 | STAC collection browser with search | `/api/stac/*` ✅ |
-| S8.13.2 | 📋 | Promoted datasets gallery view | `/api/promote/gallery` ✅ |
-| S8.13.3 | 📋 | Preview thumbnails from TiTiler | TiTiler ✅ |
-| S8.13.4 | 📋 | Click to view on map | TiTiler ✅ |
+| S8.10.1 | 📋 | STAC collection browser with search | `/api/stac/*` ✅ |
+| S8.10.2 | 📋 | Promoted datasets gallery view | `/api/promote/gallery` ✅ |
+| S8.10.3 | 📋 | Preview thumbnails from TiTiler | TiTiler ✅ |
+| S8.10.4 | 📋 | Click to view on map | TiTiler ✅ |
 
 ---
 
-### Feature F8.14: H3 Visualization UI 📋 (~~E11.F11.3~~)
+### Feature F8.11: H3 Visualization UI 📋 (~~E11~~)
 
 **Deliverable**: Hexagonal analytics visualization with drill-down (KEY FEATURE)
-**Origin**: Absorbed from E11 (Pipeline Builder Demo App)
 
 | Story | Status | Description | Backend Dep |
 |-------|--------|-------------|-------------|
-| S8.14.1 | 📋 | H3 hexagon layer (Mapbox GL + deck.gl) | `/api/h3/stats/*/cells` (F8.6) |
-| S8.14.2 | 📋 | Resolution switcher (zoom mapping) | H3 pyramid ✅ |
-| S8.14.3 | 📋 | Click hexagon → drill to children | H3 schema ✅ |
-| S8.14.4 | 📋 | Choropleth styling by stat value | OGC Styles ✅ |
-| S8.14.5 | 📋 | Country/Admin filter | `/api/h3/stats?iso3=` (F8.6) |
-| S8.14.6 | 📋 | Time slider for temporal stats | xarray service ✅ |
+| S8.11.1 | 📋 | H3 hexagon layer (Mapbox GL + deck.gl) | `/api/h3/stats/*/cells` (F8.6) |
+| S8.11.2 | 📋 | Resolution switcher (zoom mapping) | H3 pyramid ✅ |
+| S8.11.3 | 📋 | Click hexagon → drill to children | H3 schema ✅ |
+| S8.11.4 | 📋 | Choropleth styling by stat value | OGC Styles ✅ |
+| S8.11.5 | 📋 | Country/Admin filter | `/api/h3/stats?iso3=` (F8.6) |
+| S8.11.6 | 📋 | Time slider for temporal stats | xarray service ✅ |
 
 **Blockers**: Requires F8.3 (H3 aggregation handlers) + F8.6 (H3 API)
 
 ---
 
-### Feature F8.15: Analytics Export UI 📋 (~~E11.F11.4~~)
+### Feature F8.12: Analytics Export UI 📋 (~~E11~~)
 
 **Deliverable**: Export capabilities for external tools
-**Origin**: Absorbed from E11 (Pipeline Builder Demo App)
 
 | Story | Status | Description | Backend Dep |
 |-------|--------|-------------|-------------|
-| S8.15.1 | 📋 | Export H3 stats as GeoParquet | `/api/h3/export` (F8.5) |
-| S8.15.2 | 📋 | DuckDB SQL preview (WASM) | Client-side |
-| S8.15.3 | 📋 | Copy tile URL for other tools | TiTiler URLs ✅ |
-| S8.15.4 | 📋 | STAC item JSON download | `/api/stac/items/*` ✅ |
+| S8.12.1 | 📋 | Export H3 stats as GeoParquet | `/api/h3/export` (F8.5) |
+| S8.12.2 | 📋 | DuckDB SQL preview (WASM) | Client-side |
+| S8.12.3 | 📋 | Copy tile URL for other tools | TiTiler URLs ✅ |
+| S8.12.4 | 📋 | STAC item JSON download | `/api/stac/items/*` ✅ |
 
 ---
 
 ---
 
-## Epic E9: Zarr/Climate Data as API 🚧
+## Epic E9: Large and Multidimensional Data 🚧
 
-**Business Requirement**: Zarr/NetCDF data access with time-series query support
-**Status**: 🚧 PARTIAL
+**Business Requirement**: Host and serve massive GeoTIFF and Zarr/NetCDF datasets at scale
+**Status**: 🚧 PARTIAL (F9.1 🚧, F9.5 ✅)
+**Last Updated**: 30 DEC 2025
 
-### Feature F9.1: xarray Service Layer ✅
+**Strategic Context**:
+> E9 is the "data hosting" epic. It handles ingesting, processing, and serving very large datasets
+> that feed into E8 (GeoAnalytics). First prototypes: FATHOM flood data (GeoTIFF) and CMIP6 climate
+> data (Zarr/NetCDF). VirtualiZarr pipeline enables serving NetCDF without conversion.
 
-**Deliverable**: Time-series and statistics endpoints
+**Architecture**:
+```
+Raw Data                  Processing                Serving
+┌─────────────────┐      ┌─────────────────┐      ┌─────────────────┐
+│ FATHOM GeoTIFFs │─────▶│ Band Stack +    │─────▶│ TiTiler COG     │
+│ (1000s tiles)   │      │ Spatial Merge   │      │ Service         │
+├─────────────────┤      ├─────────────────┤      ├─────────────────┤
+│ CMIP6 NetCDF    │─────▶│ VirtualiZarr    │─────▶│ TiTiler Zarr    │
+│ (TB-scale)      │      │ References      │      │ Service         │
+└─────────────────┘      └─────────────────┘      └─────────────────┘
+   Bronze Storage           Silver Storage           API Endpoints
+```
 
-| Story | Description |
-|-------|-------------|
-| S9.1.1 | Create xarray reader service |
-| S9.1.2 | Implement /api/xarray/point time-series |
-| S9.1.3 | Implement /api/xarray/statistics |
-| S9.1.4 | Implement /api/xarray/aggregate |
-
-**Key Files**: `xarray_api/`, `services/xarray_reader.py`
+**Feature Summary**:
+| Feature | Status | Description |
+|---------|--------|-------------|
+| F9.1 | 🚧 | FATHOM ETL Operations (~~E10~~) |
+| F9.2 | ⬜ | FATHOM Flood Data Hosting |
+| F9.3 | 📋 | VirtualiZarr Pipeline (NetCDF → Zarr references) |
+| F9.4 | 📋 | CMIP6 Data Hosting |
+| F9.5 | ✅ | xarray Service Layer |
+| F9.6 | 📋 | TiTiler Services (COG + Zarr) |
+| F9.7 | ⬜ | Reader App Migration |
 
 ---
 
-### Feature F9.2: Virtual Zarr Pipeline 📋 PLANNED
+### Feature F9.1: FATHOM ETL Operations 🚧 (formerly E10)
 
-**Deliverable**: Kerchunk reference files enabling cloud-native access to legacy NetCDF
+**Deliverable**: Band stacking, spatial merge, STAC registration for FATHOM flood data
+**Documentation**: [FATHOM_ETL.md](docs_claude/FATHOM_ETL.md)
+**Status**: 🚧 Phase 1 ✅, Phase 2 46/47 tasks
+
+| Story | Status | Description |
+|-------|--------|-------------|
+| S9.1.1 | ✅ | Phase 1: Band stacking (8 return periods → 1 COG) |
+| S9.1.2 | 🚧 | Phase 2: Spatial merge (N×N tiles → 1 COG) - 46/47 tasks |
+| S9.1.3 | 📋 | Phase 3: STAC registration for merged COGs |
+| S9.1.4 | 📋 | Phase 4: West Africa / Africa scale processing |
+
+**Current Issue**: Phase 2 task `n10-n15_w005-w010` failed. Need retry with `force_reprocess=true`.
+
+**Key Files**: `services/fathom/fathom_etl.py`, `jobs/fathom_*.py`
+
+---
+
+### Feature F9.2: FATHOM Flood Data Hosting ⬜ READY
+
+**Deliverable**: End-to-end hosting pipeline for FATHOM flood risk data
+**Partner**: FATHOM
+**Data Patterns**: Zarr (preferred), COG (fallback)
+
+| Story | Status | Description |
+|-------|--------|-------------|
+| S9.2.1 | ⬜ | FATHOM data inventory and schema analysis |
+| S9.2.2 | ⬜ | FATHOM handler implementation |
+| S9.2.3 | ⬜ | Zarr output configuration (chunking, compression) |
+| S9.2.4 | ⬜ | STAC collection with datacube extension |
+| S9.2.5 | ⬜ | TiTiler Zarr Service integration for tile serving |
+| S9.2.6 | ⬜ | Manual update trigger endpoint |
+
+**FATHOM Data Characteristics**:
+- Global flood hazard maps (fluvial, pluvial, coastal)
+- Multiple return periods (1-in-5 to 1-in-1000 year)
+- High resolution (3 arcsec / ~90m)
+- Time-series projections (climate scenarios)
+
+---
+
+### Feature F9.3: VirtualiZarr Pipeline 📋 PLANNED
+
+**Deliverable**: Kerchunk/VirtualiZarr reference files enabling cloud-native access to legacy NetCDF
 
 **Strategic Context**:
 Eliminates need for traditional THREDDS/OPeNDAP infrastructure. NetCDF files
@@ -1906,14 +1755,13 @@ remain in blob storage unchanged; lightweight JSON references (~KB) enable
 
 | Story | Status | Description |
 |-------|--------|-------------|
-| S9.2.1 | ⬜ | CMIP6 filename parser (extract variable, model, scenario) |
-| S9.2.2 | ⬜ | Chunking validator (pre-flight NetCDF compatibility check) |
-| S9.2.3 | ⬜ | Reference generator (single NetCDF → Kerchunk JSON ~KB) |
-| S9.2.4 | ⬜ | Virtual combiner (merge time-series references) |
-| S9.2.5 | ⬜ | STAC datacube registration (xarray-compatible items) |
-| S9.2.6 | ⬜ | Inventory job (scan and group NetCDF files) |
-| S9.2.7 | ⬜ | Generate job (full reference pipeline) |
-| S9.2.8 | ⬜ | **TiTiler Zarr Service** configuration for virtual Zarr serving |
+| S9.3.1 | 📋 | CMIP6 filename parser (extract variable, model, scenario) |
+| S9.3.2 | 📋 | Chunking validator (pre-flight NetCDF compatibility check) |
+| S9.3.3 | 📋 | Reference generator (single NetCDF → Kerchunk JSON ~KB) |
+| S9.3.4 | 📋 | Virtual combiner (merge time-series references) |
+| S9.3.5 | 📋 | STAC datacube registration (xarray-compatible items) |
+| S9.3.6 | 📋 | Inventory job (scan and group NetCDF files) |
+| S9.3.7 | 📋 | Generate job (full reference pipeline) |
 
 **Dependencies**: `virtualizarr`, `kerchunk`, `h5netcdf`, `h5py`
 
@@ -1932,18 +1780,68 @@ NetCDF Files (unchanged)     Reference Generation      TiTiler Zarr Service
 
 ---
 
-### Feature F9.3: Reader App Migration ⬜ READY
+### Feature F9.4: CMIP6 Data Hosting 📋 PLANNED
+
+**Deliverable**: Curated subset of CMIP6 climate projections for East Africa analysis
+**Data Source**: Planetary Computer CMIP6 collection
+
+| Story | Status | Description |
+|-------|--------|-------------|
+| S9.4.1 | 📋 | Identify priority variables (tas, pr, tasmax, tasmin) |
+| S9.4.2 | 📋 | Identify priority scenarios (SSP2-4.5, SSP5-8.5) |
+| S9.4.3 | 📋 | Download/mirror selected data to Azure storage |
+| S9.4.4 | 📋 | Generate VirtualiZarr references for time-series access |
+| S9.4.5 | 📋 | Register in STAC catalog with datacube extension |
+| S9.4.6 | 📋 | Create source_catalog entries for H3 aggregation |
+
+**NOT the whole thing** - curated subset for specific analysis:
+- Variables: Temperature (tas, tasmax, tasmin), Precipitation (pr)
+- Scenarios: SSP2-4.5 (moderate), SSP5-8.5 (high emissions)
+- Region: East Africa bounding box
+- Time: 2020-2100 (decadal snapshots)
+
+---
+
+### Feature F9.5: xarray Service Layer ✅
+
+**Deliverable**: Time-series and statistics endpoints for multidimensional data
+
+| Story | Status | Description |
+|-------|--------|-------------|
+| S9.5.1 | ✅ | Create xarray reader service |
+| S9.5.2 | ✅ | Implement /api/xarray/point time-series |
+| S9.5.3 | ✅ | Implement /api/xarray/statistics |
+| S9.5.4 | ✅ | Implement /api/xarray/aggregate |
+
+**Key Files**: `xarray_api/`, `services/xarray_reader.py`
+
+---
+
+### Feature F9.6: TiTiler Services 📋 PLANNED
+
+**Deliverable**: Unified tile serving for COG and Zarr data
+
+| Story | Status | Description |
+|-------|--------|-------------|
+| S9.6.1 | 📋 | TiTiler COG configuration for FATHOM merged COGs |
+| S9.6.2 | 📋 | TiTiler Zarr configuration for VirtualiZarr references |
+| S9.6.3 | 📋 | STAC-based asset discovery for dynamic tiling |
+| S9.6.4 | 📋 | Colormap configuration for flood depth visualization |
+
+---
+
+### Feature F9.7: Reader App Migration ⬜ READY
 
 **Deliverable**: Move read APIs to **Reader Function App** (clean separation)
 
 | Story | Status | Description |
 |-------|--------|-------------|
-| S9.3.1 | ⬜ | Copy raster_api module |
-| S9.3.2 | ⬜ | Copy xarray_api module |
-| S9.3.3 | ⬜ | Copy service clients |
-| S9.3.4 | ⬜ | Update requirements.txt |
-| S9.3.5 | ⬜ | Register routes |
-| S9.3.6 | ⬜ | Deploy and validate |
+| S9.7.1 | ⬜ | Copy raster_api module |
+| S9.7.2 | ⬜ | Copy xarray_api module |
+| S9.7.3 | ⬜ | Copy service clients |
+| S9.7.4 | ⬜ | Update requirements.txt |
+| S9.7.5 | ⬜ | Register routes |
+| S9.7.6 | ⬜ | Deploy and validate |
 
 ---
 
@@ -2391,4 +2289,4 @@ After Phase 1, evaluate:
 
 ---
 
-**Last Updated**: 30 DEC 2025 (E11 absorbed into E8 as F8.13-15, duplicate E13 section removed)
+**Last Updated**: 30 DEC 2025 (E7/E8/E9 restructured: E7=Infrastructure, E8=GeoAnalytics, E9=Large Data)

@@ -336,6 +336,99 @@ class PgStacRepository:
             logger.error(f"❌ Error fetching collection '{collection_id}': {e}")
             return None
 
+    def get_item(self, item_id: str, collection_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Get item by ID and collection.
+
+        Args:
+            item_id: Item ID to retrieve
+            collection_id: Collection ID the item belongs to
+
+        Returns:
+            Item dict or None if not found
+        """
+        logger.debug(f"🔍 Fetching item: {item_id} (collection: {collection_id})")
+
+        try:
+            with self._pg_repo._get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT content
+                        FROM pgstac.items
+                        WHERE id = %s AND collection = %s
+                        """,
+                        (item_id, collection_id)
+                    )
+                    result = cur.fetchone()
+
+                    if result:
+                        logger.debug(f"   ✅ Item found: {item_id}")
+                        return result['content']  # content is JSONB, returns dict
+                    else:
+                        logger.debug(f"   ❌ Item not found: {item_id}")
+                        return None
+
+        except Exception as e:
+            logger.error(f"❌ Error fetching item '{item_id}': {e}")
+            return None
+
+    def update_item_properties(
+        self,
+        item_id: str,
+        collection_id: str,
+        properties_update: Dict[str, Any]
+    ) -> bool:
+        """
+        Update specific properties of a STAC item.
+
+        Args:
+            item_id: Item ID to update
+            collection_id: Collection ID the item belongs to
+            properties_update: Dict of properties to merge/update
+
+        Returns:
+            True if update succeeded, False otherwise
+
+        Note:
+            Uses PostgreSQL jsonb_set to update properties in place.
+            Only updates specified properties, preserves others.
+        """
+        logger.info(f"🔄 Updating item properties: {item_id} (collection: {collection_id})")
+        logger.debug(f"   Properties update: {properties_update}")
+
+        try:
+            with self._pg_repo._get_connection() as conn:
+                with conn.cursor() as cur:
+                    # Update properties using jsonb concatenation (||)
+                    # This merges the new properties with existing ones
+                    cur.execute(
+                        """
+                        UPDATE pgstac.items
+                        SET content = jsonb_set(
+                            content,
+                            '{properties}',
+                            (content->'properties') || %s::jsonb
+                        )
+                        WHERE id = %s AND collection = %s
+                        RETURNING id
+                        """,
+                        (json.dumps(properties_update), item_id, collection_id)
+                    )
+                    result = cur.fetchone()
+                    conn.commit()
+
+                    if result:
+                        logger.info(f"✅ Item properties updated: {item_id}")
+                        return True
+                    else:
+                        logger.warning(f"⚠️ Item not found for update: {item_id}")
+                        return False
+
+        except Exception as e:
+            logger.error(f"❌ Error updating item properties '{item_id}': {e}")
+            return False
+
     def list_collections(self, limit: int = 100, offset: int = 0) -> List[Dict[str, Any]]:
         """
         List all collections.

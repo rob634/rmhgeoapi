@@ -337,6 +337,81 @@ class RasterCollectionViewerService:
             margin-top: 2px;
         }}
 
+        .item-delete {{
+            padding: 6px 10px;
+            background: transparent;
+            border: 1px solid #dc2626;
+            color: #dc2626;
+            border-radius: 4px;
+            font-size: 11px;
+            cursor: pointer;
+            flex-shrink: 0;
+            transition: all 0.15s;
+        }}
+
+        .item-delete:hover {{
+            background: #dc2626;
+            color: white;
+        }}
+
+        /* Modal */
+        .modal-overlay {{
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.5);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 2000;
+        }}
+
+        .modal-content {{
+            background: white;
+            padding: 24px;
+            border-radius: 8px;
+            max-width: 400px;
+            width: 90%;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+        }}
+
+        .modal-title {{
+            font-size: 18px;
+            font-weight: 600;
+            color: var(--ds-navy);
+            margin-bottom: 12px;
+        }}
+
+        .modal-body {{
+            font-size: 14px;
+            color: var(--ds-gray);
+            margin-bottom: 20px;
+            line-height: 1.5;
+        }}
+
+        .modal-buttons {{
+            display: flex;
+            gap: 12px;
+            justify-content: flex-end;
+        }}
+
+        .btn-danger {{
+            background: #dc2626;
+            color: white;
+        }}
+
+        .btn-danger:hover {{
+            background: #b91c1c;
+        }}
+
+        .btn-cancel {{
+            background: var(--ds-gray-light);
+            color: var(--ds-navy);
+        }}
+
+        .btn-cancel:hover {{
+            background: #e5e7eb;
+        }}
+
         /* Band Controls */
         .band-controls {{
             display: grid;
@@ -461,6 +536,121 @@ class RasterCollectionViewerService:
 
         .layer-info-label {{ color: var(--ds-gray); }}
         .layer-info-value {{ font-weight: 600; color: var(--ds-navy); }}
+
+        /* Point Query Popup */
+        .point-query-popup {{
+            min-width: 200px;
+        }}
+
+        .point-query-popup .popup-title {{
+            font-weight: 600;
+            font-size: 13px;
+            color: var(--ds-navy);
+            margin-bottom: 8px;
+            padding-bottom: 6px;
+            border-bottom: 2px solid var(--ds-blue);
+        }}
+
+        .point-query-popup .popup-coords {{
+            font-size: 11px;
+            color: var(--ds-gray);
+            margin-bottom: 8px;
+            font-family: 'Courier New', monospace;
+        }}
+
+        .point-query-popup .band-values {{
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 4px 12px;
+        }}
+
+        .point-query-popup .band-row {{
+            display: flex;
+            justify-content: space-between;
+            font-size: 12px;
+            padding: 2px 0;
+        }}
+
+        .point-query-popup .band-label {{
+            color: var(--ds-gray);
+        }}
+
+        .point-query-popup .band-value {{
+            font-weight: 600;
+            color: var(--ds-navy);
+            font-family: 'Courier New', monospace;
+        }}
+
+        .point-query-popup .loading {{
+            text-align: center;
+            padding: 10px;
+            color: var(--ds-gray);
+        }}
+
+        /* QA Status */
+        .qa-section {{
+            display: flex;
+            gap: 8px;
+            margin-top: 12px;
+        }}
+
+        .qa-btn {{
+            flex: 1;
+            padding: 10px 16px;
+            border: none;
+            border-radius: 6px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }}
+
+        .qa-btn.approve {{
+            background: #10B981;
+            color: white;
+        }}
+
+        .qa-btn.approve:hover {{
+            background: #059669;
+        }}
+
+        .qa-btn.reject {{
+            background: #DC2626;
+            color: white;
+        }}
+
+        .qa-btn.reject:hover {{
+            background: #B91C1C;
+        }}
+
+        .qa-btn:disabled {{
+            opacity: 0.5;
+            cursor: not-allowed;
+        }}
+
+        .qa-status-badge {{
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 10px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }}
+
+        .qa-status-badge.pending {{
+            background: #FEF3C7;
+            color: #92400E;
+        }}
+
+        .qa-status-badge.approved {{
+            background: #D1FAE5;
+            color: #065F46;
+        }}
+
+        .qa-status-badge.rejected {{
+            background: #FEE2E2;
+            color: #991B1B;
+        }}
 
         /* Loading Overlay */
         .loading-overlay {{
@@ -617,9 +807,23 @@ class RasterCollectionViewerService:
                     </div>
                 </div>
 
+                <!-- QA Actions -->
+                <div class="section-card" id="qa-section" style="display: none;">
+                    <div class="section-header">QA Review</div>
+                    <div class="section-body">
+                        <div style="margin-bottom: 12px; font-size: 13px;">
+                            Current status: <span id="qa-current-status" class="qa-status-badge pending">pending</span>
+                        </div>
+                        <div class="qa-section">
+                            <button class="qa-btn approve" onclick="setQaStatus('approved')">✓ Approve</button>
+                            <button class="qa-btn reject" onclick="setQaStatus('rejected')">✗ Reject</button>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Status -->
                 <div class="status-bar" id="status">
-                    Select an item from the list to view on map
+                    Select an item to view. Click on map for band values.
                 </div>
             </div>
         </div>
@@ -651,6 +855,22 @@ class RasterCollectionViewerService:
                     <span class="layer-info-label">Rescale:</span>
                     <span class="layer-info-value" id="layer-rescale">--</span>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Delete Confirmation Modal -->
+    <div class="modal-overlay" id="delete-modal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-title">Delete STAC Item</div>
+            <div class="modal-body">
+                Are you sure you want to delete item <strong id="delete-item-id"></strong>?
+                <br><br>
+                This will remove the item from the STAC catalog and delete associated files. This action cannot be undone.
+            </div>
+            <div class="modal-buttons">
+                <button class="btn btn-cancel" onclick="closeDeleteModal()">Cancel</button>
+                <button class="btn btn-danger" onclick="confirmDelete()">Delete</button>
             </div>
         </div>
     </div>
@@ -704,8 +924,8 @@ class RasterCollectionViewerService:
                 const thumbUrl = item.assets?.thumbnail?.href || '';
 
                 // Get raster metadata
-                const rasterType = props['rmh:raster_type'] || 'unknown';
-                const bandCount = props['rmh:band_count'] || '?';
+                const rasterType = props['app:raster_type'] || 'unknown';
+                const bandCount = props['app:band_count'] || '?';
                 const datetime = props.datetime ? new Date(props.datetime).toLocaleDateString() : '';
 
                 const row = document.createElement('div');
@@ -714,13 +934,15 @@ class RasterCollectionViewerService:
 
                 row.innerHTML = `
                     ${{thumbUrl ? `<img class="item-thumb" src="${{thumbUrl}}" onerror="this.style.display='none'">` : ''}}
-                    <div class="item-info">
+                    <div class="item-info" onclick="selectItem(${{index}})">
                         <div class="item-name">${{itemId}}</div>
                         <div class="item-meta">${{rasterType}} | ${{bandCount}} bands ${{datetime ? '| ' + datetime : ''}}</div>
                     </div>
+                    <button class="item-delete" onclick="showDeleteModal('${{itemId}}', event)" title="Delete item">🗑️</button>
                 `;
 
-                row.onclick = () => selectItem(index);
+                // Click on row (but not delete button) selects item
+                row.onclick = (e) => {{ if (!e.target.classList.contains('item-delete')) selectItem(index); }};
                 listEl.appendChild(row);
             }});
         }}
@@ -737,8 +959,11 @@ class RasterCollectionViewerService:
             // Update band selectors based on item metadata
             updateBandSelectors();
 
-            // Apply item's rmh:* metadata if available
+            // Apply item's app:* metadata if available
             applyItemMetadata();
+
+            // Show QA section and update status
+            updateQaSection();
 
             // Load tile layer
             loadTileLayer();
@@ -746,7 +971,7 @@ class RasterCollectionViewerService:
 
         // Update band selectors based on current item
         function updateBandSelectors() {{
-            const bandCount = currentItem?.properties?.['rmh:band_count'] || 3;
+            const bandCount = currentItem?.properties?.['app:band_count'] || 3;
 
             ['band-r', 'band-g', 'band-b'].forEach(id => {{
                 const select = document.getElementById(id);
@@ -825,12 +1050,12 @@ class RasterCollectionViewerService:
             if (currentItem) loadTileLayer();
         }}
 
-        // Apply item's rmh:* metadata
+        // Apply item's app:* metadata
         function applyItemMetadata() {{
             const props = currentItem?.properties || {{}};
 
             // Apply rgb_bands if available
-            const rgbBands = props['rmh:rgb_bands'];
+            const rgbBands = props['app:rgb_bands'];
             if (rgbBands && Array.isArray(rgbBands)) {{
                 currentBands = rgbBands;
                 if (rgbBands.length >= 1) document.getElementById('band-r').value = rgbBands[0];
@@ -839,7 +1064,7 @@ class RasterCollectionViewerService:
             }}
 
             // Apply rescale if available
-            const rescale = props['rmh:rescale'];
+            const rescale = props['app:rescale'];
             if (rescale && rescale.min !== undefined && rescale.max !== undefined) {{
                 currentRescale = [rescale.min, rescale.max];
                 document.getElementById('rescale-min').value = rescale.min;
@@ -851,7 +1076,7 @@ class RasterCollectionViewerService:
             }}
 
             // Apply colormap if available
-            const colormap = props['rmh:colormap'];
+            const colormap = props['app:colormap'];
             if (colormap) {{
                 currentColormap = colormap;
                 document.getElementById('colormap-select').value = colormap;
@@ -952,7 +1177,7 @@ class RasterCollectionViewerService:
             panel.style.display = 'block';
 
             document.getElementById('layer-title').textContent = currentItem?.id || 'Unknown';
-            document.getElementById('layer-type').textContent = currentItem?.properties?.['rmh:raster_type'] || 'unknown';
+            document.getElementById('layer-type').textContent = currentItem?.properties?.['app:raster_type'] || 'unknown';
             document.getElementById('layer-bands').textContent = currentBands.join(', ');
             document.getElementById('layer-rescale').textContent = currentRescale ? `${{currentRescale[0]}} - ${{currentRescale[1]}}` : 'auto';
         }}
@@ -997,6 +1222,239 @@ class RasterCollectionViewerService:
             el.className = 'status-bar' + (type ? ' ' + type : '');
         }}
 
+        // Delete item functionality
+        let pendingDeleteItemId = null;
+
+        function showDeleteModal(itemId, event) {{
+            event.stopPropagation();
+            pendingDeleteItemId = itemId;
+            document.getElementById('delete-item-id').textContent = itemId;
+            document.getElementById('delete-modal').style.display = 'flex';
+        }}
+
+        function closeDeleteModal() {{
+            document.getElementById('delete-modal').style.display = 'none';
+            pendingDeleteItemId = null;
+        }}
+
+        async function confirmDelete() {{
+            if (!pendingDeleteItemId) return;
+
+            const itemId = pendingDeleteItemId;
+            closeDeleteModal();
+            showLoading();
+            setStatus(`Deleting item ${{itemId}}...`);
+
+            try {{
+                const response = await fetch('/api/platform/unpublish/raster', {{
+                    method: 'POST',
+                    headers: {{ 'Content-Type': 'application/json' }},
+                    body: JSON.stringify({{
+                        stac_item_id: itemId,
+                        collection_id: COLLECTION_ID,
+                        dry_run: false
+                    }})
+                }});
+
+                const result = await response.json();
+
+                if (response.ok && result.success) {{
+                    setStatus(`Deleted: ${{itemId}}`, 'success');
+
+                    // Remove item from list and refresh
+                    const idx = INITIAL_ITEMS.findIndex(item => item.id === itemId);
+                    if (idx !== -1) {{
+                        INITIAL_ITEMS.splice(idx, 1);
+                        populateItemsList();
+
+                        // Update counts
+                        document.getElementById('total-items').textContent = INITIAL_ITEMS.length;
+                        document.getElementById('loaded-items').textContent = INITIAL_ITEMS.length;
+
+                        // If deleted item was selected, select first available
+                        if (currentItem && currentItem.id === itemId) {{
+                            currentItem = null;
+                            if (tileLayer) {{
+                                map.removeLayer(tileLayer);
+                                tileLayer = null;
+                            }}
+                            if (INITIAL_ITEMS.length > 0) {{
+                                selectItem(0);
+                            }}
+                        }}
+                    }}
+                }} else {{
+                    const errMsg = result.error || result.message || 'Unknown error';
+                    setStatus(`Delete failed: ${{errMsg}}`, 'error');
+                }}
+            }} catch (error) {{
+                console.error('Delete error:', error);
+                setStatus(`Delete error: ${{error.message}}`, 'error');
+            }} finally {{
+                hideLoading();
+            }}
+        }}
+
+        // QA Section Management
+        function updateQaSection() {{
+            if (!currentItem) {{
+                document.getElementById('qa-section').style.display = 'none';
+                return;
+            }}
+
+            // Show QA section
+            document.getElementById('qa-section').style.display = 'block';
+
+            // Get current QA status
+            const qaStatus = currentItem.properties?.['app:qa_status'] || 'pending';
+            updateQaStatusBadge(qaStatus);
+        }}
+
+        function updateQaStatusBadge(status) {{
+            const badge = document.getElementById('qa-current-status');
+            badge.textContent = status;
+            badge.className = 'qa-status-badge ' + status;
+        }}
+
+        async function setQaStatus(status) {{
+            if (!currentItem) return;
+
+            const itemId = currentItem.id;
+            showLoading();
+            setStatus(`Setting QA status to '${{status}}'...`);
+
+            try {{
+                const response = await fetch('/api/raster/qa', {{
+                    method: 'POST',
+                    headers: {{ 'Content-Type': 'application/json' }},
+                    body: JSON.stringify({{
+                        item_id: itemId,
+                        collection_id: COLLECTION_ID,
+                        status: status
+                    }})
+                }});
+
+                const result = await response.json();
+
+                if (response.ok && result.success) {{
+                    // Update local item properties
+                    currentItem.properties = currentItem.properties || {{}};
+                    currentItem.properties['app:qa_status'] = status;
+
+                    // Update UI
+                    updateQaStatusBadge(status);
+                    setStatus(`QA status set to '${{status}}'`, 'success');
+                }} else {{
+                    const errMsg = result.error || 'Unknown error';
+                    setStatus(`QA update failed: ${{errMsg}}`, 'error');
+                }}
+            }} catch (error) {{
+                console.error('QA status error:', error);
+                setStatus(`QA update error: ${{error.message}}`, 'error');
+            }} finally {{
+                hideLoading();
+            }}
+        }}
+
+        // Close modal on overlay click
+        document.getElementById('delete-modal')?.addEventListener('click', (e) => {{
+            if (e.target.classList.contains('modal-overlay')) closeDeleteModal();
+        }});
+
+        // Point Query on Map Click
+        let pointQueryPopup = null;
+
+        map.on('click', async (e) => {{
+            if (!currentItem) return;
+
+            const {{ lat, lng }} = e.latlng;
+
+            // Get COG URL from data asset
+            const dataAsset = currentItem.assets?.data || currentItem.assets?.visual || Object.values(currentItem.assets || {{}})[0];
+            if (!dataAsset?.href) return;
+
+            // Show loading popup
+            if (pointQueryPopup) {{
+                map.closePopup(pointQueryPopup);
+            }}
+
+            pointQueryPopup = L.popup()
+                .setLatLng(e.latlng)
+                .setContent(`
+                    <div class="point-query-popup">
+                        <div class="popup-title">Point Query</div>
+                        <div class="popup-coords">${{lat.toFixed(6)}}, ${{lng.toFixed(6)}}</div>
+                        <div class="loading">Loading band values...</div>
+                    </div>
+                `)
+                .openOn(map);
+
+            // Query TiTiler point endpoint
+            try {{
+                const cogUrl = dataAsset.href;
+                const encodedUrl = encodeURIComponent(cogUrl);
+                const pointUrl = `${{TITILER_BASE}}/cog/point/${{lng}},${{lat}}?url=${{encodedUrl}}`;
+
+                const response = await fetch(pointUrl);
+                const result = await response.json();
+
+                if (response.ok && result.values) {{
+                    // Build band values HTML
+                    const bandCount = result.values.length;
+                    let bandHtml = '<div class="band-values">';
+
+                    result.values.forEach((val, idx) => {{
+                        const bandNum = idx + 1;
+                        const displayVal = val === null || val === undefined ? 'NoData' :
+                            (typeof val === 'number' ? val.toFixed(4) : val);
+                        bandHtml += `
+                            <div class="band-row">
+                                <span class="band-label">Band ${{bandNum}}:</span>
+                                <span class="band-value">${{displayVal}}</span>
+                            </div>
+                        `;
+                    }});
+                    bandHtml += '</div>';
+
+                    pointQueryPopup.setContent(`
+                        <div class="point-query-popup">
+                            <div class="popup-title">Band Values</div>
+                            <div class="popup-coords">${{lat.toFixed(6)}}, ${{lng.toFixed(6)}}</div>
+                            ${{bandHtml}}
+                        </div>
+                    `);
+                }} else {{
+                    // No data at location or error
+                    const errMsg = result.detail || 'No data at this location';
+                    pointQueryPopup.setContent(`
+                        <div class="point-query-popup">
+                            <div class="popup-title">Point Query</div>
+                            <div class="popup-coords">${{lat.toFixed(6)}}, ${{lng.toFixed(6)}}</div>
+                            <div style="color: #999; font-style: italic;">No data available</div>
+                        </div>
+                    `);
+                }}
+            }} catch (error) {{
+                console.error('Point query error:', error);
+                pointQueryPopup.setContent(`
+                    <div class="point-query-popup">
+                        <div class="popup-title">Point Query</div>
+                        <div class="popup-coords">${{lat.toFixed(6)}}, ${{lng.toFixed(6)}}</div>
+                        <div style="color: #dc2626;">Error: ${{error.message}}</div>
+                    </div>
+                `);
+            }}
+        }});
+
+        // Parse URL parameters
+        function getUrlParams() {{
+            const params = new URLSearchParams(window.location.search);
+            return {{
+                item: params.get('item'),
+                collection: params.get('collection')
+            }};
+        }}
+
         // Initialize
         document.addEventListener('DOMContentLoaded', () => {{
             populateItemsList();
@@ -1007,9 +1465,26 @@ class RasterCollectionViewerService:
                 map.fitBounds(bounds, {{ padding: [50, 50] }});
             }}
 
-            // Auto-select first item if available
-            if (INITIAL_ITEMS.length > 0) {{
-                selectItem(0);
+            // Check for item URL parameter
+            const urlParams = getUrlParams();
+            if (urlParams.item) {{
+                // Find and select the item by ID
+                const itemIndex = INITIAL_ITEMS.findIndex(item => item.id === urlParams.item);
+                if (itemIndex !== -1) {{
+                    selectItem(itemIndex);
+                    setStatus(`Loaded item from URL: ${{urlParams.item}}`, 'success');
+                }} else {{
+                    setStatus(`Item not found: ${{urlParams.item}}`, 'error');
+                    // Still select first item as fallback
+                    if (INITIAL_ITEMS.length > 0) {{
+                        selectItem(0);
+                    }}
+                }}
+            }} else {{
+                // Auto-select first item if available
+                if (INITIAL_ITEMS.length > 0) {{
+                    selectItem(0);
+                }}
             }}
         }});
 

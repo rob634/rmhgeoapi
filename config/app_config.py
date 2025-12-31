@@ -399,21 +399,6 @@ class AppConfig(BaseModel):
         return self.queues.jobs_queue
 
     @property
-    def blob_service_url(self) -> str:
-        """Azure Blob Storage service URL for managed identity."""
-        return f"https://{self.storage_account_name}.blob.core.windows.net"
-
-    @property
-    def queue_service_url(self) -> str:
-        """Azure Queue Storage service URL for managed identity."""
-        return f"https://{self.storage_account_name}.queue.core.windows.net"
-
-    @property
-    def table_service_url(self) -> str:
-        """Azure Table Storage service URL for managed identity."""
-        return f"https://{self.storage_account_name}.table.core.windows.net"
-
-    @property
     def service_bus_jobs_queue(self) -> str:
         """Legacy compatibility - use queues.jobs_queue instead."""
         return self.queues.jobs_queue

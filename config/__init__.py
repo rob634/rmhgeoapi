@@ -123,8 +123,7 @@ def debug_config() -> dict:
     try:
         config = get_config()
         return {
-            # Storage
-            'storage_account_name': config.storage_account_name,
+            # Storage (zone-specific accounts - 31 DEC 2025)
             'storage': config.storage.debug_dict(),
 
             # Database

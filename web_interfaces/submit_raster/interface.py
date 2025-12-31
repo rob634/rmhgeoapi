@@ -276,8 +276,9 @@ class SubmitRasterInterface(BaseInterface):
                 return self._render_submit_error("Missing dataset_id. Please enter a DDH dataset identifier.")
             if not resource_id:
                 return self._render_submit_error("Missing resource_id. Please enter a DDH resource identifier.")
+            # Default version_id if not provided
             if not version_id:
-                return self._render_submit_error("Missing version_id. Please enter a DDH version identifier.")
+                version_id = "v1.0"
             if not blob_name:
                 return self._render_submit_error("Missing blob_name. Please select a file.")
             if not service_name:
@@ -631,14 +632,12 @@ class SubmitRasterInterface(BaseInterface):
                                            title="Lowercase letters, numbers, hyphens.">
                                     <span class="field-hint">DDH resource identifier</span>
                                 </div>
-                                <div class="form-group required">
-                                    <label for="version_id">Version ID *</label>
-                                    <input type="text" id="version_id" name="version_id" required
+                                <div class="form-group">
+                                    <label for="version_id">Version ID</label>
+                                    <input type="text" id="version_id" name="version_id"
                                            value="v1.0"
-                                           placeholder="e.g., v1.0"
-                                           pattern="v[0-9]+\\.[0-9]+"
-                                           title="Version format: v1.0, v2.1, etc.">
-                                    <span class="field-hint">DDH version identifier</span>
+                                           placeholder="e.g., v1.0">
+                                    <span class="field-hint">Version identifier (any string, defaults to v1.0)</span>
                                 </div>
                             </div>
                         </div>

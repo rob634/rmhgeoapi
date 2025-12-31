@@ -13,17 +13,17 @@
 
 | Priority | Epic | Name | Status | Features | WSJF | Link |
 |:--------:|------|------|--------|:--------:|:----:|:----:|
-| — | E1 | Vector Data as API | ✅ Complete | 6 | — | [E1](E1_vector_data.md) |
+| — | E1 | Vector Data as API | 🚧 Partial | 8 | — | [E1](E1_vector_data.md) |
 | 1 | E2 | Raster Data as API | 🚧 Partial | 8 | 5.9 | [E2](E2_raster_data.md) |
 | 2 | E3 | DDH Platform Integration | 🚧 Partial | 8 | 4.8 | [E3](E3_ddh_integration.md) |
 | 3 | E4 | Data Externalization & Security Zones | 🚧 Partial | 5 | 4.3 | [E4](E4_security_zones.md) |
 | 4 | E9 | Large and Multidimensional Data | 🚧 Partial | 7 | 2.5 | [E9](E9_large_data.md) |
 | 5 | E8 | GeoAnalytics Pipeline | 🚧 Partial | 12 | 1.8 | [E8](E8_geoanalytics.md) |
-| 6 | E5 | OGC Styles | 🚧 Partial | 2 | 3.7 | [E5](E5_ogc_styles.md) |
-| 7 | E7 | Pipeline Infrastructure | 🚧 Partial | 5 | — | [E7](E7_pipeline_infra.md) |
+| 6 | E7 | Pipeline Infrastructure | 🚧 Partial | 5 | — | [E7](E7_pipeline_infra.md) |
 | — | E12 | Interface Modernization | ✅ Phase 1 | 5 | — | [E12](E12_interfaces.md) |
 
-**Consolidated Epics** (absorbed into E7, E8, or E9):
+**Consolidated Epics** (absorbed into E1, E7, E8, or E9):
+- ~~E5~~ → F1.7-F1.8 (OGC Styles) - now in E1
 - ~~E10~~ → F9.1 (FATHOM ETL Operations) - now in E9
 - ~~E11~~ → F8.10-12 (Analytics UI: Data Browser, H3 Visualization, Export)
 - ~~E13~~ → F7.4 (Pipeline Observability)
@@ -57,10 +57,9 @@ E9: Large Data (FATHOM, CMIP6)  →  E8: GeoAnalytics  →  GeoParquet / OGC Fea
 | E4 | 13 (external access) | 8 (post-platform) | 13 (security/audit) | **34** | 8 | **4.3** |
 | E9 | 13 (CMIP client priority) | 5 (secondary tier) | 8 (technical complexity) | **26** | 13 | **2.0** |
 | E7 | 5 (operational efficiency) | 3 | 5 | **13** | 5 | **2.6** |
-| E5 | 5 (styling metadata) | 3 | 3 | **11** | 3 | **3.7** |
 | E8 | 8 (analytics capability) | 3 | 5 | **16** | 13 | **1.2** |
 
-**WSJF-Ordered Sequence**: E2 (5.9) → E3 (4.8) → E4 (4.3) → E5 (3.7) → E7 (2.6) → E9 (2.0) → E8 (1.2)
+**WSJF-Ordered Sequence**: E2 (5.9) → E3 (4.8) → E4 (4.3) → E7 (2.6) → E9 (2.0) → E8 (1.2)
 
 **Note**: E3 absorbs former E6 (Platform Observability) — observability is app-to-app monitoring that enables integration.
 
@@ -145,11 +144,10 @@ Abstract component names for ADO work items. Actual Azure resource names assigne
 ```
 docs/epics/
 ├── README.md              # This file - Quick Reference + Navigation
-├── E1_vector_data.md      # Epic E1: Vector Data as API ✅
+├── E1_vector_data.md      # Epic E1: Vector Data as API (includes OGC Styles)
 ├── E2_raster_data.md      # Epic E2: Raster Data as API
 ├── E3_ddh_integration.md  # Epic E3: DDH Platform Integration
 ├── E4_security_zones.md   # Epic E4: Data Externalization & Security Zones
-├── E5_ogc_styles.md       # Epic E5: OGC Styles
 ├── E7_pipeline_infra.md   # Epic E7: Pipeline Infrastructure
 ├── E8_geoanalytics.md     # Epic E8: GeoAnalytics Pipeline
 ├── E9_large_data.md       # Epic E9: Large and Multidimensional Data

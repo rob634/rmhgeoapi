@@ -149,7 +149,7 @@ class StacInterface(BaseInterface):
         Note: Most styles now in COMMON_CSS (S12.1.1).
         Only STAC-specific styles remain here.
 
-        Updated 30 DEC 2025: Smaller cards, header with count, action bar.
+        Updated 31 DEC 2025: Match vector interface card style with Map/Promote/Delete buttons.
         """
         return """
         /* Header with count - flex layout */
@@ -208,6 +208,7 @@ class StacInterface(BaseInterface):
         .collection-card {
             padding: 12px !important;
             cursor: pointer;
+            position: relative;
         }
 
         .collection-card h3 {
@@ -230,11 +231,206 @@ class StacInterface(BaseInterface):
             margin-bottom: 8px;
         }
 
+        /* Card meta section with border - matches vector */
         .collection-card .meta {
-            font-size: 11px;
+            margin-top: 8px;
+            padding-top: 8px;
+            border-top: 1px solid var(--ds-gray-light);
             color: var(--ds-gray);
+            font-size: 11px;
+        }
+
+        .collection-card .meta-item {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            margin-bottom: 2px;
+        }
+
+        .collection-card .item-count {
+            color: var(--ds-blue-primary);
+            font-weight: 600;
+        }
+
+        .collection-card .links {
+            margin-top: 8px;
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+        }
+
+        .collection-card .link-badge {
+            font-size: 11px !important;
+            padding: 3px 8px !important;
+        }
+
+        /* Promote button */
+        .link-badge-promote {
+            background: linear-gradient(135deg, #10B981 0%, #059669 100%) !important;
+            color: white !important;
+            border-color: #059669 !important;
+        }
+
+        .link-badge-promote:hover {
+            background: linear-gradient(135deg, #059669 0%, #047857 100%) !important;
+        }
+
+        /* Delete button */
+        .link-badge-delete {
+            background: linear-gradient(135deg, #EF4444 0%, #DC2626 100%) !important;
+            color: white !important;
+            border-color: #DC2626 !important;
+        }
+
+        .link-badge-delete:hover {
+            background: linear-gradient(135deg, #DC2626 0%, #B91C1C 100%) !important;
+        }
+
+        /* Modal overlay */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.6);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+
+        .modal-content {
+            background: white;
+            border-radius: 8px;
+            max-width: 700px;
+            max-height: 80vh;
+            overflow-y: auto;
+            padding: 24px;
+            position: relative;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+        }
+
+        .modal-close {
+            position: absolute;
+            top: 12px;
+            right: 12px;
+            background: none;
+            border: none;
+            font-size: 24px;
+            cursor: pointer;
+            color: var(--ds-gray);
+        }
+
+        .modal-close:hover {
+            color: var(--ds-blue-primary);
+        }
+
+        .modal-content h2 {
+            margin-bottom: 16px;
+            padding-right: 30px;
+        }
+
+        .modal-section {
+            margin-bottom: 16px;
+        }
+
+        .modal-section h4 {
+            color: var(--ds-gray);
+            font-size: 12px;
+            text-transform: uppercase;
+            margin-bottom: 6px;
+        }
+
+        .modal-links {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin-top: 16px;
+        }
+
+        /* Confirm/Alert modal specific styles */
+        .modal-content.modal-confirm {
+            max-width: 400px;
+            text-align: center;
+        }
+
+        .modal-confirm .modal-icon {
+            font-size: 48px;
+            margin-bottom: 16px;
+        }
+
+        .modal-confirm .modal-message {
+            color: var(--ds-gray);
+            margin-bottom: 20px;
+            line-height: 1.5;
+        }
+
+        .modal-confirm .modal-buttons {
             display: flex;
             gap: 12px;
+            justify-content: center;
+        }
+
+        .modal-confirm .btn-danger {
+            background: linear-gradient(135deg, #EF4444 0%, #DC2626 100%);
+            color: white;
+            border: none;
+            padding: 10px 24px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 600;
+        }
+
+        .modal-confirm .btn-danger:hover {
+            background: linear-gradient(135deg, #DC2626 0%, #B91C1C 100%);
+        }
+
+        .modal-confirm .btn-cancel {
+            background: var(--ds-gray-lighter);
+            color: var(--ds-gray-dark);
+            border: 1px solid var(--ds-gray-light);
+            padding: 10px 24px;
+            border-radius: 6px;
+            cursor: pointer;
+        }
+
+        .modal-confirm .btn-cancel:hover {
+            background: var(--ds-gray-light);
+        }
+
+        .modal-content.modal-success {
+            max-width: 450px;
+            text-align: center;
+        }
+
+        .modal-success .modal-icon {
+            font-size: 48px;
+            margin-bottom: 16px;
+        }
+
+        .modal-success .modal-details {
+            background: var(--ds-gray-lighter);
+            padding: 12px;
+            border-radius: 6px;
+            margin: 16px 0;
+            text-align: left;
+        }
+
+        .modal-success .detail-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 6px;
+        }
+
+        .modal-success .detail-label {
+            color: var(--ds-gray);
+            font-size: 12px;
+        }
+
+        .modal-success .detail-value {
+            font-family: monospace;
+            font-size: 12px;
         }
 
         /* STAC-specific: Detail view */
@@ -348,7 +544,10 @@ class StacInterface(BaseInterface):
         """
 
     def _generate_custom_js(self) -> str:
-        """Generate custom JavaScript for STAC dashboard."""
+        """Generate custom JavaScript for STAC dashboard.
+
+        Updated 31 DEC 2025: Match vector interface with Map/Promote/Delete buttons.
+        """
         return """
         // State
         let allCollections = [];
@@ -392,7 +591,7 @@ class StacInterface(BaseInterface):
             }
         }
 
-        // Render collections grid
+        // Render collections grid - matches vector interface style
         function renderCollections(collections) {
             const grid = document.getElementById('collections-grid');
             grid.innerHTML = collections.map(c => {
@@ -401,17 +600,187 @@ class StacInterface(BaseInterface):
                 const title = c.title || c.id;
                 const desc = c.description || 'No description available';
 
+                // Get bbox if available
+                const bbox = c.extent?.spatial?.bbox?.[0];
+                const bboxStr = bbox ?
+                    `[${bbox.map(v => v.toFixed(2)).join(', ')}]` :
+                    'No extent';
+
+                // Build action buttons - Map (placeholder), Promote (placeholder), Delete
+                const actionButtons = `
+                    <button class="link-badge link-badge-primary"
+                            onclick="openMapView('${c.id}', event)"
+                            title="Open in map viewer (coming soon)">
+                        🗺️ Map
+                    </button>
+                    <button class="link-badge link-badge-promote"
+                            onclick="promoteCollection('${c.id}', event)"
+                            title="Promote collection (coming soon)">
+                        ⬆️ Promote
+                    </button>
+                    <button class="link-badge link-badge-delete"
+                            onclick="deleteCollection('${c.id}', event)"
+                            title="Delete this collection (unpublish)">
+                        🗑️ Delete
+                    </button>
+                `;
+
                 return `
                     <div class="collection-card" onclick="showCollectionDetail('${c.id}')" title="${title}">
                         <h3>${title}</h3>
                         <div class="description">${desc}</div>
+
                         <div class="meta">
-                            <span>📄 ${itemCount.toLocaleString()} items</span>
-                            <span>${type === 'raster' ? '🌍' : '📐'} ${type}</span>
+                            <div class="meta-item">
+                                <span>📄</span>
+                                <span class="item-count">${itemCount.toLocaleString()} items</span>
+                            </div>
+                            <div class="meta-item">
+                                <span>${type === 'raster' ? '🌍' : '📐'}</span>
+                                <span>${type}</span>
+                            </div>
+                            <div class="meta-item">
+                                <span>🗺️</span>
+                                <span style="font-family: monospace; font-size: 10px;">${bboxStr}</span>
+                            </div>
+                        </div>
+
+                        <div class="links">
+                            ${actionButtons}
                         </div>
                     </div>
                 `;
             }).join('');
+        }
+
+        // Placeholder: Open map view
+        function openMapView(collectionId, event) {
+            event.stopPropagation();
+            showResultModal(
+                'Map View',
+                'Map viewer integration is coming soon. This will open the collection in TiTiler viewer.',
+                { 'Collection': collectionId },
+                '🗺️'
+            );
+        }
+
+        // Placeholder: Promote collection
+        function promoteCollection(collectionId, event) {
+            event.stopPropagation();
+            showResultModal(
+                'Promote Collection',
+                'Promote workflow for STAC raster collections is coming soon.',
+                { 'Collection': collectionId },
+                '⬆️'
+            );
+        }
+
+        // Show confirmation modal - returns Promise that resolves to true/false
+        function showConfirmModal(title, message, confirmText = 'Delete', icon = '⚠️') {
+            return new Promise((resolve) => {
+                const modal = document.createElement('div');
+                modal.className = 'modal-overlay';
+                modal.innerHTML = `
+                    <div class="modal-content modal-confirm">
+                        <div class="modal-icon">${icon}</div>
+                        <h3>${title}</h3>
+                        <p class="modal-message">${message}</p>
+                        <div class="modal-buttons">
+                            <button class="btn-cancel" onclick="this.closest('.modal-overlay').remove(); window._confirmResolve(false);">Cancel</button>
+                            <button class="btn-danger" onclick="this.closest('.modal-overlay').remove(); window._confirmResolve(true);">${confirmText}</button>
+                        </div>
+                    </div>
+                `;
+                window._confirmResolve = resolve;
+                document.body.appendChild(modal);
+            });
+        }
+
+        // Show success/info modal
+        function showResultModal(title, message, details = null, icon = '✅') {
+            const modal = document.createElement('div');
+            modal.className = 'modal-overlay';
+            modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
+
+            let detailsHtml = '';
+            if (details) {
+                detailsHtml = `<div class="modal-details">
+                    ${Object.entries(details).map(([k, v]) => `
+                        <div class="detail-row">
+                            <span class="detail-label">${k}</span>
+                            <span class="detail-value">${v}</span>
+                        </div>
+                    `).join('')}
+                </div>`;
+            }
+
+            modal.innerHTML = `
+                <div class="modal-content modal-success">
+                    <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">&times;</button>
+                    <div class="modal-icon">${icon}</div>
+                    <h3>${title}</h3>
+                    <p class="modal-message">${message}</p>
+                    ${detailsHtml}
+                    <button class="btn btn-primary" onclick="this.closest('.modal-overlay').remove()">OK</button>
+                </div>
+            `;
+            document.body.appendChild(modal);
+        }
+
+        // Delete collection (trigger unpublish_raster)
+        async function deleteCollection(collectionId, event) {
+            event.stopPropagation();
+
+            const confirmed = await showConfirmModal(
+                'Delete Collection?',
+                `This will unpublish <strong>${collectionId}</strong> and remove all associated STAC items. This action cannot be undone.`,
+                'Delete',
+                '🗑️'
+            );
+
+            if (!confirmed) return;
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/api/platform/unpublish/raster`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        collection_id: collectionId,
+                        dry_run: false
+                    })
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    showResultModal(
+                        'Unpublish Submitted',
+                        'The raster collection will be removed shortly.',
+                        {
+                            'Job ID': result.job_id,
+                            'Collection': collectionId
+                        },
+                        '✅'
+                    );
+                    // Refresh the grid
+                    loadCollections();
+                } else {
+                    showResultModal(
+                        'Delete Failed',
+                        result.error || 'Unknown error occurred',
+                        null,
+                        '❌'
+                    );
+                }
+            } catch (error) {
+                console.error('Error deleting collection:', error);
+                showResultModal(
+                    'Request Failed',
+                    'Failed to submit delete request: ' + error.message,
+                    null,
+                    '❌'
+                );
+            }
         }
 
         // Filter collections

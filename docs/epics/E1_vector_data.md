@@ -1,8 +1,8 @@
-## Epic E1: Vector Data as API ✅
+## Epic E1: Vector Data as API 🚧
 
 **Business Requirement**: "Make vector data available as API"
-**Status**: ✅ COMPLETE
-**Completed**: NOV 2025
+**Status**: 🚧 PARTIAL (Core ✅, Styles 🚧)
+**Completed**: NOV 2025 (core features)
 
 **Feature Overview**:
 | Feature | Status | Scope |
@@ -13,6 +13,8 @@
 | F1.4 | ✅ | Vector Unpublish |
 | F1.5 | ✅ | Vector Map Viewer |
 | F1.6 | 🚧 | Enhanced Data Validation |
+| F1.7 | ✅ | OGC API Styles |
+| F1.8 | 📋 | ETL Style Integration |
 
 ### Feature F1.1: Vector ETL Pipeline ✅
 
@@ -132,6 +134,36 @@
 - PostgreSQL accepted it (max year 294276) but psycopg crashed reading back (Python max year 9999)
 - S1.6.1 implemented: out-of-range timestamps set to NULL with warning in job results
 - Prompted discussion of systematic validation approach → pandera spike
+
+---
+
+### Feature F1.7: OGC API Styles ✅
+
+**Deliverable**: CartoSym-JSON storage with multi-format output
+**Tested**: 18 DEC 2025 - All three output formats verified (Leaflet, Mapbox GL, CartoSym-JSON)
+
+| Story | Description |
+|-------|-------------|
+| S1.7.1 | Create Pydantic models |
+| S1.7.2 | Build style translator (CartoSym → Leaflet/Mapbox) |
+| S1.7.3 | Create repository layer |
+| S1.7.4 | Implement service orchestration |
+| S1.7.5 | Create GET /features/collections/{id}/styles |
+| S1.7.6 | Create GET /features/collections/{id}/styles/{sid} |
+| S1.7.7 | Add geo.feature_collection_styles table |
+
+**Key Files**: `ogc_styles/`
+
+---
+
+### Feature F1.8: ETL Style Integration 📋 PLANNED
+
+**Deliverable**: Auto-create default styles on vector ingest
+
+| Story | Status | Description |
+|-------|--------|-------------|
+| S1.8.1 | 📋 | Design default style templates |
+| S1.8.2 | 📋 | Integrate into process_vector job |
 
 ---
 

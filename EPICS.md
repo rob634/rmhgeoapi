@@ -273,7 +273,7 @@ Abstract component names for ADO work items. Actual Azure resource names assigne
 ## Epic E2: Raster Data as API 🚧
 
 **Business Requirement**: "Make GeoTIFF available as API"
-**Status**: 🚧 PARTIAL (F2.7 Collection + F2.8 Classification + F2.9 Viewer pending)
+**Status**: 🚧 PARTIAL (F2.7 Collection + F2.8 Classification pending)
 **Core Complete**: NOV 2025
 
 **Feature Overview**:
@@ -287,7 +287,7 @@ Abstract component names for ADO work items. Actual Azure resource names assigne
 | F2.6 | ✅ | Large Raster Tiling |
 | F2.7 | 📋 | Raster Collection Pipeline |
 | F2.8 | 📋 | Classification & Detection |
-| F2.9 | 📋 | STAC-Integrated Raster Map Viewer |
+| F2.9 | ✅ | STAC-Integrated Raster Map Viewer |
 
 ### Feature F2.1: Raster ETL Pipeline ✅
 
@@ -479,83 +479,69 @@ Raster Input → F2.8 (Classify) → Route to F2.1/F2.6/F2.7 → Tier Selection 
 
 ---
 
-### Feature F2.9: STAC-Integrated Raster Map Viewer 📋 PLANNED
+### Feature F2.9: STAC-Integrated Raster Map Viewer ✅ COMPLETE
 
 **Deliverable**: Interactive Leaflet map viewer for browsing STAC raster collections with smart TiTiler URL generation
 **Created**: 30 DEC 2025
+**Completed**: 30 DEC 2025
 **Reference**: TiTiler URL Guide at `/rmhtitiler/docs/TITILER-URL-GUIDE.md`
 
 **Goal**: Create a collection-aware raster viewer (like F1.5 Vector Viewer) that loads STAC items and generates appropriate TiTiler URLs based on raster type (DEM, RGB, multi-band, etc.).
 
-#### Phase 1: Persist Raster Metadata in STAC Items
+#### Phase 1: Persist Raster Metadata in STAC Items ✅
 
 | Story | Status | Description |
 |-------|--------|-------------|
-| S2.9.1 | 📋 | Add `rmh:raster_type` to STAC item properties (rgb, rgba, dem, nir, multispectral) |
-| S2.9.2 | 📋 | Add `rmh:band_count` and `rmh:dtype` explicitly |
-| S2.9.3 | 📋 | Add `rmh:rgb_bands` array for multi-band (e.g., `[5,3,2]` for WV-3) |
-| S2.9.4 | 📋 | Add `rmh:rescale` object with p2/p98 values when stats available |
-| S2.9.5 | 📋 | Add `rmh:colormap` recommendation based on raster type |
+| S2.9.1 | ✅ | Add `rmh:raster_type` to STAC item properties (rgb, rgba, dem, nir, multispectral) |
+| S2.9.2 | ✅ | Add `rmh:band_count` and `rmh:dtype` explicitly |
+| S2.9.3 | ✅ | Add `rmh:rgb_bands` array for multi-band (e.g., `[5,3,2]` for WV-3) |
+| S2.9.4 | ✅ | Add `rmh:rescale` object with p2/p98 values when stats available |
+| S2.9.5 | ✅ | Add `rmh:colormap` recommendation based on raster type |
 
-**Files**: `services/service_stac_metadata.py`, `services/stac_metadata_helper.py`
+**Implementation**: `RasterVisualizationMetadata` dataclass in `services/stac_metadata_helper.py`
 
-#### Phase 2: Smart TiTiler URL Generation
+#### Phase 2: Smart TiTiler URL Generation ✅
 
 | Story | Status | Description |
 |-------|--------|-------------|
-| S2.9.6 | 📋 | Create `TiTilerUrlBuilder` utility class with decision tree |
-| S2.9.7 | 📋 | Integrate URL builder into `stac_metadata_helper.py` |
-| S2.9.8 | 📋 | Update existing STAC items via migration script (optional) |
+| S2.9.6 | ✅ | Create URL builder with decision tree (`_build_titiler_url_params()`) |
+| S2.9.7 | ✅ | Integrate URL builder into `stac_metadata_helper.py` |
+| S2.9.8 | 📋 | Update existing STAC items via migration script (optional - future) |
 
 **URL Patterns by Raster Type**:
 | Type | URL Pattern |
 |------|-------------|
-| DEM | `?url={cog}&rescale={p2},{p98}&colormap_name=terrain` |
+| DEM (1 band float) | `?url={cog}&rescale={p2},{p98}&colormap_name=terrain` |
 | RGB (3 bands) | `?url={cog}` |
 | RGBA (4 bands) | `?url={cog}&bidx=1&bidx=2&bidx=3` |
-| WV-3 (8 bands) | `?url={cog}&bidx=5&bidx=3&bidx=2` |
+| Multi-band (8+) | `?url={cog}&bidx=5&bidx=3&bidx=2` (or custom rgb_bands) |
 
-**Files**: `services/titiler_url_builder.py` (new)
+**Implementation**: `_build_titiler_url_params()` method in `services/stac_metadata_helper.py`
 
-#### Phase 3: Collection-Aware Raster Viewer Interface
+#### Phase 3: Collection-Aware Raster Viewer Interface ✅
 
 | Story | Status | Description |
 |-------|--------|-------------|
-| S2.9.9 | 📋 | Create `RasterCollectionViewerService` (like `VectorViewerService`) |
-| S2.9.10 | 📋 | Create viewer endpoint `/api/raster/viewer?collection={id}` |
-| S2.9.11 | 📋 | Build Leaflet UI with item browser sidebar (30/70 layout) |
-| S2.9.12 | 📋 | Add band combo selector (presets + custom R/G/B dropdowns) |
-| S2.9.13 | 📋 | Add rescale controls (auto from stats / manual override) |
-| S2.9.14 | 📋 | Add colormap selector for single-band rasters |
+| S2.9.9 | ✅ | Create `RasterCollectionViewerService` (like `VectorViewerService`) |
+| S2.9.10 | ✅ | Create viewer endpoint `/api/raster/viewer?collection={id}` |
+| S2.9.11 | ✅ | Build Leaflet UI with item browser sidebar (70/30 map/sidebar layout) |
+| S2.9.12 | ✅ | Add band combo selector (presets + custom R/G/B dropdowns) |
+| S2.9.13 | ✅ | Add rescale controls (auto from stats / manual override) |
+| S2.9.14 | ✅ | Add colormap selector for single-band rasters |
 
 **Endpoint**: `/api/raster/viewer?collection={collection_id}`
 
 **Files**: `raster_collection_viewer/service.py`, `raster_collection_viewer/triggers.py`
 
-**UI Features**:
-- Load STAC items from collection via `/api/stac/collections/{id}/items`
-- Click item → load on map with smart TiTiler URL
-- Band combo selector populated from item's `rmh:band_count`
-- Auto-apply `rmh:rgb_bands` preset if available
-- Rescale from `rmh:rescale` or manual override
-- Colormap from `rmh:colormap` or dropdown
-- Point query on click (all band values)
-- QA approve/reject section
+**UI Features** (all implemented):
+- ✅ Load STAC items from collection via `/api/stac/collections/{id}/items`
+- ✅ Click item → load on map with smart TiTiler URL
+- ✅ Band combo selector populated from item's band count
+- ✅ Rescale controls (manual min/max input)
+- ✅ Colormap dropdown for single-band rasters
+- ✅ 70/30 map-left/sidebar-right layout
 
-**Dependencies**:
-- S2.2.5 (bidx fix for >3 band rasters) - planned
-- S2.2.6 (DEM auto-rescale) - planned
-- F2.8 (Raster Classification) - shares detection logic
-
-**Current State Assessment**:
-| Component | Status | Location |
-|-----------|--------|----------|
-| Raster type detection | ✅ | `services/raster_validation.py:835` |
-| Band mapping models | ✅ | `models/band_mapping.py` |
-| Statistics extraction | ⚠️ | Skipped for >1GB files |
-| Raster type in STAC | ❌ | Detected but not persisted |
-| Smart TiTiler URLs | ❌ | Generic URLs only |
-| Collection-aware viewer | ❌ | Existing viewer requires manual URL |
+**Deployed**: Commit `ddebba1` (30 DEC 2025)
 
 ---
 

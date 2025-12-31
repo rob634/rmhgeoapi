@@ -267,6 +267,7 @@ class ProcessRasterV2Job(JobBaseMixin, JobBase):
         stac_summary = {}
         stac_urls = None
         titiler_urls = None
+        app_urls = None  # App viewer URLs (30 DEC 2025)
         share_url = None
         degraded_mode = False
         degraded_warnings = []
@@ -312,6 +313,14 @@ class ProcessRasterV2Job(JobBaseMixin, JobBase):
                         "catalog_url": stac_base
                     }
 
+                    # Generate App URLs for viewers (30 DEC 2025)
+                    # Uses ETL_APP_URL from config for the raster collection viewer
+                    etl_base = config.etl_app_base_url.rstrip('/')
+                    app_urls = {
+                        "collection_viewer": f"{etl_base}/api/raster/viewer?collection={collection_id}",
+                        "item_viewer": f"{etl_base}/api/raster/viewer?collection={collection_id}&item={item_id}"
+                    }
+
         # Generate TiTiler URLs regardless of STAC status (works in degraded mode)
         if cog_summary.get('cog_blob') and cog_summary.get('cog_container'):
             try:
@@ -353,6 +362,7 @@ class ProcessRasterV2Job(JobBaseMixin, JobBase):
             "stac": stac_summary,
             "stac_urls": stac_urls,
             "titiler_urls": titiler_urls,
+            "app_urls": app_urls,  # Raster collection viewer URLs (30 DEC 2025)
             "share_url": share_url,
             "stages_completed": context.current_stage,
             "total_tasks_executed": len(task_results),

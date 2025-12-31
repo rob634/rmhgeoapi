@@ -727,58 +727,38 @@ class StacInterface(BaseInterface):
             document.body.appendChild(modal);
         }
 
-        // Delete collection (trigger unpublish_raster)
+        // Delete collection - currently items must be deleted individually
         async function deleteCollection(collectionId, event) {
             event.stopPropagation();
 
-            const confirmed = await showConfirmModal(
-                'Delete Collection?',
-                `This will unpublish <strong>${collectionId}</strong> and remove all associated STAC items. This action cannot be undone.`,
-                'Delete',
-                '🗑️'
-            );
+            // Get item count for this collection
+            let itemCount = 0;
+            const collection = allCollections.find(c => c.id === collectionId);
+            if (collection) {
+                itemCount = collection.summaries?.total_items || 0;
+            }
 
-            if (!confirmed) return;
-
-            try {
-                const response = await fetch(`${API_BASE_URL}/api/platform/unpublish/raster`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        collection_id: collectionId,
-                        dry_run: false
-                    })
-                });
-
-                const result = await response.json();
-
-                if (result.success) {
-                    showResultModal(
-                        'Unpublish Submitted',
-                        'The raster collection will be removed shortly.',
-                        {
-                            'Job ID': result.job_id,
-                            'Collection': collectionId
-                        },
-                        '✅'
-                    );
-                    // Refresh the grid
-                    loadCollections();
-                } else {
-                    showResultModal(
-                        'Delete Failed',
-                        result.error || 'Unknown error occurred',
-                        null,
-                        '❌'
-                    );
-                }
-            } catch (error) {
-                console.error('Error deleting collection:', error);
+            if (itemCount > 0) {
                 showResultModal(
-                    'Request Failed',
-                    'Failed to submit delete request: ' + error.message,
-                    null,
-                    '❌'
+                    'Delete Collection',
+                    `Collection <strong>${collectionId}</strong> has ${itemCount} item(s).<br><br>` +
+                    'To delete this collection, use the <strong>Raster Viewer</strong> to delete items individually, ' +
+                    'or use the API to unpublish each item.',
+                    {
+                        'Collection': collectionId,
+                        'Items': itemCount,
+                        'Viewer': `Click collection → Delete individual items`
+                    },
+                    'ℹ️'
+                );
+            } else {
+                // Empty collection - could potentially delete, but collection deletion not yet implemented
+                showResultModal(
+                    'Delete Collection',
+                    `Collection <strong>${collectionId}</strong> is empty.<br><br>` +
+                    'Batch collection deletion is coming soon.',
+                    { 'Collection': collectionId },
+                    'ℹ️'
                 );
             }
         }

@@ -41,7 +41,7 @@ class ImportValidator:
     ## Two-Tier Validation System:
     
     **1. Critical Modules (External Dependencies):**
-        - azure.functions, azure.identity, azure.storage.queue
+        - azure.functions, azure.identity, azure.servicebus
         - pydantic, psycopg, json, logging, os, sys
         - Predefined list of essential dependencies
         
@@ -455,8 +455,8 @@ class ImportValidator:
             # Azure SDK Core
             ('azure.functions', 'Azure Functions runtime'),
             ('azure.identity', 'Azure authentication'),
-            ('azure.storage.queue', 'Azure Storage Queue client'),
-            
+            ('azure.servicebus', 'Azure Service Bus client'),
+
             # Pydantic for schema validation
             ('pydantic', 'Pydantic data validation'),
             

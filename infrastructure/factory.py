@@ -150,51 +150,23 @@ class RepositoryFactory:
         return StageCompletionRepository(connection_string, schema_name)
     
     # ========================================================================
-    # FUTURE REPOSITORY TYPES
+    # SERVICE BUS REPOSITORY
     # ========================================================================
-    
-    @staticmethod
-    def create_queue_repository() -> 'QueueRepository':
-        """
-        Create queue repository with authentication.
-
-        This is THE centralized authentication point for all queue operations.
-        Uses DefaultAzureCredential for seamless auth across environments.
-        The repository uses a singleton pattern to ensure credentials are
-        created only once per worker, providing 100x performance improvement.
-
-        Returns:
-            QueueRepository singleton instance
-
-        Example:
-            queue_repo = RepositoryFactory.create_queue_repository()
-            queue_repo.send_message("jobs", job_message)
-        """
-        from .queue import QueueRepository
-
-        logger.info("🏭 Creating Queue repository")
-        queue_repo = QueueRepository.instance()
-        logger.info("✅ Queue repository created successfully")
-
-        return queue_repo
 
     @staticmethod
     def create_service_bus_repository() -> 'ServiceBusRepository':
         """
-        Create Service Bus repository for high-volume message operations.
+        Create Service Bus repository for message queue operations.
 
-        This is the parallel pipeline to Queue Storage for A/B testing.
-        Uses Service Bus for batch operations and better performance.
+        Uses Azure Service Bus for all async job/task messaging.
+        Singleton pattern ensures credentials created once per worker.
 
         Returns:
             ServiceBusRepository singleton instance
 
         Example:
-            # Route based on parameter
-            if job_params.get('use_service_bus', False):
-                repo = RepositoryFactory.create_service_bus_repository()
-            else:
-                repo = RepositoryFactory.create_queue_repository()
+            repo = RepositoryFactory.create_service_bus_repository()
+            repo.send_message("geospatial-jobs", job_message)
         """
         from .service_bus import ServiceBusRepository
 

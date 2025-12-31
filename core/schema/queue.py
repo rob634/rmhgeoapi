@@ -1,7 +1,7 @@
 """
 Queue Message Schemas - Transport Boundary.
 
-Message formats for Azure Storage Queues and Service Bus.
+Message formats for Azure Service Bus queues.
 Inherits from TaskData/JobData and adds transport-specific fields.
 
 Architecture:
@@ -26,7 +26,7 @@ from core.contracts import TaskData, JobData
 
 class JobQueueMessage(JobData):
     """
-    Job queue message for Azure Storage Queue and Service Bus.
+    Job queue message for Azure Service Bus.
 
     Inherits essential job properties from JobData:
     - job_id, job_type, parameters
@@ -164,7 +164,7 @@ class StageCompleteMessage(BaseModel):
 
 class TaskQueueMessage(TaskData):
     """
-    Task queue message for Azure Storage Queue and Service Bus.
+    Task queue message for Azure Service Bus.
 
     Inherits essential task properties from TaskData:
     - task_id, parent_job_id, job_type, task_type, stage, task_index, parameters

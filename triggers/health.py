@@ -111,13 +111,6 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
             health_data["status"] = "unhealthy"
             health_data["errors"].extend(import_health.get("errors", []))
 
-        # Storage Queues - DEPRECATED (2 OCT 2025) - SERVICE BUS ONLY APPLICATION
-        # queue_health = self._check_storage_queues()
-        # health_data["components"]["queues"] = queue_health
-        # if queue_health["status"] == "unhealthy":
-        #     health_data["status"] = "unhealthy"
-        #     health_data["errors"].extend(queue_health.get("errors", []))
-
         # Check critical storage containers (08 DEC 2025)
         storage_containers_health = self._check_storage_containers()
         health_data["components"]["storage_containers"] = storage_containers_health
@@ -335,44 +328,6 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                 headers={"X-Request-ID": request_id}
             )
     
-    def _check_storage_queues(self) -> Dict[str, Any]:
-        """Check Azure Storage Queue health using QueueRepository. DEPRECATED - SERVICE BUS ONLY."""
-        def check_queues():
-            from infrastructure import RepositoryFactory
-            from config import QueueNames
-
-            # Use QueueRepository singleton - credential reused.
-            queue_repo = RepositoryFactory.create_queue_repository()
-
-            queue_status = {}
-            for queue_name in [QueueNames.JOBS, QueueNames.TASKS]:
-                try:
-                    # Use repository method to get queue length
-                    message_count = queue_repo.get_queue_length(queue_name)
-                    queue_status[queue_name] = {
-                        "status": "accessible",
-                        "message_count": message_count
-                    }
-                except Exception as e:
-                    queue_status[queue_name] = {
-                        "status": "error",
-                        "error": str(e)
-                    }
-
-            # Add singleton status to verify performance improvement
-            queue_status["_repository_info"] = {
-                "singleton_id": id(queue_repo),
-                "type": "QueueRepository"
-            }
-
-            return queue_status
-
-        return self.check_component_health(
-            "storage_queues",
-            check_queues,
-            description="Azure Storage Queue connectivity (deprecated - use Service Bus)"
-        )
-
     def _check_storage_containers(self) -> Dict[str, Any]:
         """
         Check critical storage container existence for Bronze and Silver zones.

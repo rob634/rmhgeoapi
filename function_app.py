@@ -26,7 +26,7 @@ Key Features:
     - Pydantic-based workflow definitions with strong typing discipline
     - Job->Task architecture with controller pattern
     - Idempotent job processing with SHA256-based deduplication
-    - Queue-based async processing with poison queue monitoring
+    - Service Bus async processing with dead-letter queue handling
     - Managed identity authentication with user delegation SAS
     - Support for files up to 20GB with smart metadata extraction
     - Comprehensive STAC cataloging with PostGIS integration
@@ -67,9 +67,6 @@ Endpoints:
         GET  /api/dbadmin/jobs?status=failed&limit=10 - Query jobs
         GET  /api/dbadmin/tasks/{job_id} - Query tasks for job
         GET  /api/dbadmin/stats - Database statistics
-
-    Monitoring:
-        GET  /api/monitor/poison - Check poison queue status
 
     Schema Management (DEV ONLY):
         POST /api/dbadmin/maintenance/full-rebuild?confirm=yes - Atomic schema rebuild
@@ -219,7 +216,6 @@ from triggers.health import health_check_trigger
 from triggers.livez import livez_trigger
 from triggers.submit_job import submit_job_trigger
 from triggers.get_job_status import get_job_status_trigger
-from triggers.poison_monitor import poison_monitor_trigger
 from triggers.schema_pydantic_deploy import pydantic_deploy_trigger
 # ⚠️ LEGACY IMPORTS - DEPRECATED (10 NOV 2025) - COMMENTED OUT 16 NOV 2025
 # These imports are kept temporarily for backward compatibility
@@ -2158,13 +2154,6 @@ def openapi_spec(req: func.HttpRequest) -> func.HttpResponse:
 # DUPLICATE SERVICE BUS TRIGGERS REMOVED (2 OCT 2025)
 # Removed duplicate process_job_service_bus() and process_task_service_bus()
 # Keeping process_service_bus_job() and process_service_bus_task() below
-# ============================================================================
-
-
-# ============================================================================
-# POISON QUEUE MONITORING (HTTP endpoint) - REMOVED (2 OCT 2025)
-# Service Bus does not have poison queue monitoring set up yet
-# Storage Queue poison monitoring was removed with Storage Queue deprecation
 # ============================================================================
 
 

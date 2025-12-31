@@ -16,7 +16,7 @@
 | — | E1 | Vector Data as API | ✅ Complete | 6 | — |
 | 1 | E2 | Raster Data as API | 🚧 Partial | 8 | 5.9 |
 | 2 | E3 | DDH Platform Integration | 🚧 Partial | 8 | 4.8 |
-| 3 | E4 | Data Externalization | 🚧 Partial | 5 | 4.3 |
+| 3 | E4 | Data Externalization & Security Zones | 🚧 Partial | 5 | 4.3 |
 | 4 | E9 | Large and Multidimensional Data | 🚧 Partial | 7 | 2.5 |
 | 5 | E8 | GeoAnalytics Pipeline | 🚧 Partial | 12 | 1.8 |
 | 6 | E5 | OGC Styles | 🚧 Partial | 2 | 3.7 |
@@ -834,20 +834,31 @@ Stories requiring ITSDA team action or coordination:
 
 ---
 
-## Epic E4: Data Externalization 📋
+## Epic E4: Data Externalization & Security Zones 📋
 
-**Business Requirement**: Controlled data movement to external access zones
+**Business Requirement**: Controlled data movement between security zones via Azure Data Factory
 **Status**: 📋 PLANNED
+**Last Updated**: 30 DEC 2025
+
+**Strategic Context**:
+> E4 handles movement of data between security zones. ADF copies data from the **Silver Zone**
+> (internal working storage) to target zones: **External** (public hosting via CDN) or
+> **Restricted** (internal but access-controlled). Restricted zone is NOT IN SCOPE currently,
+> but the workflow pattern established here will apply to future restricted data scenarios.
 
 ```
-INTERNAL ZONE                    EXTERNAL ZONE
-(Bronze/Silver Storage)    →     (External Storage Account)
-              ↓
-     Approval + Data Factory Copy
-              ↓
-         CDN/WAF
-              ↓
-       Public Access
+SILVER ZONE                      TARGET ZONES
+(App Working Storage)            ┌─────────────────────────────┐
+       │                         │ EXTERNAL (public hosting)   │
+       │    Approval +           │  • CDN/WAF fronted          │
+       ├───────────────────────▶│  • Public read access       │
+       │    ADF Copy             │  • Partner/client delivery  │
+       │                         ├─────────────────────────────┤
+       │                         │ RESTRICTED (future)         │
+       └ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ▶│  • Internal but limited     │
+             (not in scope)      │  • Role-based access        │
+                                 │  • Audit logging            │
+                                 └─────────────────────────────┘
 ```
 
 ### Architecture: Python ↔ Data Factory Integration

@@ -4,8 +4,6 @@
 
 azure-functions
 azure-storage-blob
-azure-storage-queue
-azure-data-tables
 azure-identity
 azure-keyvault-secrets
 azure-servicebus>=7.11.0

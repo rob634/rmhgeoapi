@@ -287,9 +287,6 @@ class TaskRoutingDefaults:
         "vector_create_stac",
         "vector_extract_stac_metadata",
         # H3 handlers (DB-bound PostGIS operations), renamed (29 DEC 2025)
-        "h3_level4_generate",
-        "h3_base_generate",
-        "h3_insert_to_postgis",
         "h3_create_stac",
         "h3_native_streaming_postgis",
         "h3_generate_grid",

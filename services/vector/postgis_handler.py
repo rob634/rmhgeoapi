@@ -61,6 +61,10 @@ class VectorToPostGISHandler:
         else:
             logger.info(f"📊 VectorToPostGISHandler: Using APP database (fallback or explicit)")
 
+        # Warnings from last prepare_gdf call (30 DEC 2025)
+        # Callers can check this after prepare_gdf() to include warnings in job results
+        self.last_warnings = []
+
     def prepare_gdf(self, gdf: gpd.GeoDataFrame, geometry_params: dict = None) -> gpd.GeoDataFrame:
         """
         Validate, reproject, clean, and optionally process GeoDataFrame geometries.
@@ -244,6 +248,59 @@ class VectorToPostGISHandler:
             raise ValueError(error_msg)
 
         logger.info(f"✅ All geometry types supported by PostGIS: {unique_types}")
+
+        # ========================================================================
+        # DATETIME VALIDATION - Sanitize out-of-range timestamps (30 DEC 2025)
+        # ========================================================================
+        # KML/KMZ and other garbage files may contain timestamps with invalid years
+        # (e.g., year 48113). PostgreSQL accepts these (max year 294276) but Python
+        # datetime only supports years 1-9999. This causes psycopg to crash when
+        # reading data back from the database.
+        #
+        # Solution: Set out-of-range datetime values to NULL (NaT) with warning.
+        # Warnings are stored in self.last_warnings for inclusion in job results.
+        # ========================================================================
+        self.last_warnings = []  # Clear warnings from previous calls
+
+        # Python datetime valid range
+        MIN_YEAR = 1
+        MAX_YEAR = 9999
+
+        for col in gdf.columns:
+            if col == 'geometry':
+                continue
+
+            # Check if column is datetime type
+            if pd.api.types.is_datetime64_any_dtype(gdf[col]):
+                # Find out-of-range values
+                # pandas datetime64 stores as nanoseconds, can handle wider range than Python
+                # We need to check the actual year values
+                try:
+                    years = gdf[col].dt.year
+                    invalid_mask = (years < MIN_YEAR) | (years > MAX_YEAR)
+                    invalid_count = invalid_mask.sum()
+
+                    if invalid_count > 0:
+                        # Get sample of invalid values for logging
+                        invalid_samples = gdf.loc[invalid_mask, col].head(3).tolist()
+                        sample_str = ", ".join(str(v) for v in invalid_samples)
+
+                        warning_msg = (
+                            f"Column '{col}': {invalid_count} datetime values outside Python range "
+                            f"(years {MIN_YEAR}-{MAX_YEAR}) set to NULL. Samples: {sample_str}"
+                        )
+                        logger.warning(f"⚠️  {warning_msg}")
+                        self.last_warnings.append(warning_msg)
+
+                        # Set invalid values to NaT (pandas null for datetime)
+                        gdf.loc[invalid_mask, col] = pd.NaT
+
+                except Exception as e:
+                    # If year extraction fails, the column might have mixed types
+                    logger.warning(f"⚠️  Could not validate datetime column '{col}': {e}")
+
+        if self.last_warnings:
+            logger.info(f"📋 {len(self.last_warnings)} datetime warning(s) recorded for job results")
 
         # Reproject to EPSG:4326 if needed
         if gdf.crs and gdf.crs != "EPSG:4326":

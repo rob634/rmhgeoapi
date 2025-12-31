@@ -1,6 +1,6 @@
 # SAFe Epic & Feature Registry
 
-**Last Updated**: 29 DEC 2025
+**Last Updated**: 30 DEC 2025
 **Framework**: SAFe (Scaled Agile Framework)
 **Purpose**: Master reference for Azure DevOps Boards import
 **Source of Truth**: This file defines Epic/Feature numbers; TODO.md should align
@@ -13,7 +13,7 @@
 
 | Priority | Epic | Name | Status | Features | WSJF |
 |:--------:|------|------|--------|:--------:|:----:|
-| — | E1 | Vector Data as API | ✅ Complete | 4 | — |
+| — | E1 | Vector Data as API | ✅ Complete | 6 | — |
 | 1 | E2 | Raster Data as API | 🚧 Partial | 8 | 5.9 |
 | 2 | E3 | DDH Platform Integration | 🚧 Partial | 8 | 4.8 |
 | 3 | E4 | Data Externalization | 🚧 Partial | 5 | 4.3 |
@@ -145,6 +145,7 @@ Abstract component names for ADO work items. Actual Azure resource names assigne
 | F1.3 | ✅ | Vector STAC Integration |
 | F1.4 | ✅ | Vector Unpublish |
 | F1.5 | ✅ | Vector Map Viewer |
+| F1.6 | 🚧 | Enhanced Data Validation |
 
 ### Feature F1.1: Vector ETL Pipeline ✅
 
@@ -232,6 +233,38 @@ Abstract component names for ADO work items. Actual Azure resource names assigne
 - Geometry simplification slider
 - Feature property popup on click
 - QA workflow buttons
+
+---
+
+### Feature F1.6: Enhanced Data Validation 🚧
+
+**Deliverable**: Robust data validation during vector ETL to prevent garbage data from entering the database
+
+| Story | Status | Description |
+|-------|--------|-------------|
+| S1.6.1 | ✅ | Datetime range validation - sanitize out-of-range timestamps (year > 9999) |
+| SP1.6.2 | 📋 | **SPIKE**: Evaluate pandera for DataFrame validation |
+| S1.6.3 | 📋 | Implement pandera-based validation schema (if spike approved) |
+| S1.6.4 | 📋 | Add coordinate range validation (lat -90/90, lon -180/180) |
+| S1.6.5 | 📋 | Add string length validation for TEXT columns |
+
+**Spike SP1.6.2 Details**:
+- **Goal**: Evaluate pandera library for dynamic DataFrame validation
+- **Questions to Answer**:
+  1. Can pandera handle dynamic schemas (unknown columns at runtime)?
+  2. Performance impact on large GeoDataFrames?
+  3. Integration complexity with existing `prepare_gdf()` workflow?
+  4. Error reporting quality for user-facing messages?
+- **Timebox**: 4 hours
+- **Output**: Decision document + prototype if approved
+
+**Key Files**: `services/vector/postgis_handler.py` (`prepare_gdf()`)
+
+**Context (30 DEC 2025)**:
+- KML files imported timestamps with year 48113 (garbage data)
+- PostgreSQL accepted it (max year 294276) but psycopg crashed reading back (Python max year 9999)
+- S1.6.1 implemented: out-of-range timestamps set to NULL with warning in job results
+- Prompted discussion of systematic validation approach → pandera spike
 
 ---
 

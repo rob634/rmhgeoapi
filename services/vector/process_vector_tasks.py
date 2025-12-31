@@ -274,6 +274,10 @@ def process_vector_prepare(parameters: Dict[str, Any]) -> Dict[str, Any]:
     handler = VectorToPostGISHandler()
     validated_gdf = handler.prepare_gdf(gdf, geometry_params=geometry_params)
 
+    # Capture any warnings from prepare_gdf (e.g., out-of-range datetime values)
+    # These will be included in the job result for visibility (30 DEC 2025)
+    data_warnings = handler.last_warnings.copy() if handler.last_warnings else []
+
     # GAP-009 FIX (16 DEC 2025): Log memory usage after validation
     validated_mem_mb = _log_memory_usage(validated_gdf, "after_validation", job_id)
 
@@ -552,6 +556,10 @@ def process_vector_prepare(parameters: Dict[str, Any]) -> Dict[str, Any]:
     # Include skipped columns in result if any were filtered
     if skipped_columns:
         result['skipped_reserved_columns'] = skipped_columns
+
+    # Include data warnings in result (e.g., sanitized datetime values) (30 DEC 2025)
+    if data_warnings:
+        result['data_warnings'] = data_warnings
 
     return {
         "success": True,

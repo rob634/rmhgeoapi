@@ -82,9 +82,6 @@ from .stac_vector_catalog import extract_vector_stac_metadata, create_vector_sta
 # test_minimal removed (30 NOV 2025) - file doesn't exist
 from .raster_validation import validate_raster
 from .raster_cog import create_cog
-from .handler_h3_level4 import h3_level4_generate
-from .handler_h3_base import h3_base_generate
-from .handler_insert_h3_postgis import insert_h3_to_postgis
 from .handler_create_h3_stac import create_h3_stac
 from .handler_h3_native_streaming import h3_native_streaming_postgis
 from .handler_generate_h3_grid import generate_h3_grid  # Universal H3 handler (14 NOV 2025) - replaces bootstrap_res2
@@ -207,10 +204,7 @@ ALL_HANDLERS = {
     # "test_minimal" removed (30 NOV 2025) - file doesn't exist
     "raster_validate": validate_raster,
     "raster_create_cog": create_cog,
-    "h3_level4_generate": h3_level4_generate,
-    "h3_base_generate": h3_base_generate,
     # H3 PostGIS + STAC handlers (9 NOV 2025 - Phase 2), renamed (29 DEC 2025)
-    "h3_insert_to_postgis": insert_h3_to_postgis,  # Stage 2: Load GeoParquet → PostGIS (DEPRECATED - use h3_native_streaming_postgis)
     "h3_create_stac": create_h3_stac,              # Stage 3: Create STAC item for H3 grid
     # H3 Native Streaming Handler (9 NOV 2025 - Phase 3)
     "h3_native_streaming_postgis": h3_native_streaming_postgis,  # Stage 1: h3-py → async stream → PostGIS (3.5x faster)

@@ -578,8 +578,11 @@ ORDER BY r.rolname;""")
 
         # Functions that need search_path = pgstac, public
         # These are trigger functions that reference pgstac tables without schema prefix
+        # partition_after_triggerfunc: Triggered when deleting items (partition_sys_meta)
+        # collection_delete_trigger_func: Triggered when deleting collections (partition_stats)
         functions_to_fix = [
             'partition_after_triggerfunc()',
+            'collection_delete_trigger_func()',
         ]
 
         with self._pg_repo._get_connection() as conn:

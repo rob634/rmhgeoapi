@@ -380,10 +380,10 @@ logger.info(f"   ✅ Platform callback registered (will be connected on Platform
 app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
 
 # ============================================================================
-# BLUEPRINT REGISTRATIONS (15 DEC 2025)
+# BLUEPRINT REGISTRATIONS (15 DEC 2025, updated 02 JAN 2026)
 # ============================================================================
-# DEV/Admin endpoints moved to separate Blueprint modules for better organization
-from routes import admin_db_bp, admin_servicebus_bp
+# DEV/Admin endpoints in triggers/admin/ Blueprint modules
+from triggers.admin import admin_db_bp, admin_servicebus_bp
 from web_interfaces.h3_sources import bp as h3_sources_bp
 
 app.register_functions(admin_db_bp)

@@ -94,34 +94,14 @@ All follow the same pattern: `__init__.py` + `triggers.py` + `service.py` + opti
 
 ---
 
-### 4. `routes/` - Only 2 Files
+### 4. ~~`routes/` - Only 2 Files~~ ✅ RESOLVED
 
-**Current Contents**:
-```
-routes/
-├── admin_db.py
-└── admin_servicebus.py
-```
-
-**Problem**: Only 2 files while `triggers/admin/` already has 12 admin-related files
-
-**`triggers/admin/` Contents** (for comparison):
-```
-triggers/admin/
-├── db_data.py
-├── db_diagnostics.py
-├── db_health.py
-├── db_maintenance.py
-├── db_queries.py
-├── db_schemas.py
-├── db_tables.py
-├── h3_datasets.py
-├── h3_debug.py
-├── servicebus.py
-└── stac_repair.py
-```
-
-**Recommendation**: Merge `routes/*.py` into `triggers/admin/`
+**Status**: Consolidated on 02 JAN 2026
+- `admin_db.py` → `triggers/admin/admin_db.py`
+- `admin_servicebus.py` → `triggers/admin/admin_servicebus.py`
+- Updated `triggers/admin/__init__.py` to export blueprints
+- Updated `function_app.py` import
+- `routes/` folder deleted
 
 ---
 
@@ -208,10 +188,10 @@ openapi/
 
 ### Phase 3: Routes Consolidation
 
-- [ ] **TODO-3.1**: Move `routes/admin_db.py` to `triggers/admin/`
-- [ ] **TODO-3.2**: Move `routes/admin_servicebus.py` to `triggers/admin/`
-- [ ] **TODO-3.3**: Update imports in `function_app.py`
-- [ ] **TODO-3.4**: Delete empty `routes/` folder
+- [x] **TODO-3.1**: Move `routes/admin_db.py` to `triggers/admin/` ✅ 02 JAN 2026
+- [x] **TODO-3.2**: Move `routes/admin_servicebus.py` to `triggers/admin/` ✅ 02 JAN 2026
+- [x] **TODO-3.3**: Update imports in `function_app.py` and `triggers/admin/__init__.py` ✅ 02 JAN 2026
+- [x] **TODO-3.4**: Delete `routes/` folder ✅ 02 JAN 2026
 
 ### Phase 4: Utils Consolidation
 
@@ -328,7 +308,6 @@ rmhgeoapi/
 ├── openapi/             # ⚠️ Consider - API specs
 ├── raster_api/          # ✅ Keep - Raster API
 ├── raster_collection_viewer/  # ✅ Keep - Viewer
-├── routes/              # ❌ Merge - Only 2 files → triggers/admin/
 ├── scripts/             # ⚠️ Consider - Utility scripts
 ├── services/            # ✅ Keep - Business logic
 │   ├── curated/
@@ -363,3 +342,4 @@ Legend:
 | 02 JAN 2026 | TODO-1.1, 1.2 | Moved `titiler/` (18 files) → `docs/titiler/` |
 | 02 JAN 2026 | TODO-1.3, 1.4 | Moved `fathom/FATHOM.md` → `docs_claude/`, deleted folder |
 | 02 JAN 2026 | TODO-2.1-2.4 | Consolidated `models/`: `band_mapping.py` → `core/models/`, `h3_base.py` archived |
+| 02 JAN 2026 | TODO-3.1-3.4 | Consolidated `routes/`: blueprints → `triggers/admin/`, updated imports |

@@ -20,6 +20,10 @@ from triggers.admin.db_diagnostics import AdminDbDiagnosticsTrigger, admin_db_di
 # Phase 2: Service Bus Admin API ✅ COMPLETE
 from triggers.admin.servicebus import ServiceBusAdminTrigger, servicebus_admin_trigger
 
+# Phase 3: Admin Blueprints (moved from routes/ - 02 JAN 2026)
+from triggers.admin.admin_db import bp as admin_db_bp
+from triggers.admin.admin_servicebus import bp as admin_servicebus_bp
+
 # Export all admin triggers
 __all__ = [
     # Phase 1: Database Admin - Classes
@@ -41,4 +45,7 @@ __all__ = [
     # Phase 2: Service Bus Admin - Class & Instance
     'ServiceBusAdminTrigger',
     'servicebus_admin_trigger',
+    # Phase 3: Admin Blueprints
+    'admin_db_bp',
+    'admin_servicebus_bp',
 ]
